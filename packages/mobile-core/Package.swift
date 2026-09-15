@@ -13,7 +13,10 @@ let package = Package(
         .target(name: "MonacoCore"),
         .testTarget(
             name: "MonacoCoreTests",
-            dependencies: ["MonacoCore"]
+            dependencies: ["MonacoCore"],
+            resources: [
+                .process("Fixtures"),
+            ]
         ),
     ]
 )
