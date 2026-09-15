@@ -9,6 +9,9 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 )
 
+// ErrUserNotFound means the Privy token is valid but no Monaco user row exists.
+var ErrUserNotFound = errors.New("user not found")
+
 // SessionService orchestrates auth session flows.
 type SessionService struct {
 	store *postgres.Store

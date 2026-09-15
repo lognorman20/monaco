@@ -54,7 +54,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 	store := postgres.NewStore(db)
 	privyClient := privy.NewHTTPClient(cfg)
 	sessions := app.NewSessionService(store, privyClient)
+	groups := app.NewGroupService(store, privyClient)
 	auth := &httpapi.AuthHandlers{Sessions: sessions}
+	groupHandlers := &httpapi.GroupHandlers{Groups: groups}
 
 	addr := "127.0.0.1:8080"
 	if v := os.Getenv("API_ADDR"); v != "" {
@@ -64,6 +66,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", httpapi.HealthHandler)
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
+	mux.HandleFunc("POST /v1/groups", groupHandlers.CreateGroupHandler)
 
 	return &bootResult{
 		Server: &http.Server{
