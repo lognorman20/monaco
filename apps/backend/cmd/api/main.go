@@ -2,23 +2,38 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/config"
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 )
 
-func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+// bootResult holds API wiring produced at startup.
+type bootResult struct {
+	Server  *http.Server
+	Config  *config.Config
+	Relayer *config.Relayer
+}
 
-	if databaseURL := os.Getenv("DATABASE_URL"); databaseURL != "" {
-		if err := postgres.ApplyFromEnv(ctx, databaseURL, postgres.MigrationsDir()); err != nil {
-			log.Fatalf("apply migrations: %v", err)
-		}
+// boot loads config, registers the relayer fee payer, applies migrations, and builds the HTTP server.
+func boot(ctx context.Context) (*bootResult, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+
+	relayer, err := config.LoadRelayer(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := postgres.ApplyFromEnv(ctx, cfg.DatabaseURL, postgres.MigrationsDir()); err != nil {
+		return nil, fmt.Errorf("apply migrations: %w", err)
 	}
 
 	addr := "127.0.0.1:8080"
@@ -29,8 +44,27 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", httpapi.HealthHandler)
 
-	log.Printf("listening on http://%s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	return &bootResult{
+		Server: &http.Server{
+			Addr:    addr,
+			Handler: mux,
+		},
+		Config:  cfg,
+		Relayer: relayer,
+	}, nil
+}
+
+func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, err := boot(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("listening on http://%s", result.Server.Addr)
+	if err := result.Server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
