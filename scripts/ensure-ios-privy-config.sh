@@ -53,6 +53,10 @@ EOF
 export_launch_env() {
   load_privy_env
   local client_id="${PRIVY_APP_CLIENT_ID:-${PRIVY_AUTH_ID:-}}"
+  export PRIVY_APP_ID
+  export PRIVY_APP_CLIENT_ID="$client_id"
+  export PRIVY_SMS_LOGIN_ENABLED="${PRIVY_SMS_LOGIN_ENABLED:-true}"
+  export PRIVY_EMAIL_LOGIN_ENABLED="${PRIVY_EMAIL_LOGIN_ENABLED:-true}"
   export SIMCTL_CHILD_PRIVY_APP_ID="$PRIVY_APP_ID"
   export SIMCTL_CHILD_PRIVY_APP_CLIENT_ID="$client_id"
   export SIMCTL_CHILD_PRIVY_SMS_LOGIN_ENABLED="${PRIVY_SMS_LOGIN_ENABLED:-true}"

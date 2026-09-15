@@ -9,20 +9,22 @@ struct ContentView: View {
     @State private var isLoading = true
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                header
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    header
 
-                AuthGateView(auth: auth)
+                    AuthGateView(auth: auth)
 
-                Divider()
+                    Divider()
 
-                apiHealthSection
+                    apiHealthSection
+                }
+                .padding()
             }
-            .padding()
-        }
-        .task {
-            await loadHealth()
+            .task {
+                await loadHealth()
+            }
         }
     }
 

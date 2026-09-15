@@ -11,36 +11,34 @@ struct MeScreenView: View {
     @State private var isLoading = true
 
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Your account")
-                    .font(.title2.bold())
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Your account")
+                .font(.title2.bold())
 
-                if isLoading {
-                    ProgressView("Loading profile…")
-                } else if let profile {
-                    profileSection(profile)
-                } else if let errorMessage {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                }
-
-                NavigationLink {
-                    CreateGroupView(auth: auth)
-                } label: {
-                    Label("Create group", systemImage: "person.3.fill")
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button("Sign out") {
-                    Task { await auth.logout() }
-                }
-                .buttonStyle(.bordered)
+            if isLoading {
+                ProgressView("Loading profile…")
+            } else if let profile {
+                profileSection(profile)
+            } else if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
             }
-            .task(id: auth.accessToken) {
-                await loadProfile()
+
+            NavigationLink {
+                CreateGroupView(auth: auth)
+            } label: {
+                Label("Create group", systemImage: "person.3.fill")
             }
+            .buttonStyle(.borderedProminent)
+
+            Button("Sign out") {
+                Task { await auth.logout() }
+            }
+            .buttonStyle(.bordered)
+        }
+        .task(id: auth.accessToken) {
+            await loadProfile()
         }
     }
 

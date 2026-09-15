@@ -9,6 +9,30 @@ import XCTest
 
 final class MonacoUITests: XCTestCase {
 
+    private func privyLaunchEnvironment() -> [String: String] {
+        let keys = [
+            "PRIVY_APP_ID",
+            "PRIVY_APP_CLIENT_ID",
+            "PRIVY_SMS_LOGIN_ENABLED",
+            "PRIVY_EMAIL_LOGIN_ENABLED",
+        ]
+        let defaults: [String: String] = [
+            "PRIVY_APP_ID": "cmu26uw5s00mp0cl81v6dud1n",
+            "PRIVY_APP_CLIENT_ID": "client-WY6dnErYgTBNFxTtjREKwCSYjwu5mecwunVjEndGhLy12",
+            "PRIVY_SMS_LOGIN_ENABLED": "true",
+            "PRIVY_EMAIL_LOGIN_ENABLED": "true",
+        ]
+        let process = ProcessInfo.processInfo.environment
+        var env: [String: String] = [:]
+        for key in keys {
+            let value = process[key] ?? process["SIMCTL_CHILD_\(key)"] ?? defaults[key]
+            if let value, !value.isEmpty {
+                env[key] = value
+            }
+        }
+        return env
+    }
+
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.
 
@@ -23,14 +47,44 @@ final class MonacoUITests: XCTestCase {
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testM1CreateGroupShowsTreasury() throws {
         let app = XCUIApplication()
+        app.launchEnvironment = privyLaunchEnvironment()
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
+        let phoneField = app.textFields["Phone number"]
+        XCTAssertTrue(phoneField.waitForExistence(timeout: 15))
+        phoneField.tap()
+        phoneField.typeText("+15555557177")
+
+        app.buttons["Send code"].tap()
+
+        let codeField = app.textFields["6-digit code"]
+        XCTAssertTrue(codeField.waitForExistence(timeout: 20))
+        codeField.tap()
+        codeField.typeText("465354")
+
+        app.buttons["Verify code"].tap()
+
+        XCTAssertTrue(
+            app.staticTexts["Member wallet"].waitForExistence(timeout: 30)
+                || app.staticTexts["Your account"].waitForExistence(timeout: 30)
+        )
+
+        app.buttons["Create group"].tap()
+
+        let nameField = app.textFields["Group name"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 10))
+        nameField.tap()
+        nameField.typeText("QA Alpha")
+
+        app.buttons["Create group"].tap()
+
+        XCTAssertTrue(app.staticTexts["Treasury address"].waitForExistence(timeout: 30))
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "issue14-create-group-treasury"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     @MainActor
