@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Monaco iOS sim launch with Privy env from dotenvx .env.local (gold sim via ~/.local/bin/ios-sim).
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+global_ios_sim="$(command -v ios-sim || true)"
+if [[ -z "$global_ios_sim" || "$global_ios_sim" == "$repo_root/scripts/ios-sim" ]]; then
+  global_ios_sim="${HOME}/.local/bin/ios-sim"
+fi
+if [[ ! -x "$global_ios_sim" ]]; then
+  echo "error: ios-sim not found (~/.local/bin). Use: just run mobile" >&2
+  exit 1
+fi
+
+exec "$repo_root/scripts/with-ios-privy-env.sh" bash -c 'cd apps/mobile && exec "$1" "${@:2}"' _ "$global_ios_sim" "$@"

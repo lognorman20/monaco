@@ -6,6 +6,8 @@
 - For M1 testing, support email OTP login in addition to SMS auth.
 - Backend is Go over Rust for faster compile times and iteration speed.
 - Use dotenvx for repo secrets (`.env.local` for dev, `.env.production` for prod); wrap `just` with `dotenvx run -f .env.local --` because Justfile `dotenv-load` only reads plain `.env`.
+- GitHub issue and milestone ticket bodies should follow the write-ticket format (Context, Problem, Proposal with Implement exactly, acceptance criteria, verification commands, Done when) with minimal agent discretion.
+- Parallel milestone implementation should use worktree-orchestrate with Composer 2.5 subagents unless another model is explicitly requested.
 
 ## Learned Workspace Facts
 
@@ -20,9 +22,11 @@
 - `PHANTOM_APP_ID` belongs in Cursor Phantom MCP config, not Monaco `.env` — Phantom MCP is an agent test harness, separate from Privy product wallets.
 - Product uses Solana mainnet (not devnet) for RPC, USDC, and chain operations.
 - M0 only needs `DATABASE_URL` (compose defaults suffice); Privy, relayer, and RPC env vars matter from M1 onward.
+- M2+ money movement uses Deposit, Withdrawal, Transaction, and Position domain tables—not `sweep_tx_log` or `share_ledger`.
 
 ## Privy (M1)
 
+- iOS sim launch: `./scripts/ios-sim` or `just run mobile` from repo root. Decrypts `.env.local` via dotenvx and injects `SIMCTL_CHILD_PRIVY_*` at `simctl launch`. Mobile needs `PRIVY_APP_ID` + `PRIVY_APP_CLIENT_ID` (or legacy `PRIVY_AUTH_ID`); backend uses `PRIVY_APP_SECRET`.
 - App: Monaco. App id `cmu26uw5s00mp0cl81v6dud1n` (public).
 - Login methods (Authentication → Login methods, verified 2026-09-15): Email **ON** (OTP to inbox; Privy has no separate email+password toggle), SMS **ON** (US/Canada). OAuth/wallets/passkeys off.
 - Test accounts (Dashboard → Test accounts **ON**). Login via email + OTP or phone + OTP:

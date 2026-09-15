@@ -1,6 +1,7 @@
 .env
 .env.local
 .env.keys
+apps/mobile/Config/Privy.local.xcconfig
 bin/
 *.exe
 .DS_Store

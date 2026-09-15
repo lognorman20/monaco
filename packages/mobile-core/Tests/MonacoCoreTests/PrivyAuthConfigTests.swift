@@ -35,6 +35,21 @@ final class PrivyAuthConfigTests: XCTestCase {
         XCTAssertTrue(config.emailLoginEnabled)
     }
 
+    func testFromEnvironment_legacyAuthID_isClientIDFallback() {
+        // Arrange
+        let environment: [String: String] = [
+            "PRIVY_APP_ID": "app-123",
+            "PRIVY_AUTH_ID": "client-legacy",
+        ]
+
+        // Act
+        let config = PrivyAuthConfig.fromEnvironment(environment)
+
+        // Assert
+        XCTAssertEqual(config.appClientID, "client-legacy")
+        XCTAssertTrue(config.isConfigured)
+    }
+
     func testFromEnvironment_canDisableLoginMethods() {
         // Arrange
         let environment: [String: String] = [

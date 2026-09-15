@@ -27,7 +27,7 @@ public struct PrivyAuthConfig: Equatable, Sendable {
     /// Parses Privy settings from environment-style key/value pairs (e.g. dotenv or Xcode scheme).
     public static func fromEnvironment(_ environment: [String: String]) -> PrivyAuthConfig {
         let appID = environment["PRIVY_APP_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let appClientID = environment["PRIVY_APP_CLIENT_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let appClientID = resolvedClientID(from: environment)
         let smsEnabled = parseBool(environment["PRIVY_SMS_LOGIN_ENABLED"], defaultValue: true)
         let emailEnabled = parseBool(environment["PRIVY_EMAIL_LOGIN_ENABLED"], defaultValue: true)
 
@@ -37,6 +37,14 @@ public struct PrivyAuthConfig: Equatable, Sendable {
             smsLoginEnabled: smsEnabled,
             emailLoginEnabled: emailEnabled
         )
+    }
+
+    private static func resolvedClientID(from environment: [String: String]) -> String {
+        let clientID = environment["PRIVY_APP_CLIENT_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !clientID.isEmpty {
+            return clientID
+        }
+        return environment["PRIVY_AUTH_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     private static func parseBool(_ value: String?, defaultValue: Bool) -> Bool {

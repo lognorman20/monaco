@@ -20,11 +20,50 @@ struct PrivyAuthSettings: Equatable {
     static var current: PrivyAuthSettings {
         let environment = ProcessInfo.processInfo.environment
         return PrivyAuthSettings(
-            appID: trimmed(environment["PRIVY_APP_ID"]),
-            appClientID: trimmed(environment["PRIVY_APP_CLIENT_ID"]),
-            smsLoginEnabled: parseBool(environment["PRIVY_SMS_LOGIN_ENABLED"], defaultValue: true),
-            emailLoginEnabled: parseBool(environment["PRIVY_EMAIL_LOGIN_ENABLED"], defaultValue: true)
+            appID: value(for: "PRIVY_APP_ID", environment: environment),
+            appClientID: resolvedClientID(from: environment),
+            smsLoginEnabled: parseBool(
+                firstNonEmpty(
+                    trimmed(environment["PRIVY_SMS_LOGIN_ENABLED"]),
+                    plistString("PRIVY_SMS_LOGIN_ENABLED")
+                ),
+                defaultValue: true
+            ),
+            emailLoginEnabled: parseBool(
+                firstNonEmpty(
+                    trimmed(environment["PRIVY_EMAIL_LOGIN_ENABLED"]),
+                    plistString("PRIVY_EMAIL_LOGIN_ENABLED")
+                ),
+                defaultValue: true
+            )
         )
+    }
+
+    private static func resolvedClientID(from environment: [String: String]) -> String {
+        let clientID = value(for: "PRIVY_APP_CLIENT_ID", environment: environment)
+        if !clientID.isEmpty {
+            return clientID
+        }
+        return value(for: "PRIVY_AUTH_ID", environment: environment)
+    }
+
+    /// Process env (simctl / Xcode scheme) wins; Info.plist from xcconfig is fallback.
+    private static func value(for key: String, environment: [String: String]) -> String {
+        let fromEnvironment = trimmed(environment[key])
+        if !fromEnvironment.isEmpty {
+            return fromEnvironment
+        }
+        return plistString(key)
+    }
+
+    private static func plistString(_ key: String) -> String {
+        trimmed(Bundle.main.object(forInfoDictionaryKey: key) as? String)
+    }
+
+    private static func firstNonEmpty(_ first: String, _ second: String) -> String? {
+        if !first.isEmpty { return first }
+        if !second.isEmpty { return second }
+        return nil
     }
 
     private static func trimmed(_ value: String?) -> String {
