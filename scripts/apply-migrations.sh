@@ -4,6 +4,11 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
+if [[ -f apps/backend/go.mod ]]; then
+  (cd apps/backend && go run ./cmd/migrate)
+  exit 0
+fi
+
 migrations_dir="supabase/migrations"
 if [[ ! -d "$migrations_dir" ]]; then
   echo "error: missing $migrations_dir"
