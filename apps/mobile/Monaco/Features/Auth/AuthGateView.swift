@@ -7,7 +7,11 @@ struct AuthGateView: View {
         Group {
             if Config.privy.isConfigured {
                 if hasLoginMethod {
-                    LoginView(auth: auth)
+                    if isAuthenticated {
+                        MeScreenView(auth: auth)
+                    } else {
+                        LoginView(auth: auth)
+                    }
                 } else {
                     missingLoginMethodsView
                 }
@@ -18,6 +22,13 @@ struct AuthGateView: View {
         .task {
             await auth.restoreSessionIfNeeded()
         }
+    }
+
+    private var isAuthenticated: Bool {
+        if case .authenticated = auth.phase {
+            return auth.accessToken != nil
+        }
+        return false
     }
 
     private var hasLoginMethod: Bool {
