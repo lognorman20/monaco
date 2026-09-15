@@ -23,9 +23,18 @@ func NewGroupService(store *postgres.Store, privyClient privy.Client) *GroupServ
 	}
 }
 
+// ErrGroupNotFound means the group does not exist or the caller cannot access it.
+var ErrGroupNotFound = errors.New("group not found")
+
 // CreateGroupResult is the created group and treasury for POST /v1/groups.
 type CreateGroupResult struct {
 	GroupID         string
+	Name            string
+	TreasuryAddress string
+}
+
+// GetGroupResult is the group name and treasury for GET /v1/groups/{id}.
+type GetGroupResult struct {
 	Name            string
 	TreasuryAddress string
 }
@@ -87,5 +96,49 @@ func (g *GroupService) CreateGroup(ctx context.Context, accessToken string, name
 		GroupID:         group.ID,
 		Name:            group.Name,
 		TreasuryAddress: treasuryRef.SolanaAddress,
+	}, nil
+}
+
+// GetGroup returns group name and treasury address for an authenticated creator.
+func (g *GroupService) GetGroup(ctx context.Context, accessToken string, groupID string) (GetGroupResult, error) {
+	if groupID == "" {
+		return GetGroupResult{}, fmt.Errorf("group id is required")
+	}
+
+	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			return GetGroupResult{}, privy.ErrInvalidToken
+		}
+		return GetGroupResult{}, fmt.Errorf("verify session: %w", err)
+	}
+
+	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	if err != nil {
+		return GetGroupResult{}, err
+	}
+	if !found {
+		return GetGroupResult{}, ErrUserNotFound
+	}
+
+	group, found, err := g.store.GetGroupByID(ctx, groupID)
+	if err != nil {
+		return GetGroupResult{}, err
+	}
+	if !found || group.CreatorUserID != user.ID {
+		return GetGroupResult{}, ErrGroupNotFound
+	}
+
+	treasury, found, err := g.store.GetTreasuryByGroupID(ctx, groupID)
+	if err != nil {
+		return GetGroupResult{}, err
+	}
+	if !found {
+		return GetGroupResult{}, ErrGroupNotFound
+	}
+
+	return GetGroupResult{
+		Name:            group.Name,
+		TreasuryAddress: treasury.SolanaAddress,
 	}, nil
 }

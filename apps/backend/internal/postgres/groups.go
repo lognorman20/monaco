@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -54,4 +55,32 @@ RETURNING id, name, creator_user_id, created_at`
 	}
 
 	return group, nil
+}
+
+// GetGroupByID returns the group for id, or false if none exists.
+func (s *Store) GetGroupByID(ctx context.Context, id string) (Group, bool, error) {
+	if id == "" {
+		return Group{}, false, fmt.Errorf("id is required")
+	}
+
+	const selectSQL = `
+SELECT id, name, creator_user_id, created_at
+FROM groups
+WHERE id = $1`
+
+	var group Group
+	err := s.db.QueryRowContext(ctx, selectSQL, id).Scan(
+		&group.ID,
+		&group.Name,
+		&group.CreatorUserID,
+		&group.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Group{}, false, nil
+	}
+	if err != nil {
+		return Group{}, false, fmt.Errorf("get group by id: %w", err)
+	}
+
+	return group, true, nil
 }

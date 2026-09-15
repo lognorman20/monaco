@@ -23,25 +23,6 @@ func integrationGroupApp(t *testing.T) (*GroupHandlers, *AuthHandlers, privy.Cli
 	return &GroupHandlers{Groups: groups}, authHandlers, privyClient, db
 }
 
-func seedAuthenticatedUser(t *testing.T, handlers *AuthHandlers, privyClient privy.Client, token privy.AccessToken, identity privy.Identity) authSessionResponse {
-	t.Helper()
-
-	privy.RegisterToken(privyClient, token, identity)
-	req := httptest.NewRequest(http.MethodPost, "/v1/auth/session", strings.NewReader(`{"accessToken":"`+string(token)+`"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handlers.SessionHandler(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("seed session status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
-
-	var payload authSessionResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode session json: %v", err)
-	}
-	return payload
-}
-
 func TestCreateGroup_insertsGroupAndTreasuryRows(t *testing.T) {
 	// Arrange
 	groupHandlers, authHandlers, privyClient, db := integrationGroupApp(t)
@@ -136,5 +117,122 @@ func TestCreateGroup_provisionsTreasuryViaPrivyClient(t *testing.T) {
 	}
 	if privyWalletID != expectedTreasury.PrivyWalletID {
 		t.Fatalf("privy_wallet_id = %q, want %q", privyWalletID, expectedTreasury.PrivyWalletID)
+	}
+}
+
+func TestGET_group_byId_returnsNameAndTreasuryAddress(t *testing.T) {
+	// Arrange
+	groupHandlers, authHandlers, privyClient, _ := integrationGroupApp(t)
+	token := fixtureSessionToken()
+	seedAuthenticatedUser(t, authHandlers, privyClient, token, privy.Identity{
+		PrivyUserID: "did:privy:alfred",
+		DisplayName: "Alfred",
+	})
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Alpha Fund"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+string(token))
+	createRec := httptest.NewRecorder()
+	groupHandlers.CreateGroupHandler(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create group status = %d, want 200; body = %s", createRec.Code, createRec.Body.String())
+	}
+
+	var created createGroupResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create json: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/groups/"+created.GroupID, nil)
+	req.SetPathValue("id", created.GroupID)
+	req.Header.Set("Authorization", "Bearer "+string(token))
+	rec := httptest.NewRecorder()
+
+	// Act
+	groupHandlers.GetGroupHandler(rec, req)
+
+	// Assert
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+
+	var payload getGroupResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if payload.Name != "Alpha Fund" {
+		t.Fatalf("name = %q, want Alpha Fund", payload.Name)
+	}
+	if payload.TreasuryAddress != created.TreasuryAddress {
+		t.Fatalf("treasuryAddress = %q, want %q", payload.TreasuryAddress, created.TreasuryAddress)
+	}
+}
+
+func TestGET_group_nonMemberOrUnknown_returns404(t *testing.T) {
+	// Arrange
+	groupHandlers, authHandlers, privyClient, _ := integrationGroupApp(t)
+	creatorToken := fixtureSessionToken()
+	seedAuthenticatedUser(t, authHandlers, privyClient, creatorToken, privy.Identity{
+		PrivyUserID: "did:privy:alfred",
+		DisplayName: "Alfred",
+	})
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Alpha Fund"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	createRec := httptest.NewRecorder()
+	groupHandlers.CreateGroupHandler(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create group status = %d, want 200; body = %s", createRec.Code, createRec.Body.String())
+	}
+
+	var created createGroupResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create json: %v", err)
+	}
+
+	unknownReq := httptest.NewRequest(http.MethodGet, "/v1/groups/00000000-0000-0000-0000-000000000000", nil)
+	unknownReq.SetPathValue("id", "00000000-0000-0000-0000-000000000000")
+	unknownReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	unknownRec := httptest.NewRecorder()
+
+	// Act
+	groupHandlers.GetGroupHandler(unknownRec, unknownReq)
+
+	// Assert
+	if unknownRec.Code != http.StatusNotFound {
+		t.Fatalf("unknown group status = %d, want 404; body = %s", unknownRec.Code, unknownRec.Body.String())
+	}
+
+	otherToken := privy.AccessToken("other-user-session-token")
+	seedAuthenticatedUser(t, authHandlers, privyClient, otherToken, privy.Identity{
+		PrivyUserID: "did:privy:bartholomez",
+		DisplayName: "Bartholomez",
+	})
+	nonMemberReq := httptest.NewRequest(http.MethodGet, "/v1/groups/"+created.GroupID, nil)
+	nonMemberReq.SetPathValue("id", created.GroupID)
+	nonMemberReq.Header.Set("Authorization", "Bearer "+string(otherToken))
+	nonMemberRec := httptest.NewRecorder()
+
+	// Act
+	groupHandlers.GetGroupHandler(nonMemberRec, nonMemberReq)
+
+	// Assert
+	if nonMemberRec.Code != http.StatusNotFound {
+		t.Fatalf("non-member status = %d, want 404; body = %s", nonMemberRec.Code, nonMemberRec.Body.String())
+	}
+}
+
+func TestGET_group_missingAuth_returns401(t *testing.T) {
+	// Arrange
+	groupHandlers, _, _, _ := integrationGroupApp(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/groups/00000000-0000-0000-0000-000000000000", nil)
+	req.SetPathValue("id", "00000000-0000-0000-0000-000000000000")
+	rec := httptest.NewRecorder()
+
+	// Act
+	groupHandlers.GetGroupHandler(rec, req)
+
+	// Assert
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
 	}
 }
