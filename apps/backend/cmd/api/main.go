@@ -55,6 +55,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	privyClient := privy.NewHTTPClient(cfg)
 	sessions := app.NewSessionService(store, privyClient)
 	auth := &httpapi.AuthHandlers{Sessions: sessions}
+	me := &httpapi.MeHandlers{Sessions: sessions}
 
 	addr := "127.0.0.1:8080"
 	if v := os.Getenv("API_ADDR"); v != "" {
@@ -64,6 +65,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", httpapi.HealthHandler)
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
+	mux.HandleFunc("GET /v1/me", me.MeHandler)
 
 	return &bootResult{
 		Server: &http.Server{
