@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -55,4 +56,33 @@ RETURNING id, group_id, privy_wallet_id, solana_address, created_at`
 	}
 
 	return treasury, nil
+}
+
+// GetTreasuryByGroupID returns the treasury for groupID, or false if none exists.
+func (s *Store) GetTreasuryByGroupID(ctx context.Context, groupID string) (Treasury, bool, error) {
+	if groupID == "" {
+		return Treasury{}, false, fmt.Errorf("group_id is required")
+	}
+
+	const selectSQL = `
+SELECT id, group_id, privy_wallet_id, solana_address, created_at
+FROM treasuries
+WHERE group_id = $1`
+
+	var treasury Treasury
+	err := s.db.QueryRowContext(ctx, selectSQL, groupID).Scan(
+		&treasury.ID,
+		&treasury.GroupID,
+		&treasury.PrivyWalletID,
+		&treasury.SolanaAddress,
+		&treasury.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Treasury{}, false, nil
+	}
+	if err != nil {
+		return Treasury{}, false, fmt.Errorf("get treasury by group_id: %w", err)
+	}
+
+	return treasury, true, nil
 }

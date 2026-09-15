@@ -69,6 +69,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
 	mux.HandleFunc("POST /v1/groups", groupHandlers.CreateGroupHandler)
+	mux.HandleFunc("GET /v1/groups/{id}", groupHandlers.GetGroupHandler)
 
 	return &bootResult{
 		Server: &http.Server{
