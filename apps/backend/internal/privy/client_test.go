@@ -113,15 +113,15 @@ func TestHTTPClient_EnsureTreasury_createsServerWallet(t *testing.T) {
 	}
 }
 
-func TestHTTPClient_VerifySession_stubReturnsNotImplemented(t *testing.T) {
+func TestHTTPClient_VerifySession_emptyTokenReturnsInvalid(t *testing.T) {
 	// Arrange
 	client := NewHTTPClient(testConfig())
 
 	// Act
-	_, err := client.VerifySession(context.Background(), AccessToken("token"))
+	_, err := client.VerifySession(context.Background(), AccessToken(""))
 
 	// Assert
-	if err != ErrVerifyNotImplemented {
-		t.Fatalf("err = %v, want %v", err, ErrVerifyNotImplemented)
+	if err != ErrInvalidToken {
+		t.Fatalf("err = %v, want %v", err, ErrInvalidToken)
 	}
 }
