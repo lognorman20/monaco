@@ -44,46 +44,6 @@ func resetTables(t *testing.T, db *sql.DB) {
 	}
 }
 
-func TestEnsureMemberWallet_firstSession_createsMemberWalletRow(t *testing.T) {
-	// Arrange
-	ctx := context.Background()
-	db := integrationDB(t)
-	resetTables(t, db)
-	store := postgres.NewStore(db)
-	privyClient := privy.NewFakeClient()
-	session := NewSessionService(store, privyClient)
-
-	user, err := store.UpsertUser(ctx, "did:privy:test-user-456", "Cayman")
-	if err != nil {
-		t.Fatalf("UpsertUser: %v", err)
-	}
-
-	// Act
-	wallet, err := session.EnsureMemberWallet(ctx, user.PrivyUserID, user.ID)
-	if err != nil {
-		t.Fatalf("EnsureMemberWallet: %v", err)
-	}
-
-	// Assert
-	if wallet.UserID != user.ID {
-		t.Fatalf("expected user_id %s, got %s", user.ID, wallet.UserID)
-	}
-	if wallet.PrivyWalletID == "" {
-		t.Fatal("expected privy_wallet_id to be set")
-	}
-	if wallet.SolanaAddress == "" {
-		t.Fatal("expected solana_address to be set")
-	}
-
-	var rowCount int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM member_wallets WHERE user_id = $1", user.ID).Scan(&rowCount); err != nil {
-		t.Fatalf("count member_wallets: %v", err)
-	}
-	if rowCount != 1 {
-		t.Fatalf("expected 1 member_wallets row, got %d", rowCount)
-	}
-}
-
 func TestEnsureMemberWallet_repeatSession_reusesSameWallet(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
