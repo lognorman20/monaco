@@ -23,6 +23,22 @@ func integrationGroupApp(t *testing.T) (*GroupHandlers, *AuthHandlers, privy.Cli
 	return &GroupHandlers{Groups: groups}, authHandlers, privyClient, db
 }
 
+func TestPOST_groups_missingAuth_returns401(t *testing.T) {
+	// Arrange
+	groupHandlers, _, _, _ := integrationGroupApp(t)
+	req := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Alpha Fund"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	// Act
+	groupHandlers.CreateGroupHandler(rec, req)
+
+	// Assert
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
 func TestCreateGroup_insertsGroupAndTreasuryRows(t *testing.T) {
 	// Arrange
 	groupHandlers, authHandlers, privyClient, db := integrationGroupApp(t)
