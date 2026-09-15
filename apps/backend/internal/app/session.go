@@ -9,6 +9,9 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 )
 
+// ErrUserNotFound means the Privy token is valid but no Monaco user row exists.
+var ErrUserNotFound = errors.New("user not found")
+
 // SessionService orchestrates auth session flows.
 type SessionService struct {
 	store *postgres.Store
@@ -25,6 +28,13 @@ func NewSessionService(store *postgres.Store, privyClient privy.Client) *Session
 
 // SessionResult is the authenticated user and member wallet for POST /v1/auth/session.
 type SessionResult struct {
+	UserID              string
+	DisplayName         string
+	MemberWalletAddress string
+}
+
+// MeResult is the authenticated profile for GET /v1/me.
+type MeResult struct {
 	UserID              string
 	DisplayName         string
 	MemberWalletAddress string
@@ -64,6 +74,44 @@ func (s *SessionService) OpenSession(ctx context.Context, accessToken string) (S
 	}
 
 	return SessionResult{
+		UserID:              user.ID,
+		DisplayName:         displayName,
+		MemberWalletAddress: wallet.SolanaAddress,
+	}, nil
+}
+
+// GetMe returns the authenticated user's profile and member wallet address.
+func (s *SessionService) GetMe(ctx context.Context, accessToken string) (MeResult, error) {
+	identity, err := s.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			return MeResult{}, privy.ErrInvalidToken
+		}
+		return MeResult{}, fmt.Errorf("verify session: %w", err)
+	}
+
+	user, found, err := s.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	if err != nil {
+		return MeResult{}, err
+	}
+	if !found {
+		return MeResult{}, ErrUserNotFound
+	}
+
+	wallet, found, err := s.store.GetMemberWalletByUserID(ctx, user.ID)
+	if err != nil {
+		return MeResult{}, err
+	}
+	if !found {
+		return MeResult{}, ErrUserNotFound
+	}
+
+	displayName := ""
+	if user.DisplayName.Valid {
+		displayName = user.DisplayName.String
+	}
+
+	return MeResult{
 		UserID:              user.ID,
 		DisplayName:         displayName,
 		MemberWalletAddress: wallet.SolanaAddress,

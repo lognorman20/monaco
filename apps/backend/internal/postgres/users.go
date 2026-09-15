@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -55,4 +56,32 @@ RETURNING id, privy_user_id, display_name, created_at`
 	}
 
 	return user, nil
+}
+
+// GetUserByPrivyUserID returns the user for privyUserID, or false if none exists.
+func (s *Store) GetUserByPrivyUserID(ctx context.Context, privyUserID string) (User, bool, error) {
+	if privyUserID == "" {
+		return User{}, false, fmt.Errorf("privy_user_id is required")
+	}
+
+	const selectSQL = `
+SELECT id, privy_user_id, display_name, created_at
+FROM users
+WHERE privy_user_id = $1`
+
+	var user User
+	err := s.db.QueryRowContext(ctx, selectSQL, privyUserID).Scan(
+		&user.ID,
+		&user.PrivyUserID,
+		&user.DisplayName,
+		&user.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, false, nil
+	}
+	if err != nil {
+		return User{}, false, fmt.Errorf("get user by privy_user_id: %w", err)
+	}
+
+	return user, true, nil
 }
