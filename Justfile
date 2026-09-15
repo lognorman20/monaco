@@ -55,6 +55,9 @@ test app:
         else
           echo "M0: apps/backend not scaffolded. Local DB smoke test passed."
         fi
+        if [[ "${SKIP_SCRIPTS_TESTS:-}" != "1" && -f scripts/go.mod ]]; then
+          (cd scripts && go test -short ./...)
+        fi
         ;;
       mobile)
         if [[ ! -d apps/mobile ]]; then
