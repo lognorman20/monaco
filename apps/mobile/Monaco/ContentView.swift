@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
+    @EnvironmentObject private var auth: PrivyAuthService
     private let apiClient = MonacoAPIClient()
 
     @State private var healthStatus: String?
@@ -8,13 +9,38 @@ struct ContentView: View {
     @State private var isLoading = true
 
     var body: some View {
-        VStack(spacing: 16) {
+        ScrollView {
+            VStack(spacing: 24) {
+                header
+
+                AuthGateView(auth: auth)
+
+                Divider()
+
+                apiHealthSection
+            }
+            .padding()
+        }
+        .task {
+            await loadHealth()
+        }
+    }
+
+    private var header: some View {
+        VStack(spacing: 8) {
             Image(systemName: "chart.line.uptrend.xyaxis")
                 .imageScale(.large)
                 .foregroundStyle(.tint)
 
             Text("Monaco")
                 .font(.title.bold())
+        }
+    }
+
+    private var apiHealthSection: some View {
+        VStack(spacing: 12) {
+            Text("API health")
+                .font(.headline)
 
             if isLoading {
                 ProgressView("Checking API…")
@@ -26,10 +52,6 @@ struct ContentView: View {
                     .foregroundStyle(.orange)
                     .multilineTextAlignment(.center)
             }
-        }
-        .padding()
-        .task {
-            await loadHealth()
         }
     }
 
@@ -51,4 +73,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+        .environmentObject(PrivyAuthService())
 }

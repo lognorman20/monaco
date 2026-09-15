@@ -23,6 +23,13 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXBuildFile section */
+		B463064130590361008E7964 /* PrivySDK in Frameworks */ = {
+			isa = PBXBuildFile;
+			productRef = B463064030590361008E7964 /* PrivySDK */;
+		};
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		B46306133059035D008E7964 /* Monaco.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Monaco.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B463062030590360008E7964 /* MonacoTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MonacoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -52,6 +59,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B463064130590361008E7964 /* PrivySDK in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +120,7 @@
 			);
 			name = Monaco;
 			packageProductDependencies = (
+				B463064030590361008E7964 /* PrivySDK */,
 			);
 			productName = Monaco;
 			productReference = B46306133059035D008E7964 /* Monaco.app */;
@@ -195,6 +204,9 @@
 			);
 			mainGroup = B463060A3059035D008E7964;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				B463063F30590361008E7964 /* XCRemoteSwiftPackageReference "privy-ios" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = B46306143059035D008E7964 /* Products */;
 			projectDirPath = "";
@@ -580,6 +592,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		B463063F30590361008E7964 /* XCRemoteSwiftPackageReference "privy-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/privy-io/privy-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.16.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B463064030590361008E7964 /* PrivySDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B463063F30590361008E7964 /* XCRemoteSwiftPackageReference "privy-ios" */;
+			productName = Privy;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = B463060B3059035D008E7964 /* Project object */;
 }
