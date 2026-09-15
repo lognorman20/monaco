@@ -57,18 +57,25 @@ func TestGET_me_authenticated_returnsUserIdDisplayNameAndMemberAddress(t *testin
 		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	}
 
+	body := rec.Body.String()
+	for _, key := range []string{`"userId"`, `"displayName"`, `"memberWalletAddress"`} {
+		if !strings.Contains(body, key) {
+			t.Fatalf("expected %s in response body: %s", key, body)
+		}
+	}
+
 	var payload meResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode json: %v", err)
 	}
 	if payload.UserID != session.UserID {
-		t.Fatalf("user_id = %q, want %q", payload.UserID, session.UserID)
+		t.Fatalf("userId = %q, want %q", payload.UserID, session.UserID)
 	}
 	if payload.DisplayName != "Alfred" {
-		t.Fatalf("display_name = %q, want Alfred", payload.DisplayName)
+		t.Fatalf("displayName = %q, want Alfred", payload.DisplayName)
 	}
 	if payload.MemberWalletAddress != session.MemberWalletAddress {
-		t.Fatalf("member_wallet_address = %q, want %q", payload.MemberWalletAddress, session.MemberWalletAddress)
+		t.Fatalf("memberWalletAddress = %q, want %q", payload.MemberWalletAddress, session.MemberWalletAddress)
 	}
 }
 

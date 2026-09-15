@@ -16,9 +16,9 @@ type MeHandlers struct {
 }
 
 type meResponse struct {
-	UserID              string `json:"user_id"`
-	DisplayName         string `json:"display_name"`
-	MemberWalletAddress string `json:"member_wallet_address"`
+	UserID              string `json:"userId"`
+	DisplayName         string `json:"displayName"`
+	MemberWalletAddress string `json:"memberWalletAddress"`
 }
 
 // MeHandler handles GET /v1/me.
