@@ -2,7 +2,7 @@ import Combine
 import Foundation
 import PrivySDK
 
-/// Wraps Privy SDK init and SMS login. Access token is for later `POST /v1/auth/session`.
+/// Wraps Privy SDK init and SMS/email OTP login. Access token is for later `POST /v1/auth/session`.
 @MainActor
 final class PrivyAuthService: ObservableObject {
     enum Phase: Equatable {
@@ -60,6 +60,36 @@ final class PrivyAuthService: ObservableObject {
         } catch {
             accessToken = nil
             phase = .failed(message: "Invalid code or phone number.")
+        }
+    }
+
+    func sendEmailCode(to email: String) async {
+        phase = .sendingCode
+
+        do {
+            try await privy.email.sendCode(to: email)
+            phase = .awaitingCode
+        } catch {
+            phase = .failed(message: "Could not send email code.")
+        }
+    }
+
+    func loginWithEmailCode(_ code: String, sentTo email: String) async {
+        phase = .verifyingCode
+
+        do {
+            let user = try await privy.email.loginWithCode(code, sentTo: email)
+            await storeAuthenticatedUser(user)
+        } catch {
+            accessToken = nil
+            phase = .failed(message: "Invalid code or email address.")
+        }
+    }
+
+    func resetLoginFlow() {
+        guard case .authenticated = phase else {
+            phase = .idle
+            return
         }
     }
 

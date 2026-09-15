@@ -6,8 +6,8 @@ struct AuthGateView: View {
     var body: some View {
         Group {
             if Config.privy.isConfigured {
-                if Config.privy.smsLoginEnabled {
-                    SMSLoginView(auth: auth)
+                if hasLoginMethod {
+                    LoginView(auth: auth)
                 } else {
                     missingLoginMethodsView
                 }
@@ -18,6 +18,10 @@ struct AuthGateView: View {
         .task {
             await auth.restoreSessionIfNeeded()
         }
+    }
+
+    private var hasLoginMethod: Bool {
+        Config.privy.smsLoginEnabled || Config.privy.emailLoginEnabled
     }
 
     private var missingConfigView: some View {
@@ -33,18 +37,12 @@ struct AuthGateView: View {
 
     private var missingLoginMethodsView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("SMS login disabled", systemImage: "message.fill")
+            Label("No login methods enabled", systemImage: "person.crop.circle.badge.exclamationmark")
                 .font(.headline)
 
-            Text("Enable PRIVY_SMS_LOGIN_ENABLED or turn SMS on in Privy dashboard Login Methods.")
+            Text("Enable PRIVY_SMS_LOGIN_ENABLED and/or PRIVY_EMAIL_LOGIN_ENABLED, or turn SMS/email on in Privy dashboard Login Methods.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-
-            if Config.privy.emailLoginEnabled {
-                Text("Email OTP login is enabled in app config; UI fields arrive in M1-T11.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 }
