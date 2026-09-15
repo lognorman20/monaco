@@ -52,7 +52,18 @@ func (g *GroupService) CreateGroup(ctx context.Context, accessToken string, name
 		return CreateGroupResult{}, ErrUserNotFound
 	}
 
-	group, err := g.store.InsertGroup(ctx, name, user.ID)
+	tx, err := g.store.BeginTx(ctx)
+	if err != nil {
+		return CreateGroupResult{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	group, err := g.store.InsertGroupTx(ctx, tx, name, user.ID)
 	if err != nil {
 		return CreateGroupResult{}, err
 	}
@@ -62,10 +73,15 @@ func (g *GroupService) CreateGroup(ctx context.Context, accessToken string, name
 		return CreateGroupResult{}, fmt.Errorf("privy ensure treasury: %w", err)
 	}
 
-	_, err = g.store.InsertTreasury(ctx, group.ID, treasuryRef.PrivyWalletID, treasuryRef.SolanaAddress)
+	_, err = g.store.InsertTreasuryTx(ctx, tx, group.ID, treasuryRef.PrivyWalletID, treasuryRef.SolanaAddress)
 	if err != nil {
 		return CreateGroupResult{}, err
 	}
+
+	if err := tx.Commit(); err != nil {
+		return CreateGroupResult{}, fmt.Errorf("commit create group: %w", err)
+	}
+	committed = true
 
 	return CreateGroupResult{
 		GroupID:         group.ID,

@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 )
@@ -17,6 +18,15 @@ type Treasury struct {
 
 // InsertTreasury persists a treasury wallet row for a group.
 func (s *Store) InsertTreasury(ctx context.Context, groupID string, privyWalletID string, solanaAddress string) (Treasury, error) {
+	return insertTreasury(ctx, s.db, groupID, privyWalletID, solanaAddress)
+}
+
+// InsertTreasuryTx persists a treasury wallet row for a group within tx.
+func (s *Store) InsertTreasuryTx(ctx context.Context, tx *sql.Tx, groupID string, privyWalletID string, solanaAddress string) (Treasury, error) {
+	return insertTreasury(ctx, tx, groupID, privyWalletID, solanaAddress)
+}
+
+func insertTreasury(ctx context.Context, q queryRower, groupID string, privyWalletID string, solanaAddress string) (Treasury, error) {
 	if groupID == "" {
 		return Treasury{}, fmt.Errorf("group_id is required")
 	}
@@ -33,7 +43,7 @@ VALUES ($1, $2, $3)
 RETURNING id, group_id, privy_wallet_id, solana_address, created_at`
 
 	var treasury Treasury
-	err := s.db.QueryRowContext(ctx, insertSQL, groupID, privyWalletID, solanaAddress).Scan(
+	err := q.QueryRowContext(ctx, insertSQL, groupID, privyWalletID, solanaAddress).Scan(
 		&treasury.ID,
 		&treasury.GroupID,
 		&treasury.PrivyWalletID,
