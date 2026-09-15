@@ -17,25 +17,6 @@ func integrationMeApp(t *testing.T) (*MeHandlers, privy.Client) {
 	return &MeHandlers{Sessions: authHandlers.Sessions}, privyClient
 }
 
-func seedAuthenticatedUser(t *testing.T, handlers *AuthHandlers, privyClient privy.Client, token privy.AccessToken, identity privy.Identity) authSessionResponse {
-	t.Helper()
-
-	privy.RegisterToken(privyClient, token, identity)
-	req := httptest.NewRequest(http.MethodPost, "/v1/auth/session", strings.NewReader(`{"accessToken":"`+string(token)+`"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handlers.SessionHandler(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("seed session status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
-
-	var payload authSessionResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode session json: %v", err)
-	}
-	return payload
-}
-
 func TestGET_me_authenticated_returnsUserIdDisplayNameAndMemberAddress(t *testing.T) {
 	// Arrange
 	authHandlers, privyClient, _ := integrationApp(t)
