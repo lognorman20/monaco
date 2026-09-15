@@ -179,6 +179,34 @@ They receive USDC equal to their redeemed fraction of the pot at that moment, no
 | Marks            | Jupiter fill + [Pyth Hermes](https://docs.pyth.network/price-feeds/core/api-instances-and-providers/hermes)  |
 
 
+## Local env
+
+Secrets use [dotenvx](https://dotenvx.com). Install the CLI (not a repo dependency):
+
+```bash
+brew tap dotenvx/brew && brew trust dotenvx/brew && brew install dotenvx
+```
+
+Or `curl -sfS https://dotenvx.sh | sh`. See [install docs](https://dotenvx.com/docs/install).
+
+1. Copy `.env.example` → `.env.local` for local dev. Optionally add `.env.production`.
+2. Encrypt: `dotenvx encrypt -f .env.local` (and `-f .env.production` if used).
+3. Set values: `dotenvx set KEY value -f .env.local` (encrypts by default; `--plain` for non-secrets).
+
+The Justfile `set dotenv-load` only auto-loads plain `.env` and does not decrypt dotenvx ciphertext. Run through dotenvx:
+
+```bash
+dotenvx run -f .env.local -- just test backend
+dotenvx run -f .env.local -- just run
+dotenvx run -f .env.local -- just run backend
+```
+
+Private keys: `DOTENV_PRIVATE_KEY` for `.env` / `.env.local`; `DOTENV_PRIVATE_KEY_PRODUCTION` for `.env.production`. On macOS, new keys often land in Keychain, not `.env.keys`. Export with `dotenvx native pull` or `dotenvx keypair -f .env.local`.
+
+Encrypted `.env*` files (public key in repo) may be committed. Never commit `.env.keys`, `.env.local`, or private keys. `.gitignore` covers `.env`; keep `.env.keys` and `.env.local` out of git locally.
+
+A pre-commit hook runs `dotenvx precommit` and blocks commits of plaintext `.env*` files. Reinstall after clone: `chmod +x scripts/githooks/pre-commit && cp scripts/githooks/pre-commit .git/hooks/pre-commit` (or `dotenvx precommit --install`).
+
 ## Hackathon demo checklist
 
 Judges should spend most of the live pass on P&L. Show the in-group member board and the app-wide group and people boards. The buy exists so those numbers are real.
