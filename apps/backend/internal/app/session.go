@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
@@ -22,12 +23,51 @@ func NewSessionService(store *postgres.Store, privyClient privy.Client) *Session
 	}
 }
 
+// SessionResult is the authenticated user and member wallet for POST /v1/auth/session.
+type SessionResult struct {
+	UserID              string
+	DisplayName         string
+	MemberWalletAddress string
+}
+
 // MemberWallet is the persisted member Solana wallet for a user.
 type MemberWallet struct {
 	ID            string
 	UserID        string
 	PrivyWalletID string
 	SolanaAddress string
+}
+
+// OpenSession verifies a Privy token, upserts the user, and ensures a member wallet.
+func (s *SessionService) OpenSession(ctx context.Context, accessToken string) (SessionResult, error) {
+	identity, err := s.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			return SessionResult{}, privy.ErrInvalidToken
+		}
+		return SessionResult{}, fmt.Errorf("verify session: %w", err)
+	}
+
+	user, err := s.store.UpsertUser(ctx, identity.PrivyUserID, identity.DisplayName)
+	if err != nil {
+		return SessionResult{}, err
+	}
+
+	wallet, err := s.EnsureMemberWallet(ctx, identity.PrivyUserID, user.ID)
+	if err != nil {
+		return SessionResult{}, err
+	}
+
+	displayName := ""
+	if user.DisplayName.Valid {
+		displayName = user.DisplayName.String
+	}
+
+	return SessionResult{
+		UserID:              user.ID,
+		DisplayName:         displayName,
+		MemberWalletAddress: wallet.SolanaAddress,
+	}, nil
 }
 
 // EnsureMemberWallet provisions a member wallet once per user and returns the persisted row.
