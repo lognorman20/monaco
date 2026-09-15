@@ -2,16 +2,17 @@
 //  MonacoApp.swift
 //  Monaco
 //
-//  Created by Logan Norman on 9/15/26.
-//
 
 import SwiftUI
 
 @main
 struct MonacoApp: App {
+    @StateObject private var auth = PrivyAuthService()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(auth)
         }
     }
 }
