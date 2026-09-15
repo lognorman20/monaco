@@ -23,23 +23,20 @@ func integrationGroupApp(t *testing.T) (*GroupHandlers, *AuthHandlers, privy.Cli
 	return &GroupHandlers{Groups: groups}, authHandlers, privyClient, db
 }
 
-func seedAuthenticatedUser(t *testing.T, handlers *AuthHandlers, privyClient privy.Client, token privy.AccessToken, identity privy.Identity) authSessionResponse {
-	t.Helper()
-
-	privy.RegisterToken(privyClient, token, identity)
-	req := httptest.NewRequest(http.MethodPost, "/v1/auth/session", strings.NewReader(`{"accessToken":"`+string(token)+`"}`))
+func TestPOST_groups_missingAuth_returns401(t *testing.T) {
+	// Arrange
+	groupHandlers, _, _, _ := integrationGroupApp(t)
+	req := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Alpha Fund"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	handlers.SessionHandler(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("seed session status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
 
-	var payload authSessionResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode session json: %v", err)
+	// Act
+	groupHandlers.CreateGroupHandler(rec, req)
+
+	// Assert
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
 	}
-	return payload
 }
 
 func TestCreateGroup_insertsGroupAndTreasuryRows(t *testing.T) {

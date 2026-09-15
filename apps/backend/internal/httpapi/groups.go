@@ -65,16 +65,3 @@ func (h *GroupHandlers) CreateGroupHandler(w http.ResponseWriter, r *http.Reques
 		TreasuryAddress: result.TreasuryAddress,
 	})
 }
-
-func bearerToken(r *http.Request) (string, bool) {
-	auth := r.Header.Get("Authorization")
-	const prefix = "Bearer "
-	if !strings.HasPrefix(auth, prefix) {
-		return "", false
-	}
-	token := strings.TrimSpace(strings.TrimPrefix(auth, prefix))
-	if token == "" {
-		return "", false
-	}
-	return token, true
-}
