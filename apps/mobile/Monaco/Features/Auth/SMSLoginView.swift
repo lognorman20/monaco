@@ -66,7 +66,9 @@ struct SMSLoginView: View {
                     Button("Send code") {
                         Task {
                             await auth.sendSMSCode(to: normalizedPhone)
-                            focusedField = .code
+                            if case .awaitingCode = auth.phase {
+                                focusedField = .code
+                            }
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -89,9 +91,9 @@ struct SMSLoginView: View {
 
     private var showsOTPField: Bool {
         switch auth.phase {
-        case .awaitingCode, .verifyingCode, .authenticated, .failed:
+        case .awaitingCode, .verifyingCode, .authenticated:
             true
-        case .idle, .sendingCode:
+        case .idle, .sendingCode, .failed:
             false
         }
     }
