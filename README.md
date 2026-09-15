@@ -17,7 +17,7 @@ Prize target is the general Stocklana pool. Judges ask whether this could be a r
 
 ## How it works
 
-1. Sign in with Apple or SMS via Privy.
+1. Sign in with SMS or email and password via Privy.
 2. Create a group or join one of many. One user belongs to many groups. App home ranks groups and people across the whole app.
 3. Deposit USDC into the member wallet. The backend sweeps it into the group treasury and credits share units at the current share price.
 4. Propose a buy from the xStocks catalog. The group's voter set must pass it under the creator's threshold and expiry. Then the backend swaps treasury USDC for the token on Jupiter.

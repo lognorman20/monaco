@@ -1,0 +1,23 @@
+name: monaco
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: monaco-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-monaco}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-monaco}
+      POSTGRES_DB: ${POSTGRES_DB:-monaco}
+    ports:
+      - "${POSTGRES_PORT:-54322}:5432"
+    volumes:
+      - monaco_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-monaco} -d ${POSTGRES_DB:-monaco}"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+volumes:
+  monaco_pg_data:

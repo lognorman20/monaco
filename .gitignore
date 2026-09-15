@@ -1,0 +1,12 @@
+.env
+bin/
+*.exe
+.DS_Store
+.idea/
+.vscode/
+*.xcuserstate
+xcuserdata/
+DerivedData/
+build/
+.cursor/*
+.tmp*
