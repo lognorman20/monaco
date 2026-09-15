@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"testing"
@@ -28,4 +29,14 @@ func integrationDB(t *testing.T) *sql.DB {
 	})
 
 	return db
+}
+
+func resetTables(t *testing.T, db *sql.DB) {
+	t.Helper()
+
+	ctx := context.Background()
+	_, err := db.ExecContext(ctx, "TRUNCATE users, member_wallets, groups, treasuries RESTART IDENTITY CASCADE")
+	if err != nil {
+		t.Fatalf("reset tables: %v", err)
+	}
 }
