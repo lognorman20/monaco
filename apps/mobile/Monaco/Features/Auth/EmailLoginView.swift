@@ -1,33 +1,33 @@
 import SwiftUI
 
-/// SMS OTP login via Privy. Email OTP lives in `EmailLoginView`; both sit under `LoginView`.
-struct SMSLoginView: View {
+/// Email OTP login via Privy. Privy dashboard uses inbox code, not password.
+struct EmailLoginView: View {
     @ObservedObject var auth: PrivyAuthService
 
-    @State private var phoneNumber = ""
+    @State private var emailAddress = ""
     @State private var otpCode = ""
     @FocusState private var focusedField: Field?
 
     private enum Field {
-        case phone
+        case email
         case code
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Sign in with SMS")
+            Text("Sign in with email")
                 .font(.title2.bold())
 
-            Text("Use E.164 format, e.g. +14155552671.")
+            Text("We send a one-time code to your inbox. Check spam if it does not arrive.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            TextField("Phone number", text: $phoneNumber)
-                .keyboardType(.phonePad)
-                .textContentType(.telephoneNumber)
+            TextField("Email address", text: $emailAddress)
+                .keyboardType(.emailAddress)
+                .textContentType(.emailAddress)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .focused($focusedField, equals: .phone)
+                .focused($focusedField, equals: .email)
 
             if showsOTPField {
                 TextField("6-digit code", text: $otpCode)
@@ -57,7 +57,7 @@ struct SMSLoginView: View {
                 if showsOTPField {
                     Button("Verify code") {
                         Task {
-                            await auth.loginWithSMSCode(otpCode, sentTo: normalizedPhone)
+                            await auth.loginWithEmailCode(otpCode, sentTo: normalizedEmail)
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -65,7 +65,7 @@ struct SMSLoginView: View {
                 } else {
                     Button("Send code") {
                         Task {
-                            await auth.sendSMSCode(to: normalizedPhone)
+                            await auth.sendEmailCode(to: normalizedEmail)
                             if case .awaitingCode = auth.phase {
                                 focusedField = .code
                             }
@@ -85,8 +85,8 @@ struct SMSLoginView: View {
         }
     }
 
-    private var normalizedPhone: String {
-        phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var normalizedEmail: String {
+        emailAddress.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var showsOTPField: Bool {
@@ -99,7 +99,7 @@ struct SMSLoginView: View {
     }
 
     private var isSendDisabled: Bool {
-        normalizedPhone.isEmpty || auth.phase == .sendingCode
+        normalizedEmail.isEmpty || !normalizedEmail.contains("@") || auth.phase == .sendingCode
     }
 
     private var isVerifyDisabled: Bool {
@@ -111,9 +111,9 @@ struct SMSLoginView: View {
         case .idle:
             return nil
         case .sendingCode:
-            return "Sending SMS code…"
+            return "Sending email code…"
         case .awaitingCode:
-            return "Enter the code from your text message."
+            return "Enter the code from your email."
         case .verifyingCode:
             return "Verifying code…"
         case .authenticated:
@@ -141,5 +141,5 @@ struct SMSLoginView: View {
 }
 
 #Preview {
-    SMSLoginView(auth: PrivyAuthService())
+    EmailLoginView(auth: PrivyAuthService())
 }
