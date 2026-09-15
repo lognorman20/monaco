@@ -1,4 +1,6 @@
 .env
+.env.local
+.env.keys
 bin/
 *.exe
 .DS_Store
