@@ -64,9 +64,12 @@ test app:
           echo "error: apps/mobile is not scaffolded yet (M0-T4)."
           exit 1
         fi
-        xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
-          -destination 'platform=iOS Simulator,id=7B30D45E-62FD-42E2-871A-787B19D38CCF' \
-          -configuration Debug test
+        if [[ ! -f packages/mobile-core/Package.swift ]]; then
+          echo "error: packages/mobile-core is not scaffolded yet."
+          exit 1
+        fi
+        # Host unit tests only (swift test on macOS). iOS sim UI tests stay on just build/run mobile.
+        (cd packages/mobile-core && swift test)
         ;;
       *)
         echo "error: unknown app '{{app}}' (use backend or mobile)"

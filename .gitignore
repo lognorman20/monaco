@@ -10,5 +10,6 @@ bin/
 xcuserdata/
 DerivedData/
 build/
+.build/
 .cursor/*
 .tmp*
