@@ -11,27 +11,36 @@ struct MeScreenView: View {
     @State private var isLoading = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Your account")
-                .font(.title2.bold())
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Your account")
+                    .font(.title2.bold())
 
-            if isLoading {
-                ProgressView("Loading profile…")
-            } else if let profile {
-                profileSection(profile)
-            } else if let errorMessage {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-            }
+                if isLoading {
+                    ProgressView("Loading profile…")
+                } else if let profile {
+                    profileSection(profile)
+                } else if let errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
 
-            Button("Sign out") {
-                Task { await auth.logout() }
+                NavigationLink {
+                    CreateGroupView(auth: auth)
+                } label: {
+                    Label("Create group", systemImage: "person.3.fill")
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("Sign out") {
+                    Task { await auth.logout() }
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
-        }
-        .task(id: auth.accessToken) {
-            await loadProfile()
+            .task(id: auth.accessToken) {
+                await loadProfile()
+            }
         }
     }
 
