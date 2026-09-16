@@ -55,6 +55,11 @@ type walletRPCRequest struct {
 	Params walletRPCParams `json:"params"`
 }
 
+type signTransactionRPCRequest struct {
+	Method string          `json:"method"`
+	Params walletRPCParams `json:"params"`
+}
+
 type walletRPCParams struct {
 	Transaction string `json:"transaction"`
 	Encoding    string `json:"encoding"`
@@ -278,9 +283,8 @@ func (c *HTTPClient) SignSolanaTransaction(ctx context.Context, walletID, txBase
 }
 
 func (c *HTTPClient) signSolanaTransaction(ctx context.Context, walletID, txBase64 string) (string, error) {
-	payload, err := json.Marshal(walletRPCRequest{
+	payload, err := json.Marshal(signTransactionRPCRequest{
 		Method: "signTransaction",
-		CAIP2:  solanaMainnetCAIP2,
 		Params: walletRPCParams{
 			Transaction: txBase64,
 			Encoding:    "base64",
