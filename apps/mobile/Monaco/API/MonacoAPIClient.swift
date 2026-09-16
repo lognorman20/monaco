@@ -168,6 +168,22 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(GetGroupResponse.self, from: data)
     }
 
+    func getGroupView(accessToken: String, groupId: String) async throws -> GroupViewDTO {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/view")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(GroupViewDTO.self, from: data)
+    }
+
     func createDeposit(accessToken: String, groupId: String, amount: Int64) async throws -> CreateDepositResponse {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/deposits")
         var request = URLRequest(url: url)

@@ -1,0 +1,44 @@
+{
+  "id": "550e8400-e29b-41d4-a716-446655440099",
+  "name": "Weekend investors",
+  "pot": [
+    {
+      "symbol": "USDC",
+      "units": "125.50",
+      "markUsd": "1.00",
+      "valueUsd": "125.50",
+      "afterHours": null
+    },
+    {
+      "symbol": "AAPLx",
+      "units": "2.15",
+      "markUsd": "231.40",
+      "valueUsd": "497.51",
+      "afterHours": true
+    }
+  ],
+  "you": {
+    "shareUnits": "500000",
+    "equityUsd": "311.50",
+    "slicePercent": "0.42",
+    "dollarPnl": "+48.20",
+    "percentReturn": "0.124"
+  },
+  "members": [
+    {
+      "rank": 1,
+      "userId": "u1",
+      "displayName": "Alfred",
+      "percentReturn": "0.124",
+      "dollarPnl": "+48.20"
+    },
+    {
+      "rank": 2,
+      "userId": "u2",
+      "displayName": "Beatrice",
+      "percentReturn": "0.082",
+      "dollarPnl": "+22.10"
+    }
+  ],
+  "proposals": []
+}
