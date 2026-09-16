@@ -1,0 +1,13 @@
+{
+  "symbol": "AAPLx",
+  "deployments": [
+    {
+      "address": "0x0000000000000000000000000000000000000001",
+      "network": "Ethereum"
+    },
+    {
+      "address": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+      "network": "Solana"
+    }
+  ]
+}
