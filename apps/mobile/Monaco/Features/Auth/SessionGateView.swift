@@ -16,7 +16,9 @@ struct SessionGateView: View {
                 ProgressView("Loading your boards…")
                     .frame(maxWidth: .infinity, minHeight: 200)
             } else if let home {
-                HomeView(auth: auth, home: home, onRefresh: refreshHome)
+                NavigationStack {
+                    HomeView(auth: auth, home: home, onRefresh: refreshHome)
+                }
             } else if let errorMessage {
                 VStack(alignment: .leading, spacing: 12) {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")

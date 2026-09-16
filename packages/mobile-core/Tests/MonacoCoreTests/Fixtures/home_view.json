@@ -1,0 +1,18 @@
+{
+  "groups": [
+    {
+      "groupId": "g1",
+      "name": "Weekend investors",
+      "percentReturn": "+12.4%",
+      "dollarPnl": "+$48.20"
+    }
+  ],
+  "people": [
+    {
+      "userId": "u1",
+      "displayName": "Alfred",
+      "percentReturn": "+12.4%",
+      "dollarPnl": "+$48.20"
+    }
+  ]
+}
