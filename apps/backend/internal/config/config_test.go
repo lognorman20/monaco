@@ -9,6 +9,7 @@ func clearConfigEnv(t *testing.T) {
 	t.Setenv("PRIVY_APP_ID", "")
 	t.Setenv("PRIVY_APP_SECRET", "")
 	t.Setenv("PRIVY_AUTHORIZATION_PRIVATE_KEY", "")
+	t.Setenv("PRIVY_AUTHORIZATION_KEY_ID", "")
 	t.Setenv("RELAYER_PRIVATE_KEY", "")
 }
 
@@ -18,6 +19,7 @@ func setValidConfigEnv(t *testing.T) {
 	t.Setenv("PRIVY_APP_SECRET", "test-privy-app-secret")
 	t.Setenv("RELAYER_PRIVATE_KEY", "test-relayer-private-key")
 	t.Setenv("PRIVY_AUTHORIZATION_PRIVATE_KEY", "wallet-auth:test-authorization-key")
+	t.Setenv("PRIVY_AUTHORIZATION_KEY_ID", "test-authorization-key-id")
 }
 
 func TestLoad_returnsConfigWhenAllRequiredEnvVarsSet(t *testing.T) {
@@ -49,6 +51,9 @@ func TestLoad_returnsConfigWhenAllRequiredEnvVarsSet(t *testing.T) {
 	}
 	if cfg.PrivyAuthorizationPrivateKey != "wallet-auth:test-authorization-key" {
 		t.Fatalf("PrivyAuthorizationPrivateKey = %q", cfg.PrivyAuthorizationPrivateKey)
+	}
+	if cfg.PrivyAuthorizationKeyID != "test-authorization-key-id" {
+		t.Fatalf("PrivyAuthorizationKeyID = %q", cfg.PrivyAuthorizationKeyID)
 	}
 }
 

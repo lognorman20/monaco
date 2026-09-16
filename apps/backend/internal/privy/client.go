@@ -25,6 +25,7 @@ type HTTPClient struct {
 	appID                        string
 	appSecret                    string
 	privyAuthorizationPrivateKey string
+	privyAuthorizationKeyID      string
 	baseURL                      string
 	solanaCluster                string
 	solanaRPCURL                 string // test override; empty uses cluster default
@@ -37,6 +38,7 @@ func NewHTTPClient(cfg *config.Config) *HTTPClient {
 		appID:                        cfg.PrivyAppID,
 		appSecret:                    cfg.PrivyAppSecret,
 		privyAuthorizationPrivateKey: cfg.PrivyAuthorizationPrivateKey,
+		privyAuthorizationKeyID:      cfg.PrivyAuthorizationKeyID,
 		baseURL:                      defaultBaseURL,
 		solanaCluster:                cfg.SolanaCluster,
 		httpClient: &http.Client{

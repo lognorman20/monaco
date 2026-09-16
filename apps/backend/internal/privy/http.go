@@ -11,11 +11,16 @@ import (
 	"strings"
 )
 
+type additionalSigner struct {
+	SignerID string `json:"signer_id"`
+}
+
 type createWalletRequest struct {
-	ChainType   string       `json:"chain_type"`
-	DisplayName string       `json:"display_name,omitempty"`
-	ExternalID  string       `json:"external_id,omitempty"`
-	Owner       *walletOwner `json:"owner,omitempty"`
+	ChainType         string             `json:"chain_type"`
+	DisplayName       string             `json:"display_name,omitempty"`
+	ExternalID        string             `json:"external_id,omitempty"`
+	Owner             *walletOwner       `json:"owner,omitempty"`
+	AdditionalSigners []additionalSigner `json:"additional_signers,omitempty"`
 }
 
 type walletOwner struct {

@@ -15,6 +15,7 @@ const (
 	envPrivyAppID                    = "PRIVY_APP_ID"
 	envPrivyAppSecret                = "PRIVY_APP_SECRET"
 	envPrivyAuthorizationPrivateKey  = "PRIVY_AUTHORIZATION_PRIVATE_KEY"
+	envPrivyAuthorizationKeyID       = "PRIVY_AUTHORIZATION_KEY_ID"
 	envRelayerPrivateKey             = "RELAYER_PRIVATE_KEY"
 )
 
@@ -30,11 +31,16 @@ const (
 // Optional environment variables:
 //   - PRIVY_AUTHORIZATION_PRIVATE_KEY: Privy wallet authorization key (wallet-auth:… PKCS#8)
 //     required for server-side wallet RPC such as signAndSendTransaction.
+//   - PRIVY_AUTHORIZATION_KEY_ID: Privy authorization key quorum id (public config) added as
+//     additional_signer on new member wallets so the server can sign sweeps. Existing wallets
+//     created without this signer must be updated in Privy (owner-signed PATCH); new wallets
+//     get the signer at create time when this is set.
 type Config struct {
 	DatabaseURL                   string
 	PrivyAppID                    string
 	PrivyAppSecret                string
 	PrivyAuthorizationPrivateKey  string
+	PrivyAuthorizationKeyID       string
 	RelayerPrivateKey             string
 	SolanaCluster                 string
 }
@@ -47,6 +53,7 @@ func Load() (*Config, error) {
 		PrivyAppID:                   strings.TrimSpace(os.Getenv(envPrivyAppID)),
 		PrivyAppSecret:               strings.TrimSpace(os.Getenv(envPrivyAppSecret)),
 		PrivyAuthorizationPrivateKey: strings.TrimSpace(os.Getenv(envPrivyAuthorizationPrivateKey)),
+		PrivyAuthorizationKeyID:      strings.TrimSpace(os.Getenv(envPrivyAuthorizationKeyID)),
 		RelayerPrivateKey:            strings.TrimSpace(os.Getenv(envRelayerPrivateKey)),
 		SolanaCluster:                SolanaCluster,
 	}

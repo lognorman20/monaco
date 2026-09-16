@@ -17,10 +17,11 @@ func (c *HTTPClient) EnsureMemberWallet(ctx context.Context, privyUserID string,
 	}
 
 	wallet, err := c.createWallet(ctx, "member-"+string(userID), createWalletRequest{
-		ChainType:   "solana",
-		DisplayName: "monaco-member",
-		ExternalID:  string(userID),
-		Owner:       &walletOwner{UserID: privyUserID},
+		ChainType:         "solana",
+		DisplayName:       "monaco-member",
+		ExternalID:        string(userID),
+		Owner:             &walletOwner{UserID: privyUserID},
+		AdditionalSigners: c.walletAdditionalSigners(),
 	})
 	if err != nil {
 		return WalletRef{}, err
@@ -31,4 +32,11 @@ func (c *HTTPClient) EnsureMemberWallet(ctx context.Context, privyUserID string,
 		PrivyWalletID: wallet.ID,
 		SolanaAddress: wallet.Address,
 	}, nil
+}
+
+func (c *HTTPClient) walletAdditionalSigners() []additionalSigner {
+	if c.privyAuthorizationKeyID == "" {
+		return nil
+	}
+	return []additionalSigner{{SignerID: c.privyAuthorizationKeyID}}
 }
