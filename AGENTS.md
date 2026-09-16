@@ -2,6 +2,7 @@
 
 - Keep `just` recipes minimal: `just build`, `just test`, and `just run` per app (`backend` or `mobile`), plus root `just run` to start backend and mobile together.
 - When the user says "test mobile" or runs `just test mobile`, run host `swift test` in `packages/mobile-core` (fast, deterministic; no iOS Simulator or `xcodebuild test`). `just build mobile` is the iOS compile gate (`xcodebuild build` on gold sim UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`). Do not boot a sim for unit tests.
+- Gold slim sim QA: reuse UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`; never `simctl erase` or destination by name. Sim smoke / agent tap-through: `.cursor/skills/ios-simslim-fast-qa/SKILL.md`. XcodeBuildMCP: `--simulator-id 7B30D45E-62FD-42E2-871A-787B19D38CCF`. Details in README **Gold slim simulator**.
 - App directories are `apps/backend` and `apps/mobile` by intentional rename; do not refer to or recreate `apps/api` or `apps/ios`. The iOS Xcode project/scheme may stay named `Monaco` under `apps/mobile`.
 - For M1 testing, support email OTP login in addition to SMS auth.
 - Backend is Go over Rust for faster compile times and iteration speed.

@@ -212,6 +212,20 @@ For iOS, use `./scripts/ios-sim` or `just run mobile` from the repo root. Both d
 
 `just test mobile` runs host `swift test` in `packages/mobile-core` (fast, no simulator). `just build mobile` is the iOS compile gate on gold sim UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`.
 
+#### Gold slim simulator
+
+Monaco uses one **gold slim** iOS Simulator: SimSlim RAM-thinned, fixed UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF` (~0.9 GB vs ~4 GB stock). Reuse it across builds and QA. Never `simctl erase`, never spin up a fresh sim for QA, and never target by device name (e.g. `iPhone 17`) — always by UDID.
+
+| Command | When to use |
+| --- | --- |
+| `ios-build` / `ios-sim` (`~/.local/bin`) | Bare compile or run on the gold sim. No Privy env. |
+| `./scripts/ios-build` | Monaco compile: generates Privy xcconfig from `.env.local`, then calls `ios-build`. |
+| `./scripts/ios-sim` | Monaco run: injects Privy via dotenvx, then calls `ios-sim`. Prefer this over bare `ios-sim`. |
+| `dotenvx run -f .env.local -- just build mobile` | Compile gate with Privy xcconfig (same UDID). |
+| `dotenvx run -f .env.local -- just run mobile` | Full run with Privy; delegates to `./scripts/ios-sim`. |
+
+**Agent / sim QA.** Fast smoke (launch, primary nav, one critical path) — follow `.cursor/skills/ios-simslim-fast-qa/SKILL.md` (SimSlim verify, MobAI tap-through). Run unit tests first (`just test mobile`, no sim). XcodeBuildMCP: always pass `--simulator-id 7B30D45E-62FD-42E2-871A-787B19D38CCF`.
+
 Privy test accounts and OTP codes: see **Privy (M1)** in `AGENTS.md`.
 
 Private keys: `DOTENV_PRIVATE_KEY` for `.env` / `.env.local`; `DOTENV_PRIVATE_KEY_PRODUCTION` for `.env.production`. On macOS, new keys often land in Keychain, not `.env.keys`. Export with `dotenvx native pull` or `dotenvx keypair -f .env.local`.
