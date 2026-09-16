@@ -124,6 +124,34 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(CreateGroupResponse.self, from: data)
     }
 
+    func joinGroup(accessToken: String, groupId: String, password: String?) async throws {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/join")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        if let password {
+            request.httpBody = try JSONEncoder().encode(JoinGroupRequest(password: password))
+        } else {
+            request.httpBody = try JSONEncoder().encode(JoinGroupRequest(password: ""))
+        }
+
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        switch http.statusCode {
+        case 204:
+            return
+        case 403:
+            throw MonacoAPIError.httpStatus(403)
+        case 404:
+            throw MonacoAPIError.httpStatus(404)
+        default:
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+    }
+
     func getGroup(accessToken: String, groupId: String) async throws -> GetGroupResponse {
         let url = baseURL.appending(path: "v1/groups/\(groupId)")
         var request = URLRequest(url: url)
@@ -247,6 +275,10 @@ private struct CreateGroupRulesRequest: Encodable {
     let voterSet: CreateGroupVoterSetRequest
     let threshold: String
     let voteExpirySeconds: Int64
+}
+
+private struct JoinGroupRequest: Encodable {
+    let password: String
 }
 
 private struct CreateDepositRequest: Encodable {
