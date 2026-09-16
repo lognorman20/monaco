@@ -11,7 +11,11 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
-// DevBuyHandlers serves the temporary M3 dev-only buy route.
+// DELETE_IN_M4 marks the temporary dev buy HTTP stub for removal when M4 vote pass
+// becomes the execute hook (see M4-T19). Grep this symbol to find all delete targets.
+const DELETE_IN_M4 = "DELETE_IN_M4"
+
+// DevBuyHandlers serves the temporary M3 dev-only buy route. DELETE_IN_M4
 type DevBuyHandlers struct {
 	DevBuy *app.DevBuyService
 }
@@ -30,7 +34,7 @@ type devBuyResponse struct {
 	Created       bool   `json:"created"`
 }
 
-// DevBuyHandler handles POST /v1/dev/groups/{id}/buy.
+// DevBuyHandler handles POST /v1/dev/groups/{id}/buy. DELETE_IN_M4
 func (h *DevBuyHandlers) DevBuyHandler(w http.ResponseWriter, r *http.Request) {
 	if !app.DevBuyEnabled() {
 		writeJSONError(w, http.StatusNotFound, "not found")
