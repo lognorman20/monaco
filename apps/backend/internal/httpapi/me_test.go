@@ -1,0 +1,97 @@
+package httpapi
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/monaco/monaco/apps/backend/internal/privy"
+)
+
+func integrationMeApp(t *testing.T) (*MeHandlers, privy.Client) {
+	t.Helper()
+
+	authHandlers, privyClient, _ := integrationApp(t)
+	return &MeHandlers{Sessions: authHandlers.Sessions}, privyClient
+}
+
+func TestGET_me_authenticated_returnsUserIdDisplayNameAndMemberAddress(t *testing.T) {
+	// Arrange
+	authHandlers, privyClient, _ := integrationApp(t)
+	meHandlers := &MeHandlers{Sessions: authHandlers.Sessions}
+	token := fixtureSessionToken()
+	session := seedAuthenticatedUser(t, authHandlers, privyClient, token, privy.Identity{
+		PrivyUserID: "did:privy:alfred",
+		DisplayName: "Alfred",
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+string(token))
+	rec := httptest.NewRecorder()
+
+	// Act
+	meHandlers.MeHandler(rec, req)
+
+	// Assert
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+
+	body := rec.Body.String()
+	for _, key := range []string{`"userId"`, `"displayName"`, `"memberWalletAddress"`} {
+		if !strings.Contains(body, key) {
+			t.Fatalf("expected %s in response body: %s", key, body)
+		}
+	}
+
+	var payload meResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if payload.UserID != session.UserID {
+		t.Fatalf("userId = %q, want %q", payload.UserID, session.UserID)
+	}
+	if payload.DisplayName != "Alfred" {
+		t.Fatalf("displayName = %q, want Alfred", payload.DisplayName)
+	}
+	if payload.MemberWalletAddress != session.MemberWalletAddress {
+		t.Fatalf("memberWalletAddress = %q, want %q", payload.MemberWalletAddress, session.MemberWalletAddress)
+	}
+}
+
+func TestGET_me_missingAuth_returns401(t *testing.T) {
+	// Arrange
+	meHandlers, _ := integrationMeApp(t)
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	rec := httptest.NewRecorder()
+
+	// Act
+	meHandlers.MeHandler(rec, req)
+
+	// Assert
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestGET_me_unknownUser_returns404(t *testing.T) {
+	// Arrange
+	meHandlers, privyClient := integrationMeApp(t)
+	token := privy.AccessToken("orphan-session-token")
+	privy.RegisterToken(privyClient, token, privy.Identity{
+		PrivyUserID: "did:privy:unknown-user",
+		DisplayName: "Ghost",
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+string(token))
+	rec := httptest.NewRecorder()
+
+	// Act
+	meHandlers.MeHandler(rec, req)
+
+	// Assert
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body = %s", rec.Code, rec.Body.String())
+	}
+}

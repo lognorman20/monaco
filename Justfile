@@ -22,6 +22,11 @@ build app:
           echo "error: apps/mobile is not scaffolded yet (M0-T4)."
           exit 1
         fi
+        if [[ ! -f .env.local ]]; then
+          echo "error: .env.local missing — copy .env.example and set Privy keys (dotenvx set … -f .env.local)."
+          exit 1
+        fi
+        dotenvx run -f .env.local -- ./scripts/ensure-ios-privy-config.sh generate
         xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
           -destination 'platform=iOS Simulator,id=7B30D45E-62FD-42E2-871A-787B19D38CCF' \
           -configuration Debug build
@@ -165,15 +170,18 @@ run *app:
           exit 1
         fi
         if command -v ios-sim >/dev/null 2>&1; then
-          ios-sim
+          ./scripts/ios-sim
         else
-          xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
-            -destination 'platform=iOS Simulator,id=7B30D45E-62FD-42E2-871A-787B19D38CCF' \
-            -configuration Debug build
-          xcrun simctl boot 7B30D45E-62FD-42E2-871A-787B19D38CCF 2>/dev/null || true
-          xcrun simctl install 7B30D45E-62FD-42E2-871A-787B19D38CCF \
-            "$(find ~/Library/Developer/Xcode/DerivedData -name Monaco.app -path '*Debug-iphonesimulator*' | head -1)"
-          xcrun simctl launch 7B30D45E-62FD-42E2-871A-787B19D38CCF com.monaco.app
+          ./scripts/with-ios-privy-env.sh bash -c '
+            set -euo pipefail
+            xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
+              -destination "platform=iOS Simulator,id=7B30D45E-62FD-42E2-871A-787B19D38CCF" \
+              -configuration Debug build
+            xcrun simctl boot 7B30D45E-62FD-42E2-871A-787B19D38CCF 2>/dev/null || true
+            xcrun simctl install 7B30D45E-62FD-42E2-871A-787B19D38CCF \
+              "$(find ~/Library/Developer/Xcode/DerivedData -name Monaco.app -path "*Debug-iphonesimulator*" | head -1)"
+            xcrun simctl launch 7B30D45E-62FD-42E2-871A-787B19D38CCF com.monaco.app
+          '
         fi
         ;;
       *)
