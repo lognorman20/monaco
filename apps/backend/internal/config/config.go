@@ -70,6 +70,9 @@ func Load() (*Config, error) {
 	if cfg.RelayerPrivateKey == "" {
 		return nil, fmt.Errorf("%s is required", envRelayerPrivateKey)
 	}
+	if cfg.PrivyAuthorizationPrivateKey != "" && cfg.PrivyAuthorizationKeyID == "" {
+		return nil, fmt.Errorf("%s is required when %s is set", envPrivyAuthorizationKeyID, envPrivyAuthorizationPrivateKey)
+	}
 
 	return cfg, nil
 }

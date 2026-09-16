@@ -83,6 +83,26 @@ func TestHTTPClient_EnsureMemberWallet_createsSolanaWallet(t *testing.T) {
 	}
 }
 
+func TestHTTPClient_EnsureMemberWallet_returnsErrorWhenPrivateKeySetWithoutKeyID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected HTTP request when KEY_ID missing with private key set")
+	}))
+	defer server.Close()
+
+	client := NewHTTPClientWithTransport(&config.Config{
+		PrivyAppID:                   "test-app-id",
+		PrivyAppSecret:               "test-app-secret",
+		PrivyAuthorizationPrivateKey: "wallet-auth:test-authorization-key",
+		PrivyAuthorizationKeyID:      "",
+		SolanaCluster:                "mainnet-beta",
+	}, server.URL, server.Client().Transport)
+
+	_, err := client.EnsureMemberWallet(context.Background(), "did:privy:test-user", UserID("user-uuid-2"))
+	if err == nil {
+		t.Fatal("expected error when authorization private key is set without KEY_ID")
+	}
+}
+
 func TestHTTPClient_EnsureMemberWallet_omitsAdditionalSignersWhenKeyIDUnset(t *testing.T) {
 	// Arrange
 	var gotBody createWalletRequest

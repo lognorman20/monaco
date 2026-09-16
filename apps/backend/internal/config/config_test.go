@@ -105,6 +105,21 @@ func TestLoad_missingPrivyAppSecret_returnsError(t *testing.T) {
 	}
 }
 
+func TestLoad_missingAuthorizationKeyIDWhenPrivateKeySet_returnsError(t *testing.T) {
+	// Arrange
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+	t.Setenv("PRIVY_AUTHORIZATION_KEY_ID", "")
+
+	// Act
+	_, err := Load()
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for missing PRIVY_AUTHORIZATION_KEY_ID when private key is set")
+	}
+}
+
 func TestLoad_missingRelayerPrivateKey_returnsError(t *testing.T) {
 	// Arrange
 	clearConfigEnv(t)
