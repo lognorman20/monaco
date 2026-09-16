@@ -15,7 +15,7 @@ build app:
           exit 1
         fi
         mkdir -p bin
-        (cd apps/backend && go build -o ../../bin/monaco-api .)
+        (cd apps/backend && go build -o ../../bin/monaco-api ./cmd/api)
         ;;
       mobile)
         if [[ ! -d apps/mobile ]]; then
@@ -55,15 +55,21 @@ test app:
         else
           echo "M0: apps/backend not scaffolded. Local DB smoke test passed."
         fi
+        if [[ "${SKIP_SCRIPTS_TESTS:-}" != "1" && -f scripts/go.mod ]]; then
+          (cd scripts && go test -short ./...)
+        fi
         ;;
       mobile)
         if [[ ! -d apps/mobile ]]; then
           echo "error: apps/mobile is not scaffolded yet (M0-T4)."
           exit 1
         fi
-        xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
-          -destination 'platform=iOS Simulator,id=7B30D45E-62FD-42E2-871A-787B19D38CCF' \
-          -configuration Debug test
+        if [[ ! -f packages/mobile-core/Package.swift ]]; then
+          echo "error: packages/mobile-core is not scaffolded yet."
+          exit 1
+        fi
+        # Host unit tests only (swift test on macOS). iOS sim UI tests stay on just build/run mobile.
+        (cd packages/mobile-core && swift test)
         ;;
       *)
         echo "error: unknown app '{{app}}' (use backend or mobile)"
@@ -116,7 +122,7 @@ run *app:
       }
       trap cleanup EXIT INT TERM
       echo "Starting backend (background) and mobile (foreground)..."
-      (cd apps/backend && go run .) &
+      (cd apps/backend && go run ./cmd/api) &
       backend_pid=$!
       if ! kill -0 "${backend_pid}" 2>/dev/null; then
         echo "error: backend failed to start"
@@ -147,7 +153,7 @@ run *app:
         echo "  psql: docker compose exec postgres psql -U ${POSTGRES_USER:-monaco} -d ${POSTGRES_DB:-monaco}"
         echo ""
         if [[ -f apps/backend/go.mod ]]; then
-          (cd apps/backend && go run .)
+          (cd apps/backend && go run ./cmd/api)
         else
           echo "M0: apps/backend not scaffolded yet. DB is up; wire the API in M0-T3."
           exit 1
