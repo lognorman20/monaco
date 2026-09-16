@@ -126,6 +126,7 @@ func TestObserveSweep_multipleDeposits_sumsShareUnitsAndAmountDeposited(t *testi
 }
 
 func TestProperty_sweptUsdcEqualsShareUnitsAndAmountDeposited(t *testing.T) {
+	// Arrange
 	amounts := []int64{1, 50_000, 2_500_000}
 	deposits, privyClient, _ := integrationDepositService(t)
 	ctx := context.Background()
@@ -156,7 +157,11 @@ func TestProperty_sweptUsdcEqualsShareUnitsAndAmountDeposited(t *testing.T) {
 			UserID:      user.ID,
 			GroupID:     group.GroupID,
 		}
+
+		// Act
 		result, err := deposits.ObserveSweep(ctx, sweep)
+
+		// Assert
 		if err != nil {
 			t.Fatalf("ObserveSweep amount=%d: %v", amount, err)
 		}
@@ -167,6 +172,7 @@ func TestProperty_sweptUsdcEqualsShareUnitsAndAmountDeposited(t *testing.T) {
 }
 
 func TestProperty_multipleDepositsPreserveOneToOneInvariant(t *testing.T) {
+	// Arrange
 	deposits, privyClient, _ := integrationDepositService(t)
 	ctx := context.Background()
 	sweep1, token := seedFundedDeposit(t, deposits, privyClient)
@@ -181,7 +187,11 @@ func TestProperty_multipleDepositsPreserveOneToOneInvariant(t *testing.T) {
 	sweep2.TxSignature = "SWEEP-prop-2"
 	sweep2.DepositID = created2.Deposit.ID
 	sweep2.Amount = 2_000_000
+
+	// Act
 	result, err := deposits.ObserveSweep(ctx, sweep2)
+
+	// Assert
 	if err != nil {
 		t.Fatalf("ObserveSweep: %v", err)
 	}

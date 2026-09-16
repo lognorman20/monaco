@@ -109,6 +109,8 @@ func TestProperty_observeSweepIdempotent(t *testing.T) {
 	// Act
 	for i := 0; i < 3; i++ {
 		again, err := deposits.ObserveSweep(ctx, sweep)
+
+		// Assert
 		if err != nil {
 			t.Fatalf("repeat ObserveSweep: %v", err)
 		}
