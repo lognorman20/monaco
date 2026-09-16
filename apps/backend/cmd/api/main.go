@@ -14,9 +14,11 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/config"
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/worker"
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
 // bootResult holds API wiring produced at startup.
@@ -62,6 +64,13 @@ func boot(ctx context.Context) (*bootResult, error) {
 	me := &httpapi.MeHandlers{Sessions: sessions}
 	groupHandlers := &httpapi.GroupHandlers{Groups: groups}
 	depositHandlers := &httpapi.DepositHandlers{Deposits: deposits}
+	jupiterClient := jupiter.NewHTTPClient()
+	xstocksResolver := xstocks.NewHTTPResolver()
+	buy := app.NewBuyService(jupiterClient, xstocksResolver)
+	treasurySigner := app.NewPrivyTreasurySigner(privyClient)
+	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, treasurySigner)
+	devBuy := app.NewDevBuyService(swap, store, privyClient)
+	devBuyHandlers := &httpapi.DevBuyHandlers{DevBuy: devBuy}
 
 	addr := "127.0.0.1:8080"
 	if v := os.Getenv("API_ADDR"); v != "" {
@@ -78,6 +87,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/groups/{id}/share-units", depositHandlers.GetMemberShareUnitsHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/treasury/usdc", depositHandlers.GetTreasuryUsdcBalanceHandler)
 	mux.HandleFunc("GET /v1/deposits/{id}", depositHandlers.GetDepositHandler)
+	mux.HandleFunc("POST /v1/dev/groups/{id}/buy", devBuyHandlers.DevBuyHandler)
 
 	solanaRPC := worker.NewHTTPSolanaRPC(cfg.SolanaCluster)
 	poller := worker.NewSweepPoller(store, privyClient, solanaRPC, deposits, relayer.PrivateKey(), nil)
