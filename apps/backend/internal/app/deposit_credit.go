@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"math/big"
 	"strings"
@@ -14,13 +15,13 @@ import (
 
 const tokenAtomicScale int64 = 1_000_000
 
-func (d *DepositService) shareCreditForSweep(ctx context.Context, groupID, treasuryAddress string, swept int64) (int64, error) {
+func (d *DepositService) shareCreditForSweep(ctx context.Context, tx *sql.Tx, groupID, treasuryAddress string, swept int64) (int64, error) {
 	treasuryUsdc, err := d.privy.TreasuryUSDCBalance(ctx, treasuryAddress)
 	if err != nil {
 		return 0, fmt.Errorf("treasury usdc balance: %w", err)
 	}
 
-	totalSharesMicro, err := d.store.SumShareUnitsByGroup(ctx, groupID)
+	totalSharesMicro, err := d.store.SumShareUnitsByGroupTx(ctx, tx, groupID)
 	if err != nil {
 		return 0, err
 	}
@@ -29,7 +30,7 @@ func (d *DepositService) shareCreditForSweep(ctx context.Context, groupID, treas
 		return 0, err
 	}
 
-	holdings, err := d.store.ListNetTokenHoldingsByGroup(ctx, groupID)
+	holdings, err := d.store.ListNetTokenHoldingsByGroupTx(ctx, tx, groupID)
 	if err != nil {
 		return 0, err
 	}
@@ -48,7 +49,7 @@ func (d *DepositService) shareCreditForSweep(ctx context.Context, groupID, treas
 	if d.pyth == nil {
 		return 0, fmt.Errorf("pyth client is required for marked pot deposit credit")
 	}
-	costBasis, err := d.costBasisForGroup(ctx, groupID, holdings)
+	costBasis, err := d.costBasisForGroup(ctx, tx, groupID, holdings)
 	if err != nil {
 		return 0, err
 	}
@@ -72,10 +73,10 @@ func (d *DepositService) shareCreditForSweep(ctx context.Context, groupID, treas
 	return domain.ShareUnitsMicrosForDeposit(domain.USDCMicros(swept), nav)
 }
 
-func (d *DepositService) costBasisForGroup(ctx context.Context, groupID string, holdings []postgres.TokenHoldingRow) ([]pyth.CostBasis, error) {
+func (d *DepositService) costBasisForGroup(ctx context.Context, tx *sql.Tx, groupID string, holdings []postgres.TokenHoldingRow) ([]pyth.CostBasis, error) {
 	out := make([]pyth.CostBasis, 0, len(holdings))
 	for _, holding := range holdings {
-		price, _, found, err := d.store.GetFillDerivedCostBasisByOutputMint(ctx, groupID, holding.Mint)
+		price, _, found, err := d.store.GetFillDerivedCostBasisByOutputMintTx(ctx, tx, groupID, holding.Mint)
 		if err != nil {
 			return nil, err
 		}

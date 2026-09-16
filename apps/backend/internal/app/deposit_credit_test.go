@@ -77,8 +77,14 @@ func TestCostBasisForGroup_usesNetHoldingAtomicsNotLatestFillOnly(t *testing.T) 
 		t.Fatalf("net holding amount = %+v, want 1100000 atomics", holdings)
 	}
 
+	tx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	// Act
-	costBasis, err := h.Deposits.costBasisForGroup(ctx, groupID, holdings)
+	costBasis, err := h.Deposits.costBasisForGroup(ctx, tx, groupID, holdings)
 
 	// Assert
 	if err != nil {
@@ -137,8 +143,14 @@ func TestShareCreditForSweep_excludesInboundSweepFromTreasuryNav(t *testing.T) {
 		}},
 	})
 
+	creditTx, err := h.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx credit: %v", err)
+	}
+	defer func() { _ = creditTx.Rollback() }()
+
 	// Act
-	shareUnits, err := h.Deposits.shareCreditForSweep(ctx, groupID, treasuryAddress, blairDeposit)
+	shareUnits, err := h.Deposits.shareCreditForSweep(ctx, creditTx, groupID, treasuryAddress, blairDeposit)
 
 	// Assert
 	if err != nil {

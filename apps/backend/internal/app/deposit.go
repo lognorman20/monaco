@@ -213,7 +213,7 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 
 	var positionRow postgres.PositionRow
 	if newlyConfirmed {
-		shareUnits, err := d.shareCreditForSweep(ctx, sweep.GroupID, treasury.SolanaAddress, sweep.Amount)
+		shareUnits, err := d.shareCreditForSweep(ctx, tx, sweep.GroupID, treasury.SolanaAddress, sweep.Amount)
 		if err != nil {
 			return ObserveSweepResult{}, err
 		}
