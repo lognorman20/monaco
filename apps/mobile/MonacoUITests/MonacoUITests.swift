@@ -7,6 +7,16 @@
 
 import XCTest
 
+private extension XCUIApplication {
+    func scrollToElement(_ element: XCUIElement, maxSwipes: Int = 8) {
+        var swipes = 0
+        while !element.isHittable && swipes < maxSwipes {
+            swipeUp()
+            swipes += 1
+        }
+    }
+}
+
 final class MonacoUITests: XCTestCase {
 
     private func privyLaunchEnvironment() -> [String: String] {
@@ -85,6 +95,127 @@ final class MonacoUITests: XCTestCase {
         attachment.name = "issue14-create-group-treasury"
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    @MainActor
+    private func loginIfNeeded(_ app: XCUIApplication) {
+        if app.staticTexts["Your account"].waitForExistence(timeout: 5) {
+            return
+        }
+
+        let phoneField = app.textFields["Phone number"]
+        XCTAssertTrue(phoneField.waitForExistence(timeout: 15))
+        phoneField.tap()
+        phoneField.typeText("+15555557177")
+
+        app.buttons["Send code"].tap()
+
+        let codeField = app.textFields["6-digit code"]
+        XCTAssertTrue(codeField.waitForExistence(timeout: 20))
+        codeField.tap()
+        codeField.typeText("465354")
+
+        app.buttons["Verify code"].tap()
+
+        XCTAssertTrue(
+            app.staticTexts["Member wallet"].waitForExistence(timeout: 30)
+                || app.staticTexts["Your account"].waitForExistence(timeout: 30)
+        )
+    }
+
+    @MainActor
+    private func attachScreenshot(_ app: XCUIApplication, name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    func testM2DepositLinkReachable() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment = privyLaunchEnvironment()
+        app.launch()
+
+        loginIfNeeded(app)
+
+        app.buttons["Create group"].tap()
+
+        let nameField = app.textFields["Group name"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 10))
+        nameField.tap()
+        nameField.typeText("M2 Deposit Reach")
+
+        app.buttons["Create group"].tap()
+
+        XCTAssertTrue(app.staticTexts["Treasury address"].waitForExistence(timeout: 30))
+
+        let depositLink = app.buttons["deposit-usdc-link"]
+        XCTAssertTrue(depositLink.waitForExistence(timeout: 10))
+        app.scrollToElement(depositLink)
+        XCTAssertTrue(depositLink.isHittable)
+        depositLink.tap()
+
+        XCTAssertTrue(app.staticTexts["Member wallet"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.textFields["deposit-amount-field"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["create-deposit-button"].waitForExistence(timeout: 10))
+        attachScreenshot(app, name: "m2-t13-deposit-reachable")
+    }
+
+    @MainActor
+    func testM2DepositLive() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment = privyLaunchEnvironment()
+        app.launch()
+
+        loginIfNeeded(app)
+        attachScreenshot(app, name: "m2-t13-xbmcp-01-me")
+
+        app.buttons["Create group"].tap()
+
+        let nameField = app.textFields["Group name"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 10))
+        nameField.tap()
+        nameField.typeText("M2 Deposit QA")
+
+        app.buttons["Create group"].tap()
+
+        XCTAssertTrue(app.staticTexts["Treasury address"].waitForExistence(timeout: 30))
+        attachScreenshot(app, name: "m2-t13-xbmcp-02-treasury")
+
+        let depositLink = app.buttons["deposit-usdc-link"]
+        XCTAssertTrue(depositLink.waitForExistence(timeout: 10))
+        app.scrollToElement(depositLink)
+        depositLink.tap()
+
+        XCTAssertTrue(app.staticTexts["Member wallet"].waitForExistence(timeout: 15))
+
+        let amountField = app.textFields["deposit-amount-field"]
+        XCTAssertTrue(amountField.waitForExistence(timeout: 10))
+        amountField.tap()
+        amountField.typeText("1")
+
+        attachScreenshot(app, name: "m2-t13-xbmcp-03-amount")
+
+        app.buttons["create-deposit-button"].tap()
+
+        let refreshButton = app.buttons["Refresh status"]
+        XCTAssertTrue(refreshButton.waitForExistence(timeout: 15))
+        attachScreenshot(app, name: "m2-t13-xbmcp-04-created")
+
+        let deadline = Date().addingTimeInterval(120)
+        var confirmed = false
+        while Date() < deadline {
+            refreshButton.tap()
+            if app.staticTexts["confirmed"].waitForExistence(timeout: 3) {
+                confirmed = true
+                break
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(5))
+        }
+
+        attachScreenshot(app, name: "m2-t13-xbmcp-05-final")
+        XCTAssertTrue(confirmed, "Deposit did not reach confirmed within 120s — check SweepPoller and member USDC balance")
     }
 
     @MainActor

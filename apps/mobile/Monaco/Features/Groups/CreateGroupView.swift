@@ -28,6 +28,17 @@ struct CreateGroupView: View {
             }
 
             if let createdGroup {
+                if verifiedGroup != nil {
+                    Section {
+                        NavigationLink {
+                            DepositView(auth: auth, groupId: createdGroup.groupId)
+                        } label: {
+                            Label("Deposit USDC", systemImage: "dollarsign.circle.fill")
+                        }
+                        .accessibilityIdentifier("deposit-usdc-link")
+                    }
+                }
+
                 Section("Created group") {
                     detailRow(title: "Group ID", value: createdGroup.groupId)
                     detailRow(title: "Name", value: createdGroup.name)
@@ -42,12 +53,6 @@ struct CreateGroupView: View {
                         Label("Backend-controlled treasury confirmed", systemImage: "checkmark.seal.fill")
                             .font(.footnote)
                             .foregroundStyle(.green)
-                    }
-
-                    NavigationLink {
-                        DepositView(auth: auth, groupId: createdGroup.groupId)
-                    } label: {
-                        Label("Deposit USDC", systemImage: "dollarsign.circle.fill")
                     }
                 }
             } else if let errorMessage {

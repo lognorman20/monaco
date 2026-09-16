@@ -7,32 +7,55 @@ struct DepositView: View {
 
     private let apiClient = MonacoAPIClient()
 
+    @State private var profile: MeResponse?
     @State private var amountText = ""
     @State private var depositId: String?
     @State private var deposit: GetDepositResponse?
     @State private var errorMessage: String?
     @State private var isSubmitting = false
     @State private var isPolling = false
+    @State private var isLoadingProfile = true
 
     var body: some View {
         Form {
+            if isLoadingProfile {
+                Section {
+                    ProgressView("Loading member wallet…")
+                }
+            } else if let profile {
+                Section("Member wallet") {
+                    detailRow(title: "Solana address", value: profile.memberWalletAddress, monospaced: true)
+                        .accessibilityIdentifier("deposit-member-wallet")
+                    Text("Fund this address with USDC, then create a deposit below.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Group") {
                 Text(groupId)
                     .font(.body.monospaced())
                     .textSelection(.enabled)
             }
 
-            Section("Deposit amount (USDC micro-units)") {
+            Section("Deposit amount (USDC)") {
                 TextField("Amount", text: $amountText)
-                    .keyboardType(.numberPad)
+                    .keyboardType(.decimalPad)
                     .disabled(isSubmitting || depositId != nil)
+                    .accessibilityIdentifier("deposit-amount-field")
+                if let microUnits = parsedAmountMicro {
+                    Text("= \(microUnits) micro-units")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section {
                 Button(isSubmitting ? "Submitting…" : "Create deposit") {
                     Task { await createDeposit() }
                 }
-                .disabled(isSubmitting || depositId != nil || parsedAmount == nil)
+                .disabled(isSubmitting || depositId != nil || parsedAmountMicro == nil)
+                .accessibilityIdentifier("create-deposit-button")
 
                 if depositId != nil {
                     Button(isPolling ? "Refreshing…" : "Refresh status") {
@@ -45,6 +68,7 @@ struct DepositView: View {
             if let deposit {
                 Section("Deposit status") {
                     detailRow(title: "Deposit ID", value: deposit.depositId)
+                    detailRow(title: "Amount", value: formatUSDC(microUnits: deposit.amount))
                     detailRow(title: "Status", value: deposit.status)
                     detailRow(title: "Share units", value: String(deposit.shareUnits))
                     if let txSignature = deposit.txSignature, !txSignature.isEmpty {
@@ -61,13 +85,28 @@ struct DepositView: View {
         }
         .navigationTitle("Deposit")
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: auth.accessToken) {
+            await loadProfile()
+        }
     }
 
-    private var parsedAmount: Int64? {
-        guard let value = Int64(amountText.trimmingCharacters(in: .whitespacesAndNewlines)), value > 0 else {
+    private var parsedAmountMicro: Int64? {
+        let trimmed = amountText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let decimal = Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX")),
+              decimal > 0 else {
             return nil
         }
-        return value
+        var scaled = decimal * Decimal(1_000_000)
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &scaled, 0, .plain)
+        let microUnits = (rounded as NSDecimalNumber).int64Value
+        return microUnits > 0 ? microUnits : nil
+    }
+
+    private func formatUSDC(microUnits: Int64) -> String {
+        let dollars = Decimal(microUnits) / Decimal(1_000_000)
+        return "\(dollars) USDC"
     }
 
     @ViewBuilder
@@ -82,13 +121,30 @@ struct DepositView: View {
         }
     }
 
+    private func loadProfile() async {
+        guard let accessToken = auth.accessToken else {
+            profile = nil
+            isLoadingProfile = false
+            return
+        }
+
+        isLoadingProfile = true
+        do {
+            _ = try await apiClient.openSession(accessToken: accessToken)
+            profile = try await apiClient.me(accessToken: accessToken)
+        } catch {
+            profile = nil
+        }
+        isLoadingProfile = false
+    }
+
     private func createDeposit() async {
         guard let accessToken = auth.accessToken else {
             errorMessage = "Missing Privy access token."
             return
         }
-        guard let amount = parsedAmount else {
-            errorMessage = "Enter a positive amount."
+        guard let amount = parsedAmountMicro else {
+            errorMessage = "Enter a positive USDC amount."
             return
         }
 
