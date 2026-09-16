@@ -21,6 +21,7 @@ func FixtureJupiterSuccessResponse(outputMint string) []byte {
   "outputMint": "%s",
   "inAmount": "1000000",
   "outAmount": "500000",
+  "transaction": "dGVzdC11bnNpZ25lZC10eA==",
   "routePlan": [
     {
       "swapInfo": {
@@ -37,4 +38,42 @@ func FixtureJupiterSuccessResponse(outputMint string) []byte {
   ],
   "requestId": "req-success"
 }`, USDCMint, outputMint, USDCMint, outputMint))
+}
+
+// FixtureJupiterExecuteSuccess returns Jupiter /execute success JSON.
+func FixtureJupiterExecuteSuccess(signature string) []byte {
+	if signature == "" {
+		signature = "test-swap-signature"
+	}
+	return []byte(fmt.Sprintf(`{
+  "status": "Success",
+  "code": 0,
+  "signature": "%s",
+  "inputAmountResult": "1000000",
+  "outputAmountResult": "500000",
+  "totalOutputAmount": "500000"
+}`, signature))
+}
+
+// FixtureJupiterExecuteFailure returns Jupiter /execute terminal failure JSON.
+func FixtureJupiterExecuteFailure(signature string) []byte {
+	if signature == "" {
+		signature = "test-failed-signature"
+	}
+	return []byte(fmt.Sprintf(`{
+  "status": "Failed",
+  "code": -1000,
+  "signature": "%s",
+  "error": "failed to land"
+}`, signature))
+}
+
+// FixtureJupiterExecutePendingSuccessCode returns Success with non-zero code.
+func FixtureJupiterExecutePendingSuccessCode() []byte {
+	return []byte(`{
+  "status": "Success",
+  "code": -1,
+  "signature": "pending-signature",
+  "error": "missing cached order"
+}`)
 }

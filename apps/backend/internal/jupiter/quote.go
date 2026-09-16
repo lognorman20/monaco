@@ -28,6 +28,11 @@ var ErrNoRoute = errors.New("jupiter: no route")
 // Client quotes and executes Jupiter Swap API v2 swaps.
 type Client interface {
 	QuoteBuy(ctx context.Context, params QuoteBuyParams) (BuyQuote, error)
+	OrderBuy(ctx context.Context, params OrderBuyParams) (BuyOrder, error)
+	ExecuteBuy(ctx context.Context, params ExecuteBuyParams) (ExecuteResult, error)
+	PollExecute(ctx context.Context, params PollExecuteParams) (ExecuteResult, error)
+	QuoteSell(ctx context.Context, params QuoteSellParams) (SellQuote, error)
+	SellToUSDC(ctx context.Context, params SellToUSDCParams) (ExecuteResult, error)
 }
 
 // QuoteBuyParams identifies a USDC → xStock quote request.

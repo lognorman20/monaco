@@ -65,7 +65,9 @@ type walletRPCResponse struct {
 }
 
 type walletRPCData struct {
-	Hash string `json:"hash"`
+	Hash              string `json:"hash"`
+	SignedTransaction string `json:"signed_transaction"`
+	Encoding          string `json:"encoding"`
 }
 
 type solanaRPCRequest struct {
@@ -268,6 +270,43 @@ func (c *HTTPClient) getLatestBlockhash(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("%w: solana rpc missing blockhash", ErrAPI)
 	}
 	return decodeBase58Pubkey(blockhash)
+}
+
+// SignSolanaTransaction signs a base64-encoded Solana transaction without broadcasting.
+func (c *HTTPClient) SignSolanaTransaction(ctx context.Context, walletID, txBase64 string) (string, error) {
+	return c.signSolanaTransaction(ctx, walletID, txBase64)
+}
+
+func (c *HTTPClient) signSolanaTransaction(ctx context.Context, walletID, txBase64 string) (string, error) {
+	payload, err := json.Marshal(walletRPCRequest{
+		Method: "signTransaction",
+		CAIP2:  solanaMainnetCAIP2,
+		Params: walletRPCParams{
+			Transaction: txBase64,
+			Encoding:    "base64",
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	path := fmt.Sprintf("/v1/wallets/%s/rpc", url.PathEscape(walletID))
+	respBody, status, err := c.doPrivyRequestWithAuthorization(ctx, http.MethodPost, path, payload, "", true)
+	if err != nil {
+		return "", err
+	}
+	if status < 200 || status >= 300 {
+		return "", fmt.Errorf("%w: sign transaction status %d: %s", ErrAPI, status, string(respBody))
+	}
+
+	var rpcResp walletRPCResponse
+	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
+		return "", err
+	}
+	if rpcResp.Data.SignedTransaction == "" {
+		return "", fmt.Errorf("%w: sign transaction missing signed_transaction", ErrAPI)
+	}
+	return rpcResp.Data.SignedTransaction, nil
 }
 
 func (c *HTTPClient) signAndSendSolanaTransaction(ctx context.Context, walletID, txBase64 string) (string, error) {
