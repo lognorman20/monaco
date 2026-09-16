@@ -131,6 +131,51 @@ public final class MonacoAPIClient: @unchecked Sendable {
         }
     }
 
+    public func getGroupView(groupId: String) async throws -> GroupViewDTO {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/view")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(GroupViewDTO.self, from: data)
+    }
+
+    public func postRedeem(
+        groupId: String,
+        shareUnits: String,
+        payoutAddress: String,
+        payoutProof: String
+    ) async throws -> RedeemJobDTO {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/redeems")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try await applyAuthorizationHeader(to: &request)
+        request.httpBody = try JSONEncoder().encode(
+            RedeemRequestDTO(
+                shareUnits: shareUnits,
+                payoutAddress: payoutAddress,
+                payoutProof: payoutProof
+            )
+        )
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(RedeemJobDTO.self, from: data)
+    }
+
     public func devBuy(groupId: String, symbol: String, usdc: Int64) async throws -> DevBuyResponseDTO {
         let url = baseURL.appending(path: "v1/dev/groups/\(groupId)/buy")
         var request = URLRequest(url: url)

@@ -295,6 +295,36 @@ final class MonacoAPIClient {
         }
     }
 
+    func postRedeem(
+        accessToken: String,
+        groupId: String,
+        shareUnits: String,
+        payoutAddress: String,
+        payoutProof: String
+    ) async throws -> RedeemJobDTO {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/redeems")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        request.httpBody = try JSONEncoder().encode(
+            RedeemSubmitRequest(
+                shareUnits: shareUnits,
+                payoutAddress: payoutAddress,
+                payoutProof: payoutProof
+            )
+        )
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(RedeemJobDTO.self, from: data)
+    }
+
     func devBuy(accessToken: String, groupId: String, symbol: String, usdc: Int64) async throws -> DevBuyResponse {
         let url = baseURL.appending(path: "v1/dev/groups/\(groupId)/buy")
         var request = URLRequest(url: url)
@@ -390,4 +420,10 @@ private struct ProposalRequest: Encodable {
 
 private struct VoteRequest: Encodable {
     let choice: String
+}
+
+private struct RedeemSubmitRequest: Encodable {
+    let shareUnits: String
+    let payoutAddress: String
+    let payoutProof: String
 }
