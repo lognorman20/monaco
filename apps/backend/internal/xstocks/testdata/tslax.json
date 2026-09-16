@@ -1,0 +1,13 @@
+{
+  "symbol": "TSLAx",
+  "deployments": [
+    {
+      "address": "0x0000000000000000000000000000000000000002",
+      "network": "Ethereum"
+    },
+    {
+      "address": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB",
+      "network": "Solana"
+    }
+  ]
+}

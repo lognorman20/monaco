@@ -1,0 +1,291 @@
+package jupiter
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"sync"
+)
+
+// fakeJupiterClient is the locked test double for quote and integration tests.
+type fakeJupiterClient struct {
+	mu sync.Mutex
+
+	quotes       map[string]BuyQuote
+	quoteErrs    map[string]error
+	orders       map[string]BuyOrder
+	sellQuotes   map[string]SellQuote
+	sellQuoteErr map[string]error
+	executePolls  map[string][]ExecuteResult
+	executeErrs   map[string]error
+	lastSuccesses map[string]ExecuteResult
+}
+
+// NewFakeClient returns an in-memory Jupiter client for tests.
+func NewFakeClient() Client {
+	return &fakeJupiterClient{
+		quotes:       make(map[string]BuyQuote),
+		quoteErrs:    make(map[string]error),
+		orders:       make(map[string]BuyOrder),
+		sellQuotes:   make(map[string]SellQuote),
+		sellQuoteErr: make(map[string]error),
+		executePolls:  make(map[string][]ExecuteResult),
+		executeErrs:   make(map[string]error),
+		lastSuccesses: make(map[string]ExecuteResult),
+	}
+}
+
+func quoteKey(outputMint string, usdcAmount int64) string {
+	return fmt.Sprintf("%s:%d", outputMint, usdcAmount)
+}
+
+func sellQuoteKey(inputMint string, amount int64) string {
+	return fmt.Sprintf("%s:%d", inputMint, amount)
+}
+
+// RegisterQuoteBuy configures a fake quote for outputMint and usdcAmount.
+func RegisterQuoteBuy(client Client, outputMint string, usdcAmount int64, quote BuyQuote) {
+	fake, ok := client.(*fakeJupiterClient)
+	if !ok {
+		panic("jupiter: RegisterQuoteBuy requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	key := quoteKey(outputMint, usdcAmount)
+	fake.quotes[key] = quote
+	delete(fake.quoteErrs, key)
+	fake.mu.Unlock()
+}
+
+// RegisterQuoteBuyError forces QuoteBuy to return err for outputMint and usdcAmount.
+func RegisterQuoteBuyError(client Client, outputMint string, usdcAmount int64, err error) {
+	fake, ok := client.(*fakeJupiterClient)
+	if !ok {
+		panic("jupiter: RegisterQuoteBuyError requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	key := quoteKey(outputMint, usdcAmount)
+	fake.quoteErrs[key] = err
+	delete(fake.quotes, key)
+	fake.mu.Unlock()
+}
+
+// RegisterBuyOrder configures an unsigned buy order for a request id.
+func RegisterBuyOrder(client Client, requestID string, order BuyOrder) {
+	fake, ok := client.(*fakeJupiterClient)
+	if !ok {
+		panic("jupiter: RegisterBuyOrder requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.orders[requestID] = order
+	fake.mu.Unlock()
+}
+
+// RegisterExecutePoll configures poll responses for a request id.
+func RegisterExecutePoll(client Client, requestID string, results []ExecuteResult) {
+	fake, ok := client.(*fakeJupiterClient)
+	if !ok {
+		panic("jupiter: RegisterExecutePoll requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.executePolls[requestID] = results
+	delete(fake.executeErrs, requestID)
+	fake.mu.Unlock()
+}
+
+// RegisterExecuteError forces execute/poll to return err for requestID.
+func RegisterExecuteError(client Client, requestID string, err error) {
+	fake, ok := client.(*fakeJupiterClient)
+	if !ok {
+		panic("jupiter: RegisterExecuteError requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.executeErrs[requestID] = err
+	fake.mu.Unlock()
+}
+
+// RegisterSellQuote configures a fake sell quote.
+func RegisterSellQuote(client Client, inputMint string, amount int64, quote SellQuote) {
+	fake, ok := client.(*fakeJupiterClient)
+	if !ok {
+		panic("jupiter: RegisterSellQuote requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	key := sellQuoteKey(inputMint, amount)
+	fake.sellQuotes[key] = quote
+	delete(fake.sellQuoteErr, key)
+	fake.mu.Unlock()
+}
+
+func (f *fakeJupiterClient) QuoteBuy(ctx context.Context, params QuoteBuyParams) (BuyQuote, error) {
+	logQuoteAttempt(params.GroupID, params.UserID, params.Symbol, params.USDCAmount)
+
+	key := quoteKey(params.OutputMint, params.USDCAmount)
+	f.mu.Lock()
+	if err, ok := f.quoteErrs[key]; ok {
+		f.mu.Unlock()
+		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, err.Error())
+		return BuyQuote{Routable: false, InputMint: USDCMint, OutputMint: params.OutputMint}, err
+	}
+	quote, ok := f.quotes[key]
+	f.mu.Unlock()
+	if !ok {
+		reason := "no route"
+		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, reason)
+		return BuyQuote{Routable: false, InputMint: USDCMint, OutputMint: params.OutputMint}, ErrNoRoute
+	}
+	if !quote.Routable {
+		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, "no route")
+		return quote, ErrNoRoute
+	}
+	if quote.InputMint == "" {
+		quote.InputMint = USDCMint
+	}
+	if quote.OutputMint == "" {
+		quote.OutputMint = params.OutputMint
+	}
+	return quote, nil
+}
+
+func (f *fakeJupiterClient) OrderBuy(ctx context.Context, params OrderBuyParams) (BuyOrder, error) {
+	_ = ctx
+	quote, err := f.QuoteBuy(ctx, QuoteBuyParams{
+		GroupID:    params.GroupID,
+		UserID:     params.UserID,
+		Symbol:     params.Symbol,
+		OutputMint: params.OutputMint,
+		USDCAmount: params.Amount,
+	})
+	if err != nil {
+		return BuyOrder{}, err
+	}
+	requestID := quote.RequestID
+	if requestID == "" {
+		requestID = deterministicRequestID(params.OutputMint, params.Amount)
+	}
+
+	f.mu.Lock()
+	if order, ok := f.orders[requestID]; ok {
+		f.mu.Unlock()
+		return order, nil
+	}
+	f.mu.Unlock()
+
+	return BuyOrder{
+		RequestID:   requestID,
+		Transaction: deterministicUnsignedTx("buy", requestID),
+		InAmount:    quote.InAmount,
+		OutAmount:   quote.OutAmount,
+		InputMint:   quote.InputMint,
+		OutputMint:  quote.OutputMint,
+	}, nil
+}
+
+func (f *fakeJupiterClient) ExecuteBuy(ctx context.Context, params ExecuteBuyParams) (ExecuteResult, error) {
+	logExecuteSubmit(params.GroupID, params.UserID, params.Symbol, "", params.RequestID)
+	return ExecuteResult{
+		Status:    ExecuteStatusPending,
+		Code:      -1,
+		RequestID: params.RequestID,
+	}, nil
+}
+
+func (f *fakeJupiterClient) PollExecute(ctx context.Context, params PollExecuteParams) (ExecuteResult, error) {
+	return f.nextExecuteResult(ctx, params.GroupID, params.UserID, params.Symbol, params.RequestID)
+}
+
+func (f *fakeJupiterClient) nextExecuteResult(ctx context.Context, groupID, userID, symbol, requestID string) (ExecuteResult, error) {
+	_ = ctx
+	f.mu.Lock()
+	if err, ok := f.executeErrs[requestID]; ok {
+		f.mu.Unlock()
+		return ExecuteResult{}, err
+	}
+	pollSeq, ok := f.executePolls[requestID]
+	if !ok || len(pollSeq) == 0 {
+		if cached, ok := f.lastSuccesses[requestID]; ok {
+			f.mu.Unlock()
+			cached.RequestID = requestID
+			logPollTransition(groupID, userID, symbol, cached.Signature, ExecuteStatusPending, cached.Status, cached.Code)
+			return cached, nil
+		}
+		f.mu.Unlock()
+		return ExecuteResult{
+			Status:    ExecuteStatusSuccess,
+			Code:      0,
+			Signature: deterministicTxSignature(requestID, "default"),
+			RequestID: requestID,
+		}, nil
+	}
+	result := pollSeq[0]
+	if len(pollSeq) > 1 {
+		f.executePolls[requestID] = pollSeq[1:]
+	} else {
+		delete(f.executePolls, requestID)
+	}
+	if result.IsConfirmedSuccess() {
+		f.lastSuccesses[requestID] = result
+	}
+	f.mu.Unlock()
+
+	result.RequestID = requestID
+	if result.Signature == "" {
+		result.Signature = deterministicTxSignature(requestID, result.Status)
+	}
+	logPollTransition(groupID, userID, symbol, result.Signature, ExecuteStatusPending, result.Status, result.Code)
+	return result, nil
+}
+
+func (f *fakeJupiterClient) QuoteSell(ctx context.Context, params QuoteSellParams) (SellQuote, error) {
+	logQuoteAttempt(params.GroupID, params.UserID, params.Symbol, params.Amount)
+
+	key := sellQuoteKey(params.InputMint, params.Amount)
+	f.mu.Lock()
+	if err, ok := f.sellQuoteErr[key]; ok {
+		f.mu.Unlock()
+		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, err.Error())
+		return SellQuote{Routable: false, InputMint: params.InputMint, OutputMint: USDCMint}, err
+	}
+	quote, ok := f.sellQuotes[key]
+	f.mu.Unlock()
+	if !ok {
+		reason := "no route"
+		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, reason)
+		return SellQuote{Routable: false, InputMint: params.InputMint, OutputMint: USDCMint}, ErrNoRoute
+	}
+	if !quote.Routable {
+		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, "no route")
+		return quote, ErrNoRoute
+	}
+	if quote.OutputMint == "" {
+		quote.OutputMint = USDCMint
+	}
+	if quote.Transaction == "" {
+		quote.Transaction = deterministicUnsignedTx("sell", quote.RequestID)
+	}
+	return quote, nil
+}
+
+func (f *fakeJupiterClient) SellToUSDC(ctx context.Context, params SellToUSDCParams) (ExecuteResult, error) {
+	logExecuteSubmit(params.GroupID, params.UserID, params.Symbol, "", params.RequestID)
+	return ExecuteResult{
+		Status:    ExecuteStatusPending,
+		Code:      -1,
+		RequestID: params.RequestID,
+	}, nil
+}
+
+func deterministicRequestID(outputMint string, amount int64) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("req:%s:%d", outputMint, amount)))
+	return "req-" + hex.EncodeToString(sum[:8])
+}
+
+func deterministicUnsignedTx(kind, requestID string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("unsigned:%s:%s", kind, requestID)))
+	return "UNSIGNED" + hex.EncodeToString(sum[:16])
+}
+
+func deterministicTxSignature(requestID, status string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("sig:%s:%s", requestID, status)))
+	return "SWAP" + hex.EncodeToString(sum[:16])
+}

@@ -25,6 +25,7 @@ final class MonacoUITests: XCTestCase {
             "PRIVY_APP_CLIENT_ID",
             "PRIVY_SMS_LOGIN_ENABLED",
             "PRIVY_EMAIL_LOGIN_ENABLED",
+            "PRIVY_AUTHORIZATION_KEY_ID",
         ]
         let defaults: [String: String] = [
             "PRIVY_APP_ID": "cmu26uw5s00mp0cl81v6dud1n",
@@ -216,6 +217,40 @@ final class MonacoUITests: XCTestCase {
 
         attachScreenshot(app, name: "m2-t13-xbmcp-05-final")
         XCTAssertTrue(confirmed, "Deposit did not reach confirmed within 120s — check SweepPoller and member USDC balance")
+    }
+
+    @MainActor
+    func testAlfredEmailLoginMigratesSigner() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment = privyLaunchEnvironment()
+        app.launch()
+
+        if app.buttons["Sign out"].waitForExistence(timeout: 5) {
+            app.buttons["Sign out"].tap()
+        }
+
+        if app.buttons["Email"].waitForExistence(timeout: 5) {
+            app.buttons["Email"].tap()
+        }
+
+        let emailField = app.textFields["Email address"]
+        XCTAssertTrue(emailField.waitForExistence(timeout: 15))
+        emailField.tap()
+        emailField.typeText("test-8081@privy.io")
+
+        app.buttons["Send code"].tap()
+
+        let codeField = app.textFields["6-digit code"]
+        XCTAssertTrue(codeField.waitForExistence(timeout: 20))
+        codeField.tap()
+        codeField.typeText("465354")
+
+        app.buttons["Verify code"].tap()
+
+        XCTAssertTrue(
+            app.staticTexts["Your account"].waitForExistence(timeout: 60)
+                || app.staticTexts["Member wallet"].waitForExistence(timeout: 60)
+        )
     }
 
     @MainActor

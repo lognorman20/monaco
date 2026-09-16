@@ -128,6 +128,24 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(GetDepositResponse.self, from: data)
     }
 
+    func devBuy(accessToken: String, groupId: String, symbol: String, usdc: Int64) async throws -> DevBuyResponse {
+        let url = baseURL.appending(path: "v1/dev/groups/\(groupId)/buy")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        request.httpBody = try JSONEncoder().encode(DevBuyRequest(symbol: symbol, usdc: usdc))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(DevBuyResponse.self, from: data)
+    }
+
     private func applyAuthorizationHeader(accessToken: String, to request: inout URLRequest) throws {
         let token = accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else {

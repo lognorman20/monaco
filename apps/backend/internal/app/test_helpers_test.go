@@ -1,6 +1,67 @@
 package app
 
-import "github.com/monaco/monaco/apps/backend/internal/postgres"
+import (
+	"context"
+	"database/sql"
+	"os"
+	"testing"
+
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/postgres"
+	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+)
+
+type integrationHarness struct {
+	DB            *sql.DB
+	Store         *postgres.Store
+	Privy         privy.Client
+	Deposits      *DepositService
+	Groups        *GroupService
+	Swap          *SwapService
+	Jupiter       jupiter.Client
+	XStocks       xstocks.Resolver
+}
+
+func integrationApp(t *testing.T) integrationHarness {
+	t.Helper()
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+	db, err := sql.Open("pgx", databaseURL)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.Ping(); err != nil {
+		t.Fatalf("ping db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	ctx := context.Background()
+	_, err = db.ExecContext(ctx, "TRUNCATE users, member_wallets, groups, treasuries, deposits, positions, withdrawals, transactions RESTART IDENTITY CASCADE")
+	if err != nil {
+		t.Fatalf("reset tables: %v", err)
+	}
+
+	store := postgres.NewStore(db)
+	privyClient := privy.NewFakeClient()
+	jupiterClient := jupiter.NewFakeClient()
+	xstocksResolver := xstocks.NewFakeResolver()
+	buy := NewBuyService(jupiterClient, xstocksResolver)
+
+	return integrationHarness{
+		DB:       db,
+		Store:    store,
+		Privy:    privyClient,
+		Deposits: NewDepositService(store, privyClient),
+		Groups:   NewGroupService(store, privyClient),
+		Swap:     NewSwapService(store, buy, jupiterClient, privyClient, NewFakePrivyTreasurySigner()),
+		Jupiter:  jupiterClient,
+		XStocks:  xstocksResolver,
+	}
+}
 
 func buildObservedSweep(overrides map[string]any) ObservedSweep {
 	sweep := ObservedSweep{

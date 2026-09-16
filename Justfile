@@ -56,6 +56,7 @@ test app:
         ./scripts/apply-migrations.sh
         ./scripts/verify-local-db.sh
         if [[ -f apps/backend/go.mod ]]; then
+          # M3-T17–T21 Jupiter quote/execute/sell locked tests run via go test ./...
           (cd apps/backend && go test -p 1 ./...)
         else
           echo "M0: apps/backend not scaffolded. Local DB smoke test passed."

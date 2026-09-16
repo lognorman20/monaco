@@ -36,6 +36,13 @@ struct CreateGroupView: View {
                             Label("Deposit USDC", systemImage: "dollarsign.circle.fill")
                         }
                         .accessibilityIdentifier("deposit-usdc-link")
+
+                        NavigationLink {
+                            DevBuyView(auth: auth, groupId: createdGroup.groupId)
+                        } label: {
+                            Label("Dev buy AAPLx", systemImage: "chart.line.uptrend.xyaxis")
+                        }
+                        .accessibilityIdentifier("dev-buy-aaplx-link")
                     }
                 }
 
