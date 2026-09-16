@@ -45,6 +45,47 @@ final class MonacoAPIClientTests: XCTestCase {
         XCTAssertEqual(capturedAuthorization, expectedAuthorization)
     }
 
+    func testAPIClient_getHome_callsV1Home() async throws {
+        // Arrange
+        let token = TestFixtures.fixtureSessionToken
+        var capturedPath: String?
+        var capturedAuthorization: String?
+
+        MockURLProtocol.requestHandler = { request in
+            capturedPath = request.url?.path
+            capturedAuthorization = request.value(forHTTPHeaderField: "Authorization")
+            let responseBody = """
+            {
+              "groups": [],
+              "people": []
+            }
+            """
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, Data(responseBody.utf8))
+        }
+
+        let session = makeMockURLSession()
+        let client = MonacoAPIClient(
+            baseURL: URL(string: "https://api.test")!,
+            session: session,
+            accessTokenProvider: { token }
+        )
+
+        // Act
+        let home = try await client.getHome()
+
+        // Assert
+        XCTAssertEqual(capturedPath, "/v1/home")
+        XCTAssertEqual(capturedAuthorization, "Bearer \(token)")
+        XCTAssertEqual(home.groups, [])
+        XCTAssertEqual(home.people, [])
+    }
+
     func testMeDTO_decodesFixtureJSON() throws {
         // Arrange
         let fixtureURL = try XCTUnwrap(

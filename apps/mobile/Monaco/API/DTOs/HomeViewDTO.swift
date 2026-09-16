@@ -1,0 +1,24 @@
+import Foundation
+
+struct HomeViewDTO: Codable, Equatable {
+    let groups: [HomeGroupBoardRowDTO]
+    let people: [HomePeopleBoardRowDTO]
+}
+
+struct HomeGroupBoardRowDTO: Codable, Equatable, Identifiable {
+    let groupId: String
+    let name: String
+    let percentReturn: String?
+    let dollarPnl: String
+
+    var id: String { groupId }
+}
+
+struct HomePeopleBoardRowDTO: Codable, Equatable, Identifiable {
+    let userId: String
+    let displayName: String
+    let percentReturn: String?
+    let dollarPnl: String
+
+    var id: String { userId }
+}

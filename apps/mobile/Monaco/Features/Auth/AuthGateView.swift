@@ -8,7 +8,7 @@ struct AuthGateView: View {
             if Config.privy.isConfigured {
                 if hasLoginMethod {
                     if isAuthenticated {
-                        MeScreenView(auth: auth)
+                        SessionGateView(auth: auth)
                     } else {
                         LoginView(auth: auth)
                     }

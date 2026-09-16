@@ -60,6 +60,22 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(MeResponse.self, from: data)
     }
 
+    func getHome(accessToken: String) async throws -> HomeViewDTO {
+        let url = baseURL.appending(path: "v1/home")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(HomeViewDTO.self, from: data)
+    }
+
     func createGroup(accessToken: String, name: String) async throws -> CreateGroupResponse {
         let url = baseURL.appending(path: "v1/groups")
         var request = URLRequest(url: url)
