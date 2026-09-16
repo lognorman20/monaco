@@ -202,6 +202,83 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(GetDepositResponse.self, from: data)
     }
 
+    func searchAssets(accessToken: String, groupId: String, query: String) async throws -> SearchAssetsResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/groups/\(groupId)/assets"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "query", value: query)]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(SearchAssetsResponse.self, from: data)
+    }
+
+    func postQuote(accessToken: String, groupId: String, symbol: String, usdc: Int64) async throws -> BuyQuoteDTO {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/quotes")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        request.httpBody = try JSONEncoder().encode(QuoteRequest(symbol: symbol, usdc: usdc))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(BuyQuoteDTO.self, from: data)
+    }
+
+    func createProposal(accessToken: String, groupId: String, symbol: String, usdc: Int64) async throws -> CreateProposalResponse {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/proposals")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        request.httpBody = try JSONEncoder().encode(ProposalRequest(symbol: symbol, usdc: usdc))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(CreateProposalResponse.self, from: data)
+    }
+
+    func castVote(accessToken: String, proposalId: String, choice: String) async throws {
+        let url = baseURL.appending(path: "v1/proposals/\(proposalId)/votes")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        request.httpBody = try JSONEncoder().encode(VoteRequest(choice: choice))
+
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 || http.statusCode == 204 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+    }
+
     func devBuy(accessToken: String, groupId: String, symbol: String, usdc: Int64) async throws -> DevBuyResponse {
         let url = baseURL.appending(path: "v1/dev/groups/\(groupId)/buy")
         var request = URLRequest(url: url)
@@ -283,4 +360,18 @@ private struct JoinGroupRequest: Encodable {
 
 private struct CreateDepositRequest: Encodable {
     let amount: Int64
+}
+
+private struct QuoteRequest: Encodable {
+    let symbol: String
+    let usdc: Int64
+}
+
+private struct ProposalRequest: Encodable {
+    let symbol: String
+    let usdc: Int64
+}
+
+private struct VoteRequest: Encodable {
+    let choice: String
 }
