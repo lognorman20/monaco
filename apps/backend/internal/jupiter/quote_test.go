@@ -2,6 +2,8 @@ package jupiter
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -65,5 +67,41 @@ func TestJupiterQuoteBuy_noRoute_returnsRoutableFalse(t *testing.T) {
 	}
 	if quote.InputMint != USDCMint {
 		t.Fatalf("InputMint = %q, want %q", quote.InputMint, USDCMint)
+	}
+}
+
+func TestJupiterQuoteBuy_httpError_propagatesAsRefusal(t *testing.T) {
+	t.Parallel()
+
+	// Arrange
+	const outputMint = "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client := NewHTTPClientWithBaseURL(server.URL, server.Client())
+
+	// Act
+	quote, err := client.QuoteBuy(t.Context(), QuoteBuyParams{
+		GroupID:    "group-1",
+		UserID:     "user-1",
+		Symbol:     "AAPLx",
+		OutputMint: outputMint,
+		USDCAmount: 1_000_000,
+	})
+
+	// Assert
+	if !errors.Is(err, ErrNoRoute) {
+		t.Fatalf("QuoteBuy() error = %v, want ErrNoRoute", err)
+	}
+	if quote.Routable {
+		t.Fatal("expected Routable=false on HTTP error")
+	}
+	if quote.InputMint != USDCMint {
+		t.Fatalf("InputMint = %q, want %q", quote.InputMint, USDCMint)
+	}
+	if quote.OutputMint != outputMint {
+		t.Fatalf("OutputMint = %q, want %q", quote.OutputMint, outputMint)
 	}
 }
