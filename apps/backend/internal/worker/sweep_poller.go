@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
@@ -31,6 +32,9 @@ func NewStubClock(now time.Time) *stubClock {
 
 func (c *stubClock) Now() time.Time { return c.now }
 
+// DefaultPollInterval is how often the API process polls pending deposits.
+const DefaultPollInterval = 15 * time.Second
+
 // SweepPoller polls member USDC balances and submits sweeps to treasury.
 type SweepPoller struct {
 	store    *postgres.Store
@@ -53,6 +57,33 @@ func NewSweepPoller(store *postgres.Store, privyClient privy.Client, rpc SolanaR
 		deposits: deposits,
 		relayer:  relayerKey,
 		clock:    clock,
+	}
+}
+
+// Run ticks the poller until ctx is cancelled.
+func Run(ctx context.Context, poller *SweepPoller, interval time.Duration) {
+	if poller == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = DefaultPollInterval
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			tickCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			err := poller.Tick(tickCtx)
+			cancel()
+			if err != nil && ctx.Err() == nil {
+				slog.Error("sweep poller tick failed", "err", err)
+			}
+		}
 	}
 }
 

@@ -16,14 +16,16 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/worker"
 )
 
 // bootResult holds API wiring produced at startup.
 type bootResult struct {
-	Server  *http.Server
-	Config  *config.Config
-	Relayer *config.Relayer
-	DB      *sql.DB
+	Server     *http.Server
+	Config     *config.Config
+	Relayer    *config.Relayer
+	DB         *sql.DB
+	stopPoller context.CancelFunc
 }
 
 // boot loads config, registers the relayer fee payer, applies migrations, and builds the HTTP server.
@@ -77,14 +79,20 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/groups/{id}/treasury/usdc", depositHandlers.GetTreasuryUsdcBalanceHandler)
 	mux.HandleFunc("GET /v1/deposits/{id}", depositHandlers.GetDepositHandler)
 
+	solanaRPC := worker.NewHTTPSolanaRPC(cfg.SolanaCluster)
+	poller := worker.NewSweepPoller(store, privyClient, solanaRPC, deposits, relayer.PrivateKey(), nil)
+	pollerCtx, stopPoller := context.WithCancel(context.Background())
+	go worker.Run(pollerCtx, poller, worker.DefaultPollInterval)
+
 	return &bootResult{
 		Server: &http.Server{
 			Addr:    addr,
 			Handler: mux,
 		},
-		Config:  cfg,
-		Relayer: relayer,
-		DB:      db,
+		Config:     cfg,
+		Relayer:    relayer,
+		DB:         db,
+		stopPoller: stopPoller,
 	}, nil
 }
 
