@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 type createWalletRequest struct {
@@ -60,6 +61,24 @@ type walletRPCResponse struct {
 
 type walletRPCData struct {
 	Hash string `json:"hash"`
+}
+
+type solanaRPCRequest struct {
+	JSONRPC string `json:"jsonrpc"`
+	ID      int    `json:"id"`
+	Method  string `json:"method"`
+	Params  []any  `json:"params"`
+}
+
+type solanaBlockhashResponse struct {
+	Result struct {
+		Value struct {
+			Blockhash string `json:"blockhash"`
+		} `json:"value"`
+	} `json:"result"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
 }
 
 func (c *HTTPClient) doPrivyRequest(ctx context.Context, method, path string, body []byte, idempotencyKey string) ([]byte, int, error) {
@@ -163,6 +182,62 @@ func (c *HTTPClient) getWalletUSDCBalance(ctx context.Context, walletID string) 
 		return 0, nil
 	}
 	return parseRawTokenAmount(balance.Balances[0].RawValue)
+}
+
+func (c *HTTPClient) solanaRPCEndpoint() string {
+	if c.solanaRPCURL != "" {
+		return c.solanaRPCURL
+	}
+	cluster := c.solanaCluster
+	if cluster == "" {
+		cluster = "mainnet-beta"
+	}
+	return fmt.Sprintf("https://api.%s.solana.com", cluster)
+}
+
+func (c *HTTPClient) getLatestBlockhash(ctx context.Context) ([]byte, error) {
+	payload, err := json.Marshal(solanaRPCRequest{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "getLatestBlockhash",
+		Params:  []any{map[string]string{"commitment": "finalized"}},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.solanaRPCEndpoint(), bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("%w: solana rpc status %d: %s", ErrAPI, resp.StatusCode, string(respBody))
+	}
+
+	var rpcResp solanaBlockhashResponse
+	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
+		return nil, err
+	}
+	if rpcResp.Error != nil {
+		return nil, fmt.Errorf("%w: solana rpc error: %s", ErrAPI, rpcResp.Error.Message)
+	}
+	blockhash := strings.TrimSpace(rpcResp.Result.Value.Blockhash)
+	if blockhash == "" {
+		return nil, fmt.Errorf("%w: solana rpc missing blockhash", ErrAPI)
+	}
+	return decodeBase58Pubkey(blockhash)
 }
 
 func (c *HTTPClient) signAndSendSolanaTransaction(ctx context.Context, walletID, txBase64 string) (string, error) {

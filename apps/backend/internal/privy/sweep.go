@@ -13,9 +13,8 @@ import (
 
 const (
 	usdcMintAddress      = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-	solanaMainnetCAIP2   = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
-	solanaDummyBlockhash = "11111111111111111111111111111111"
-	tokenProgramID       = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+	solanaMainnetCAIP2 = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+	tokenProgramID     = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 	associatedTokenProg  = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
 	systemProgramID      = "11111111111111111111111111111111"
 )
@@ -37,7 +36,12 @@ func (c *HTTPClient) SubmitSweep(ctx context.Context, req SweepRequest) (SweepRe
 		return SweepResult{}, err
 	}
 
-	txBase64, err := buildUSDCSweepTransaction(req)
+	blockhash, err := c.getLatestBlockhash(ctx)
+	if err != nil {
+		return SweepResult{}, err
+	}
+
+	txBase64, err := buildUSDCSweepTransaction(req, blockhash)
 	if err != nil {
 		return SweepResult{}, err
 	}
@@ -101,7 +105,7 @@ func parseRawTokenAmount(raw string) (int64, error) {
 	return amount, nil
 }
 
-func buildUSDCSweepTransaction(req SweepRequest) (string, error) {
+func buildUSDCSweepTransaction(req SweepRequest, recentBlockhash []byte) (string, error) {
 	relayerPriv, relayerPub, err := decodeSolanaKeypair(req.RelayerKey)
 	if err != nil {
 		return "", fmt.Errorf("%w: invalid relayer key: %v", ErrAPI, err)
@@ -131,9 +135,8 @@ func buildUSDCSweepTransaction(req SweepRequest) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	blockhash, err := decodeBase58Pubkey(solanaDummyBlockhash)
-	if err != nil {
-		return "", err
+	if len(recentBlockhash) != ed25519.PublicKeySize {
+		return "", fmt.Errorf("%w: invalid recent blockhash length %d", ErrAPI, len(recentBlockhash))
 	}
 
 	sourceATA, err := findAssociatedTokenAddress(memberPub, mintPub, tokenProgram, ataProgram)
@@ -159,7 +162,7 @@ func buildUSDCSweepTransaction(req SweepRequest) (string, error) {
 
 	createATA := compiledInstruction{
 		programIDIndex: 8,
-		accounts:       []byte{0, 3, 4, 5, 6, 7, 8},
+		accounts:       []byte{0, 3, 4, 5, 6, 7},
 		data:           []byte{1},
 	}
 	transferData := make([]byte, 9)
@@ -174,7 +177,7 @@ func buildUSDCSweepTransaction(req SweepRequest) (string, error) {
 	message := encodeLegacyMessage(
 		[]byte{2, 0, 5},
 		accounts,
-		blockhash,
+		recentBlockhash,
 		[]compiledInstruction{createATA, transfer},
 	)
 
@@ -380,23 +383,39 @@ func decodeBase58(input string) ([]byte, error) {
 }
 
 func decompressEdwardsY(pubkey []byte) bool {
-	p := new(big.Int).SetBytes(reverseBytes(pubkey))
-	if p.Cmp(ed25519FieldModulus()) >= 0 {
+	if len(pubkey) != ed25519.PublicKeySize {
 		return false
 	}
 
-	y2 := new(big.Int).Mul(p, p)
-	y2.Mod(y2, ed25519FieldModulus())
+	yBytes := make([]byte, len(pubkey))
+	copy(yBytes, pubkey)
+	yBytes[31] &= 0x7f
 
-	d := new(big.Int).Mul(big.NewInt(121665), y2)
-	d.Mod(d, ed25519FieldModulus())
-	d.Add(d, big.NewInt(1))
-	d.Mod(d, ed25519FieldModulus())
+	p := ed25519FieldModulus()
+	y := new(big.Int).SetBytes(reverseBytes(yBytes))
+	if y.Cmp(p) >= 0 {
+		return false
+	}
+
+	y2 := new(big.Int).Mul(y, y)
+	y2.Mod(y2, p)
 
 	u := new(big.Int).Sub(y2, big.NewInt(1))
-	u.Mod(u, ed25519FieldModulus())
+	u.Mod(u, p)
 
-	return hasSquareRoot(u, ed25519FieldModulus()) && hasSquareRoot(d, ed25519FieldModulus())
+	v := new(big.Int).Mul(ed25519CurveD(), y2)
+	v.Mod(v, p)
+	v.Add(v, big.NewInt(1))
+	v.Mod(v, p)
+
+	vInv := new(big.Int).ModInverse(v, p)
+	if vInv == nil {
+		return false
+	}
+	x2 := new(big.Int).Mul(u, vInv)
+	x2.Mod(x2, p)
+
+	return hasSquareRoot(x2, p)
 }
 
 var ed25519FieldModulusValue = func() *big.Int {
@@ -404,8 +423,22 @@ var ed25519FieldModulusValue = func() *big.Int {
 	return modulus
 }()
 
+var ed25519CurveDValue = func() *big.Int {
+	p := ed25519FieldModulusValue
+	num := new(big.Int).SetInt64(-121665)
+	num.Mod(num, p)
+	denInv := new(big.Int).ModInverse(big.NewInt(121666), p)
+	d := new(big.Int).Mul(num, denInv)
+	d.Mod(d, p)
+	return d
+}()
+
 func ed25519FieldModulus() *big.Int {
 	return ed25519FieldModulusValue
+}
+
+func ed25519CurveD() *big.Int {
+	return ed25519CurveDValue
 }
 
 func reverseBytes(in []byte) []byte {
