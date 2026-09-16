@@ -196,10 +196,23 @@ Or `curl -sfS https://dotenvx.sh | sh`. See [install docs](https://dotenvx.com/d
 The Justfile `set dotenv-load` only auto-loads plain `.env` and does not decrypt dotenvx ciphertext. Run through dotenvx:
 
 ```bash
+dotenvx run -f .env.local -- just run              # Postgres + API + iOS app
+dotenvx run -f .env.local -- just run backend      # API only
+dotenvx run -f .env.local -- just run mobile       # iOS app only (start API separately)
 dotenvx run -f .env.local -- just test backend
-dotenvx run -f .env.local -- just run
-dotenvx run -f .env.local -- just run backend
+dotenvx run -f .env.local -- just test mobile
+dotenvx run -f .env.local -- just build mobile
 ```
+
+### Running the stack
+
+Always wrap `just` with `dotenvx run -f .env.local --` (see above). The Justfile does not decrypt ciphertext.
+
+For iOS, use `./scripts/ios-sim` or `just run mobile` from the repo root. Both decrypt `.env.local` and inject Privy env into the simulator. Do not launch from `apps/mobile` with a bare `ios-sim` — that skips Privy config.
+
+`just test mobile` runs host `swift test` in `packages/mobile-core` (fast, no simulator). `just build mobile` is the iOS compile gate on gold sim UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`.
+
+Privy test accounts and OTP codes: see **Privy (M1)** in `AGENTS.md`.
 
 Private keys: `DOTENV_PRIVATE_KEY` for `.env` / `.env.local`; `DOTENV_PRIVATE_KEY_PRODUCTION` for `.env.production`. On macOS, new keys often land in Keychain, not `.env.keys`. Export with `dotenvx native pull` or `dotenvx keypair -f .env.local`.
 
