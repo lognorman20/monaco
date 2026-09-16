@@ -8,7 +8,7 @@
 
 | Item | Detail |
 |------|--------|
-| **Integration branch** | `milestone-4` @ **`5574fea48345393ff5001d0440e302758f553159`** (`test(backend): assert M4-T36 redeem slice matches domain math`) |
+| **Integration branch** | `milestone-4` @ **`6467ea0e2f2890053b956ad2633fe4de96cc230c`** (`docs(m5): add agent handoff for mobile UI milestone`) |
 | **Verify HEAD** | `git rev-parse milestone-4` — if newer than above, use actual SHA in prompts |
 | **Start M5 from** | `milestone-4`, **not** `main` |
 | **M5 integration branch** | `gt create milestone-5` from current `milestone-4` tip |
@@ -187,7 +187,7 @@ Read first, in order:
 Repo: /Users/logno/Documents/work/github/monaco
 
 Branch:
-- Base: milestone-4 (verify tip; was 5574fea — use actual `git rev-parse milestone-4`)
+- Base: milestone-4 (verify tip; was 6467ea0 — use actual `git rev-parse milestone-4`)
 - Create/use milestone-5 FROM milestone-4, never from main
 - gt create milestone-5   (after milestone-4 PR submitted if user asked)
 
