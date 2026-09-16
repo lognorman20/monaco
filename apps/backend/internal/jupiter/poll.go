@@ -13,10 +13,11 @@ type PollConfig struct {
 }
 
 // DefaultPollConfig is the standard poll loop for Jupiter execute.
+// Buy/sell paths use this; unit tests inject a short PollConfig instead.
 func DefaultPollConfig() PollConfig {
 	return PollConfig{
-		MaxAttempts: 10,
-		Interval:    10 * time.Millisecond,
+		MaxAttempts: 30,
+		Interval:    2 * time.Second,
 	}
 }
 
