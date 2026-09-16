@@ -7,8 +7,8 @@ struct DevBuyView: View {
 
     private let apiClient = MonacoAPIClient()
 
-    /// 0.1 USDC in micro-units — small dev stub amount.
-    private static let devBuyUSDCMicro: Int64 = 100_000
+    /// 0.20 USDC in micro-units — above Jupiter taker min (~0.18 for AAPLx).
+    private static let devBuyUSDCMicro: Int64 = 200_000
 
     @State private var result: DevBuyResponse?
     @State private var errorMessage: String?
@@ -30,7 +30,7 @@ struct DevBuyView: View {
 
             Section("Order") {
                 detailRow(title: "Symbol", value: "AAPLx")
-                detailRow(title: "USDC", value: "0.1 USDC (\(Self.devBuyUSDCMicro) micro-units)")
+                detailRow(title: "USDC", value: "0.20 USDC (\(Self.devBuyUSDCMicro) micro-units)")
             }
 
             Section {

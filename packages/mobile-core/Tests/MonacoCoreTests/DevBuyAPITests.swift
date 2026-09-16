@@ -48,7 +48,7 @@ final class DevBuyAPITests: XCTestCase {
         )
 
         // Act
-        let result = try await client.devBuy(groupId: groupId, symbol: "AAPLx", usdc: 100_000)
+        let result = try await client.devBuy(groupId: groupId, symbol: "AAPLx", usdc: 200_000)
 
         // Assert
         let url = try XCTUnwrap(capturedURL)
@@ -65,7 +65,7 @@ final class DevBuyAPITests: XCTestCase {
         let body = try XCTUnwrap(capturedBody)
         let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
         XCTAssertEqual(json?["symbol"] as? String, "AAPLx")
-        XCTAssertEqual((json?["usdc"] as? NSNumber)?.int64Value, 100_000)
+        XCTAssertEqual((json?["usdc"] as? NSNumber)?.int64Value, 200_000)
 
         XCTAssertEqual(result.transactionId, "tx-1")
         XCTAssertEqual(result.groupId, groupId)
