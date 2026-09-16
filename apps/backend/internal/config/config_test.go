@@ -8,6 +8,8 @@ func clearConfigEnv(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	t.Setenv("PRIVY_APP_ID", "")
 	t.Setenv("PRIVY_APP_SECRET", "")
+	t.Setenv("PRIVY_AUTHORIZATION_PRIVATE_KEY", "")
+	t.Setenv("PRIVY_AUTHORIZATION_KEY_ID", "")
 	t.Setenv("RELAYER_PRIVATE_KEY", "")
 }
 
@@ -16,6 +18,8 @@ func setValidConfigEnv(t *testing.T) {
 	t.Setenv("PRIVY_APP_ID", "test-privy-app-id")
 	t.Setenv("PRIVY_APP_SECRET", "test-privy-app-secret")
 	t.Setenv("RELAYER_PRIVATE_KEY", "test-relayer-private-key")
+	t.Setenv("PRIVY_AUTHORIZATION_PRIVATE_KEY", "wallet-auth:test-authorization-key")
+	t.Setenv("PRIVY_AUTHORIZATION_KEY_ID", "test-authorization-key-id")
 }
 
 func TestLoad_returnsConfigWhenAllRequiredEnvVarsSet(t *testing.T) {
@@ -44,6 +48,12 @@ func TestLoad_returnsConfigWhenAllRequiredEnvVarsSet(t *testing.T) {
 	}
 	if cfg.SolanaCluster != SolanaCluster {
 		t.Fatalf("SolanaCluster = %q, want %q", cfg.SolanaCluster, SolanaCluster)
+	}
+	if cfg.PrivyAuthorizationPrivateKey != "wallet-auth:test-authorization-key" {
+		t.Fatalf("PrivyAuthorizationPrivateKey = %q", cfg.PrivyAuthorizationPrivateKey)
+	}
+	if cfg.PrivyAuthorizationKeyID != "test-authorization-key-id" {
+		t.Fatalf("PrivyAuthorizationKeyID = %q", cfg.PrivyAuthorizationKeyID)
 	}
 }
 
@@ -92,6 +102,21 @@ func TestLoad_missingPrivyAppSecret_returnsError(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("expected error for missing PRIVY_APP_SECRET")
+	}
+}
+
+func TestLoad_missingAuthorizationKeyIDWhenPrivateKeySet_returnsError(t *testing.T) {
+	// Arrange
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+	t.Setenv("PRIVY_AUTHORIZATION_KEY_ID", "")
+
+	// Act
+	_, err := Load()
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for missing PRIVY_AUTHORIZATION_KEY_ID when private key is set")
 	}
 }
 

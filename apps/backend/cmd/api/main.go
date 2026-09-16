@@ -16,14 +16,16 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/worker"
 )
 
 // bootResult holds API wiring produced at startup.
 type bootResult struct {
-	Server  *http.Server
-	Config  *config.Config
-	Relayer *config.Relayer
-	DB      *sql.DB
+	Server     *http.Server
+	Config     *config.Config
+	Relayer    *config.Relayer
+	DB         *sql.DB
+	stopPoller context.CancelFunc
 }
 
 // boot loads config, registers the relayer fee payer, applies migrations, and builds the HTTP server.
@@ -55,9 +57,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 	privyClient := privy.NewHTTPClient(cfg)
 	sessions := app.NewSessionService(store, privyClient)
 	groups := app.NewGroupService(store, privyClient)
+	deposits := app.NewDepositService(store, privyClient)
 	auth := &httpapi.AuthHandlers{Sessions: sessions}
 	me := &httpapi.MeHandlers{Sessions: sessions}
 	groupHandlers := &httpapi.GroupHandlers{Groups: groups}
+	depositHandlers := &httpapi.DepositHandlers{Deposits: deposits}
 
 	addr := "127.0.0.1:8080"
 	if v := os.Getenv("API_ADDR"); v != "" {
@@ -70,15 +74,25 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
 	mux.HandleFunc("POST /v1/groups", groupHandlers.CreateGroupHandler)
 	mux.HandleFunc("GET /v1/groups/{id}", groupHandlers.GetGroupHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/deposits", depositHandlers.CreateDepositHandler)
+	mux.HandleFunc("GET /v1/groups/{id}/share-units", depositHandlers.GetMemberShareUnitsHandler)
+	mux.HandleFunc("GET /v1/groups/{id}/treasury/usdc", depositHandlers.GetTreasuryUsdcBalanceHandler)
+	mux.HandleFunc("GET /v1/deposits/{id}", depositHandlers.GetDepositHandler)
+
+	solanaRPC := worker.NewHTTPSolanaRPC(cfg.SolanaCluster)
+	poller := worker.NewSweepPoller(store, privyClient, solanaRPC, deposits, relayer.PrivateKey(), nil)
+	pollerCtx, stopPoller := context.WithCancel(context.Background())
+	go worker.Run(pollerCtx, poller, worker.DefaultPollInterval)
 
 	return &bootResult{
 		Server: &http.Server{
 			Addr:    addr,
 			Handler: mux,
 		},
-		Config:  cfg,
-		Relayer: relayer,
-		DB:      db,
+		Config:     cfg,
+		Relayer:    relayer,
+		DB:         db,
+		stopPoller: stopPoller,
 	}, nil
 }
 

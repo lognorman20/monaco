@@ -16,11 +16,17 @@ func (c *HTTPClient) EnsureMemberWallet(ctx context.Context, privyUserID string,
 		return WalletRef{}, fmt.Errorf("%w: missing monaco user id", ErrAPI)
 	}
 
+	additionalSigners, err := c.walletAdditionalSigners()
+	if err != nil {
+		return WalletRef{}, err
+	}
+
 	wallet, err := c.createWallet(ctx, "member-"+string(userID), createWalletRequest{
-		ChainType:   "solana",
-		DisplayName: "monaco-member",
-		ExternalID:  string(userID),
-		Owner:       &walletOwner{UserID: privyUserID},
+		ChainType:         "solana",
+		DisplayName:       "monaco-member",
+		ExternalID:        string(userID),
+		Owner:             &walletOwner{UserID: privyUserID},
+		AdditionalSigners: additionalSigners,
 	})
 	if err != nil {
 		return WalletRef{}, err
@@ -31,4 +37,14 @@ func (c *HTTPClient) EnsureMemberWallet(ctx context.Context, privyUserID string,
 		PrivyWalletID: wallet.ID,
 		SolanaAddress: wallet.Address,
 	}, nil
+}
+
+func (c *HTTPClient) walletAdditionalSigners() ([]additionalSigner, error) {
+	if c.privyAuthorizationPrivateKey != "" && c.privyAuthorizationKeyID == "" {
+		return nil, fmt.Errorf("%w: PRIVY_AUTHORIZATION_KEY_ID is required when PRIVY_AUTHORIZATION_PRIVATE_KEY is set", ErrAPI)
+	}
+	if c.privyAuthorizationKeyID == "" {
+		return nil, nil
+	}
+	return []additionalSigner{{SignerID: c.privyAuthorizationKeyID}}, nil
 }

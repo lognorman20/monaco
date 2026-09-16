@@ -94,6 +94,40 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(GetGroupResponse.self, from: data)
     }
 
+    func createDeposit(accessToken: String, groupId: String, amount: Int64) async throws -> CreateDepositResponse {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/deposits")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        request.httpBody = try JSONEncoder().encode(CreateDepositRequest(amount: amount))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(CreateDepositResponse.self, from: data)
+    }
+
+    func getDeposit(accessToken: String, depositId: String) async throws -> GetDepositResponse {
+        let url = baseURL.appending(path: "v1/deposits/\(depositId)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(GetDepositResponse.self, from: data)
+    }
+
     private func applyAuthorizationHeader(accessToken: String, to request: inout URLRequest) throws {
         let token = accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else {
@@ -109,4 +143,8 @@ private struct SessionRequest: Encodable {
 
 private struct CreateGroupRequest: Encodable {
     let name: String
+}
+
+private struct CreateDepositRequest: Encodable {
+    let amount: Int64
 }

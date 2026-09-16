@@ -13,8 +13,9 @@ import (
 
 func testConfig() *config.Config {
 	return &config.Config{
-		PrivyAppID:     "test-app-id",
-		PrivyAppSecret: "test-app-secret",
+		PrivyAppID:              "test-app-id",
+		PrivyAppSecret:          "test-app-secret",
+		PrivyAuthorizationKeyID: "j2ygtljjgxmn5tzao5vjov1t",
 	}
 }
 
@@ -73,6 +74,64 @@ func TestHTTPClient_EnsureMemberWallet_createsSolanaWallet(t *testing.T) {
 	}
 	if gotBody.ExternalID != "user-uuid-1" {
 		t.Fatalf("external_id = %q", gotBody.ExternalID)
+	}
+	if len(gotBody.AdditionalSigners) != 1 {
+		t.Fatalf("additional_signers = %#v, want one signer", gotBody.AdditionalSigners)
+	}
+	if gotBody.AdditionalSigners[0].SignerID != "j2ygtljjgxmn5tzao5vjov1t" {
+		t.Fatalf("signer_id = %q", gotBody.AdditionalSigners[0].SignerID)
+	}
+}
+
+func TestHTTPClient_EnsureMemberWallet_returnsErrorWhenPrivateKeySetWithoutKeyID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected HTTP request when KEY_ID missing with private key set")
+	}))
+	defer server.Close()
+
+	client := NewHTTPClientWithTransport(&config.Config{
+		PrivyAppID:                   "test-app-id",
+		PrivyAppSecret:               "test-app-secret",
+		PrivyAuthorizationPrivateKey: "wallet-auth:test-authorization-key",
+		PrivyAuthorizationKeyID:      "",
+		SolanaCluster:                "mainnet-beta",
+	}, server.URL, server.Client().Transport)
+
+	_, err := client.EnsureMemberWallet(context.Background(), "did:privy:test-user", UserID("user-uuid-2"))
+	if err == nil {
+		t.Fatal("expected error when authorization private key is set without KEY_ID")
+	}
+}
+
+func TestHTTPClient_EnsureMemberWallet_omitsAdditionalSignersWhenKeyIDUnset(t *testing.T) {
+	// Arrange
+	var gotBody createWalletRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(createWalletResponse{
+			ID:      "wallet-member-2",
+			Address: "So11111111111111111111111111111111111111112",
+		})
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		PrivyAppID:     "test-app-id",
+		PrivyAppSecret: "test-app-secret",
+	}
+	client := NewHTTPClientWithTransport(cfg, server.URL, server.Client().Transport)
+
+	// Act
+	_, err := client.EnsureMemberWallet(context.Background(), "did:privy:test-user", UserID("user-uuid-2"))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("EnsureMemberWallet: %v", err)
+	}
+	if len(gotBody.AdditionalSigners) != 0 {
+		t.Fatalf("additional_signers = %#v, want empty", gotBody.AdditionalSigners)
 	}
 }
 
