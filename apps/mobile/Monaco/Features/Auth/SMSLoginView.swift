@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// SMS OTP login via Privy. Email OTP lives in `EmailLoginView`; both sit under `LoginView`.
+/// SMS OTP sign-in via Privy — primary demo path.
 struct SMSLoginView: View {
     @ObservedObject var auth: PrivyAuthService
 
@@ -15,10 +15,7 @@ struct SMSLoginView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Sign in with SMS")
-                .font(.title2.bold())
-
-            Text("Use E.164 format, e.g. +14155552671.")
+            Text("We’ll text you a one-time code to sign in.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -28,12 +25,14 @@ struct SMSLoginView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($focusedField, equals: .phone)
+                .accessibilityIdentifier("smsPhoneField")
 
             if showsOTPField {
                 TextField("6-digit code", text: $otpCode)
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
                     .focused($focusedField, equals: .code)
+                    .accessibilityIdentifier("smsCodeField")
             }
 
             if let message = statusMessage {
@@ -42,26 +41,16 @@ struct SMSLoginView: View {
                     .foregroundStyle(statusColor)
             }
 
-            if case .authenticated = auth.phase, let token = auth.accessToken {
-                Label("Privy access token ready for session API.", systemImage: "checkmark.seal.fill")
-                    .font(.footnote)
-                    .foregroundStyle(.green)
-
-                Text(tokenPreview(token))
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
             HStack {
                 if showsOTPField {
-                    Button("Verify code") {
+                    Button("Continue") {
                         Task {
                             await auth.loginWithSMSCode(otpCode, sentTo: normalizedPhone)
                         }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(isVerifyDisabled)
+                    .accessibilityIdentifier("smsVerifyButton")
                 } else {
                     Button("Send code") {
                         Task {
@@ -73,14 +62,8 @@ struct SMSLoginView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(isSendDisabled)
+                    .accessibilityIdentifier("smsSendCodeButton")
                 }
-            }
-
-            if case .authenticated = auth.phase {
-                Button("Sign out") {
-                    Task { await auth.logout() }
-                }
-                .buttonStyle(.bordered)
             }
         }
     }
@@ -111,13 +94,13 @@ struct SMSLoginView: View {
         case .idle:
             return nil
         case .sendingCode:
-            return "Sending SMS code…"
+            return "Sending code…"
         case .awaitingCode:
             return "Enter the code from your text message."
         case .verifyingCode:
-            return "Verifying code…"
+            return "Signing you in…"
         case .authenticated:
-            return "Signed in with Privy."
+            return "Signed in."
         case .failed(let message):
             return message
         }
@@ -132,11 +115,6 @@ struct SMSLoginView: View {
         default:
             return .secondary
         }
-    }
-
-    private func tokenPreview(_ token: String) -> String {
-        guard token.count > 16 else { return token }
-        return String(token.prefix(8)) + "…" + String(token.suffix(8))
     }
 }
 
