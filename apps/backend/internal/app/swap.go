@@ -178,6 +178,7 @@ func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyReques
 }
 
 // SellToUSDC quotes, signs, executes, polls, and persists a treasury sell.
+// Confirmed sells are idempotent on tx_signature via postgres.ConfirmSellTransaction.
 func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (SellToUSDCResult, error) {
 	treasury, err := s.privy.EnsureTreasury(ctx, privy.GroupID(req.GroupID))
 	if err != nil {
