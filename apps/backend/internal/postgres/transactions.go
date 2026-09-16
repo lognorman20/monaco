@@ -339,6 +339,123 @@ WHERE execute_request_id = $1 AND status = 'confirmed'`
 	return row, true, nil
 }
 
+// GetTransactionByID returns a transaction row by primary key.
+func (s *Store) GetTransactionByID(ctx context.Context, id string) (TransactionRow, bool, error) {
+	if id == "" {
+		return TransactionRow{}, false, fmt.Errorf("transaction id is required")
+	}
+
+	const selectSQL = `
+SELECT id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
+       tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
+FROM transactions
+WHERE id = $1`
+
+	var row TransactionRow
+	err := s.db.QueryRowContext(ctx, selectSQL, id).Scan(
+		&row.ID,
+		&row.GroupID,
+		&row.ProposalID,
+		&row.Amount,
+		&row.Action,
+		&row.InputMint,
+		&row.OutputMint,
+		&row.Status,
+		&row.TxSignature,
+		&row.ExecuteRequestID,
+		&row.CostBasisPrice,
+		&row.CostBasisAmount,
+		&row.CreatedAt,
+		&row.ConfirmedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TransactionRow{}, false, nil
+	}
+	if err != nil {
+		return TransactionRow{}, false, fmt.Errorf("get transaction by id: %w", err)
+	}
+	return row, true, nil
+}
+
+// TokenHoldingRow is a net treasury token balance derived from confirmed transactions.
+type TokenHoldingRow struct {
+	Mint   string
+	Amount int64
+}
+
+// ListNetTokenHoldingsByGroup aggregates confirmed buy output minus sell input per mint.
+func (s *Store) ListNetTokenHoldingsByGroup(ctx context.Context, groupID string) ([]TokenHoldingRow, error) {
+	if groupID == "" {
+		return nil, fmt.Errorf("group_id is required")
+	}
+
+	const selectSQL = `
+WITH buys AS (
+  SELECT output_mint AS mint, COALESCE(SUM(cost_basis_amount), 0) AS amount
+  FROM transactions
+  WHERE group_id = $1 AND action = 'buy' AND status = 'confirmed'
+  GROUP BY output_mint
+),
+sells AS (
+  SELECT input_mint AS mint, COALESCE(SUM(amount), 0) AS amount
+  FROM transactions
+  WHERE group_id = $1 AND action = 'sell' AND status = 'confirmed'
+  GROUP BY input_mint
+)
+SELECT COALESCE(buys.mint, sells.mint) AS mint,
+       COALESCE(buys.amount, 0) - COALESCE(sells.amount, 0) AS amount
+FROM buys
+FULL OUTER JOIN sells ON buys.mint = sells.mint
+WHERE COALESCE(buys.amount, 0) - COALESCE(sells.amount, 0) > 0
+ORDER BY mint`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("list net token holdings: %w", err)
+	}
+	defer rows.Close()
+
+	var holdings []TokenHoldingRow
+	for rows.Next() {
+		var row TokenHoldingRow
+		if err := rows.Scan(&row.Mint, &row.Amount); err != nil {
+			return nil, fmt.Errorf("scan token holding: %w", err)
+		}
+		holdings = append(holdings, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate token holdings: %w", err)
+	}
+	return holdings, nil
+}
+
+// GetFillDerivedCostBasisByOutputMint returns cost basis from the latest confirmed buy fill.
+func (s *Store) GetFillDerivedCostBasisByOutputMint(ctx context.Context, groupID, outputMint string) (int64, int64, bool, error) {
+	if groupID == "" || outputMint == "" {
+		return 0, 0, false, fmt.Errorf("group_id and output_mint are required")
+	}
+
+	const selectSQL = `
+SELECT cost_basis_price, cost_basis_amount
+FROM transactions
+WHERE group_id = $1 AND output_mint = $2 AND action = 'buy' AND status = 'confirmed'
+ORDER BY confirmed_at DESC NULLS LAST, created_at DESC
+LIMIT 1`
+
+	var price, amount sql.NullInt64
+	err := s.db.QueryRowContext(ctx, selectSQL, groupID, outputMint).Scan(&price, &amount)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, false, nil
+	}
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("get fill-derived cost basis: %w", err)
+	}
+	if !price.Valid || !amount.Valid {
+		return 0, 0, false, nil
+	}
+	return price.Int64, amount.Int64, true, nil
+}
+
 // CountConfirmedTransactionsBySignature counts confirmed rows for a signature.
 func (s *Store) CountConfirmedTransactionsBySignature(ctx context.Context, txSignature string) (int, error) {
 	if txSignature == "" {

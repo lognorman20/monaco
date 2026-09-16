@@ -71,6 +71,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, treasurySigner)
 	devBuy := app.NewDevBuyService(swap, store, privyClient)
 	devBuyHandlers := &httpapi.DevBuyHandlers{DevBuy: devBuy}
+	transactionHandlers := &httpapi.TransactionHandlers{
+		Store:   store,
+		Privy:   privyClient,
+		XStocks: xstocksResolver,
+	}
 
 	addr := "127.0.0.1:8080"
 	if v := os.Getenv("API_ADDR"); v != "" {
@@ -88,6 +93,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/groups/{id}/treasury/usdc", depositHandlers.GetTreasuryUsdcBalanceHandler)
 	mux.HandleFunc("GET /v1/deposits/{id}", depositHandlers.GetDepositHandler)
 	mux.HandleFunc("POST /v1/dev/groups/{id}/buy", devBuyHandlers.DevBuyHandler)
+	mux.HandleFunc("GET /v1/transactions/{id}", transactionHandlers.GetTransactionHandler)
+	mux.HandleFunc("GET /v1/groups/{id}/treasury/tokens", transactionHandlers.GetTreasuryTokenBalancesHandler)
+	mux.HandleFunc("GET /v1/groups/{id}/cost-basis/{symbol}", transactionHandlers.GetCostBasisBySymbolHandler)
 
 	solanaRPC := worker.NewHTTPSolanaRPC(cfg.SolanaCluster)
 	poller := worker.NewSweepPoller(store, privyClient, solanaRPC, deposits, relayer.PrivateKey(), nil)
