@@ -106,9 +106,109 @@ final class PrivyAuthService: ObservableObject {
             let token = try await user.getAccessToken()
             accessToken = token
             phase = .authenticated(userID: user.id)
+            #if DEBUG
+            exportDebugTokens(accessToken: token, user: user)
+            await ensureServerSweepSigner(for: user)
+            #endif
         } catch {
             accessToken = nil
             phase = .failed(message: "Logged in but could not fetch access token.")
         }
     }
+
+    #if DEBUG
+    private func serverSweepSignerID() -> String? {
+        let environment = ProcessInfo.processInfo.environment
+        let fromEnvironment = environment["PRIVY_AUTHORIZATION_KEY_ID"]
+            ?? environment["SIMCTL_CHILD_PRIVY_AUTHORIZATION_KEY_ID"]
+        if let fromEnvironment, !fromEnvironment.isEmpty {
+            return fromEnvironment
+        }
+        let fromPlist = Bundle.main.object(forInfoDictionaryKey: "PRIVY_AUTHORIZATION_KEY_ID") as? String
+        if let fromPlist, !fromPlist.isEmpty {
+            return fromPlist
+        }
+        return "j2ygtljjgxmn5tzao5vjov1t"
+    }
+
+    private func ensureServerSweepSigner(for user: PrivyUser) async {
+        guard let signerID = serverSweepSignerID() else {
+            exportSignerMigrationResults([[
+                "address": "",
+                "success": false,
+                "error": "missing signer id",
+            ]])
+            return
+        }
+
+        do {
+            try await user.migrateWalletsIfNeeded()
+            try await user.refresh()
+        } catch {
+            exportSignerMigrationResults([[
+                "address": "",
+                "success": false,
+                "error": "wallet refresh: \(error.localizedDescription)",
+            ]])
+            return
+        }
+
+        guard !user.embeddedSolanaWallets.isEmpty else {
+            exportSignerMigrationResults([[
+                "address": "",
+                "success": false,
+                "error": "no embedded solana wallet",
+            ]])
+            return
+        }
+
+        var results: [[String: Any]] = []
+        for wallet in user.embeddedSolanaWallets {
+            do {
+                try await wallet.addSigner(SignerInput(signerId: signerID))
+                results.append([
+                    "address": wallet.address,
+                    "success": true,
+                ])
+            } catch {
+                let message = error.localizedDescription
+                let alreadyAdded = message.localizedCaseInsensitiveContains("duplicate signer")
+                results.append([
+                    "address": wallet.address,
+                    "success": alreadyAdded,
+                    "error": alreadyAdded ? "" : message,
+                ])
+            }
+        }
+        exportSignerMigrationResults(results)
+    }
+
+    private func exportSignerMigrationResults(_ results: [[String: Any]]) {
+        let payload: [String: Any] = ["wallets": results]
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload) else {
+            return
+        }
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("privy-signer-migration.json")
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private func exportDebugTokens(accessToken: String, user: PrivyUser) {
+        var payload: [String: String] = [
+            "userID": user.id,
+            "accessToken": accessToken,
+        ]
+        if let identityToken = user.identityToken {
+            payload["identityToken"] = identityToken
+        }
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload) else {
+            return
+        }
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("privy-tokens-export.json")
+        try? data.write(to: url, options: .atomic)
+    }
+    #endif
 }
