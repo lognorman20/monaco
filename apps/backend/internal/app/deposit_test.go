@@ -10,7 +10,8 @@ import (
 )
 
 func integrationDepositService(t *testing.T) (*DepositService, privy.Client, *sql.DB) {
-	return integrationApp(t)
+	h := integrationApp(t)
+	return h.Deposits, h.Privy, h.DB
 }
 
 func seedFundedDeposit(t *testing.T, deposits *DepositService, privyClient privy.Client) (ObservedSweep, string) {

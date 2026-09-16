@@ -2,50 +2,24 @@ package app
 
 import (
 	"context"
-	"database/sql"
-	"os"
 	"sync"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 )
 
-func integrationApp(t *testing.T) (*DepositService, privy.Client, *sql.DB) {
-	t.Helper()
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Fatal("DATABASE_URL is not set")
-	}
-	db, err := sql.Open("pgx", databaseURL)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	if err := db.Ping(); err != nil {
-		t.Fatalf("ping db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, "TRUNCATE users, member_wallets, groups, treasuries, deposits, positions, withdrawals RESTART IDENTITY CASCADE"); err != nil {
-		t.Fatalf("reset tables: %v", err)
-	}
-	store := postgres.NewStore(db)
-	privyClient := privy.NewFakeClient()
-	return NewDepositService(store, privyClient), privyClient, db
-}
-
 func TestObserveSweep_duplicateSignature_doesNotDoubleCredit(t *testing.T) {
 	// Arrange
-	deposits, privyClient, _ := integrationApp(t)
+	h := integrationApp(t)
 	ctx := context.Background()
-	sweep, _ := seedFundedDeposit(t, deposits, privyClient)
-	first, err := deposits.ObserveSweep(ctx, sweep)
+	sweep, _ := seedFundedDeposit(t, h.Deposits, h.Privy)
+	first, err := h.Deposits.ObserveSweep(ctx, sweep)
 	if err != nil {
 		t.Fatalf("first ObserveSweep: %v", err)
 	}
 
 	// Act
-	second, err := deposits.ObserveSweep(ctx, sweep)
+	second, err := h.Deposits.ObserveSweep(ctx, sweep)
 
 	// Assert
 	if err != nil {
@@ -61,9 +35,9 @@ func TestObserveSweep_duplicateSignature_doesNotDoubleCredit(t *testing.T) {
 
 func TestObserveSweep_concurrentDuplicateSignature_creditsOnceOnly(t *testing.T) {
 	// Arrange
-	deposits, privyClient, _ := integrationApp(t)
+	h := integrationApp(t)
 	ctx := context.Background()
-	sweep, _ := seedFundedDeposit(t, deposits, privyClient)
+	sweep, _ := seedFundedDeposit(t, h.Deposits, h.Privy)
 
 	// Act
 	var wg sync.WaitGroup
@@ -73,7 +47,7 @@ func TestObserveSweep_concurrentDuplicateSignature_creditsOnceOnly(t *testing.T)
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			results[idx], errs[idx] = deposits.ObserveSweep(ctx, sweep)
+			results[idx], errs[idx] = h.Deposits.ObserveSweep(ctx, sweep)
 		}(i)
 	}
 	wg.Wait()
@@ -98,17 +72,17 @@ func TestObserveSweep_concurrentDuplicateSignature_creditsOnceOnly(t *testing.T)
 
 func TestProperty_observeSweepIdempotent(t *testing.T) {
 	// Arrange
-	deposits, privyClient, _ := integrationApp(t)
+	h := integrationApp(t)
 	ctx := context.Background()
-	sweep, _ := seedFundedDeposit(t, deposits, privyClient)
-	first, err := deposits.ObserveSweep(ctx, sweep)
+	sweep, _ := seedFundedDeposit(t, h.Deposits, h.Privy)
+	first, err := h.Deposits.ObserveSweep(ctx, sweep)
 	if err != nil {
 		t.Fatalf("first ObserveSweep: %v", err)
 	}
 
 	// Act
 	for i := 0; i < 3; i++ {
-		again, err := deposits.ObserveSweep(ctx, sweep)
+		again, err := h.Deposits.ObserveSweep(ctx, sweep)
 
 		// Assert
 		if err != nil {
@@ -125,19 +99,19 @@ func TestProperty_observeSweepIdempotent(t *testing.T) {
 
 func TestObserveSweep_memberWalletOnlyBalance_doesNotCreditPosition(t *testing.T) {
 	// Arrange
-	deposits, privyClient, _ := integrationApp(t)
-	sweep, _ := seedFundedDeposit(t, deposits, privyClient)
+	h := integrationApp(t)
+	sweep, _ := seedFundedDeposit(t, h.Deposits, h.Privy)
 	sweep.ToAddress = sweep.FromAddress
-	privy.SetMemberUSDCBalance(privyClient, sweep.FromAddress, sweep.Amount)
+	privy.SetMemberUSDCBalance(h.Privy, sweep.FromAddress, sweep.Amount)
 
 	// Act
-	_, err := deposits.ObserveSweep(context.Background(), sweep)
+	_, err := h.Deposits.ObserveSweep(context.Background(), sweep)
 
 	// Assert
 	if err == nil {
 		t.Fatal("expected invalid sweep target error")
 	}
-	pos, found, err := deposits.store.GetPosition(context.Background(), sweep.UserID, sweep.GroupID)
+	pos, found, err := h.Deposits.store.GetPosition(context.Background(), sweep.UserID, sweep.GroupID)
 	if err != nil {
 		t.Fatalf("GetPosition: %v", err)
 	}
