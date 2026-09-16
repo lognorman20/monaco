@@ -82,6 +82,14 @@ type solanaBlockhashResponse struct {
 }
 
 func (c *HTTPClient) doPrivyRequest(ctx context.Context, method, path string, body []byte, idempotencyKey string) ([]byte, int, error) {
+	return c.doPrivyRequestWithAuthorization(ctx, method, path, body, idempotencyKey, false)
+}
+
+func (c *HTTPClient) doPrivyRequestWithAuthorization(ctx context.Context, method, path string, body []byte, idempotencyKey string, requireAuthorization bool) ([]byte, int, error) {
+	if requireAuthorization && c.privyAuthorizationPrivateKey == "" {
+		return nil, 0, fmt.Errorf("%w: PRIVY_AUTHORIZATION_PRIVATE_KEY is required for wallet rpc", ErrAPI)
+	}
+
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -97,6 +105,23 @@ func (c *HTTPClient) doPrivyRequest(ctx context.Context, method, path string, bo
 	req.Header.Set("privy-app-id", c.appID)
 	if idempotencyKey != "" {
 		req.Header.Set("privy-idempotency-key", idempotencyKey)
+	}
+	if requireAuthorization {
+		bodyMap, err := bodyMapForAuthorization(body)
+		if err != nil {
+			return nil, 0, err
+		}
+		payload := buildAuthorizationSignaturePayload(
+			method,
+			authorizationSignatureURL(c.baseURL, path),
+			bodyMap,
+			authorizationHeaders(c.appID, idempotencyKey),
+		)
+		signature, err := signAuthorizationPayload(c.privyAuthorizationPrivateKey, payload)
+		if err != nil {
+			return nil, 0, err
+		}
+		req.Header.Set(authorizationSignatureHeader, signature)
 	}
 	req.SetBasicAuth(c.appID, c.appSecret)
 
@@ -254,7 +279,7 @@ func (c *HTTPClient) signAndSendSolanaTransaction(ctx context.Context, walletID,
 	}
 
 	path := fmt.Sprintf("/v1/wallets/%s/rpc", url.PathEscape(walletID))
-	respBody, status, err := c.doPrivyRequest(ctx, http.MethodPost, path, payload, "")
+	respBody, status, err := c.doPrivyRequestWithAuthorization(ctx, http.MethodPost, path, payload, "", true)
 	if err != nil {
 		return "", err
 	}

@@ -22,21 +22,23 @@ type Client interface {
 
 // HTTPClient calls Privy REST APIs with app credentials.
 type HTTPClient struct {
-	appID         string
-	appSecret     string
-	baseURL       string
-	solanaCluster string
-	solanaRPCURL  string // test override; empty uses cluster default
-	httpClient    *http.Client
+	appID                        string
+	appSecret                    string
+	privyAuthorizationPrivateKey string
+	baseURL                      string
+	solanaCluster                string
+	solanaRPCURL                 string // test override; empty uses cluster default
+	httpClient                   *http.Client
 }
 
 // NewHTTPClient builds a Privy client from API config.
 func NewHTTPClient(cfg *config.Config) *HTTPClient {
 	return &HTTPClient{
-		appID:         cfg.PrivyAppID,
-		appSecret:     cfg.PrivyAppSecret,
-		baseURL:       defaultBaseURL,
-		solanaCluster: cfg.SolanaCluster,
+		appID:                        cfg.PrivyAppID,
+		appSecret:                    cfg.PrivyAppSecret,
+		privyAuthorizationPrivateKey: cfg.PrivyAuthorizationPrivateKey,
+		baseURL:                      defaultBaseURL,
+		solanaCluster:                cfg.SolanaCluster,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},

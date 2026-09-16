@@ -11,10 +11,11 @@ import (
 const SolanaCluster = "mainnet-beta"
 
 const (
-	envDatabaseURL        = "DATABASE_URL"
-	envPrivyAppID         = "PRIVY_APP_ID"
-	envPrivyAppSecret     = "PRIVY_APP_SECRET"
-	envRelayerPrivateKey  = "RELAYER_PRIVATE_KEY"
+	envDatabaseURL                   = "DATABASE_URL"
+	envPrivyAppID                    = "PRIVY_APP_ID"
+	envPrivyAppSecret                = "PRIVY_APP_SECRET"
+	envPrivyAuthorizationPrivateKey  = "PRIVY_AUTHORIZATION_PRIVATE_KEY"
+	envRelayerPrivateKey             = "RELAYER_PRIVATE_KEY"
 )
 
 // Config holds runtime credentials for the Monaco API.
@@ -25,23 +26,29 @@ const (
 //   - PRIVY_APP_ID: Privy application ID from the dashboard.
 //   - PRIVY_APP_SECRET: Privy application secret from the dashboard.
 //   - RELAYER_PRIVATE_KEY: Base58-encoded Solana keypair for the app fee payer (mainnet).
+//
+// Optional environment variables:
+//   - PRIVY_AUTHORIZATION_PRIVATE_KEY: Privy wallet authorization key (wallet-auth:… PKCS#8)
+//     required for server-side wallet RPC such as signAndSendTransaction.
 type Config struct {
-	DatabaseURL        string
-	PrivyAppID         string
-	PrivyAppSecret     string
-	RelayerPrivateKey  string
-	SolanaCluster      string
+	DatabaseURL                   string
+	PrivyAppID                    string
+	PrivyAppSecret                string
+	PrivyAuthorizationPrivateKey  string
+	RelayerPrivateKey             string
+	SolanaCluster                 string
 }
 
 // Load reads required settings from the process environment.
 // Missing or blank values return an error naming the variable.
 func Load() (*Config, error) {
 	cfg := &Config{
-		DatabaseURL:       strings.TrimSpace(os.Getenv(envDatabaseURL)),
-		PrivyAppID:        strings.TrimSpace(os.Getenv(envPrivyAppID)),
-		PrivyAppSecret:    strings.TrimSpace(os.Getenv(envPrivyAppSecret)),
-		RelayerPrivateKey: strings.TrimSpace(os.Getenv(envRelayerPrivateKey)),
-		SolanaCluster:     SolanaCluster,
+		DatabaseURL:                  strings.TrimSpace(os.Getenv(envDatabaseURL)),
+		PrivyAppID:                   strings.TrimSpace(os.Getenv(envPrivyAppID)),
+		PrivyAppSecret:               strings.TrimSpace(os.Getenv(envPrivyAppSecret)),
+		PrivyAuthorizationPrivateKey: strings.TrimSpace(os.Getenv(envPrivyAuthorizationPrivateKey)),
+		RelayerPrivateKey:            strings.TrimSpace(os.Getenv(envRelayerPrivateKey)),
+		SolanaCluster:                SolanaCluster,
 	}
 
 	if cfg.DatabaseURL == "" {

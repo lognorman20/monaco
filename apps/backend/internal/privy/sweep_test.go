@@ -184,6 +184,7 @@ func TestHTTPClient_SubmitSweep_callsPrivyWithMemberAndTreasuryAddresses(t *test
 	var gotWalletID string
 	var gotRPC walletRPCRequest
 	var gotSolanaRPC bool
+	var gotAuthorizationSignature string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -219,6 +220,7 @@ func TestHTTPClient_SubmitSweep_callsPrivyWithMemberAndTreasuryAddresses(t *test
 			})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/rpc"):
 			gotWalletID = strings.TrimPrefix(strings.TrimSuffix(r.URL.Path, "/rpc"), "/v1/wallets/")
+			gotAuthorizationSignature = r.Header.Get(authorizationSignatureHeader)
 			if err := json.NewDecoder(r.Body).Decode(&gotRPC); err != nil {
 				t.Fatalf("decode rpc body: %v", err)
 			}
@@ -232,7 +234,9 @@ func TestHTTPClient_SubmitSweep_callsPrivyWithMemberAndTreasuryAddresses(t *test
 	}))
 	defer server.Close()
 
-	client := NewHTTPClientWithTransport(testConfig(), server.URL, server.Client().Transport)
+	cfg := testConfig()
+	cfg.PrivyAuthorizationPrivateKey = testAuthorizationPrivateKey(t)
+	client := NewHTTPClientWithTransport(cfg, server.URL, server.Client().Transport)
 	client.solanaRPCURL = server.URL + "/"
 	req := SweepRequest{
 		MemberAddress:   memberAddress,
@@ -268,6 +272,9 @@ func TestHTTPClient_SubmitSweep_callsPrivyWithMemberAndTreasuryAddresses(t *test
 	}
 	if !gotSolanaRPC {
 		t.Fatal("expected getLatestBlockhash solana rpc call")
+	}
+	if gotAuthorizationSignature == "" {
+		t.Fatal("expected privy-authorization-signature header on wallet rpc")
 	}
 	blockhash, err := recentBlockhashFromTransaction(gotRPC.Params.Transaction)
 	if err != nil {
