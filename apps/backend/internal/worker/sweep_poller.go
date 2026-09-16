@@ -96,20 +96,30 @@ func (p *SweepPoller) Tick(ctx context.Context) error {
 	}
 
 	for _, deposit := range pending {
+		if err := p.processPendingDeposit(ctx, deposit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *SweepPoller) processPendingDeposit(ctx context.Context, deposit postgres.DepositRow) error {
+	treasury, found, err := p.store.GetTreasuryByGroupID(ctx, deposit.GroupID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("treasury not found for group %s", deposit.GroupID)
+	}
+
+	txSignature := depositBroadcastSignature(deposit)
+	if txSignature == "" {
 		balance, err := p.privy.MemberUSDCBalance(ctx, deposit.FromAddress)
 		if err != nil {
 			return err
 		}
 		if balance < deposit.Amount {
-			continue
-		}
-
-		treasury, found, err := p.store.GetTreasuryByGroupID(ctx, deposit.GroupID)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return fmt.Errorf("treasury not found for group %s", deposit.GroupID)
+			return nil
 		}
 
 		logSweepAttempt(deposit.GroupID, deposit.UserID, deposit.ID, deposit.Amount)
@@ -122,29 +132,42 @@ func (p *SweepPoller) Tick(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		txSignature = result.TxSignature
 
-		confirmed, err := p.rpc.IsConfirmed(ctx, result.TxSignature)
-		if err != nil {
-			return err
-		}
-		if !confirmed {
-			continue
-		}
-
-		logSweepConfirm(deposit.GroupID, deposit.UserID, deposit.ID, result.TxSignature)
-
-		_, err = p.deposits.ObserveSweep(ctx, app.ObservedSweep{
-			TxSignature: result.TxSignature,
-			FromAddress: deposit.FromAddress,
-			ToAddress:   treasury.SolanaAddress,
-			Amount:      deposit.Amount,
-			DepositID:   deposit.ID,
-			UserID:      deposit.UserID,
-			GroupID:     deposit.GroupID,
-		})
-		if err != nil {
+		if err := p.store.SetDepositBroadcastSignature(ctx, deposit.ID, txSignature); err != nil {
 			return err
 		}
 	}
-	return nil
+
+	return p.confirmAndObserveSweep(ctx, deposit, treasury.SolanaAddress, txSignature)
+}
+
+func depositBroadcastSignature(deposit postgres.DepositRow) string {
+	if deposit.TxSignature.Valid {
+		return deposit.TxSignature.String
+	}
+	return ""
+}
+
+func (p *SweepPoller) confirmAndObserveSweep(ctx context.Context, deposit postgres.DepositRow, treasuryAddress, txSignature string) error {
+	confirmed, err := p.rpc.IsConfirmed(ctx, txSignature)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return nil
+	}
+
+	logSweepConfirm(deposit.GroupID, deposit.UserID, deposit.ID, txSignature)
+
+	_, err = p.deposits.ObserveSweep(ctx, app.ObservedSweep{
+		TxSignature: txSignature,
+		FromAddress: deposit.FromAddress,
+		ToAddress:   treasuryAddress,
+		Amount:      deposit.Amount,
+		DepositID:   deposit.ID,
+		UserID:      deposit.UserID,
+		GroupID:     deposit.GroupID,
+	})
+	return err
 }

@@ -124,6 +124,32 @@ ORDER BY created_at ASC`
 	return deposits, nil
 }
 
+// SetDepositBroadcastSignature records a broadcast sweep signature on a pending deposit.
+// Status stays pending until ObserveSweep confirms on-chain arrival and credits shares.
+func (s *Store) SetDepositBroadcastSignature(ctx context.Context, depositID, txSignature string) error {
+	if depositID == "" || txSignature == "" {
+		return fmt.Errorf("deposit id and tx signature are required")
+	}
+
+	const updateSQL = `
+UPDATE deposits
+SET tx_signature = $2
+WHERE id = $1 AND status = 'pending'`
+
+	result, err := s.db.ExecContext(ctx, updateSQL, depositID, txSignature)
+	if err != nil {
+		return fmt.Errorf("set deposit broadcast signature: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set deposit broadcast signature rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("deposit %s not found or not pending", depositID)
+	}
+	return nil
+}
+
 // ConfirmDepositTx marks a deposit confirmed with a treasury sweep signature.
 func (s *Store) ConfirmDepositTx(ctx context.Context, tx *sql.Tx, depositID, txSignature string) (DepositRow, error) {
 	if depositID == "" || txSignature == "" {
@@ -153,7 +179,8 @@ RETURNING id, user_id, group_id, amount, from_address, status, tx_signature, cre
 	return row, nil
 }
 
-// GetDepositByTxSignature returns a deposit keyed by sweep signature for idempotency.
+// GetDepositByTxSignature returns a confirmed deposit keyed by sweep signature for idempotency.
+// Pending deposits may store a broadcast signature before confirmation; those are ignored here.
 func (s *Store) GetDepositByTxSignature(ctx context.Context, txSignature string) (DepositRow, bool, error) {
 	if txSignature == "" {
 		return DepositRow{}, false, fmt.Errorf("tx signature is required")
@@ -162,7 +189,7 @@ func (s *Store) GetDepositByTxSignature(ctx context.Context, txSignature string)
 	const selectSQL = `
 SELECT id, user_id, group_id, amount, from_address, status, tx_signature, created_at
 FROM deposits
-WHERE tx_signature = $1`
+WHERE tx_signature = $1 AND status = 'confirmed'`
 
 	var row DepositRow
 	err := s.db.QueryRowContext(ctx, selectSQL, txSignature).Scan(
