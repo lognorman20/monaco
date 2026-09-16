@@ -1,81 +1,66 @@
 import SwiftUI
 
-/// M2 deposit screen: POST deposit then poll GET status until confirmed.
+/// Add money flow with sweep status feedback (not member balance as money).
 struct DepositView: View {
     @ObservedObject var auth: PrivyAuthService
     let groupId: String
 
     private let apiClient = MonacoAPIClient()
 
-    @State private var profile: MeResponse?
     @State private var amountText = ""
     @State private var depositId: String?
-    @State private var deposit: GetDepositResponse?
+    @State private var pollState = DepositPollStateMachine()
+    @State private var shareUnits: Int64?
     @State private var errorMessage: String?
     @State private var isSubmitting = false
     @State private var isPolling = false
-    @State private var isLoadingProfile = true
 
     var body: some View {
         Form {
-            if isLoadingProfile {
-                Section {
-                    ProgressView("Loading member wallet…")
-                }
-            } else if let profile {
-                Section("Member wallet") {
-                    detailRow(title: "Solana address", value: profile.memberWalletAddress, monospaced: true)
-                        .accessibilityIdentifier("deposit-member-wallet")
-                    Text("Fund this address with USDC, then create a deposit below.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
+            Section {
+                Text("Add USDC to grow your club's pot. We track sweep progress until your share is credited.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
-            Section("Group") {
-                Text(groupId)
-                    .font(.body.monospaced())
-                    .textSelection(.enabled)
-            }
-
-            Section("Deposit amount (USDC)") {
-                TextField("Amount", text: $amountText)
+            Section("Amount") {
+                TextField("USDC amount", text: $amountText)
                     .keyboardType(.decimalPad)
                     .disabled(isSubmitting || depositId != nil)
                     .accessibilityIdentifier("deposit-amount-field")
-                if let microUnits = parsedAmountMicro {
-                    Text("= \(microUnits) micro-units")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
             }
 
             Section {
-                Button(isSubmitting ? "Submitting…" : "Create deposit") {
+                Button(isSubmitting ? "Starting…" : "Add money") {
                     Task { await createDeposit() }
                 }
                 .disabled(isSubmitting || depositId != nil || parsedAmountMicro == nil)
                 .accessibilityIdentifier("create-deposit-button")
+            }
 
-                if depositId != nil {
-                    Button(isPolling ? "Refreshing…" : "Refresh status") {
-                        Task { await refreshStatus() }
+            if depositId != nil {
+                Section("Sweep status") {
+                    Label(pollState.statusCopy, systemImage: sweepIcon)
+                        .font(.subheadline)
+                        .accessibilityIdentifier("deposit-sweep-status")
+
+                    if let shareUnits, pollState.phase == .credited {
+                        Text("Share units credited: \(shareUnits)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
                     }
-                    .disabled(isPolling || auth.accessToken == nil)
+
+                    if !pollState.isTerminal {
+                        Button(isPolling ? "Checking…" : "Refresh status") {
+                            Task { await refreshStatus() }
+                        }
+                        .disabled(isPolling || auth.accessToken == nil)
+                        .accessibilityIdentifier("deposit-refresh-status")
+                    }
                 }
             }
 
-            if let deposit {
-                Section("Deposit status") {
-                    detailRow(title: "Deposit ID", value: deposit.depositId)
-                    detailRow(title: "Amount", value: formatUSDC(microUnits: deposit.amount))
-                    detailRow(title: "Status", value: deposit.status)
-                    detailRow(title: "Share units", value: String(deposit.shareUnits))
-                    if let txSignature = deposit.txSignature, !txSignature.isEmpty {
-                        detailRow(title: "Tx signature", value: txSignature, monospaced: true)
-                    }
-                }
-            } else if let errorMessage {
+            if let errorMessage {
                 Section {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
@@ -83,10 +68,18 @@ struct DepositView: View {
                 }
             }
         }
-        .navigationTitle("Deposit")
+        .navigationTitle("Add money")
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: auth.accessToken) {
-            await loadProfile()
+    }
+
+    private var sweepIcon: String {
+        switch pollState.phase {
+        case .idle, .awaitingSweep:
+            "arrow.triangle.2.circlepath"
+        case .credited:
+            "checkmark.circle.fill"
+        case .failed:
+            "exclamationmark.triangle.fill"
         }
     }
 
@@ -104,43 +97,9 @@ struct DepositView: View {
         return microUnits > 0 ? microUnits : nil
     }
 
-    private func formatUSDC(microUnits: Int64) -> String {
-        let dollars = Decimal(microUnits) / Decimal(1_000_000)
-        return "\(dollars) USDC"
-    }
-
-    @ViewBuilder
-    private func detailRow(title: String, value: String, monospaced: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(monospaced ? .body.monospaced() : .body)
-                .textSelection(.enabled)
-        }
-    }
-
-    private func loadProfile() async {
-        guard let accessToken = auth.accessToken else {
-            profile = nil
-            isLoadingProfile = false
-            return
-        }
-
-        isLoadingProfile = true
-        do {
-            _ = try await apiClient.openSession(accessToken: accessToken)
-            profile = try await apiClient.me(accessToken: accessToken)
-        } catch {
-            profile = nil
-        }
-        isLoadingProfile = false
-    }
-
     private func createDeposit() async {
         guard let accessToken = auth.accessToken else {
-            errorMessage = "Missing Privy access token."
+            errorMessage = "Sign in to add money."
             return
         }
         guard let amount = parsedAmountMicro else {
@@ -150,38 +109,42 @@ struct DepositView: View {
 
         isSubmitting = true
         errorMessage = nil
+        pollState = DepositPollStateMachine()
 
         do {
             let created = try await apiClient.createDeposit(accessToken: accessToken, groupId: groupId, amount: amount)
             depositId = created.depositId
+            pollState.apply(status: created.status)
             isSubmitting = false
-            await refreshStatus()
+            if !pollState.isTerminal {
+                await refreshStatus()
+            }
         } catch MonacoAPIError.httpStatus(let status) {
-            errorMessage = "Create deposit failed (HTTP \(status))."
+            errorMessage = "Could not start deposit (HTTP \(status))."
             isSubmitting = false
         } catch {
-            errorMessage = "Could not create deposit."
+            errorMessage = "Could not start deposit."
             isSubmitting = false
         }
     }
 
     private func refreshStatus() async {
-        guard let accessToken = auth.accessToken, let depositId else {
-            return
-        }
+        guard let accessToken = auth.accessToken, let depositId else { return }
 
         isPolling = true
         errorMessage = nil
 
         do {
             let status = try await apiClient.getDeposit(accessToken: accessToken, depositId: depositId)
-            deposit = status
+            pollState.apply(status: status.status)
+            shareUnits = status.shareUnits
         } catch {
-            errorMessage = "Could not load deposit status."
+            errorMessage = "Could not refresh sweep status."
         }
 
         isPolling = false
     }
+
 }
 
 #Preview {
