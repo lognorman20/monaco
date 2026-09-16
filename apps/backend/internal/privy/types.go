@@ -29,3 +29,16 @@ type TreasuryRef struct {
 	PrivyWalletID  string
 	SolanaAddress  string
 }
+
+// SweepRequest is a server-signed USDC transfer from member wallet to treasury.
+type SweepRequest struct {
+	MemberAddress   string
+	TreasuryAddress string
+	Amount          int64
+	RelayerKey      string
+}
+
+// SweepResult is the submitted sweep transaction signature.
+type SweepResult struct {
+	TxSignature string
+}

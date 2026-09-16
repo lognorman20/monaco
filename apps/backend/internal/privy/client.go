@@ -15,6 +15,9 @@ type Client interface {
 	VerifySession(ctx context.Context, token AccessToken) (Identity, error)
 	EnsureMemberWallet(ctx context.Context, privyUserID string, userID UserID) (WalletRef, error)
 	EnsureTreasury(ctx context.Context, groupID GroupID) (TreasuryRef, error)
+	MemberUSDCBalance(ctx context.Context, memberAddress string) (int64, error)
+	TreasuryUSDCBalance(ctx context.Context, treasuryAddress string) (int64, error)
+	SubmitSweep(ctx context.Context, req SweepRequest) (SweepResult, error)
 }
 
 // HTTPClient calls Privy REST APIs with app credentials.

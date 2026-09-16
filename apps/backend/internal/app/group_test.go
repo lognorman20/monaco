@@ -26,6 +26,18 @@ func (c *failingEnsureTreasuryClient) EnsureTreasury(ctx context.Context, groupI
 	return privy.TreasuryRef{}, c.ensureTreasuryErr
 }
 
+func (c *failingEnsureTreasuryClient) MemberUSDCBalance(ctx context.Context, memberAddress string) (int64, error) {
+	return c.inner.MemberUSDCBalance(ctx, memberAddress)
+}
+
+func (c *failingEnsureTreasuryClient) TreasuryUSDCBalance(ctx context.Context, treasuryAddress string) (int64, error) {
+	return c.inner.TreasuryUSDCBalance(ctx, treasuryAddress)
+}
+
+func (c *failingEnsureTreasuryClient) SubmitSweep(ctx context.Context, req privy.SweepRequest) (privy.SweepResult, error) {
+	return c.inner.SubmitSweep(ctx, req)
+}
+
 func TestCreateGroup_privyTreasuryFailure_rollsBackGroupRow(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
