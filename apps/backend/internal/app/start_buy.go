@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
@@ -16,10 +14,10 @@ import (
 // ErrQuoteNotRoutable means Jupiter returned no route for the requested buy.
 var ErrQuoteNotRoutable = errors.New("quote not routable")
 
-// ErrDevRouteBlocked means the temporary dev-only buy route is disabled.
-var ErrDevRouteBlocked = errors.New("dev route blocked")
+// ErrProposalNotPassed means Jupiter execute requires a passed proposal tally.
+var ErrProposalNotPassed = errors.New("proposal not passed")
 
-// StartBuyRequest is input for the M3 dev stub buy gate (M4 vote gate later).
+// StartBuyRequest is input for quote gating before proposal create or execute.
 type StartBuyRequest struct {
 	GroupID    string
 	UserID     string
@@ -35,8 +33,8 @@ type StartBuyResult struct {
 
 // BuyService gates treasury buys behind quote availability.
 type BuyService struct {
-	jupiter  jupiter.Client
-	xstocks  xstocks.Resolver
+	jupiter jupiter.Client
+	xstocks xstocks.Resolver
 }
 
 // NewBuyService wires Jupiter quote and xStocks mint resolution.
@@ -86,124 +84,118 @@ func (s *BuyService) StartBuy(ctx context.Context, req StartBuyRequest) (StartBu
 	}, nil
 }
 
-// DevBuyEnabled reports whether POST /v1/dev/groups/{id}/buy is available.
-func DevBuyEnabled() bool {
-	value := strings.TrimSpace(os.Getenv("DEV_BUY_ENABLED"))
-	return value == "1" || strings.EqualFold(value, "true")
-}
-
-// AllowDevRoute returns nil when StartBuy may run via the M3 dev stub route.
-func (s *BuyService) AllowDevRoute() error {
-	if !DevBuyEnabled() {
-		return ErrDevRouteBlocked
-	}
-	return nil
-}
-
-// StartBuyViaDevRoute runs StartBuy only when the dev stub route is enabled.
-func (s *BuyService) StartBuyViaDevRoute(ctx context.Context, req StartBuyRequest) (StartBuyResult, error) {
-	if err := s.AllowDevRoute(); err != nil {
-		return StartBuyResult{}, err
-	}
-	return s.StartBuy(ctx, req)
-}
-
-// DevBuyService orchestrates the temporary M3 dev-only execute-buy path.
-type DevBuyService struct {
+// ExecuteOnPassService orchestrates Jupiter v2 buy execute after proposal pass (M4-T19).
+type ExecuteOnPassService struct {
 	swap  *SwapService
 	store *postgres.Store
-	privy privy.Client
 }
 
-// NewDevBuyService wires the dev stub execute-buy dependencies.
-func NewDevBuyService(swap *SwapService, store *postgres.Store, privyClient privy.Client) *DevBuyService {
-	return &DevBuyService{
+// NewExecuteOnPassService wires vote-pass buy execute dependencies.
+func NewExecuteOnPassService(swap *SwapService, store *postgres.Store) *ExecuteOnPassService {
+	return &ExecuteOnPassService{
 		swap:  swap,
 		store: store,
-		privy: privyClient,
 	}
 }
 
-// DevBuyRequest is input for the dev stub execute-buy route.
-type DevBuyRequest struct {
-	GroupID string
-	Symbol  string
-	USDC    int64
+// ExecuteOnPassResult is a confirmed treasury buy linked to a passed proposal.
+type ExecuteOnPassResult struct {
+	Transaction postgres.TransactionRow
+	Created     bool
 }
 
-// DevBuyResult is the persisted buy from the dev stub route.
-type DevBuyResult struct {
-	TransactionID string
-	GroupID       string
-	Symbol        string
-	Status        string
-	TxSignature   string
-	Created       bool
-}
-
-// ExecuteDevBuy authenticates a member and runs DevExecuteBuy without a vote gate.
-func (s *DevBuyService) ExecuteDevBuy(ctx context.Context, accessToken string, req DevBuyRequest) (DevBuyResult, error) {
-	if !DevBuyEnabled() {
-		return DevBuyResult{}, ErrDevRouteBlocked
+// ExecuteOnPass builds, signs, POSTs Jupiter execute, polls Success code 0, and persists the buy.
+// Only proposals with status passed may execute. Idempotency on proposal id is wired for M4-T21.
+func (s *ExecuteOnPassService) ExecuteOnPass(ctx context.Context, proposal Proposal) (ExecuteOnPassResult, error) {
+	if proposal.Status != ProposalPassed {
+		return ExecuteOnPassResult{}, ErrProposalNotPassed
 	}
-	if req.GroupID == "" {
-		return DevBuyResult{}, ErrGroupNotFound
+	if proposal.ID == "" || proposal.GroupID == "" {
+		return ExecuteOnPassResult{}, fmt.Errorf("proposal id and group id are required")
 	}
-	if strings.TrimSpace(req.Symbol) == "" {
-		return DevBuyResult{}, fmt.Errorf("symbol is required")
+	if proposal.Symbol == "" {
+		return ExecuteOnPassResult{}, fmt.Errorf("symbol is required")
 	}
-	if req.USDC <= 0 {
-		return DevBuyResult{}, fmt.Errorf("usdc must be positive")
+	if proposal.UsdcMicros <= 0 {
+		return ExecuteOnPassResult{}, fmt.Errorf("usdc must be positive")
 	}
 
-	identity, err := s.privy.VerifySession(ctx, privy.AccessToken(accessToken))
-	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return DevBuyResult{}, privy.ErrInvalidToken
-		}
-		return DevBuyResult{}, fmt.Errorf("verify session: %w", err)
-	}
-
-	user, found, err := s.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
-	if err != nil {
-		return DevBuyResult{}, err
-	}
-	if !found {
-		return DevBuyResult{}, ErrUserNotFound
-	}
-
-	group, found, err := s.store.GetGroupByID(ctx, req.GroupID)
-	if err != nil {
-		return DevBuyResult{}, err
-	}
-	if !found {
-		return DevBuyResult{}, ErrGroupNotFound
-	}
-	if group.CreatorUserID != user.ID {
-		return DevBuyResult{}, ErrNotGroupMember
+	if existing, ok, err := s.existingBuyForProposal(ctx, proposal.ID); err != nil {
+		return ExecuteOnPassResult{}, err
+	} else if ok {
+		return ExecuteOnPassResult{Transaction: existing, Created: false}, nil
 	}
 
 	executeResult, err := s.swap.DevExecuteBuy(ctx, DevExecuteBuyRequest{
-		GroupID:    req.GroupID,
-		UserID:     user.ID,
-		Symbol:     req.Symbol,
-		USDCAmount: req.USDC,
+		GroupID:    proposal.GroupID,
+		UserID:     proposal.ProposerID,
+		Symbol:     proposal.Symbol,
+		USDCAmount: proposal.UsdcMicros,
 	})
 	if err != nil {
-		return DevBuyResult{}, err
+		return ExecuteOnPassResult{}, err
 	}
 
-	txSignature := ""
-	if executeResult.Transaction.TxSignature.Valid {
-		txSignature = executeResult.Transaction.TxSignature.String
+	linked, _, err := s.linkBuyToProposal(ctx, proposal.ID, executeResult.Transaction)
+	if err != nil {
+		return ExecuteOnPassResult{}, err
 	}
 
-	return DevBuyResult{
-		TransactionID: executeResult.Transaction.ID,
-		GroupID:       executeResult.Transaction.GroupID,
-		Symbol:        req.Symbol,
-		Status:        executeResult.Transaction.Status,
-		TxSignature:   txSignature,
-		Created:       executeResult.Created,
+	if err := s.recordTreasuryHoldingsAndNavSnapshot(ctx, proposal, linked, executeResult.Created); err != nil {
+		return ExecuteOnPassResult{}, err
+	}
+
+	return ExecuteOnPassResult{
+		Transaction: linked,
+		Created:     executeResult.Created,
 	}, nil
+}
+
+func (s *ExecuteOnPassService) existingBuyForProposal(ctx context.Context, proposalID string) (postgres.TransactionRow, bool, error) {
+	existing, found, err := s.store.GetConfirmedTransactionByProposal(ctx, proposalID)
+	if err != nil {
+		return postgres.TransactionRow{}, false, err
+	}
+	if found {
+		return existing, true, nil
+	}
+	return postgres.TransactionRow{}, false, nil
+}
+
+func (s *ExecuteOnPassService) linkBuyToProposal(ctx context.Context, proposalID string, tx postgres.TransactionRow) (postgres.TransactionRow, bool, error) {
+	if tx.ProposalID.Valid && tx.ProposalID.String == proposalID {
+		return tx, false, nil
+	}
+	if tx.ProposalID.Valid && tx.ProposalID.String != proposalID {
+		return postgres.TransactionRow{}, false, fmt.Errorf("transaction already linked to another proposal")
+	}
+	if !tx.TxSignature.Valid {
+		return postgres.TransactionRow{}, false, fmt.Errorf("transaction signature is required")
+	}
+	if bySig, found, err := s.store.GetConfirmedTransactionBySignature(ctx, tx.TxSignature.String); err != nil {
+		return postgres.TransactionRow{}, false, err
+	} else if found && bySig.ProposalID.Valid && bySig.ProposalID.String != proposalID {
+		return postgres.TransactionRow{}, false, fmt.Errorf("transaction signature already linked to another proposal")
+	}
+	return s.store.SetTransactionProposalID(ctx, tx.ID, proposalID)
+}
+
+func (s *ExecuteOnPassService) recordTreasuryHoldingsAndNavSnapshot(
+	ctx context.Context,
+	proposal Proposal,
+	tx postgres.TransactionRow,
+	buyCreated bool,
+) error {
+	if !buyCreated {
+		return nil
+	}
+	treasury, err := s.swap.privy.EnsureTreasury(ctx, privy.GroupID(proposal.GroupID))
+	if err != nil {
+		return err
+	}
+	treasuryUSDC, err := s.swap.treasuryUSDCForSnapshot(ctx, treasury.SolanaAddress)
+	if err != nil {
+		return err
+	}
+	return RecordConfirmedBuyHoldings(ctx, s.store, proposal.GroupID, tx, treasuryUSDC)
 }

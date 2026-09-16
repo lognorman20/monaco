@@ -38,6 +38,14 @@ func (c *failingEnsureTreasuryClient) SubmitSweep(ctx context.Context, req privy
 	return c.inner.SubmitSweep(ctx, req)
 }
 
+func (c *failingEnsureTreasuryClient) VerifyPayoutProof(ctx context.Context, userID string, proof privy.PayoutProof) error {
+	return c.inner.VerifyPayoutProof(ctx, userID, proof)
+}
+
+func (c *failingEnsureTreasuryClient) PayUSDC(ctx context.Context, req privy.PayUSDCRequest) (privy.PayUSDCResult, error) {
+	return c.inner.PayUSDC(ctx, req)
+}
+
 func TestCreateGroup_privyTreasuryFailure_rollsBackGroupRow(t *testing.T) {
 	// Arrange
 	ctx := context.Background()

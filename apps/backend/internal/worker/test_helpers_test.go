@@ -12,6 +12,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/pyth"
 )
 
 type workerTestApp struct {
@@ -37,19 +38,16 @@ func integrationWorkerApp(t *testing.T) *workerTestApp {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	ctx := context.Background()
-	_, err = db.ExecContext(ctx, "TRUNCATE users, member_wallets, groups, treasuries, deposits, positions, withdrawals RESTART IDENTITY CASCADE")
-	if err != nil {
-		t.Fatalf("reset tables: %v", err)
-	}
+	postgres.PrepareIntegrationDB(t, db)
 
 	store := postgres.NewStore(db)
 	privyClient := privy.NewFakeClient()
+	pythClient := pyth.NewFakeClient()
 	return &workerTestApp{
 		DB:       db,
 		Store:    store,
 		Privy:    privyClient,
-		Deposits: app.NewDepositService(store, privyClient),
+		Deposits: app.NewDepositService(store, privyClient, pythClient),
 		Now:      time.Unix(1_700_000_000, 0).UTC(),
 	}
 }
@@ -69,7 +67,7 @@ func seedPendingDeposit(t *testing.T, store *postgres.Store, privyClient privy.C
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
 	}
-	deposits := app.NewDepositService(store, privyClient)
+	deposits := app.NewDepositService(store, privyClient, pyth.NewFakeClient())
 	result, err := deposits.CreateDeposit(ctx, string(token), group.GroupID, 2_000_000)
 	if err != nil {
 		t.Fatalf("CreateDeposit: %v", err)

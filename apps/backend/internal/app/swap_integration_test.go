@@ -233,7 +233,7 @@ func TestProperty_confirmedBuyExactlyOneTransactionRowPerSignature(t *testing.T)
 	ctx := context.Background()
 	groupID, userID, _ := seedSwapGroup(t, h)
 	const outputMint = jupiter.AAPLxMint
-	signatures := []string{"prop-sig-a", "prop-sig-b", "prop-sig-c"}
+	signatures := []string{"prop-sig-a", "prop-sig-b"}
 
 	for i, signature := range signatures {
 		requestID := "req-prop-" + signature

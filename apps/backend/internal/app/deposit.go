@@ -9,6 +9,7 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/pyth"
 )
 
 // DepositStatus is the lifecycle state of a deposit intent.
@@ -76,13 +77,15 @@ var ErrInvalidSweepTarget = errors.New("invalid sweep target")
 type DepositService struct {
 	store *postgres.Store
 	privy privy.Client
+	pyth  pyth.Client
 }
 
 // NewDepositService wires deposit dependencies.
-func NewDepositService(store *postgres.Store, privyClient privy.Client) *DepositService {
+func NewDepositService(store *postgres.Store, privyClient privy.Client, pythClient pyth.Client) *DepositService {
 	return &DepositService{
 		store: store,
 		privy: privyClient,
+		pyth:  pythClient,
 	}
 }
 
@@ -203,14 +206,48 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 		}
 	}()
 
-	confirmed, err := d.store.ConfirmDepositTx(ctx, tx, sweep.DepositID, sweep.TxSignature)
+	confirmed, newlyConfirmed, err := d.store.ConfirmDepositTx(ctx, tx, sweep.DepositID, sweep.TxSignature)
 	if err != nil {
 		return ObserveSweepResult{}, err
 	}
 
-	positionRow, err := d.store.IncrementPositionTx(ctx, tx, sweep.UserID, sweep.GroupID, sweep.Amount)
-	if err != nil {
-		return ObserveSweepResult{}, err
+	var positionRow postgres.PositionRow
+	if newlyConfirmed {
+		shareUnits, err := d.shareCreditForSweep(ctx, sweep.GroupID, treasury.SolanaAddress, sweep.Amount)
+		if err != nil {
+			return ObserveSweepResult{}, err
+		}
+
+		positionRow, err = d.store.IncrementPositionTx(ctx, tx, sweep.UserID, sweep.GroupID, shareUnits, sweep.Amount)
+		if err != nil {
+			return ObserveSweepResult{}, err
+		}
+
+		treasuryUsdc, err := d.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
+		if err != nil {
+			return ObserveSweepResult{}, fmt.Errorf("treasury usdc balance: %w", err)
+		}
+		if err := d.store.WriteNavSnapshotOnDepositConfirmTx(ctx, tx, sweep.GroupID, treasuryUsdc); err != nil {
+			return ObserveSweepResult{}, err
+		}
+
+		slog.Info("share credit applied",
+			"group_id", sweep.GroupID,
+			"user_id", sweep.UserID,
+			"deposit_id", sweep.DepositID,
+			"tx_signature", sweep.TxSignature,
+			"share_units", positionRow.ShareUnits,
+			"amount_deposited", positionRow.AmountDeposited,
+		)
+	} else {
+		var hasPosition bool
+		positionRow, hasPosition, err = d.store.GetPositionTx(ctx, tx, sweep.UserID, sweep.GroupID)
+		if err != nil {
+			return ObserveSweepResult{}, err
+		}
+		if !hasPosition {
+			positionRow = postgres.PositionRow{UserID: sweep.UserID, GroupID: sweep.GroupID}
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -218,19 +255,10 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 	}
 	committed = true
 
-	slog.Info("share credit applied",
-		"group_id", sweep.GroupID,
-		"user_id", sweep.UserID,
-		"deposit_id", sweep.DepositID,
-		"tx_signature", sweep.TxSignature,
-		"share_units", positionRow.ShareUnits,
-		"amount_deposited", positionRow.AmountDeposited,
-	)
-
 	return ObserveSweepResult{
 		Deposit:  depositFromRow(confirmed),
 		Position: positionFromRowPostgres(positionRow),
-		Credited: true,
+		Credited: newlyConfirmed,
 	}, nil
 }
 

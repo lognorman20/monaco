@@ -20,7 +20,8 @@ func integrationGroupApp(t *testing.T) (*GroupHandlers, *AuthHandlers, privy.Cli
 	authHandlers, privyClient, db := integrationApp(t)
 	store := postgres.NewStore(db)
 	groups := app.NewGroupService(store, privyClient)
-	return &GroupHandlers{Groups: groups}, authHandlers, privyClient, db
+	governance := app.NewGovernanceService(store, privyClient)
+	return &GroupHandlers{Groups: groups, Governance: governance}, authHandlers, privyClient, db
 }
 
 func TestPOST_groups_missingAuth_returns401(t *testing.T) {
@@ -234,6 +235,131 @@ func TestGET_group_nonMemberOrUnknown_returns404(t *testing.T) {
 	// Assert
 	if nonMemberRec.Code != http.StatusNotFound {
 		t.Fatalf("non-member status = %d, want 404; body = %s", nonMemberRec.Code, nonMemberRec.Body.String())
+	}
+}
+
+func TestPOST_groups_persistsJoinPolicyVoterSetThresholdExpiry(t *testing.T) {
+	// Arrange
+	groupHandlers, authHandlers, privyClient, db := integrationGroupApp(t)
+	token := fixtureSessionToken()
+	user := seedAuthenticatedUser(t, authHandlers, privyClient, token, privy.Identity{PrivyUserID: "did:privy:rules-creator", DisplayName: "Creator"})
+	body := `{"name":"Rules Fund","joinPolicy":{"mode":"password","password":"potluck"},"voterSet":{"mode":"named_subset","memberIds":["` + user.UserID + `"]},"threshold":"unanimous","voteExpirySeconds":3600}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+string(token))
+	rec := httptest.NewRecorder()
+	// Act
+	groupHandlers.CreateGroupHandler(rec, req)
+	// Assert
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	var payload createGroupResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	var joinMode, voterSetMode, threshold string
+	var voteExpirySeconds int64
+	var passwordHash string
+	if err := db.QueryRowContext(context.Background(), `SELECT join_mode, voter_set_mode, threshold, vote_expiry_seconds, COALESCE(join_password_hash, '') FROM groups WHERE id = $1`, payload.GroupID).Scan(&joinMode, &voterSetMode, &threshold, &voteExpirySeconds, &passwordHash); err != nil {
+		t.Fatalf("select group rules: %v", err)
+	}
+	if joinMode != "password" || voterSetMode != "named_subset" || threshold != "unanimous" || voteExpirySeconds != 3600 {
+		t.Fatalf("unexpected persisted rules")
+	}
+	if passwordHash == "" || passwordHash == "potluck" {
+		t.Fatal("expected hashed join password")
+	}
+}
+
+func TestPOST_join_openGroup_addsMemberWithoutPassword(t *testing.T) {
+	// Arrange
+	groupHandlers, authHandlers, privyClient, db := integrationGroupApp(t)
+	creatorToken := fixtureSessionToken()
+	seedAuthenticatedUser(t, authHandlers, privyClient, creatorToken, privy.Identity{PrivyUserID: "did:privy:open-creator", DisplayName: "Creator"})
+	createRec := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Open Club"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	groupHandlers.CreateGroupHandler(createRec, createReq)
+	var created createGroupResponse
+	_ = json.Unmarshal(createRec.Body.Bytes(), &created)
+	joinerToken := privy.AccessToken("open-joiner-token")
+	seedAuthenticatedUser(t, authHandlers, privyClient, joinerToken, privy.Identity{PrivyUserID: "did:privy:open-joiner", DisplayName: "Joiner"})
+	joinRec := httptest.NewRecorder()
+	joinReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/join", strings.NewReader(`{}`))
+	joinReq.SetPathValue("id", created.GroupID)
+	joinReq.Header.Set("Content-Type", "application/json")
+	joinReq.Header.Set("Authorization", "Bearer "+string(joinerToken))
+	// Act
+	groupHandlers.JoinGroupHandler(joinRec, joinReq)
+	// Assert
+	if joinRec.Code != http.StatusNoContent {
+		t.Fatalf("join status = %d, want 204", joinRec.Code)
+	}
+	var memberCount int
+	_ = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM group_members WHERE group_id = $1", created.GroupID).Scan(&memberCount)
+	if memberCount != 2 {
+		t.Fatalf("expected 2 members, got %d", memberCount)
+	}
+}
+
+func TestPOST_join_passwordGroup_requiresCorrectPassword(t *testing.T) {
+	// Arrange
+	groupHandlers, authHandlers, privyClient, db := integrationGroupApp(t)
+	creatorToken := fixtureSessionToken()
+	seedAuthenticatedUser(t, authHandlers, privyClient, creatorToken, privy.Identity{PrivyUserID: "did:privy:pw-creator", DisplayName: "Creator"})
+	createRec := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Secret Club","joinPolicy":{"mode":"password","password":"potluck"}}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	groupHandlers.CreateGroupHandler(createRec, createReq)
+	var created createGroupResponse
+	_ = json.Unmarshal(createRec.Body.Bytes(), &created)
+	joinerToken := privy.AccessToken("pw-joiner-token")
+	seedAuthenticatedUser(t, authHandlers, privyClient, joinerToken, privy.Identity{PrivyUserID: "did:privy:pw-joiner", DisplayName: "Joiner"})
+	joinRec := httptest.NewRecorder()
+	joinReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/join", strings.NewReader(`{"password":"potluck"}`))
+	joinReq.SetPathValue("id", created.GroupID)
+	joinReq.Header.Set("Content-Type", "application/json")
+	joinReq.Header.Set("Authorization", "Bearer "+string(joinerToken))
+	// Act
+	groupHandlers.JoinGroupHandler(joinRec, joinReq)
+	// Assert
+	if joinRec.Code != http.StatusNoContent {
+		t.Fatalf("join status = %d, want 204", joinRec.Code)
+	}
+	var memberCount int
+	_ = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM group_members WHERE group_id = $1", created.GroupID).Scan(&memberCount)
+	if memberCount != 2 {
+		t.Fatalf("expected 2 members, got %d", memberCount)
+	}
+}
+
+func TestPOST_join_wrongPassword_returns403(t *testing.T) {
+	// Arrange
+	groupHandlers, authHandlers, privyClient, _ := integrationGroupApp(t)
+	creatorToken := fixtureSessionToken()
+	seedAuthenticatedUser(t, authHandlers, privyClient, creatorToken, privy.Identity{PrivyUserID: "did:privy:badpw-creator", DisplayName: "Creator"})
+	createRec := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Locked Club","joinPolicy":{"mode":"password","password":"potluck"}}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	groupHandlers.CreateGroupHandler(createRec, createReq)
+	var created createGroupResponse
+	_ = json.Unmarshal(createRec.Body.Bytes(), &created)
+	joinerToken := privy.AccessToken("badpw-joiner-token")
+	seedAuthenticatedUser(t, authHandlers, privyClient, joinerToken, privy.Identity{PrivyUserID: "did:privy:badpw-joiner", DisplayName: "Joiner"})
+	joinRec := httptest.NewRecorder()
+	joinReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/join", strings.NewReader(`{"password":"wrong"}`))
+	joinReq.SetPathValue("id", created.GroupID)
+	joinReq.Header.Set("Content-Type", "application/json")
+	joinReq.Header.Set("Authorization", "Bearer "+string(joinerToken))
+	// Act
+	groupHandlers.JoinGroupHandler(joinRec, joinReq)
+	// Assert
+	if joinRec.Code != http.StatusForbidden {
+		t.Fatalf("join status = %d, want 403", joinRec.Code)
 	}
 }
 

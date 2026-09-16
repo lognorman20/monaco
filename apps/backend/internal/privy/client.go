@@ -18,6 +18,8 @@ type Client interface {
 	MemberUSDCBalance(ctx context.Context, memberAddress string) (int64, error)
 	TreasuryUSDCBalance(ctx context.Context, treasuryAddress string) (int64, error)
 	SubmitSweep(ctx context.Context, req SweepRequest) (SweepResult, error)
+	VerifyPayoutProof(ctx context.Context, userID string, proof PayoutProof) error
+	PayUSDC(ctx context.Context, req PayUSDCRequest) (PayUSDCResult, error)
 }
 
 // HTTPClient calls Privy REST APIs with app credentials.

@@ -19,10 +19,7 @@ func integrationTransactionApp(t *testing.T) (*TransactionHandlers, *GroupHandle
 	t.Helper()
 
 	db := integrationDB(t)
-	_, err := db.ExecContext(context.Background(), "TRUNCATE users, member_wallets, groups, treasuries, deposits, positions, withdrawals, transactions RESTART IDENTITY CASCADE")
-	if err != nil {
-		t.Fatalf("reset tables: %v", err)
-	}
+	postgres.PrepareIntegrationDB(t, db)
 
 	store := postgres.NewStore(db)
 	privyClient := privy.NewFakeClient()
@@ -30,6 +27,7 @@ func integrationTransactionApp(t *testing.T) (*TransactionHandlers, *GroupHandle
 	xstocksResolver := xstocks.NewFakeResolver()
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, app.NewFakePrivyTreasurySigner())
+	swap.SetPollConfigForTests(jupiter.TestPollConfig())
 	groups := app.NewGroupService(store, privyClient)
 	sessions := app.NewSessionService(store, privyClient)
 
@@ -37,7 +35,7 @@ func integrationTransactionApp(t *testing.T) (*TransactionHandlers, *GroupHandle
 		Store:   store,
 		Privy:   privyClient,
 		XStocks: xstocksResolver,
-	}, &GroupHandlers{Groups: groups}, &AuthHandlers{Sessions: sessions}, swap, jupiterClient, privyClient, db
+	}, &GroupHandlers{Groups: groups, Governance: app.NewGovernanceService(store, privyClient)}, &AuthHandlers{Sessions: sessions}, swap, jupiterClient, privyClient, db
 }
 
 func seedSwapGroupHTTP(t *testing.T, groupHandlers *GroupHandlers, authHandlers *AuthHandlers, privyClient privy.Client, db *sql.DB) (groupID, userID string) {

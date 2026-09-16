@@ -41,12 +41,7 @@ func integrationDB(t *testing.T) *sql.DB {
 
 func resetTables(t *testing.T, db *sql.DB) {
 	t.Helper()
-
-	ctx := context.Background()
-	_, err := db.ExecContext(ctx, "TRUNCATE users, member_wallets, groups, treasuries, deposits, positions, withdrawals RESTART IDENTITY CASCADE")
-	if err != nil {
-		t.Fatalf("reset tables: %v", err)
-	}
+	postgres.PrepareIntegrationDB(t, db)
 }
 
 func fixtureSessionToken() privy.AccessToken {

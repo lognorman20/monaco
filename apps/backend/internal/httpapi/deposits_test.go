@@ -12,6 +12,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/pyth"
 )
 
 func integrationDepositApp(t *testing.T) (*DepositHandlers, *GroupHandlers, *AuthHandlers, privy.Client, *sql.DB) {
@@ -20,8 +21,9 @@ func integrationDepositApp(t *testing.T) (*DepositHandlers, *GroupHandlers, *Aut
 	authHandlers, privyClient, db := integrationApp(t)
 	store := postgres.NewStore(db)
 	groups := app.NewGroupService(store, privyClient)
-	deposits := app.NewDepositService(store, privyClient)
-	return &DepositHandlers{Deposits: deposits}, &GroupHandlers{Groups: groups}, authHandlers, privyClient, db
+	governance := app.NewGovernanceService(store, privyClient)
+	deposits := app.NewDepositService(store, privyClient, pyth.NewFakeClient())
+	return &DepositHandlers{Deposits: deposits}, &GroupHandlers{Groups: groups, Governance: governance}, authHandlers, privyClient, db
 }
 
 func seedGroup(t *testing.T, groupHandlers *GroupHandlers, authHandlers *AuthHandlers, privyClient privy.Client, token privy.AccessToken, identity privy.Identity, name string) createGroupResponse {
