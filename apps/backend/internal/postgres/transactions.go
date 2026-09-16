@@ -36,6 +36,7 @@ type TransactionRow struct {
 }
 
 // ConfirmBuyTransactionParams persists a confirmed buy transaction idempotently.
+// CostBasisPrice stores fill input (USDC spent); CostBasisAmount stores fill output (xStock received).
 type ConfirmBuyTransactionParams struct {
 	GroupID          string
 	Amount           int64
@@ -48,6 +49,7 @@ type ConfirmBuyTransactionParams struct {
 }
 
 // ConfirmSellTransactionParams persists a confirmed sell transaction idempotently.
+// ProceedsUSDC is stored in cost_basis_amount for the confirmed sell row.
 type ConfirmSellTransactionParams struct {
 	GroupID          string
 	Amount           int64
