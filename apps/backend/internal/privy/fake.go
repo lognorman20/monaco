@@ -12,17 +12,23 @@ import (
 type fakePrivyClient struct {
 	mu sync.Mutex
 
-	validTokens map[AccessToken]Identity
-	memberWallets map[UserID]WalletRef
-	treasuries    map[GroupID]TreasuryRef
+	validTokens     map[AccessToken]Identity
+	memberWallets   map[UserID]WalletRef
+	treasuries      map[GroupID]TreasuryRef
+	memberBalances  map[string]int64
+	treasuryBalances map[string]int64
+	lastSweep       SweepRequest
+	sweepCount      int
 }
 
 // NewFakeClient returns a deterministic in-memory Privy client for tests.
 func NewFakeClient() Client {
 	return &fakePrivyClient{
-		validTokens:   make(map[AccessToken]Identity),
-		memberWallets: make(map[UserID]WalletRef),
-		treasuries:    make(map[GroupID]TreasuryRef),
+		validTokens:      make(map[AccessToken]Identity),
+		memberWallets:    make(map[UserID]WalletRef),
+		treasuries:       make(map[GroupID]TreasuryRef),
+		memberBalances:   make(map[string]int64),
+		treasuryBalances: make(map[string]int64),
 	}
 }
 
@@ -91,6 +97,86 @@ func (f *fakePrivyClient) EnsureTreasury(ctx context.Context, groupID GroupID) (
 	f.treasuries[groupID] = ref
 	f.mu.Unlock()
 	return ref, nil
+}
+
+func (f *fakePrivyClient) MemberUSDCBalance(ctx context.Context, memberAddress string) (int64, error) {
+	_ = ctx
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.memberBalances[memberAddress], nil
+}
+
+func (f *fakePrivyClient) TreasuryUSDCBalance(ctx context.Context, treasuryAddress string) (int64, error) {
+	_ = ctx
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.treasuryBalances[treasuryAddress], nil
+}
+
+func (f *fakePrivyClient) SubmitSweep(ctx context.Context, req SweepRequest) (SweepResult, error) {
+	_ = ctx
+	if req.MemberAddress == "" || req.TreasuryAddress == "" {
+		return SweepResult{}, fmt.Errorf("%w: missing addresses", ErrAPI)
+	}
+	if req.Amount <= 0 {
+		return SweepResult{}, fmt.Errorf("%w: invalid amount", ErrAPI)
+	}
+	if req.RelayerKey == "" {
+		return SweepResult{}, fmt.Errorf("%w: relayer key required", ErrAPI)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastSweep = req
+	f.sweepCount++
+	f.memberBalances[req.MemberAddress] -= req.Amount
+	if f.memberBalances[req.MemberAddress] < 0 {
+		f.memberBalances[req.MemberAddress] = 0
+	}
+	f.treasuryBalances[req.TreasuryAddress] += req.Amount
+	sig := deterministicTxSignature(req.MemberAddress, req.TreasuryAddress, req.Amount, f.sweepCount)
+	return SweepResult{TxSignature: sig}, nil
+}
+
+// SetMemberUSDCBalance sets fake member wallet USDC for tests.
+func SetMemberUSDCBalance(client Client, address string, amount int64) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		panic("privy: SetMemberUSDCBalance requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.memberBalances[address] = amount
+	fake.mu.Unlock()
+}
+
+// SetTreasuryUSDCBalance sets fake treasury USDC for tests.
+func SetTreasuryUSDCBalance(client Client, address string, amount int64) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		panic("privy: SetTreasuryUSDCBalance requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.treasuryBalances[address] = amount
+	fake.mu.Unlock()
+}
+
+// LastSweepRequest returns the most recent sweep submitted to the fake client.
+func LastSweepRequest(client Client) (SweepRequest, bool) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		return SweepRequest{}, false
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.sweepCount == 0 {
+		return SweepRequest{}, false
+	}
+	return fake.lastSweep, true
+}
+
+func deterministicTxSignature(member, treasury string, amount int64, count int) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("sweep:%s:%s:%d:%d", member, treasury, amount, count)))
+	return "SWEEP" + hex.EncodeToString(sum[:16])
 }
 
 func deterministicPrivyWalletID(scope, id string) string {

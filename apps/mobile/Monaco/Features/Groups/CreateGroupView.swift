@@ -43,6 +43,12 @@ struct CreateGroupView: View {
                             .font(.footnote)
                             .foregroundStyle(.green)
                     }
+
+                    NavigationLink {
+                        DepositView(auth: auth, groupId: createdGroup.groupId)
+                    } label: {
+                        Label("Deposit USDC", systemImage: "dollarsign.circle.fill")
+                    }
                 }
             } else if let errorMessage {
                 Section {

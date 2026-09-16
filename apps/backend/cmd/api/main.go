@@ -55,9 +55,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 	privyClient := privy.NewHTTPClient(cfg)
 	sessions := app.NewSessionService(store, privyClient)
 	groups := app.NewGroupService(store, privyClient)
+	deposits := app.NewDepositService(store, privyClient)
 	auth := &httpapi.AuthHandlers{Sessions: sessions}
 	me := &httpapi.MeHandlers{Sessions: sessions}
 	groupHandlers := &httpapi.GroupHandlers{Groups: groups}
+	depositHandlers := &httpapi.DepositHandlers{Deposits: deposits}
 
 	addr := "127.0.0.1:8080"
 	if v := os.Getenv("API_ADDR"); v != "" {
@@ -70,6 +72,10 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
 	mux.HandleFunc("POST /v1/groups", groupHandlers.CreateGroupHandler)
 	mux.HandleFunc("GET /v1/groups/{id}", groupHandlers.GetGroupHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/deposits", depositHandlers.CreateDepositHandler)
+	mux.HandleFunc("GET /v1/groups/{id}/share-units", depositHandlers.GetMemberShareUnitsHandler)
+	mux.HandleFunc("GET /v1/groups/{id}/treasury/usdc", depositHandlers.GetTreasuryUsdcBalanceHandler)
+	mux.HandleFunc("GET /v1/deposits/{id}", depositHandlers.GetDepositHandler)
 
 	return &bootResult{
 		Server: &http.Server{
