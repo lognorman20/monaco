@@ -14,4 +14,6 @@ if [[ ! -x "$global_ios_sim" ]]; then
   exit 1
 fi
 
-exec "$repo_root/scripts/with-ios-privy-env.sh" bash -c 'cd apps/mobile && exec "$1" "${@:2}"' _ "$global_ios_sim" "$@"
+# ios-sim-common resolves .xcodeproj from PWD — must run under apps/mobile.
+export WITH_IOS_PRIVY_CWD="$repo_root/apps/mobile"
+exec "$repo_root/scripts/with-ios-privy-env.sh" "$global_ios_sim" "$@"
