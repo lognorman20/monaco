@@ -22,16 +22,22 @@ struct GroupDetailView: View {
         Group {
             if isLoading && groupView == nil {
                 ProgressView("Loading club…")
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .tint(MonacoTheme.accent)
             } else if let groupView {
                 groupContent(groupView)
             } else if let errorMessage {
                 VStack(alignment: .leading, spacing: 12) {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(MonacoTheme.warning)
                     Button("Try again") {
                         Task { await loadGroup() }
                     }
+                    .buttonStyle(.monacoPrimary)
                 }
+                .padding()
+                .monacoSurfaceCard()
+                .padding()
             }
         }
         .navigationTitle(groupView?.name ?? "Club")
@@ -87,6 +93,8 @@ struct GroupDetailView: View {
                 }
             }
         }
+        .monacoInsetList()
+        .background(MonacoTheme.background)
     }
 
     private func loadGroup() async {

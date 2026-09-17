@@ -16,6 +16,7 @@ struct SettingsView: View {
                     )
                 } label: {
                     Label("Advanced", systemImage: "link")
+                        .foregroundStyle(MonacoTheme.primaryText)
                 }
                 .accessibilityIdentifier("settings-advanced-link")
             }
@@ -24,8 +25,10 @@ struct SettingsView: View {
                 Button("Sign out") {
                     Task { await auth.logout() }
                 }
+                .monacoFormDestructiveAction()
             }
         }
+        .monacoFormScreen()
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -41,6 +44,7 @@ struct AdvancedSettingsView: View {
                 ForEach(SettingsAdvancedLinks.explorerLinks) { link in
                     Link(destination: link.url) {
                         Label(link.title, systemImage: "safari")
+                            .foregroundStyle(MonacoTheme.accent)
                     }
                     .accessibilityIdentifier("settings-explorer-\(link.id)")
                 }
@@ -57,6 +61,7 @@ struct AdvancedSettingsView: View {
                 }
             }
         }
+        .monacoFormScreen()
         .navigationTitle("Advanced")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -65,9 +70,10 @@ struct AdvancedSettingsView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MonacoTheme.secondaryText)
             Text(value)
                 .font(.body.monospaced())
+                .foregroundStyle(MonacoTheme.primaryText)
                 .textSelection(.enabled)
         }
     }

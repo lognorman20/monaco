@@ -9,21 +9,26 @@ struct UserProfileGroupsView: View {
         List {
             Section("\(displayName)'s clubs") {
                 if groups.isEmpty {
-                    Text("No shared clubs yet.")
-                        .foregroundStyle(.secondary)
+                    MonacoEmptyStateCard(
+                        message: "No shared clubs yet.",
+                        systemImage: "person.3"
+                    )
                 } else {
                     ForEach(groups) { row in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(row.name)
                                 .font(.body.bold())
+                                .foregroundStyle(MonacoTheme.primaryText)
                             Text(row.dollarPnl)
                                 .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(MonacoTheme.secondaryText)
                         }
                     }
                 }
             }
         }
+        .monacoInsetList()
+        .background(MonacoTheme.background)
         .navigationTitle(displayName)
         .navigationBarTitleDisplayMode(.inline)
     }

@@ -15,7 +15,7 @@ struct HomeView: View {
                 Text("People").tag(1)
             }
             .pickerStyle(.segmented)
-            .padding()
+            .monacoSegmentedBoardPicker()
 
             if selectedTab == 0 {
                 groupBoardSection
@@ -23,6 +23,7 @@ struct HomeView: View {
                 peopleBoardSection
             }
         }
+        .background(MonacoTheme.background)
         .navigationTitle("Home")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -30,6 +31,7 @@ struct HomeView: View {
                     SettingsView(auth: auth, memberWalletAddress: nil, treasuryAddress: nil)
                 } label: {
                     Image(systemName: "gearshape")
+                        .monacoToolbarIcon()
                 }
                 .accessibilityIdentifier("home-settings-link")
             }
@@ -47,6 +49,7 @@ struct HomeView: View {
                     }
                 } label: {
                     Image(systemName: "plus.circle")
+                        .monacoToolbarIcon()
                 }
                 .accessibilityIdentifier("home-club-menu")
             }
@@ -59,9 +62,10 @@ struct HomeView: View {
     private var groupBoardSection: some View {
         List {
             if home.groups.isEmpty {
-                Text("No clubs yet. Create or join one to start investing together.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                MonacoEmptyStateCard(
+                    message: "No clubs yet. Create or join one to start investing together.",
+                    systemImage: "person.3"
+                )
             } else {
                 ForEach(home.groups) { row in
                     NavigationLink {
@@ -70,6 +74,7 @@ struct HomeView: View {
                         HStack {
                             Text(row.name)
                                 .font(.body.bold())
+                                .foregroundStyle(MonacoTheme.primaryText)
                             Spacer()
                             boardMetrics(percentReturn: row.percentReturn, dollarPnl: row.dollarPnl)
                         }
@@ -78,14 +83,16 @@ struct HomeView: View {
                 }
             }
         }
+        .monacoInsetList()
     }
 
     private var peopleBoardSection: some View {
         List {
             if home.people.isEmpty {
-                Text("No leaderboard rows yet.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                MonacoEmptyStateCard(
+                    message: "No leaderboard rows yet.",
+                    systemImage: "chart.bar"
+                )
             } else {
                 ForEach(home.people) { row in
                     NavigationLink {
@@ -94,6 +101,7 @@ struct HomeView: View {
                         HStack {
                             Text(row.displayName)
                                 .font(.body.bold())
+                                .foregroundStyle(MonacoTheme.primaryText)
                             Spacer()
                             boardMetrics(percentReturn: row.percentReturn, dollarPnl: row.dollarPnl)
                         }
@@ -102,6 +110,7 @@ struct HomeView: View {
                 }
             }
         }
+        .monacoInsetList()
     }
 
     @ViewBuilder
@@ -110,14 +119,15 @@ struct HomeView: View {
             if let percentReturn {
                 Text(percentReturn)
                     .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(MonacoTheme.primaryText)
             } else {
                 Text("—")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MonacoTheme.secondaryText)
             }
             Text(dollarPnl)
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MonacoTheme.secondaryText)
         }
     }
 }
@@ -145,5 +155,6 @@ struct HomeView: View {
                 ]
             )
         )
+        .monacoRootAppearance()
     }
 }

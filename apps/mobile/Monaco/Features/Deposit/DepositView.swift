@@ -19,13 +19,13 @@ struct DepositView: View {
         Form {
             Section {
                 Text("Add USDC to grow your club's pot. We track sweep progress until your share is credited.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .monacoSecondaryCaption()
             }
 
             Section("Amount") {
                 TextField("USDC amount", text: $amountText)
                     .keyboardType(.decimalPad)
+                    .monacoFormTextField()
                     .disabled(isSubmitting || depositId != nil)
                     .accessibilityIdentifier("deposit-amount-field")
             }
@@ -34,6 +34,7 @@ struct DepositView: View {
                 Button(isSubmitting ? "Starting…" : "Add money") {
                     Task { await createDeposit() }
                 }
+                .monacoFormPrimaryAction()
                 .disabled(isSubmitting || depositId != nil || parsedAmountMicro == nil)
                 .accessibilityIdentifier("create-deposit-button")
             }
@@ -42,18 +43,20 @@ struct DepositView: View {
                 Section("Sweep status") {
                     Label(pollState.statusCopy, systemImage: sweepIcon)
                         .font(.subheadline)
+                        .foregroundStyle(sweepStatusColor)
                         .accessibilityIdentifier("deposit-sweep-status")
 
                     if let shareUnits, pollState.phase == .credited {
                         Text("Share units credited: \(shareUnits)")
                             .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(MonacoTheme.secondaryText)
                     }
 
                     if !pollState.isTerminal {
                         Button(isPolling ? "Checking…" : "Refresh status") {
                             Task { await refreshStatus() }
                         }
+                        .monacoFormSecondaryAction()
                         .disabled(isPolling || auth.accessToken == nil)
                         .accessibilityIdentifier("deposit-refresh-status")
                     }
@@ -64,12 +67,24 @@ struct DepositView: View {
                 Section {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(MonacoTheme.warning)
                 }
             }
         }
+        .monacoFormScreen()
         .navigationTitle("Add money")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var sweepStatusColor: Color {
+        switch pollState.phase {
+        case .credited:
+            MonacoTheme.success
+        case .failed:
+            MonacoTheme.warning
+        case .idle, .awaitingSweep:
+            MonacoTheme.primaryText
+        }
     }
 
     private var sweepIcon: String {

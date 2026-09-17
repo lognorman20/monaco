@@ -31,6 +31,7 @@ struct LoginView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     Text("Sign in")
                         .font(.title2.bold())
+                        .foregroundStyle(MonacoTheme.primaryText)
 
                     if showsMethodPicker {
                         Picker("Sign-in method", selection: $selectedMethod) {
@@ -39,6 +40,7 @@ struct LoginView: View {
                             }
                         }
                         .pickerStyle(.segmented)
+                        .tint(MonacoTheme.accent)
                     }
 
                     loginContent
@@ -46,6 +48,9 @@ struct LoginView: View {
             }
             .padding(.vertical, 24)
         }
+        .authScreenBackground()
+        .tint(MonacoTheme.accent)
+        .foregroundStyle(MonacoTheme.primaryText)
         .onChange(of: selectedMethod) { _, _ in
             auth.resetLoginFlow()
         }

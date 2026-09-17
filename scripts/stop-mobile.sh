@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Stop Monaco iOS app on gold sim (terminate only — no erase, no new sim).
+# Stop Monaco iOS on gold sim: terminate, uninstall app (clears Privy keychain/session), kill xcodebuild.
+# Never simctl erase — gold slim sim UDID only.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,6 +13,12 @@ if xcrun simctl terminate "$gold_sim" "$bundle_id" 2>/dev/null; then
   echo "terminated ${bundle_id} on gold sim"
 else
   echo "Monaco not running on gold sim (or sim unavailable)"
+fi
+
+if xcrun simctl uninstall "$gold_sim" "$bundle_id" 2>/dev/null; then
+  echo "uninstalled ${bundle_id} on gold sim (cleared app container + Privy session)"
+else
+  echo "Monaco not installed on gold sim (or sim unavailable)"
 fi
 
 if pkill -f '[x]codebuild.*Monaco\.xcodeproj' 2>/dev/null; then

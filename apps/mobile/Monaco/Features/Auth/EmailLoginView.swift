@@ -16,22 +16,31 @@ struct EmailLoginView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("We’ll email you a one-time code. Check spam if it doesn’t arrive.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .authSecondaryCaption()
 
-            TextField("Email address", text: $emailAddress)
+            TextField(
+                "",
+                text: $emailAddress,
+                prompt: Text("Email address").foregroundStyle(MonacoTheme.disabled)
+            )
                 .keyboardType(.emailAddress)
                 .textContentType(.emailAddress)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($focusedField, equals: .email)
+                .authTextFieldStyle()
                 .accessibilityIdentifier("emailAddressField")
 
             if showsOTPField {
-                TextField("6-digit code", text: $otpCode)
+                TextField(
+                    "",
+                    text: $otpCode,
+                    prompt: Text("6-digit code").foregroundStyle(MonacoTheme.disabled)
+                )
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
                     .focused($focusedField, equals: .code)
+                    .authTextFieldStyle()
                     .accessibilityIdentifier("emailCodeField")
             }
 
@@ -48,7 +57,7 @@ struct EmailLoginView: View {
                             await auth.loginWithEmailCode(otpCode, sentTo: normalizedEmail)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.monacoPrimary)
                     .disabled(isVerifyDisabled)
                     .accessibilityIdentifier("emailVerifyButton")
                 } else {
@@ -60,7 +69,7 @@ struct EmailLoginView: View {
                             }
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.monacoPrimary)
                     .disabled(isSendDisabled)
                     .accessibilityIdentifier("emailSendCodeButton")
                 }
@@ -109,11 +118,11 @@ struct EmailLoginView: View {
     private var statusColor: Color {
         switch auth.phase {
         case .failed:
-            return .orange
+            return MonacoTheme.destructive
         case .authenticated:
-            return .green
+            return MonacoTheme.success
         default:
-            return .secondary
+            return MonacoTheme.secondaryText
         }
     }
 }

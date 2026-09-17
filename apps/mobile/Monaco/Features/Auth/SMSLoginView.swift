@@ -16,22 +16,31 @@ struct SMSLoginView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("We’ll text you a one-time code to sign in.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .authSecondaryCaption()
 
-            TextField("Phone number", text: $phoneNumber)
+            TextField(
+                "",
+                text: $phoneNumber,
+                prompt: Text("Phone number").foregroundStyle(MonacoTheme.disabled)
+            )
                 .keyboardType(.phonePad)
                 .textContentType(.telephoneNumber)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($focusedField, equals: .phone)
+                .authTextFieldStyle()
                 .accessibilityIdentifier("smsPhoneField")
 
             if showsOTPField {
-                TextField("6-digit code", text: $otpCode)
+                TextField(
+                    "",
+                    text: $otpCode,
+                    prompt: Text("6-digit code").foregroundStyle(MonacoTheme.disabled)
+                )
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
                     .focused($focusedField, equals: .code)
+                    .authTextFieldStyle()
                     .accessibilityIdentifier("smsCodeField")
             }
 
@@ -48,7 +57,7 @@ struct SMSLoginView: View {
                             await auth.loginWithSMSCode(otpCode, sentTo: normalizedPhone)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.monacoPrimary)
                     .disabled(isVerifyDisabled)
                     .accessibilityIdentifier("smsVerifyButton")
                 } else {
@@ -60,7 +69,7 @@ struct SMSLoginView: View {
                             }
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.monacoPrimary)
                     .disabled(isSendDisabled)
                     .accessibilityIdentifier("smsSendCodeButton")
                 }
@@ -109,11 +118,11 @@ struct SMSLoginView: View {
     private var statusColor: Color {
         switch auth.phase {
         case .failed:
-            return .orange
+            return MonacoTheme.destructive
         case .authenticated:
-            return .green
+            return MonacoTheme.success
         default:
-            return .secondary
+            return MonacoTheme.secondaryText
         }
     }
 }

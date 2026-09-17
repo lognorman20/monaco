@@ -19,9 +19,11 @@ struct YouSectionView: View {
     private func metricRow(title: String, value: String) -> some View {
         HStack {
             Text(title)
+                .foregroundStyle(MonacoTheme.secondaryText)
             Spacer()
             Text(value)
                 .font(.body.monospacedDigit())
+                .foregroundStyle(MonacoTheme.primaryText)
         }
     }
 

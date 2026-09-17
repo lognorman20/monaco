@@ -14,22 +14,25 @@ struct SessionGateView: View {
         Group {
             if isLoading {
                 ProgressView("Loading your boards…")
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .tint(MonacoTheme.accent)
                     .frame(maxWidth: .infinity, minHeight: 200)
             } else if let home {
-                NavigationStack {
-                    HomeView(auth: auth, home: home, onRefresh: refreshHome)
-                }
+                HomeView(auth: auth, home: home, onRefresh: refreshHome)
             } else if let errorMessage {
                 VStack(alignment: .leading, spacing: 12) {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(MonacoTheme.destructive)
 
                     Button("Try again") {
                         Task { await openSessionAndLoadHome() }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.monacoPrimary)
                 }
+                .padding()
+                .monacoSurfaceCard()
+                .padding()
             }
         }
         .task(id: auth.accessToken) {
@@ -54,8 +57,15 @@ struct SessionGateView: View {
         home = nil
 
         do {
-            _ = try await apiClient.openSession(accessToken: accessToken)
+            let session = try await apiClient.openSession(accessToken: accessToken)
+            if auth.shouldInvalidateBackendSession(serverUserId: session.userId) {
+                await auth.logout()
+                return
+            }
+            auth.recordBackendSession(userId: session.userId)
             await loadHome(accessToken: accessToken)
+        } catch MonacoAPIError.httpStatus(let status) where status == 401 {
+            await auth.logout()
         } catch MonacoAPIError.httpStatus(let status) {
             errorMessage = "Could not open session (HTTP \(status))."
             isLoading = false
@@ -76,6 +86,8 @@ struct SessionGateView: View {
         do {
             home = try await apiClient.getHome(accessToken: token)
             errorMessage = nil
+        } catch MonacoAPIError.httpStatus(let status) where status == 401 {
+            await auth.logout()
         } catch MonacoAPIError.httpStatus(let status) {
             errorMessage = "Could not load home (HTTP \(status))."
             home = nil

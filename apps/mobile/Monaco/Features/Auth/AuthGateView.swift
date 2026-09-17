@@ -8,7 +8,9 @@ struct AuthGateView: View {
             if Config.privy.isConfigured {
                 if hasLoginMethod {
                     if isAuthenticated {
-                        SessionGateView(auth: auth)
+                        NavigationStack {
+                            SessionGateView(auth: auth)
+                        }
                     } else {
                         LoginView(auth: auth)
                     }
@@ -19,6 +21,9 @@ struct AuthGateView: View {
                 missingConfigView
             }
         }
+        .authScreenBackground()
+        .tint(MonacoTheme.accent)
+        .foregroundStyle(MonacoTheme.primaryText)
         .task {
             await auth.restoreSessionIfNeeded()
         }
@@ -39,10 +44,10 @@ struct AuthGateView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Privy not configured", systemImage: "key.fill")
                 .font(.headline)
+                .foregroundStyle(MonacoTheme.primaryText)
 
             Text("Set PRIVY_APP_ID and PRIVY_APP_CLIENT_ID in your Xcode scheme or shell env. Copy values from `.env.example`.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .authSecondaryCaption()
         }
     }
 
@@ -50,10 +55,10 @@ struct AuthGateView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("No login methods enabled", systemImage: "person.crop.circle.badge.exclamationmark")
                 .font(.headline)
+                .foregroundStyle(MonacoTheme.primaryText)
 
             Text("Enable PRIVY_SMS_LOGIN_ENABLED and/or PRIVY_EMAIL_LOGIN_ENABLED, or turn SMS/email on in Privy dashboard Login Methods.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .authSecondaryCaption()
         }
     }
 }
