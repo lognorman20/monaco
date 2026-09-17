@@ -6,24 +6,23 @@ import (
 )
 
 func TestSession_samePrivyUserTwice_doesNotDuplicateUsersRow(t *testing.T) {
-	// Arrange
 	ctx := context.Background()
 	db := integrationDB(t)
-	resetTables(t, db)
+	iso := prepareIsolation(t, db)
 	store := NewStore(db)
-	privyUserID := "did:privy:test-user-123"
+	privyUserID := iso.UniquePrivyID("dup")
 
-	// Act
 	first, err := store.UpsertUser(ctx, privyUserID, "Alfred")
 	if err != nil {
 		t.Fatalf("first UpsertUser: %v", err)
 	}
+	iso.TrackUser(first.ID)
+
 	second, err := store.UpsertUser(ctx, privyUserID, "Alfred")
 	if err != nil {
 		t.Fatalf("second UpsertUser: %v", err)
 	}
 
-	// Assert
 	if first.ID != second.ID {
 		t.Fatalf("expected same user id, got first=%s second=%s", first.ID, second.ID)
 	}

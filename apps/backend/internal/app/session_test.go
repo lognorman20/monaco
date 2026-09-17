@@ -2,56 +2,25 @@ package app
 
 import (
 	"context"
-	"database/sql"
-	"os"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 )
 
-func integrationDB(t *testing.T) *sql.DB {
-	t.Helper()
-
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Fatal("DATABASE_URL is not set")
-	}
-
-	db, err := sql.Open("pgx", databaseURL)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	if err := db.Ping(); err != nil {
-		_ = db.Close()
-		t.Fatalf("ping db: %v", err)
-	}
-
-	t.Cleanup(func() {
-		_ = db.Close()
-	})
-
-	return db
-}
-
-func resetTables(t *testing.T, db *sql.DB) {
-	t.Helper()
-	postgres.PrepareIntegrationDB(t, db)
-}
-
 func TestEnsureMemberWallet_repeatSession_reusesSameWallet(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
-	db := integrationDB(t)
-	resetTables(t, db)
+	db, iso := integrationDB(t)
 	store := postgres.NewStore(db)
 	privyClient := privy.NewFakeClient()
 	session := NewSessionService(store, privyClient)
 
-	user, err := store.UpsertUser(ctx, "did:privy:test-user-789", "Bartholomez")
+	user, err := store.UpsertUser(ctx, iso.UniquePrivyID("wallet"), "Bartholomez")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
+	iso.TrackUser(user.ID)
 
 	// Act
 	first, err := session.EnsureMemberWallet(ctx, user.PrivyUserID, user.ID)

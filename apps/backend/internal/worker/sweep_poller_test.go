@@ -4,25 +4,23 @@ import (
 	"context"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 )
 
-func setupPoller(t *testing.T) (*SweepPoller, privy.Client, *fakeSolanaRPC, *app.DepositService, *postgres.Store) {
+func setupPoller(t *testing.T) (*SweepPoller, *workerTestApp, *fakeSolanaRPC) {
 	t.Helper()
 	testApp := integrationWorkerApp(t)
 	rpc := NewFakeSolanaRPC()
 	poller := NewSweepPoller(testApp.Store, testApp.Privy, rpc, testApp.Deposits, "relayer-key", NewStubClock(testApp.Now))
-	return poller, testApp.Privy, rpc, testApp.Deposits, testApp.Store
+	return poller, testApp, rpc
 }
 
 func TestSweepPoller_memberBalanceCoversIntent_triggersSubmitSweep(t *testing.T) {
 	// Arrange
-	poller, privyClient, _, _, store := setupPoller(t)
+	poller, testApp, _ := setupPoller(t)
 	ctx := context.Background()
-	_, memberAddress, _ := seedPendingDeposit(t, store, privyClient)
-	privy.SetMemberUSDCBalance(privyClient, memberAddress, 2_000_000)
+	_, memberAddress, _ := seedPendingDeposit(t, testApp)
+	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
 
 	// Act
 	if err := poller.Tick(ctx); err != nil {
@@ -30,7 +28,7 @@ func TestSweepPoller_memberBalanceCoversIntent_triggersSubmitSweep(t *testing.T)
 	}
 
 	// Assert
-	last, ok := privy.LastSweepRequest(privyClient)
+	last, ok := privy.LastSweepRequest(testApp.Privy)
 	if !ok {
 		t.Fatal("expected SubmitSweep call")
 	}
@@ -44,17 +42,17 @@ func TestSweepPoller_memberBalanceCoversIntent_triggersSubmitSweep(t *testing.T)
 
 func TestSweepPoller_afterBroadcast_observeSweepRunsWhenBalanceBelowIntent(t *testing.T) {
 	// Arrange
-	poller, privyClient, rpc, _, store := setupPoller(t)
+	poller, testApp, rpc := setupPoller(t)
 	ctx := context.Background()
-	deposit, memberAddress, _ := seedPendingDeposit(t, store, privyClient)
-	privy.SetMemberUSDCBalance(privyClient, memberAddress, 2_000_000)
+	deposit, memberAddress, _ := seedPendingDeposit(t, testApp)
+	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
 
 	// Act — broadcast while balance covers intent; confirmation not ready yet
 	if err := poller.Tick(ctx); err != nil {
 		t.Fatalf("first Tick: %v", err)
 	}
 
-	updated, found, err := store.GetDepositByID(ctx, deposit.ID)
+	updated, found, err := testApp.Store.GetDepositByID(ctx, deposit.ID)
 	if err != nil || !found {
 		t.Fatalf("GetDepositByID: found=%v err=%v", found, err)
 	}
@@ -66,7 +64,7 @@ func TestSweepPoller_afterBroadcast_observeSweepRunsWhenBalanceBelowIntent(t *te
 	}
 
 	sig := updated.TxSignature.String
-	privy.SetMemberUSDCBalance(privyClient, memberAddress, 0)
+	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 0)
 	rpc.Confirm(sig)
 
 	// Act — member balance below intent but stored sig should still confirm and credit
@@ -75,14 +73,14 @@ func TestSweepPoller_afterBroadcast_observeSweepRunsWhenBalanceBelowIntent(t *te
 	}
 
 	// Assert
-	confirmed, found, err := store.GetDepositByID(ctx, deposit.ID)
+	confirmed, found, err := testApp.Store.GetDepositByID(ctx, deposit.ID)
 	if err != nil || !found {
 		t.Fatalf("GetDepositByID after confirm: found=%v err=%v", found, err)
 	}
 	if confirmed.Status != "confirmed" {
 		t.Fatalf("status = %q, want confirmed", confirmed.Status)
 	}
-	position, hasPosition, err := store.GetPosition(ctx, deposit.UserID, deposit.GroupID)
+	position, hasPosition, err := testApp.Store.GetPosition(ctx, deposit.UserID, deposit.GroupID)
 	if err != nil {
 		t.Fatalf("GetPosition: %v", err)
 	}
@@ -93,10 +91,10 @@ func TestSweepPoller_afterBroadcast_observeSweepRunsWhenBalanceBelowIntent(t *te
 
 func TestSweepPoller_memberBalanceBelowIntent_doesNotSweep(t *testing.T) {
 	// Arrange
-	poller, privyClient, _, _, store := setupPoller(t)
+	poller, testApp, _ := setupPoller(t)
 	ctx := context.Background()
-	_, memberAddress, _ := seedPendingDeposit(t, store, privyClient)
-	privy.SetMemberUSDCBalance(privyClient, memberAddress, 0)
+	_, memberAddress, _ := seedPendingDeposit(t, testApp)
+	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 0)
 
 	// Act
 	if err := poller.Tick(ctx); err != nil {
@@ -104,7 +102,7 @@ func TestSweepPoller_memberBalanceBelowIntent_doesNotSweep(t *testing.T) {
 	}
 
 	// Assert
-	if _, ok := privy.LastSweepRequest(privyClient); ok {
+	if _, ok := privy.LastSweepRequest(testApp.Privy); ok {
 		t.Fatal("expected no SubmitSweep call")
 	}
 }

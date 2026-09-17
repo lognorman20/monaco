@@ -14,19 +14,20 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 )
 
-func integrationGroupApp(t *testing.T) (*GroupHandlers, *AuthHandlers, privy.Client, *sql.DB) {
+func integrationGroupApp(t *testing.T) (*GroupHandlers, *AuthHandlers, privy.Client, *sql.DB, *postgres.TestIsolation) {
 	t.Helper()
 
-	authHandlers, privyClient, db := integrationApp(t)
+	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
 	groups := app.NewGroupService(store, privyClient)
 	governance := app.NewGovernanceService(store, privyClient)
-	return &GroupHandlers{Groups: groups, Governance: governance}, authHandlers, privyClient, db
+	return &GroupHandlers{Groups: groups, Governance: governance}, authHandlers, privyClient, db, iso
 }
 
 func TestPOST_groups_missingAuth_returns401(t *testing.T) {
+	t.Parallel()
 	// Arrange
-	groupHandlers, _, _, _ := integrationGroupApp(t)
+	groupHandlers, _, _, _, _ := integrationGroupApp(t)
 	req := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Alpha Fund"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -41,13 +42,10 @@ func TestPOST_groups_missingAuth_returns401(t *testing.T) {
 }
 
 func TestCreateGroup_insertsGroupAndTreasuryRows(t *testing.T) {
+	t.Parallel()
 	// Arrange
-	groupHandlers, authHandlers, privyClient, db := integrationGroupApp(t)
-	token := fixtureSessionToken()
-	seedAuthenticatedUser(t, authHandlers, privyClient, token, privy.Identity{
-		PrivyUserID: "did:privy:alfred",
-		DisplayName: "Alfred",
-	})
+	groupHandlers, authHandlers, privyClient, db, iso := integrationGroupApp(t)
+	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "creator", "Alfred")
 	req := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Alpha Fund"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+string(token))
@@ -65,6 +63,7 @@ func TestCreateGroup_insertsGroupAndTreasuryRows(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode json: %v", err)
 	}
+	trackCreatedGroup(iso, payload.GroupID)
 	if payload.GroupID == "" {
 		t.Fatal("expected groupId in response")
 	}
@@ -94,13 +93,10 @@ func TestCreateGroup_insertsGroupAndTreasuryRows(t *testing.T) {
 }
 
 func TestCreateGroup_provisionsTreasuryViaPrivyClient(t *testing.T) {
+	t.Parallel()
 	// Arrange
-	groupHandlers, authHandlers, privyClient, db := integrationGroupApp(t)
-	token := fixtureSessionToken()
-	seedAuthenticatedUser(t, authHandlers, privyClient, token, privy.Identity{
-		PrivyUserID: "did:privy:bartholomez",
-		DisplayName: "Bartholomez",
-	})
+	groupHandlers, authHandlers, privyClient, db, iso := integrationGroupApp(t)
+	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "creator", "Bartholomez")
 	req := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Beta Club"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+string(token))
@@ -118,6 +114,7 @@ func TestCreateGroup_provisionsTreasuryViaPrivyClient(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode json: %v", err)
 	}
+	trackCreatedGroup(iso, payload.GroupID)
 
 	expectedTreasury, err := privyClient.EnsureTreasury(context.Background(), privy.GroupID(payload.GroupID))
 	if err != nil {
@@ -138,13 +135,10 @@ func TestCreateGroup_provisionsTreasuryViaPrivyClient(t *testing.T) {
 }
 
 func TestGET_group_byId_returnsNameAndTreasuryAddress(t *testing.T) {
+	t.Parallel()
 	// Arrange
-	groupHandlers, authHandlers, privyClient, _ := integrationGroupApp(t)
-	token := fixtureSessionToken()
-	seedAuthenticatedUser(t, authHandlers, privyClient, token, privy.Identity{
-		PrivyUserID: "did:privy:alfred",
-		DisplayName: "Alfred",
-	})
+	groupHandlers, authHandlers, privyClient, _, iso := integrationGroupApp(t)
+	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "creator", "Alfred")
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Alpha Fund"}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("Authorization", "Bearer "+string(token))
@@ -158,6 +152,7 @@ func TestGET_group_byId_returnsNameAndTreasuryAddress(t *testing.T) {
 	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode create json: %v", err)
 	}
+	trackCreatedGroup(iso, created.GroupID)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/groups/"+created.GroupID, nil)
 	req.SetPathValue("id", created.GroupID)
@@ -185,13 +180,10 @@ func TestGET_group_byId_returnsNameAndTreasuryAddress(t *testing.T) {
 }
 
 func TestGET_group_nonMemberOrUnknown_returns404(t *testing.T) {
+	t.Parallel()
 	// Arrange
-	groupHandlers, authHandlers, privyClient, _ := integrationGroupApp(t)
-	creatorToken := fixtureSessionToken()
-	seedAuthenticatedUser(t, authHandlers, privyClient, creatorToken, privy.Identity{
-		PrivyUserID: "did:privy:alfred",
-		DisplayName: "Alfred",
-	})
+	groupHandlers, authHandlers, privyClient, _, iso := integrationGroupApp(t)
+	_, creatorToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "creator", "Alfred")
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Alpha Fund"}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
@@ -205,6 +197,7 @@ func TestGET_group_nonMemberOrUnknown_returns404(t *testing.T) {
 	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode create json: %v", err)
 	}
+	trackCreatedGroup(iso, created.GroupID)
 
 	unknownReq := httptest.NewRequest(http.MethodGet, "/v1/groups/00000000-0000-0000-0000-000000000000", nil)
 	unknownReq.SetPathValue("id", "00000000-0000-0000-0000-000000000000")
@@ -219,11 +212,7 @@ func TestGET_group_nonMemberOrUnknown_returns404(t *testing.T) {
 		t.Fatalf("unknown group status = %d, want 404; body = %s", unknownRec.Code, unknownRec.Body.String())
 	}
 
-	otherToken := privy.AccessToken("other-user-session-token")
-	seedAuthenticatedUser(t, authHandlers, privyClient, otherToken, privy.Identity{
-		PrivyUserID: "did:privy:bartholomez",
-		DisplayName: "Bartholomez",
-	})
+	_, otherToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "other", "Bartholomez")
 	nonMemberReq := httptest.NewRequest(http.MethodGet, "/v1/groups/"+created.GroupID, nil)
 	nonMemberReq.SetPathValue("id", created.GroupID)
 	nonMemberReq.Header.Set("Authorization", "Bearer "+string(otherToken))
@@ -239,10 +228,10 @@ func TestGET_group_nonMemberOrUnknown_returns404(t *testing.T) {
 }
 
 func TestPOST_groups_persistsJoinPolicyVoterSetThresholdExpiry(t *testing.T) {
+	t.Parallel()
 	// Arrange
-	groupHandlers, authHandlers, privyClient, db := integrationGroupApp(t)
-	token := fixtureSessionToken()
-	user := seedAuthenticatedUser(t, authHandlers, privyClient, token, privy.Identity{PrivyUserID: "did:privy:rules-creator", DisplayName: "Creator"})
+	groupHandlers, authHandlers, privyClient, db, iso := integrationGroupApp(t)
+	user, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "rules-creator", "Creator")
 	body := `{"name":"Rules Fund","joinPolicy":{"mode":"password","password":"potluck"},"voterSet":{"mode":"named_subset","memberIds":["` + user.UserID + `"]},"threshold":"unanimous","voteExpirySeconds":3600}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -258,6 +247,7 @@ func TestPOST_groups_persistsJoinPolicyVoterSetThresholdExpiry(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode json: %v", err)
 	}
+	trackCreatedGroup(iso, payload.GroupID)
 	var joinMode, voterSetMode, threshold string
 	var voteExpirySeconds int64
 	var passwordHash string
@@ -273,10 +263,10 @@ func TestPOST_groups_persistsJoinPolicyVoterSetThresholdExpiry(t *testing.T) {
 }
 
 func TestPOST_join_openGroup_addsMemberWithoutPassword(t *testing.T) {
+	t.Parallel()
 	// Arrange
-	groupHandlers, authHandlers, privyClient, db := integrationGroupApp(t)
-	creatorToken := fixtureSessionToken()
-	seedAuthenticatedUser(t, authHandlers, privyClient, creatorToken, privy.Identity{PrivyUserID: "did:privy:open-creator", DisplayName: "Creator"})
+	groupHandlers, authHandlers, privyClient, db, iso := integrationGroupApp(t)
+	_, creatorToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "open-creator", "Creator")
 	createRec := httptest.NewRecorder()
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Open Club"}`))
 	createReq.Header.Set("Content-Type", "application/json")
@@ -284,8 +274,8 @@ func TestPOST_join_openGroup_addsMemberWithoutPassword(t *testing.T) {
 	groupHandlers.CreateGroupHandler(createRec, createReq)
 	var created createGroupResponse
 	_ = json.Unmarshal(createRec.Body.Bytes(), &created)
-	joinerToken := privy.AccessToken("open-joiner-token")
-	seedAuthenticatedUser(t, authHandlers, privyClient, joinerToken, privy.Identity{PrivyUserID: "did:privy:open-joiner", DisplayName: "Joiner"})
+	trackCreatedGroup(iso, created.GroupID)
+	_, joinerToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "open-joiner", "Joiner")
 	joinRec := httptest.NewRecorder()
 	joinReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/join", strings.NewReader(`{}`))
 	joinReq.SetPathValue("id", created.GroupID)
@@ -305,10 +295,10 @@ func TestPOST_join_openGroup_addsMemberWithoutPassword(t *testing.T) {
 }
 
 func TestPOST_join_passwordGroup_requiresCorrectPassword(t *testing.T) {
+	t.Parallel()
 	// Arrange
-	groupHandlers, authHandlers, privyClient, db := integrationGroupApp(t)
-	creatorToken := fixtureSessionToken()
-	seedAuthenticatedUser(t, authHandlers, privyClient, creatorToken, privy.Identity{PrivyUserID: "did:privy:pw-creator", DisplayName: "Creator"})
+	groupHandlers, authHandlers, privyClient, db, iso := integrationGroupApp(t)
+	_, creatorToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "pw-creator", "Creator")
 	createRec := httptest.NewRecorder()
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Secret Club","joinPolicy":{"mode":"password","password":"potluck"}}`))
 	createReq.Header.Set("Content-Type", "application/json")
@@ -316,8 +306,8 @@ func TestPOST_join_passwordGroup_requiresCorrectPassword(t *testing.T) {
 	groupHandlers.CreateGroupHandler(createRec, createReq)
 	var created createGroupResponse
 	_ = json.Unmarshal(createRec.Body.Bytes(), &created)
-	joinerToken := privy.AccessToken("pw-joiner-token")
-	seedAuthenticatedUser(t, authHandlers, privyClient, joinerToken, privy.Identity{PrivyUserID: "did:privy:pw-joiner", DisplayName: "Joiner"})
+	trackCreatedGroup(iso, created.GroupID)
+	_, joinerToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "pw-joiner", "Joiner")
 	joinRec := httptest.NewRecorder()
 	joinReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/join", strings.NewReader(`{"password":"potluck"}`))
 	joinReq.SetPathValue("id", created.GroupID)
@@ -337,10 +327,10 @@ func TestPOST_join_passwordGroup_requiresCorrectPassword(t *testing.T) {
 }
 
 func TestPOST_join_wrongPassword_returns403(t *testing.T) {
+	t.Parallel()
 	// Arrange
-	groupHandlers, authHandlers, privyClient, _ := integrationGroupApp(t)
-	creatorToken := fixtureSessionToken()
-	seedAuthenticatedUser(t, authHandlers, privyClient, creatorToken, privy.Identity{PrivyUserID: "did:privy:badpw-creator", DisplayName: "Creator"})
+	groupHandlers, authHandlers, privyClient, _, iso := integrationGroupApp(t)
+	_, creatorToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "badpw-creator", "Creator")
 	createRec := httptest.NewRecorder()
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Locked Club","joinPolicy":{"mode":"password","password":"potluck"}}`))
 	createReq.Header.Set("Content-Type", "application/json")
@@ -348,8 +338,8 @@ func TestPOST_join_wrongPassword_returns403(t *testing.T) {
 	groupHandlers.CreateGroupHandler(createRec, createReq)
 	var created createGroupResponse
 	_ = json.Unmarshal(createRec.Body.Bytes(), &created)
-	joinerToken := privy.AccessToken("badpw-joiner-token")
-	seedAuthenticatedUser(t, authHandlers, privyClient, joinerToken, privy.Identity{PrivyUserID: "did:privy:badpw-joiner", DisplayName: "Joiner"})
+	trackCreatedGroup(iso, created.GroupID)
+	_, joinerToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "badpw-joiner", "Joiner")
 	joinRec := httptest.NewRecorder()
 	joinReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/join", strings.NewReader(`{"password":"wrong"}`))
 	joinReq.SetPathValue("id", created.GroupID)
@@ -364,8 +354,9 @@ func TestPOST_join_wrongPassword_returns403(t *testing.T) {
 }
 
 func TestGET_group_missingAuth_returns401(t *testing.T) {
+	t.Parallel()
 	// Arrange
-	groupHandlers, _, _, _ := integrationGroupApp(t)
+	groupHandlers, _, _, _, _ := integrationGroupApp(t)
 	req := httptest.NewRequest(http.MethodGet, "/v1/groups/00000000-0000-0000-0000-000000000000", nil)
 	req.SetPathValue("id", "00000000-0000-0000-0000-000000000000")
 	rec := httptest.NewRecorder()

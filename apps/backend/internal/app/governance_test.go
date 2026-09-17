@@ -23,6 +23,7 @@ type governanceHarness struct {
 	Privy      privy.Client
 	Jupiter    jupiter.Client
 	XStocks    xstocks.Resolver
+	ISO        *postgres.TestIsolation
 }
 
 func integrationGovernanceApp(t *testing.T) governanceHarness {
@@ -39,22 +40,8 @@ func integrationGovernanceApp(t *testing.T) governanceHarness {
 		Privy:      h.Privy,
 		Jupiter:    h.Jupiter,
 		XStocks:    h.XStocks,
+		ISO:        h.ISO,
 	}
-}
-
-func seedUser(t *testing.T, sessions *SessionService, privyClient privy.Client, privyUserID, displayName string) string {
-	t.Helper()
-
-	token := privy.AccessToken("token-" + privyUserID)
-	privy.RegisterToken(privyClient, token, privy.Identity{
-		PrivyUserID: privyUserID,
-		DisplayName: displayName,
-	})
-	result, err := sessions.OpenSession(context.Background(), string(token))
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	return result.UserID
 }
 
 func registerRoutableQuote(t *testing.T, jupiterClient jupiter.Client, resolver xstocks.Resolver, symbol string, usdc int64) {
@@ -73,16 +60,13 @@ func registerRoutableQuote(t *testing.T, jupiterClient jupiter.Client, resolver 
 func TestPOST_proposals_happyPath_createsOpenProposalWithExpiry(t *testing.T) {
 	// Arrange
 	h := integrationGovernanceApp(t)
-	token := privy.AccessToken("token-proposer")
-	privy.RegisterToken(h.Privy, token, privy.Identity{PrivyUserID: "did:privy:proposer", DisplayName: "Proposer"})
-	userID, err := h.Sessions.OpenSession(context.Background(), string(token))
-	if err != nil {
-		t.Fatalf("session: %v", err)
-	}
-	created, err := h.Governance.CreateGroupWithRules(context.Background(), string(token), "Vote Fund", DefaultGroupRules(), "")
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "proposer", "Proposer")
+	token := h.ISO.UniqueToken("proposer")
+	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "vote"), DefaultGroupRules(), "")
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
+	h.ISO.TrackGroup(created.GroupID)
 	registerRoutableQuote(t, h.Jupiter, h.XStocks, "AAPLx", 2_000_000)
 	fixedNow := time.Unix(1_700_000_000, 0).UTC()
 	h.Governance.SetClock(func() time.Time { return fixedNow })
@@ -114,18 +98,15 @@ func TestPOST_proposals_happyPath_createsOpenProposalWithExpiry(t *testing.T) {
 func TestTallyProposal_expiredOpenProposal_failsWithoutSwap(t *testing.T) {
 	// Arrange
 	h := integrationGovernanceApp(t)
-	token := privy.AccessToken("token-expiry")
-	privy.RegisterToken(h.Privy, token, privy.Identity{PrivyUserID: "did:privy:expiry", DisplayName: "Expiry"})
-	userID, err := h.Sessions.OpenSession(context.Background(), string(token))
-	if err != nil {
-		t.Fatalf("session: %v", err)
-	}
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "expiry", "Expiry")
+	token := h.ISO.UniqueToken("expiry")
 	rules := DefaultGroupRules()
 	rules.VoteExpirySeconds = 60
-	created, err := h.Governance.CreateGroupWithRules(context.Background(), string(token), "Expiry Fund", rules, "")
+	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "expiry"), rules, "")
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
+	h.ISO.TrackGroup(created.GroupID)
 	registerRoutableQuote(t, h.Jupiter, h.XStocks, "TSLAx", 1_000_000)
 	start := time.Unix(1_700_100_000, 0).UTC()
 	h.Governance.SetClock(func() time.Time { return start })
@@ -162,20 +143,17 @@ func TestTallyProposal_expiredOpenProposal_failsWithoutSwap(t *testing.T) {
 func TestPOST_vote_nonVoterSetMember_returns403(t *testing.T) {
 	// Arrange
 	h := integrationGovernanceApp(t)
-	creatorToken := privy.AccessToken("token-creator")
-	privy.RegisterToken(h.Privy, creatorToken, privy.Identity{PrivyUserID: "did:privy:creator", DisplayName: "Creator"})
-	creator, err := h.Sessions.OpenSession(context.Background(), string(creatorToken))
-	if err != nil {
-		t.Fatalf("creator session: %v", err)
-	}
+	creator := openTestSession(t, h.ISO, h.Sessions, h.Privy, "creator", "Creator")
+	creatorToken := h.ISO.UniqueToken("creator")
 	rules := DefaultGroupRules()
 	rules.VoterSet = VoterSet{Mode: VoterSetNamed, MemberIDs: []string{creator.UserID}}
-	created, err := h.Governance.CreateGroupWithRules(context.Background(), string(creatorToken), "Named Voters", rules, "")
+	created, err := h.Governance.CreateGroupWithRules(context.Background(), creatorToken, testGroupName(h.ISO, "named-voters"), rules, "")
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
+	h.ISO.TrackGroup(created.GroupID)
 
-	outsiderID := seedUser(t, h.Sessions, h.Privy, "did:privy:outsider", "Outsider")
+	outsiderID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "outsider", "Outsider").UserID
 	tx, err := h.Store.BeginTx(context.Background())
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
@@ -217,16 +195,13 @@ func TestPOST_vote_nonVoterSetMember_returns403(t *testing.T) {
 func TestPOST_vote_doubleVoteSameMember_isIdempotentOrRejected(t *testing.T) {
 	// Arrange
 	h := integrationGovernanceApp(t)
-	token := privy.AccessToken("token-double")
-	privy.RegisterToken(h.Privy, token, privy.Identity{PrivyUserID: "did:privy:double", DisplayName: "Double"})
-	userID, err := h.Sessions.OpenSession(context.Background(), string(token))
-	if err != nil {
-		t.Fatalf("session: %v", err)
-	}
-	created, err := h.Governance.CreateGroupWithRules(context.Background(), string(token), "Double Vote", DefaultGroupRules(), "")
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "double", "Double")
+	token := h.ISO.UniqueToken("double")
+	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "double-vote"), DefaultGroupRules(), "")
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
+	h.ISO.TrackGroup(created.GroupID)
 	registerRoutableQuote(t, h.Jupiter, h.XStocks, "MSFTx", 750_000)
 	proposal, err := h.Governance.CreateProposal(context.Background(), CreateProposalInput{
 		GroupID:    created.GroupID,
@@ -272,16 +247,13 @@ func TestPOST_vote_doubleVoteSameMember_isIdempotentOrRejected(t *testing.T) {
 func TestPOST_vote_concurrentDoubleVote_recordsOneBallot(t *testing.T) {
 	// Arrange
 	h := integrationGovernanceApp(t)
-	token := privy.AccessToken("token-race")
-	privy.RegisterToken(h.Privy, token, privy.Identity{PrivyUserID: "did:privy:race", DisplayName: "Race"})
-	userID, err := h.Sessions.OpenSession(context.Background(), string(token))
-	if err != nil {
-		t.Fatalf("session: %v", err)
-	}
-	created, err := h.Governance.CreateGroupWithRules(context.Background(), string(token), "Race Vote", DefaultGroupRules(), "")
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "race", "Race")
+	token := h.ISO.UniqueToken("race")
+	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "race-vote"), DefaultGroupRules(), "")
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
+	h.ISO.TrackGroup(created.GroupID)
 	registerRoutableQuote(t, h.Jupiter, h.XStocks, "GOOGx", 900_000)
 	proposal, err := h.Governance.CreateProposal(context.Background(), CreateProposalInput{
 		GroupID:    created.GroupID,

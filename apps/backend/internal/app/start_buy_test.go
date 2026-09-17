@@ -8,8 +8,39 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 	"github.com/monaco/monaco/packages/domain"
 )
+
+func registerHappyBuy(client jupiter.Client, resolver xstocks.Resolver, outputMint string, usdcAmount int64, requestID string, signature string) {
+	xstocks.RegisterSolanaMint(resolver, "AAPLx", outputMint)
+	jupiter.RegisterQuoteBuy(client, outputMint, usdcAmount, jupiter.BuyQuote{
+		Routable:   true,
+		InputMint:  jupiter.USDCMint,
+		OutputMint: outputMint,
+		InAmount:   "1000000",
+		OutAmount:  "500000",
+		RequestID:  requestID,
+	})
+	jupiter.RegisterBuyOrder(client, requestID, jupiter.BuyOrder{
+		RequestID:   requestID,
+		Transaction: "unsigned-buy-tx",
+		InAmount:    "1000000",
+		OutAmount:   "500000",
+		InputMint:   jupiter.USDCMint,
+		OutputMint:  outputMint,
+	})
+	jupiter.RegisterExecutePoll(client, requestID, []jupiter.ExecuteResult{
+		{Status: jupiter.ExecuteStatusPending, Code: -1},
+		{
+			Status:             jupiter.ExecuteStatusSuccess,
+			Code:               0,
+			Signature:          signature,
+			InputAmountResult:  "1000000",
+			OutputAmountResult: "500000",
+		},
+	})
+}
 
 type executeOnPassHarness struct {
 	Governance  *GovernanceService
@@ -35,19 +66,17 @@ func TestExecuteOnPass_onlyAfterTallyPassed_callsJupiter(t *testing.T) {
 	// Arrange
 	h := integrationExecuteOnPassApp(t)
 	ctx := context.Background()
-	token := privy.AccessToken("token-execute-pass")
-	privy.RegisterToken(h.App.Privy, token, privy.Identity{PrivyUserID: "did:privy:execute-pass", DisplayName: "Execute Pass"})
-	userID, err := NewSessionService(h.App.Store, h.App.Privy).OpenSession(ctx, string(token))
-	if err != nil {
-		t.Fatalf("session: %v", err)
-	}
-	created, err := h.Governance.CreateGroupWithRules(ctx, string(token), "Execute Pass Fund", DefaultGroupRules(), "")
+	sessions := NewSessionService(h.App.Store, h.App.Privy)
+	userID := openTestSession(t, h.App.ISO, sessions, h.App.Privy, "execute-pass", "Execute Pass")
+	token := h.App.ISO.UniqueToken("execute-pass")
+	created, err := h.Governance.CreateGroupWithRules(ctx, token, testGroupName(h.App.ISO, "execute-pass"), DefaultGroupRules(), "")
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
+	h.App.ISO.TrackGroup(created.GroupID)
 	const usdcAmount int64 = 2_000_000
-	const requestID = "req-execute-on-pass"
-	const signature = "sig-execute-on-pass"
+	requestID := testRequestID(h.App.ISO, "execute-on-pass")
+	signature := testTxSignature(h.App.ISO, "execute-on-pass")
 	registerHappyBuy(h.App.Jupiter, h.App.XStocks, jupiter.AAPLxMint, usdcAmount, requestID, signature)
 	treasury, err := h.App.Privy.EnsureTreasury(ctx, privy.GroupID(created.GroupID))
 	if err != nil {
@@ -107,7 +136,7 @@ func TestExecuteOnPass_writesNavSnapshotOnConfirm(t *testing.T) {
 	// Arrange
 	h := integrationExecuteOnPassApp(t)
 	ctx := context.Background()
-	passed := seedPassedExecuteProposal(t, h, "token-nav-snapshot", "req-nav-snapshot-pass", "sig-nav-snapshot-pass")
+	passed := seedPassedExecuteProposal(t, h, "nav-snapshot")
 
 	beforeCount, err := h.App.Store.CountNavSnapshotsByGroupAndReason(ctx, passed.GroupID, postgres.NavSnapshotReasonTransactionConfirm)
 	if err != nil {
@@ -144,7 +173,7 @@ func TestExecuteOnPass_duplicateProposalAndSignature_executesOnce(t *testing.T) 
 	// Arrange
 	h := integrationExecuteOnPassApp(t)
 	ctx := context.Background()
-	passed := seedPassedExecuteProposal(t, h, "token-execute-idempotent", "req-execute-idempotent", "sig-execute-idempotent")
+	passed := seedPassedExecuteProposal(t, h, "execute-idempotent")
 
 	// Act
 	first, err := h.ExecutePass.ExecuteOnPass(ctx, passed)
@@ -188,20 +217,20 @@ func TestExecuteOnPass_duplicateProposalAndSignature_executesOnce(t *testing.T) 
 	}
 }
 
-func seedPassedExecuteProposal(t *testing.T, h executeOnPassHarness, tokenSuffix, requestID, signature string) Proposal {
+func seedPassedExecuteProposal(t *testing.T, h executeOnPassHarness, label string) Proposal {
 	t.Helper()
 	ctx := context.Background()
-	token := privy.AccessToken("token-" + tokenSuffix)
-	privy.RegisterToken(h.App.Privy, token, privy.Identity{PrivyUserID: "did:privy:" + tokenSuffix, DisplayName: "Execute Pass"})
-	userID, err := NewSessionService(h.App.Store, h.App.Privy).OpenSession(ctx, string(token))
-	if err != nil {
-		t.Fatalf("session: %v", err)
-	}
-	created, err := h.Governance.CreateGroupWithRules(ctx, string(token), "Execute Pass Fund", DefaultGroupRules(), "")
+	sessions := NewSessionService(h.App.Store, h.App.Privy)
+	userID := openTestSession(t, h.App.ISO, sessions, h.App.Privy, label, "Execute Pass")
+	token := h.App.ISO.UniqueToken(label)
+	created, err := h.Governance.CreateGroupWithRules(ctx, token, testGroupName(h.App.ISO, label), DefaultGroupRules(), "")
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
+	h.App.ISO.TrackGroup(created.GroupID)
 	const usdcAmount int64 = 2_000_000
+	requestID := testRequestID(h.App.ISO, label)
+	signature := testTxSignature(h.App.ISO, label)
 	registerHappyBuy(h.App.Jupiter, h.App.XStocks, jupiter.AAPLxMint, usdcAmount, requestID, signature)
 	treasury, err := h.App.Privy.EnsureTreasury(ctx, privy.GroupID(created.GroupID))
 	if err != nil {

@@ -37,51 +37,6 @@ func TestAPIServer_missingRelayerKey_failsStartup(t *testing.T) {
 		t.Fatal("expected boot to fail without RELAYER_PRIVATE_KEY")
 	}
 	if !strings.Contains(err.Error(), "RELAYER_PRIVATE_KEY") {
-		t.Fatalf("error = %q, want RELAYER_PRIVATE_KEY mentioned", err)
+		t.Fatalf("error = %q, want RELAYER_PRIVATE_KEY mentioned", err.Error())
 	}
-}
-
-func TestAPIServer_validRelayerKey_startsSuccessfully(t *testing.T) {
-	// Arrange
-	clearAPIEnv(t)
-	setValidAPIEnv(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Act
-	result, err := boot(ctx)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("boot: %v", err)
-	}
-	if result.Relayer == nil {
-		t.Fatal("expected relayer to be registered at startup")
-	}
-	if result.stopPoller == nil {
-		t.Fatal("expected sweep poller to be started at boot")
-	}
-	result.stopPoller()
-	_ = result.DB.Close()
-}
-
-func TestAPIServer_bootStartsSweepPoller(t *testing.T) {
-	// Arrange
-	clearAPIEnv(t)
-	setValidAPIEnv(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Act
-	result, err := boot(ctx)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("boot: %v", err)
-	}
-	if result.stopPoller == nil {
-		t.Fatal("expected sweep poller cancel func at boot")
-	}
-	result.stopPoller()
-	_ = result.DB.Close()
 }

@@ -10,12 +10,13 @@ import (
 func TestUser_inManyGroups_hasDistinctPositionsPerGroup(t *testing.T) {
 	ctx := context.Background()
 	db := integrationDB(t)
-	resetTables(t, db)
+	iso := prepareIsolation(t, db)
 	store := NewStore(db)
-	creator, err := store.UpsertUser(ctx, "did:privy:multi-group-user", "Alex")
+	creator, err := store.UpsertUser(ctx, iso.UniquePrivyID("creator"), "Alex")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
+	iso.TrackUser(creator.ID)
 	rules := domain.GroupRules{
 		JoinPolicy:        domain.JoinPolicy{Mode: domain.JoinModeOpen},
 		VoterSet:          domain.VoterSet{Mode: domain.VoterSetAllMembers},
@@ -30,6 +31,7 @@ func TestUser_inManyGroups_hasDistinctPositionsPerGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert alpha: %v", err)
 	}
+	iso.TrackGroup(groupA.ID)
 	_ = store.InsertGroupMemberTx(ctx, txA, groupA.ID, creator.ID)
 	_ = txA.Commit()
 	txB, err := store.BeginTx(ctx)
@@ -40,6 +42,7 @@ func TestUser_inManyGroups_hasDistinctPositionsPerGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert beta: %v", err)
 	}
+	iso.TrackGroup(groupB.ID)
 	_ = store.InsertGroupMemberTx(ctx, txB, groupB.ID, creator.ID)
 	_ = txB.Commit()
 	txPos, err := store.BeginTx(ctx)
