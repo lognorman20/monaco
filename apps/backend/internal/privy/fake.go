@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -19,6 +20,10 @@ type fakePrivyClient struct {
 	treasuryBalances map[string]int64
 	lastSweep       SweepRequest
 	sweepCount      int
+	validProofs     map[string]struct{}
+	lastPayout      PayUSDCRequest
+	payoutCount     int
+	rejectProofs    bool
 }
 
 // NewFakeClient returns a deterministic in-memory Privy client for tests.
@@ -29,6 +34,7 @@ func NewFakeClient() Client {
 		treasuries:       make(map[GroupID]TreasuryRef),
 		memberBalances:   make(map[string]int64),
 		treasuryBalances: make(map[string]int64),
+		validProofs:      make(map[string]struct{}),
 	}
 }
 
@@ -113,6 +119,48 @@ func (f *fakePrivyClient) TreasuryUSDCBalance(ctx context.Context, treasuryAddre
 	return f.treasuryBalances[treasuryAddress], nil
 }
 
+func (f *fakePrivyClient) VerifyPayoutProof(ctx context.Context, userID string, proof PayoutProof) error {
+	_ = ctx
+	if f.rejectProofs {
+		return ErrInvalidPayoutProof
+	}
+	if strings.TrimSpace(proof.PayoutAddress) == "" {
+		return ErrInvalidPayoutProof
+	}
+	expected := PayoutMessage(userID, proof.PayoutAddress)
+	if proof.Message != expected {
+		return ErrInvalidPayoutProof
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.validProofs[proof.Signature]; ok {
+		return nil
+	}
+	if proof.Signature == deterministicPayoutSignature(userID, proof.PayoutAddress) {
+		return nil
+	}
+	return ErrInvalidPayoutProof
+}
+
+func (f *fakePrivyClient) PayUSDC(ctx context.Context, req PayUSDCRequest) (PayUSDCResult, error) {
+	_ = ctx
+	if req.Amount <= 0 || req.ToAddress == "" || req.TreasuryAddress == "" {
+		return PayUSDCResult{}, fmt.Errorf("%w: invalid payout request", ErrAPI)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastPayout = req
+	f.payoutCount++
+	balance := f.treasuryBalances[req.TreasuryAddress]
+	if balance < req.Amount {
+		return PayUSDCResult{}, fmt.Errorf("%w: insufficient treasury usdc", ErrAPI)
+	}
+	f.treasuryBalances[req.TreasuryAddress] = balance - req.Amount
+	sig := deterministicTxSignature(req.TreasuryAddress, req.ToAddress, req.Amount, f.payoutCount)
+	return PayUSDCResult{TxSignature: sig}, nil
+}
+
 func (f *fakePrivyClient) SubmitSweep(ctx context.Context, req SweepRequest) (SweepResult, error) {
 	_ = ctx
 	if req.MemberAddress == "" || req.TreasuryAddress == "" {
@@ -161,6 +209,52 @@ func SetTreasuryUSDCBalance(client Client, address string, amount int64) {
 }
 
 // LastSweepRequest returns the most recent sweep submitted to the fake client.
+// RegisterPayoutProof registers a valid payout proof signature for tests.
+func RegisterPayoutProof(client Client, signature string) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		panic("privy: RegisterPayoutProof requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.validProofs[signature] = struct{}{}
+	fake.mu.Unlock()
+}
+
+// SetRejectPayoutProofs forces VerifyPayoutProof to fail for tests.
+func SetRejectPayoutProofs(client Client, reject bool) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		panic("privy: SetRejectPayoutProofs requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.rejectProofs = reject
+	fake.mu.Unlock()
+}
+
+// LastPayUSDCRequest returns the most recent payout submitted to the fake client.
+func LastPayUSDCRequest(client Client) (PayUSDCRequest, bool) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		return PayUSDCRequest{}, false
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.payoutCount == 0 {
+		return PayUSDCRequest{}, false
+	}
+	return fake.lastPayout, true
+}
+
+// BuildValidPayoutProof returns a proof that passes fake VerifyPayoutProof.
+func BuildValidPayoutProof(userID, payoutAddress string) PayoutProof {
+	message := PayoutMessage(userID, payoutAddress)
+	return PayoutProof{
+		PayoutAddress: payoutAddress,
+		Message:       message,
+		Signature:     deterministicPayoutSignature(userID, payoutAddress),
+	}
+}
+
 func LastSweepRequest(client Client) (SweepRequest, bool) {
 	fake, ok := client.(*fakePrivyClient)
 	if !ok {

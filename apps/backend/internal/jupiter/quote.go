@@ -64,9 +64,9 @@ type HTTPClient struct {
 func NewHTTPClient() *HTTPClient {
 	return &HTTPClient{
 		baseURL: defaultBaseURL,
-		httpClient: &http.Client{
+		httpClient: wrapHTTPClientForTests(&http.Client{
 			Timeout: defaultTimeout,
-		},
+		}),
 	}
 }
 
@@ -77,7 +77,7 @@ func NewHTTPClientWithBaseURL(baseURL string, httpClient *http.Client) *HTTPClie
 	}
 	return &HTTPClient{
 		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: httpClient,
+		httpClient: wrapHTTPClientForTests(httpClient),
 	}
 }
 

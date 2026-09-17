@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-func TestPOST_devBuy_withoutDevFlag_returns404(t *testing.T) {
+func TestDevBuyRoute_deleted_returns404(t *testing.T) {
 	// Arrange
-	t.Setenv("DEV_BUY_ENABLED", "")
+	t.Setenv("DEV_BUY_ENABLED", "true")
 	handlers := &DevBuyHandlers{}
 	req := httptest.NewRequest(http.MethodPost, "/v1/dev/groups/group-1/buy", strings.NewReader(`{"symbol":"AAPLx","usdc":1000000}`))
 	req.SetPathValue("id", "group-1")

@@ -2,6 +2,10 @@ set dotenv-load := true
 set dotenv-filename := ".env"
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
+# Re-exec recipe under dotenvx once (decrypts .env.local into the process).
+# Usage inside a recipe body: _dotenvx just <recipe> <args...>
+_dotenvx := "./scripts/with-dotenv-local.sh"
+
 default:
     @just --list
 
@@ -22,11 +26,8 @@ build app:
           echo "error: apps/mobile is not scaffolded yet (M0-T4)."
           exit 1
         fi
-        if [[ ! -f .env.local ]]; then
-          echo "error: .env.local missing — copy .env.example and set Privy keys (dotenvx set … -f .env.local)."
-          exit 1
-        fi
-        dotenvx run -f .env.local -- ./scripts/ensure-ios-privy-config.sh generate
+        # ensure-ios-privy-config reads .env.local via dotenvx get → Privy.local.xcconfig
+        ./scripts/ensure-ios-privy-config.sh generate
         xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
           -destination 'platform=iOS Simulator,id=7B30D45E-62FD-42E2-871A-787B19D38CCF' \
           -configuration Debug build
@@ -42,21 +43,15 @@ test app:
     set -euo pipefail
     case "{{app}}" in
       backend)
-        ./scripts/require-docker.sh
-        if [[ ! -f .env ]]; then
-          echo "note: no .env file; using defaults from .env.example via compose"
-          export DATABASE_URL="postgres://monaco:monaco@localhost:54322/monaco?sslmode=disable"
-          export POSTGRES_USER=monaco
-          export POSTGRES_PASSWORD=monaco
-          export POSTGRES_DB=monaco
-          export POSTGRES_PORT=54322
+        if [[ "${MONACO_DOTENVX:-}" != "1" ]]; then
+          exec {{_dotenvx}} env MONACO_DOTENVX=1 just test backend
         fi
+        ./scripts/require-docker.sh
         source ./scripts/assert-local-database-url.sh
         docker compose up -d --wait
         ./scripts/apply-migrations.sh
         ./scripts/verify-local-db.sh
         if [[ -f apps/backend/go.mod ]]; then
-          # M3-T17–T21 Jupiter quote/execute/sell locked tests run via go test ./...
           (cd apps/backend && go test -p 1 ./...)
         else
           echo "M0: apps/backend not scaffolded. Local DB smoke test passed."
@@ -103,15 +98,10 @@ run *app:
         echo "Run per-app recipes once scaffold exists: just run backend | just run mobile"
         exit 1
       fi
-      ./scripts/require-docker.sh
-      if [[ ! -f .env ]]; then
-        echo "note: copy .env.example to .env for local overrides"
-        export DATABASE_URL="postgres://monaco:monaco@localhost:54322/monaco?sslmode=disable"
-        export POSTGRES_USER=monaco
-        export POSTGRES_PASSWORD=monaco
-        export POSTGRES_DB=monaco
-        export POSTGRES_PORT=54322
+      if [[ "${MONACO_DOTENVX:-}" != "1" ]]; then
+        exec {{_dotenvx}} env MONACO_DOTENVX=1 just run
       fi
+      ./scripts/require-docker.sh
       source ./scripts/assert-local-database-url.sh
       docker compose up -d --wait
       ./scripts/apply-migrations.sh
@@ -141,15 +131,10 @@ run *app:
     fi
     case "{{app}}" in
       backend)
-        ./scripts/require-docker.sh
-        if [[ ! -f .env ]]; then
-          echo "note: copy .env.example to .env for local overrides"
-          export DATABASE_URL="postgres://monaco:monaco@localhost:54322/monaco?sslmode=disable"
-          export POSTGRES_USER=monaco
-          export POSTGRES_PASSWORD=monaco
-          export POSTGRES_DB=monaco
-          export POSTGRES_PORT=54322
+        if [[ "${MONACO_DOTENVX:-}" != "1" ]]; then
+          exec {{_dotenvx}} env MONACO_DOTENVX=1 just run backend
         fi
+        ./scripts/require-docker.sh
         source ./scripts/assert-local-database-url.sh
         docker compose up -d --wait
         ./scripts/apply-migrations.sh
@@ -170,23 +155,88 @@ run *app:
           echo "error: apps/mobile is not scaffolded yet (M0-T4)."
           exit 1
         fi
-        if command -v ios-sim >/dev/null 2>&1; then
-          ./scripts/ios-sim
-        else
-          ./scripts/with-ios-privy-env.sh bash -c '
-            set -euo pipefail
-            xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
-              -destination "platform=iOS Simulator,id=7B30D45E-62FD-42E2-871A-787B19D38CCF" \
-              -configuration Debug build
-            xcrun simctl boot 7B30D45E-62FD-42E2-871A-787B19D38CCF 2>/dev/null || true
-            xcrun simctl install 7B30D45E-62FD-42E2-871A-787B19D38CCF \
-              "$(find ~/Library/Developer/Xcode/DerivedData -name Monaco.app -path "*Debug-iphonesimulator*" | head -1)"
-            xcrun simctl launch 7B30D45E-62FD-42E2-871A-787B19D38CCF com.monaco.app
-          '
-        fi
+        # Privy: xcconfig + SIMCTL_CHILD_* via with-ios-privy-env, then gold ios-sim
+        ./scripts/ios-sim
         ;;
       *)
         echo "error: unknown app '{{app}}' (use backend or mobile)"
         exit 1
         ;;
     esac
+
+stop *app:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "{{app}}" ]]; then
+      ./scripts/stop-backend.sh
+      ./scripts/stop-mobile.sh
+      exit 0
+    fi
+    case "{{app}}" in
+      backend)
+        ./scripts/stop-backend.sh
+        ;;
+      mobile)
+        ./scripts/stop-mobile.sh
+        ;;
+      *)
+        echo "error: unknown app '{{app}}' (use backend or mobile)"
+        exit 1
+        ;;
+    esac
+
+reset *target:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "{{target}}" ]]; then
+      ./scripts/stop-backend.sh
+      ./scripts/stop-mobile.sh
+      if [[ "${MONACO_DOTENVX:-}" != "1" ]]; then
+        exec {{_dotenvx}} env MONACO_DOTENVX=1 just reset
+      fi
+      ./scripts/reset-db.sh
+      exit 0
+    fi
+    case "{{target}}" in
+      backend)
+        ./scripts/stop-backend.sh
+        rm -f bin/monaco-api
+        echo "removed bin/monaco-api"
+        ;;
+      mobile)
+        ./scripts/stop-mobile.sh
+        if [[ ! -d apps/mobile ]]; then
+          echo "error: apps/mobile is not scaffolded yet (M0-T4)."
+          exit 1
+        fi
+        xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
+          -destination 'platform=iOS Simulator,id=7B30D45E-62FD-42E2-871A-787B19D38CCF' \
+          clean
+        echo "xcodebuild clean complete"
+        ;;
+      db)
+        if [[ "${MONACO_DOTENVX:-}" != "1" ]]; then
+          exec {{_dotenvx}} env MONACO_DOTENVX=1 just reset db
+        fi
+        ./scripts/reset-db.sh
+        ;;
+      *)
+        echo "error: unknown target '{{target}}' (use backend, mobile, or db)"
+        exit 1
+        ;;
+    esac
+
+killports:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # App dev ports only — Postgres stays up (use just reset db for volume wipe).
+    port=8080
+    if [[ -n "${API_ADDR:-}" ]]; then
+      port="${API_ADDR##*:}"
+    elif command -v dotenvx >/dev/null 2>&1 && [[ -f .env.local ]]; then
+      addr="$(dotenvx get API_ADDR -f .env.local 2>/dev/null || true)"
+      if [[ -n "$addr" ]]; then
+        port="${addr##*:}"
+      fi
+    fi
+    ./scripts/kill-listeners.sh "$port"

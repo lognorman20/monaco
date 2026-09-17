@@ -11,6 +11,7 @@ func clearConfigEnv(t *testing.T) {
 	t.Setenv("PRIVY_AUTHORIZATION_PRIVATE_KEY", "")
 	t.Setenv("PRIVY_AUTHORIZATION_KEY_ID", "")
 	t.Setenv("RELAYER_PRIVATE_KEY", "")
+	t.Setenv("PYTH_API_KEY", "")
 }
 
 func setValidConfigEnv(t *testing.T) {
@@ -132,6 +133,24 @@ func TestLoad_missingRelayerPrivateKey_returnsError(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("expected error for missing RELAYER_PRIVATE_KEY")
+	}
+}
+
+func TestLoad_optionalPythAPIKey_isLoadedWhenSet(t *testing.T) {
+	// Arrange
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+	t.Setenv("PYTH_API_KEY", "  test-pyth-key  ")
+
+	// Act
+	cfg, err := Load()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.PythAPIKey != "test-pyth-key" {
+		t.Fatalf("PythAPIKey = %q", cfg.PythAPIKey)
 	}
 }
 

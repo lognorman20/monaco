@@ -47,12 +47,13 @@ type TreasuryBalances struct {
 
 // SwapService orchestrates Jupiter buy and sell flows for group treasuries.
 type SwapService struct {
-	store   *postgres.Store
-	buy     *BuyService
-	jupiter jupiter.Client
-	privy   privy.Client
-	signer  TreasurySigner
-	balances map[string]TreasuryBalances
+	store      *postgres.Store
+	buy        *BuyService
+	jupiter    jupiter.Client
+	privy      privy.Client
+	signer     TreasurySigner
+	balances   map[string]TreasuryBalances
+	pollConfig jupiter.PollConfig
 }
 
 // NewSwapService wires swap dependencies.
@@ -71,6 +72,18 @@ func NewSwapService(
 		signer:   signer,
 		balances: make(map[string]TreasuryBalances),
 	}
+}
+
+// SetPollConfigForTests configures execute polling for integration tests.
+func (s *SwapService) SetPollConfigForTests(cfg jupiter.PollConfig) {
+	s.pollConfig = cfg
+}
+
+func (s *SwapService) pollCfg() jupiter.PollConfig {
+	if s.pollConfig.MaxAttempts > 0 {
+		return s.pollConfig
+	}
+	return jupiter.DefaultPollConfig()
 }
 
 // SetTreasuryBalances seeds treasury token balances for integration tests.
@@ -138,7 +151,7 @@ func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyReques
 		Symbol:            req.Symbol,
 		RequestID:         order.RequestID,
 		SignedTransaction: signedTx,
-	}, jupiter.DefaultPollConfig())
+	}, s.pollCfg())
 	if err != nil {
 		return DevExecuteBuyResult{}, err
 	}
@@ -172,6 +185,13 @@ func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyReques
 
 	if created {
 		s.applyBuyBalances(treasury.SolanaAddress, start.OutputMint, req.USDCAmount, costBasisAmount)
+		treasuryUsdc, err := s.treasuryUSDCForSnapshot(ctx, treasury.SolanaAddress)
+		if err != nil {
+			return DevExecuteBuyResult{}, err
+		}
+		if err := s.store.WriteNavSnapshotOnTransactionConfirm(ctx, req.GroupID, treasuryUsdc); err != nil {
+			return DevExecuteBuyResult{}, err
+		}
 	}
 
 	return DevExecuteBuyResult{Transaction: row, Created: created}, nil
@@ -226,7 +246,7 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 		Symbol:            req.Symbol,
 		RequestID:         quote.RequestID,
 		SignedTransaction: signedTx,
-	}, jupiter.DefaultPollConfig())
+	}, s.pollCfg())
 	if err != nil {
 		return SellToUSDCResult{}, err
 	}
@@ -255,9 +275,27 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 
 	if created {
 		s.applySellBalances(treasury.SolanaAddress, req.InputMint, req.Amount, proceeds)
+		treasuryUsdc, err := s.treasuryUSDCForSnapshot(ctx, treasury.SolanaAddress)
+		if err != nil {
+			return SellToUSDCResult{}, err
+		}
+		if err := s.store.WriteNavSnapshotOnTransactionConfirm(ctx, req.GroupID, treasuryUsdc); err != nil {
+			return SellToUSDCResult{}, err
+		}
 	}
 
 	return SellToUSDCResult{Transaction: row, Created: created}, nil
+}
+
+func (s *SwapService) treasuryUSDCForSnapshot(ctx context.Context, treasuryAddress string) (int64, error) {
+	if balances, ok := s.balances[treasuryAddress]; ok {
+		return balances.USDC, nil
+	}
+	balance, err := s.privy.TreasuryUSDCBalance(ctx, treasuryAddress)
+	if err != nil {
+		return 0, fmt.Errorf("treasury usdc balance: %w", err)
+	}
+	return balance, nil
 }
 
 func (s *SwapService) applyBuyBalances(treasuryAddress, outputMint string, usdcSpent, xStockReceived int64) {

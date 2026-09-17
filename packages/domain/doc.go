@@ -1,3 +1,3 @@
 // Package domain holds shared product types for Monaco.
-// M0: empty stub; product types land in later milestones.
+// Pure Go math and governance types; no I/O.
 package domain

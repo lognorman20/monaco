@@ -6,6 +6,42 @@ This document is the canonical product and architecture brief. It is not legal a
 
 Prize target is the general Stocklana pool. Judges ask whether this could be a real app people use. The build does **not** use Meteora DBC or Clawpump. Execution is Jupiter Swap API v2 on **Solana mainnet** with small real USDC.
 
+## Getting started with development
+
+**Prereqs:** Docker, Go, Xcode/Swift, [dotenvx CLI](https://dotenvx.com/docs/install), and gold `ios-sim` / `ios-build` on PATH (`~/.local/bin`).
+
+**One-time env setup**
+
+1. Copy `.env.example` → `.env.local`.
+2. Set values: `dotenvx set KEY value -f .env.local` (encrypts by default; `--plain` for non-secrets).
+3. Encrypt if needed: `dotenvx encrypt -f .env.local`.
+
+Secrets, private keys, and pre-commit hooks: see **[Local env](#local-env)** below. Do not wrap `just` with `dotenvx run` manually — recipes that need secrets re-exec under `scripts/with-dotenv-local.sh`.
+
+**Commands**
+
+| Command | What it does |
+| --- | --- |
+| `just run` | Full stack: Postgres + API + iOS app (dotenvx re-exec) |
+| `just run backend` | API only (dotenvx) |
+| `just run mobile` | iOS on gold sim — Privy xcconfig + `SIMCTL_CHILD_*` via `./scripts/ios-sim` |
+| `just stop` | Stop API + iOS app (kill port 8080, `simctl terminate` on gold sim) |
+| `just stop backend` | Stop API only |
+| `just stop mobile` | Terminate Monaco on gold sim; stop `xcodebuild` if running |
+| `just reset` | Stop all + wipe local Postgres volume + re-apply migrations (dotenvx) |
+| `just reset backend` | Stop API + remove `bin/monaco-api` |
+| `just reset mobile` | Stop app + `xcodebuild clean` on gold sim |
+| `just reset db` | Wipe local Docker Postgres volume + migrations (localhost only, dotenvx) |
+| `just killports` | Kill listeners on API port (default 8080; not Postgres 54322) |
+| `just test backend` | Go tests + local DB smoke (dotenvx) |
+| `just test mobile` | Host `swift test` in `packages/mobile-core` — fast, no secrets |
+| `just build backend` | `go build` only — no dotenvx |
+| `just build mobile` | Privy xcconfig, then `xcodebuild` on gold sim |
+| `./scripts/ios-sim` | Monaco run with Privy env (prefer over bare `ios-sim`) |
+| `./scripts/ios-build` | Monaco compile with Privy xcconfig |
+
+Gold sim UDID: `7B30D45E-62FD-42E2-871A-787B19D38CCF`. iOS sim details: **[Running the stack](#running-the-stack)**.
+
 ## Goals
 
 - **Social investing, not crypto.** Copy is "invite friends", "add money", "buy Apple". No wallets, gas, seed phrases, or "mint" in user-facing copy.
@@ -193,24 +229,13 @@ Or `curl -sfS https://dotenvx.sh | sh`. See [install docs](https://dotenvx.com/d
 2. Encrypt: `dotenvx encrypt -f .env.local` (and `-f .env.production` if used).
 3. Set values: `dotenvx set KEY value -f .env.local` (encrypts by default; `--plain` for non-secrets).
 
-The Justfile `set dotenv-load` only auto-loads plain `.env` and does not decrypt dotenvx ciphertext. Run through dotenvx:
+Justfile `dotenv-load` only reads plain `.env` — not dotenvx ciphertext. Recipes that need secrets re-exec once under `dotenvx run -f .env.local` (via `scripts/with-dotenv-local.sh`). Mobile Privy uses `scripts/ensure-ios-privy-config.sh` (xcconfig) + `SIMCTL_CHILD_*` at sim launch.
 
-```bash
-dotenvx run -f .env.local -- just run              # Postgres + API + iOS app
-dotenvx run -f .env.local -- just run backend      # API only
-dotenvx run -f .env.local -- just run mobile       # iOS app only (start API separately)
-dotenvx run -f .env.local -- just test backend
-dotenvx run -f .env.local -- just test mobile
-dotenvx run -f .env.local -- just build mobile
-```
+Day-to-day commands: **[Getting started with development](#getting-started-with-development)**.
 
 ### Running the stack
 
-Always wrap `just` with `dotenvx run -f .env.local --` (see above). The Justfile does not decrypt ciphertext.
-
-For iOS, use `./scripts/ios-sim` or `just run mobile` from the repo root. Both decrypt `.env.local` and inject Privy env into the simulator. Do not launch from `apps/mobile` with a bare `ios-sim` — that skips Privy config.
-
-`just test mobile` runs host `swift test` in `packages/mobile-core` (fast, no simulator). `just build mobile` is the iOS compile gate on gold sim UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`.
+Need `.env.local` from one-time setup above. For iOS use `./scripts/ios-sim` or `just run mobile` from repo root. Bare `ios-sim` from `apps/mobile` skips Privy.
 
 #### Gold slim simulator
 
@@ -221,8 +246,8 @@ Monaco uses one **gold slim** iOS Simulator: SimSlim RAM-thinned, fixed UDID `7B
 | `ios-build` / `ios-sim` (`~/.local/bin`) | Bare compile or run on the gold sim. No Privy env. |
 | `./scripts/ios-build` | Monaco compile: generates Privy xcconfig from `.env.local`, then calls `ios-build`. |
 | `./scripts/ios-sim` | Monaco run: injects Privy via dotenvx, then calls `ios-sim`. Prefer this over bare `ios-sim`. |
-| `dotenvx run -f .env.local -- just build mobile` | Compile gate with Privy xcconfig (same UDID). |
-| `dotenvx run -f .env.local -- just run mobile` | Full run with Privy; delegates to `./scripts/ios-sim`. |
+| `just build mobile` | Compile gate with Privy xcconfig (same UDID). |
+| `just run mobile` | Full run with Privy; delegates to `./scripts/ios-sim`. |
 
 **Agent / sim QA.** Fast smoke (launch, primary nav, one critical path) — follow `.cursor/skills/ios-simslim-fast-qa/SKILL.md` (SimSlim verify, MobAI tap-through). Run unit tests first (`just test mobile`, no sim). XcodeBuildMCP: always pass `--simulator-id 7B30D45E-62FD-42E2-871A-787B19D38CCF`.
 

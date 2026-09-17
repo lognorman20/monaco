@@ -17,6 +17,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/worker"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
@@ -57,24 +58,40 @@ func boot(ctx context.Context) (*bootResult, error) {
 
 	store := postgres.NewStore(db)
 	privyClient := privy.NewHTTPClient(cfg)
+	var pythClient pyth.Client
+	if cfg.PythAPIKey != "" {
+		pythClient, err = pyth.NewHermesClientFromConfig(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("pyth client: %w", err)
+		}
+	}
 	sessions := app.NewSessionService(store, privyClient)
 	groups := app.NewGroupService(store, privyClient)
-	deposits := app.NewDepositService(store, privyClient)
+	governance := app.NewGovernanceService(store, privyClient)
+	deposits := app.NewDepositService(store, privyClient, pythClient)
 	auth := &httpapi.AuthHandlers{Sessions: sessions}
 	me := &httpapi.MeHandlers{Sessions: sessions}
-	groupHandlers := &httpapi.GroupHandlers{Groups: groups}
+	groupHandlers := &httpapi.GroupHandlers{Groups: groups, Governance: governance}
 	depositHandlers := &httpapi.DepositHandlers{Deposits: deposits}
 	jupiterClient := jupiter.NewHTTPClient()
 	xstocksResolver := xstocks.NewHTTPResolver()
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
-	treasurySigner := app.NewPrivyTreasurySigner(privyClient)
-	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, treasurySigner)
-	devBuy := app.NewDevBuyService(swap, store, privyClient)
-	devBuyHandlers := &httpapi.DevBuyHandlers{DevBuy: devBuy}
+	governance.SetBuyService(buy)
 	transactionHandlers := &httpapi.TransactionHandlers{
 		Store:   store,
 		Privy:   privyClient,
 		XStocks: xstocksResolver,
+	}
+	catalogSearcher := xstocks.NewHTTPCatalogSearcher()
+	catalogHandlers := &httpapi.CatalogHandlers{
+		Store:   store,
+		Privy:   privyClient,
+		Catalog: catalogSearcher,
+	}
+	quoteHandlers := &httpapi.QuoteHandlers{
+		Store: store,
+		Privy: privyClient,
+		Buy:   buy,
 	}
 
 	addr := "127.0.0.1:8080"
@@ -87,15 +104,17 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
 	mux.HandleFunc("POST /v1/groups", groupHandlers.CreateGroupHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/join", groupHandlers.JoinGroupHandler)
 	mux.HandleFunc("GET /v1/groups/{id}", groupHandlers.GetGroupHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/deposits", depositHandlers.CreateDepositHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/share-units", depositHandlers.GetMemberShareUnitsHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/treasury/usdc", depositHandlers.GetTreasuryUsdcBalanceHandler)
 	mux.HandleFunc("GET /v1/deposits/{id}", depositHandlers.GetDepositHandler)
-	mux.HandleFunc("POST /v1/dev/groups/{id}/buy", devBuyHandlers.DevBuyHandler)
 	mux.HandleFunc("GET /v1/transactions/{id}", transactionHandlers.GetTransactionHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/treasury/tokens", transactionHandlers.GetTreasuryTokenBalancesHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/cost-basis/{symbol}", transactionHandlers.GetCostBasisBySymbolHandler)
+	mux.HandleFunc("GET /v1/groups/{id}/assets", catalogHandlers.SearchAssetsHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/quotes", quoteHandlers.QuoteHandler)
 
 	solanaRPC := worker.NewHTTPSolanaRPC(cfg.SolanaCluster)
 	poller := worker.NewSweepPoller(store, privyClient, solanaRPC, deposits, relayer.PrivateKey(), nil)

@@ -1,21 +1,11 @@
 #!/usr/bin/env bash
-# Monaco iOS compile for gold sim. Generates Privy xcconfig from dotenvx .env.local first.
+# Monaco iOS compile for gold sim. Generates Privy xcconfig from .env.local first.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-if [[ ! -f .env.local ]]; then
-  echo "error: .env.local missing — copy .env.example and set Privy keys (dotenvx set … -f .env.local)." >&2
-  exit 1
-fi
-
-if ! command -v dotenvx >/dev/null 2>&1; then
-  echo "error: dotenvx not on PATH. Install: https://dotenvx.com/docs/install" >&2
-  exit 1
-fi
-
-dotenvx run -f .env.local -- ./scripts/ensure-ios-privy-config.sh generate
+./scripts/ensure-ios-privy-config.sh generate
 
 global_ios_build="$(command -v ios-build || true)"
 if [[ -z "$global_ios_build" || "$global_ios_build" == "$repo_root/scripts/ios-build" ]]; then

@@ -469,3 +469,93 @@ SELECT COUNT(*) FROM transactions WHERE tx_signature = $1 AND status = 'confirme
 	}
 	return count, nil
 }
+
+// GetConfirmedTransactionByProposal returns the confirmed buy linked to a passed proposal.
+func (s *Store) GetConfirmedTransactionByProposal(ctx context.Context, proposalID string) (TransactionRow, bool, error) {
+	if proposalID == "" {
+		return TransactionRow{}, false, fmt.Errorf("proposal_id is required")
+	}
+
+	const selectSQL = `
+SELECT id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
+       tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
+FROM transactions
+WHERE proposal_id = $1 AND action = 'buy' AND status = 'confirmed'
+ORDER BY confirmed_at DESC NULLS LAST, created_at DESC
+LIMIT 1`
+
+	var row TransactionRow
+	err := s.db.QueryRowContext(ctx, selectSQL, proposalID).Scan(
+		&row.ID,
+		&row.GroupID,
+		&row.ProposalID,
+		&row.Amount,
+		&row.Action,
+		&row.InputMint,
+		&row.OutputMint,
+		&row.Status,
+		&row.TxSignature,
+		&row.ExecuteRequestID,
+		&row.CostBasisPrice,
+		&row.CostBasisAmount,
+		&row.CreatedAt,
+		&row.ConfirmedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TransactionRow{}, false, nil
+	}
+	if err != nil {
+		return TransactionRow{}, false, fmt.Errorf("get transaction by proposal: %w", err)
+	}
+	return row, true, nil
+}
+
+// SetTransactionProposalID links a confirmed buy transaction to its passed proposal idempotently.
+func (s *Store) SetTransactionProposalID(ctx context.Context, transactionID, proposalID string) (TransactionRow, bool, error) {
+	if transactionID == "" || proposalID == "" {
+		return TransactionRow{}, false, fmt.Errorf("transaction id and proposal id are required")
+	}
+
+	const updateSQL = `
+UPDATE transactions
+SET proposal_id = $2
+WHERE id = $1 AND status = 'confirmed' AND (proposal_id IS NULL OR proposal_id = $2)
+RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
+          tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
+
+	var row TransactionRow
+	err := s.db.QueryRowContext(ctx, updateSQL, transactionID, proposalID).Scan(
+		&row.ID,
+		&row.GroupID,
+		&row.ProposalID,
+		&row.Amount,
+		&row.Action,
+		&row.InputMint,
+		&row.OutputMint,
+		&row.Status,
+		&row.TxSignature,
+		&row.ExecuteRequestID,
+		&row.CostBasisPrice,
+		&row.CostBasisAmount,
+		&row.CreatedAt,
+		&row.ConfirmedAt,
+	)
+	if err == nil {
+		return row, true, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return TransactionRow{}, false, fmt.Errorf("set transaction proposal id: %w", err)
+	}
+
+	existing, found, err := s.GetTransactionByID(ctx, transactionID)
+	if err != nil {
+		return TransactionRow{}, false, err
+	}
+	if !found {
+		return TransactionRow{}, false, fmt.Errorf("set transaction proposal id: transaction not found")
+	}
+	if existing.ProposalID.Valid && existing.ProposalID.String != proposalID {
+		return TransactionRow{}, false, fmt.Errorf("set transaction proposal id: proposal mismatch")
+	}
+	return existing, false, nil
+}

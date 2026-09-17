@@ -150,16 +150,17 @@ WHERE id = $1 AND status = 'pending'`
 	return nil
 }
 
-// ConfirmDepositTx marks a deposit confirmed with a treasury sweep signature.
-func (s *Store) ConfirmDepositTx(ctx context.Context, tx *sql.Tx, depositID, txSignature string) (DepositRow, error) {
+// ConfirmDepositTx marks a pending deposit confirmed with a treasury sweep signature.
+// Returns newlyConfirmed=false when another caller already confirmed the same deposit.
+func (s *Store) ConfirmDepositTx(ctx context.Context, tx *sql.Tx, depositID, txSignature string) (DepositRow, bool, error) {
 	if depositID == "" || txSignature == "" {
-		return DepositRow{}, fmt.Errorf("deposit id and tx signature are required")
+		return DepositRow{}, false, fmt.Errorf("deposit id and tx signature are required")
 	}
 
 	const updateSQL = `
 UPDATE deposits
 SET status = 'confirmed', tx_signature = $2
-WHERE id = $1
+WHERE id = $1 AND status = 'pending'
 RETURNING id, user_id, group_id, amount, from_address, status, tx_signature, created_at`
 
 	var row DepositRow
@@ -173,10 +174,53 @@ RETURNING id, user_id, group_id, amount, from_address, status, tx_signature, cre
 		&row.TxSignature,
 		&row.CreatedAt,
 	)
-	if err != nil {
-		return DepositRow{}, fmt.Errorf("confirm deposit: %w", err)
+	if err == nil {
+		return row, true, nil
 	}
-	return row, nil
+	if !errors.Is(err, sql.ErrNoRows) {
+		return DepositRow{}, false, fmt.Errorf("confirm deposit: %w", err)
+	}
+
+	existing, found, err := getDepositByIDTx(ctx, tx, depositID)
+	if err != nil {
+		return DepositRow{}, false, err
+	}
+	if !found {
+		return DepositRow{}, false, fmt.Errorf("confirm deposit: deposit not found")
+	}
+	if existing.Status != "confirmed" {
+		return DepositRow{}, false, fmt.Errorf("confirm deposit: deposit not pending")
+	}
+	if !existing.TxSignature.Valid || existing.TxSignature.String != txSignature {
+		return DepositRow{}, false, fmt.Errorf("confirm deposit: tx signature mismatch")
+	}
+	return existing, false, nil
+}
+
+func getDepositByIDTx(ctx context.Context, tx *sql.Tx, id string) (DepositRow, bool, error) {
+	const selectSQL = `
+SELECT id, user_id, group_id, amount, from_address, status, tx_signature, created_at
+FROM deposits
+WHERE id = $1`
+
+	var row DepositRow
+	err := tx.QueryRowContext(ctx, selectSQL, id).Scan(
+		&row.ID,
+		&row.UserID,
+		&row.GroupID,
+		&row.Amount,
+		&row.FromAddress,
+		&row.Status,
+		&row.TxSignature,
+		&row.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DepositRow{}, false, nil
+	}
+	if err != nil {
+		return DepositRow{}, false, fmt.Errorf("get deposit: %w", err)
+	}
+	return row, true, nil
 }
 
 // GetDepositByTxSignature returns a confirmed deposit keyed by sweep signature for idempotency.

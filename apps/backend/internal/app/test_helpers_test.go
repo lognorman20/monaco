@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"database/sql"
 	"os"
 	"testing"
@@ -9,6 +8,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
@@ -16,9 +16,11 @@ type integrationHarness struct {
 	DB            *sql.DB
 	Store         *postgres.Store
 	Privy         privy.Client
+	Pyth          pyth.Client
 	Deposits      *DepositService
 	Groups        *GroupService
 	Swap          *SwapService
+	Redeem        *RedeemService
 	Jupiter       jupiter.Client
 	XStocks       xstocks.Resolver
 }
@@ -39,25 +41,28 @@ func integrationApp(t *testing.T) integrationHarness {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	ctx := context.Background()
-	_, err = db.ExecContext(ctx, "TRUNCATE users, member_wallets, groups, treasuries, deposits, positions, withdrawals, transactions RESTART IDENTITY CASCADE")
-	if err != nil {
-		t.Fatalf("reset tables: %v", err)
-	}
+	postgres.PrepareIntegrationDB(t, db)
 
 	store := postgres.NewStore(db)
 	privyClient := privy.NewFakeClient()
+	pythClient := pyth.NewFakeClient()
 	jupiterClient := jupiter.NewFakeClient()
 	xstocksResolver := xstocks.NewFakeResolver()
 	buy := NewBuyService(jupiterClient, xstocksResolver)
+
+	signer := NewFakePrivyTreasurySigner()
+	swap := NewSwapService(store, buy, jupiterClient, privyClient, signer)
+	swap.SetPollConfigForTests(jupiter.TestPollConfig())
 
 	return integrationHarness{
 		DB:       db,
 		Store:    store,
 		Privy:    privyClient,
-		Deposits: NewDepositService(store, privyClient),
+		Pyth:     pythClient,
+		Deposits: NewDepositService(store, privyClient, pythClient),
 		Groups:   NewGroupService(store, privyClient),
-		Swap:     NewSwapService(store, buy, jupiterClient, privyClient, NewFakePrivyTreasurySigner()),
+		Swap:     swap,
+		Redeem:   NewRedeemService(store, privyClient, pythClient, jupiterClient, swap, signer),
 		Jupiter:  jupiterClient,
 		XStocks:  xstocksResolver,
 	}

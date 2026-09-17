@@ -136,3 +136,11 @@ func (c *HTTPClient) SellToUSDC(ctx context.Context, params SellToUSDCParams) (E
 	logExecuteSubmit(params.GroupID, params.UserID, params.Symbol, "", params.RequestID)
 	return c.postExecute(ctx, params.GroupID, params.UserID, params.Symbol, params.RequestID, params.SignedTransaction)
 }
+
+// RedeemSliceSellAmount returns proportional xStock atomics to sell for a redeem slice.
+func RedeemSliceSellAmount(holdingAtomics, sharesRedeemedMicros, totalSharesMicros int64) int64 {
+	if holdingAtomics <= 0 || sharesRedeemedMicros <= 0 || totalSharesMicros <= 0 {
+		return 0
+	}
+	return (holdingAtomics * sharesRedeemedMicros) / totalSharesMicros
+}

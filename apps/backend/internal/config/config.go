@@ -17,6 +17,7 @@ const (
 	envPrivyAuthorizationPrivateKey  = "PRIVY_AUTHORIZATION_PRIVATE_KEY"
 	envPrivyAuthorizationKeyID       = "PRIVY_AUTHORIZATION_KEY_ID"
 	envRelayerPrivateKey             = "RELAYER_PRIVATE_KEY"
+	envPythAPIKey                    = "PYTH_API_KEY"
 )
 
 // Config holds runtime credentials for the Monaco API.
@@ -35,6 +36,7 @@ const (
 //     additional_signer on new member wallets so the server can sign sweeps. Existing wallets
 //     created without this signer must be updated in Privy (owner-signed PATCH); new wallets
 //     get the signer at create time when this is set.
+//   - PYTH_API_KEY: Pyth Hermes API key (Bearer token) for marked equity price fetches (M4).
 type Config struct {
 	DatabaseURL                   string
 	PrivyAppID                    string
@@ -42,6 +44,7 @@ type Config struct {
 	PrivyAuthorizationPrivateKey  string
 	PrivyAuthorizationKeyID       string
 	RelayerPrivateKey             string
+	PythAPIKey                    string
 	SolanaCluster                 string
 }
 
@@ -55,6 +58,7 @@ func Load() (*Config, error) {
 		PrivyAuthorizationPrivateKey: strings.TrimSpace(os.Getenv(envPrivyAuthorizationPrivateKey)),
 		PrivyAuthorizationKeyID:      strings.TrimSpace(os.Getenv(envPrivyAuthorizationKeyID)),
 		RelayerPrivateKey:            strings.TrimSpace(os.Getenv(envRelayerPrivateKey)),
+		PythAPIKey:                   strings.TrimSpace(os.Getenv(envPythAPIKey)),
 		SolanaCluster:                SolanaCluster,
 	}
 

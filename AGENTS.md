@@ -1,16 +1,17 @@
 ## Learned User Preferences
 
-- Keep `just` recipes minimal: `just build`, `just test`, and `just run` per app (`backend` or `mobile`), plus root `just run` to start backend and mobile together.
-- When the user says "test mobile" or runs `just test mobile`, run host `swift test` in `packages/mobile-core` (fast, deterministic; no iOS Simulator or `xcodebuild test`). `just build mobile` is the iOS compile gate (`xcodebuild build` on gold sim UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`). Do not boot a sim for unit tests.
+- Keep `just` recipes minimal: `just build`, `just test`, `just run`, `just stop`, and `just reset` per app (`backend` or `mobile`), plus root variants. `just reset` = stop all + wipe local Postgres; `just reset db` = DB only. `just killports` kills API listeners (8080), not Compose Postgres (54322).
+- When the user says "test mobile" or runs `just test mobile`, run host `swift test` in `packages/mobile-core` (fast, deterministic; no iOS Simulator or `xcodebuild test`). `just build mobile` is the iOS compile gate (`xcodebuild build` on gold sim UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`). Do not boot a sim for unit tests. For `just test backend`, use stubs/mocks only—never hit the live Jupiter API; trim property tests that run longer than ~2 minutes.
 - Gold slim sim QA: reuse UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`; never `simctl erase` or destination by name. Sim smoke / agent tap-through: `.cursor/skills/ios-simslim-fast-qa/SKILL.md` or XcodeBuildMCP with `--simulator-id 7B30D45E-62FD-42E2-871A-787B19D38CCF`; do not drive taps with AppleScript, CGEvent, or coordinate hacks.
 - App directories are `apps/backend` and `apps/mobile` by intentional rename; do not refer to or recreate `apps/api` or `apps/ios`. The iOS Xcode project/scheme may stay named `Monaco` under `apps/mobile`.
 - For M1 testing, support email OTP login in addition to SMS auth.
 - Backend is Go over Rust for faster compile times and iteration speed.
-- Use dotenvx for repo secrets (`.env.local` for dev, `.env.production` for prod); wrap `just` with `dotenvx run -f .env.local --` because Justfile `dotenv-load` only reads plain `.env`.
+- Use dotenvx for repo secrets (`.env.local` for dev, `.env.production` for prod). Backend `just run` / `just test backend` re-exec under `scripts/with-dotenv-local.sh`. Mobile Privy: `ensure-ios-privy-config.sh` → xcconfig; `with-ios-privy-env.sh` / `./scripts/ios-sim` → `SIMCTL_CHILD_*`. Justfile `dotenv-load` only reads plain `.env`.
 - GitHub issue and milestone ticket bodies should follow the write-ticket format (Context, Problem, Proposal with Implement exactly, acceptance criteria, verification commands, Done when) with minimal agent discretion.
-- Parallel milestone implementation should use worktree-orchestrate with Composer 2.5 subagents unless another model is explicitly requested.
-- When multiple agents overlap on the same task, run one agent only and keep whichever is furthest along; for milestone orchestration the parent chat owns the queue and must not spawn nested orchestrator subagents.
+- Parallel milestone implementation should use worktree-orchestrate with Composer 2.5 subagents unless another model is explicitly requested; each implementer gets its own worktree; parent orchestrator periodically checks subagents for progress, blockers, and stalls.
+- When multiple agents overlap on the same task, run one agent only and keep whichever is furthest along; when orchestrating parallel lanes, split mobile vs backend tickets to separate agents; for milestone orchestration the parent chat owns the queue and must not spawn nested orchestrator subagents.
 - For Privy dashboard verification or client settings during agent QA, use the attached Privy browser tab; do not ask the user to make dashboard changes. Prefer Privy API/dashboard ops over ad-hoc product PATCH-in-loop for legacy wallet signer fixes.
+- Never skip verification steps (ticket Done-when, milestone manual verification, `just test`/`just build`, gold-sim QA) unless the user explicitly says to skip in the current message.
 
 ## Learned Workspace Facts
 
