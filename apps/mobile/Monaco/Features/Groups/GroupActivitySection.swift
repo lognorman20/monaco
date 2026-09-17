@@ -1,6 +1,8 @@
 import SwiftUI
+import MonacoCore
 
 struct GroupActivitySection: View {
+    @ObservedObject var auth: PrivyAuthService
     let items: [GroupActivityItemDTO]
     let isLoading: Bool
     let errorMessage: String?
@@ -33,24 +35,13 @@ struct GroupActivitySection: View {
             } else {
                 ForEach(items) { item in
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(activityTitle(item))
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(MonacoTheme.primaryText)
-                            Spacer()
-                            Text(formatAmount(item))
-                                .font(.body.monospacedDigit())
-                                .foregroundStyle(MonacoTheme.primaryText)
+                        NavigationLink {
+                            activityDetailDestination(for: item)
+                        } label: {
+                            activityRowSummary(item)
                         }
-                        HStack {
-                            Text(formatTimestamp(item.createdAt))
-                                .font(.caption)
-                                .foregroundStyle(MonacoTheme.secondaryText)
-                            Spacer()
-                            Text(statusLabel(item.status))
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(statusColor(item.status))
-                        }
+                        .accessibilityIdentifier("group-activity-row-\(item.id)")
+
                         if canRetry(item) {
                             HStack {
                                 Spacer()
@@ -71,8 +62,55 @@ struct GroupActivitySection: View {
                             }
                         }
                     }
-                    .accessibilityIdentifier("group-activity-row-\(item.id)")
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func activityDetailDestination(for item: GroupActivityItemDTO) -> some View {
+        if needsProposalFallback(item) {
+            ActivityDetailDestination(
+                auth: auth,
+                activityItem: item,
+                onRetry: onRetry,
+                isRetrying: retryingTransactionIDs.contains(item.id)
+            )
+        } else {
+            TransactionDetailView(
+                auth: auth,
+                activityItem: item,
+                onRetry: onRetry,
+                isRetrying: retryingTransactionIDs.contains(item.id)
+            )
+        }
+    }
+
+    private func needsProposalFallback(_ item: GroupActivityItemDTO) -> Bool {
+        item.kind.lowercased() == "buy"
+            && item.status.lowercased() == "pending"
+            && (item.txSignature ?? "").isEmpty
+    }
+
+    private func activityRowSummary(_ item: GroupActivityItemDTO) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(activityTitle(item))
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(MonacoTheme.primaryText)
+                Spacer()
+                Text(formatAmount(item))
+                    .font(.body.monospacedDigit())
+                    .foregroundStyle(MonacoTheme.primaryText)
+            }
+            HStack {
+                Text(formatTimestamp(item.createdAt))
+                    .font(.caption)
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                Spacer()
+                Text(statusLabel(item.status))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(statusColor(item.status))
             }
         }
     }
@@ -88,7 +126,7 @@ struct GroupActivitySection: View {
     }
 
     private func activityTitle(_ item: GroupActivityItemDTO) -> String {
-        let symbol = item.symbol ?? "USDC"
+        let symbol = AssetSymbolFormatter.format(item.symbol ?? "USDC")
         switch item.kind.lowercased() {
         case "deposit":
             return "Deposit"

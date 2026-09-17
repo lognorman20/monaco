@@ -18,6 +18,15 @@ Prize target is the general Stocklana pool. Judges ask whether this could be a r
 
 Secrets, private keys, and pre-commit hooks: see **[Local env](#local-env)** below. Do not wrap `just` with `dotenvx run` manually — recipes that need secrets re-exec under `scripts/with-dotenv-local.sh`.
 
+**Privy test logins** (fixed OTP; dashboard Login Methods must have **Email** and **SMS** on). Product path is OTP, not a password field. iOS bundle `com.monaco.app` must be on the Privy iOS client or `sendCode` returns 403 `invalid_native_app_id`. Sign out in-app to switch users.
+
+| Name | Method | Login | OTP |
+| --- | --- | --- | --- |
+| Alfred | Email | `test-8081@privy.io` | `465354` |
+| QA SMS | SMS | `+15555557177` | `465354` |
+
+Demo “second account”: sign out, then the other method (or a second Privy test user). Same OTP for both of these.
+
 **Commands**
 
 | Command | What it does |
@@ -495,7 +504,7 @@ Stock Xcode Simulator runs the same app. You do not need Homebrew `simslim`, `~/
 
 Do not `simctl erase` a sim you later want as gold. Creating extra stock sims for local play is fine.
 
-Privy test accounts and OTP codes: see **Privy (M1)** in `AGENTS.md`.
+Privy test emails/SMS and OTP: **[Getting started](#getting-started-with-development)**.
 
 Private keys: `DOTENV_PRIVATE_KEY` for `.env` / `.env.local`; `DOTENV_PRIVATE_KEY_PRODUCTION` for `.env.production`. On macOS, new keys often land in Keychain, not `.env.keys`. Export with `dotenvx native pull` or `dotenvx keypair -f .env.local`.
 

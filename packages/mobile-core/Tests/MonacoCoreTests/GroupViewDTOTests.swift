@@ -14,7 +14,11 @@ final class GroupViewDTOTests: XCTestCase {
 
         // Assert
         XCTAssertEqual(dto.name, "Weekend investors")
+        XCTAssertEqual(dto.potTotalUsd, "623.01")
+        XCTAssertEqual(dto.resolvedPotTotalUsd, "623.01")
         XCTAssertEqual(dto.pot.count, 2)
+        XCTAssertEqual(dto.pot[0].dollarPnl, "+0.00")
+        XCTAssertEqual(dto.pot[1].dollarPnl, "+47.51")
         XCTAssertEqual(dto.members.count, 2)
         XCTAssertEqual(dto.you.equityUsd, "311.50")
     }
@@ -22,7 +26,7 @@ final class GroupViewDTOTests: XCTestCase {
     func testPotRowDTO_afterHoursTrue_decodesLabelFlag() throws {
         // Arrange
         let json = """
-        {"symbol":"AAPLx","units":"1","markUsd":"100","valueUsd":"100","afterHours":true}
+        {"symbol":"AAPLx","units":"1","markUsd":"100","valueUsd":"100","dollarPnl":"+0.00","afterHours":true}
         """
 
         // Act

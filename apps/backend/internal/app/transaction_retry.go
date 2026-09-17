@@ -65,8 +65,8 @@ func (s *SwapService) RetryFailedSwap(ctx context.Context, req RetryFailedSwapRe
 
 	switch tx.Action {
 	case postgres.TransactionActionBuy:
-		symbol := symbolForMint(tx.OutputMint)
-		if symbol == "" || strings.Contains(symbol, "…") {
+		symbol := s.symbolForMint(ctx, tx.OutputMint)
+		if symbol == "" || symbol == unknownStockSymbol {
 			return RetryFailedSwapResult{}, fmt.Errorf("unsupported output mint for retry")
 		}
 		result, err := s.DevExecuteBuy(ctx, DevExecuteBuyRequest{
@@ -81,8 +81,8 @@ func (s *SwapService) RetryFailedSwap(ctx context.Context, req RetryFailedSwapRe
 		}
 		return RetryFailedSwapResult{Transaction: result.Transaction, Created: result.Created}, nil
 	case postgres.TransactionActionSell:
-		symbol := symbolForMint(tx.InputMint)
-		if symbol == "" || strings.Contains(symbol, "…") {
+		symbol := s.symbolForMint(ctx, tx.InputMint)
+		if symbol == "" || symbol == unknownStockSymbol {
 			return RetryFailedSwapResult{}, fmt.Errorf("unsupported input mint for retry")
 		}
 		result, err := s.SellToUSDC(ctx, SellToUSDCRequest{

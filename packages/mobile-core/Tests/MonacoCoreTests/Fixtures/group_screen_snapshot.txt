@@ -1,9 +1,12 @@
 # Weekend investors
 
 ## Pot
+Total | $623.01
 USDC | $125.50
+  +0.00
   125.50 units @ $1.00
 AAPLx | $497.51 [After hours]
+  +47.51
   2.15 units @ $231.40
 
 ## You

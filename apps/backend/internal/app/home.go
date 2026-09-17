@@ -8,6 +8,7 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -15,15 +16,19 @@ import (
 type HomeService struct {
 	store    *postgres.Store
 	privy    privy.Client
+	pyth     pyth.Client
 	deposits *DepositService
+	symbols  *SymbolResolver
 }
 
 // NewHomeService wires home dependencies.
-func NewHomeService(store *postgres.Store, privyClient privy.Client, deposits *DepositService) *HomeService {
+func NewHomeService(store *postgres.Store, privyClient privy.Client, pythClient pyth.Client, deposits *DepositService, symbols *SymbolResolver) *HomeService {
 	return &HomeService{
 		store:    store,
 		privy:    privyClient,
+		pyth:     pythClient,
 		deposits: deposits,
+		symbols:  symbols,
 	}
 }
 
@@ -186,11 +191,25 @@ func (h *HomeService) groupPotNavAndShares(ctx context.Context, groupID string, 
 		return 0, 0, err
 	}
 
-	vals, err := h.store.ComputeNavSnapshotValues(ctx, groupID, treasuryUSDC)
+	treasuryAddress := ""
+	treasury, found, err := h.store.GetTreasuryByGroupID(ctx, groupID)
 	if err != nil {
-		return treasuryUSDC, 0, nil
+		return 0, 0, err
 	}
-	return vals.PotNavMicros, vals.TotalShares, nil
+	if found {
+		treasuryAddress = treasury.SolanaAddress
+	}
+
+	potView, err := computeGroupPotView(ctx, h.store, h.pyth, h.symbols, groupID, treasuryAddress, treasuryUSDC)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	totalSharesMicro, err := h.store.SumShareUnitsByGroup(ctx, groupID)
+	if err != nil {
+		return 0, 0, err
+	}
+	return potView.PotNavMicros, totalSharesMicro, nil
 }
 
 func (h *HomeService) groupTreasuryUSDC(ctx context.Context, groupID string, netUsdcIn int64) (int64, error) {

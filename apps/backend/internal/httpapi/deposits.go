@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
@@ -32,8 +33,10 @@ type getDepositResponse struct {
 	GroupID     string `json:"groupId"`
 	Amount      int64  `json:"amount"`
 	Status      string `json:"status"`
+	FromAddress string `json:"fromAddress,omitempty"`
 	TxSignature string `json:"txSignature,omitempty"`
 	ShareUnits  int64  `json:"shareUnits"`
+	CreatedAt   string `json:"createdAt"`
 }
 
 type memberShareUnitsResponse struct {
@@ -150,8 +153,10 @@ func (h *DepositHandlers) GetDepositHandler(w http.ResponseWriter, r *http.Reque
 		GroupID:     deposit.GroupID,
 		Amount:      deposit.Amount,
 		Status:      string(deposit.Status),
+		FromAddress: deposit.FromAddress,
 		TxSignature: deposit.TxSignature,
 		ShareUnits:  position.ShareUnits,
+		CreatedAt:   deposit.CreatedAt.UTC().Format(time.RFC3339),
 	})
 	logJSONOK(ctx, log, "ok", "deposit_id", deposit.ID, "group_id", deposit.GroupID, "status", deposit.Status)
 }

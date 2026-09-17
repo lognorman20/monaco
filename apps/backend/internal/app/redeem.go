@@ -293,7 +293,7 @@ func (r *RedeemService) sellRedeemSliceIfNeeded(ctx context.Context, view *Redee
 		if sellAmount <= 0 {
 			continue
 		}
-		symbol := symbolForOutputMint(holding.Mint)
+		symbol := symbolForOutputMint(ctx, r.swap.symbols, holding.Mint)
 		if _, err := r.swap.SellToUSDC(ctx, SellToUSDCRequest{
 			GroupID:   view.GroupID,
 			UserID:    view.UserID,

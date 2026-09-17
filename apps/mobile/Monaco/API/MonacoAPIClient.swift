@@ -304,6 +304,22 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(GroupActivityResponse.self, from: data)
     }
 
+    func getTransactionDetail(accessToken: String, transactionId: String) async throws -> TransactionDetailDTO {
+        let url = baseURL.appending(path: "v1/transactions/\(transactionId)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(TransactionDetailDTO.self, from: data)
+    }
+
     func retryTransaction(accessToken: String, transactionId: String) async throws -> RetryTransactionResponse {
         let url = baseURL.appending(path: "v1/transactions/\(transactionId)/retry")
         var request = URLRequest(url: url)

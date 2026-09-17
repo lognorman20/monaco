@@ -33,7 +33,7 @@ func integrationWorkerApp(t *testing.T) *workerTestApp {
 		DB:       db,
 		Store:    store,
 		Privy:    privyClient,
-		Deposits: app.NewDepositService(store, privyClient, pythClient),
+		Deposits: app.NewDepositService(store, privyClient, pythClient, app.NewSymbolResolver(nil)),
 		ISO:      iso,
 		Now:      time.Unix(1_700_000_000, 0).UTC(),
 	}
@@ -62,7 +62,7 @@ func seedPendingDeposit(t *testing.T, testApp *workerTestApp) (postgres.DepositR
 		t.Fatalf("CreateGroup: %v", err)
 	}
 	testApp.ISO.TrackGroup(group.GroupID)
-	deposits := app.NewDepositService(testApp.Store, testApp.Privy, pyth.NewFakeClient())
+	deposits := app.NewDepositService(testApp.Store, testApp.Privy, pyth.NewFakeClient(), app.NewSymbolResolver(nil))
 	result, err := deposits.CreateDeposit(ctx, string(token), group.GroupID, 2_000_000)
 	if err != nil {
 		t.Fatalf("CreateDeposit: %v", err)

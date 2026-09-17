@@ -20,7 +20,7 @@ func TestProposalExecutePoller_executesPassedProposal(t *testing.T) {
 	xstocksResolver := xstocks.NewFakeResolver()
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	signer := app.NewFakePrivyTreasurySigner()
-	swap := app.NewSwapService(store, buy, jupiterClient, testApp.Privy, signer, "")
+	swap := app.NewSwapService(store, buy, jupiterClient, testApp.Privy, signer, "", app.NewSymbolResolver(nil))
 	governance := app.NewGovernanceService(store, testApp.Privy)
 	governance.SetBuyService(buy)
 	executeOnPass := app.NewExecuteOnPassService(swap, store)

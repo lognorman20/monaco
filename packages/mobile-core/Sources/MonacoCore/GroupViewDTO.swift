@@ -5,15 +5,24 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
     public let units: String
     public let markUsd: String
     public let valueUsd: String
+    public let dollarPnl: String
     public let afterHours: Bool?
 
     public var id: String { symbol }
 
-    public init(symbol: String, units: String, markUsd: String, valueUsd: String, afterHours: Bool?) {
+    public init(
+        symbol: String,
+        units: String,
+        markUsd: String,
+        valueUsd: String,
+        dollarPnl: String,
+        afterHours: Bool?
+    ) {
         self.symbol = symbol
         self.units = units
         self.markUsd = markUsd
         self.valueUsd = valueUsd
+        self.dollarPnl = dollarPnl
         self.afterHours = afterHours
     }
 }
@@ -62,6 +71,7 @@ public struct GroupViewDTO: Codable, Equatable, Sendable {
     public let id: String
     public let name: String
     public let treasuryAddress: String?
+    public let potTotalUsd: String?
     public let pot: [PotRowDTO]
     public let you: MemberSliceDTO
     public let members: [LeaderboardRowDTO]
@@ -71,6 +81,7 @@ public struct GroupViewDTO: Codable, Equatable, Sendable {
         id: String,
         name: String,
         treasuryAddress: String? = nil,
+        potTotalUsd: String? = nil,
         pot: [PotRowDTO],
         you: MemberSliceDTO,
         members: [LeaderboardRowDTO],
@@ -79,10 +90,25 @@ public struct GroupViewDTO: Codable, Equatable, Sendable {
         self.id = id
         self.name = name
         self.treasuryAddress = treasuryAddress
+        self.potTotalUsd = potTotalUsd
         self.pot = pot
         self.you = you
         self.members = members
         self.proposals = proposals
+    }
+
+    /// Marked pot NAV; falls back to summing row values when the server omits potTotalUsd.
+    public var resolvedPotTotalUsd: String {
+        if let potTotalUsd, !potTotalUsd.isEmpty {
+            return potTotalUsd
+        }
+        let sum = pot.reduce(Decimal.zero) { partial, row in
+            partial + (Decimal(string: row.valueUsd) ?? .zero)
+        }
+        var rounded = sum
+        var result = Decimal()
+        NSDecimalRound(&result, &rounded, 2, .plain)
+        return NSDecimalNumber(decimal: result).stringValue
     }
 }
 

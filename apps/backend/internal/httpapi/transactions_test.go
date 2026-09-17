@@ -22,13 +22,21 @@ func integrationTransactionHandlers(t *testing.T) (*TransactionHandlers, *AuthHa
 	jupiterClient := jupiter.NewFakeClient()
 	xstocksResolver := xstocks.NewFakeResolver()
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
+	catalog := xstocks.NewFakeCatalogSearcher()
+	xstocks.RegisterCatalogAsset(catalog, xstocks.CatalogAsset{
+		Symbol:     "AAPLx",
+		Name:       "Apple",
+		SolanaMint: jupiter.AAPLxMint,
+	})
+	symbols := app.NewSymbolResolver(catalog)
 	signer := app.NewFakePrivyTreasurySigner()
-	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, "")
+	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, "", symbols)
 	return &TransactionHandlers{
 		Store:   store,
 		Privy:   privyClient,
 		XStocks: xstocksResolver,
 		Swap:    swap,
+		Symbols: symbols,
 	}, authHandlers, privyClient, jupiterClient, iso
 }
 
@@ -106,6 +114,69 @@ func TestRetryTransactionHandler_failedBuy_returnsConfirmed(t *testing.T) {
 	}
 	if payload.TransactionID == failed.ID {
 		t.Fatal("expected new transaction id after retry")
+	}
+}
+
+func TestGetTransactionHandler_returnsFullDetail(t *testing.T) {
+	handlers, authHandlers, privyClient, _, iso := integrationTransactionHandlers(t)
+	ctx := context.Background()
+	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "get-tx", "Get Tx")
+
+	governance := app.NewGovernanceService(handlers.Store, handlers.Privy)
+	created, err := governance.CreateGroupWithRules(ctx, string(token), "Get Tx Club "+iso.Suffix(), app.DefaultGroupRules(), "")
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	trackCreatedGroup(iso, created.GroupID)
+
+	confirmed, _, err := handlers.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
+		GroupID:          created.GroupID,
+		Amount:           2_000_000,
+		InputMint:        jupiter.USDCMint,
+		OutputMint:       jupiter.AAPLxMint,
+		TxSignature:      "sig-get-tx-" + iso.Suffix(),
+		ExecuteRequestID: "req-get-tx-" + iso.Suffix(),
+		CostBasisPrice:   2_000_000,
+		CostBasisAmount:  1_000_000,
+	})
+	if err != nil {
+		t.Fatalf("confirm buy: %v", err)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/transactions/"+confirmed.ID, nil)
+	getReq.SetPathValue("id", confirmed.ID)
+	getReq.Header.Set("Authorization", "Bearer "+string(token))
+	getRec := httptest.NewRecorder()
+	handlers.GetTransactionHandler(getRec, getReq)
+
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", getRec.Code, getRec.Body.String())
+	}
+
+	var payload getTransactionResponse
+	if err := json.Unmarshal(getRec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if payload.TransactionID != confirmed.ID {
+		t.Fatalf("transactionId = %q, want %q", payload.TransactionID, confirmed.ID)
+	}
+	if payload.Action != postgres.TransactionActionBuy {
+		t.Fatalf("action = %q, want buy", payload.Action)
+	}
+	if payload.Status != postgres.TransactionStatusConfirmed {
+		t.Fatalf("status = %q, want confirmed", payload.Status)
+	}
+	if payload.AmountMicros != 2_000_000 {
+		t.Fatalf("amountMicros = %d, want 2000000", payload.AmountMicros)
+	}
+	if payload.TxSignature == "" || payload.ExecuteRequestID == "" {
+		t.Fatalf("expected txSignature and executeRequestId, got sig=%q req=%q", payload.TxSignature, payload.ExecuteRequestID)
+	}
+	if payload.CreatedAt == "" || payload.ConfirmedAt == "" {
+		t.Fatalf("expected timestamps, got created=%q confirmed=%q", payload.CreatedAt, payload.ConfirmedAt)
+	}
+	if payload.InputSymbol != "USDC" || payload.OutputSymbol != "AAPLx" {
+		t.Fatalf("symbols = %q / %q, want USDC / AAPLx", payload.InputSymbol, payload.OutputSymbol)
 	}
 }
 

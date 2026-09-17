@@ -1,12 +1,14 @@
 {
   "id": "550e8400-e29b-41d4-a716-446655440099",
   "name": "Weekend investors",
+  "potTotalUsd": "623.01",
   "pot": [
     {
       "symbol": "USDC",
       "units": "125.50",
       "markUsd": "1.00",
       "valueUsd": "125.50",
+      "dollarPnl": "+0.00",
       "afterHours": null
     },
     {
@@ -14,6 +16,7 @@
       "units": "2.15",
       "markUsd": "231.40",
       "valueUsd": "497.51",
+      "dollarPnl": "+47.51",
       "afterHours": true
     }
   ],

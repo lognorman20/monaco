@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
@@ -21,16 +21,27 @@ type TransactionHandlers struct {
 	Privy   privy.Client
 	XStocks xstocks.Resolver
 	Swap    *app.SwapService
+	Symbols *app.SymbolResolver
 }
 
 type getTransactionResponse struct {
-	TransactionID   string `json:"transactionId"`
-	GroupID         string `json:"groupId"`
-	Action          string `json:"action"`
-	Status          string `json:"status"`
-	TxSignature     string `json:"txSignature,omitempty"`
-	CostBasisPrice  int64  `json:"costBasisPrice,omitempty"`
-	CostBasisAmount int64  `json:"costBasisAmount,omitempty"`
+	TransactionID    string `json:"transactionId"`
+	GroupID          string `json:"groupId"`
+	Action           string `json:"action"`
+	Status           string `json:"status"`
+	AmountMicros     int64  `json:"amountMicros"`
+	InputMint        string `json:"inputMint,omitempty"`
+	OutputMint       string `json:"outputMint,omitempty"`
+	InputSymbol      string `json:"inputSymbol,omitempty"`
+	OutputSymbol     string `json:"outputSymbol,omitempty"`
+	TxSignature      string `json:"txSignature,omitempty"`
+	ExecuteRequestID string `json:"executeRequestId,omitempty"`
+	ProposalID       string `json:"proposalId,omitempty"`
+	CostBasisPrice   int64  `json:"costBasisPrice,omitempty"`
+	CostBasisAmount  int64  `json:"costBasisAmount,omitempty"`
+	CreatedAt        string `json:"createdAt"`
+	ConfirmedAt      string `json:"confirmedAt,omitempty"`
+	FailureReason    string `json:"failureReason,omitempty"`
 }
 
 type treasuryTokenBalance struct {
@@ -106,21 +117,7 @@ func (h *TransactionHandlers) RetryTransactionHandler(w http.ResponseWriter, r *
 		return
 	}
 
-	resp := getTransactionResponse{
-		TransactionID: result.Transaction.ID,
-		GroupID:       result.Transaction.GroupID,
-		Action:        result.Transaction.Action,
-		Status:        result.Transaction.Status,
-	}
-	if result.Transaction.TxSignature.Valid {
-		resp.TxSignature = result.Transaction.TxSignature.String
-	}
-	if result.Transaction.CostBasisPrice.Valid {
-		resp.CostBasisPrice = result.Transaction.CostBasisPrice.Int64
-	}
-	if result.Transaction.CostBasisAmount.Valid {
-		resp.CostBasisAmount = result.Transaction.CostBasisAmount.Int64
-	}
+	resp := h.transactionRowToResponse(ctx, result.Transaction)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -156,21 +153,7 @@ func (h *TransactionHandlers) GetTransactionHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
-	resp := getTransactionResponse{
-		TransactionID: row.ID,
-		GroupID:       row.GroupID,
-		Action:        row.Action,
-		Status:        row.Status,
-	}
-	if row.TxSignature.Valid {
-		resp.TxSignature = row.TxSignature.String
-	}
-	if row.CostBasisPrice.Valid {
-		resp.CostBasisPrice = row.CostBasisPrice.Int64
-	}
-	if row.CostBasisAmount.Valid {
-		resp.CostBasisAmount = row.CostBasisAmount.Int64
-	}
+	resp := h.transactionRowToResponse(ctx, row)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -180,6 +163,43 @@ func (h *TransactionHandlers) GetTransactionHandler(w http.ResponseWriter, r *ht
 		"group_id", row.GroupID,
 		"status", row.Status,
 	)
+}
+
+func (h *TransactionHandlers) transactionRowToResponse(ctx context.Context, row postgres.TransactionRow) getTransactionResponse {
+	resp := getTransactionResponse{
+		TransactionID: row.ID,
+		GroupID:       row.GroupID,
+		Action:        row.Action,
+		Status:        row.Status,
+		AmountMicros:  row.Amount,
+		InputMint:     row.InputMint,
+		OutputMint:    row.OutputMint,
+		InputSymbol:   h.symbolForMint(ctx, row.InputMint),
+		OutputSymbol:  h.symbolForMint(ctx, row.OutputMint),
+		CreatedAt:     row.CreatedAt.UTC().Format(time.RFC3339),
+	}
+	if row.TxSignature.Valid {
+		resp.TxSignature = row.TxSignature.String
+	}
+	if row.ExecuteRequestID.Valid {
+		resp.ExecuteRequestID = row.ExecuteRequestID.String
+	}
+	if row.ProposalID.Valid {
+		resp.ProposalID = row.ProposalID.String
+	}
+	if row.CostBasisPrice.Valid {
+		resp.CostBasisPrice = row.CostBasisPrice.Int64
+	}
+	if row.CostBasisAmount.Valid {
+		resp.CostBasisAmount = row.CostBasisAmount.Int64
+	}
+	if row.ConfirmedAt.Valid {
+		resp.ConfirmedAt = row.ConfirmedAt.Time.UTC().Format(time.RFC3339)
+	}
+	if row.Status == postgres.TransactionStatusFailed {
+		resp.FailureReason = "swap failed"
+	}
+	return resp
 }
 
 // GetTreasuryTokenBalancesHandler handles GET /v1/groups/{id}/treasury/tokens.
@@ -220,7 +240,7 @@ func (h *TransactionHandlers) GetTreasuryTokenBalancesHandler(w http.ResponseWri
 	tokens := make([]treasuryTokenBalance, 0, len(holdings))
 	for _, holding := range holdings {
 		tokens = append(tokens, treasuryTokenBalance{
-			Symbol: symbolForMint(holding.Mint),
+			Symbol: h.symbolForMint(ctx, holding.Mint),
 			Mint:   holding.Mint,
 			Amount: holding.Amount,
 		})
@@ -300,7 +320,7 @@ func (h *TransactionHandlers) getTransactionForMember(ctx context.Context, acces
 		return postgres.TransactionRow{}, errTransactionNotFound
 	}
 
-	if _, err := h.authorizeGroupMember(ctx, accessToken, row.GroupID); err != nil {
+	if _, err := h.authorizeGroupMemberForTransaction(ctx, accessToken, row.GroupID); err != nil {
 		return postgres.TransactionRow{}, err
 	}
 	return row, nil
@@ -386,11 +406,10 @@ func writeTransactionError(ctx context.Context, log *requestLog, w http.Response
 	}
 }
 
-func symbolForMint(mint string) string {
-	switch mint {
-	case jupiter.AAPLxMint:
-		return "AAPLx"
-	default:
-		return ""
+func (h *TransactionHandlers) symbolForMint(ctx context.Context, mint string) string {
+	if h.Symbols != nil {
+		return h.Symbols.SymbolForMint(ctx, mint)
 	}
+	resolver := app.NewSymbolResolver(nil)
+	return resolver.SymbolForMint(ctx, mint)
 }

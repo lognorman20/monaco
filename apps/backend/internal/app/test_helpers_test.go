@@ -24,6 +24,8 @@ type integrationHarness struct {
 	Redeem   *RedeemService
 	Jupiter  jupiter.Client
 	XStocks  xstocks.Resolver
+	Catalog  xstocks.CatalogSearcher
+	Symbols  *SymbolResolver
 	ISO      *postgres.TestIsolation
 }
 
@@ -75,9 +77,21 @@ func integrationApp(t *testing.T) integrationHarness {
 	jupiterClient := jupiter.NewFakeClient()
 	xstocksResolver := xstocks.NewFakeResolver()
 	buy := NewBuyService(jupiterClient, xstocksResolver)
+	catalog := xstocks.NewFakeCatalogSearcher()
+	xstocks.RegisterCatalogAsset(catalog, xstocks.CatalogAsset{
+		Symbol:     "AAPLx",
+		Name:       "Apple",
+		SolanaMint: jupiter.AAPLxMint,
+	})
+	xstocks.RegisterCatalogAsset(catalog, xstocks.CatalogAsset{
+		Symbol:     "TSLAx",
+		Name:       "Tesla",
+		SolanaMint: jupiter.TSLAxMint,
+	})
+	symbols := NewSymbolResolver(catalog)
 
 	signer := NewFakePrivyTreasurySigner()
-	swap := NewSwapService(store, buy, jupiterClient, privyClient, signer, "")
+	swap := NewSwapService(store, buy, jupiterClient, privyClient, signer, "", symbols)
 	swap.SetPollConfigForTests(jupiter.TestPollConfig())
 
 	return integrationHarness{
@@ -85,12 +99,14 @@ func integrationApp(t *testing.T) integrationHarness {
 		Store:    store,
 		Privy:    privyClient,
 		Pyth:     pythClient,
-		Deposits: NewDepositService(store, privyClient, pythClient),
+		Deposits: NewDepositService(store, privyClient, pythClient, symbols),
 		Groups:   NewGroupService(store, privyClient),
 		Swap:     swap,
 		Redeem:   NewRedeemService(store, privyClient, pythClient, jupiterClient, swap, signer),
 		Jupiter:  jupiterClient,
 		XStocks:  xstocksResolver,
+		Catalog:  catalog,
+		Symbols:  symbols,
 		ISO:      iso,
 	}
 }

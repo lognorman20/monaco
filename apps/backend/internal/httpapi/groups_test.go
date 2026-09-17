@@ -21,8 +21,9 @@ func integrationGroupApp(t *testing.T) (*GroupHandlers, *AuthHandlers, privy.Cli
 	store := postgres.NewStore(db)
 	groups := app.NewGroupService(store, privyClient)
 	governance := app.NewGovernanceService(store, privyClient)
-	deposits := app.NewDepositService(store, privyClient, nil)
-	home := app.NewHomeService(store, privyClient, deposits)
+	symbols := app.NewSymbolResolver(nil)
+	deposits := app.NewDepositService(store, privyClient, nil, symbols)
+	home := app.NewHomeService(store, privyClient, nil, deposits, symbols)
 	return &GroupHandlers{Groups: groups, Governance: governance, Home: home}, authHandlers, privyClient, db, iso
 }
 
@@ -229,6 +230,9 @@ func TestGET_groupView_byId_returnsPotYouAndMembers(t *testing.T) {
 	}
 	if len(payload.Pot) == 0 || payload.Pot[0].Symbol != "USDC" {
 		t.Fatalf("pot = %#v, want USDC row", payload.Pot)
+	}
+	if payload.Pot[0].DollarPnL != "+0.00" {
+		t.Fatalf("pot[0].dollarPnl = %q, want +0.00", payload.Pot[0].DollarPnL)
 	}
 	if payload.You.ShareUnits != "0" {
 		t.Fatalf("you.shareUnits = %q, want 0", payload.You.ShareUnits)

@@ -68,7 +68,7 @@ func TestGetGroupView_afterSecondDeposit_showsZeroPnL(t *testing.T) {
 
 	ctx := context.Background()
 	h := integrationApp(t)
-	home := NewHomeService(h.Store, h.Privy, h.Deposits)
+	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "view-pnl", "View PnL")
 	token := string(privy.AccessToken(h.ISO.UniqueToken("view-pnl")))
@@ -129,7 +129,7 @@ func TestGetGroupView_treasurySurplusWithoutShareCredit_reconcilesOnRead(t *test
 
 	ctx := context.Background()
 	h := integrationApp(t)
-	home := NewHomeService(h.Store, h.Privy, h.Deposits)
+	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "surplus", "Surplus User")
 	token := string(privy.AccessToken(h.ISO.UniqueToken("surplus")))

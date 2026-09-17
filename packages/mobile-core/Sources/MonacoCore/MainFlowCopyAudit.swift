@@ -9,6 +9,7 @@ public enum MainFlowCopyAudit {
         " mint",
         "mint ",
         "nav",
+        "xstock",
     ]
 
     public static func stringsAreClean(_ strings: [String]) -> Bool {

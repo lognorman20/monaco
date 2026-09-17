@@ -57,6 +57,7 @@ type SwapService struct {
 	relayerKey string
 	balances   map[string]TreasuryBalances
 	pollConfig jupiter.PollConfig
+	symbols    *SymbolResolver
 }
 
 // NewSwapService wires swap dependencies.
@@ -67,6 +68,7 @@ func NewSwapService(
 	privyClient privy.Client,
 	signer TreasurySigner,
 	relayerKey string,
+	symbols *SymbolResolver,
 ) *SwapService {
 	return &SwapService{
 		store:      store,
@@ -76,12 +78,20 @@ func NewSwapService(
 		signer:     signer,
 		relayerKey: relayerKey,
 		balances:   make(map[string]TreasuryBalances),
+		symbols:    symbols,
 	}
 }
 
 // SetPollConfigForTests configures execute polling for integration tests.
 func (s *SwapService) SetPollConfigForTests(cfg jupiter.PollConfig) {
 	s.pollConfig = cfg
+}
+
+func (s *SwapService) symbolForMint(ctx context.Context, mint string) string {
+	if s.symbols != nil {
+		return s.symbols.SymbolForMint(ctx, mint)
+	}
+	return symbolForOutputMint(ctx, nil, mint)
 }
 
 func (s *SwapService) pollCfg() jupiter.PollConfig {

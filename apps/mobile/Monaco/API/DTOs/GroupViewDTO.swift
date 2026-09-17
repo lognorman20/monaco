@@ -5,6 +5,7 @@ struct PotRowDTO: Codable, Equatable, Identifiable {
     let units: String
     let markUsd: String
     let valueUsd: String
+    let dollarPnl: String
     let afterHours: Bool?
 
     var id: String { symbol }
@@ -32,8 +33,22 @@ struct GroupViewDTO: Codable, Equatable {
     let id: String
     let name: String
     let treasuryAddress: String?
+    let potTotalUsd: String?
     let pot: [PotRowDTO]
     let you: MemberSliceDTO
     let members: [LeaderboardRowDTO]
     let proposals: [ProposalDTO]?
+
+    var resolvedPotTotalUsd: String {
+        if let potTotalUsd, !potTotalUsd.isEmpty {
+            return potTotalUsd
+        }
+        let sum = pot.reduce(Decimal.zero) { partial, row in
+            partial + (Decimal(string: row.valueUsd) ?? .zero)
+        }
+        var rounded = sum
+        var result = Decimal()
+        NSDecimalRound(&result, &rounded, 2, .plain)
+        return NSDecimalNumber(decimal: result).stringValue
+    }
 }

@@ -101,11 +101,16 @@ struct GroupDetailView: View {
     @ViewBuilder
     private func groupContent(_ view: GroupViewDTO) -> some View {
         List {
-            PotSectionView(pot: view.pot, treasuryAddress: view.treasuryAddress)
+            PotSectionView(
+                potTotalUsd: view.resolvedPotTotalUsd,
+                pot: view.pot,
+                treasuryAddress: view.treasuryAddress
+            )
             YouSectionView(slice: view.you)
             MemberBoardSection(members: view.members)
 
             GroupActivitySection(
+                auth: auth,
                 items: activityItems,
                 isLoading: activityLoading,
                 errorMessage: activityError,

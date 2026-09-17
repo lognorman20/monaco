@@ -66,7 +66,7 @@ func TestSweepPoller_submitSweepFailure_surfacesInGroupActivity(t *testing.T) {
 		t.Fatalf("Tick: %v", err)
 	}
 
-	home := app.NewHomeService(testApp.Store, testApp.Privy, testApp.Deposits)
+	home := app.NewHomeService(testApp.Store, testApp.Privy, nil, testApp.Deposits, app.NewSymbolResolver(nil))
 	items, err := home.ListGroupActivity(ctx, token, deposit.GroupID)
 	if err != nil {
 		t.Fatalf("ListGroupActivity: %v", err)

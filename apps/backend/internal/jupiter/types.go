@@ -10,6 +10,9 @@ const (
 // AAPLxMint is the Solana mainnet AAPLx token mint used in tests and docs.
 const AAPLxMint = "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"
 
+// TSLAxMint is the Solana mainnet TSLAx token mint used in tests and docs.
+const TSLAxMint = "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"
+
 // XStockDecimals is the on-chain decimal count for xStock SPL tokens on Solana mainnet.
 const XStockDecimals = 8
 

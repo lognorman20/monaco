@@ -19,6 +19,7 @@ type GroupViewPotRow struct {
 	Units      string
 	MarkUsd    string
 	ValueUsd   string
+	DollarPnL  string
 	AfterHours *bool
 }
 
@@ -45,6 +46,7 @@ type GroupViewResult struct {
 	ID              string
 	Name            string
 	TreasuryAddress string
+	PotTotalUsd     string
 	Pot             []GroupViewPotRow
 	You             GroupViewMemberSlice
 	Members         []GroupViewMemberRow
@@ -112,12 +114,14 @@ func (h *HomeService) GetGroupView(ctx context.Context, accessToken, groupID str
 		return GroupViewResult{}, err
 	}
 
-	potNavMicros, totalSharesMicro, err := h.groupPotNavAndShares(ctx, groupID, netUsdcIn)
+	potView, err := computeGroupPotView(ctx, h.store, h.pyth, h.symbols, groupID, treasury.SolanaAddress, treasuryUSDC)
 	if err != nil {
 		return GroupViewResult{}, err
 	}
+	potNavMicros := potView.PotNavMicros
+	potRows := potView.Rows
 
-	potRows, err := h.buildGroupViewPotRows(ctx, groupID, treasuryUSDC)
+	totalSharesMicro, err := h.store.SumShareUnitsByGroup(ctx, groupID)
 	if err != nil {
 		return GroupViewResult{}, err
 	}
@@ -141,54 +145,11 @@ func (h *HomeService) GetGroupView(ctx context.Context, accessToken, groupID str
 		ID:              group.ID,
 		Name:            group.Name,
 		TreasuryAddress: treasury.SolanaAddress,
+		PotTotalUsd:     formatMicrosAsUsdDecimal(potNavMicros),
 		Pot:             potRows,
 		You:             you,
 		Members:         members,
 	}, nil
-}
-
-func (h *HomeService) buildGroupViewPotRows(ctx context.Context, groupID string, treasuryUSDC int64) ([]GroupViewPotRow, error) {
-	rows := []GroupViewPotRow{{
-		Symbol:   "USDC",
-		Units:    formatMicrosAsUsdDecimal(treasuryUSDC),
-		MarkUsd:  "1.00",
-		ValueUsd: formatMicrosAsUsdDecimal(treasuryUSDC),
-	}}
-
-	holdings, err := h.store.ListNetTokenHoldingsByGroup(ctx, groupID)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, holding := range holdings {
-		if holding.Amount <= 0 {
-			continue
-		}
-		priceMicros, fillAmount, found, err := h.store.GetFillDerivedCostBasisByOutputMint(ctx, groupID, holding.Mint)
-		if err != nil {
-			return nil, err
-		}
-		if !found || fillAmount <= 0 {
-			continue
-		}
-		markPerUnit, err := costBasisMarkPerUnitMicros(priceMicros, fillAmount)
-		if err != nil {
-			return nil, err
-		}
-		units, err := tokenAtomicsToDecimalUnits(holding.Amount)
-		if err != nil {
-			return nil, err
-		}
-		valueMicros := holding.Amount * markPerUnit / tokenAtomicScale
-		rows = append(rows, GroupViewPotRow{
-			Symbol:   symbolForOutputMint(holding.Mint),
-			Units:    string(units),
-			MarkUsd:  formatMicrosAsUsdDecimal(markPerUnit),
-			ValueUsd: formatMicrosAsUsdDecimal(valueMicros),
-		})
-	}
-
-	return rows, nil
 }
 
 func (h *HomeService) buildGroupViewYouSlice(
@@ -362,16 +323,3 @@ func formatShareFractionDecimal(memberShares, totalShares domain.ShareUnits) str
 	return strings.TrimRight(strings.TrimRight(fraction.FloatString(6), "0"), ".")
 }
 
-func costBasisMarkPerUnitMicros(totalUSDCMicros, tokenAtomics int64) (int64, error) {
-	if totalUSDCMicros < 0 {
-		return 0, fmt.Errorf("cost basis usdc must be non-negative")
-	}
-	if tokenAtomics <= 0 {
-		return 0, fmt.Errorf("cost basis token amount must be positive")
-	}
-	mark := (totalUSDCMicros * tokenAtomicScale) / tokenAtomics
-	if mark <= 0 {
-		return 0, fmt.Errorf("derived mark per unit must be positive")
-	}
-	return mark, nil
-}

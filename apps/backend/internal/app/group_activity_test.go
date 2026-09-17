@@ -16,7 +16,7 @@ func TestListGroupActivity_includesDepositsBuysSellsAndMixedStatuses(t *testing.
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	home := NewHomeService(h.Store, h.Privy, h.Deposits)
+	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
 	governance := NewGovernanceService(h.Store, h.Privy)
 	governance.SetBuyService(NewBuyService(h.Jupiter, h.XStocks))
 
@@ -176,7 +176,7 @@ func TestListGroupActivity_emptyWhenNoRows(t *testing.T) {
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	home := NewHomeService(h.Store, h.Privy, h.Deposits)
+	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
 	governance := NewGovernanceService(h.Store, h.Privy)
 
 	token := privy.AccessToken(h.ISO.UniqueToken("activity-empty"))
@@ -206,7 +206,7 @@ func TestListGroupActivity_sortsNewestFirst(t *testing.T) {
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	home := NewHomeService(h.Store, h.Privy, h.Deposits)
+	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
 	governance := NewGovernanceService(h.Store, h.Privy)
 
 	token := privy.AccessToken(h.ISO.UniqueToken("activity-sort"))

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 )
@@ -65,7 +64,7 @@ func (h *HomeService) ListGroupActivity(ctx context.Context, accessToken, groupI
 		items = append(items, item)
 	}
 	for _, tx := range transactions {
-		items = append(items, activityItemFromTransaction(tx))
+		items = append(items, h.activityItemFromTransaction(ctx, tx))
 	}
 	for _, proposal := range awaitingExecute {
 		items = append(items, GroupActivityItem{
@@ -111,7 +110,7 @@ func (h *HomeService) authorizeGroupMember(ctx context.Context, accessToken, gro
 	return user.ID, nil
 }
 
-func activityItemFromTransaction(tx postgres.TransactionRow) GroupActivityItem {
+func (h *HomeService) activityItemFromTransaction(ctx context.Context, tx postgres.TransactionRow) GroupActivityItem {
 	item := GroupActivityItem{
 		ID:           tx.ID,
 		Kind:         tx.Action,
@@ -121,13 +120,13 @@ func activityItemFromTransaction(tx postgres.TransactionRow) GroupActivityItem {
 	}
 	switch tx.Action {
 	case postgres.TransactionActionBuy:
-		item.Symbol = symbolForMint(tx.OutputMint)
+		item.Symbol = h.symbolForMint(ctx, tx.OutputMint)
 	case postgres.TransactionActionSell:
 		if tx.Status == postgres.TransactionStatusConfirmed && tx.CostBasisAmount.Valid {
 			item.Symbol = "USDC"
 			item.AmountMicros = tx.CostBasisAmount.Int64
 		} else {
-			item.Symbol = symbolForMint(tx.InputMint)
+			item.Symbol = h.symbolForMint(ctx, tx.InputMint)
 		}
 	}
 	if tx.TxSignature.Valid {
@@ -136,19 +135,9 @@ func activityItemFromTransaction(tx postgres.TransactionRow) GroupActivityItem {
 	return item
 }
 
-func symbolForMint(mint string) string {
-	switch mint {
-	case jupiter.USDCMint:
-		return "USDC"
-	case jupiter.AAPLxMint:
-		return "AAPLx"
-	default:
-		if mint == "" {
-			return ""
-		}
-		if len(mint) > 8 {
-			return mint[:4] + "…"
-		}
-		return mint
+func (h *HomeService) symbolForMint(ctx context.Context, mint string) string {
+	if h.symbols != nil {
+		return h.symbols.SymbolForMint(ctx, mint)
 	}
+	return symbolForOutputMint(ctx, nil, mint)
 }

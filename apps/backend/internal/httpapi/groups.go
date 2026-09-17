@@ -198,6 +198,7 @@ type groupViewPotRowResponse struct {
 	Units      string `json:"units"`
 	MarkUsd    string `json:"markUsd"`
 	ValueUsd   string `json:"valueUsd"`
+	DollarPnL  string `json:"dollarPnl"`
 	AfterHours *bool  `json:"afterHours"`
 }
 
@@ -221,6 +222,7 @@ type groupViewResponse struct {
 	ID              string                       `json:"id"`
 	Name            string                       `json:"name"`
 	TreasuryAddress string                       `json:"treasuryAddress"`
+	PotTotalUsd     string                       `json:"potTotalUsd"`
 	Pot             []groupViewPotRowResponse    `json:"pot"`
 	You             groupViewMemberSliceResponse `json:"you"`
 	Members         []groupViewMemberRowResponse `json:"members"`
@@ -265,6 +267,7 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 			Units:      row.Units,
 			MarkUsd:    row.MarkUsd,
 			ValueUsd:   row.ValueUsd,
+			DollarPnL:  row.DollarPnL,
 			AfterHours: row.AfterHours,
 		})
 	}
@@ -285,6 +288,7 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 		ID:              result.ID,
 		Name:            result.Name,
 		TreasuryAddress: result.TreasuryAddress,
+		PotTotalUsd:     result.PotTotalUsd,
 		Pot:             pot,
 		You: groupViewMemberSliceResponse{
 			ShareUnits:    result.You.ShareUnits,

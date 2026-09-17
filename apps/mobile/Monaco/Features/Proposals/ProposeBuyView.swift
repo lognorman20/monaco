@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Search catalog, fetch quote, propose buy when routable.
+/// Search catalog, enter amount, navigate to quote detail.
 struct ProposeBuyView: View {
     @ObservedObject var auth: PrivyAuthService
     let groupId: String
@@ -8,8 +8,6 @@ struct ProposeBuyView: View {
     private let apiClient = MonacoAPIClient()
     private let pageSize = 25
     private let searchDebounceNanos: UInt64 = 300_000_000
-    /// xStock SPL tokens use 8 on-chain decimals (Jupiter outAmount atomics).
-    private let xStockAtomicScale = Decimal(100_000_000)
 
     @State private var searchQuery = ""
     @State private var assets: [CatalogAssetDTO] = []
@@ -17,8 +15,6 @@ struct ProposeBuyView: View {
     @State private var catalogOffset = 0
     @State private var selectedSymbol: String?
     @State private var amountText = ""
-    @State private var quote: BuyQuoteDTO?
-    @State private var createdProposalId: String?
     @State private var errorMessage: String?
     @State private var isLoadingCatalog = false
     @State private var isLoadingMore = false
@@ -26,8 +22,6 @@ struct ProposeBuyView: View {
     @State private var isLoadingTreasury = false
     @State private var treasuryLoadFailed = false
     @State private var treasuryUsdcMicros: Int64?
-    @State private var isQuoting = false
-    @State private var isProposing = false
     @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
@@ -87,43 +81,25 @@ struct ProposeBuyView: View {
                             .foregroundStyle(.orange)
                     }
 
-                    Button(isQuoting ? "Checking quote…" : "Get quote") {
-                        Task { await fetchQuote() }
-                    }
-                    .disabled(isQuoting || parsedUsdcMicro == nil || exceedsTreasury)
-                    .accessibilityIdentifier("proposal-quote-button")
-                }
-            }
-
-            if let quote {
-                Section("Quote") {
-                    Label(
-                        quote.routable ? "Route available" : "No route right now",
-                        systemImage: quote.routable ? "checkmark.seal" : "xmark.seal"
-                    )
-                    .foregroundStyle(quote.routable ? .green : .orange)
-
-                    if quote.routable {
-                        if let priceText = formattedPricePerShare(for: quote) {
-                            LabeledContent("Price", value: priceText)
+                    if let usdcMicros = parsedUsdcMicro {
+                        NavigationLink {
+                            ProposeQuoteDetailView(
+                                auth: auth,
+                                groupId: groupId,
+                                symbol: selectedSymbol,
+                                usdcMicros: usdcMicros,
+                                treasuryUsdcMicros: treasuryUsdcMicros
+                            )
+                        } label: {
+                            Text("Get quote")
                         }
-                        if let sharesText = formattedSharesReceived(for: quote) {
-                            LabeledContent("Shares received", value: sharesText)
-                        }
+                        .disabled(exceedsTreasury)
+                        .accessibilityIdentifier("proposal-quote-button")
+                    } else {
+                        Button("Get quote") {}
+                            .disabled(true)
+                            .accessibilityIdentifier("proposal-quote-button")
                     }
-
-                    Button(isProposing ? "Proposing…" : "Propose buy") {
-                        Task { await submitProposal() }
-                    }
-                    .disabled(isProposing || !quote.routable || exceedsTreasury)
-                    .accessibilityIdentifier("proposal-submit-button")
-                }
-            }
-
-            if let createdProposalId {
-                Section {
-                    Label("Proposal \(createdProposalId) created", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
                 }
             }
 
@@ -174,7 +150,7 @@ struct ProposeBuyView: View {
                 HStack {
                     VStack(alignment: .leading) {
                         Text(asset.symbol).font(.body.bold())
-                        Text(asset.name).font(.caption).foregroundStyle(.secondary)
+                        Text(asset.displayName).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     Button("Buy") {
@@ -216,7 +192,6 @@ struct ProposeBuyView: View {
 
     private func selectAsset(_ symbol: String) {
         selectedSymbol = symbol
-        quote = nil
         errorMessage = nil
     }
 
@@ -297,51 +272,6 @@ struct ProposeBuyView: View {
         }
     }
 
-    private func fetchQuote() async {
-        guard let token = auth.accessToken, let symbol = selectedSymbol, let usdc = parsedUsdcMicro else { return }
-        if exceedsTreasury {
-            errorMessage = "Amount exceeds treasury USDC available."
-            return
-        }
-        isQuoting = true
-        errorMessage = nil
-        defer { isQuoting = false }
-
-        do {
-            quote = try await apiClient.postQuote(accessToken: token, groupId: groupId, symbol: symbol, usdc: usdc)
-        } catch {
-            errorMessage = "Could not fetch quote."
-        }
-    }
-
-    private func submitProposal() async {
-        guard let token = auth.accessToken, let quote, quote.routable,
-              let usdc = parsedUsdcMicro else { return }
-        if exceedsTreasury {
-            errorMessage = "Amount exceeds treasury USDC available."
-            return
-        }
-        isProposing = true
-        errorMessage = nil
-        defer { isProposing = false }
-
-        do {
-            let response = try await apiClient.createProposal(
-                accessToken: token,
-                groupId: groupId,
-                symbol: quote.symbol,
-                usdc: usdc
-            )
-            createdProposalId = response.proposalId
-        } catch MonacoAPIError.httpStatus(400) {
-            errorMessage = "Amount exceeds treasury USDC available."
-        } catch MonacoAPIError.httpStatus(let code) {
-            errorMessage = "Proposal failed (HTTP \(code))."
-        } catch {
-            errorMessage = "Could not create proposal."
-        }
-    }
-
     private func usdcMicrosFromPot(_ pot: [PotRowDTO]) -> Int64? {
         guard let usdcRow = pot.first(where: { $0.symbol.uppercased() == "USDC" }),
               let decimal = Decimal(string: usdcRow.units, locale: Locale(identifier: "en_US_POSIX")) else {
@@ -351,33 +281,6 @@ struct ProposeBuyView: View {
         var rounded = Decimal()
         NSDecimalRound(&rounded, &scaled, 0, .plain)
         return (rounded as NSDecimalNumber).int64Value
-    }
-
-    private func formattedPricePerShare(for quote: BuyQuoteDTO) -> String? {
-        if let priceMicros = quote.priceUsdcMicros, let value = microsToDecimal(priceMicros) {
-            return formatUsd(value) + " / share"
-        }
-        guard let outputAmount = quote.outputAmount,
-              let usdc = microsToDecimal(quote.usdcMicros),
-              let shares = xStockAtomicsToShares(outputAmount),
-              shares > 0 else {
-            return nil
-        }
-        return formatUsd(usdc / shares) + " / share"
-    }
-
-    private func formattedSharesReceived(for quote: BuyQuoteDTO) -> String? {
-        guard let outputAmount = quote.outputAmount, let shares = xStockAtomicsToShares(outputAmount) else {
-            return nil
-        }
-        return formatShares(shares)
-    }
-
-    private func xStockAtomicsToShares(_ raw: String) -> Decimal? {
-        guard let atomics = Decimal(string: raw, locale: Locale(identifier: "en_US_POSIX")) else {
-            return nil
-        }
-        return atomics / xStockAtomicScale
     }
 
     private func microsToDecimal(_ raw: String) -> Decimal? {
@@ -397,19 +300,5 @@ struct ProposeBuyView: View {
         formatter.currencyCode = "USD"
         formatter.locale = Locale(identifier: "en_US_POSIX")
         return formatter.string(from: number) ?? "$\(number)"
-    }
-
-    private func formatShares(_ value: Decimal) -> String {
-        var rounded = Decimal()
-        var source = value
-        NSDecimalRound(&rounded, &source, 4, .plain)
-        let number = rounded as NSDecimalNumber
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 4
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        let formatted = formatter.string(from: number) ?? number.stringValue
-        return "\(formatted) shares"
     }
 }

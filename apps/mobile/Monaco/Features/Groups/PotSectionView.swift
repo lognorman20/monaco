@@ -1,14 +1,16 @@
 import SwiftUI
 import UIKit
+import MonacoCore
 
 struct PotSectionView: View {
+    let potTotalUsd: String
     let pot: [PotRowDTO]
     let treasuryAddress: String?
 
     @State private var didCopyTreasury = false
 
     var body: some View {
-        Section("Pot") {
+        Section {
             if pot.isEmpty {
                 Text("No holdings yet. Add money to get started.")
                     .font(.footnote)
@@ -17,7 +19,7 @@ struct PotSectionView: View {
                 ForEach(pot) { row in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text(row.symbol)
+                            Text(AssetSymbolFormatter.format(row.symbol))
                                 .font(.body.bold())
                                 .foregroundStyle(MonacoTheme.primaryText)
                             if row.afterHours == true {
@@ -31,9 +33,15 @@ struct PotSectionView: View {
                                     .accessibilityIdentifier("pot-after-hours-\(row.symbol)")
                             }
                             Spacer()
-                            Text("$\(row.valueUsd)")
-                                .font(.body.monospacedDigit())
-                                .foregroundStyle(MonacoTheme.primaryText)
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text("$\(row.valueUsd)")
+                                    .font(.body.monospacedDigit())
+                                    .foregroundStyle(MonacoTheme.primaryText)
+                                Text(row.dollarPnl)
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(pnlColor(for: row.dollarPnl))
+                                    .accessibilityIdentifier("pot-row-pnl-\(row.symbol)")
+                            }
                         }
                         HStack {
                             Text("\(row.units) units @ $\(row.markUsd)")
@@ -48,6 +56,17 @@ struct PotSectionView: View {
 
             if let treasuryAddress {
                 treasuryAddressBlock(treasuryAddress)
+            }
+        } header: {
+            HStack {
+                Text("Pot")
+                Spacer()
+                if !pot.isEmpty {
+                    Text("$\(potTotalUsd)")
+                        .font(.subheadline.bold().monospacedDigit())
+                        .foregroundStyle(MonacoTheme.primaryText)
+                        .accessibilityIdentifier("pot-total-value")
+                }
             }
         }
     }
@@ -96,5 +115,15 @@ struct PotSectionView: View {
             try? await Task.sleep(for: .seconds(2))
             didCopyTreasury = false
         }
+    }
+
+    private func pnlColor(for dollarPnl: String) -> Color {
+        if dollarPnl.hasPrefix("-") {
+            return MonacoTheme.warning
+        }
+        if dollarPnl.hasPrefix("+") && dollarPnl != "+0.00" {
+            return MonacoTheme.success
+        }
+        return MonacoTheme.secondaryText
     }
 }

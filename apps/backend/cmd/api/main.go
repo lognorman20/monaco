@@ -107,9 +107,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 	} else {
 		slog.Info("pyth client skipped", "reason", "PYTH_API_KEY unset")
 	}
-	deposits := app.NewDepositService(store, privyClient, pythClient)
+	catalogSearcher := xstocks.NewHTTPCatalogSearcher()
+	symbols := app.NewSymbolResolver(catalogSearcher)
+	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
 	sessions := app.NewSessionService(store, privyClient)
-	home := app.NewHomeService(store, privyClient, deposits)
+	home := app.NewHomeService(store, privyClient, pythClient, deposits, symbols)
 	groups := app.NewGroupService(store, privyClient)
 	governance := app.NewGovernanceService(store, privyClient)
 	auth := &httpapi.AuthHandlers{Sessions: sessions}
@@ -121,16 +123,16 @@ func boot(ctx context.Context) (*bootResult, error) {
 	xstocksResolver := xstocks.NewHTTPResolver()
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	signer := app.NewPrivyTreasurySigner(privyClient)
-	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, relayer.PrivateKey())
+	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, relayer.PrivateKey(), symbols)
 	executeOnPass := app.NewExecuteOnPassService(swap, store)
 	governance.SetBuyService(buy)
 	transactionHandlers := &httpapi.TransactionHandlers{
-		Store:   store,
-		Privy:   privyClient,
-		XStocks: xstocksResolver,
-		Swap:    swap,
+		Store:    store,
+		Privy:    privyClient,
+		XStocks:  xstocksResolver,
+		Swap:     swap,
+		Symbols:  symbols,
 	}
-	catalogSearcher := xstocks.NewHTTPCatalogSearcher()
 	catalogHandlers := &httpapi.CatalogHandlers{
 		Store:   store,
 		Privy:   privyClient,

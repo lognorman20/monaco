@@ -8,12 +8,14 @@ public enum ScreenSnapshotRenderer {
         if view.pot.isEmpty {
             lines.append("No holdings yet. Add money to get started.")
         } else {
+            lines.append("Total | $\(view.resolvedPotTotalUsd)")
             for row in view.pot {
                 var headline = "\(row.symbol) | $\(row.valueUsd)"
                 if row.afterHours == true {
                     headline += " [After hours]"
                 }
                 lines.append(headline)
+                lines.append("  \(row.dollarPnl)")
                 lines.append("  \(row.units) units @ $\(row.markUsd)")
             }
         }

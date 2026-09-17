@@ -29,6 +29,7 @@ type CatalogSearchPage struct {
 
 // CatalogSearcher searches the xStocks catalog and resolves Solana mints.
 type CatalogSearcher interface {
+	MintCatalog
 	Search(ctx context.Context, query string, limit, offset int) (CatalogSearchPage, error)
 }
 
@@ -36,6 +37,7 @@ type CatalogSearcher interface {
 type HTTPCatalogSearcher struct {
 	baseURL    string
 	httpClient *http.Client
+	mintIndex  mintIndex
 }
 
 // NewHTTPCatalogSearcher returns a catalog searcher backed by the production API.
@@ -45,6 +47,7 @@ func NewHTTPCatalogSearcher() *HTTPCatalogSearcher {
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 		},
+		mintIndex: mintIndex{byMint: make(map[string]CatalogAsset)},
 	}
 }
 
@@ -56,6 +59,7 @@ func NewHTTPCatalogSearcherWithClient(baseURL string, httpClient *http.Client) *
 	return &HTTPCatalogSearcher{
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		httpClient: httpClient,
+		mintIndex:  mintIndex{byMint: make(map[string]CatalogAsset)},
 	}
 }
 

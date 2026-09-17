@@ -13,6 +13,8 @@ struct GetDepositResponse: Decodable {
     let groupId: String
     let amount: Int64
     let status: String
+    let fromAddress: String?
     let txSignature: String?
     let shareUnits: Int64
+    let createdAt: String
 }

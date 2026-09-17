@@ -76,17 +76,19 @@ var ErrInvalidSweepTarget = errors.New("invalid sweep target")
 
 // DepositService orchestrates deposit create and sweep credit flows.
 type DepositService struct {
-	store *postgres.Store
-	privy privy.Client
-	pyth  pyth.Client
+	store   *postgres.Store
+	privy   privy.Client
+	pyth    pyth.Client
+	symbols *SymbolResolver
 }
 
 // NewDepositService wires deposit dependencies.
-func NewDepositService(store *postgres.Store, privyClient privy.Client, pythClient pyth.Client) *DepositService {
+func NewDepositService(store *postgres.Store, privyClient privy.Client, pythClient pyth.Client, symbols *SymbolResolver) *DepositService {
 	return &DepositService{
-		store: store,
-		privy: privyClient,
-		pyth:  pythClient,
+		store:   store,
+		privy:   privyClient,
+		pyth:    pythClient,
+		symbols: symbols,
 	}
 }
 
@@ -361,17 +363,28 @@ func (d *DepositService) GetDeposit(ctx context.Context, accessToken, depositID 
 	if err != nil {
 		return Deposit{}, Position{}, err
 	}
-	if !found || row.UserID != user.ID {
+	if !found {
 		return Deposit{}, Position{}, ErrDepositNotFound
 	}
-
-	positionRow, hasPosition, err := d.store.GetPosition(ctx, user.ID, row.GroupID)
-	if err != nil {
-		return Deposit{}, Position{}, err
+	if row.UserID != user.ID {
+		member, err := d.store.IsGroupMember(ctx, row.GroupID, user.ID)
+		if err != nil {
+			return Deposit{}, Position{}, err
+		}
+		if !member {
+			return Deposit{}, Position{}, ErrDepositNotFound
+		}
 	}
+
 	position := Position{UserID: user.ID, GroupID: row.GroupID}
-	if hasPosition {
-		position = positionFromRowPostgres(positionRow)
+	if row.UserID == user.ID {
+		positionRow, hasPosition, err := d.store.GetPosition(ctx, user.ID, row.GroupID)
+		if err != nil {
+			return Deposit{}, Position{}, err
+		}
+		if hasPosition {
+			position = positionFromRowPostgres(positionRow)
+		}
 	}
 
 	return depositFromRow(row), position, nil
