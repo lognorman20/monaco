@@ -8,7 +8,7 @@
 
 | Item | Detail |
 |------|--------|
-| **Integration branch** | `milestone-4` @ **`5574fea48345393ff5001d0440e302758f553159`** (`test(backend): assert M4-T36 redeem slice matches domain math`) |
+| **Integration branch** | `milestone-4` @ **`6467ea0e2f2890053b956ad2633fe4de96cc230c`** (`docs(m5): add agent handoff for mobile UI milestone`) |
 | **Verify HEAD** | `git rev-parse milestone-4` — if newer than above, use actual SHA in prompts |
 | **Start M5 from** | `milestone-4`, **not** `main` |
 | **M5 integration branch** | `gt create milestone-5` from current `milestone-4` tip |
@@ -28,7 +28,7 @@
 ```bash
 dotenvx run -f .env.local -- just test backend
 just test mobile          # host swift test packages/mobile-core — no sim
-just build mobile         # xcodebuild on gold sim UDID below
+just build mobile         # xcodebuild on $SIMSLIM_UDID
 curl -s http://127.0.0.1:8080/health
 ```
 
@@ -123,10 +123,10 @@ dotenvx run -f .env.local -- just run           # postgres + backend + mobile
 
 | Item | Value |
 |------|-------|
-| Gold sim UDID | `7B30D45E-62FD-42E2-871A-787B19D38CCF` |
+| Gold sim UDID | `$SIMSLIM_UDID` (per machine; never commit) |
 | Bundle ID | `com.monaco.app` |
 | `just test mobile` | Host `swift test` in `packages/mobile-core` — **no sim boot** |
-| `just build mobile` | `xcodebuild build` on gold UDID only |
+| `just build mobile` | `xcodebuild build` on `$SIMSLIM_UDID` only |
 | Launch | `./scripts/ios-sim` or `just run mobile` from repo root |
 
 **Never:** `simctl erase`, destination by device name (`iPhone 17`), AppleScript/CGEvent/coordinate tap hacks.
@@ -162,7 +162,7 @@ Skill: [`.cursor/skills/worktree-orchestrate/SKILL.md`](../.cursor/skills/worktr
 
 Within a wave: parallel implementers on disjoint `Features/*` paths. Redeem parent M5-T17; subissues M5-T18, M5-T19 first.
 
-**Sim QA:** XcodeBuildMCP or ios-simslim-fast-qa with `--simulator-id 7B30D45E-62FD-42E2-871A-787B19D38CCF`.
+**Sim QA:** XcodeBuildMCP or ios-simslim-fast-qa with `--simulator-id "$SIMSLIM_UDID"`.
 
 ---
 
@@ -187,7 +187,7 @@ Read first, in order:
 Repo: /Users/logno/Documents/work/github/monaco
 
 Branch:
-- Base: milestone-4 (verify tip; was 5574fea — use actual `git rev-parse milestone-4`)
+- Base: milestone-4 (verify tip; was 6467ea0 — use actual `git rev-parse milestone-4`)
 - Create/use milestone-5 FROM milestone-4, never from main
 - gt create milestone-5   (after milestone-4 PR submitted if user asked)
 
@@ -214,11 +214,11 @@ Product:
 Gates (must stay green). Do not change just test/build recipes:
   dotenvx run -f .env.local -- just test backend
   just test mobile          # host swift test packages/mobile-core — no sim
-  just build mobile         # gold UDID 7B30D45E-62FD-42E2-871A-787B19D38CCF only
+  just build mobile         # $SIMSLIM_UDID only
   curl -s http://127.0.0.1:8080/health
 
 QA (if sim):
-- Gold slim sim UDID 7B30D45E-62FD-42E2-871A-787B19D38CCF. Never simctl erase. Never destination by name.
+- Gold slim sim `$SIMSLIM_UDID` (per machine). Never simctl erase. Never destination by name.
 - Launch ./scripts/ios-sim or just run mobile. Bundle com.monaco.app. Privy via with-ios-privy-env.
 - Privy test Alfred: test-8081@privy.io OTP 465354.
 - No AppleScript/CGEvent/coordinate tap hacks. Use XcodeBuildMCP accessibility labels/ids.

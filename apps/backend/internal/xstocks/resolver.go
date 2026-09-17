@@ -79,23 +79,34 @@ func (r *HTTPResolver) ResolveSolanaMint(ctx context.Context, symbol string) (st
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
+		logResolveMint(symbol, "", err)
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logResolveMint(symbol, "", err)
 		return "", err
 	}
 
 	if resp.StatusCode == http.StatusNotFound {
+		logResolveMint(symbol, "", ErrNotFound)
 		return "", ErrNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("%w: status %d", ErrInvalidResponse, resp.StatusCode)
+		resolveErr := fmt.Errorf("%w: status %d", ErrInvalidResponse, resp.StatusCode)
+		logResolveMint(symbol, "", resolveErr)
+		return "", resolveErr
 	}
 
-	return SolanaMintFromAssetResponse(body)
+	mint, err := SolanaMintFromAssetResponse(body)
+	if err != nil {
+		logResolveMint(symbol, "", err)
+		return "", err
+	}
+	logResolveMint(symbol, mint, nil)
+	return mint, nil
 }
 
 // SolanaMintFromAssetResponse parses catalog JSON and returns the Solana mint.

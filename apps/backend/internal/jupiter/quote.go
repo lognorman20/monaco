@@ -25,6 +25,15 @@ const (
 // ErrNoRoute means Jupiter returned no routable path for the requested swap.
 var ErrNoRoute = errors.New("jupiter: no route")
 
+// ErrInsufficientFunds means the taker cannot fund the requested swap amount.
+var ErrInsufficientFunds = errors.New("jupiter: insufficient funds")
+
+// ErrInsufficientSOL means the taker or payer lacks SOL for fees or ATA rent.
+var ErrInsufficientSOL = errors.New("jupiter: insufficient SOL for gas")
+
+// ErrBelowMinimumSize means the swap is below Jupiter's executable minimum.
+var ErrBelowMinimumSize = errors.New("jupiter: below minimum swap size")
+
 // Client quotes and executes Jupiter Swap API v2 swaps.
 type Client interface {
 	QuoteBuy(ctx context.Context, params QuoteBuyParams) (BuyQuote, error)
@@ -42,6 +51,9 @@ type QuoteBuyParams struct {
 	Symbol     string
 	OutputMint string
 	USDCAmount int64
+	// Taker is the treasury wallet that will sign the swap. When set, routability
+	// requires a buildable unsigned transaction (same constraints as OrderBuy).
+	Taker string
 }
 
 // BuyQuote is a parsed Jupiter buy quote response.
@@ -58,6 +70,7 @@ type BuyQuote struct {
 type HTTPClient struct {
 	baseURL    string
 	httpClient *http.Client
+	payer      string
 }
 
 // NewHTTPClient returns a Jupiter v2 client using the production API.
@@ -68,6 +81,14 @@ func NewHTTPClient() *HTTPClient {
 			Timeout: defaultTimeout,
 		}),
 	}
+}
+
+// NewHTTPClientWithPayer returns a production client that sponsors gas via payer.
+// Jupiter requires payer != taker; treasury swaps need this when treasuries hold 0 SOL.
+func NewHTTPClientWithPayer(payer string) *HTTPClient {
+	client := NewHTTPClient()
+	client.payer = strings.TrimSpace(payer)
+	return client
 }
 
 // NewHTTPClientWithBaseURL injects a custom base URL and HTTP client for tests.
@@ -82,13 +103,17 @@ func NewHTTPClientWithBaseURL(baseURL string, httpClient *http.Client) *HTTPClie
 }
 
 type quoteResponse struct {
-	InputMint  string          `json:"inputMint"`
-	OutputMint string          `json:"outputMint"`
-	InAmount   string          `json:"inAmount"`
-	OutAmount  string          `json:"outAmount"`
-	RoutePlan  json.RawMessage `json:"routePlan"`
-	RequestID  string          `json:"requestId"`
-	Error      string          `json:"error"`
+	InputMint    string          `json:"inputMint"`
+	OutputMint   string          `json:"outputMint"`
+	InAmount     string          `json:"inAmount"`
+	OutAmount    string          `json:"outAmount"`
+	Transaction  string          `json:"transaction"`
+	RoutePlan    json.RawMessage `json:"routePlan"`
+	RequestID    string          `json:"requestId"`
+	Router       string          `json:"router"`
+	ErrorCode    float64         `json:"errorCode"`
+	ErrorMessage string          `json:"errorMessage"`
+	Error        string          `json:"error"`
 }
 
 // QuoteBuy requests a USDC inputMint quote for an xStock outputMint.
@@ -106,50 +131,38 @@ func (c *HTTPClient) QuoteBuy(ctx context.Context, params QuoteBuyParams) (BuyQu
 		return BuyQuote{Routable: false, InputMint: USDCMint}, fmt.Errorf("%w: %s", ErrNoRoute, reason)
 	}
 
-	query := url.Values{}
-	query.Set("inputMint", USDCMint)
-	query.Set("outputMint", params.OutputMint)
-	query.Set("amount", strconv.FormatInt(params.USDCAmount, 10))
-	query.Set("swapMode", "ExactIn")
-	query.Set("slippageBps", strconv.Itoa(defaultSlippageBps))
-
-	endpoint := c.baseURL + "/order?" + query.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	body, err := c.fetchBuyOrder(ctx, buyOrderRequest{
+		InputMint:  USDCMint,
+		OutputMint: params.OutputMint,
+		Amount:     params.USDCAmount,
+		Taker:      params.Taker,
+	}, params.GroupID, params.UserID, params.Symbol)
 	if err != nil {
-		return BuyQuote{}, err
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, err.Error())
-		return BuyQuote{Routable: false, InputMint: USDCMint, OutputMint: params.OutputMint}, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return BuyQuote{}, err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		reason := fmt.Sprintf("status %d", resp.StatusCode)
+		reason := err.Error()
+		if strings.Contains(reason, "order status") {
+			reason = fmt.Sprintf("status %s", strings.TrimPrefix(reason, "jupiter: order status "))
+		}
 		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, reason)
 		return BuyQuote{Routable: false, InputMint: USDCMint, OutputMint: params.OutputMint}, fmt.Errorf("%w: %s", ErrNoRoute, reason)
 	}
 
-	quote, err := ParseBuyQuoteResponse(body)
+	quote, err := ParseBuyQuoteResponse(body, params.Taker != "")
 	if err != nil {
 		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, err.Error())
 		return BuyQuote{Routable: false, InputMint: USDCMint, OutputMint: params.OutputMint}, err
 	}
 	if !quote.Routable {
 		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, "no route")
+	} else {
+		logQuoteSuccess(params.GroupID, params.UserID, params.Symbol, quote.RequestID, true)
 	}
 	return quote, nil
 }
 
 // ParseBuyQuoteResponse parses Jupiter v2 order/quote JSON.
-func ParseBuyQuoteResponse(body []byte) (BuyQuote, error) {
+// requireTransaction mirrors Jupiter /order with taker: price-only quotes omit
+// transaction; executable quotes must include a buildable unsigned transaction.
+func ParseBuyQuoteResponse(body []byte, requireTransaction bool) (BuyQuote, error) {
 	var raw quoteResponse
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return BuyQuote{}, fmt.Errorf("jupiter: invalid quote json: %w", err)
@@ -161,7 +174,7 @@ func ParseBuyQuoteResponse(body []byte) (BuyQuote, error) {
 		InAmount:   raw.InAmount,
 		OutAmount:  raw.OutAmount,
 		RequestID:  raw.RequestID,
-		Routable:   isRoutableQuote(raw),
+		Routable:   isRoutableBuyQuote(raw, requireTransaction),
 	}
 	if quote.InputMint == "" {
 		quote.InputMint = USDCMint
@@ -172,8 +185,11 @@ func ParseBuyQuoteResponse(body []byte) (BuyQuote, error) {
 	return quote, nil
 }
 
-func isRoutableQuote(raw quoteResponse) bool {
-	if strings.TrimSpace(raw.Error) != "" {
+func isRoutableBuyQuote(raw quoteResponse, requireTransaction bool) bool {
+	if raw.ErrorCode != 0 || strings.TrimSpace(raw.Error) != "" || strings.TrimSpace(raw.ErrorMessage) != "" {
+		return false
+	}
+	if requireTransaction && strings.TrimSpace(raw.Transaction) == "" {
 		return false
 	}
 	if len(raw.RoutePlan) == 0 || string(raw.RoutePlan) == "null" {
@@ -188,4 +204,115 @@ func isRoutableQuote(raw quoteResponse) bool {
 		return false
 	}
 	return true
+}
+
+type buyOrderRequest struct {
+	InputMint  string
+	OutputMint string
+	Amount     int64
+	Taker      string
+}
+
+func (c *HTTPClient) fetchBuyOrder(ctx context.Context, req buyOrderRequest, groupID, userID, symbol string) ([]byte, error) {
+	if req.Amount <= 0 {
+		return nil, fmt.Errorf("jupiter: amount must be positive")
+	}
+	if strings.TrimSpace(req.OutputMint) == "" {
+		return nil, fmt.Errorf("jupiter: output mint is required")
+	}
+	inputMint := req.InputMint
+	if inputMint == "" {
+		inputMint = USDCMint
+	}
+
+	query := url.Values{}
+	query.Set("inputMint", inputMint)
+	query.Set("outputMint", req.OutputMint)
+	query.Set("amount", strconv.FormatInt(req.Amount, 10))
+	query.Set("swapMode", "ExactIn")
+	query.Set("slippageBps", strconv.Itoa(defaultSlippageBps))
+	taker := strings.TrimSpace(req.Taker)
+	if taker != "" {
+		query.Set("taker", taker)
+	}
+	if payer := orderPayer(c.payer, taker); payer != "" {
+		query.Set("payer", payer)
+	}
+
+	endpoint := c.baseURL + "/order?" + query.Encode()
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		logOrderHTTPFailure(groupID, userID, symbol, req, c.payer, 0, nil, err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logOrderHTTPFailure(groupID, userID, symbol, req, c.payer, resp.StatusCode, body, err)
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		apiErr := fmt.Errorf("jupiter: order status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		logOrderHTTPFailure(groupID, userID, symbol, req, c.payer, resp.StatusCode, body, apiErr)
+		return nil, apiErr
+	}
+	if err := orderResponseBuildError(body); err != nil {
+		logOrderHTTPFailure(groupID, userID, symbol, req, c.payer, resp.StatusCode, body, err)
+		return nil, err
+	}
+	return body, nil
+}
+
+func orderPayer(configuredPayer, taker string) string {
+	payer := strings.TrimSpace(configuredPayer)
+	if payer == "" || payer == strings.TrimSpace(taker) {
+		return ""
+	}
+	return payer
+}
+
+func orderResponseBuildError(body []byte) error {
+	var raw quoteResponse
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil
+	}
+	if strings.TrimSpace(raw.Transaction) != "" {
+		return nil
+	}
+	if raw.ErrorCode == 0 && strings.TrimSpace(raw.Error) == "" && strings.TrimSpace(raw.ErrorMessage) == "" {
+		return nil
+	}
+	return orderBuildError(raw.Router, raw.ErrorCode, raw.ErrorMessage, raw.Error)
+}
+
+func orderBuildError(router string, errorCode float64, errorMessage, errText string) error {
+	msg := strings.TrimSpace(errorMessage)
+	if msg == "" {
+		msg = strings.TrimSpace(errText)
+	}
+	if msg == "" {
+		msg = "order could not be built"
+	}
+	if router != "" {
+		msg = fmt.Sprintf("[%s] %s", router, msg)
+	}
+	switch int(errorCode) {
+	case 1:
+		return fmt.Errorf("%w: %s", ErrInsufficientFunds, msg)
+	case 2:
+		return fmt.Errorf("%w: %s", ErrInsufficientSOL, msg)
+	case 3:
+		return fmt.Errorf("%w: %s", ErrBelowMinimumSize, msg)
+	default:
+		if strings.Contains(strings.ToLower(msg), "failed to get quotes") {
+			return fmt.Errorf("%w: %s (treasury may need SOL or integrator payer)", ErrNoRoute, msg)
+		}
+		return fmt.Errorf("%w: %s", ErrNoRoute, msg)
+	}
 }

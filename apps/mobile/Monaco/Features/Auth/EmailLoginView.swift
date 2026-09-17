@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Email OTP login via Privy. Privy dashboard uses inbox code, not password.
+/// Email OTP sign-in via Privy — kept for internal testers.
 struct EmailLoginView: View {
     @ObservedObject var auth: PrivyAuthService
 
@@ -15,25 +15,33 @@ struct EmailLoginView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Sign in with email")
-                .font(.title2.bold())
+            Text("We’ll email you a one-time code. Check spam if it doesn’t arrive.")
+                .authSecondaryCaption()
 
-            Text("We send a one-time code to your inbox. Check spam if it does not arrive.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            TextField("Email address", text: $emailAddress)
+            TextField(
+                "",
+                text: $emailAddress,
+                prompt: Text("Email address").foregroundStyle(MonacoTheme.disabled)
+            )
                 .keyboardType(.emailAddress)
                 .textContentType(.emailAddress)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($focusedField, equals: .email)
+                .authTextFieldStyle()
+                .accessibilityIdentifier("emailAddressField")
 
             if showsOTPField {
-                TextField("6-digit code", text: $otpCode)
+                TextField(
+                    "",
+                    text: $otpCode,
+                    prompt: Text("6-digit code").foregroundStyle(MonacoTheme.disabled)
+                )
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
                     .focused($focusedField, equals: .code)
+                    .authTextFieldStyle()
+                    .accessibilityIdentifier("emailCodeField")
             }
 
             if let message = statusMessage {
@@ -42,26 +50,16 @@ struct EmailLoginView: View {
                     .foregroundStyle(statusColor)
             }
 
-            if case .authenticated = auth.phase, let token = auth.accessToken {
-                Label("Privy access token ready for session API.", systemImage: "checkmark.seal.fill")
-                    .font(.footnote)
-                    .foregroundStyle(.green)
-
-                Text(tokenPreview(token))
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
             HStack {
                 if showsOTPField {
-                    Button("Verify code") {
+                    Button("Continue") {
                         Task {
                             await auth.loginWithEmailCode(otpCode, sentTo: normalizedEmail)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.monacoPrimary)
                     .disabled(isVerifyDisabled)
+                    .accessibilityIdentifier("emailVerifyButton")
                 } else {
                     Button("Send code") {
                         Task {
@@ -71,16 +69,10 @@ struct EmailLoginView: View {
                             }
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.monacoPrimary)
                     .disabled(isSendDisabled)
+                    .accessibilityIdentifier("emailSendCodeButton")
                 }
-            }
-
-            if case .authenticated = auth.phase {
-                Button("Sign out") {
-                    Task { await auth.logout() }
-                }
-                .buttonStyle(.bordered)
             }
         }
     }
@@ -111,13 +103,13 @@ struct EmailLoginView: View {
         case .idle:
             return nil
         case .sendingCode:
-            return "Sending email code…"
+            return "Sending code…"
         case .awaitingCode:
             return "Enter the code from your email."
         case .verifyingCode:
-            return "Verifying code…"
+            return "Signing you in…"
         case .authenticated:
-            return "Signed in with Privy."
+            return "Signed in."
         case .failed(let message):
             return message
         }
@@ -126,17 +118,12 @@ struct EmailLoginView: View {
     private var statusColor: Color {
         switch auth.phase {
         case .failed:
-            return .orange
+            return MonacoTheme.destructive
         case .authenticated:
-            return .green
+            return MonacoTheme.success
         default:
-            return .secondary
+            return MonacoTheme.secondaryText
         }
-    }
-
-    private func tokenPreview(_ token: String) -> String {
-        guard token.count > 16 else { return token }
-        return String(token.prefix(8)) + "…" + String(token.suffix(8))
     }
 }
 

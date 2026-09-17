@@ -4,71 +4,44 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
-func integrationCatalogApp(t *testing.T) (*CatalogHandlers, *GroupHandlers, *AuthHandlers, privy.Client) {
+func integrationCatalogApp(t *testing.T) (*CatalogHandlers, *GroupHandlers, *AuthHandlers, privy.Client, *postgres.TestIsolation) {
 	t.Helper()
 
-	authHandlers, privyClient, db := integrationApp(t)
-	store := postgres.NewStore(db)
+	quoteHandlers, groupHandlers, authHandlers, privyClient, _, _, iso := integrationQuotesApp(t)
 	catalog := xstocks.NewFakeCatalogSearcher()
-	catalogHandlers := &CatalogHandlers{
-		Store:   store,
-		Privy:   privyClient,
+	return &CatalogHandlers{
+		Store:   quoteHandlers.Store,
+		Privy:   quoteHandlers.Privy,
 		Catalog: catalog,
-	}
-	groupHandlers := &GroupHandlers{
-		Groups:     app.NewGroupService(store, privyClient),
-		Governance: app.NewGovernanceService(store, privyClient),
-	}
-	return catalogHandlers, groupHandlers, authHandlers, privyClient
+	}, groupHandlers, authHandlers, privyClient, iso
 }
 
-func TestGET_assets_search_returnsBackendResolvedCatalog(t *testing.T) {
-	// Arrange
-	catalogHandlers, groupHandlers, authHandlers, privyClient := integrationCatalogApp(t)
-	token := fixtureSessionToken()
-	seedAuthenticatedUser(t, authHandlers, privyClient, token, privy.Identity{
-		PrivyUserID: "did:privy:catalog",
-		DisplayName: "Catalog User",
-	})
+func TestGET_assets_paginatesCatalogResults(t *testing.T) {
+	t.Parallel()
 
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Catalog Fund"}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createReq.Header.Set("Authorization", "Bearer "+string(token))
-	createRec := httptest.NewRecorder()
-	groupHandlers.CreateGroupHandler(createRec, createReq)
-	if createRec.Code != http.StatusOK {
-		t.Fatalf("create group status = %d, want 200; body = %s", createRec.Code, createRec.Body.String())
+	catalogHandlers, groupHandlers, authHandlers, _, iso := integrationCatalogApp(t)
+	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Privy)
+	for i := 0; i < 3; i++ {
+		xstocks.RegisterCatalogAsset(catalogHandlers.Catalog, xstocks.CatalogAsset{
+			Symbol:     "SYM" + string(rune('A'+i)) + "x",
+			Name:       "Stock " + string(rune('A'+i)),
+			SolanaMint: "Mint" + string(rune('A'+i)),
+		})
 	}
 
-	var created createGroupResponse
-	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode create group json: %v", err)
-	}
-
-	xstocks.RegisterCatalogAsset(catalogHandlers.Catalog, xstocks.CatalogAsset{
-		Symbol:     "AAPLx",
-		Name:       "Apple xStock",
-		SolanaMint: "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/groups/"+created.GroupID+"/assets?query=AAPL", nil)
-	req.SetPathValue("id", created.GroupID)
+	req := httptest.NewRequest(http.MethodGet, "/v1/groups/"+groupID+"/assets?limit=2&offset=0", nil)
+	req.SetPathValue("id", groupID)
 	req.Header.Set("Authorization", "Bearer "+string(token))
 	rec := httptest.NewRecorder()
-
-	// Act
 	catalogHandlers.SearchAssetsHandler(rec, req)
 
-	// Assert
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	}
@@ -77,16 +50,10 @@ func TestGET_assets_search_returnsBackendResolvedCatalog(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode json: %v", err)
 	}
-	if len(payload.Assets) != 1 {
-		t.Fatalf("assets len = %d, want 1", len(payload.Assets))
+	if len(payload.Assets) != 2 {
+		t.Fatalf("assets len = %d, want 2", len(payload.Assets))
 	}
-	if payload.Assets[0].Symbol != "AAPLx" {
-		t.Fatalf("symbol = %q, want AAPLx", payload.Assets[0].Symbol)
-	}
-	if payload.Assets[0].Name != "Apple xStock" {
-		t.Fatalf("name = %q, want Apple xStock", payload.Assets[0].Name)
-	}
-	if payload.Assets[0].SolanaMint != "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp" {
-		t.Fatalf("solanaMint = %q, want backend-resolved mint", payload.Assets[0].SolanaMint)
+	if !payload.HasMore {
+		t.Fatal("expected hasMore=true")
 	}
 }

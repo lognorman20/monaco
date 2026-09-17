@@ -1,8 +1,9 @@
 package app
 
 import (
+	"context"
 	"database/sql"
-	"os"
+	"fmt"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
@@ -13,45 +14,84 @@ import (
 )
 
 type integrationHarness struct {
-	DB            *sql.DB
-	Store         *postgres.Store
-	Privy         privy.Client
-	Pyth          pyth.Client
-	Deposits      *DepositService
-	Groups        *GroupService
-	Swap          *SwapService
-	Redeem        *RedeemService
-	Jupiter       jupiter.Client
-	XStocks       xstocks.Resolver
+	DB       *sql.DB
+	Store    *postgres.Store
+	Privy    privy.Client
+	Pyth     pyth.Client
+	Deposits *DepositService
+	Groups   *GroupService
+	Swap     *SwapService
+	Redeem   *RedeemService
+	Jupiter  jupiter.Client
+	XStocks  xstocks.Resolver
+	Catalog  xstocks.CatalogSearcher
+	Symbols  *SymbolResolver
+	ISO      *postgres.TestIsolation
+}
+
+func integrationDB(t *testing.T) (*sql.DB, *postgres.TestIsolation) {
+	t.Helper()
+	db := postgres.OpenTestDB(t)
+	return db, postgres.PrepareTestDB(t, db)
+}
+
+func testGroupName(iso *postgres.TestIsolation, label string) string {
+	return fmt.Sprintf("%s-%s Fund", iso.Suffix(), label)
+}
+
+func testRequestID(iso *postgres.TestIsolation, label string) string {
+	return fmt.Sprintf("req-%s-%s", iso.Suffix(), label)
+}
+
+func testTxSignature(iso *postgres.TestIsolation, label string) string {
+	return fmt.Sprintf("sig-%s-%s", iso.Suffix(), label)
+}
+
+func seedTestTreasuryUSDC(t *testing.T, privyClient privy.Client, treasuryAddress string, usdcMicros int64) {
+	t.Helper()
+	privy.SetTreasuryUSDCBalance(privyClient, treasuryAddress, usdcMicros)
+}
+
+func openTestSession(t *testing.T, iso *postgres.TestIsolation, sessions *SessionService, privyClient privy.Client, label, displayName string) SessionResult {
+	t.Helper()
+	token := privy.AccessToken(iso.UniqueToken(label))
+	privy.RegisterToken(privyClient, token, privy.Identity{
+		PrivyUserID: iso.UniquePrivyID(label),
+		DisplayName: displayName,
+	})
+	result, err := sessions.OpenSession(context.Background(), string(token))
+	if err != nil {
+		t.Fatalf("open session: %v", err)
+	}
+	iso.TrackUser(result.UserID)
+	return result
 }
 
 func integrationApp(t *testing.T) integrationHarness {
 	t.Helper()
 
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Fatal("DATABASE_URL is not set")
-	}
-	db, err := sql.Open("pgx", databaseURL)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	if err := db.Ping(); err != nil {
-		t.Fatalf("ping db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	postgres.PrepareIntegrationDB(t, db)
-
+	db, iso := integrationDB(t)
 	store := postgres.NewStore(db)
 	privyClient := privy.NewFakeClient()
 	pythClient := pyth.NewFakeClient()
 	jupiterClient := jupiter.NewFakeClient()
 	xstocksResolver := xstocks.NewFakeResolver()
 	buy := NewBuyService(jupiterClient, xstocksResolver)
+	catalog := xstocks.NewFakeCatalogSearcher()
+	xstocks.RegisterCatalogAsset(catalog, xstocks.CatalogAsset{
+		Symbol:     "AAPLx",
+		Name:       "Apple",
+		SolanaMint: jupiter.AAPLxMint,
+	})
+	xstocks.RegisterCatalogAsset(catalog, xstocks.CatalogAsset{
+		Symbol:     "TSLAx",
+		Name:       "Tesla",
+		SolanaMint: jupiter.TSLAxMint,
+	})
+	symbols := NewSymbolResolver(catalog)
 
 	signer := NewFakePrivyTreasurySigner()
-	swap := NewSwapService(store, buy, jupiterClient, privyClient, signer)
+	swap := NewSwapService(store, buy, jupiterClient, privyClient, signer, "", symbols)
 	swap.SetPollConfigForTests(jupiter.TestPollConfig())
 
 	return integrationHarness{
@@ -59,49 +99,14 @@ func integrationApp(t *testing.T) integrationHarness {
 		Store:    store,
 		Privy:    privyClient,
 		Pyth:     pythClient,
-		Deposits: NewDepositService(store, privyClient, pythClient),
+		Deposits: NewDepositService(store, privyClient, pythClient, symbols),
 		Groups:   NewGroupService(store, privyClient),
 		Swap:     swap,
 		Redeem:   NewRedeemService(store, privyClient, pythClient, jupiterClient, swap, signer),
 		Jupiter:  jupiterClient,
 		XStocks:  xstocksResolver,
+		Catalog:  catalog,
+		Symbols:  symbols,
+		ISO:      iso,
 	}
-}
-
-func buildObservedSweep(overrides map[string]any) ObservedSweep {
-	sweep := ObservedSweep{
-		TxSignature: "SWEEP-test-signature",
-		FromAddress: "FAKEmember",
-		ToAddress:   "FAKEtreasury",
-		Amount:      1_000_000,
-		DepositID:   "00000000-0000-0000-0000-000000000001",
-		UserID:      "00000000-0000-0000-0000-000000000002",
-		GroupID:     "00000000-0000-0000-0000-000000000003",
-	}
-	if v, ok := overrides["TxSignature"].(string); ok {
-		sweep.TxSignature = v
-	}
-	if v, ok := overrides["FromAddress"].(string); ok {
-		sweep.FromAddress = v
-	}
-	if v, ok := overrides["ToAddress"].(string); ok {
-		sweep.ToAddress = v
-	}
-	if v, ok := overrides["Amount"].(int64); ok {
-		sweep.Amount = v
-	}
-	if v, ok := overrides["DepositID"].(string); ok {
-		sweep.DepositID = v
-	}
-	if v, ok := overrides["UserID"].(string); ok {
-		sweep.UserID = v
-	}
-	if v, ok := overrides["GroupID"].(string); ok {
-		sweep.GroupID = v
-	}
-	return sweep
-}
-
-func depositRowToDeposit(row postgres.DepositRow) Deposit {
-	return depositFromRow(row)
 }

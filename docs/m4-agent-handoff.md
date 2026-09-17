@@ -59,7 +59,7 @@ End-to-end Jupiter buy path is **live on mainnet** via the temporary dev route:
 | Output mint | AAPLx `XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp` |
 | Cost basis | price `179820`, amount `54100` (micro-units) |
 
-**Sim UI path (gold UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`):**
+**Sim UI path (gold `$SIMSLIM_UDID`):**
 
 | Step | Screen | Screenshot |
 |------|--------|------------|
@@ -143,7 +143,7 @@ dotenvx run -f .env.local -- just run           # postgres + backend + mobile
 
 | Item | Value |
 |------|-------|
-| Gold sim UDID | `7B30D45E-62FD-42E2-871A-787B19D38CCF` |
+| Gold sim UDID | `$SIMSLIM_UDID` (per machine; never commit) |
 | Bundle ID | `com.monaco.app` |
 | Launch | `./scripts/ios-sim` or `just run mobile` from repo root |
 

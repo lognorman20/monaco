@@ -17,6 +17,8 @@ final class PrivyAuthService: ObservableObject {
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var accessToken: String?
 
+    private var sessionStore = MonacoSessionStore()
+
     let privy: Privy
 
     init(settings: PrivyAuthSettings) {
@@ -33,11 +35,19 @@ final class PrivyAuthService: ObservableObject {
     }
 
     func restoreSessionIfNeeded() async {
-        guard accessToken == nil else { return }
+        guard accessToken == nil, sessionStore.hasExplicitLogin else { return }
 
         if case .authenticated(let user) = await privy.getAuthState() {
-            await storeAuthenticatedUser(user)
+            await storeAuthenticatedUser(user, markExplicitLogin: false)
         }
+    }
+
+    func shouldInvalidateBackendSession(serverUserId: String) -> Bool {
+        sessionStore.shouldInvalidateSession(serverUserId: serverUserId)
+    }
+
+    func recordBackendSession(userId: String) {
+        sessionStore.recordSession(userId: userId)
     }
 
     func sendSMSCode(to phoneNumberE164: String) async {
@@ -56,7 +66,7 @@ final class PrivyAuthService: ObservableObject {
 
         do {
             let user = try await privy.sms.loginWithCode(code, sentTo: phoneNumberE164)
-            await storeAuthenticatedUser(user)
+            await storeAuthenticatedUser(user, markExplicitLogin: true)
         } catch {
             accessToken = nil
             phase = .failed(message: "Invalid code or phone number.")
@@ -79,7 +89,7 @@ final class PrivyAuthService: ObservableObject {
 
         do {
             let user = try await privy.email.loginWithCode(code, sentTo: email)
-            await storeAuthenticatedUser(user)
+            await storeAuthenticatedUser(user, markExplicitLogin: true)
         } catch {
             accessToken = nil
             phase = .failed(message: "Invalid code or email address.")
@@ -99,13 +109,17 @@ final class PrivyAuthService: ObservableObject {
         }
         accessToken = nil
         phase = .idle
+        sessionStore.clear()
     }
 
-    private func storeAuthenticatedUser(_ user: PrivyUser) async {
+    private func storeAuthenticatedUser(_ user: PrivyUser, markExplicitLogin: Bool) async {
         do {
             let token = try await user.getAccessToken()
             accessToken = token
             phase = .authenticated(userID: user.id)
+            if markExplicitLogin {
+                sessionStore.markExplicitLogin()
+            }
             #if DEBUG
             exportDebugTokens(accessToken: token, user: user)
             await ensureServerSweepSigner(for: user)

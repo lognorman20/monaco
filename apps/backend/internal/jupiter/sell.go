@@ -4,10 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
 )
 
@@ -48,37 +44,15 @@ func (c *HTTPClient) QuoteSell(ctx context.Context, params QuoteSellParams) (Sel
 		return SellQuote{Routable: false, OutputMint: USDCMint}, fmt.Errorf("%w: %s", ErrNoRoute, reason)
 	}
 
-	query := url.Values{}
-	query.Set("inputMint", params.InputMint)
-	query.Set("outputMint", USDCMint)
-	query.Set("amount", strconv.FormatInt(params.Amount, 10))
-	query.Set("swapMode", "ExactIn")
-	query.Set("slippageBps", strconv.Itoa(defaultSlippageBps))
-	if params.Taker != "" {
-		query.Set("taker", params.Taker)
-	}
-
-	endpoint := c.baseURL + "/order?" + query.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return SellQuote{}, err
-	}
-
-	resp, err := c.httpClient.Do(req)
+	body, err := c.fetchBuyOrder(ctx, buyOrderRequest{
+		InputMint:  params.InputMint,
+		OutputMint: USDCMint,
+		Amount:     params.Amount,
+		Taker:      params.Taker,
+	}, params.GroupID, params.UserID, params.Symbol)
 	if err != nil {
 		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, err.Error())
 		return SellQuote{Routable: false, InputMint: params.InputMint, OutputMint: USDCMint}, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return SellQuote{}, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		reason := fmt.Sprintf("status %d", resp.StatusCode)
-		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, reason)
-		return SellQuote{Routable: false, InputMint: params.InputMint, OutputMint: USDCMint}, fmt.Errorf("%w: %s", ErrNoRoute, reason)
 	}
 
 	quote, err := ParseSellQuoteResponse(body)
@@ -88,6 +62,8 @@ func (c *HTTPClient) QuoteSell(ctx context.Context, params QuoteSellParams) (Sel
 	}
 	if !quote.Routable {
 		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, "no route")
+	} else {
+		logQuoteSuccess(params.GroupID, params.UserID, params.Symbol, quote.RequestID, true)
 	}
 	return quote, nil
 }
@@ -118,7 +94,7 @@ func ParseSellQuoteResponse(body []byte) (SellQuote, error) {
 }
 
 func isSellRoutable(raw orderResponse) bool {
-	if strings.TrimSpace(raw.Error) != "" {
+	if raw.ErrorCode != 0 || strings.TrimSpace(raw.Error) != "" || strings.TrimSpace(raw.ErrorMessage) != "" {
 		return false
 	}
 	if strings.TrimSpace(raw.Transaction) == "" {

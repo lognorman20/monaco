@@ -23,6 +23,9 @@ type StartBuyRequest struct {
 	UserID     string
 	Symbol     string
 	USDCAmount int64
+	// Taker is the group treasury wallet. When set, Jupiter must return a buildable
+	// unsigned transaction (same /order constraints as execute OrderBuy).
+	Taker string
 }
 
 // StartBuyResult holds a routable Jupiter quote ready for execute.
@@ -45,11 +48,16 @@ func NewBuyService(jupiterClient jupiter.Client, resolver xstocks.Resolver) *Buy
 	}
 }
 
+// ResolveOutputMint returns the Solana mint for a catalog symbol.
+func (s *BuyService) ResolveOutputMint(ctx context.Context, symbol string) (string, error) {
+	return s.xstocks.ResolveSolanaMint(ctx, symbol)
+}
+
 // StartBuy resolves the xStock mint and refuses when Jupiter has no route.
 func (s *BuyService) StartBuy(ctx context.Context, req StartBuyRequest) (StartBuyResult, error) {
 	logSwapQuoteAttempt(req.GroupID, req.UserID, req.Symbol, req.USDCAmount)
 
-	outputMint, err := s.xstocks.ResolveSolanaMint(ctx, req.Symbol)
+	outputMint, err := s.ResolveOutputMint(ctx, req.Symbol)
 	if err != nil {
 		logSwapRefusal(req.GroupID, req.UserID, req.Symbol, err.Error())
 		return StartBuyResult{}, err
@@ -61,6 +69,7 @@ func (s *BuyService) StartBuy(ctx context.Context, req StartBuyRequest) (StartBu
 		Symbol:     req.Symbol,
 		OutputMint: outputMint,
 		USDCAmount: req.USDCAmount,
+		Taker:      req.Taker,
 	})
 	if err != nil {
 		reason := err.Error()
@@ -107,22 +116,30 @@ type ExecuteOnPassResult struct {
 // ExecuteOnPass builds, signs, POSTs Jupiter execute, polls Success code 0, and persists the buy.
 // Only proposals with status passed may execute. Idempotency on proposal id is wired for M4-T21.
 func (s *ExecuteOnPassService) ExecuteOnPass(ctx context.Context, proposal Proposal) (ExecuteOnPassResult, error) {
+	logExecuteOnPassStart(proposal.ID, proposal.GroupID, proposal.Symbol, proposal.UsdcMicros)
+
 	if proposal.Status != ProposalPassed {
+		logExecuteOnPassBranchWarn("execute on pass rejected", "proposal not passed", "proposal_id", proposal.ID, "status", proposal.Status)
 		return ExecuteOnPassResult{}, ErrProposalNotPassed
 	}
 	if proposal.ID == "" || proposal.GroupID == "" {
+		logExecuteOnPassBranchWarn("execute on pass rejected", "missing ids")
 		return ExecuteOnPassResult{}, fmt.Errorf("proposal id and group id are required")
 	}
 	if proposal.Symbol == "" {
+		logExecuteOnPassBranchWarn("execute on pass rejected", "symbol required", "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, fmt.Errorf("symbol is required")
 	}
 	if proposal.UsdcMicros <= 0 {
+		logExecuteOnPassBranchWarn("execute on pass rejected", "usdc not positive", "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, fmt.Errorf("usdc must be positive")
 	}
 
 	if existing, ok, err := s.existingBuyForProposal(ctx, proposal.ID); err != nil {
+		logExecuteOnPassBranchError("execute on pass lookup existing failed", err, "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, err
 	} else if ok {
+		logExecuteOnPassIdempotent(proposal.ID, existing.ID)
 		return ExecuteOnPassResult{Transaction: existing, Created: false}, nil
 	}
 
@@ -131,20 +148,27 @@ func (s *ExecuteOnPassService) ExecuteOnPass(ctx context.Context, proposal Propo
 		UserID:     proposal.ProposerID,
 		Symbol:     proposal.Symbol,
 		USDCAmount: proposal.UsdcMicros,
+		ProposalID: proposal.ID,
 	})
 	if err != nil {
+		logExecuteOnPassBranchError("execute on pass buy failed", err,
+			"proposal_id", proposal.ID, "group_id", proposal.GroupID, "symbol", proposal.Symbol,
+			"usdc_amount", proposal.UsdcMicros, "stage", "dev_execute_buy")
 		return ExecuteOnPassResult{}, err
 	}
 
 	linked, _, err := s.linkBuyToProposal(ctx, proposal.ID, executeResult.Transaction)
 	if err != nil {
+		logExecuteOnPassBranchError("execute on pass link failed", err, "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, err
 	}
 
 	if err := s.recordTreasuryHoldingsAndNavSnapshot(ctx, proposal, linked, executeResult.Created); err != nil {
+		logExecuteOnPassBranchError("execute on pass record holdings failed", err, "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, err
 	}
 
+	logExecuteOnPassSuccess(proposal.ID, linked.ID, executeResult.Created)
 	return ExecuteOnPassResult{
 		Transaction: linked,
 		Created:     executeResult.Created,

@@ -49,20 +49,21 @@ func (c *failingEnsureTreasuryClient) PayUSDC(ctx context.Context, req privy.Pay
 func TestCreateGroup_privyTreasuryFailure_rollsBackGroupRow(t *testing.T) {
 	// Arrange
 	ctx := context.Background()
-	db := integrationDB(t)
-	resetTables(t, db)
+	db, iso := integrationDB(t)
 	store := postgres.NewStore(db)
 
 	fake := privy.NewFakeClient()
-	token := privy.AccessToken("test-create-group-privy-fail")
+	token := privy.AccessToken(iso.UniqueToken("create-group"))
+	privyUserID := iso.UniquePrivyID("create-group")
 	privy.RegisterToken(fake, token, privy.Identity{
-		PrivyUserID: "did:privy:create-group-privy-fail",
+		PrivyUserID: privyUserID,
 		DisplayName: "Alfred",
 	})
-	user, err := store.UpsertUser(ctx, "did:privy:create-group-privy-fail", "Alfred")
+	user, err := store.UpsertUser(ctx, privyUserID, "Alfred")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
+	iso.TrackUser(user.ID)
 
 	privyClient := &failingEnsureTreasuryClient{
 		inner:             fake,
@@ -71,7 +72,7 @@ func TestCreateGroup_privyTreasuryFailure_rollsBackGroupRow(t *testing.T) {
 	groups := NewGroupService(store, privyClient)
 
 	// Act
-	_, err = groups.CreateGroup(ctx, string(token), "Alpha Fund")
+	_, err = groups.CreateGroup(ctx, string(token), testGroupName(iso, "alpha"))
 
 	// Assert
 	if err == nil {
@@ -87,7 +88,11 @@ func TestCreateGroup_privyTreasuryFailure_rollsBackGroupRow(t *testing.T) {
 	}
 
 	var treasuryCount int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM treasuries").Scan(&treasuryCount); err != nil {
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM treasuries t
+		INNER JOIN groups g ON g.id = t.group_id
+		WHERE g.creator_user_id = $1`, user.ID).Scan(&treasuryCount); err != nil {
 		t.Fatalf("count treasuries: %v", err)
 	}
 	if treasuryCount != 0 {

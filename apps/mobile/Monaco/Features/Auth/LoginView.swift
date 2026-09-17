@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// M1 login shell: pick SMS or email OTP when both are enabled in config.
+/// M5 product launch shell: hero + SMS or email OTP sign-in.
 struct LoginView: View {
     @ObservedObject var auth: PrivyAuthService
 
     @State private var selectedMethod: LoginMethod
 
     private enum LoginMethod: String, CaseIterable, Identifiable {
-        case sms = "SMS"
+        case sms = "Text message"
         case email = "Email"
 
         var id: String { rawValue }
@@ -24,18 +24,33 @@ struct LoginView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            if showsMethodPicker {
-                Picker("Login method", selection: $selectedMethod) {
-                    ForEach(availableMethods) { method in
-                        Text(method.rawValue).tag(method)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                LaunchScreenView()
 
-            loginContent
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Sign in")
+                        .font(.title2.bold())
+                        .foregroundStyle(MonacoTheme.primaryText)
+
+                    if showsMethodPicker {
+                        Picker("Sign-in method", selection: $selectedMethod) {
+                            ForEach(availableMethods) { method in
+                                Text(method.rawValue).tag(method)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .tint(MonacoTheme.accent)
+                    }
+
+                    loginContent
+                }
+            }
+            .padding(.vertical, 24)
         }
+        .authScreenBackground()
+        .tint(MonacoTheme.accent)
+        .foregroundStyle(MonacoTheme.primaryText)
         .onChange(of: selectedMethod) { _, _ in
             auth.resetLoginFlow()
         }

@@ -129,6 +129,41 @@ func ComputeMemberPnL(pos MemberPosition, totalShares ShareUnits, potNav USDCMic
 	}, nil
 }
 
+// BuildInGroupViewBoard assembles ranked in-group board rows for the group view.
+// Every member is included; members without a computable percent return sort last.
+func BuildInGroupViewBoard(members []MemberPosition, totalShares ShareUnits, potNav USDCMicros) ([]MemberPnL, error) {
+	rows := make([]MemberPnL, 0, len(members))
+	for _, member := range members {
+		pnl, err := ComputeMemberPnL(member, totalShares, potNav)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, pnl)
+	}
+	RankMemberPnLForGroupView(rows)
+	return rows, nil
+}
+
+// RankMemberPnLForGroupView sorts by percent return descending, then user id.
+// Members without a percent return rank after those with one.
+func RankMemberPnLForGroupView(rows []MemberPnL) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		iHas := rows[i].PercentReturn != nil
+		jHas := rows[j].PercentReturn != nil
+		if iHas != jHas {
+			return iHas
+		}
+		if iHas {
+			pi := *rows[i].PercentReturn
+			pj := *rows[j].PercentReturn
+			if pi != pj {
+				return pi > pj
+			}
+		}
+		return rows[i].UserID < rows[j].UserID
+	})
+}
+
 // BuildInGroupBoard assembles ranked in-group board rows, skipping ineligible members.
 func BuildInGroupBoard(members []MemberPosition, totalShares ShareUnits, potNav USDCMicros) ([]MemberPnL, error) {
 	rows := make([]MemberPnL, 0, len(members))

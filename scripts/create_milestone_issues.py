@@ -1190,7 +1190,7 @@ def all_tickets() -> list[Ticket]:
                out_of_scope=["App Store public listing"]),
         Ticket("M5-T26", "Run full demo script on gold slim sim UDID", 5, 4,
                ["docs/"], ["M5-T16", "M5-T19", "M5-T22"], labels=["mobile"],
-               manual=["README hackathon demo checklist on UDID 7B30D45E-62FD-42E2-871A-787B19D38CCF"],
+               manual=["README hackathon demo checklist on $SIMSLIM_UDID (machine gold slim sim)"],
                out_of_scope=["Android demo"]),
     ]
 

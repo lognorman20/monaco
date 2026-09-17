@@ -85,3 +85,37 @@ WHERE privy_user_id = $1`
 
 	return user, true, nil
 }
+
+// ListUserDisplayNamesByIDs returns display names keyed by user id.
+func (s *Store) ListUserDisplayNamesByIDs(ctx context.Context, userIDs []string) (map[string]string, error) {
+	if len(userIDs) == 0 {
+		return map[string]string{}, nil
+	}
+
+	const selectSQL = `
+SELECT id, display_name
+FROM users
+WHERE id = ANY($1::uuid[])`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, userIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list user display names: %w", err)
+	}
+	defer rows.Close()
+
+	names := make(map[string]string, len(userIDs))
+	for rows.Next() {
+		var id string
+		var displayName sql.NullString
+		if err := rows.Scan(&id, &displayName); err != nil {
+			return nil, fmt.Errorf("scan user display name: %w", err)
+		}
+		if displayName.Valid {
+			names[id] = displayName.String
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate user display names: %w", err)
+	}
+	return names, nil
+}

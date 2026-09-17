@@ -14,15 +14,18 @@ struct MeScreenView: View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Your account")
                 .font(.title2.bold())
+                .foregroundStyle(MonacoTheme.primaryText)
 
             if isLoading {
                 ProgressView("Loading profile…")
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .tint(MonacoTheme.accent)
             } else if let profile {
                 profileSection(profile)
             } else if let errorMessage {
                 Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                     .font(.footnote)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(MonacoTheme.destructive)
             }
 
             NavigationLink {
@@ -30,12 +33,12 @@ struct MeScreenView: View {
             } label: {
                 Label("Create group", systemImage: "person.3.fill")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.monacoPrimary)
 
             Button("Sign out") {
                 Task { await auth.logout() }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.monacoSecondary)
         }
         .task(id: auth.accessToken) {
             await loadProfile()
@@ -54,15 +57,13 @@ struct MeScreenView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Member wallet")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text(profile.memberWalletAddress)
-                    .font(.body.monospaced())
-                    .textSelection(.enabled)
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                MonacoWalletAddressText(address: profile.memberWalletAddress)
             }
 
             Label("Connected Solana address from GET /v1/me", systemImage: "checkmark.seal.fill")
                 .font(.footnote)
-                .foregroundStyle(.green)
+                .foregroundStyle(MonacoTheme.success)
         }
     }
 
@@ -70,9 +71,10 @@ struct MeScreenView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MonacoTheme.secondaryText)
             Text(value)
                 .font(.body)
+                .foregroundStyle(MonacoTheme.primaryText)
                 .textSelection(.enabled)
         }
     }

@@ -26,19 +26,22 @@ type authSessionResponse struct {
 
 // SessionHandler handles POST /v1/auth/session.
 func (h *AuthHandlers) SessionHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "POST /v1/auth/session")
+
 	var req authSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	result, err := h.Sessions.OpenSession(r.Context(), req.AccessToken)
+	result, err := h.Sessions.OpenSession(ctx, req.AccessToken)
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
-			writeJSONError(w, http.StatusUnauthorized, "invalid or expired access token")
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		logJSONError(ctx, log, "open_session_failed", w, http.StatusInternalServerError, "internal server error", "err", err.Error())
 		return
 	}
 
@@ -49,10 +52,5 @@ func (h *AuthHandlers) SessionHandler(w http.ResponseWriter, r *http.Request) {
 		DisplayName:         result.DisplayName,
 		MemberWalletAddress: result.MemberWalletAddress,
 	})
-}
-
-func writeJSONError(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
+	logJSONOK(ctx, log, "session_opened", "user_id", result.UserID)
 }

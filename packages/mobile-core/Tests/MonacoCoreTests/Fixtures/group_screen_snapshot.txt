@@ -1,0 +1,20 @@
+# Weekend investors
+
+## Pot
+Total | $623.01
+USDC | $125.50
+  +0.00
+  125.50 units @ $1.00
+AAPLx | $497.51 [After hours]
+  +47.51
+  2.15 units @ $231.40
+
+## You
+Your slice | $311.50
+Slice % | 42.0%
+P&L | +48.20
+Return | 0.124
+
+## Member board
+#1 Alfred | 0.124 | +48.20
+#2 Beatrice | 0.082 | +22.10

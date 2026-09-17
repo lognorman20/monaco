@@ -178,6 +178,21 @@ func (s *Store) ComputeNavSnapshotValues(ctx context.Context, groupID string, tr
 	return s.computeNavSnapshotValues(ctx, s.db, groupID, treasuryUSDC)
 }
 
+// SumShareUnitsByGroupTx returns total share_units within tx.
+func (s *Store) SumShareUnitsByGroupTx(ctx context.Context, tx *sql.Tx, groupID string) (int64, error) {
+	return sumShareUnitsByGroupQuery(ctx, tx, groupID)
+}
+
+// ListNetTokenHoldingsByGroupTx aggregates holdings visible within tx.
+func (s *Store) ListNetTokenHoldingsByGroupTx(ctx context.Context, tx *sql.Tx, groupID string) ([]TokenHoldingRow, error) {
+	return listNetTokenHoldingsByGroupQuery(ctx, tx, groupID)
+}
+
+// GetFillDerivedCostBasisByOutputMintTx returns fill cost basis visible within tx.
+func (s *Store) GetFillDerivedCostBasisByOutputMintTx(ctx context.Context, tx *sql.Tx, groupID, outputMint string) (int64, int64, bool, error) {
+	return fillDerivedCostBasisByOutputMintQuery(ctx, tx, groupID, outputMint)
+}
+
 func (s *Store) computeNavSnapshotValues(ctx context.Context, q navSnapshotQuerier, groupID string, treasuryUSDC int64) (NavSnapshotValues, error) {
 	if groupID == "" {
 		return NavSnapshotValues{}, fmt.Errorf("group_id is required")
@@ -203,6 +218,10 @@ func (s *Store) computeNavSnapshotValues(ctx context.Context, q navSnapshotQueri
 
 	if len(holdings) == 0 {
 		potNav := treasuryUSDC
+		// Uncredited treasury USDC must not inflate NAV until shares are minted (1:1 M2).
+		if totalSharesMicro > 0 && potNav > totalSharesMicro {
+			potNav = totalSharesMicro
+		}
 		if potNav == 0 && totalSharesMicro > 0 {
 			potNav = totalSharesMicro
 		}

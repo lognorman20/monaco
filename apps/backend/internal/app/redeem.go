@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
@@ -80,37 +81,48 @@ func (r *RedeemService) Redeem(ctx context.Context, req RedeemRequest) (RedeemJo
 	}
 
 	if req.GroupID == "" {
+		logRedeemBranchWarn("redeem rejected", "group id required")
 		return RedeemJobView{}, fmt.Errorf("group id is required")
 	}
 
 	identity, err := r.privy.VerifySession(ctx, privy.AccessToken(req.AccessToken))
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
+			logRedeemBranchWarn("redeem rejected", "invalid token", "group_id", req.GroupID)
 			return RedeemJobView{}, privy.ErrInvalidToken
 		}
+		logRedeemBranchError("redeem verify session failed", err, "group_id", req.GroupID)
 		return RedeemJobView{}, fmt.Errorf("verify session: %w", err)
 	}
 
 	user, found, err := r.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
 	if err != nil {
+		logRedeemBranchError("redeem lookup user failed", err, "group_id", req.GroupID)
 		return RedeemJobView{}, err
 	}
 	if !found {
+		logRedeemBranchWarn("redeem rejected", "user not found", "group_id", req.GroupID)
 		return RedeemJobView{}, ErrUserNotFound
 	}
 
+	logRedeemStart(req.GroupID, user.ID, "")
+
 	if err := r.privy.VerifyPayoutProof(ctx, user.ID, req.PayoutProof); err != nil {
 		if errors.Is(err, privy.ErrInvalidPayoutProof) {
+			logRedeemBranchWarn("redeem rejected", "invalid payout proof", "group_id", req.GroupID, "user_id", user.ID)
 			return RedeemJobView{}, ErrInvalidPayoutProof
 		}
+		logRedeemBranchError("redeem verify payout proof failed", err, "group_id", req.GroupID, "user_id", user.ID)
 		return RedeemJobView{}, err
 	}
 
 	release, acquired, err := r.store.TryAcquireMemberRedeemLock(ctx, user.ID, req.GroupID)
 	if err != nil {
+		logRedeemBranchError("redeem acquire lock failed", err, "group_id", req.GroupID, "user_id", user.ID)
 		return RedeemJobView{}, err
 	}
 	if !acquired {
+		logRedeemLockContended(user.ID, req.GroupID)
 		return RedeemJobView{}, ErrRedeemAlreadyInProgress
 	}
 	defer release()
@@ -137,6 +149,7 @@ func (r *RedeemService) Redeem(ctx context.Context, req RedeemRequest) (RedeemJo
 		return RedeemJobView{}, err
 	}
 	if slice.UsdcOwed < domain.RedeemDustMinimumMicros {
+		logRedeemBranchWarn("redeem rejected", "below dust minimum", "group_id", req.GroupID, "user_id", user.ID, "slice_usdc", int64(slice.UsdcOwed))
 		return RedeemJobView{}, fmt.Errorf("%w: below dust minimum", ErrInvalidRedeemRequest)
 	}
 
@@ -165,28 +178,36 @@ func (r *RedeemService) Redeem(ctx context.Context, req RedeemRequest) (RedeemJo
 	}
 
 	if err := tx.Commit(); err != nil {
+		logRedeemBranchError("redeem commit debit failed", err, "group_id", req.GroupID, "user_id", user.ID)
 		return RedeemJobView{}, fmt.Errorf("commit redeem debit: %w", err)
 	}
 	committed = true
 
+	logRedeemDebited(job.ID, user.ID, req.GroupID, shareUnitsToDebit, int64(slice.UsdcOwed))
 	view := redeemJobFromRow(job, positionFromRowPostgres(position))
 	return r.continueRedeemJob(ctx, view, req.PayoutProof)
 }
 
 func (r *RedeemService) resumeRedeemJob(ctx context.Context, jobID string, proof privy.PayoutProof) (RedeemJobView, error) {
+	slog.Info("redeem resume start", "job_id", jobID)
+
 	job, found, err := r.store.GetRedeemJobByID(ctx, jobID)
 	if err != nil {
+		logRedeemBranchError("redeem resume lookup job failed", err, "job_id", jobID)
 		return RedeemJobView{}, err
 	}
 	if !found {
+		logRedeemBranchWarn("redeem resume rejected", "job not found", "job_id", jobID)
 		return RedeemJobView{}, fmt.Errorf("redeem job not found")
 	}
 
 	release, acquired, err := r.store.TryAcquireMemberRedeemLock(ctx, job.UserID, job.GroupID)
 	if err != nil {
+		logRedeemBranchError("redeem resume acquire lock failed", err, "job_id", jobID, "user_id", job.UserID, "group_id", job.GroupID)
 		return RedeemJobView{}, err
 	}
 	if !acquired {
+		logRedeemLockContended(job.UserID, job.GroupID)
 		return RedeemJobView{}, ErrRedeemAlreadyInProgress
 	}
 	defer release()
@@ -208,27 +229,35 @@ func (r *RedeemService) resumeRedeemJob(ctx context.Context, jobID string, proof
 }
 
 func (r *RedeemService) continueRedeemJob(ctx context.Context, view RedeemJobView, proof privy.PayoutProof) (RedeemJobView, error) {
+	slog.Info("redeem continue", "job_id", view.ID, "status", string(view.Status))
+
 	if view.Status == domain.RedeemJobSettled {
+		slog.Info("redeem already settled", "job_id", view.ID)
 		return view, nil
 	}
 
 	if view.Status == domain.RedeemJobDebited {
 		if err := r.sellRedeemSliceIfNeeded(ctx, &view); err != nil {
+			logRedeemBranchError("redeem sell slice failed", err, "job_id", view.ID)
 			return view, err
 		}
 	}
 
 	if view.Status == domain.RedeemJobDebited || view.Status == domain.RedeemJobSelling {
+		prev := view.Status
 		if err := r.store.UpdateRedeemJobStatus(ctx, view.ID, string(domain.RedeemJobPaying)); err != nil {
+			logRedeemBranchError("redeem update status failed", err, "job_id", view.ID)
 			return view, err
 		}
 		view.Status = domain.RedeemJobPaying
+		logRedeemStatusTransition(view.ID, string(prev), string(view.Status))
 	}
 
 	if view.Status == domain.RedeemJobPaying {
 		return r.payRedeemSlice(ctx, view, proof)
 	}
 
+	logRedeemBranchWarn("redeem rejected", "unsupported status", "job_id", view.ID, "status", string(view.Status))
 	return view, fmt.Errorf("unsupported redeem job status %q", view.Status)
 }
 
@@ -238,10 +267,13 @@ func (r *RedeemService) sellRedeemSliceIfNeeded(ctx context.Context, view *Redee
 		return err
 	}
 	if len(holdings) == 0 {
+		slog.Info("redeem sell slice skipped", "job_id", view.ID, "reason", "no token holdings")
 		if err := r.store.UpdateRedeemJobStatus(ctx, view.ID, string(domain.RedeemJobPaying)); err != nil {
 			return err
 		}
+		prev := view.Status
 		view.Status = domain.RedeemJobPaying
+		logRedeemStatusTransition(view.ID, string(prev), string(view.Status))
 		return nil
 	}
 
@@ -261,7 +293,7 @@ func (r *RedeemService) sellRedeemSliceIfNeeded(ctx context.Context, view *Redee
 		if sellAmount <= 0 {
 			continue
 		}
-		symbol := symbolForOutputMint(holding.Mint)
+		symbol := symbolForOutputMint(ctx, r.swap.symbols, holding.Mint)
 		if _, err := r.swap.SellToUSDC(ctx, SellToUSDCRequest{
 			GroupID:   view.GroupID,
 			UserID:    view.UserID,
@@ -274,10 +306,12 @@ func (r *RedeemService) sellRedeemSliceIfNeeded(ctx context.Context, view *Redee
 		_ = treasury
 	}
 
+	prev := view.Status
 	if err := r.store.UpdateRedeemJobStatus(ctx, view.ID, string(domain.RedeemJobSelling)); err != nil {
 		return err
 	}
 	view.Status = domain.RedeemJobSelling
+	logRedeemStatusTransition(view.ID, string(prev), string(view.Status))
 	return nil
 }
 
@@ -350,6 +384,7 @@ func (r *RedeemService) payRedeemSlice(ctx context.Context, view RedeemJobView, 
 	view.Status = domain.RedeemJobSettled
 	view.WithdrawalID = withdrawal.ID
 	view.Position = positionFromRowPostgres(position)
+	logRedeemSettled(view.ID, view.UserID, view.GroupID, withdrawal.ID, view.SliceUsdc)
 	return view, nil
 }
 

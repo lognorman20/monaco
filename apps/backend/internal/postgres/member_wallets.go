@@ -46,6 +46,39 @@ WHERE user_id = $1`
 	return wallet, true, nil
 }
 
+// ListMemberWallets returns all member wallet rows.
+func (s *Store) ListMemberWallets(ctx context.Context) ([]MemberWallet, error) {
+	const selectSQL = `
+SELECT id, user_id, privy_wallet_id, solana_address, created_at
+FROM member_wallets
+ORDER BY created_at ASC`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL)
+	if err != nil {
+		return nil, fmt.Errorf("list member wallets: %w", err)
+	}
+	defer rows.Close()
+
+	var wallets []MemberWallet
+	for rows.Next() {
+		var wallet MemberWallet
+		if err := rows.Scan(
+			&wallet.ID,
+			&wallet.UserID,
+			&wallet.PrivyWalletID,
+			&wallet.SolanaAddress,
+			&wallet.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan member wallet: %w", err)
+		}
+		wallets = append(wallets, wallet)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate member wallets: %w", err)
+	}
+	return wallets, nil
+}
+
 // InsertMemberWallet persists a new member wallet row for userID.
 func (s *Store) InsertMemberWallet(ctx context.Context, userID string, privyWalletID string, solanaAddress string) (MemberWallet, error) {
 	if userID == "" {

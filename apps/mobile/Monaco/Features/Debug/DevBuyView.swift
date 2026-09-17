@@ -17,7 +17,7 @@ struct DevBuyView: View {
     var body: some View {
         Form {
             Section("Dev buy (M3 stub)") {
-                Text("Triggers backend POST /v1/dev/groups/{id}/buy. No Jupiter or xStocks from Swift.")
+                Text("Triggers backend POST /v1/dev/groups/{id}/buy. No Jupiter or catalog API calls from Swift.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -69,9 +69,14 @@ struct DevBuyView: View {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text(value)
-                .font(monospaced ? .body.monospaced() : .body)
-                .textSelection(.enabled)
+            Group {
+                if monospaced {
+                    MonacoWalletAddressText(address: value)
+                } else {
+                    Text(value)
+                        .textSelection(.enabled)
+                }
+            }
         }
     }
 

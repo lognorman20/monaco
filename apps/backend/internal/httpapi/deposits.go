@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
@@ -32,8 +33,10 @@ type getDepositResponse struct {
 	GroupID     string `json:"groupId"`
 	Amount      int64  `json:"amount"`
 	Status      string `json:"status"`
+	FromAddress string `json:"fromAddress,omitempty"`
 	TxSignature string `json:"txSignature,omitempty"`
 	ShareUnits  int64  `json:"shareUnits"`
+	CreatedAt   string `json:"createdAt"`
 }
 
 type memberShareUnitsResponse struct {
@@ -49,47 +52,50 @@ type treasuryUsdcBalanceResponse struct {
 
 // CreateDepositHandler handles POST /v1/groups/{id}/deposits.
 func (h *DepositHandlers) CreateDepositHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "POST /v1/groups/{id}/deposits")
+
 	token, ok := bearerToken(r)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "missing or invalid authorization")
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
 		return
 	}
 
 	groupID := strings.TrimSpace(r.PathValue("id"))
 	if groupID == "" {
-		writeJSONError(w, http.StatusBadRequest, "group id is required")
+		logJSONError(ctx, log, "missing_group_id", w, http.StatusBadRequest, "group id is required")
 		return
 	}
 
 	var req createDepositRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body", "group_id", groupID)
 		return
 	}
 	if req.Amount <= 0 {
-		writeJSONError(w, http.StatusBadRequest, "amount must be positive")
+		logJSONError(ctx, log, "invalid_amount", w, http.StatusBadRequest, "amount must be positive", "group_id", groupID)
 		return
 	}
 
-	result, err := h.Deposits.CreateDeposit(r.Context(), token, groupID, req.Amount)
+	result, err := h.Deposits.CreateDeposit(ctx, token, groupID, req.Amount)
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
-			writeJSONError(w, http.StatusUnauthorized, "invalid or expired access token")
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
 		if errors.Is(err, app.ErrUserNotFound) {
-			writeJSONError(w, http.StatusNotFound, "user not found")
+			logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", "group_id", groupID)
 			return
 		}
 		if errors.Is(err, app.ErrGroupNotFound) {
-			writeJSONError(w, http.StatusNotFound, "group not found")
+			logJSONError(ctx, log, "group_not_found", w, http.StatusNotFound, "group not found", "group_id", groupID)
 			return
 		}
 		if errors.Is(err, app.ErrNotGroupMember) {
-			writeJSONError(w, http.StatusForbidden, "not a group member")
+			logJSONError(ctx, log, "not_group_member", w, http.StatusForbidden, "not a group member", "group_id", groupID)
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		logJSONError(ctx, log, "create_deposit_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
 		return
 	}
 
@@ -102,33 +108,41 @@ func (h *DepositHandlers) CreateDepositHandler(w http.ResponseWriter, r *http.Re
 		Status:      string(result.Deposit.Status),
 		FromAddress: result.Deposit.FromAddress,
 	})
+	logJSONOK(ctx, log, "deposit_created",
+		"deposit_id", result.Deposit.ID,
+		"group_id", result.Deposit.GroupID,
+		"amount", result.Deposit.Amount,
+	)
 }
 
 // GetDepositHandler handles GET /v1/deposits/{id}.
 func (h *DepositHandlers) GetDepositHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "GET /v1/deposits/{id}")
+
 	token, ok := bearerToken(r)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "missing or invalid authorization")
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
 		return
 	}
 
 	depositID := strings.TrimSpace(r.PathValue("id"))
 	if depositID == "" {
-		writeJSONError(w, http.StatusBadRequest, "deposit id is required")
+		logJSONError(ctx, log, "missing_deposit_id", w, http.StatusBadRequest, "deposit id is required")
 		return
 	}
 
-	deposit, position, err := h.Deposits.GetDeposit(r.Context(), token, depositID)
+	deposit, position, err := h.Deposits.GetDeposit(ctx, token, depositID)
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
-			writeJSONError(w, http.StatusUnauthorized, "invalid or expired access token")
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "deposit_id", depositID)
 			return
 		}
 		if errors.Is(err, app.ErrDepositNotFound) {
-			writeJSONError(w, http.StatusNotFound, "deposit not found")
+			logJSONError(ctx, log, "deposit_not_found", w, http.StatusNotFound, "deposit not found", "deposit_id", depositID)
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		logJSONError(ctx, log, "get_deposit_failed", w, http.StatusInternalServerError, "internal server error", "deposit_id", depositID, "err", err.Error())
 		return
 	}
 
@@ -139,32 +153,38 @@ func (h *DepositHandlers) GetDepositHandler(w http.ResponseWriter, r *http.Reque
 		GroupID:     deposit.GroupID,
 		Amount:      deposit.Amount,
 		Status:      string(deposit.Status),
+		FromAddress: deposit.FromAddress,
 		TxSignature: deposit.TxSignature,
 		ShareUnits:  position.ShareUnits,
+		CreatedAt:   deposit.CreatedAt.UTC().Format(time.RFC3339),
 	})
+	logJSONOK(ctx, log, "ok", "deposit_id", deposit.ID, "group_id", deposit.GroupID, "status", deposit.Status)
 }
 
 // GetMemberShareUnitsHandler handles GET /v1/groups/{id}/share-units.
 func (h *DepositHandlers) GetMemberShareUnitsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "GET /v1/groups/{id}/share-units")
+
 	token, ok := bearerToken(r)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "missing or invalid authorization")
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
 		return
 	}
 
 	groupID := strings.TrimSpace(r.PathValue("id"))
 	if groupID == "" {
-		writeJSONError(w, http.StatusBadRequest, "group id is required")
+		logJSONError(ctx, log, "missing_group_id", w, http.StatusBadRequest, "group id is required")
 		return
 	}
 
-	position, err := h.Deposits.GetMemberPosition(r.Context(), token, groupID)
+	position, err := h.Deposits.GetMemberPosition(ctx, token, groupID)
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
-			writeJSONError(w, http.StatusUnauthorized, "invalid or expired access token")
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		logJSONError(ctx, log, "get_share_units_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
 		return
 	}
 
@@ -174,33 +194,37 @@ func (h *DepositHandlers) GetMemberShareUnitsHandler(w http.ResponseWriter, r *h
 		GroupID:    groupID,
 		ShareUnits: position.ShareUnits,
 	})
+	logJSONOK(ctx, log, "ok", "group_id", groupID, "share_units", position.ShareUnits)
 }
 
 // GetTreasuryUsdcBalanceHandler handles GET /v1/groups/{id}/treasury/usdc.
 func (h *DepositHandlers) GetTreasuryUsdcBalanceHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "GET /v1/groups/{id}/treasury/usdc")
+
 	token, ok := bearerToken(r)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "missing or invalid authorization")
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
 		return
 	}
 
 	groupID := strings.TrimSpace(r.PathValue("id"))
 	if groupID == "" {
-		writeJSONError(w, http.StatusBadRequest, "group id is required")
+		logJSONError(ctx, log, "missing_group_id", w, http.StatusBadRequest, "group id is required")
 		return
 	}
 
-	balance, treasuryAddress, err := h.Deposits.GetTreasuryUSDCBalance(r.Context(), token, groupID)
+	balance, treasuryAddress, err := h.Deposits.GetTreasuryUSDCBalance(ctx, token, groupID)
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
-			writeJSONError(w, http.StatusUnauthorized, "invalid or expired access token")
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
 		if errors.Is(err, app.ErrGroupNotFound) {
-			writeJSONError(w, http.StatusNotFound, "group not found")
+			logJSONError(ctx, log, "group_not_found", w, http.StatusNotFound, "group not found", "group_id", groupID)
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		logJSONError(ctx, log, "treasury_balance_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
 		return
 	}
 
@@ -211,4 +235,5 @@ func (h *DepositHandlers) GetTreasuryUsdcBalanceHandler(w http.ResponseWriter, r
 		TreasuryAddress: treasuryAddress,
 		UsdcBalance:     balance,
 	})
+	logJSONOK(ctx, log, "ok", "group_id", groupID, "usdc_balance", balance)
 }

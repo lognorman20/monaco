@@ -19,12 +19,66 @@ func testConfig() *config.Config {
 	}
 }
 
+func TestHTTPClient_EnsureMemberWallet_reusesExistingPrivyWallet(t *testing.T) {
+	// Arrange
+	createCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/wallets":
+			if r.URL.Query().Get("user_id") != "did:privy:test-user" {
+				t.Fatalf("user_id = %q", r.URL.Query().Get("user_id"))
+			}
+			if r.URL.Query().Get("chain_type") != "solana" {
+				t.Fatalf("chain_type = %q", r.URL.Query().Get("chain_type"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(listWalletsResponse{
+				Data: []walletResponse{{
+					ID:         "wallet-existing-1",
+					Address:    "SoExisting1111111111111111111111111111111111",
+					ExternalID: "user-uuid-1",
+				}},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/wallets":
+			createCalls++
+			t.Fatal("expected no create wallet call when Privy wallet already exists")
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewHTTPClientWithTransport(testConfig(), server.URL, server.Client().Transport)
+
+	// Act
+	ref, err := client.EnsureMemberWallet(context.Background(), "did:privy:test-user", UserID("user-uuid-1"))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("EnsureMemberWallet: %v", err)
+	}
+	if ref.PrivyWalletID != "wallet-existing-1" {
+		t.Fatalf("PrivyWalletID = %q", ref.PrivyWalletID)
+	}
+	if ref.SolanaAddress != "SoExisting1111111111111111111111111111111111" {
+		t.Fatalf("SolanaAddress = %q", ref.SolanaAddress)
+	}
+	if createCalls != 0 {
+		t.Fatalf("createCalls = %d, want 0", createCalls)
+	}
+}
+
 func TestHTTPClient_EnsureMemberWallet_createsSolanaWallet(t *testing.T) {
 	// Arrange
 	var gotAuth string
 	var gotAppID string
 	var gotBody createWalletRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/wallets" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(listWalletsResponse{Data: []walletResponse{}})
+			return
+		}
 		if r.URL.Path != "/v1/wallets" || r.Method != http.MethodPost {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -85,7 +139,12 @@ func TestHTTPClient_EnsureMemberWallet_createsSolanaWallet(t *testing.T) {
 
 func TestHTTPClient_EnsureMemberWallet_returnsErrorWhenPrivateKeySetWithoutKeyID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatalf("unexpected HTTP request when KEY_ID missing with private key set")
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/wallets" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(listWalletsResponse{Data: []walletResponse{}})
+			return
+		}
+		t.Fatalf("unexpected HTTP request when KEY_ID missing with private key set: %s %s", r.Method, r.URL.Path)
 	}))
 	defer server.Close()
 
@@ -107,6 +166,11 @@ func TestHTTPClient_EnsureMemberWallet_omitsAdditionalSignersWhenKeyIDUnset(t *t
 	// Arrange
 	var gotBody createWalletRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/wallets" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(listWalletsResponse{Data: []walletResponse{}})
+			return
+		}
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
@@ -182,5 +246,48 @@ func TestHTTPClient_VerifySession_emptyTokenReturnsInvalid(t *testing.T) {
 	// Assert
 	if err != ErrInvalidToken {
 		t.Fatalf("err = %v, want %v", err, ErrInvalidToken)
+	}
+}
+
+func TestHTTPClient_ListAppSolanaWallets_pagesAllWalletsWithoutUserFilter(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/wallets" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		if r.URL.Query().Get("user_id") != "" {
+			t.Fatalf("user_id = %q, want empty", r.URL.Query().Get("user_id"))
+		}
+		if r.URL.Query().Get("chain_type") != "solana" {
+			t.Fatalf("chain_type = %q", r.URL.Query().Get("chain_type"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		calls++
+		if r.URL.Query().Get("cursor") == "" {
+			_ = json.NewEncoder(w).Encode(listWalletsResponse{
+				Data:       []walletResponse{{ID: "w1", Address: "Addr111"}},
+				NextCursor: "page-2",
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(listWalletsResponse{
+			Data: []walletResponse{{ID: "w2", Address: "Addr222"}},
+		})
+	}))
+	defer server.Close()
+
+	client := NewHTTPClientWithTransport(testConfig(), server.URL, server.Client().Transport)
+	refs, err := client.ListAppSolanaWallets(context.Background())
+	if err != nil {
+		t.Fatalf("ListAppSolanaWallets: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2", calls)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("len(refs) = %d, want 2", len(refs))
+	}
+	if refs[0].SolanaAddress != "Addr111" || refs[1].SolanaAddress != "Addr222" {
+		t.Fatalf("refs = %#v", refs)
 	}
 }

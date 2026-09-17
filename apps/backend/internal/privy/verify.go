@@ -18,6 +18,7 @@ type privyClaims struct {
 func (c *HTTPClient) VerifySession(ctx context.Context, token AccessToken) (Identity, error) {
 	_ = ctx
 	if strings.TrimSpace(string(token)) == "" {
+		logVerifySession(false, "")
 		return Identity{}, ErrInvalidToken
 	}
 
@@ -46,12 +47,15 @@ func (c *HTTPClient) VerifySession(ctx context.Context, token AccessToken) (Iden
 		jwt.WithValidMethods([]string{jwt.SigningMethodES256.Alg()}),
 	)
 	if err != nil {
+		logVerifySession(false, "")
 		return Identity{}, ErrInvalidToken
 	}
 	if claims.Subject == "" {
+		logVerifySession(false, "")
 		return Identity{}, ErrInvalidToken
 	}
 
+	logVerifySession(true, claims.Subject)
 	return Identity{
 		PrivyUserID: claims.Subject,
 		SessionID:   claims.SessionID,

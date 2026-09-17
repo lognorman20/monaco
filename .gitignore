@@ -15,3 +15,5 @@ build/
 .cursor/*
 .tmp*
 .worktrees/
+.logs/
+*.test

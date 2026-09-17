@@ -5,6 +5,32 @@ import (
 	"testing"
 )
 
+func TestFakeClient_EnsureMemberWallet_reusesRegisteredPrivyWallet(t *testing.T) {
+	// Arrange
+	client := NewFakeClient()
+	ctx := context.Background()
+	privyUserID := "did:privy:existing-user"
+	userID := UserID("11111111-1111-1111-1111-111111111111")
+	RegisterPrivyMemberWallet(client, privyUserID, WalletRef{
+		PrivyWalletID: "wallet-registered",
+		SolanaAddress: "SoRegistered1111111111111111111111111111111",
+	})
+
+	// Act
+	ref, err := client.EnsureMemberWallet(ctx, privyUserID, userID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("EnsureMemberWallet: %v", err)
+	}
+	if ref.PrivyWalletID != "wallet-registered" {
+		t.Fatalf("PrivyWalletID = %q", ref.PrivyWalletID)
+	}
+	if ref.SolanaAddress != "SoRegistered1111111111111111111111111111111" {
+		t.Fatalf("SolanaAddress = %q", ref.SolanaAddress)
+	}
+}
+
 func TestFakeClient_EnsureMemberWallet_returnsDeterministicAddress(t *testing.T) {
 	// Arrange
 	client := NewFakeClient()

@@ -1,186 +1,146 @@
 import SwiftUI
+import UIKit
 
-/// M2 deposit screen: POST deposit then poll GET status until confirmed.
+/// Add money — show member deposit address; backend sweep credits club share.
 struct DepositView: View {
     @ObservedObject var auth: PrivyAuthService
     let groupId: String
 
     private let apiClient = MonacoAPIClient()
 
-    @State private var profile: MeResponse?
-    @State private var amountText = ""
-    @State private var depositId: String?
-    @State private var deposit: GetDepositResponse?
+    @State private var depositAddress: String?
     @State private var errorMessage: String?
-    @State private var isSubmitting = false
-    @State private var isPolling = false
-    @State private var isLoadingProfile = true
+    @State private var isLoading = true
+    @State private var didCopy = false
 
     var body: some View {
         Form {
-            if isLoadingProfile {
-                Section {
-                    ProgressView("Loading member wallet…")
-                }
-            } else if let profile {
-                Section("Member wallet") {
-                    detailRow(title: "Solana address", value: profile.memberWalletAddress, monospaced: true)
-                        .accessibilityIdentifier("deposit-member-wallet")
-                    Text("Fund this address with USDC, then create a deposit below.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Group") {
-                Text(groupId)
-                    .font(.body.monospaced())
-                    .textSelection(.enabled)
-            }
-
-            Section("Deposit amount (USDC)") {
-                TextField("Amount", text: $amountText)
-                    .keyboardType(.decimalPad)
-                    .disabled(isSubmitting || depositId != nil)
-                    .accessibilityIdentifier("deposit-amount-field")
-                if let microUnits = parsedAmountMicro {
-                    Text("= \(microUnits) micro-units")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
             Section {
-                Button(isSubmitting ? "Submitting…" : "Create deposit") {
-                    Task { await createDeposit() }
-                }
-                .disabled(isSubmitting || depositId != nil || parsedAmountMicro == nil)
-                .accessibilityIdentifier("create-deposit-button")
+                Text("Send USDC on Solana to your deposit address. We sweep it into your club's vault and credit your share when it lands.")
+                    .monacoSecondaryCaption()
+            }
 
-                if depositId != nil {
-                    Button(isPolling ? "Refreshing…" : "Refresh status") {
-                        Task { await refreshStatus() }
+            Section("Your deposit address") {
+                if isLoading {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                            .tint(MonacoTheme.accent)
+                        Text("Loading address…")
+                            .monacoSecondaryCaption()
                     }
-                    .disabled(isPolling || auth.accessToken == nil)
+                    .accessibilityIdentifier("deposit-address-loading")
+                } else if let depositAddress {
+                    addressBlock(depositAddress)
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label(
+                            errorMessage ?? "Deposit address not ready yet.",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(MonacoTheme.warning)
+
+                        Button("Try again") {
+                            Task { await loadDepositAddress() }
+                        }
+                        .monacoFormSecondaryAction()
+                        .accessibilityIdentifier("deposit-address-retry")
+                    }
                 }
             }
 
-            if let deposit {
-                Section("Deposit status") {
-                    detailRow(title: "Deposit ID", value: deposit.depositId)
-                    detailRow(title: "Amount", value: formatUSDC(microUnits: deposit.amount))
-                    detailRow(title: "Status", value: deposit.status)
-                    detailRow(title: "Share units", value: String(deposit.shareUnits))
-                    if let txSignature = deposit.txSignature, !txSignature.isEmpty {
-                        detailRow(title: "Tx signature", value: txSignature, monospaced: true)
-                    }
-                }
-            } else if let errorMessage {
-                Section {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                }
+            Section("How it works") {
+                stepRow(number: 1, text: "Send USDC on Solana to the address above.")
+                stepRow(number: 2, text: "Monaco sweeps your deposit into the club vault.")
+                stepRow(number: 3, text: "Your share in the pot updates once the sweep completes.")
             }
         }
-        .navigationTitle("Deposit")
+        .monacoFormScreen()
+        .navigationTitle("Add money")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: auth.accessToken) {
-            await loadProfile()
+            await loadDepositAddress()
         }
-    }
-
-    private var parsedAmountMicro: Int64? {
-        let trimmed = amountText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              let decimal = Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX")),
-              decimal > 0 else {
-            return nil
-        }
-        var scaled = decimal * Decimal(1_000_000)
-        var rounded = Decimal()
-        NSDecimalRound(&rounded, &scaled, 0, .plain)
-        let microUnits = (rounded as NSDecimalNumber).int64Value
-        return microUnits > 0 ? microUnits : nil
-    }
-
-    private func formatUSDC(microUnits: Int64) -> String {
-        let dollars = Decimal(microUnits) / Decimal(1_000_000)
-        return "\(dollars) USDC"
     }
 
     @ViewBuilder
-    private func detailRow(title: String, value: String, monospaced: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(monospaced ? .body.monospaced() : .body)
-                .textSelection(.enabled)
+    private func addressBlock(_ address: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            MonacoWalletAddressText(address: address)
+                .accessibilityIdentifier("deposit-address-value")
+                .onTapGesture {
+                    copyAddress(address)
+                }
+
+            HStack {
+                Button {
+                    copyAddress(address)
+                } label: {
+                    Label(didCopy ? "Copied" : "Copy address", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.monacoSecondary)
+                .accessibilityIdentifier("deposit-address-copy-button")
+
+                if didCopy {
+                    Text("Copied")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(MonacoTheme.success)
+                        .accessibilityIdentifier("deposit-address-copied-feedback")
+                }
+            }
         }
     }
 
-    private func loadProfile() async {
+    private func stepRow(number: Int, text: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(number).")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(MonacoTheme.accent)
+                .frame(width: 20, alignment: .trailing)
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(MonacoTheme.primaryText)
+        }
+    }
+
+    private func copyAddress(_ address: String) {
+        UIPasteboard.general.string = address
+        didCopy = true
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            didCopy = false
+        }
+    }
+
+    private func loadDepositAddress() async {
         guard let accessToken = auth.accessToken else {
-            profile = nil
-            isLoadingProfile = false
+            depositAddress = nil
+            errorMessage = "Sign in to view your deposit address."
+            isLoading = false
             return
         }
 
-        isLoadingProfile = true
+        isLoading = true
+        errorMessage = nil
+        depositAddress = nil
+
         do {
             _ = try await apiClient.openSession(accessToken: accessToken)
-            profile = try await apiClient.me(accessToken: accessToken)
-        } catch {
-            profile = nil
-        }
-        isLoadingProfile = false
-    }
-
-    private func createDeposit() async {
-        guard let accessToken = auth.accessToken else {
-            errorMessage = "Missing Privy access token."
-            return
-        }
-        guard let amount = parsedAmountMicro else {
-            errorMessage = "Enter a positive USDC amount."
-            return
-        }
-
-        isSubmitting = true
-        errorMessage = nil
-
-        do {
-            let created = try await apiClient.createDeposit(accessToken: accessToken, groupId: groupId, amount: amount)
-            depositId = created.depositId
-            isSubmitting = false
-            await refreshStatus()
+            let profile = try await apiClient.me(accessToken: accessToken)
+            let address = profile.memberWalletAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !address.isEmpty, !address.hasPrefix("FAKE") else {
+                errorMessage = "Deposit address not ready yet."
+                isLoading = false
+                return
+            }
+            depositAddress = address
         } catch MonacoAPIError.httpStatus(let status) {
-            errorMessage = "Create deposit failed (HTTP \(status))."
-            isSubmitting = false
+            errorMessage = "Could not load address (HTTP \(status))."
         } catch {
-            errorMessage = "Could not create deposit."
-            isSubmitting = false
-        }
-    }
-
-    private func refreshStatus() async {
-        guard let accessToken = auth.accessToken, let depositId else {
-            return
+            errorMessage = "Could not load deposit address."
         }
 
-        isPolling = true
-        errorMessage = nil
-
-        do {
-            let status = try await apiClient.getDeposit(accessToken: accessToken, depositId: depositId)
-            deposit = status
-        } catch {
-            errorMessage = "Could not load deposit status."
-        }
-
-        isPolling = false
+        isLoading = false
     }
 }
 

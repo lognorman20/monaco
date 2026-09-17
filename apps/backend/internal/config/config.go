@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	solanakey "github.com/monaco/monaco/apps/backend/internal/solana/key"
 )
 
 // SolanaCluster is the production Solana RPC cluster for chain operations.
@@ -27,7 +29,8 @@ const (
 //     postgres://monaco:monaco@localhost:54322/monaco?sslmode=disable
 //   - PRIVY_APP_ID: Privy application ID from the dashboard.
 //   - PRIVY_APP_SECRET: Privy application secret from the dashboard.
-//   - RELAYER_PRIVATE_KEY: Base58-encoded Solana keypair for the app fee payer (mainnet).
+//   - RELAYER_PRIVATE_KEY: Base58-encoded Solana secret key for the app fee payer (mainnet).
+//     JSON [1,2,...] arrays from solana-keygen are auto-converted at startup; base58 is preferred.
 //
 // Optional environment variables:
 //   - PRIVY_AUTHORIZATION_PRIVATE_KEY: Privy wallet authorization key (wallet-auth:… PKCS#8)
@@ -74,6 +77,11 @@ func Load() (*Config, error) {
 	if cfg.RelayerPrivateKey == "" {
 		return nil, fmt.Errorf("%s is required", envRelayerPrivateKey)
 	}
+	normalizedRelayerKey, err := solanakey.ParsePrivateKey(cfg.RelayerPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", envRelayerPrivateKey, err)
+	}
+	cfg.RelayerPrivateKey = normalizedRelayerKey
 	if cfg.PrivyAuthorizationPrivateKey != "" && cfg.PrivyAuthorizationKeyID == "" {
 		return nil, fmt.Errorf("%s is required when %s is set", envPrivyAuthorizationKeyID, envPrivyAuthorizationPrivateKey)
 	}

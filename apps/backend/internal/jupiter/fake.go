@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -120,6 +121,29 @@ func RegisterSellQuote(client Client, inputMint string, amount int64, quote Sell
 func (f *fakeJupiterClient) QuoteBuy(ctx context.Context, params QuoteBuyParams) (BuyQuote, error) {
 	logQuoteAttempt(params.GroupID, params.UserID, params.Symbol, params.USDCAmount)
 
+	if strings.TrimSpace(params.Taker) != "" {
+		order, err := f.OrderBuy(ctx, OrderBuyParams{
+			GroupID:    params.GroupID,
+			UserID:     params.UserID,
+			Symbol:     params.Symbol,
+			OutputMint: params.OutputMint,
+			Amount:     params.USDCAmount,
+			Taker:      params.Taker,
+		})
+		if err != nil {
+			logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, err.Error())
+			return BuyQuote{Routable: false, InputMint: USDCMint, OutputMint: params.OutputMint}, err
+		}
+		return BuyQuote{
+			Routable:   true,
+			InputMint:  order.InputMint,
+			OutputMint: order.OutputMint,
+			InAmount:   order.InAmount,
+			OutAmount:  order.OutAmount,
+			RequestID:  order.RequestID,
+		}, nil
+	}
+
 	key := quoteKey(params.OutputMint, params.USDCAmount)
 	f.mu.Lock()
 	if err, ok := f.quoteErrs[key]; ok {
@@ -144,11 +168,13 @@ func (f *fakeJupiterClient) QuoteBuy(ctx context.Context, params QuoteBuyParams)
 	if quote.OutputMint == "" {
 		quote.OutputMint = params.OutputMint
 	}
+	logQuoteSuccess(params.GroupID, params.UserID, params.Symbol, quote.RequestID, true)
 	return quote, nil
 }
 
 func (f *fakeJupiterClient) OrderBuy(ctx context.Context, params OrderBuyParams) (BuyOrder, error) {
-	_ = ctx
+	logOrderAttempt(params.GroupID, params.UserID, params.Symbol, params.Amount)
+
 	quote, err := f.QuoteBuy(ctx, QuoteBuyParams{
 		GroupID:    params.GroupID,
 		UserID:     params.UserID,
@@ -157,6 +183,7 @@ func (f *fakeJupiterClient) OrderBuy(ctx context.Context, params OrderBuyParams)
 		USDCAmount: params.Amount,
 	})
 	if err != nil {
+		logOrderResult(params.GroupID, params.UserID, params.Symbol, "", err)
 		return BuyOrder{}, err
 	}
 	requestID := quote.RequestID
@@ -167,27 +194,32 @@ func (f *fakeJupiterClient) OrderBuy(ctx context.Context, params OrderBuyParams)
 	f.mu.Lock()
 	if order, ok := f.orders[requestID]; ok {
 		f.mu.Unlock()
+		logOrderResult(params.GroupID, params.UserID, params.Symbol, order.RequestID, nil)
 		return order, nil
 	}
 	f.mu.Unlock()
 
-	return BuyOrder{
+	order := BuyOrder{
 		RequestID:   requestID,
 		Transaction: deterministicUnsignedTx("buy", requestID),
 		InAmount:    quote.InAmount,
 		OutAmount:   quote.OutAmount,
 		InputMint:   quote.InputMint,
 		OutputMint:  quote.OutputMint,
-	}, nil
+	}
+	logOrderResult(params.GroupID, params.UserID, params.Symbol, order.RequestID, nil)
+	return order, nil
 }
 
 func (f *fakeJupiterClient) ExecuteBuy(ctx context.Context, params ExecuteBuyParams) (ExecuteResult, error) {
 	logExecuteSubmit(params.GroupID, params.UserID, params.Symbol, "", params.RequestID)
-	return ExecuteResult{
+	result := ExecuteResult{
 		Status:    ExecuteStatusPending,
 		Code:      -1,
 		RequestID: params.RequestID,
-	}, nil
+	}
+	logExecuteResult(params.GroupID, params.UserID, params.Symbol, params.RequestID, result.Status, 0, result.Code, nil, "", nil)
+	return result, nil
 }
 
 func (f *fakeJupiterClient) PollExecute(ctx context.Context, params PollExecuteParams) (ExecuteResult, error) {
@@ -263,16 +295,19 @@ func (f *fakeJupiterClient) QuoteSell(ctx context.Context, params QuoteSellParam
 	if quote.Transaction == "" {
 		quote.Transaction = deterministicUnsignedTx("sell", quote.RequestID)
 	}
+	logQuoteSuccess(params.GroupID, params.UserID, params.Symbol, quote.RequestID, true)
 	return quote, nil
 }
 
 func (f *fakeJupiterClient) SellToUSDC(ctx context.Context, params SellToUSDCParams) (ExecuteResult, error) {
 	logExecuteSubmit(params.GroupID, params.UserID, params.Symbol, "", params.RequestID)
-	return ExecuteResult{
+	result := ExecuteResult{
 		Status:    ExecuteStatusPending,
 		Code:      -1,
 		RequestID: params.RequestID,
-	}, nil
+	}
+	logExecuteResult(params.GroupID, params.UserID, params.Symbol, params.RequestID, result.Status, 0, result.Code, nil, "", nil)
+	return result, nil
 }
 
 func deterministicRequestID(outputMint string, amount int64) string {

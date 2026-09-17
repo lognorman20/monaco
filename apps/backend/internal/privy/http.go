@@ -37,8 +37,14 @@ type getWalletByAddressRequest struct {
 }
 
 type walletResponse struct {
-	ID      string `json:"id"`
-	Address string `json:"address"`
+	ID         string `json:"id"`
+	Address    string `json:"address"`
+	ExternalID string `json:"external_id,omitempty"`
+}
+
+type listWalletsResponse struct {
+	Data       []walletResponse `json:"data"`
+	NextCursor string           `json:"next_cursor"`
 }
 
 type walletBalanceResponse struct {
@@ -102,6 +108,8 @@ func (c *HTTPClient) doPrivyRequestWithAuthorization(ctx context.Context, method
 		return nil, 0, fmt.Errorf("%w: PRIVY_AUTHORIZATION_PRIVATE_KEY is required for wallet rpc", ErrAPI)
 	}
 
+	logAPIStart(method, path, idempotencyKey != "")
+
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -139,15 +147,67 @@ func (c *HTTPClient) doPrivyRequestWithAuthorization(ctx context.Context, method
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		logAPIResult(method, path, 0, nil, err)
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logAPIResult(method, path, resp.StatusCode, respBody, err)
 		return nil, resp.StatusCode, err
 	}
+	logAPIResult(method, path, resp.StatusCode, respBody, nil)
 	return respBody, resp.StatusCode, nil
+}
+
+func (c *HTTPClient) listWallets(ctx context.Context, privyUserID string) ([]walletResponse, error) {
+	if privyUserID == "" {
+		return nil, fmt.Errorf("%w: missing privy user id", ErrAPI)
+	}
+	return c.listSolanaWallets(ctx, privyUserID)
+}
+
+func (c *HTTPClient) listSolanaWallets(ctx context.Context, privyUserID string) ([]walletResponse, error) {
+	query := url.Values{}
+	query.Set("chain_type", "solana")
+	query.Set("limit", "50")
+	if privyUserID != "" {
+		query.Set("user_id", privyUserID)
+	}
+
+	var wallets []walletResponse
+	cursor := ""
+	for {
+		pageQuery := url.Values{}
+		for key, values := range query {
+			pageQuery[key] = values
+		}
+		if cursor != "" {
+			pageQuery.Set("cursor", cursor)
+		}
+
+		path := "/v1/wallets?" + pageQuery.Encode()
+		respBody, status, err := c.doPrivyRequest(ctx, http.MethodGet, path, nil, "")
+		if err != nil {
+			return nil, err
+		}
+		if status < 200 || status >= 300 {
+			return nil, fmt.Errorf("%w: list wallets status %d: %s", ErrAPI, status, string(respBody))
+		}
+
+		var page listWalletsResponse
+		if err := json.Unmarshal(respBody, &page); err != nil {
+			return nil, err
+		}
+		wallets = append(wallets, page.Data...)
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+
+	return wallets, nil
 }
 
 func (c *HTTPClient) createWallet(ctx context.Context, idempotencyKey string, body createWalletRequest) (createWalletResponse, error) {
@@ -251,29 +311,39 @@ func (c *HTTPClient) getLatestBlockhash(ctx context.Context) ([]byte, error) {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		logSolanaRPC("getLatestBlockhash", 0, nil, err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logSolanaRPC("getLatestBlockhash", resp.StatusCode, respBody, err)
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("%w: solana rpc status %d: %s", ErrAPI, resp.StatusCode, string(respBody))
+		rpcErr := fmt.Errorf("%w: solana rpc status %d: %s", ErrAPI, resp.StatusCode, string(respBody))
+		logSolanaRPC("getLatestBlockhash", resp.StatusCode, respBody, rpcErr)
+		return nil, rpcErr
 	}
 
 	var rpcResp solanaBlockhashResponse
 	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
+		logSolanaRPC("getLatestBlockhash", resp.StatusCode, respBody, err)
 		return nil, err
 	}
 	if rpcResp.Error != nil {
-		return nil, fmt.Errorf("%w: solana rpc error: %s", ErrAPI, rpcResp.Error.Message)
+		rpcErr := fmt.Errorf("%w: solana rpc error: %s", ErrAPI, rpcResp.Error.Message)
+		logSolanaRPC("getLatestBlockhash", resp.StatusCode, respBody, rpcErr)
+		return nil, rpcErr
 	}
 	blockhash := strings.TrimSpace(rpcResp.Result.Value.Blockhash)
 	if blockhash == "" {
-		return nil, fmt.Errorf("%w: solana rpc missing blockhash", ErrAPI)
+		rpcErr := fmt.Errorf("%w: solana rpc missing blockhash", ErrAPI)
+		logSolanaRPC("getLatestBlockhash", resp.StatusCode, respBody, rpcErr)
+		return nil, rpcErr
 	}
+	logSolanaRPC("getLatestBlockhash", resp.StatusCode, nil, nil)
 	return decodeBase58Pubkey(blockhash)
 }
 

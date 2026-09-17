@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,12 +22,16 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 // Apply runs pending SQL migrations from migrationsDir against db.
 func Apply(ctx context.Context, db *sql.DB, migrationsDir string) error {
+	slog.Info("postgres migrations start", "dir", migrationsDir)
+
 	if _, err := db.ExecContext(ctx, ensureSchemaMigrationsSQL); err != nil {
+		slog.Debug("postgres migrations ensure table failed", "err", err)
 		return fmt.Errorf("ensure schema_migrations: %w", err)
 	}
 
 	entries, err := os.ReadDir(migrationsDir)
 	if err != nil {
+		slog.Debug("postgres migrations read dir failed", "dir", migrationsDir, "err", err)
 		return fmt.Errorf("read migrations dir: %w", err)
 	}
 
@@ -39,6 +44,7 @@ func Apply(ctx context.Context, db *sql.DB, migrationsDir string) error {
 	}
 	sort.Strings(files)
 
+	appliedCount := 0
 	for _, name := range files {
 		applied, err := isApplied(ctx, db, name)
 		if err != nil {
@@ -61,17 +67,23 @@ func Apply(ctx context.Context, db *sql.DB, migrationsDir string) error {
 
 		if _, err := tx.ExecContext(ctx, string(sqlBytes)); err != nil {
 			_ = tx.Rollback()
+			slog.Debug("postgres migration apply failed", "version", name, "err", err)
 			return fmt.Errorf("apply migration %s: %w", name, err)
 		}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations (version) VALUES ($1)", name); err != nil {
 			_ = tx.Rollback()
+			slog.Debug("postgres migration record failed", "version", name, "err", err)
 			return fmt.Errorf("record migration %s: %w", name, err)
 		}
 		if err := tx.Commit(); err != nil {
+			slog.Debug("postgres migration commit failed", "version", name, "err", err)
 			return fmt.Errorf("commit migration %s: %w", name, err)
 		}
+		slog.Info("postgres migration applied", "version", name)
+		appliedCount++
 	}
 
+	slog.Info("postgres migrations complete", "applied", appliedCount, "total", len(files))
 	return nil
 }
 

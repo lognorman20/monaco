@@ -15,10 +15,10 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
-func integrationQuotesApp(t *testing.T) (*QuoteHandlers, *GroupHandlers, *AuthHandlers, privy.Client, jupiter.Client, xstocks.Resolver) {
+func integrationQuotesApp(t *testing.T) (*QuoteHandlers, *GroupHandlers, *AuthHandlers, privy.Client, jupiter.Client, xstocks.Resolver, *postgres.TestIsolation) {
 	t.Helper()
 
-	authHandlers, privyClient, db := integrationApp(t)
+	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
 	jupiterClient := jupiter.NewFakeClient()
 	xstocksResolver := xstocks.NewFakeResolver()
@@ -32,17 +32,13 @@ func integrationQuotesApp(t *testing.T) (*QuoteHandlers, *GroupHandlers, *AuthHa
 		Groups:     app.NewGroupService(store, privyClient),
 		Governance: app.NewGovernanceService(store, privyClient),
 	}
-	return quoteHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, xstocksResolver
+	return quoteHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, xstocksResolver, iso
 }
 
-func createGroupForQuotes(t *testing.T, groupHandlers *GroupHandlers, authHandlers *AuthHandlers, privyClient privy.Client) (privy.AccessToken, string, string) {
+func createGroupForQuotes(t *testing.T, iso *postgres.TestIsolation, groupHandlers *GroupHandlers, authHandlers *AuthHandlers, privyClient privy.Client) (privy.AccessToken, string, string) {
 	t.Helper()
 
-	token := fixtureSessionToken()
-	session := seedAuthenticatedUser(t, authHandlers, privyClient, token, privy.Identity{
-		PrivyUserID: "did:privy:quotes",
-		DisplayName: "Quotes User",
-	})
+	session, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "quotes-user", "Quotes User")
 
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Quotes Fund"}`))
 	createReq.Header.Set("Content-Type", "application/json")
@@ -57,14 +53,17 @@ func createGroupForQuotes(t *testing.T, groupHandlers *GroupHandlers, authHandle
 	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode create group json: %v", err)
 	}
+	trackCreatedGroup(iso, created.GroupID)
+	privy.SetTreasuryUSDCBalance(privyClient, created.TreasuryAddress, 100_000_000)
 
 	return token, created.GroupID, session.UserID
 }
 
 func TestPOST_quotes_noRoute_returnsRoutableFalse(t *testing.T) {
+	t.Parallel()
 	// Arrange
-	quoteHandlers, groupHandlers, authHandlers, privyClient, _, resolver := integrationQuotesApp(t)
-	token, groupID, _ := createGroupForQuotes(t, groupHandlers, authHandlers, privyClient)
+	quoteHandlers, groupHandlers, authHandlers, privyClient, _, resolver, iso := integrationQuotesApp(t)
+	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
 	xstocks.RegisterSolanaMint(resolver, "AAPLx", jupiter.AAPLxMint)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/groups/"+groupID+"/quotes", strings.NewReader(`{"symbol":"AAPLx","usdc":1000000}`))
@@ -97,9 +96,10 @@ func TestPOST_quotes_noRoute_returnsRoutableFalse(t *testing.T) {
 }
 
 func TestPOST_proposals_noRoute_refusesBeforeInsert(t *testing.T) {
+	t.Parallel()
 	// Arrange
-	quoteHandlers, groupHandlers, authHandlers, privyClient, _, resolver := integrationQuotesApp(t)
-	token, groupID, userID := createGroupForQuotes(t, groupHandlers, authHandlers, privyClient)
+	quoteHandlers, groupHandlers, authHandlers, privyClient, _, resolver, iso := integrationQuotesApp(t)
+	token, groupID, userID := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
 	xstocks.RegisterSolanaMint(resolver, "AAPLx", jupiter.AAPLxMint)
 
 	// Act

@@ -28,8 +28,9 @@ build app:
         fi
         # ensure-ios-privy-config reads .env.local via dotenvx get → Privy.local.xcconfig
         ./scripts/ensure-ios-privy-config.sh generate
+        gold_udid="$(./scripts/gold-sim-udid.sh)"
         xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
-          -destination 'platform=iOS Simulator,id=7B30D45E-62FD-42E2-871A-787B19D38CCF' \
+          -destination "platform=iOS Simulator,id=${gold_udid}" \
           -configuration Debug build
         ;;
       *)
@@ -50,6 +51,7 @@ test app:
         source ./scripts/assert-local-database-url.sh
         docker compose up -d --wait
         ./scripts/apply-migrations.sh
+        ./scripts/ensure-test-database.sh
         ./scripts/verify-local-db.sh
         if [[ -f apps/backend/go.mod ]]; then
           (cd apps/backend && go test -p 1 ./...)
@@ -109,6 +111,8 @@ run *app:
       echo "Local Postgres is ready."
       echo "  DATABASE_URL=${DATABASE_URL}"
       echo ""
+      source ./scripts/run-with-logs.sh
+      monaco_init_logs
       backend_pid=""
       cleanup() {
         if [[ -n "${backend_pid}" ]] && kill -0 "${backend_pid}" 2>/dev/null; then
@@ -116,18 +120,21 @@ run *app:
           wait "${backend_pid}" 2>/dev/null || true
         fi
       }
-      trap cleanup EXIT INT TERM
+      # INT/TERM only — ios-sim exits after launch; do not kill API on mobile recipe return.
+      trap cleanup INT TERM
       echo "Starting backend (background) and mobile (foreground)..."
-      (cd apps/backend && go run ./cmd/api) &
+      (cd apps/backend && go run ./cmd/api) 2>&1 | tee -a "${MONACO_LOG_DIR}/backend.log" &
       backend_pid=$!
       if ! kill -0 "${backend_pid}" 2>/dev/null; then
         echo "error: backend failed to start"
         exit 1
       fi
+      export MONACO_LOG_DIR
       just run mobile
-      cleanup
-      trap - EXIT INT TERM
-      exit 0
+      echo ""
+      echo "Simulator launched. Backend still running — Ctrl+C to stop."
+      wait "${backend_pid}" 2>/dev/null || true
+      trap - INT TERM
     fi
     case "{{app}}" in
       backend)
@@ -143,8 +150,10 @@ run *app:
         echo "  DATABASE_URL=${DATABASE_URL}"
         echo "  psql: docker compose exec postgres psql -U ${POSTGRES_USER:-monaco} -d ${POSTGRES_DB:-monaco}"
         echo ""
+        source ./scripts/run-with-logs.sh
+        monaco_init_logs
         if [[ -f apps/backend/go.mod ]]; then
-          (cd apps/backend && go run ./cmd/api)
+          (cd apps/backend && go run ./cmd/api) 2>&1 | tee -a "${MONACO_LOG_DIR}/backend.log"
         else
           echo "M0: apps/backend not scaffolded yet. DB is up; wire the API in M0-T3."
           exit 1
@@ -156,7 +165,9 @@ run *app:
           exit 1
         fi
         # Privy: xcconfig + SIMCTL_CHILD_* via with-ios-privy-env, then gold ios-sim
-        ./scripts/ios-sim
+        source ./scripts/run-with-logs.sh
+        monaco_init_logs
+        ./scripts/ios-sim 2>&1 | tee -a "${MONACO_LOG_DIR}/mobile.log"
         ;;
       *)
         echo "error: unknown app '{{app}}' (use backend or mobile)"
@@ -209,8 +220,9 @@ reset *target:
           echo "error: apps/mobile is not scaffolded yet (M0-T4)."
           exit 1
         fi
+        gold_udid="$(./scripts/gold-sim-udid.sh)"
         xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
-          -destination 'platform=iOS Simulator,id=7B30D45E-62FD-42E2-871A-787B19D38CCF' \
+          -destination "platform=iOS Simulator,id=${gold_udid}" \
           clean
         echo "xcodebuild clean complete"
         ;;

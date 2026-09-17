@@ -162,7 +162,7 @@ dotenvx run -f .env.local -- just run          # postgres + backend + mobile
 |---------|--------------|
 | `just test backend` | Docker Postgres + migrations + `go test -p 1 ./...` |
 | `just test mobile` | Host `swift test` in `packages/mobile-core` (no sim) |
-| `just build mobile` | `xcodebuild` on gold sim UDID only |
+| `just build mobile` | `xcodebuild` on `$SIMSLIM_UDID` only |
 | `just run mobile` | `./scripts/ios-sim` with Privy env |
 
 **Never** run uncached `go test ./...` without `-p 1` while `monaco-api` is running — can deadlock. Use `just test backend`.
@@ -171,15 +171,15 @@ dotenvx run -f .env.local -- just run          # postgres + backend + mobile
 
 | Item | Value |
 |------|-------|
-| Gold sim UDID | `7B30D45E-62FD-42E2-871A-787B19D38CCF` |
+| Gold sim UDID | `$SIMSLIM_UDID` (per machine; never commit) |
 | Bundle ID | `com.monaco.app` — must be on Privy iOS client |
 | Missing bundle | OTP `sendCode` → 403 `invalid_native_app_id` |
 | Launch | `./scripts/ios-sim` or `just run mobile` from **repo root** |
 | Privy app id (public) | `cmu26uw5s00mp0cl81v6dud1n` |
 
-**Never** `simctl erase`. **Never** destination by device name (`iPhone 17`). Always UDID.
+**Never** `simctl erase`. **Never** destination by device name (`iPhone 17`). Always `$SIMSLIM_UDID`.
 
-See README **Gold slim simulator** section and [`.cursor/skills/ios-simslim-fast-qa/SKILL.md`](../.cursor/skills/ios-simslim-fast-qa/SKILL.md).
+See README **SimSlim** section and [`.cursor/skills/ios-simslim-fast-qa/SKILL.md`](../.cursor/skills/ios-simslim-fast-qa/SKILL.md).
 
 ### Health check
 
@@ -235,7 +235,7 @@ Skill: [`.cursor/skills/worktree-orchestrate/SKILL.md`](../.cursor/skills/worktr
 | 4 | Poller stuck / double-credit risk | Persist `tx_signature` after broadcast; `ObserveSweep` even if member USDC already gone |
 | 5 | Silent misconfig | Fail-fast boot when auth private key set without `PRIVY_AUTHORIZATION_KEY_ID` |
 | 6 | Deposit UX buried | Deposit USDC **above fold** + copyable member address (`deposit-usdc-link`) |
-| 7 | Old wallet missing `additional_signer` | REST PATCH with identity token **blocked** (dashboard identity tokens off → 403/1010). **One-time ops:** owner logs in on iOS → Privy SDK `wallet.addSigner(SignerInput(signerId: j2ygtljjgxmn5tzao5vjov1t))` on **every** `embeddedSolanaWallets` entry (not `.first`) → server `SubmitSweep` or `go run ./apps/backend/cmd/sweep-member-to-address`. **Product path:** `additional_signers` at wallet **create** only |
+| 7 | Old wallet missing `additional_signer` | REST PATCH with identity token **blocked** (dashboard identity tokens off → 403/1010). **One-time ops:** owner logs in on iOS → Privy SDK `wallet.addSigner(SignerInput(signerId: j2ygtljjgxmn5tzao5vjov1t))` on **every** `embeddedSolanaWallets` entry (not `.first`) → server `SubmitSweep` or `./scripts/sweep-wallets.sh`. **Product path:** `additional_signers` at wallet **create** only |
 
 ---
 
@@ -251,9 +251,9 @@ User wanted leftover USDC returned to Phantom when M3 work is done.
 
 ### What **did** work (one-time ops on pre-fix wallets)
 
-1. Owner logs in on iOS sim (gold UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`).
+1. Owner logs in on iOS sim (gold `$SIMSLIM_UDID`).
 2. DEBUG `ensureServerSweepSigner` in `PrivyAuthService` — on login, `wallet.addSigner(SignerInput(signerId: j2ygtljjgxmn5tzao5vjov1t))` on **every** `embeddedSolanaWallets` entry (sim users can have multiple; `.first` hit wrong wallet).
-3. Server sweep: `dotenvx run -f .env.local -- go run ./apps/backend/cmd/sweep-member-to-address <member> 68ZedqeBP7tkyLNCdmfrqvtf45WNmKQeHYPi6RjdECqu`
+3. Server sweep: `./scripts/sweep-wallets.sh --destination <addr> --dry-run` then live without `--dry-run`. `--all` uses Privy wallet list. See [`docs/ops-sweep-wallets.md`](ops-sweep-wallets.md).
 
 **Ops only:** DEBUG `ensureServerSweepSigner` and `cmd/sweep-member-to-address` are uncommitted migration helpers — **not** M3 product code. New member wallets still get `additional_signers` at **create** (`EnsureMemberWallet`).
 
@@ -278,7 +278,7 @@ cd /Users/logno/Documents/work/github/monaco
 
 dotenvx run -f .env.local -- just test backend
 just test mobile
-just build mobile   # gold UDID 7B30D45E-62FD-42E2-871A-787B19D38CCF only
+just build mobile   # $SIMSLIM_UDID only
 curl -s http://127.0.0.1:8080/health
 ```
 

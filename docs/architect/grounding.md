@@ -125,7 +125,7 @@ Planned layout from `docs/index.md`. Do not use `apps/api` or `apps/ios`.
 | Path | Role |
 |------|------|
 | `apps/backend/` | Go API. M1 layout: `internal/config`, `internal/app`, `internal/privy`, `internal/postgres`, `internal/httpapi`. Jupiter and xStocks clients land in M3. |
-| `apps/mobile/` | SwiftUI, iOS 18+, scheme `Monaco`, bundle `com.monaco.app`, slim sim UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`. |
+| `apps/mobile/` | SwiftUI, iOS 18+, scheme `Monaco`, bundle `com.monaco.app`, gold slim sim via `$SIMSLIM_UDID` (per machine). |
 | `packages/domain/` | Go-only share math, vote tally, P&L, NAV. Scaffold in M0. Rules land in M4. |
 | `supabase/migrations/` | SQL applied to local Postgres. |
 | `Justfile` | `just build`, `just test`, `just run` per `backend` or `mobile`, plus root `just run`. No `just db` umbrella. |

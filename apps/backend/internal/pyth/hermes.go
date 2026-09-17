@@ -161,25 +161,35 @@ func (c *HermesClient) fetchPriceFeedBySymbol(ctx context.Context, symbol string
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return priceFeedResponse{}, fmt.Errorf("pyth feed lookup %s: %w", symbol, err)
+		lookupErr := fmt.Errorf("pyth feed lookup %s: %w", symbol, err)
+		logFeedLookup(symbol, "", lookupErr)
+		return priceFeedResponse{}, lookupErr
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logFeedLookup(symbol, "", err)
 		return priceFeedResponse{}, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return priceFeedResponse{}, fmt.Errorf("pyth feed lookup %s: status %d", symbol, resp.StatusCode)
+		lookupErr := fmt.Errorf("pyth feed lookup %s: status %d", symbol, resp.StatusCode)
+		logFeedLookup(symbol, "", lookupErr)
+		return priceFeedResponse{}, lookupErr
 	}
 
 	var feeds []priceFeedResponse
 	if err := json.Unmarshal(body, &feeds); err != nil {
-		return priceFeedResponse{}, fmt.Errorf("decode pyth feed lookup %s: %w", symbol, err)
+		lookupErr := fmt.Errorf("decode pyth feed lookup %s: %w", symbol, err)
+		logFeedLookup(symbol, "", lookupErr)
+		return priceFeedResponse{}, lookupErr
 	}
 	if len(feeds) == 0 || feeds[0].ID == "" {
-		return priceFeedResponse{}, fmt.Errorf("pyth feed not found for %s", symbol)
+		lookupErr := fmt.Errorf("pyth feed not found for %s", symbol)
+		logFeedLookup(symbol, "", lookupErr)
+		return priceFeedResponse{}, lookupErr
 	}
+	logFeedLookup(symbol, feeds[0].ID, nil)
 	return feeds[0], nil
 }
 
@@ -195,25 +205,35 @@ func (c *HermesClient) fetchLatestPrice(ctx context.Context, feedID string) (par
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return parsedPriceUpdate{}, fmt.Errorf("pyth latest price: %w", err)
+		priceErr := fmt.Errorf("pyth latest price: %w", err)
+		logLatestPrice(feedID, priceErr)
+		return parsedPriceUpdate{}, priceErr
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logLatestPrice(feedID, err)
 		return parsedPriceUpdate{}, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return parsedPriceUpdate{}, fmt.Errorf("pyth latest price: status %d", resp.StatusCode)
+		priceErr := fmt.Errorf("pyth latest price: status %d", resp.StatusCode)
+		logLatestPrice(feedID, priceErr)
+		return parsedPriceUpdate{}, priceErr
 	}
 
 	var payload latestPriceResponse
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return parsedPriceUpdate{}, fmt.Errorf("decode pyth latest price: %w", err)
+		priceErr := fmt.Errorf("decode pyth latest price: %w", err)
+		logLatestPrice(feedID, priceErr)
+		return parsedPriceUpdate{}, priceErr
 	}
 	if len(payload.Parsed) == 0 {
-		return parsedPriceUpdate{}, fmt.Errorf("pyth latest price: empty parsed payload")
+		priceErr := fmt.Errorf("pyth latest price: empty parsed payload")
+		logLatestPrice(feedID, priceErr)
+		return parsedPriceUpdate{}, priceErr
 	}
+	logLatestPrice(feedID, nil)
 	return payload.Parsed[0], nil
 }
 
