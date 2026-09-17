@@ -17,6 +17,7 @@ type HomeHandlers struct {
 type homeGroupBoardRowResponse struct {
 	GroupID       string  `json:"groupId"`
 	Name          string  `json:"name"`
+	PotValueUsd   string  `json:"potValueUsd"`
 	PercentReturn *string `json:"percentReturn"`
 	DollarPnL     string  `json:"dollarPnl"`
 }
@@ -63,6 +64,7 @@ func (h *HomeHandlers) HomeHandler(w http.ResponseWriter, r *http.Request) {
 		groups = append(groups, homeGroupBoardRowResponse{
 			GroupID:       row.GroupID,
 			Name:          row.Name,
+			PotValueUsd:   row.PotValueUsd,
 			PercentReturn: row.PercentReturn,
 			DollarPnL:     row.DollarPnL,
 		})

@@ -18,6 +18,7 @@ type DepositStatus string
 const (
 	DepositStatusPending   DepositStatus = "pending"
 	DepositStatusConfirmed DepositStatus = "confirmed"
+	DepositStatusFailed    DepositStatus = "failed"
 )
 
 // Deposit is a user funding intent for a group treasury sweep.
@@ -209,20 +210,32 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 
 	depositRow, found, err := d.store.GetDepositByID(ctx, sweep.DepositID)
 	if err != nil {
+		logDepositBranchError("deposit observe sweep lookup deposit failed", err,
+			"deposit_id", sweep.DepositID, "group_id", sweep.GroupID)
 		return ObserveSweepResult{}, err
 	}
 	if !found {
+		logDepositBranchWarn("deposit observe sweep rejected", "deposit not found",
+			"deposit_id", sweep.DepositID, "group_id", sweep.GroupID)
 		return ObserveSweepResult{}, ErrDepositNotFound
 	}
 	if depositRow.FromAddress != sweep.FromAddress {
+		logDepositBranchWarn("deposit observe sweep rejected", "from address mismatch",
+			"deposit_id", sweep.DepositID, "group_id", sweep.GroupID,
+			"expected_from", depositRow.FromAddress, "actual_from", sweep.FromAddress)
 		return ObserveSweepResult{}, fmt.Errorf("from address mismatch")
 	}
 	if depositRow.Amount != sweep.Amount {
+		logDepositBranchWarn("deposit observe sweep rejected", "amount mismatch",
+			"deposit_id", sweep.DepositID, "group_id", sweep.GroupID,
+			"expected_amount", depositRow.Amount, "actual_amount", sweep.Amount)
 		return ObserveSweepResult{}, fmt.Errorf("amount mismatch")
 	}
 
 	tx, err := d.store.BeginTx(ctx)
 	if err != nil {
+		logDepositBranchError("deposit observe sweep begin tx failed", err,
+			"deposit_id", sweep.DepositID, "group_id", sweep.GroupID)
 		return ObserveSweepResult{}, err
 	}
 	committed := false
@@ -234,6 +247,8 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 
 	confirmed, newlyConfirmed, err := d.store.ConfirmDepositTx(ctx, tx, sweep.DepositID, sweep.TxSignature)
 	if err != nil {
+		logDepositBranchError("deposit observe sweep confirm deposit failed", err,
+			"deposit_id", sweep.DepositID, "group_id", sweep.GroupID, "tx_signature", sweep.TxSignature)
 		return ObserveSweepResult{}, err
 	}
 
@@ -241,19 +256,27 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 	if newlyConfirmed {
 		shareUnits, err := d.shareCreditForSweep(ctx, tx, sweep.GroupID, treasury.SolanaAddress, sweep.Amount)
 		if err != nil {
+			logDepositBranchError("deposit observe sweep share credit failed", err,
+				"deposit_id", sweep.DepositID, "group_id", sweep.GroupID, "amount", sweep.Amount)
 			return ObserveSweepResult{}, err
 		}
 
 		positionRow, err = d.store.IncrementPositionTx(ctx, tx, sweep.UserID, sweep.GroupID, shareUnits, sweep.Amount)
 		if err != nil {
+			logDepositBranchError("deposit observe sweep increment position failed", err,
+				"deposit_id", sweep.DepositID, "group_id", sweep.GroupID, "user_id", sweep.UserID)
 			return ObserveSweepResult{}, err
 		}
 
 		treasuryUsdc, err := d.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
 		if err != nil {
+			logDepositBranchError("deposit observe sweep treasury balance failed", err,
+				"deposit_id", sweep.DepositID, "group_id", sweep.GroupID, "treasury_address", treasury.SolanaAddress)
 			return ObserveSweepResult{}, fmt.Errorf("treasury usdc balance: %w", err)
 		}
 		if err := d.store.WriteNavSnapshotOnDepositConfirmTx(ctx, tx, sweep.GroupID, treasuryUsdc); err != nil {
+			logDepositBranchError("deposit observe sweep nav snapshot failed", err,
+				"deposit_id", sweep.DepositID, "group_id", sweep.GroupID)
 			return ObserveSweepResult{}, err
 		}
 

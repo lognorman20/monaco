@@ -13,15 +13,17 @@ import (
 
 // HomeService builds app-home board projections.
 type HomeService struct {
-	store *postgres.Store
-	privy privy.Client
+	store    *postgres.Store
+	privy    privy.Client
+	deposits *DepositService
 }
 
 // NewHomeService wires home dependencies.
-func NewHomeService(store *postgres.Store, privyClient privy.Client) *HomeService {
+func NewHomeService(store *postgres.Store, privyClient privy.Client, deposits *DepositService) *HomeService {
 	return &HomeService{
-		store: store,
-		privy: privyClient,
+		store:    store,
+		privy:    privyClient,
+		deposits: deposits,
 	}
 }
 
@@ -29,6 +31,7 @@ func NewHomeService(store *postgres.Store, privyClient privy.Client) *HomeServic
 type HomeGroupRow struct {
 	GroupID       string
 	Name          string
+	PotValueUsd   string
 	PercentReturn *string
 	DollarPnL     string
 }
@@ -132,6 +135,7 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 		result.Groups = append(result.Groups, HomeGroupRow{
 			GroupID:       row.GroupID,
 			Name:          row.GroupName,
+			PotValueUsd:   formatMicrosAsUsdDecimal(int64(row.PotNav)),
 			PercentReturn: formatPercentReturnDecimal(row.PercentReturn),
 			DollarPnL:     formatSignedDollarPnL(int64(row.DollarPnL)),
 		})
@@ -143,8 +147,9 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 		result.Groups = append(result.Groups, HomeGroupRow{
 			GroupID:       input.GroupID,
 			Name:          input.GroupName,
+			PotValueUsd:   formatMicrosAsUsdDecimal(int64(input.PotNav)),
 			PercentReturn: nil,
-			DollarPnL:     formatSignedDollarPnL(0),
+			DollarPnL:     formatSignedDollarPnL(int64(input.PotNav - input.NetUsdcIn)),
 		})
 	}
 	for _, row := range peopleBoard {

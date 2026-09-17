@@ -9,4 +9,5 @@ struct CatalogAssetDTO: Codable, Equatable, Identifiable {
 
 struct SearchAssetsResponse: Codable, Equatable {
     let assets: [CatalogAssetDTO]
+    let hasMore: Bool
 }

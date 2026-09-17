@@ -28,7 +28,7 @@
 ```bash
 dotenvx run -f .env.local -- just test backend
 just test mobile          # host swift test packages/mobile-core — no sim
-just build mobile         # xcodebuild on gold sim UDID below
+just build mobile         # xcodebuild on $SIMSLIM_UDID
 curl -s http://127.0.0.1:8080/health
 ```
 
@@ -123,10 +123,10 @@ dotenvx run -f .env.local -- just run           # postgres + backend + mobile
 
 | Item | Value |
 |------|-------|
-| Gold sim UDID | `7B30D45E-62FD-42E2-871A-787B19D38CCF` |
+| Gold sim UDID | `$SIMSLIM_UDID` (per machine; never commit) |
 | Bundle ID | `com.monaco.app` |
 | `just test mobile` | Host `swift test` in `packages/mobile-core` — **no sim boot** |
-| `just build mobile` | `xcodebuild build` on gold UDID only |
+| `just build mobile` | `xcodebuild build` on `$SIMSLIM_UDID` only |
 | Launch | `./scripts/ios-sim` or `just run mobile` from repo root |
 
 **Never:** `simctl erase`, destination by device name (`iPhone 17`), AppleScript/CGEvent/coordinate tap hacks.
@@ -162,7 +162,7 @@ Skill: [`.cursor/skills/worktree-orchestrate/SKILL.md`](../.cursor/skills/worktr
 
 Within a wave: parallel implementers on disjoint `Features/*` paths. Redeem parent M5-T17; subissues M5-T18, M5-T19 first.
 
-**Sim QA:** XcodeBuildMCP or ios-simslim-fast-qa with `--simulator-id 7B30D45E-62FD-42E2-871A-787B19D38CCF`.
+**Sim QA:** XcodeBuildMCP or ios-simslim-fast-qa with `--simulator-id "$SIMSLIM_UDID"`.
 
 ---
 
@@ -214,11 +214,11 @@ Product:
 Gates (must stay green). Do not change just test/build recipes:
   dotenvx run -f .env.local -- just test backend
   just test mobile          # host swift test packages/mobile-core — no sim
-  just build mobile         # gold UDID 7B30D45E-62FD-42E2-871A-787B19D38CCF only
+  just build mobile         # $SIMSLIM_UDID only
   curl -s http://127.0.0.1:8080/health
 
 QA (if sim):
-- Gold slim sim UDID 7B30D45E-62FD-42E2-871A-787B19D38CCF. Never simctl erase. Never destination by name.
+- Gold slim sim `$SIMSLIM_UDID` (per machine). Never simctl erase. Never destination by name.
 - Launch ./scripts/ios-sim or just run mobile. Bundle com.monaco.app. Privy via with-ios-privy-env.
 - Privy test Alfred: test-8081@privy.io OTP 465354.
 - No AppleScript/CGEvent/coordinate tap hacks. Use XcodeBuildMCP accessibility labels/ids.

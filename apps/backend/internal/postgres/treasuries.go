@@ -86,3 +86,36 @@ WHERE group_id = $1`
 
 	return treasury, true, nil
 }
+
+// ListTreasuries returns all group treasury wallet rows.
+func (s *Store) ListTreasuries(ctx context.Context) ([]Treasury, error) {
+	const selectSQL = `
+SELECT id, group_id, privy_wallet_id, solana_address, created_at
+FROM treasuries
+ORDER BY created_at ASC`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL)
+	if err != nil {
+		return nil, fmt.Errorf("list treasuries: %w", err)
+	}
+	defer rows.Close()
+
+	var treasuries []Treasury
+	for rows.Next() {
+		var treasury Treasury
+		if err := rows.Scan(
+			&treasury.ID,
+			&treasury.GroupID,
+			&treasury.PrivyWalletID,
+			&treasury.SolanaAddress,
+			&treasury.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan treasury: %w", err)
+		}
+		treasuries = append(treasuries, treasury)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate treasuries: %w", err)
+	}
+	return treasuries, nil
+}

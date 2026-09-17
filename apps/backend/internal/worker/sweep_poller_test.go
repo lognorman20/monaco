@@ -2,8 +2,10 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
+	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 )
 
@@ -13,6 +15,77 @@ func setupPoller(t *testing.T) (*SweepPoller, *workerTestApp, *fakeSolanaRPC) {
 	rpc := NewFakeSolanaRPC()
 	poller := NewSweepPoller(testApp.Store, testApp.Privy, rpc, testApp.Deposits, "relayer-key", NewStubClock(testApp.Now))
 	return poller, testApp, rpc
+}
+
+func TestSweepPoller_submitSweepFailure_marksDepositFailed(t *testing.T) {
+	// Arrange
+	poller, testApp, _ := setupPoller(t)
+	ctx := context.Background()
+	deposit, memberAddress, _ := seedPendingDeposit(t, testApp)
+	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
+	privy.SetRejectSubmitSweep(testApp.Privy, true, fmt.Errorf("%w: relayer key invalid", privy.ErrAPI))
+
+	// Act
+	if err := poller.Tick(ctx); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	// Assert
+	updated, found, err := testApp.Store.GetDepositByID(ctx, deposit.ID)
+	if err != nil || !found {
+		t.Fatalf("GetDepositByID: found=%v err=%v", found, err)
+	}
+	if updated.Status != "failed: submit_sweep" {
+		t.Fatalf("status = %q, want failed: submit_sweep", updated.Status)
+	}
+	if _, ok := privy.LastSweepRequest(testApp.Privy); ok {
+		t.Fatal("expected no successful SubmitSweep")
+	}
+}
+
+func TestSweepPoller_submitSweepFailure_surfacesInGroupActivity(t *testing.T) {
+	// Arrange
+	poller, testApp, _ := setupPoller(t)
+	ctx := context.Background()
+	deposit, memberAddress, token := seedPendingDepositWithToken(t, testApp)
+	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
+	privy.SetRejectSubmitSweep(testApp.Privy, true, fmt.Errorf("%w: relayer key invalid", privy.ErrAPI))
+	tx, err := testApp.Store.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if err := testApp.Store.InsertGroupMemberTx(ctx, tx, deposit.GroupID, deposit.UserID); err != nil {
+		t.Fatalf("InsertGroupMemberTx: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// Act
+	if err := poller.Tick(ctx); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	home := app.NewHomeService(testApp.Store, testApp.Privy, testApp.Deposits)
+	items, err := home.ListGroupActivity(ctx, token, deposit.GroupID)
+	if err != nil {
+		t.Fatalf("ListGroupActivity: %v", err)
+	}
+
+	// Assert
+	foundFailed := false
+	for _, item := range items {
+		if item.ID == deposit.ID && item.Kind == "deposit" {
+			if item.Status != "failed: submit_sweep" {
+				t.Fatalf("activity status = %q, want failed: submit_sweep", item.Status)
+			}
+			foundFailed = true
+			break
+		}
+	}
+	if !foundFailed {
+		t.Fatal("expected failed deposit in group activity")
+	}
 }
 
 func TestSweepPoller_memberBalanceCoversIntent_triggersSubmitSweep(t *testing.T) {
@@ -104,5 +177,99 @@ func TestSweepPoller_memberBalanceBelowIntent_doesNotSweep(t *testing.T) {
 	// Assert
 	if _, ok := privy.LastSweepRequest(testApp.Privy); ok {
 		t.Fatal("expected no SubmitSweep call")
+	}
+}
+
+func TestSweepPoller_memberBalanceBelowIntent_sweepsAvailableBalance(t *testing.T) {
+	// Arrange
+	poller, testApp, rpc := setupPoller(t)
+	ctx := context.Background()
+	deposit, memberAddress, _ := seedPendingDeposit(t, testApp)
+	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 500_000)
+
+	// Act
+	if err := poller.Tick(ctx); err != nil {
+		t.Fatalf("first Tick: %v", err)
+	}
+
+	// Assert
+	last, ok := privy.LastSweepRequest(testApp.Privy)
+	if !ok {
+		t.Fatal("expected SubmitSweep call")
+	}
+	if last.Amount != 500_000 {
+		t.Fatalf("amount = %d, want 500000", last.Amount)
+	}
+
+	updated, found, err := testApp.Store.GetDepositByID(ctx, deposit.ID)
+	if err != nil || !found {
+		t.Fatalf("GetDepositByID: found=%v err=%v", found, err)
+	}
+	if updated.Amount != 500_000 {
+		t.Fatalf("deposit amount = %d, want 500000", updated.Amount)
+	}
+
+	sig := updated.TxSignature.String
+	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 0)
+	rpc.Confirm(sig)
+
+	if err := poller.Tick(ctx); err != nil {
+		t.Fatalf("second Tick: %v", err)
+	}
+
+	confirmed, found, err := testApp.Store.GetDepositByID(ctx, deposit.ID)
+	if err != nil || !found {
+		t.Fatalf("GetDepositByID after confirm: found=%v err=%v", found, err)
+	}
+	if confirmed.Status != "confirmed" {
+		t.Fatalf("status = %q, want confirmed", confirmed.Status)
+	}
+}
+
+func TestSweepPoller_scanCreatesPendingDepositWhenUSDCArrivesWithoutIntent(t *testing.T) {
+	// Arrange
+	poller, testApp, _ := setupPoller(t)
+	ctx := context.Background()
+	privyUserID := testApp.ISO.UniquePrivyID("scan")
+	token := privy.AccessToken(testApp.ISO.UniqueToken("scan"))
+	privy.RegisterToken(testApp.Privy, token, privy.Identity{PrivyUserID: privyUserID, DisplayName: "Scanner"})
+	sessions := app.NewSessionService(testApp.Store, testApp.Privy)
+	session, err := sessions.OpenSession(ctx, string(token))
+	if err != nil {
+		t.Fatalf("OpenSession: %v", err)
+	}
+	testApp.ISO.TrackUser(session.UserID)
+	groups := app.NewGroupService(testApp.Store, testApp.Privy)
+	group, err := groups.CreateGroup(ctx, string(token), "Scan Fund "+testApp.ISO.Suffix())
+	if err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	testApp.ISO.TrackGroup(group.GroupID)
+
+	wallet, found, err := testApp.Store.GetMemberWalletByUserID(ctx, session.UserID)
+	if err != nil || !found {
+		t.Fatalf("GetMemberWalletByUserID: found=%v err=%v", found, err)
+	}
+	privy.SetMemberUSDCBalance(testApp.Privy, wallet.SolanaAddress, 750_000)
+
+	// Act
+	if err := poller.Tick(ctx); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	// Assert
+	hasPending, err := testApp.Store.HasPendingDepositForFromAddress(ctx, wallet.SolanaAddress)
+	if err != nil {
+		t.Fatalf("HasPendingDepositForFromAddress: %v", err)
+	}
+	if !hasPending {
+		t.Fatal("expected pending deposit created by scan")
+	}
+	last, ok := privy.LastSweepRequest(testApp.Privy)
+	if !ok {
+		t.Fatal("expected SubmitSweep call")
+	}
+	if last.Amount != 750_000 {
+		t.Fatalf("amount = %d, want 750000", last.Amount)
 	}
 }

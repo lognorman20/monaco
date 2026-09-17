@@ -49,8 +49,7 @@ public enum ScreenSnapshotRenderer {
             lines.append("No clubs yet. Create or join one to start investing together.")
         } else {
             for row in view.groups {
-                let pct = row.percentReturn ?? "—"
-                lines.append("\(row.name) | \(pct) | \(row.dollarPnl)")
+                lines.append("\(row.name) | $\(row.potValueUsd) | \(row.dollarPnl)")
             }
         }
 

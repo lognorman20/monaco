@@ -54,12 +54,21 @@ public final class MonacoAPIClient: @unchecked Sendable {
         return try JSONDecoder().decode(HomeViewDTO.self, from: data)
     }
 
-    public func searchAssets(groupId: String, query: String) async throws -> SearchAssetsResponseDTO {
+    public func searchAssets(
+        groupId: String,
+        query: String,
+        limit: Int = 25,
+        offset: Int = 0
+    ) async throws -> SearchAssetsResponseDTO {
         var components = URLComponents(
             url: baseURL.appending(path: "v1/groups/\(groupId)/assets"),
             resolvingAgainstBaseURL: false
         )!
-        components.queryItems = [URLQueryItem(name: "query", value: query)]
+        components.queryItems = [
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "offset", value: String(offset)),
+        ]
         guard let url = components.url else {
             throw MonacoAPIError.invalidResponse
         }

@@ -6,7 +6,7 @@ Optional upload path for hackathon demo builds. Requires Apple Developer account
 
 - Xcode signed in with team that owns bundle ID `com.monaco.app`
 - Privy iOS client includes `com.monaco.app` (OTP `sendCode` otherwise returns 403)
-- Wave 4 green: `just test mobile` and `just build mobile` on gold sim UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`
+- Wave 4 green: `just test mobile` and `just build mobile` on this machine’s gold slim sim (`SIMSLIM_UDID`)
 
 ## Build archive
 

@@ -8,6 +8,7 @@ struct HomeViewDTO: Codable, Equatable {
 struct HomeGroupBoardRowDTO: Codable, Equatable, Identifiable {
     let groupId: String
     let name: String
+    let potValueUsd: String
     let percentReturn: String?
     let dollarPnl: String
 

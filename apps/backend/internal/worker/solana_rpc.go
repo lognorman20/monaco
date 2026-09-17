@@ -57,6 +57,62 @@ type solanaSignatureStatusesResponse struct {
 	} `json:"error"`
 }
 
+type solanaBalanceResponse struct {
+	Result struct {
+		Value uint64 `json:"value"`
+	} `json:"result"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// GetBalance returns lamports for a base58 Solana address via getBalance RPC.
+func (r *HTTPSolanaRPC) GetBalance(ctx context.Context, address string) (uint64, error) {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return 0, fmt.Errorf("address is required")
+	}
+
+	payload, err := json.Marshal(solanaRPCRequest{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "getBalance",
+		Params:  []any{address},
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, fmt.Errorf("solana rpc status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var rpcResp solanaBalanceResponse
+	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
+		return 0, err
+	}
+	if rpcResp.Error != nil {
+		return 0, fmt.Errorf("solana rpc error: %s", rpcResp.Error.Message)
+	}
+	return rpcResp.Result.Value, nil
+}
+
 func (r *HTTPSolanaRPC) IsConfirmed(ctx context.Context, txSignature string) (bool, error) {
 	txSignature = strings.TrimSpace(txSignature)
 	if txSignature == "" {

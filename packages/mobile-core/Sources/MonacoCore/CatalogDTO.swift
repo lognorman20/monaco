@@ -12,8 +12,10 @@ public struct CatalogAssetDTO: Codable, Equatable, Sendable {
 
 public struct SearchAssetsResponseDTO: Codable, Equatable, Sendable {
     public let assets: [CatalogAssetDTO]
+    public let hasMore: Bool
 
-    public init(assets: [CatalogAssetDTO]) {
+    public init(assets: [CatalogAssetDTO], hasMore: Bool) {
         self.assets = assets
+        self.hasMore = hasMore
     }
 }

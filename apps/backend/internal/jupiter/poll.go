@@ -66,6 +66,7 @@ func PollUntilConfirmed(ctx context.Context, client Client, params PollExecutePa
 			return result, nil
 		}
 		if result.IsTerminal() && !result.IsConfirmedSuccess() {
+			logPollTerminalFailure(params.GroupID, params.UserID, params.Symbol, params.RequestID, result.Status, result.Code, result.Error)
 			logPollTransition(params.GroupID, params.UserID, params.Symbol, result.Signature, ExecuteStatusPending, result.Status, result.Code)
 			return result, fmt.Errorf("jupiter: execute terminal failure status=%s code=%d: %s", result.Status, result.Code, result.Error)
 		}
@@ -74,5 +75,6 @@ func PollUntilConfirmed(ctx context.Context, client Client, params PollExecutePa
 	if last.IsConfirmedSuccess() {
 		return last, nil
 	}
+	logPollExhausted(params.GroupID, params.UserID, params.Symbol, params.RequestID, last.Status, last.Code, last.Error)
 	return last, fmt.Errorf("jupiter: execute poll exhausted attempts status=%s code=%d", last.Status, last.Code)
 }

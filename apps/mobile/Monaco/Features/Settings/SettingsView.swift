@@ -71,10 +71,7 @@ struct AdvancedSettingsView: View {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(MonacoTheme.secondaryText)
-            Text(value)
-                .font(.body.monospaced())
-                .foregroundStyle(MonacoTheme.primaryText)
-                .textSelection(.enabled)
+            MonacoWalletAddressText(address: value)
         }
     }
 }

@@ -83,6 +83,7 @@ func TestExecuteOnPass_onlyAfterTallyPassed_callsJupiter(t *testing.T) {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
 	h.App.Swap.SetTreasuryBalances(treasury.SolanaAddress, TreasuryBalances{USDC: 5_000_000})
+	privy.SetTreasuryUSDCBalance(h.App.Privy, treasury.SolanaAddress, 5_000_000)
 
 	proposal, err := h.Governance.CreateProposal(ctx, CreateProposalInput{
 		GroupID:    created.GroupID,
@@ -237,6 +238,7 @@ func seedPassedExecuteProposal(t *testing.T, h executeOnPassHarness, label strin
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
 	h.App.Swap.SetTreasuryBalances(treasury.SolanaAddress, TreasuryBalances{USDC: 5_000_000})
+	privy.SetTreasuryUSDCBalance(h.App.Privy, treasury.SolanaAddress, 5_000_000)
 	proposal, err := h.Governance.CreateProposal(ctx, CreateProposalInput{
 		GroupID:    created.GroupID,
 		ProposerID: userID.UserID,

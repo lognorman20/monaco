@@ -20,7 +20,8 @@ func integrationHomeApp(t *testing.T) (*HomeHandlers, *AuthHandlers, *GroupHandl
 	store := postgres.NewStore(db)
 	groups := app.NewGroupService(store, privyClient)
 	governance := app.NewGovernanceService(store, privyClient)
-	home := app.NewHomeService(store, privyClient)
+	deposits := app.NewDepositService(store, privyClient, nil)
+	home := app.NewHomeService(store, privyClient, deposits)
 	return &HomeHandlers{Home: home}, authHandlers, &GroupHandlers{Groups: groups, Governance: governance}, privyClient, store, iso
 }
 
@@ -118,6 +119,9 @@ func TestGET_home_authenticated_returnsUnfundedGroupRow(t *testing.T) {
 	if payload.Groups[0].GroupID != created.GroupID {
 		t.Fatalf("group id = %q, want %q", payload.Groups[0].GroupID, created.GroupID)
 	}
+	if payload.Groups[0].PotValueUsd != "0.00" {
+		t.Fatalf("potValueUsd = %q, want 0.00", payload.Groups[0].PotValueUsd)
+	}
 	if payload.Groups[0].PercentReturn != nil {
 		t.Fatalf("percentReturn = %v, want nil for unfunded group", payload.Groups[0].PercentReturn)
 	}
@@ -186,6 +190,12 @@ func TestGET_home_authenticated_returnsFundedGroupAndPeopleRows(t *testing.T) {
 	}
 	if payload.Groups[0].GroupID != created.GroupID {
 		t.Fatalf("group id = %q, want %q", payload.Groups[0].GroupID, created.GroupID)
+	}
+	if payload.Groups[0].PotValueUsd != "100.00" {
+		t.Fatalf("potValueUsd = %q, want 100.00", payload.Groups[0].PotValueUsd)
+	}
+	if payload.Groups[0].DollarPnL != "+0.00" {
+		t.Fatalf("dollarPnl = %q, want +0.00 for flat funded group", payload.Groups[0].DollarPnL)
 	}
 	if len(payload.People) != 1 {
 		t.Fatalf("people len = %d, want 1", len(payload.People))

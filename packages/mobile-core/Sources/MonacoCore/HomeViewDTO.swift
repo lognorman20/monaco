@@ -13,12 +13,14 @@ public struct HomeViewDTO: Codable, Equatable, Sendable {
 public struct HomeGroupBoardRowDTO: Codable, Equatable, Sendable {
     public let groupID: String
     public let name: String
+    public let potValueUsd: String
     public let percentReturn: String?
     public let dollarPnl: String
 
-    public init(groupID: String, name: String, percentReturn: String?, dollarPnl: String) {
+    public init(groupID: String, name: String, potValueUsd: String, percentReturn: String?, dollarPnl: String) {
         self.groupID = groupID
         self.name = name
+        self.potValueUsd = potValueUsd
         self.percentReturn = percentReturn
         self.dollarPnl = dollarPnl
     }
@@ -26,6 +28,7 @@ public struct HomeGroupBoardRowDTO: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case groupID = "groupId"
         case name
+        case potValueUsd
         case percentReturn
         case dollarPnl
     }

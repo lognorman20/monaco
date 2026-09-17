@@ -31,6 +31,7 @@ struct LeaderboardRowDTO: Codable, Equatable, Identifiable {
 struct GroupViewDTO: Codable, Equatable {
     let id: String
     let name: String
+    let treasuryAddress: String?
     let pot: [PotRowDTO]
     let you: MemberSliceDTO
     let members: [LeaderboardRowDTO]

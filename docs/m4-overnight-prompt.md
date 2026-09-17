@@ -55,11 +55,11 @@ Signing (carry from M3):
 Gates (must stay green). Do not change just test/build recipes:
   dotenvx run -f .env.local -- just test backend
   just test mobile          # host swift test packages/mobile-core — no sim
-  just build mobile         # gold UDID 7B30D45E-62FD-42E2-871A-787B19D38CCF only
+  just build mobile         # $SIMSLIM_UDID only
   curl -s http://127.0.0.1:8080/health
 
 QA (if sim):
-- Gold slim sim UDID 7B30D45E-62FD-42E2-871A-787B19D38CCF. Never simctl erase. Never destination by name.
+- Gold slim sim `$SIMSLIM_UDID` (per machine). Never simctl erase. Never destination by name.
 - Launch ./scripts/ios-sim or just run mobile. Bundle com.monaco.app. Privy via with-ios-privy-env.
 - Privy test Alfred: test-8081@privy.io OTP 465354.
 - No AppleScript/CGEvent/coordinate tap hacks. Use XcodeBuildMCP accessibility labels/ids.

@@ -4,7 +4,7 @@
 
 **Depends on.** M4 domain APIs for the seven demo steps. M1 Privy sign-in. M2 deposit sweep. Hide M1 address debug UI on the main flow. Keep explorer links under Settings, Advanced. M1 email and password login may stay on the launch screen for internal testers.
 
-**Owns.** `apps/mobile/` SwiftUI app, iOS 18+. Gold slim sim UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`. Use `just build mobile`, `just test mobile`, and `just run mobile`. API types are hand-written `Codable` models matched to `apps/backend` JSON. No shared compile-time package with Go.
+**Owns.** `apps/mobile/` SwiftUI app, iOS 18+. Gold slim sim is `$SIMSLIM_UDID` (per machine). Use `just build mobile`, `just test mobile`, and `just run mobile`. API types are hand-written `Codable` models matched to `apps/backend` JSON. No shared compile-time package with Go.
 
 **API boundary.** Product flows never call `api.xstocks.fi`, Jupiter Swap API, Pyth Hermes, or Solana RPC from Swift. No xStocks or Jupiter SDKs on iOS. Swift talks HTTP to `apps/backend` only, plus Privy Swift for auth and member wallets. Catalog search, quotes, proposal create refusal, Pyth prices for the pot, after-hours flags, and proposal status all come from backend JSON. Explorer links under Settings, Advanced open URLs in Safari. They are not product API calls.
 
@@ -1512,7 +1512,7 @@ Implement in order. No drive-by refactors. Lock choices below; do not invent pro
 1. Edit **only** **Owns** paths: `docs/`. No drive-by refactors.
 2. Build SwiftUI screen in **Owns**; call `MonacoAPIClient` only (no xStocks/Jupiter/Pyth/Solana RPC).
 3. Compile gate: `just build mobile` and `just test mobile` exit 0.
-4. **Manual (after automated green):** README hackathon demo checklist on UDID 7B30D45E-62FD-42E2-871A-787B19D38CCF
+4. **Manual (after automated green):** README hackathon demo checklist on `$SIMSLIM_UDID`
 
 **API / data contract**
 **Mobile consumes existing backend JSON only.** No direct calls to xStocks, Jupiter, Pyth, or Solana RPC from Swift. Use `MonacoAPIClient` methods matching backend routes in milestone doc.
@@ -1537,7 +1537,7 @@ Implement in order. No drive-by refactors. Lock choices below; do not invent pro
 - `just test mobile`
 
 **Manual (only for this ticket):**
-- README hackathon demo checklist on UDID 7B30D45E-62FD-42E2-871A-787B19D38CCF
+- README hackathon demo checklist on `$SIMSLIM_UDID`
 
 **Done when (zero wiggle room):**
 - [ ] Every **Acceptance Criteria** checkbox is satisfied.
@@ -1635,7 +1635,7 @@ None in Swift for M5. Fairness and ranking invariants live in M4 `packages/domai
 
 ## Manual verification
 
-README hackathon demo checklist. Two accounts on gold slim sim UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`. Run `just run` for full stack.
+README hackathon demo checklist. Two accounts on this machine’s gold slim sim (`$SIMSLIM_UDID`). Run `just run` for full stack.
 
 1. Create group with join policy, voter set, threshold, and expiry.
 2. Join second account. Two names on in-group board.

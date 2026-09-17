@@ -69,9 +69,14 @@ struct DevBuyView: View {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text(value)
-                .font(monospaced ? .body.monospaced() : .body)
-                .textSelection(.enabled)
+            Group {
+                if monospaced {
+                    MonacoWalletAddressText(address: value)
+                } else {
+                    Text(value)
+                        .textSelection(.enabled)
+                }
+            }
         }
     }
 

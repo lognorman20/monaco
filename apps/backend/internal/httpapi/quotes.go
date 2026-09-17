@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
@@ -28,9 +29,11 @@ type quoteRequest struct {
 }
 
 type quoteResponse struct {
-	Symbol     string `json:"symbol"`
-	USDCMicros string `json:"usdcMicros"`
-	Routable   bool   `json:"routable"`
+	Symbol          string `json:"symbol"`
+	USDCMicros      string `json:"usdcMicros"`
+	Routable        bool   `json:"routable"`
+	OutputAmount    string `json:"outputAmount,omitempty"`
+	PriceUsdcMicros string `json:"priceUsdcMicros,omitempty"`
 }
 
 // ProposalQuoteInput is the quote gate input shared with proposal create (M4-T13).
@@ -106,7 +109,7 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	routable, err := ProposalQuoteOK(ctx, h.Buy, ProposalQuoteInput{
+	result, err := h.Buy.StartBuy(ctx, app.StartBuyRequest{
 		GroupID:    groupID,
 		UserID:     userID,
 		Symbol:     req.Symbol,
@@ -117,24 +120,60 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 			logJSONError(ctx, log, "symbol_not_found", w, http.StatusNotFound, "symbol not found", "group_id", groupID, "symbol", req.Symbol, "user_id", userID)
 			return
 		}
+		if errors.Is(err, app.ErrQuoteNotRoutable) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(quoteResponse{
+				Symbol:     req.Symbol,
+				USDCMicros: strconv.FormatInt(req.USDC, 10),
+				Routable:   false,
+			})
+			logJSONOK(ctx, log, "quoted",
+				"group_id", groupID,
+				"user_id", userID,
+				"symbol", req.Symbol,
+				"usdc", req.USDC,
+				"routable", false,
+			)
+			return
+		}
 		logJSONError(ctx, log, "quote_check_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "symbol", req.Symbol, "user_id", userID, "err", err.Error())
 		return
 	}
 
+	resp := quoteResponse{
+		Symbol:       req.Symbol,
+		USDCMicros:   strconv.FormatInt(req.USDC, 10),
+		Routable:     result.Quote.Routable,
+		OutputAmount: strings.TrimSpace(result.Quote.OutAmount),
+	}
+	if price, ok := quotePriceUsdcMicros(req.USDC, resp.OutputAmount); ok {
+		resp.PriceUsdcMicros = strconv.FormatInt(price, 10)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(quoteResponse{
-		Symbol:     req.Symbol,
-		USDCMicros: strconv.FormatInt(req.USDC, 10),
-		Routable:   routable,
-	})
+	_ = json.NewEncoder(w).Encode(resp)
 	logJSONOK(ctx, log, "quoted",
 		"group_id", groupID,
 		"user_id", userID,
 		"symbol", req.Symbol,
 		"usdc", req.USDC,
-		"routable", routable,
+		"routable", resp.Routable,
 	)
+}
+
+func quotePriceUsdcMicros(usdcMicros int64, outputAmount string) (int64, bool) {
+	outputAmount = strings.TrimSpace(outputAmount)
+	if usdcMicros <= 0 || outputAmount == "" {
+		return 0, false
+	}
+	outAtomics, err := strconv.ParseInt(outputAmount, 10, 64)
+	if err != nil || outAtomics <= 0 {
+		return 0, false
+	}
+	// USDC micros (6 dp) per whole xStock share; Jupiter outAmount uses 8 dp atomics.
+	return (usdcMicros * jupiter.XStockAtomicScale) / outAtomics, true
 }
 
 func (h *QuoteHandlers) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {

@@ -96,6 +96,78 @@ func TestBoards_skipRowsWhenNetUsdcInZero(t *testing.T) {
 	}
 }
 
+func TestInGroupViewBoard_includesMembersWithoutDepositOrPnL(t *testing.T) {
+	// Arrange
+	members := []MemberPosition{
+		buildPosition(func(p *MemberPosition) {
+			p.UserID = "alice"
+			p.ShareUnits = ShareUnits("100")
+			p.AmountDeposited = 100_000_000
+		}),
+		buildPosition(func(p *MemberPosition) {
+			p.UserID = "bob"
+			p.ShareUnits = ShareUnits("0")
+			p.AmountDeposited = 0
+		}),
+	}
+	totalShares := ShareUnits("100")
+	potNav := USDCMicros(110_000_000)
+
+	// Act
+	board, err := BuildInGroupViewBoard(members, totalShares, potNav)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("BuildInGroupViewBoard: %v", err)
+	}
+	if len(board) != 2 {
+		t.Fatalf("board len = %d, want 2", len(board))
+	}
+	if board[0].UserID != "alice" {
+		t.Fatalf("board[0].UserID = %q, want alice", board[0].UserID)
+	}
+	if board[1].UserID != "bob" {
+		t.Fatalf("board[1].UserID = %q, want bob", board[1].UserID)
+	}
+	if board[1].PercentReturn != nil {
+		t.Fatalf("bob percent return = %v, want nil", *board[1].PercentReturn)
+	}
+	if board[1].NetUsdcIn != 0 || board[1].Equity != 0 {
+		t.Fatalf("bob pnl = equity %d netIn %d, want zeros", board[1].Equity, board[1].NetUsdcIn)
+	}
+}
+
+func TestComputeMemberPnL_depositOnlyPot_zeroReturn(t *testing.T) {
+	// Arrange — two $0.20 deposits, no price move
+	pos := MemberPosition{
+		UserID:          "solo",
+		ShareUnits:      ShareUnits("0.4"),
+		AmountDeposited: 400_000,
+	}
+	totalShares := ShareUnits("0.4")
+	potNav := USDCMicros(400_000)
+
+	// Act
+	pnl, err := ComputeMemberPnL(pos, totalShares, potNav)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ComputeMemberPnL: %v", err)
+	}
+	if pnl.Equity != 400_000 {
+		t.Fatalf("equity = %d, want 400000", pnl.Equity)
+	}
+	if pnl.NetUsdcIn != 400_000 {
+		t.Fatalf("netUsdcIn = %d, want 400000", pnl.NetUsdcIn)
+	}
+	if pnl.PercentReturn == nil {
+		t.Fatal("PercentReturn: expected non-nil")
+	}
+	if *pnl.PercentReturn != 0 {
+		t.Fatalf("percent return = %v, want 0", *pnl.PercentReturn)
+	}
+}
+
 func TestInGroupBoard_fullExit_dropsMemberFromBoard(t *testing.T) {
 	// Arrange
 	members := []MemberPosition{

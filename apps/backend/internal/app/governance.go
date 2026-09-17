@@ -45,6 +45,7 @@ var ErrProposalNotFound = errors.New("proposal not found")
 var ErrProposalNotOpen = errors.New("proposal not open")
 var ErrNotEligibleVoter = errors.New("not eligible to vote")
 var ErrNotEligibleProposer = errors.New("not eligible to propose")
+var ErrExceedsTreasuryUSDC = errors.New("exceeds treasury usdc")
 
 // CreateProposalInput is input for buy proposal create (M4-T13).
 type CreateProposalInput struct {
@@ -312,11 +313,30 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		return Proposal{}, ErrNotEligibleProposer
 	}
 
+	treasuryUSDC, err := g.groupTreasuryUSDC(ctx, in.GroupID)
+	if err != nil {
+		logGovernanceBranchError("governance create proposal treasury balance failed", err, "group_id", in.GroupID, "proposer_id", in.ProposerID)
+		return Proposal{}, err
+	}
+	if in.UsdcMicros > treasuryUSDC {
+		logGovernanceBranchWarn("governance create proposal rejected", "exceeds treasury usdc", "group_id", in.GroupID, "proposer_id", in.ProposerID, "usdc_micros", in.UsdcMicros, "treasury_usdc_micros", treasuryUSDC)
+		return Proposal{}, ErrExceedsTreasuryUSDC
+	}
+
+	treasuryTaker := ""
+	if treasury, found, err := g.store.GetTreasuryByGroupID(ctx, in.GroupID); err != nil {
+		logGovernanceBranchError("governance create proposal treasury lookup failed", err, "group_id", in.GroupID, "proposer_id", in.ProposerID)
+		return Proposal{}, err
+	} else if found {
+		treasuryTaker = treasury.SolanaAddress
+	}
+
 	_, err = g.buy.StartBuy(ctx, StartBuyRequest{
 		GroupID:    in.GroupID,
 		UserID:     in.ProposerID,
 		Symbol:     in.Symbol,
 		USDCAmount: in.UsdcMicros,
+		Taker:      treasuryTaker,
 	})
 	if err != nil {
 		if errors.Is(err, ErrQuoteNotRoutable) {
@@ -353,6 +373,29 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 
 	logGovernanceCreateProposalSuccess(row.ID, in.GroupID, in.ProposerID)
 	return proposalFromRow(row), nil
+}
+
+func (g *GovernanceService) groupTreasuryUSDC(ctx context.Context, groupID string) (int64, error) {
+	positions, err := g.store.ListPositionsByGroup(ctx, groupID)
+	if err != nil {
+		return 0, err
+	}
+	var netUsdcIn int64
+	for _, position := range positions {
+		netUsdcIn += position.AmountDeposited - position.AmountWithdrawn
+	}
+
+	treasury, found, err := g.store.GetTreasuryByGroupID(ctx, groupID)
+	if err != nil {
+		return 0, err
+	}
+	if found {
+		balance, err := g.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
+		if err == nil && balance > 0 {
+			return balance, nil
+		}
+	}
+	return netUsdcIn, nil
 }
 
 // CastVote persists a ballot and tallies to passed, failed, or expired (M4-T14).

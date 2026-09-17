@@ -69,14 +69,14 @@ struct HomeView: View {
             } else {
                 ForEach(home.groups) { row in
                     NavigationLink {
-                        GroupDetailView(auth: auth, groupId: row.groupId)
+                        GroupDetailView(auth: auth, groupId: row.groupId, groupName: row.name)
                     } label: {
                         HStack {
                             Text(row.name)
                                 .font(.body.bold())
                                 .foregroundStyle(MonacoTheme.primaryText)
                             Spacer()
-                            boardMetrics(percentReturn: row.percentReturn, dollarPnl: row.dollarPnl)
+                            groupBoardMetrics(potValueUsd: row.potValueUsd, dollarPnl: row.dollarPnl)
                         }
                     }
                     .accessibilityIdentifier("home-group-row-\(row.groupId)")
@@ -114,6 +114,18 @@ struct HomeView: View {
     }
 
     @ViewBuilder
+    private func groupBoardMetrics(potValueUsd: String, dollarPnl: String) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text("$\(potValueUsd)")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(MonacoTheme.primaryText)
+            Text(dollarPnl)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(pnlColor(for: dollarPnl))
+        }
+    }
+
+    @ViewBuilder
     private func boardMetrics(percentReturn: String?, dollarPnl: String) -> some View {
         VStack(alignment: .trailing, spacing: 2) {
             if let percentReturn {
@@ -127,8 +139,18 @@ struct HomeView: View {
             }
             Text(dollarPnl)
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(MonacoTheme.secondaryText)
+                .foregroundStyle(pnlColor(for: dollarPnl))
         }
+    }
+
+    private func pnlColor(for dollarPnl: String) -> Color {
+        if dollarPnl.hasPrefix("-") {
+            return MonacoTheme.warning
+        }
+        if dollarPnl.hasPrefix("+") && dollarPnl != "+0.00" {
+            return MonacoTheme.success
+        }
+        return MonacoTheme.secondaryText
     }
 }
 
@@ -141,8 +163,9 @@ struct HomeView: View {
                     HomeGroupBoardRowDTO(
                         groupId: "g1",
                         name: "Weekend investors",
+                        potValueUsd: "548.20",
                         percentReturn: "+12.4%",
-                        dollarPnl: "+$48.20"
+                        dollarPnl: "+48.20"
                     ),
                 ],
                 people: [

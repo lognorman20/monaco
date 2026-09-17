@@ -67,6 +67,7 @@ func TestPOST_proposals_happyPath_createsOpenProposalWithExpiry(t *testing.T) {
 		t.Fatalf("create group: %v", err)
 	}
 	h.ISO.TrackGroup(created.GroupID)
+	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 10_000_000)
 	registerRoutableQuote(t, h.Jupiter, h.XStocks, "AAPLx", 2_000_000)
 	fixedNow := time.Unix(1_700_000_000, 0).UTC()
 	h.Governance.SetClock(func() time.Time { return fixedNow })
@@ -95,6 +96,29 @@ func TestPOST_proposals_happyPath_createsOpenProposalWithExpiry(t *testing.T) {
 	}
 }
 
+func TestCreateProposal_exceedsTreasuryUSDC_rejected(t *testing.T) {
+	h := integrationGovernanceApp(t)
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "treasury-cap", "Treasury Cap")
+	token := h.ISO.UniqueToken("treasury-cap")
+	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "treasury-cap"), DefaultGroupRules(), "")
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	h.ISO.TrackGroup(created.GroupID)
+	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 1_000_000)
+	registerRoutableQuote(t, h.Jupiter, h.XStocks, "AAPLx", 2_000_000)
+
+	_, err = h.Governance.CreateProposal(context.Background(), CreateProposalInput{
+		GroupID:    created.GroupID,
+		ProposerID: userID.UserID,
+		Symbol:     "AAPLx",
+		UsdcMicros: 2_000_000,
+	})
+	if !errors.Is(err, ErrExceedsTreasuryUSDC) {
+		t.Fatalf("err = %v, want ErrExceedsTreasuryUSDC", err)
+	}
+}
+
 func TestTallyProposal_expiredOpenProposal_failsWithoutSwap(t *testing.T) {
 	// Arrange
 	h := integrationGovernanceApp(t)
@@ -107,6 +131,7 @@ func TestTallyProposal_expiredOpenProposal_failsWithoutSwap(t *testing.T) {
 		t.Fatalf("create group: %v", err)
 	}
 	h.ISO.TrackGroup(created.GroupID)
+	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 10_000_000)
 	registerRoutableQuote(t, h.Jupiter, h.XStocks, "TSLAx", 1_000_000)
 	start := time.Unix(1_700_100_000, 0).UTC()
 	h.Governance.SetClock(func() time.Time { return start })
@@ -152,6 +177,7 @@ func TestPOST_vote_nonVoterSetMember_returns403(t *testing.T) {
 		t.Fatalf("create group: %v", err)
 	}
 	h.ISO.TrackGroup(created.GroupID)
+	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 10_000_000)
 
 	outsiderID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "outsider", "Outsider").UserID
 	tx, err := h.Store.BeginTx(context.Background())
@@ -202,6 +228,7 @@ func TestPOST_vote_doubleVoteSameMember_isIdempotentOrRejected(t *testing.T) {
 		t.Fatalf("create group: %v", err)
 	}
 	h.ISO.TrackGroup(created.GroupID)
+	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 10_000_000)
 	registerRoutableQuote(t, h.Jupiter, h.XStocks, "MSFTx", 750_000)
 	proposal, err := h.Governance.CreateProposal(context.Background(), CreateProposalInput{
 		GroupID:    created.GroupID,
@@ -254,6 +281,7 @@ func TestPOST_vote_concurrentDoubleVote_recordsOneBallot(t *testing.T) {
 		t.Fatalf("create group: %v", err)
 	}
 	h.ISO.TrackGroup(created.GroupID)
+	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 10_000_000)
 	registerRoutableQuote(t, h.Jupiter, h.XStocks, "GOOGx", 900_000)
 	proposal, err := h.Governance.CreateProposal(context.Background(), CreateProposalInput{
 		GroupID:    created.GroupID,

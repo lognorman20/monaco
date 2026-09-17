@@ -21,7 +21,9 @@ func integrationGroupApp(t *testing.T) (*GroupHandlers, *AuthHandlers, privy.Cli
 	store := postgres.NewStore(db)
 	groups := app.NewGroupService(store, privyClient)
 	governance := app.NewGovernanceService(store, privyClient)
-	return &GroupHandlers{Groups: groups, Governance: governance}, authHandlers, privyClient, db, iso
+	deposits := app.NewDepositService(store, privyClient, nil)
+	home := app.NewHomeService(store, privyClient, deposits)
+	return &GroupHandlers{Groups: groups, Governance: governance, Home: home}, authHandlers, privyClient, db, iso
 }
 
 func TestPOST_groups_missingAuth_returns401(t *testing.T) {
@@ -176,6 +178,127 @@ func TestGET_group_byId_returnsNameAndTreasuryAddress(t *testing.T) {
 	}
 	if payload.TreasuryAddress != created.TreasuryAddress {
 		t.Fatalf("treasuryAddress = %q, want %q", payload.TreasuryAddress, created.TreasuryAddress)
+	}
+}
+
+func TestGET_groupView_byId_returnsPotYouAndMembers(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	groupHandlers, authHandlers, privyClient, _, iso := integrationGroupApp(t)
+	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "creator", "Alfred")
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Weekend investors"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+string(token))
+	createRec := httptest.NewRecorder()
+	groupHandlers.CreateGroupHandler(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create group status = %d, want 200; body = %s", createRec.Code, createRec.Body.String())
+	}
+
+	var created createGroupResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create json: %v", err)
+	}
+	trackCreatedGroup(iso, created.GroupID)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/groups/"+created.GroupID+"/view", nil)
+	req.SetPathValue("id", created.GroupID)
+	req.Header.Set("Authorization", "Bearer "+string(token))
+	rec := httptest.NewRecorder()
+
+	// Act
+	groupHandlers.GetGroupViewHandler(rec, req)
+
+	// Assert
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+
+	var payload groupViewResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if payload.ID != created.GroupID {
+		t.Fatalf("id = %q, want %q", payload.ID, created.GroupID)
+	}
+	if payload.Name != "Weekend investors" {
+		t.Fatalf("name = %q, want Weekend investors", payload.Name)
+	}
+	if payload.TreasuryAddress != created.TreasuryAddress {
+		t.Fatalf("treasuryAddress = %q, want %q", payload.TreasuryAddress, created.TreasuryAddress)
+	}
+	if len(payload.Pot) == 0 || payload.Pot[0].Symbol != "USDC" {
+		t.Fatalf("pot = %#v, want USDC row", payload.Pot)
+	}
+	if payload.You.ShareUnits != "0" {
+		t.Fatalf("you.shareUnits = %q, want 0", payload.You.ShareUnits)
+	}
+	if len(payload.Proposals) != 0 {
+		t.Fatalf("proposals = %#v, want empty array", payload.Proposals)
+	}
+	if len(payload.Members) != 1 {
+		t.Fatalf("members len = %d, want 1", len(payload.Members))
+	}
+}
+
+func TestGET_groupView_listsAllMembersWithoutDeposits(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	groupHandlers, authHandlers, privyClient, _, iso := integrationGroupApp(t)
+	_, creatorToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "view-creator", "Creator")
+	createRec := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Everyone Club"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	groupHandlers.CreateGroupHandler(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create group status = %d, want 200; body = %s", createRec.Code, createRec.Body.String())
+	}
+
+	var created createGroupResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create json: %v", err)
+	}
+	trackCreatedGroup(iso, created.GroupID)
+
+	_, joinerToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "view-joiner", "Joiner")
+	joinRec := httptest.NewRecorder()
+	joinReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/join", strings.NewReader(`{}`))
+	joinReq.SetPathValue("id", created.GroupID)
+	joinReq.Header.Set("Content-Type", "application/json")
+	joinReq.Header.Set("Authorization", "Bearer "+string(joinerToken))
+	groupHandlers.JoinGroupHandler(joinRec, joinReq)
+	if joinRec.Code != http.StatusNoContent {
+		t.Fatalf("join status = %d, want 204; body = %s", joinRec.Code, joinRec.Body.String())
+	}
+
+	viewReq := httptest.NewRequest(http.MethodGet, "/v1/groups/"+created.GroupID+"/view", nil)
+	viewReq.SetPathValue("id", created.GroupID)
+	viewReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	viewRec := httptest.NewRecorder()
+
+	// Act
+	groupHandlers.GetGroupViewHandler(viewRec, viewReq)
+
+	// Assert
+	if viewRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", viewRec.Code, viewRec.Body.String())
+	}
+
+	var payload groupViewResponse
+	if err := json.Unmarshal(viewRec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if len(payload.Members) != 2 {
+		t.Fatalf("members len = %d, want 2", len(payload.Members))
+	}
+	for _, member := range payload.Members {
+		if member.DisplayName == "" {
+			t.Fatalf("member %q missing display name", member.UserID)
+		}
+		if member.DollarPnL == "" {
+			t.Fatalf("member %q missing dollarPnl", member.UserID)
+		}
 	}
 }
 
@@ -350,6 +473,78 @@ func TestPOST_join_wrongPassword_returns403(t *testing.T) {
 	// Assert
 	if joinRec.Code != http.StatusForbidden {
 		t.Fatalf("join status = %d, want 403", joinRec.Code)
+	}
+}
+
+func TestGET_groupActivity_returnsMixedStatuses(t *testing.T) {
+	t.Parallel()
+
+	groupHandlers, authHandlers, privyClient, db, iso := integrationGroupApp(t)
+	session, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "activity-http", "Activity User")
+
+	createRec := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Activity Club"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+string(token))
+	groupHandlers.CreateGroupHandler(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create group status = %d, want 200; body = %s", createRec.Code, createRec.Body.String())
+	}
+
+	var created createGroupResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create json: %v", err)
+	}
+	trackCreatedGroup(iso, created.GroupID)
+
+	store := postgres.NewStore(db)
+	ctx := context.Background()
+	if _, err := store.InsertDeposit(ctx, session.UserID, created.GroupID, 1_000_000, "from-wallet"); err != nil {
+		t.Fatalf("insert deposit: %v", err)
+	}
+	if _, err := store.InsertFailedTransaction(ctx, created.GroupID, postgres.TransactionActionBuy, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp", 2_000_000, "req-failed-"+iso.Suffix()); err != nil {
+		t.Fatalf("insert failed buy: %v", err)
+	}
+	if _, _, err := store.InsertPendingTransaction(ctx, postgres.InsertPendingTransactionParams{
+		GroupID:          created.GroupID,
+		Action:           postgres.TransactionActionSell,
+		InputMint:        "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+		OutputMint:       "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+		Amount:           500_000,
+		ExecuteRequestID: "req-pending-" + iso.Suffix(),
+	}); err != nil {
+		t.Fatalf("insert pending sell: %v", err)
+	}
+
+	activityReq := httptest.NewRequest(http.MethodGet, "/v1/groups/"+created.GroupID+"/activity", nil)
+	activityReq.SetPathValue("id", created.GroupID)
+	activityReq.Header.Set("Authorization", "Bearer "+string(token))
+	activityRec := httptest.NewRecorder()
+	groupHandlers.ListGroupActivityHandler(activityRec, activityReq)
+
+	if activityRec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", activityRec.Code, activityRec.Body.String())
+	}
+
+	var payload groupActivityResponse
+	if err := json.Unmarshal(activityRec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if len(payload.Items) < 3 {
+		t.Fatalf("items = %d, want at least 3", len(payload.Items))
+	}
+
+	statuses := map[string]int{}
+	kinds := map[string]int{}
+	for _, item := range payload.Items {
+		statuses[item.Status]++
+		kinds[item.Kind]++
+	}
+	if statuses["pending"] == 0 || statuses["failed"] == 0 {
+		t.Fatalf("expected pending and failed statuses, got %#v", statuses)
+	}
+	if kinds["deposit"] == 0 || kinds["sell"] == 0 || kinds["buy"] == 0 {
+		t.Fatalf("expected deposit, buy, and sell kinds, got %#v", kinds)
 	}
 }
 

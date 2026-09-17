@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
+
+	solanakey "github.com/monaco/monaco/apps/backend/internal/solana/key"
 )
 
 const (
@@ -33,21 +35,25 @@ func (c *HTTPClient) SubmitSweep(ctx context.Context, req SweepRequest) (SweepRe
 
 	wallet, err := c.getWalletByAddress(ctx, req.MemberAddress)
 	if err != nil {
+		logSweepFailed("wallet_lookup", req.MemberAddress, req.TreasuryAddress, req.Amount, err)
 		return SweepResult{}, err
 	}
 
 	blockhash, err := c.getLatestBlockhash(ctx)
 	if err != nil {
+		logSweepFailed("blockhash", req.MemberAddress, req.TreasuryAddress, req.Amount, err)
 		return SweepResult{}, err
 	}
 
 	txBase64, err := buildUSDCSweepTransaction(req, blockhash)
 	if err != nil {
+		logSweepFailed("build_transaction", req.MemberAddress, req.TreasuryAddress, req.Amount, err)
 		return SweepResult{}, err
 	}
 
 	hash, err := c.signAndSendSolanaTransaction(ctx, wallet.ID, txBase64)
 	if err != nil {
+		logSweepFailed("sign_and_send", req.MemberAddress, req.TreasuryAddress, req.Amount, err)
 		return SweepResult{}, err
 	}
 
@@ -312,7 +318,11 @@ func isOnCurve(pubkey []byte) bool {
 }
 
 func decodeSolanaKeypair(encoded string) (ed25519.PrivateKey, ed25519.PublicKey, error) {
-	raw, err := decodeBase58(encoded)
+	normalized, err := solanakey.ParsePrivateKey(encoded)
+	if err != nil {
+		return nil, nil, err
+	}
+	raw, err := decodeBase58(normalized)
 	if err != nil {
 		return nil, nil, err
 	}

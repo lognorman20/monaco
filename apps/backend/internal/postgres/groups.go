@@ -87,6 +87,62 @@ WHERE id = $1`
 	return group, true, nil
 }
 
+// ListGroupIDs returns every group id.
+func (s *Store) ListGroupIDs(ctx context.Context) ([]string, error) {
+	const selectSQL = `SELECT id FROM groups ORDER BY created_at ASC`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL)
+	if err != nil {
+		return nil, fmt.Errorf("list group ids: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan group id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate group ids: %w", err)
+	}
+	return ids, nil
+}
+
+// ListGroupsCreatedByUserID returns group ids created by userID.
+func (s *Store) ListGroupsCreatedByUserID(ctx context.Context, userID string) ([]string, error) {
+	if userID == "" {
+		return nil, fmt.Errorf("user_id is required")
+	}
+
+	const selectSQL = `
+SELECT id
+FROM groups
+WHERE creator_user_id = $1
+ORDER BY created_at ASC`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list groups created by user: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan group id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate groups created by user: %w", err)
+	}
+	return ids, nil
+}
+
 func (s *Store) InsertGroupWithRulesTx(ctx context.Context, tx *sql.Tx, name, creatorUserID string, rules domain.GroupRules, passwordHash string) (Group, error) {
 	if name == "" || creatorUserID == "" {
 		return Group{}, fmt.Errorf("name and creator_user_id are required")

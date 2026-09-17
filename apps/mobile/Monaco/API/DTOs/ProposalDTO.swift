@@ -6,14 +6,14 @@ struct ProposalDTO: Codable, Equatable, Identifiable {
     let usdcMicros: String
     let status: String
     let canVote: Bool?
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case symbol
-        case usdcMicros
-        case status
-        case canVote
-    }
+    let proposerId: String?
+    let proposerName: String?
+    let createdAt: String?
+    let expiresAt: String?
+    let groupId: String?
+    let votes: [ProposalVoteDTO]?
+    let voteSummary: ProposalVoteSummaryDTO?
+    let execution: ProposalExecutionDTO?
 }
 
 enum ProposalStatusChipStyle: String {

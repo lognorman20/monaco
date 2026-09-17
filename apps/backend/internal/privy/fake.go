@@ -15,6 +15,7 @@ type fakePrivyClient struct {
 
 	validTokens     map[AccessToken]Identity
 	memberWallets   map[UserID]WalletRef
+	privyUserWallets map[string]WalletRef
 	treasuries      map[GroupID]TreasuryRef
 	memberBalances  map[string]int64
 	treasuryBalances map[string]int64
@@ -24,6 +25,8 @@ type fakePrivyClient struct {
 	lastPayout      PayUSDCRequest
 	payoutCount     int
 	rejectProofs    bool
+	rejectSubmitSweep bool
+	rejectSubmitSweepErr error
 }
 
 // NewFakeClient returns a deterministic in-memory Privy client for tests.
@@ -31,6 +34,7 @@ func NewFakeClient() Client {
 	return &fakePrivyClient{
 		validTokens:      make(map[AccessToken]Identity),
 		memberWallets:    make(map[UserID]WalletRef),
+		privyUserWallets: make(map[string]WalletRef),
 		treasuries:       make(map[GroupID]TreasuryRef),
 		memberBalances:   make(map[string]int64),
 		treasuryBalances: make(map[string]int64),
@@ -62,9 +66,19 @@ func (f *fakePrivyClient) VerifySession(ctx context.Context, token AccessToken) 
 	return identity, nil
 }
 
+// RegisterPrivyMemberWallet seeds an existing Privy Solana wallet for tests.
+func RegisterPrivyMemberWallet(client Client, privyUserID string, ref WalletRef) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		panic("privy: RegisterPrivyMemberWallet requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.privyUserWallets[privyUserID] = ref
+	fake.mu.Unlock()
+}
+
 func (f *fakePrivyClient) EnsureMemberWallet(ctx context.Context, privyUserID string, userID UserID) (WalletRef, error) {
 	_ = ctx
-	_ = privyUserID
 	if string(userID) == "" {
 		return WalletRef{}, fmt.Errorf("%w: missing monaco user id", ErrAPI)
 	}
@@ -75,6 +89,14 @@ func (f *fakePrivyClient) EnsureMemberWallet(ctx context.Context, privyUserID st
 		logFake("ensure_member_wallet", "user_id", userID, "cached", true)
 		return existing, nil
 	}
+	if existing, ok := f.privyUserWallets[privyUserID]; ok {
+		ref := existing
+		ref.UserID = userID
+		f.memberWallets[userID] = ref
+		f.mu.Unlock()
+		logFake("ensure_member_wallet", "user_id", userID, "cached", true, "wallet_id", ref.PrivyWalletID, "source", "privy")
+		return ref, nil
+	}
 
 	ref := WalletRef{
 		UserID:        userID,
@@ -82,6 +104,9 @@ func (f *fakePrivyClient) EnsureMemberWallet(ctx context.Context, privyUserID st
 		SolanaAddress: deterministicSolanaAddress("member", string(userID)),
 	}
 	f.memberWallets[userID] = ref
+	if privyUserID != "" {
+		f.privyUserWallets[privyUserID] = ref
+	}
 	f.mu.Unlock()
 	logFake("ensure_member_wallet", "user_id", userID, "cached", false, "wallet_id", ref.PrivyWalletID)
 	return ref, nil
@@ -186,6 +211,13 @@ func (f *fakePrivyClient) SubmitSweep(ctx context.Context, req SweepRequest) (Sw
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.rejectSubmitSweep {
+		err := f.rejectSubmitSweepErr
+		if err == nil {
+			err = fmt.Errorf("%w: submit sweep rejected", ErrAPI)
+		}
+		return SweepResult{}, err
+	}
 	logFake("submit_sweep", "amount", req.Amount, "member", req.MemberAddress, "treasury", req.TreasuryAddress)
 	f.lastSweep = req
 	f.sweepCount++
@@ -229,6 +261,18 @@ func RegisterPayoutProof(client Client, signature string) {
 	}
 	fake.mu.Lock()
 	fake.validProofs[signature] = struct{}{}
+	fake.mu.Unlock()
+}
+
+// SetRejectSubmitSweep forces SubmitSweep to fail for tests.
+func SetRejectSubmitSweep(client Client, reject bool, err error) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		panic("privy: SetRejectSubmitSweep requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.rejectSubmitSweep = reject
+	fake.rejectSubmitSweepErr = err
 	fake.mu.Unlock()
 }
 

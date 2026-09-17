@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
@@ -28,7 +29,8 @@ type catalogAssetResponse struct {
 }
 
 type searchAssetsResponse struct {
-	Assets []catalogAssetResponse `json:"assets"`
+	Assets  []catalogAssetResponse `json:"assets"`
+	HasMore bool                   `json:"hasMore"`
 }
 
 // SearchAssetsHandler handles GET /v1/groups/{id}/assets?query=.
@@ -49,17 +51,15 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	query := strings.TrimSpace(r.URL.Query().Get("query"))
-	if query == "" {
-		logJSONError(ctx, log, "missing_query", w, http.StatusBadRequest, "query is required", "group_id", groupID)
-		return
-	}
+	limit := parseCatalogLimit(r.URL.Query().Get("limit"))
+	offset := parseCatalogOffset(r.URL.Query().Get("offset"))
 
 	if _, err := h.authorizeGroupMember(ctx, token, groupID); err != nil {
 		writeCatalogError(ctx, log, w, err, "group_id", groupID, "query", query)
 		return
 	}
 
-	assets, err := h.Catalog.Search(ctx, query)
+	page, err := h.Catalog.Search(ctx, query, limit, offset)
 	if err != nil {
 		if errors.Is(err, xstocks.ErrInvalidResponse) {
 			logJSONError(ctx, log, "invalid_catalog_query", w, http.StatusBadRequest, "invalid catalog query", "group_id", groupID, "query", query)
@@ -70,9 +70,10 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	resp := searchAssetsResponse{
-		Assets: make([]catalogAssetResponse, 0, len(assets)),
+		Assets:  make([]catalogAssetResponse, 0, len(page.Assets)),
+		HasMore: page.HasMore,
 	}
-	for _, asset := range assets {
+	for _, asset := range page.Assets {
 		resp.Assets = append(resp.Assets, catalogAssetResponse{
 			Symbol:     asset.Symbol,
 			Name:       asset.Name,
@@ -83,7 +84,28 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
-	logJSONOK(ctx, log, "ok", "group_id", groupID, "query", query, "result_count", len(resp.Assets))
+	logJSONOK(ctx, log, "ok", "group_id", groupID, "query", query, "limit", limit, "offset", offset, "result_count", len(resp.Assets), "has_more", resp.HasMore)
+}
+
+func parseCatalogLimit(raw string) int {
+	const defaultLimit = 25
+	const maxLimit = 100
+	limit, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || limit <= 0 {
+		return defaultLimit
+	}
+	if limit > maxLimit {
+		return maxLimit
+	}
+	return limit
+}
+
+func parseCatalogOffset(raw string) int {
+	offset, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || offset < 0 {
+		return 0
+	}
+	return offset
 }
 
 func (h *CatalogHandlers) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {

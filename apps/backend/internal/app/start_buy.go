@@ -23,6 +23,9 @@ type StartBuyRequest struct {
 	UserID     string
 	Symbol     string
 	USDCAmount int64
+	// Taker is the group treasury wallet. When set, Jupiter must return a buildable
+	// unsigned transaction (same /order constraints as execute OrderBuy).
+	Taker string
 }
 
 // StartBuyResult holds a routable Jupiter quote ready for execute.
@@ -45,11 +48,16 @@ func NewBuyService(jupiterClient jupiter.Client, resolver xstocks.Resolver) *Buy
 	}
 }
 
+// ResolveOutputMint returns the Solana mint for a catalog symbol.
+func (s *BuyService) ResolveOutputMint(ctx context.Context, symbol string) (string, error) {
+	return s.xstocks.ResolveSolanaMint(ctx, symbol)
+}
+
 // StartBuy resolves the xStock mint and refuses when Jupiter has no route.
 func (s *BuyService) StartBuy(ctx context.Context, req StartBuyRequest) (StartBuyResult, error) {
 	logSwapQuoteAttempt(req.GroupID, req.UserID, req.Symbol, req.USDCAmount)
 
-	outputMint, err := s.xstocks.ResolveSolanaMint(ctx, req.Symbol)
+	outputMint, err := s.ResolveOutputMint(ctx, req.Symbol)
 	if err != nil {
 		logSwapRefusal(req.GroupID, req.UserID, req.Symbol, err.Error())
 		return StartBuyResult{}, err
@@ -61,6 +69,7 @@ func (s *BuyService) StartBuy(ctx context.Context, req StartBuyRequest) (StartBu
 		Symbol:     req.Symbol,
 		OutputMint: outputMint,
 		USDCAmount: req.USDCAmount,
+		Taker:      req.Taker,
 	})
 	if err != nil {
 		reason := err.Error()
@@ -139,9 +148,12 @@ func (s *ExecuteOnPassService) ExecuteOnPass(ctx context.Context, proposal Propo
 		UserID:     proposal.ProposerID,
 		Symbol:     proposal.Symbol,
 		USDCAmount: proposal.UsdcMicros,
+		ProposalID: proposal.ID,
 	})
 	if err != nil {
-		logExecuteOnPassBranchError("execute on pass buy failed", err, "proposal_id", proposal.ID)
+		logExecuteOnPassBranchError("execute on pass buy failed", err,
+			"proposal_id", proposal.ID, "group_id", proposal.GroupID, "symbol", proposal.Symbol,
+			"usdc_amount", proposal.UsdcMicros, "stage", "dev_execute_buy")
 		return ExecuteOnPassResult{}, err
 	}
 

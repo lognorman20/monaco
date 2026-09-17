@@ -218,12 +218,22 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(GetDepositResponse.self, from: data)
     }
 
-    func searchAssets(accessToken: String, groupId: String, query: String) async throws -> SearchAssetsResponse {
+    func searchAssets(
+        accessToken: String,
+        groupId: String,
+        query: String,
+        limit: Int = 25,
+        offset: Int = 0
+    ) async throws -> SearchAssetsResponse {
         var components = URLComponents(
             url: baseURL.appending(path: "v1/groups/\(groupId)/assets"),
             resolvingAgainstBaseURL: false
         )!
-        components.queryItems = [URLQueryItem(name: "query", value: query)]
+        components.queryItems = [
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "offset", value: String(offset)),
+        ]
         guard let url = components.url else {
             throw MonacoAPIError.invalidResponse
         }
@@ -276,6 +286,78 @@ final class MonacoAPIClient {
             throw MonacoAPIError.httpStatus(http.statusCode)
         }
         return try JSONDecoder().decode(CreateProposalResponse.self, from: data)
+    }
+
+    func getGroupActivity(accessToken: String, groupId: String) async throws -> GroupActivityResponse {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/activity")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(GroupActivityResponse.self, from: data)
+    }
+
+    func retryTransaction(accessToken: String, transactionId: String) async throws -> RetryTransactionResponse {
+        let url = baseURL.appending(path: "v1/transactions/\(transactionId)/retry")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(RetryTransactionResponse.self, from: data)
+    }
+
+    func listGroupProposals(accessToken: String, groupId: String, tab: String) async throws -> ProposalListResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/groups/\(groupId)/proposals"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "tab", value: tab)]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(ProposalListResponse.self, from: data)
+    }
+
+    func getProposalDetail(accessToken: String, proposalId: String) async throws -> ProposalDTO {
+        let url = baseURL.appending(path: "v1/proposals/\(proposalId)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(ProposalDTO.self, from: data)
     }
 
     func castVote(accessToken: String, proposalId: String, choice: String) async throws {

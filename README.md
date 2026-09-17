@@ -8,7 +8,7 @@ Prize target is the general Stocklana pool. Judges ask whether this could be a r
 
 ## Getting started with development
 
-**Prereqs:** Docker, Go, Xcode/Swift, [dotenvx CLI](https://dotenvx.com/docs/install), and gold `ios-sim` / `ios-build` on PATH (`~/.local/bin`).
+**Prereqs:** Docker, Go, Xcode/Swift, [dotenvx CLI](https://dotenvx.com/docs/install). iOS run: Xcode Simulator is enough (**[Without slim sim](#without-slim-sim)**). Slim gold sim + `ios-sim` / `ios-build` on PATH is optional RAM/agent wiring (**[SimSlim](#simslim-gold-simulator)**).
 
 **One-time env setup**
 
@@ -40,8 +40,11 @@ Secrets, private keys, and pre-commit hooks: see **[Local env](#local-env)** bel
 | `just build mobile` | Privy xcconfig, then `xcodebuild` on gold sim |
 | `./scripts/ios-sim` | Monaco run with Privy env (prefer over bare `ios-sim`) |
 | `./scripts/ios-build` | Monaco compile with Privy xcconfig |
+| `./scripts/sweep-wallets.sh` | **Ops.** Sweep USDC out of Privy wallets. See **[Ops: sweep USDC](#ops-sweep-usdc-out-of-privy-wallets)** |
 
-Gold sim UDID: `7B30D45E-62FD-42E2-871A-787B19D38CCF`. iOS sim details: **[Running the stack](#running-the-stack)**.
+Gold slim UDID is **per machine** (`SIMSLIM_UDID`). iOS sim: **[SimSlim](#simslim-gold-simulator)** or **[Without slim sim](#without-slim-sim)**.
+
+Live deposit QA on mainnet needs a **Phantom agent wallet** (not Privy, not `.env.local`). Install, fund (~$1 SOL + ~$4 USDC on Solana), send into the member inbox, then redeem leftover back: **[Agent QA: Phantom MCP](#agent-qa-phantom-mcp)**.
 
 ## Goals
 
@@ -109,15 +112,48 @@ SwiftUI (iOS 17+)
 
 ### Wallets
 
+A **wallet** is a keypair on a chain. On Solana the public key is the **address** (base58). The private key **signs** transactions. The address holds:
 
-| Wallet              | Owner         | Role                                                                                            |
-| ------------------- | ------------- | ----------------------------------------------------------------------------------------------- |
-| Member wallet       | One per user  | Deposit inbox. Unique attribution for who funded. Backend-signable via Privy.                   |
-| Group treasury      | One per group | Holds USDC and tokenized stocks. All group trades execute from here.                            |
-| Relayer / Fee Payer | App           | Pays SOL fees so the treasury and the member wallets need not be SOL-funded for the happy path. |
+- **SOL** — native token. Every tx burns a tiny amount as a fee. No SOL → send fails even if you hold USDC.
+- **SPL tokens** — e.g. USDC. Same address, different mint. Monaco USDC mint: `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` ([Solana mainnet USDC](https://solscan.io/token/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v)). USDC on Ethereum or Base is a different token; the deposit poller will not see it.
 
+You do not “log into Solana.” You hold keys that can move whatever sits at that address. Whoever can sign, spends.
+
+Product copy hides this. Devs still need it for QA.
+
+| Wallet | Owner | Role |
+| --- | --- | --- |
+| Member wallet | One per user (Privy) | Deposit inbox. Unique attribution for who funded. Backend-signable via Privy. |
+| Group treasury (vault) | One per group (Privy, app-owned) | Holds USDC and tokenized stocks. All group trades execute from here. |
+| Relayer / fee payer | App | Pays SOL fees so treasury and member wallets need no SOL on the happy path. |
+| Phantom **agent** wallet | Coding-agent harness | **Not product.** Funds member inboxes for mainnet QA; leftover USDC returns here. Separate keys from Privy and from your phone Phantom. |
+
+### Fee payer (relayer)
+
+The app **fee payer** is a dedicated Solana keypair loaded from `RELAYER_PRIVATE_KEY` (base58 secret in `.env.local`). Never commit or log the private key. At API startup the backend derives the public key and refuses to boot unless that address holds **more than 0.001 SOL** on mainnet (gas + ATA rent for sweeps and Jupiter txs).
+
+| Item | Value |
+| --- | --- |
+| Env (secret) | `RELAYER_PRIVATE_KEY` — base58 Solana secret key (not a JSON `[1,2,...]` array) |
+| Pubkey | Derived at startup from the secret; logged as `pubkey=` on boot (no private key) |
+| Role | Jupiter swap `payer`; relayer on deposit sweeps (Privy `SubmitSweep`) |
+| SOL requirement | Balance **> 0.001 SOL** (`1_000_000` lamports). Fund on [Solana mainnet](https://solscan.io/) before `just run backend`. |
+
+Print the fee payer pubkey without echoing the secret:
+
+```bash
+dotenvx run -f .env.local -- go run ./apps/backend/cmd/print-relayer-pubkey
+```
 
 Users never manage keys or approve individual Solana transactions in the happy path. The backend signs sweeps, swaps, and payouts.
+
+Three wallets people mix up:
+
+1. **Personal Phantom** (iOS / Android / browser extension). Your money. Create it yourself. See [Create a Phantom wallet](#create-a-phantom-wallet).
+2. **Agent Phantom** (MCP). New dedicated wallet the first time the agent signs in. Empty until you fund it. This is the QA faucet and refund target.
+3. **Privy product wallets.** Member inbox + group vault. Phantom MCP **cannot** spend these. The agent can only **send USDC to** the copyable member address, then **receive USDC back** when you redeem to the agent address.
+
+Do not put `PHANTOM_APP_ID` in Monaco `.env.local`. If a Cursor plugin still wants it, put it in Cursor MCP env only. Current `@phantom/mcp-server` device-code login does not require a Portal app id.
 
 ### Deposit and sweep
 
@@ -127,6 +163,110 @@ Users never manage keys or approve individual Solana transactions in the happy p
 4. Do **not** credit shares when USDC only arrives in the member wallet. Sweep promptly.
 
 See **NAV and share units** for the formula.
+
+## Agent QA: Phantom MCP
+
+Use this when a coding agent (or you, in Cursor chat) must move **real Solana mainnet** USDC into a sim user’s member wallet, then pull leftover cash out of the group vault when the run is done.
+
+Keep the agent wallet thin. Preview software. Do not park rent money here.
+
+### Create a Phantom wallet
+
+Personal wallet first — that is how you buy SOL/USDC and top up the agent address.
+
+1. Download only from [phantom.com/download](https://phantom.com/download) (iOS, Android, Chrome, Brave, Firefox, Edge). App Store: [Phantom](https://apps.apple.com/us/app/phantom-trade-markets/id1598432977). Play: [Phantom](https://play.google.com/store/apps/details?id=app.phantom).
+2. Follow [How to create a new Phantom wallet](https://phantom.com/learn/guides/how-to-create-a-new-wallet): Create a New Wallet → Google or Apple, or a secret recovery phrase.
+3. Write down the recovery phrase / PIN. Never paste it into git, tickets, or chat.
+4. Overview: [Get started](https://phantom.com/get-started). Help: [help.phantom.com](https://help.phantom.com).
+
+### Install the Phantom MCP (agent wallet)
+
+This is the **wallet MCP** (`@phantom/mcp-server`): sign, transfer, swap. It is not the docs-only MCP at `https://docs.phantom.com/mcp`.
+
+Docs: [Phantom MCP server](https://docs.phantom.com/phantom-mcp-server) · [Setup](https://docs.phantom.com/phantom-mcp-server/setup) · npm [`@phantom/mcp-server`](https://www.npmjs.com/package/@phantom/mcp-server) · [Cursor MCP](https://cursor.com/docs/context/mcp)
+
+**Cursor plugin (easiest):** marketplace search `phantom-connect` / Add Plugin. Bundles wallet MCP + docs MCP. See [AI-assisted development](https://docs.phantom.com/developer-powertools/ai-tools).
+
+**Manual Cursor:** add to `~/.cursor/mcp.json` (merge into existing `mcpServers`; this repo’s `.cursor/mcp.json` is XcodeBuildMCP + Pyth only):
+
+```json
+{
+  "mcpServers": {
+    "phantom": {
+      "command": "npx",
+      "args": ["-y", "@phantom/mcp-server@latest"]
+    }
+  }
+}
+```
+
+Restart Cursor. First wallet tool call opens a browser for Google/Apple device-code sign-in. Session lives in `~/.phantom-mcp/session.json`. Reset: delete that file, restart, sign in again.
+
+**Claude Code:** `claude mcp add phantom -- npx -y @phantom/mcp-server@latest`
+
+On auth, Phantom mints a **new agent wallet**. It is not your extension wallet. Ask the agent for Solana addresses (`wallet_addresses` / `get_wallet_addresses`). Copy the Solana pubkey. That string is the refund target for leftover QA USDC. Each developer has their own; do not hardcode someone else’s address in the repo.
+
+### Fund the agent wallet (~$1 SOL + ~$4 USDC on Solana)
+
+The agent cannot transact on an empty wallet.
+
+| Asset | Why | Ballpark |
+| --- | --- | --- |
+| SOL on **Solana mainnet** | Fees when the agent sends USDC to a member inbox (and ATA rent if the dest has no USDC account yet) | about **$1** of SOL |
+| USDC on **Solana** | What the app actually credits after sweep | about **$4** |
+
+Buy or swap inside personal Phantom, then send **SOL** and **Solana USDC** to the **agent** Solana address. Or buy in-app onto the agent address if Phantom shows it. Confirm mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. Ask the agent for `wallet_balances` before the first transfer.
+
+Product path does **not** need SOL on the member wallet or vault (relayer pays). The **agent** still needs SOL because the agent is the sender.
+
+### Send USDC into Monaco (member inbox → vault)
+
+1. `just run` (API + gold sim). Sign in (SMS or email OTP).
+2. Join or create a group → Add money. Copy the **Privy member** address (deposit inbox). Not the group treasury.
+3. In Cursor: transfer **small** USDC on `solana:mainnet` to that address, mint above. MCP `transfer` / `transfer_tokens` simulates first; approve only if dest matches the copied inbox.
+4. Poller detects member USDC, **sweeps** to the group treasury, then credits shares. Watch API logs / group view. Do not treat member-wallet balance as credited pot.
+5. Explorer: [solscan.io](https://solscan.io) on the sweep signature.
+
+Never insert `FAKE*` wallet rows in local Postgres. The poller will break.
+
+### Sweep leftover back to the agent wallet (vault → Phantom)
+
+Phantom MCP cannot pull from Privy. Reverse of deposit is **in-app redeem** to the agent Solana address.
+
+1. Agent: print Solana address again. Confirm it is **your** MCP wallet.
+2. Group screen → redeem leftover equity (slider at max if you want the pot empty). Payout address = that agent Solana address.
+3. Wait for payout confirm. Agent: `wallet_balances` — USDC should be back. Treasury USDC for that test should be ~0 (dust from swaps possible).
+4. If USDC is still sitting **only** in the member inbox (sweep not confirmed): do not “withdraw with Phantom.” Wait for sweep, then redeem. Or stop funding that inbox.
+5. If the pot holds xStocks, redeem sells that slice to USDC first, then pays USDC. Tiny leftover stock/USDC dust can remain; keep QA notionals small.
+
+After a funding run, leftover **agent-test USDC belongs on the agent Phantom**, not in a group vault and not in a sim user’s inbox.
+
+### Ops: sweep USDC out of Privy wallets
+
+Product path is poller member-inbox → treasury, then **in-app redeem**. Use this script only when USDC is stuck in Privy (inbox or treasury) and you must send it to a known Solana address (usually the agent Phantom).
+
+**Danger.** Mainnet USDC. Wrong `DATABASE_URL` or `--all` against the prod Privy app can empty live pots and break share credits. Relayer still pays SOL fees.
+
+```bash
+# Always dry-run first. --all = every Solana wallet Privy returns for this app (not just local DB rows).
+./scripts/sweep-wallets.sh --destination <solana_address> --all --dry-run
+
+# Live: same flags without --dry-run. Type exactly:
+#   I UNDERSTAND THIS MAY MESS WITH PROD
+# then paste the destination address again.
+./scripts/sweep-wallets.sh --destination <solana_address> --all
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--destination` | Required. Receives all swept USDC. |
+| `--all` | Source of truth = Privy `GET /v1/wallets?chain_type=solana` (paginated). Skips Postgres. |
+| *(omit `--all`)* | Source = local `member_wallets` + `treasuries` for the `DATABASE_URL` in `.env.local`. |
+| `--dry-run` | Print balances and `would sweep` lines. No txs. No confirm prompt. |
+
+Needs `.env.local` (`PRIVY_*`, `RELAYER_PRIVATE_KEY`, `DATABASE_URL`). Wrapper is `scripts/with-dotenv-local.sh`. Amounts are micro-USDC (`1000000` = $1). Zero-balance wallets skip. Destination equal to a source skips.
+
+Code: `apps/backend/cmd/sweep-member-to-address`. Full notes: [`docs/ops-sweep-wallets.md`](docs/ops-sweep-wallets.md).
 
 ## NAV and share units
 
@@ -236,21 +376,124 @@ Day-to-day commands: **[Getting started with development](#getting-started-with-
 
 ### Running the stack
 
-Need `.env.local` from one-time setup above. For iOS use `./scripts/ios-sim` or `just run mobile` from repo root. Bare `ios-sim` from `apps/mobile` skips Privy.
+Need `.env.local` from one-time setup above. API: `just run backend`. iOS: slim gold path below, or **[stock Simulator](#without-slim-sim)** if you never installed SimSlim.
 
-#### Gold slim simulator
+#### SimSlim (gold simulator)
 
-Monaco uses one **gold slim** iOS Simulator: SimSlim RAM-thinned, fixed UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF` (~0.9 GB vs ~4 GB stock). Reuse it across builds and QA. Never `simctl erase`, never spin up a fresh sim for QA, and never target by device name (e.g. `iPhone 17`) — always by UDID.
+**SimSlim** turns one iOS Simulator into a RAM-thin “gold” device (~0.9 GB vs ~4 GB stock) by disabling unused sim daemons. Pick **one** sim per machine, slim it, reuse it. Apple mints a new UUID on `simctl create` — **never commit a UDID**. Recipes read **`SIMSLIM_UDID`**.
+
+Never `simctl erase` that device (wipe kills slim + the app container). Never target by device name (`iPhone 17`). Always `$SIMSLIM_UDID`.
+
+Slim is **not** required to develop. It is required for `just run mobile` / `./scripts/ios-sim` (PATH wrappers) and for agent QA that assumes gold. Humans without slim: skip to **[Without slim sim](#without-slim-sim)**.
+
+##### Wire SimSlim on a new machine
+
+1. **Xcode** with an **iOS 18.5+** simulator runtime (slim does not persist across reboot below 18.5).
+
+2. **Install SimSlim** (Homebrew tap; not a repo dependency):
+
+   ```bash
+   brew install mobai-app/tap/simslim
+   ```
+
+3. **Create or pick one iPhone sim**, copy the UDID:
+
+   ```bash
+   xcrun simctl list devices available
+   xcrun simctl list runtimes
+   # Example — Apple assigns a new UDID:
+   xcrun simctl create "Monaco Gold" com.apple.CoreSimulator.SimDeviceType.iPhone-16 <runtime-identifier>
+   ```
+
+4. **Export `SIMSLIM_UDID`** (not a secret). Shell rc **and/or** plain gitignored `.env` (Justfile `dotenv-load` reads `.env`, not dotenvx `.env.local`):
+
+   ```bash
+   export SIMSLIM_UDID="<YOUR_UDID>"
+   export PATH="$HOME/.local/bin:$PATH"
+   # optional: echo "SIMSLIM_UDID=<YOUR_UDID>" >> .env
+   ```
+
+   `just build mobile`, `just reset mobile`, and `scripts/stop-mobile.sh` call `scripts/gold-sim-udid.sh` (fails loud if unset). `~/.local/bin/ios-sim` also honors `SIMSLIM_UDID`.
+
+5. **Slim profile.** Repo copy: [`ci/profiles/base-slim.json`](ci/profiles/base-slim.json) (`{"except": []}` = max slim). Copy to the default path the wrappers look for, or point `SIMSLIM_PROFILE` at the repo file:
+
+   ```bash
+   mkdir -p ~/.config/simslim
+   cp ci/profiles/base-slim.json ~/.config/simslim/base-slim.json
+   simslim on "$SIMSLIM_UDID" --profile ~/.config/simslim/base-slim.json --json
+   ```
+
+   Every session before driving UI:
+
+   ```bash
+   simslim verify "$SIMSLIM_UDID" --profile ~/.config/simslim/base-slim.json \
+     || simslim on "$SIMSLIM_UDID" --profile ~/.config/simslim/base-slim.json
+   simslim doctor --requires ~/.config/simslim/base-slim.json
+   ```
+
+   `except` in a profile means **keep** that daemon category on (less slim). Photos QA would use `"except": ["photos"]`. Monaco product smoke is tabs + HTTP; base-slim is enough.
+
+6. **`ios-sim` / `ios-build` on PATH.** These wrappers are **machine-local**, not in git. They live at `~/.local/bin/` and must be executable. They source `ios-sim-common.sh` in the same directory: boot `$SIMSLIM_UDID`, `simslim verify || on`, then `xcodebuild` (build) or install+`simctl launch` (sim). If you do not already have those three scripts, copy them from a machine that does, or recreate them from `.cursor/skills/ios-simslim-fast-qa/SKILL.md` (same jobs: ensure slim → build → install/launch). Confirm:
+
+   ```bash
+   command -v ios-sim ios-build simslim
+   ./scripts/ios-build   # repo root: Privy xcconfig, then ios-build
+   ```
+
+   Optional: `export SIMSLIM_PROFILE="$PWD/ci/profiles/base-slim.json"` — wrappers run with cwd `apps/mobile`, so they will not find the repo profile unless this is set or you copied it to `~/.config/simslim/base-slim.json`.
+
+Keep gold **booted** between agent sessions when you can. Clone gold after slim-once if you need a second sim (clone inherits slim + apps).
+
+##### Daily use (slim installed)
+
+Repo scripts wrap the PATH binaries and inject Privy. Bare `ios-sim` from `apps/mobile` skips Privy.
 
 | Command | When to use |
 | --- | --- |
-| `ios-build` / `ios-sim` (`~/.local/bin`) | Bare compile or run on the gold sim. No Privy env. |
-| `./scripts/ios-build` | Monaco compile: generates Privy xcconfig from `.env.local`, then calls `ios-build`. |
-| `./scripts/ios-sim` | Monaco run: injects Privy via dotenvx, then calls `ios-sim`. Prefer this over bare `ios-sim`. |
-| `just build mobile` | Compile gate with Privy xcconfig (same UDID). |
-| `just run mobile` | Full run with Privy; delegates to `./scripts/ios-sim`. |
+| `ios-build` / `ios-sim` (`~/.local/bin`) | Bare compile or run on `$SIMSLIM_UDID`. No Privy env. |
+| `./scripts/ios-build` | Monaco compile: Privy xcconfig from `.env.local`, then `ios-build`. |
+| `./scripts/ios-sim` | Monaco run: dotenvx Privy + `SIMCTL_CHILD_*`, then `ios-sim`. Prefer this. |
+| `just build mobile` | Compile gate; destination = `$SIMSLIM_UDID`. |
+| `just run mobile` | Full run with Privy; calls `./scripts/ios-sim`. |
+| `just run` | Postgres + API + gold sim (needs `ios-sim` on PATH). |
 
-**Agent / sim QA.** Fast smoke (launch, primary nav, one critical path) — follow `.cursor/skills/ios-simslim-fast-qa/SKILL.md` (SimSlim verify, MobAI tap-through). Run unit tests first (`just test mobile`, no sim). XcodeBuildMCP: always pass `--simulator-id 7B30D45E-62FD-42E2-871A-787B19D38CCF`.
+**Agent / sim QA.** Unit tests first (`just test mobile`, no sim). Fast smoke (launch, primary nav, one critical path): `.cursor/skills/ios-simslim-fast-qa/SKILL.md` (SimSlim verify, optional MobAI tap-through). MobAI desktop + `mobai-mcp` is agent UI driving, not required to run the app. XcodeBuildMCP (this repo’s `.cursor/mcp.json`): `--simulator-id "$SIMSLIM_UDID"`.
+
+#### Without slim sim
+
+Stock Xcode Simulator runs the same app. You do not need Homebrew `simslim`, `~/.local/bin/ios-sim`, MobAI, or `$SIMSLIM_UDID`.
+
+1. Backend + DB: `just run backend` (Docker Postgres, dotenvx, API on 8080).
+2. Privy into the iOS target (once per env change):
+
+   ```bash
+   ./scripts/ensure-ios-privy-config.sh generate
+   ```
+
+   Writes gitignored `apps/mobile/Config/Privy.local.xcconfig`. Without this, the app shows “Privy not configured”.
+
+3. Open `apps/mobile/Monaco.xcodeproj` in Xcode. Scheme **Monaco**. Pick any **iOS 18+** simulator. Cmd+R.
+
+4. Or compile from CLI with **your** destination (name is fine here; this path is not agent gold QA):
+
+   ```bash
+   ./scripts/ensure-ios-privy-config.sh generate
+   xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
+     -destination 'platform=iOS Simulator,name=iPhone 16' \
+     -configuration Debug build
+   ```
+
+   Then install/launch that `.app` with `simctl` on the UDID Xcode shows, or just Run from Xcode.
+
+5. If you launch via `simctl launch` instead of Xcode, wrap so Privy reaches the sim process:
+
+   ```bash
+   ./scripts/with-ios-privy-env.sh xcrun simctl launch <YOUR_UDID> com.monaco.app
+   ```
+
+**What will fail without gold slim:** `just run` / `just run mobile` / `./scripts/ios-sim` (need `~/.local/bin/ios-sim`), `just build mobile` / `just reset mobile` / `just stop mobile` if `SIMSLIM_UDID` is unset or that sim does not exist. Stop a stock sim yourself: Xcode stop, or `xcrun simctl terminate <UDID> com.monaco.app`. Host unit tests still work: `just test mobile`.
+
+Do not `simctl erase` a sim you later want as gold. Creating extra stock sims for local play is fine.
 
 Privy test accounts and OTP codes: see **Privy (M1)** in `AGENTS.md`.
 

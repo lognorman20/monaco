@@ -1,7 +1,10 @@
 package config
 
 import (
+	"strings"
 	"testing"
+
+	solanakey "github.com/monaco/monaco/apps/backend/internal/solana/key"
 )
 
 func clearConfigEnv(t *testing.T) {
@@ -18,7 +21,7 @@ func setValidConfigEnv(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://monaco:monaco@localhost:54322/monaco?sslmode=disable")
 	t.Setenv("PRIVY_APP_ID", "test-privy-app-id")
 	t.Setenv("PRIVY_APP_SECRET", "test-privy-app-secret")
-	t.Setenv("RELAYER_PRIVATE_KEY", "test-relayer-private-key")
+	t.Setenv("RELAYER_PRIVATE_KEY", solanakey.TestPrivateKeyBase58())
 	t.Setenv("PRIVY_AUTHORIZATION_PRIVATE_KEY", "wallet-auth:test-authorization-key")
 	t.Setenv("PRIVY_AUTHORIZATION_KEY_ID", "test-authorization-key-id")
 }
@@ -44,7 +47,7 @@ func TestLoad_returnsConfigWhenAllRequiredEnvVarsSet(t *testing.T) {
 	if cfg.PrivyAppSecret != "test-privy-app-secret" {
 		t.Fatalf("PrivyAppSecret = %q", cfg.PrivyAppSecret)
 	}
-	if cfg.RelayerPrivateKey != "test-relayer-private-key" {
+	if cfg.RelayerPrivateKey != solanakey.TestPrivateKeyBase58() {
 		t.Fatalf("RelayerPrivateKey = %q", cfg.RelayerPrivateKey)
 	}
 	if cfg.SolanaCluster != SolanaCluster {
@@ -154,13 +157,50 @@ func TestLoad_optionalPythAPIKey_isLoadedWhenSet(t *testing.T) {
 	}
 }
 
+func TestLoad_jsonRelayerPrivateKey_isNormalizedToBase58(t *testing.T) {
+	// Arrange
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+	want := solanakey.TestPrivateKeyBase58()
+	t.Setenv("RELAYER_PRIVATE_KEY", solanakey.TestPrivateKeyJSONIntArray())
+
+	// Act
+	cfg, err := Load()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.RelayerPrivateKey != want {
+		t.Fatalf("RelayerPrivateKey = %q, want normalized %q", cfg.RelayerPrivateKey, want)
+	}
+}
+
+func TestLoad_invalidRelayerPrivateKeyFormat_returnsHelpfulError(t *testing.T) {
+	// Arrange
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+	t.Setenv("RELAYER_PRIVATE_KEY", "[1,2,not-an-int]")
+
+	// Act
+	_, err := Load()
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected error for invalid relayer key")
+	}
+	if !strings.Contains(err.Error(), "JSON array") {
+		t.Fatalf("error = %q, want JSON array guidance", err.Error())
+	}
+}
+
 func TestLoad_trimsWhitespaceFromEnvValues(t *testing.T) {
 	// Arrange
 	clearConfigEnv(t)
 	t.Setenv("DATABASE_URL", "  postgres://monaco:monaco@localhost:54322/monaco?sslmode=disable  ")
 	t.Setenv("PRIVY_APP_ID", "  app-id  ")
 	t.Setenv("PRIVY_APP_SECRET", "  app-secret  ")
-	t.Setenv("RELAYER_PRIVATE_KEY", "  relayer-key  ")
+	t.Setenv("RELAYER_PRIVATE_KEY", "  "+solanakey.TestPrivateKeyBase58()+"  ")
 
 	// Act
 	cfg, err := Load()

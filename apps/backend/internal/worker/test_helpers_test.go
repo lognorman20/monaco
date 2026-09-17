@@ -39,6 +39,11 @@ func integrationWorkerApp(t *testing.T) *workerTestApp {
 	}
 }
 
+func seedPendingDepositWithToken(t *testing.T, testApp *workerTestApp) (postgres.DepositRow, string, string) {
+	t.Helper()
+	return seedPendingDeposit(t, testApp)
+}
+
 func seedPendingDeposit(t *testing.T, testApp *workerTestApp) (postgres.DepositRow, string, string) {
 	t.Helper()
 	ctx := context.Background()
@@ -66,6 +71,5 @@ func seedPendingDeposit(t *testing.T, testApp *workerTestApp) (postgres.DepositR
 	if err != nil || !found {
 		t.Fatalf("GetDepositByID: found=%v err=%v", found, err)
 	}
-	treasury, _ := testApp.Privy.EnsureTreasury(ctx, privy.GroupID(group.GroupID))
-	return row, result.Deposit.FromAddress, treasury.SolanaAddress
+	return row, result.Deposit.FromAddress, string(token)
 }

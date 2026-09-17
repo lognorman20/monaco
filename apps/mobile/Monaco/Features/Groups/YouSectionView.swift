@@ -9,7 +9,7 @@ struct YouSectionView: View {
             metricRow(title: "Slice %", value: formatPercent(slice.slicePercent))
             metricRow(title: "P&L", value: slice.dollarPnl)
             if let percentReturn = slice.percentReturn {
-                metricRow(title: "Return", value: percentReturn)
+                metricRow(title: "Return", value: formatPercent(percentReturn))
             } else {
                 metricRow(title: "Return", value: "—")
             }

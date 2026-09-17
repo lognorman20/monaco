@@ -60,6 +60,156 @@ type ConfirmSellTransactionParams struct {
 	ProceedsUSDC     int64
 }
 
+// InsertPendingTransactionParams records an in-flight swap before Jupiter confirms.
+type InsertPendingTransactionParams struct {
+	GroupID          string
+	ProposalID       string
+	Action           string
+	InputMint        string
+	OutputMint       string
+	Amount           int64
+	ExecuteRequestID string
+}
+
+// InsertPendingTransaction persists a pending swap row idempotently on execute_request_id.
+func (s *Store) InsertPendingTransaction(ctx context.Context, params InsertPendingTransactionParams) (TransactionRow, bool, error) {
+	if params.GroupID == "" || params.Action == "" || params.InputMint == "" || params.OutputMint == "" {
+		return TransactionRow{}, false, fmt.Errorf("group_id, action, and mints are required")
+	}
+	if params.Amount <= 0 {
+		return TransactionRow{}, false, fmt.Errorf("amount must be positive")
+	}
+	if params.ExecuteRequestID == "" {
+		return TransactionRow{}, false, fmt.Errorf("execute_request_id is required")
+	}
+
+	if existing, found, err := s.GetTransactionByExecuteRequestID(ctx, params.ExecuteRequestID); err != nil {
+		return TransactionRow{}, false, err
+	} else if found {
+		return existing, false, nil
+	}
+
+	const insertSQL = `
+INSERT INTO transactions (group_id, proposal_id, amount, action, input_mint, output_mint, status, execute_request_id)
+VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
+RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
+          tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
+
+	var proposalID sql.NullString
+	if params.ProposalID != "" {
+		proposalID = sql.NullString{String: params.ProposalID, Valid: true}
+	}
+
+	var row TransactionRow
+	err := s.db.QueryRowContext(
+		ctx,
+		insertSQL,
+		params.GroupID,
+		proposalID,
+		params.Amount,
+		params.Action,
+		params.InputMint,
+		params.OutputMint,
+		params.ExecuteRequestID,
+	).Scan(
+		&row.ID,
+		&row.GroupID,
+		&row.ProposalID,
+		&row.Amount,
+		&row.Action,
+		&row.InputMint,
+		&row.OutputMint,
+		&row.Status,
+		&row.TxSignature,
+		&row.ExecuteRequestID,
+		&row.CostBasisPrice,
+		&row.CostBasisAmount,
+		&row.CreatedAt,
+		&row.ConfirmedAt,
+	)
+	if err != nil {
+		return TransactionRow{}, false, fmt.Errorf("insert pending transaction: %w", err)
+	}
+	return row, true, nil
+}
+
+// FailTransactionByExecuteRequestID marks a pending swap failed.
+func (s *Store) FailTransactionByExecuteRequestID(ctx context.Context, executeRequestID string) (TransactionRow, bool, error) {
+	if executeRequestID == "" {
+		return TransactionRow{}, false, fmt.Errorf("execute_request_id is required")
+	}
+
+	const updateSQL = `
+UPDATE transactions
+SET status = 'failed'
+WHERE execute_request_id = $1 AND status = 'pending'
+RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
+          tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
+
+	var row TransactionRow
+	err := s.db.QueryRowContext(ctx, updateSQL, executeRequestID).Scan(
+		&row.ID,
+		&row.GroupID,
+		&row.ProposalID,
+		&row.Amount,
+		&row.Action,
+		&row.InputMint,
+		&row.OutputMint,
+		&row.Status,
+		&row.TxSignature,
+		&row.ExecuteRequestID,
+		&row.CostBasisPrice,
+		&row.CostBasisAmount,
+		&row.CreatedAt,
+		&row.ConfirmedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TransactionRow{}, false, nil
+	}
+	if err != nil {
+		return TransactionRow{}, false, fmt.Errorf("fail transaction by execute_request_id: %w", err)
+	}
+	return row, true, nil
+}
+
+// GetTransactionByExecuteRequestID returns a transaction row for an execute request id.
+func (s *Store) GetTransactionByExecuteRequestID(ctx context.Context, executeRequestID string) (TransactionRow, bool, error) {
+	if executeRequestID == "" {
+		return TransactionRow{}, false, fmt.Errorf("execute_request_id is required")
+	}
+
+	const selectSQL = `
+SELECT id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
+       tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
+FROM transactions
+WHERE execute_request_id = $1`
+
+	var row TransactionRow
+	err := s.db.QueryRowContext(ctx, selectSQL, executeRequestID).Scan(
+		&row.ID,
+		&row.GroupID,
+		&row.ProposalID,
+		&row.Amount,
+		&row.Action,
+		&row.InputMint,
+		&row.OutputMint,
+		&row.Status,
+		&row.TxSignature,
+		&row.ExecuteRequestID,
+		&row.CostBasisPrice,
+		&row.CostBasisAmount,
+		&row.CreatedAt,
+		&row.ConfirmedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TransactionRow{}, false, nil
+	}
+	if err != nil {
+		return TransactionRow{}, false, fmt.Errorf("get transaction by execute_request_id: %w", err)
+	}
+	return row, true, nil
+}
+
 // InsertFailedTransaction records a terminal failed swap attempt.
 func (s *Store) InsertFailedTransaction(ctx context.Context, groupID, action, inputMint, outputMint string, amount int64, executeRequestID string) (TransactionRow, error) {
 	if groupID == "" || action == "" || inputMint == "" || outputMint == "" {
@@ -125,6 +275,13 @@ func (s *Store) ConfirmBuyTransaction(ctx context.Context, params ConfirmBuyTran
 		}
 		if found {
 			return existing, false, nil
+		}
+		pending, pendingFound, err := s.GetTransactionByExecuteRequestID(ctx, params.ExecuteRequestID)
+		if err != nil {
+			return TransactionRow{}, false, err
+		}
+		if pendingFound && pending.Status == TransactionStatusPending {
+			return s.confirmPendingBuyTransaction(ctx, pending.ID, params)
 		}
 	}
 
@@ -202,6 +359,15 @@ func (s *Store) ConfirmSellTransaction(ctx context.Context, params ConfirmSellTr
 	}
 	if found {
 		return existing, false, nil
+	}
+	if params.ExecuteRequestID != "" {
+		pending, pendingFound, err := s.GetTransactionByExecuteRequestID(ctx, params.ExecuteRequestID)
+		if err != nil {
+			return TransactionRow{}, false, err
+		}
+		if pendingFound && pending.Status == TransactionStatusPending {
+			return s.confirmPendingSellTransaction(ctx, pending.ID, params)
+		}
 	}
 
 	const insertSQL = `
@@ -339,6 +505,52 @@ WHERE execute_request_id = $1 AND status = 'confirmed'`
 	return row, true, nil
 }
 
+// ListTransactionsByGroupID returns transactions for a group newest first.
+func (s *Store) ListTransactionsByGroupID(ctx context.Context, groupID string) ([]TransactionRow, error) {
+	if groupID == "" {
+		return nil, fmt.Errorf("group_id is required")
+	}
+
+	const selectSQL = `
+SELECT id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
+       tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
+FROM transactions
+WHERE group_id = $1
+ORDER BY created_at DESC
+LIMIT 100`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("list transactions by group: %w", err)
+	}
+	defer rows.Close()
+
+	var out []TransactionRow
+	for rows.Next() {
+		var row TransactionRow
+		if err := rows.Scan(
+			&row.ID,
+			&row.GroupID,
+			&row.ProposalID,
+			&row.Amount,
+			&row.Action,
+			&row.InputMint,
+			&row.OutputMint,
+			&row.Status,
+			&row.TxSignature,
+			&row.ExecuteRequestID,
+			&row.CostBasisPrice,
+			&row.CostBasisAmount,
+			&row.CreatedAt,
+			&row.ConfirmedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan transaction: %w", err)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 // GetTransactionByID returns a transaction row by primary key.
 func (s *Store) GetTransactionByID(ctx context.Context, id string) (TransactionRow, bool, error) {
 	if id == "" {
@@ -470,6 +682,46 @@ SELECT COUNT(*) FROM transactions WHERE tx_signature = $1 AND status = 'confirme
 	return count, nil
 }
 
+// GetLatestBuyTransactionByProposal returns the newest buy row linked to proposalID, any status.
+func (s *Store) GetLatestBuyTransactionByProposal(ctx context.Context, proposalID string) (TransactionRow, bool, error) {
+	if proposalID == "" {
+		return TransactionRow{}, false, fmt.Errorf("proposal_id is required")
+	}
+
+	const selectSQL = `
+SELECT id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
+       tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
+FROM transactions
+WHERE proposal_id = $1 AND action = 'buy'
+ORDER BY created_at DESC
+LIMIT 1`
+
+	var row TransactionRow
+	err := s.db.QueryRowContext(ctx, selectSQL, proposalID).Scan(
+		&row.ID,
+		&row.GroupID,
+		&row.ProposalID,
+		&row.Amount,
+		&row.Action,
+		&row.InputMint,
+		&row.OutputMint,
+		&row.Status,
+		&row.TxSignature,
+		&row.ExecuteRequestID,
+		&row.CostBasisPrice,
+		&row.CostBasisAmount,
+		&row.CreatedAt,
+		&row.ConfirmedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TransactionRow{}, false, nil
+	}
+	if err != nil {
+		return TransactionRow{}, false, fmt.Errorf("get latest buy transaction by proposal: %w", err)
+	}
+	return row, true, nil
+}
+
 // GetConfirmedTransactionByProposal returns the confirmed buy linked to a passed proposal.
 func (s *Store) GetConfirmedTransactionByProposal(ctx context.Context, proposalID string) (TransactionRow, bool, error) {
 	if proposalID == "" {
@@ -558,4 +810,88 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		return TransactionRow{}, false, fmt.Errorf("set transaction proposal id: proposal mismatch")
 	}
 	return existing, false, nil
+}
+
+func (s *Store) confirmPendingBuyTransaction(ctx context.Context, transactionID string, params ConfirmBuyTransactionParams) (TransactionRow, bool, error) {
+	const updateSQL = `
+UPDATE transactions
+SET status = 'confirmed',
+    tx_signature = $2,
+    cost_basis_price = $3,
+    cost_basis_amount = $4,
+    confirmed_at = now()
+WHERE id = $1 AND status = 'pending'
+RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
+          tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
+
+	var row TransactionRow
+	err := s.db.QueryRowContext(
+		ctx,
+		updateSQL,
+		transactionID,
+		params.TxSignature,
+		params.CostBasisPrice,
+		params.CostBasisAmount,
+	).Scan(
+		&row.ID,
+		&row.GroupID,
+		&row.ProposalID,
+		&row.Amount,
+		&row.Action,
+		&row.InputMint,
+		&row.OutputMint,
+		&row.Status,
+		&row.TxSignature,
+		&row.ExecuteRequestID,
+		&row.CostBasisPrice,
+		&row.CostBasisAmount,
+		&row.CreatedAt,
+		&row.ConfirmedAt,
+	)
+	if err != nil {
+		return TransactionRow{}, false, fmt.Errorf("confirm pending buy transaction: %w", err)
+	}
+	return row, true, nil
+}
+
+func (s *Store) confirmPendingSellTransaction(ctx context.Context, transactionID string, params ConfirmSellTransactionParams) (TransactionRow, bool, error) {
+	const updateSQL = `
+UPDATE transactions
+SET status = 'confirmed',
+    tx_signature = $2,
+    cost_basis_price = $3,
+    cost_basis_amount = $4,
+    confirmed_at = now()
+WHERE id = $1 AND status = 'pending'
+RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
+          tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
+
+	var row TransactionRow
+	err := s.db.QueryRowContext(
+		ctx,
+		updateSQL,
+		transactionID,
+		params.TxSignature,
+		params.ProceedsUSDC,
+		params.ProceedsUSDC,
+	).Scan(
+		&row.ID,
+		&row.GroupID,
+		&row.ProposalID,
+		&row.Amount,
+		&row.Action,
+		&row.InputMint,
+		&row.OutputMint,
+		&row.Status,
+		&row.TxSignature,
+		&row.ExecuteRequestID,
+		&row.CostBasisPrice,
+		&row.CostBasisAmount,
+		&row.CreatedAt,
+		&row.ConfirmedAt,
+	)
+	if err != nil {
+		return TransactionRow{}, false, fmt.Errorf("confirm pending sell transaction: %w", err)
+	}
+	return row, true, nil
 }

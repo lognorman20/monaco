@@ -39,9 +39,7 @@ struct RedeemView: View {
 
             Section("Payout address") {
                 TextField("Solana USDC address", text: $payoutAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
+                    .monacoWalletAddressField()
                     .accessibilityIdentifier("redeem-payout-address")
             }
 

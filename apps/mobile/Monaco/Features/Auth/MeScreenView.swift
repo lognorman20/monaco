@@ -58,10 +58,7 @@ struct MeScreenView: View {
                 Text("Member wallet")
                     .font(.caption)
                     .foregroundStyle(MonacoTheme.secondaryText)
-                Text(profile.memberWalletAddress)
-                    .font(.body.monospaced())
-                    .foregroundStyle(MonacoTheme.primaryText)
-                    .textSelection(.enabled)
+                MonacoWalletAddressText(address: profile.memberWalletAddress)
             }
 
             Label("Connected Solana address from GET /v1/me", systemImage: "checkmark.seal.fill")

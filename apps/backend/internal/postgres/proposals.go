@@ -261,6 +261,162 @@ ORDER BY cast_at`
 	return out, rows.Err()
 }
 
+// ListProposalsByGroupID returns proposals for groupID filtered by statuses, newest first.
+func (s *Store) ListProposalsByGroupID(ctx context.Context, groupID string, statuses []domain.ProposalStatus) ([]ProposalRow, error) {
+	if groupID == "" {
+		return nil, fmt.Errorf("group_id is required")
+	}
+	if len(statuses) == 0 {
+		return []ProposalRow{}, nil
+	}
+
+	statusValues := make([]string, 0, len(statuses))
+	for _, status := range statuses {
+		statusValues = append(statusValues, string(status))
+	}
+
+	const selectSQL = `
+SELECT id, group_id, proposer_id, symbol, usdc_micros, status, expires_at, created_at
+FROM proposals
+WHERE group_id = $1 AND status = ANY($2::text[])
+ORDER BY created_at DESC
+LIMIT 100`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, groupID, statusValues)
+	if err != nil {
+		return nil, fmt.Errorf("list proposals by group: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ProposalRow
+	for rows.Next() {
+		var row ProposalRow
+		var status string
+		if err := rows.Scan(
+			&row.ID,
+			&row.GroupID,
+			&row.ProposerID,
+			&row.Symbol,
+			&row.UsdcMicros,
+			&status,
+			&row.ExpiresAt,
+			&row.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan proposal: %w", err)
+		}
+		parsedStatus, err := domain.ParseProposalStatus(status)
+		if err != nil {
+			return nil, err
+		}
+		row.Status = parsedStatus
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// ListPassedProposalsPendingExecute returns passed proposals without a confirmed buy row.
+func (s *Store) ListPassedProposalsPendingExecute(ctx context.Context, limit int) ([]ProposalRow, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	const selectSQL = `
+SELECT p.id, p.group_id, p.proposer_id, p.symbol, p.usdc_micros, p.status, p.expires_at, p.created_at
+FROM proposals p
+WHERE p.status = 'passed'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM transactions t
+    WHERE t.proposal_id = p.id
+      AND t.action = 'buy'
+      AND t.status = 'confirmed'
+  )
+ORDER BY p.created_at ASC
+LIMIT $1`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list passed proposals pending execute: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ProposalRow
+	for rows.Next() {
+		var row ProposalRow
+		var status string
+		if err := rows.Scan(
+			&row.ID,
+			&row.GroupID,
+			&row.ProposerID,
+			&row.Symbol,
+			&row.UsdcMicros,
+			&status,
+			&row.ExpiresAt,
+			&row.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan passed proposal pending execute: %w", err)
+		}
+		parsedStatus, err := domain.ParseProposalStatus(status)
+		if err != nil {
+			return nil, err
+		}
+		row.Status = parsedStatus
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// ListPassedProposalsAwaitingExecuteByGroupID returns passed proposals with no linked swap row yet.
+func (s *Store) ListPassedProposalsAwaitingExecuteByGroupID(ctx context.Context, groupID string) ([]ProposalRow, error) {
+	if groupID == "" {
+		return nil, fmt.Errorf("group_id is required")
+	}
+
+	const selectSQL = `
+SELECT p.id, p.group_id, p.proposer_id, p.symbol, p.usdc_micros, p.status, p.expires_at, p.created_at
+FROM proposals p
+WHERE p.group_id = $1
+  AND p.status = 'passed'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM transactions t
+    WHERE t.proposal_id = p.id
+  )
+ORDER BY p.created_at DESC
+LIMIT 100`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("list passed proposals awaiting execute by group: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ProposalRow
+	for rows.Next() {
+		var row ProposalRow
+		var status string
+		if err := rows.Scan(
+			&row.ID,
+			&row.GroupID,
+			&row.ProposerID,
+			&row.Symbol,
+			&row.UsdcMicros,
+			&status,
+			&row.ExpiresAt,
+			&row.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan passed proposal awaiting execute: %w", err)
+		}
+		parsedStatus, err := domain.ParseProposalStatus(status)
+		if err != nil {
+			return nil, err
+		}
+		row.Status = parsedStatus
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 // CountTransactionsForProposal returns swap rows linked to proposalID.
 func (s *Store) CountTransactionsForProposal(ctx context.Context, proposalID string) (int, error) {
 	if proposalID == "" {

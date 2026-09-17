@@ -21,9 +21,15 @@ type CatalogAsset struct {
 	SolanaMint string
 }
 
+// CatalogSearchPage is one page of catalog search results.
+type CatalogSearchPage struct {
+	Assets  []CatalogAsset
+	HasMore bool
+}
+
 // CatalogSearcher searches the xStocks catalog and resolves Solana mints.
 type CatalogSearcher interface {
-	Search(ctx context.Context, query string) ([]CatalogAsset, error)
+	Search(ctx context.Context, query string, limit, offset int) (CatalogSearchPage, error)
 }
 
 // HTTPCatalogSearcher lists assets from the xStocks public API and filters locally.
@@ -71,32 +77,33 @@ type catalogAssetNode struct {
 	Deployments []deployment `json:"deployments"`
 }
 
-// Search returns catalog assets whose symbol or name matches query and have a Solana mint.
-func (s *HTTPCatalogSearcher) Search(ctx context.Context, query string) ([]CatalogAsset, error) {
+// Search returns one page of catalog assets whose symbol or name matches query.
+func (s *HTTPCatalogSearcher) Search(ctx context.Context, query string, limit, offset int) (CatalogSearchPage, error) {
 	query = strings.TrimSpace(query)
-	if query == "" {
-		err := fmt.Errorf("%w: query is required", ErrInvalidResponse)
-		logCatalogSearch(query, 0, err)
-		return nil, err
+	if limit <= 0 {
+		limit = 25
+	}
+	if offset < 0 {
+		offset = 0
 	}
 
-	if looksLikeTickerQuery(query) {
+	if offset == 0 && looksLikeTickerQuery(query) {
 		if asset, err := s.searchBySymbol(ctx, query); err != nil {
 			logCatalogSearch(query, 0, err)
-			return nil, err
+			return CatalogSearchPage{}, err
 		} else if asset != nil {
 			logCatalogSearch(query, 1, nil)
-			return []CatalogAsset{*asset}, nil
+			return CatalogSearchPage{Assets: []CatalogAsset{*asset}, HasMore: false}, nil
 		}
 	}
 
-	results, err := s.searchPaginatedList(ctx, query)
+	page, err := s.searchPaginatedList(ctx, query, limit, offset)
 	if err != nil {
 		logCatalogSearch(query, 0, err)
-		return nil, err
+		return CatalogSearchPage{}, err
 	}
-	logCatalogSearch(query, len(results), nil)
-	return results, nil
+	logCatalogSearch(query, len(page.Assets), nil)
+	return page, nil
 }
 
 func (s *HTTPCatalogSearcher) searchBySymbol(ctx context.Context, query string) (*CatalogAsset, error) {
@@ -125,19 +132,20 @@ func (s *HTTPCatalogSearcher) searchBySymbol(ctx context.Context, query string) 
 	return nil, nil
 }
 
-func (s *HTTPCatalogSearcher) searchPaginatedList(ctx context.Context, query string) ([]CatalogAsset, error) {
+func (s *HTTPCatalogSearcher) searchPaginatedList(ctx context.Context, query string, limit, offset int) (CatalogSearchPage, error) {
 	needle := strings.ToLower(strings.TrimSpace(query))
 	matches := make([]CatalogAsset, 0)
+	hasNextPage := true
 
-	for page := 0; ; page++ {
+	for page := 0; hasNextPage; page++ {
 		body, err := s.fetchCatalogListPage(ctx, page)
 		if err != nil {
-			return nil, err
+			return CatalogSearchPage{}, err
 		}
 
 		var list catalogListResponse
 		if err := json.Unmarshal(body, &list); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
+			return CatalogSearchPage{}, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
 		}
 
 		for _, node := range list.Nodes {
@@ -155,12 +163,23 @@ func (s *HTTPCatalogSearcher) searchPaginatedList(ctx context.Context, query str
 			})
 		}
 
-		if !list.Page.HasNextPage {
-			break
-		}
+		hasNextPage = list.Page.HasNextPage
 	}
 
-	return matches, nil
+	sortCatalogMatches(matches)
+
+	hasMore := len(matches) > offset+limit
+	if offset >= len(matches) {
+		return CatalogSearchPage{Assets: nil, HasMore: hasMore}, nil
+	}
+	end := offset + limit
+	if end > len(matches) {
+		end = len(matches)
+	}
+	return CatalogSearchPage{
+		Assets:  matches[offset:end],
+		HasMore: hasMore,
+	}, nil
 }
 
 func (s *HTTPCatalogSearcher) fetchCatalogListPage(ctx context.Context, page int) ([]byte, error) {
@@ -326,18 +345,21 @@ func RegisterCatalogSearchError(searcher CatalogSearcher, err error) {
 	fake.mu.Unlock()
 }
 
-func (f *fakeCatalogSearcher) Search(ctx context.Context, query string) ([]CatalogAsset, error) {
+func (f *fakeCatalogSearcher) Search(ctx context.Context, query string, limit, offset int) (CatalogSearchPage, error) {
 	_ = ctx
 	query = strings.TrimSpace(query)
-	if query == "" {
-		return nil, fmt.Errorf("%w: query is required", ErrInvalidResponse)
+	if limit <= 0 {
+		limit = 25
+	}
+	if offset < 0 {
+		offset = 0
 	}
 
 	f.mu.Lock()
 	if f.listErr != nil {
 		err := f.listErr
 		f.mu.Unlock()
-		return nil, err
+		return CatalogSearchPage{}, err
 	}
 	assets := append([]CatalogAsset(nil), f.assets...)
 	f.mu.Unlock()
@@ -347,9 +369,23 @@ func (f *fakeCatalogSearcher) Search(ctx context.Context, query string) ([]Catal
 	for _, asset := range assets {
 		symbol := strings.ToLower(strings.TrimSpace(asset.Symbol))
 		name := strings.ToLower(strings.TrimSpace(asset.Name))
-		if strings.Contains(symbol, needle) || strings.Contains(name, needle) {
+		if needle == "" || strings.Contains(symbol, needle) || strings.Contains(name, needle) {
 			matches = append(matches, asset)
 		}
 	}
-	return matches, nil
+
+	sortCatalogMatches(matches)
+
+	hasMore := len(matches) > offset+limit
+	if offset >= len(matches) {
+		return CatalogSearchPage{Assets: nil, HasMore: hasMore}, nil
+	}
+	end := offset + limit
+	if end > len(matches) {
+		end = len(matches)
+	}
+	return CatalogSearchPage{
+		Assets:  matches[offset:end],
+		HasMore: hasMore,
+	}, nil
 }

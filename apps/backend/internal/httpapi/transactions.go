@@ -15,11 +15,12 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
-// TransactionHandlers serves transaction read HTTP routes.
+// TransactionHandlers serves transaction HTTP routes.
 type TransactionHandlers struct {
 	Store   *postgres.Store
 	Privy   privy.Client
 	XStocks xstocks.Resolver
+	Swap    *app.SwapService
 }
 
 type getTransactionResponse struct {
@@ -50,6 +51,86 @@ type costBasisBySymbolResponse struct {
 	Symbol          string `json:"symbol"`
 	CostBasisPrice  int64  `json:"costBasisPrice"`
 	CostBasisAmount int64  `json:"costBasisAmount"`
+}
+
+// RetryTransactionHandler handles POST /v1/transactions/{id}/retry.
+func (h *TransactionHandlers) RetryTransactionHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "POST /v1/transactions/{id}/retry")
+
+	token, ok := bearerToken(r)
+	if !ok {
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
+		return
+	}
+
+	transactionID := strings.TrimSpace(r.PathValue("id"))
+	if transactionID == "" {
+		logJSONError(ctx, log, "missing_transaction_id", w, http.StatusBadRequest, "transaction id is required")
+		return
+	}
+	if h.Swap == nil {
+		logJSONError(ctx, log, "swap_unavailable", w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	row, found, err := h.Store.GetTransactionByID(ctx, transactionID)
+	if err != nil {
+		logJSONError(ctx, log, "get_transaction_failed", w, http.StatusInternalServerError, "internal server error", "transaction_id", transactionID, "err", err.Error())
+		return
+	}
+	if !found {
+		logJSONError(ctx, log, "transaction_not_found", w, http.StatusNotFound, "transaction not found", "transaction_id", transactionID)
+		return
+	}
+
+	userID, err := h.authorizeGroupMemberForTransaction(ctx, token, row.GroupID)
+	if err != nil {
+		writeTransactionError(ctx, log, w, err, "transaction_id", transactionID, "group_id", row.GroupID)
+		return
+	}
+
+	result, err := h.Swap.RetryFailedSwap(ctx, app.RetryFailedSwapRequest{
+		TransactionID: transactionID,
+		UserID:        userID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, app.ErrTransactionNotRetryable):
+			logJSONError(ctx, log, "transaction_not_retryable", w, http.StatusConflict, "transaction not retryable", "transaction_id", transactionID)
+		case errors.Is(err, app.ErrTransactionNotFound):
+			logJSONError(ctx, log, "transaction_not_found", w, http.StatusNotFound, "transaction not found", "transaction_id", transactionID)
+		default:
+			logJSONError(ctx, log, "retry_transaction_failed", w, http.StatusInternalServerError, "internal server error", "transaction_id", transactionID, "err", err.Error())
+		}
+		return
+	}
+
+	resp := getTransactionResponse{
+		TransactionID: result.Transaction.ID,
+		GroupID:       result.Transaction.GroupID,
+		Action:        result.Transaction.Action,
+		Status:        result.Transaction.Status,
+	}
+	if result.Transaction.TxSignature.Valid {
+		resp.TxSignature = result.Transaction.TxSignature.String
+	}
+	if result.Transaction.CostBasisPrice.Valid {
+		resp.CostBasisPrice = result.Transaction.CostBasisPrice.Int64
+	}
+	if result.Transaction.CostBasisAmount.Valid {
+		resp.CostBasisAmount = result.Transaction.CostBasisAmount.Int64
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+	logJSONOK(ctx, log, "ok",
+		"transaction_id", result.Transaction.ID,
+		"group_id", result.Transaction.GroupID,
+		"status", result.Transaction.Status,
+		"created", result.Created,
+	)
 }
 
 // GetTransactionHandler handles GET /v1/transactions/{id}.
@@ -258,6 +339,33 @@ func (h *TransactionHandlers) authorizeGroupMember(ctx context.Context, accessTo
 		return "", app.ErrGroupNotFound
 	}
 	return treasury.SolanaAddress, nil
+}
+
+func (h *TransactionHandlers) authorizeGroupMemberForTransaction(ctx context.Context, accessToken, groupID string) (string, error) {
+	identity, err := h.Privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			return "", privy.ErrInvalidToken
+		}
+		return "", fmt.Errorf("verify session: %w", err)
+	}
+
+	user, found, err := h.Store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", app.ErrUserNotFound
+	}
+
+	member, err := h.Store.IsGroupMember(ctx, groupID, user.ID)
+	if err != nil {
+		return "", err
+	}
+	if !member {
+		return "", app.ErrGroupNotFound
+	}
+	return user.ID, nil
 }
 
 var errTransactionNotFound = errors.New("transaction not found")

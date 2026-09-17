@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	solanakey "github.com/monaco/monaco/apps/backend/internal/solana/key"
 )
 
 func clearAPIEnv(t *testing.T) {
@@ -18,7 +20,7 @@ func setValidAPIEnv(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://monaco:monaco@localhost:54322/monaco?sslmode=disable")
 	t.Setenv("PRIVY_APP_ID", "test-privy-app-id")
 	t.Setenv("PRIVY_APP_SECRET", "test-privy-app-secret")
-	t.Setenv("RELAYER_PRIVATE_KEY", "test-relayer-private-key")
+	t.Setenv("RELAYER_PRIVATE_KEY", solanakey.TestPrivateKeyBase58())
 }
 
 func TestAPIServer_missingRelayerKey_failsStartup(t *testing.T) {

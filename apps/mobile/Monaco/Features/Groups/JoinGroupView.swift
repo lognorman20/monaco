@@ -1,14 +1,12 @@
 import SwiftUI
 
-/// Join an investing club by group ID with optional password.
+/// Join an investing club by group ID.
 struct JoinGroupView: View {
     @ObservedObject var auth: PrivyAuthService
 
     private let apiClient = MonacoAPIClient()
 
     @State private var groupId = ""
-    @State private var password = ""
-    @State private var requiresPassword = false
     @State private var didJoin = false
     @State private var errorMessage: String?
     @State private var isJoining = false
@@ -26,18 +24,6 @@ struct JoinGroupView: View {
                 Text("Club invite")
             } footer: {
                 Text("Paste the group ID your friend shared.")
-            }
-
-            Section("Join type") {
-                Toggle("Password required", isOn: $requiresPassword)
-                    .disabled(isJoining || didJoin)
-                    .accessibilityIdentifier("join-group-password-toggle")
-
-                if requiresPassword {
-                    SecureField("Join password", text: $password)
-                        .disabled(isJoining || didJoin)
-                        .accessibilityIdentifier("join-group-password")
-                }
             }
 
             Section {
@@ -68,12 +54,7 @@ struct JoinGroupView: View {
     }
 
     private var canSubmit: Bool {
-        let trimmedId = groupId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedId.isEmpty else { return false }
-        if requiresPassword {
-            return !password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        return true
+        !groupId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func joinGroup() async {
@@ -95,11 +76,11 @@ struct JoinGroupView: View {
             try await apiClient.joinGroup(
                 accessToken: accessToken,
                 groupId: trimmedId,
-                password: requiresPassword ? password : nil
+                password: nil
             )
             didJoin = true
         } catch MonacoAPIError.httpStatus(403) {
-            errorMessage = "Wrong join password. Ask your friend for the correct one."
+            errorMessage = "You are not allowed to join this club."
         } catch MonacoAPIError.httpStatus(404) {
             errorMessage = "Group not found. Check the ID and try again."
         } catch MonacoAPIError.httpStatus(let status) {

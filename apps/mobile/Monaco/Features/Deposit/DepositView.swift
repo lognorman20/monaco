@@ -1,165 +1,147 @@
 import SwiftUI
+import UIKit
 
-/// Add money flow with sweep status feedback (not member balance as money).
+/// Add money — show member deposit address; backend sweep credits club share.
 struct DepositView: View {
     @ObservedObject var auth: PrivyAuthService
     let groupId: String
 
     private let apiClient = MonacoAPIClient()
 
-    @State private var amountText = ""
-    @State private var depositId: String?
-    @State private var pollState = DepositPollStateMachine()
-    @State private var shareUnits: Int64?
+    @State private var depositAddress: String?
     @State private var errorMessage: String?
-    @State private var isSubmitting = false
-    @State private var isPolling = false
+    @State private var isLoading = true
+    @State private var didCopy = false
 
     var body: some View {
         Form {
             Section {
-                Text("Add USDC to grow your club's pot. We track sweep progress until your share is credited.")
+                Text("Send USDC on Solana to your deposit address. We sweep it into your club's vault and credit your share when it lands.")
                     .monacoSecondaryCaption()
             }
 
-            Section("Amount") {
-                TextField("USDC amount", text: $amountText)
-                    .keyboardType(.decimalPad)
-                    .monacoFormTextField()
-                    .disabled(isSubmitting || depositId != nil)
-                    .accessibilityIdentifier("deposit-amount-field")
-            }
-
-            Section {
-                Button(isSubmitting ? "Starting…" : "Add money") {
-                    Task { await createDeposit() }
-                }
-                .monacoFormPrimaryAction()
-                .disabled(isSubmitting || depositId != nil || parsedAmountMicro == nil)
-                .accessibilityIdentifier("create-deposit-button")
-            }
-
-            if depositId != nil {
-                Section("Sweep status") {
-                    Label(pollState.statusCopy, systemImage: sweepIcon)
-                        .font(.subheadline)
-                        .foregroundStyle(sweepStatusColor)
-                        .accessibilityIdentifier("deposit-sweep-status")
-
-                    if let shareUnits, pollState.phase == .credited {
-                        Text("Share units credited: \(shareUnits)")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(MonacoTheme.secondaryText)
+            Section("Your deposit address") {
+                if isLoading {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                            .tint(MonacoTheme.accent)
+                        Text("Loading address…")
+                            .monacoSecondaryCaption()
                     }
-
-                    if !pollState.isTerminal {
-                        Button(isPolling ? "Checking…" : "Refresh status") {
-                            Task { await refreshStatus() }
-                        }
-                        .monacoFormSecondaryAction()
-                        .disabled(isPolling || auth.accessToken == nil)
-                        .accessibilityIdentifier("deposit-refresh-status")
-                    }
-                }
-            }
-
-            if let errorMessage {
-                Section {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .accessibilityIdentifier("deposit-address-loading")
+                } else if let depositAddress {
+                    addressBlock(depositAddress)
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label(
+                            errorMessage ?? "Deposit address not ready yet.",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
                         .font(.footnote)
                         .foregroundStyle(MonacoTheme.warning)
+
+                        Button("Try again") {
+                            Task { await loadDepositAddress() }
+                        }
+                        .monacoFormSecondaryAction()
+                        .accessibilityIdentifier("deposit-address-retry")
+                    }
                 }
+            }
+
+            Section("How it works") {
+                stepRow(number: 1, text: "Send USDC on Solana to the address above.")
+                stepRow(number: 2, text: "Monaco sweeps your deposit into the club vault.")
+                stepRow(number: 3, text: "Your share in the pot updates once the sweep completes.")
             }
         }
         .monacoFormScreen()
         .navigationTitle("Add money")
         .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private var sweepStatusColor: Color {
-        switch pollState.phase {
-        case .credited:
-            MonacoTheme.success
-        case .failed:
-            MonacoTheme.warning
-        case .idle, .awaitingSweep:
-            MonacoTheme.primaryText
+        .task(id: auth.accessToken) {
+            await loadDepositAddress()
         }
     }
 
-    private var sweepIcon: String {
-        switch pollState.phase {
-        case .idle, .awaitingSweep:
-            "arrow.triangle.2.circlepath"
-        case .credited:
-            "checkmark.circle.fill"
-        case .failed:
-            "exclamationmark.triangle.fill"
-        }
-    }
+    @ViewBuilder
+    private func addressBlock(_ address: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            MonacoWalletAddressText(address: address)
+                .accessibilityIdentifier("deposit-address-value")
+                .onTapGesture {
+                    copyAddress(address)
+                }
 
-    private var parsedAmountMicro: Int64? {
-        let trimmed = amountText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              let decimal = Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX")),
-              decimal > 0 else {
-            return nil
-        }
-        var scaled = decimal * Decimal(1_000_000)
-        var rounded = Decimal()
-        NSDecimalRound(&rounded, &scaled, 0, .plain)
-        let microUnits = (rounded as NSDecimalNumber).int64Value
-        return microUnits > 0 ? microUnits : nil
-    }
+            HStack {
+                Button {
+                    copyAddress(address)
+                } label: {
+                    Label(didCopy ? "Copied" : "Copy address", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.monacoSecondary)
+                .accessibilityIdentifier("deposit-address-copy-button")
 
-    private func createDeposit() async {
-        guard let accessToken = auth.accessToken else {
-            errorMessage = "Sign in to add money."
-            return
-        }
-        guard let amount = parsedAmountMicro else {
-            errorMessage = "Enter a positive USDC amount."
-            return
-        }
-
-        isSubmitting = true
-        errorMessage = nil
-        pollState = DepositPollStateMachine()
-
-        do {
-            let created = try await apiClient.createDeposit(accessToken: accessToken, groupId: groupId, amount: amount)
-            depositId = created.depositId
-            pollState.apply(status: created.status)
-            isSubmitting = false
-            if !pollState.isTerminal {
-                await refreshStatus()
+                if didCopy {
+                    Text("Copied")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(MonacoTheme.success)
+                        .accessibilityIdentifier("deposit-address-copied-feedback")
+                }
             }
-        } catch MonacoAPIError.httpStatus(let status) {
-            errorMessage = "Could not start deposit (HTTP \(status))."
-            isSubmitting = false
-        } catch {
-            errorMessage = "Could not start deposit."
-            isSubmitting = false
         }
     }
 
-    private func refreshStatus() async {
-        guard let accessToken = auth.accessToken, let depositId else { return }
+    private func stepRow(number: Int, text: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(number).")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(MonacoTheme.accent)
+                .frame(width: 20, alignment: .trailing)
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(MonacoTheme.primaryText)
+        }
+    }
 
-        isPolling = true
+    private func copyAddress(_ address: String) {
+        UIPasteboard.general.string = address
+        didCopy = true
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            didCopy = false
+        }
+    }
+
+    private func loadDepositAddress() async {
+        guard let accessToken = auth.accessToken else {
+            depositAddress = nil
+            errorMessage = "Sign in to view your deposit address."
+            isLoading = false
+            return
+        }
+
+        isLoading = true
         errorMessage = nil
+        depositAddress = nil
 
         do {
-            let status = try await apiClient.getDeposit(accessToken: accessToken, depositId: depositId)
-            pollState.apply(status: status.status)
-            shareUnits = status.shareUnits
+            _ = try await apiClient.openSession(accessToken: accessToken)
+            let profile = try await apiClient.me(accessToken: accessToken)
+            let address = profile.memberWalletAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !address.isEmpty, !address.hasPrefix("FAKE") else {
+                errorMessage = "Deposit address not ready yet."
+                isLoading = false
+                return
+            }
+            depositAddress = address
+        } catch MonacoAPIError.httpStatus(let status) {
+            errorMessage = "Could not load address (HTTP \(status))."
         } catch {
-            errorMessage = "Could not refresh sweep status."
+            errorMessage = "Could not load deposit address."
         }
 
-        isPolling = false
+        isLoading = false
     }
-
 }
 
 #Preview {

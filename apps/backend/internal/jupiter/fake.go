@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -120,6 +121,29 @@ func RegisterSellQuote(client Client, inputMint string, amount int64, quote Sell
 func (f *fakeJupiterClient) QuoteBuy(ctx context.Context, params QuoteBuyParams) (BuyQuote, error) {
 	logQuoteAttempt(params.GroupID, params.UserID, params.Symbol, params.USDCAmount)
 
+	if strings.TrimSpace(params.Taker) != "" {
+		order, err := f.OrderBuy(ctx, OrderBuyParams{
+			GroupID:    params.GroupID,
+			UserID:     params.UserID,
+			Symbol:     params.Symbol,
+			OutputMint: params.OutputMint,
+			Amount:     params.USDCAmount,
+			Taker:      params.Taker,
+		})
+		if err != nil {
+			logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, err.Error())
+			return BuyQuote{Routable: false, InputMint: USDCMint, OutputMint: params.OutputMint}, err
+		}
+		return BuyQuote{
+			Routable:   true,
+			InputMint:  order.InputMint,
+			OutputMint: order.OutputMint,
+			InAmount:   order.InAmount,
+			OutAmount:  order.OutAmount,
+			RequestID:  order.RequestID,
+		}, nil
+	}
+
 	key := quoteKey(params.OutputMint, params.USDCAmount)
 	f.mu.Lock()
 	if err, ok := f.quoteErrs[key]; ok {
@@ -194,7 +218,7 @@ func (f *fakeJupiterClient) ExecuteBuy(ctx context.Context, params ExecuteBuyPar
 		Code:      -1,
 		RequestID: params.RequestID,
 	}
-	logExecuteResult(params.GroupID, params.UserID, params.Symbol, params.RequestID, result.Status, result.Code, nil)
+	logExecuteResult(params.GroupID, params.UserID, params.Symbol, params.RequestID, result.Status, 0, result.Code, nil, "", nil)
 	return result, nil
 }
 
@@ -282,7 +306,7 @@ func (f *fakeJupiterClient) SellToUSDC(ctx context.Context, params SellToUSDCPar
 		Code:      -1,
 		RequestID: params.RequestID,
 	}
-	logExecuteResult(params.GroupID, params.UserID, params.Symbol, params.RequestID, result.Status, result.Code, nil)
+	logExecuteResult(params.GroupID, params.UserID, params.Symbol, params.RequestID, result.Status, 0, result.Code, nil, "", nil)
 	return result, nil
 }
 

@@ -124,7 +124,7 @@ App names are `backend` and `mobile`. Wire them in M0. Each later milestone exte
 - `just build backend` builds the Go API binary.
 - `just test backend` runs env check, `docker compose up --wait`, migrations, and API tests against local Postgres.
 - `just run backend` starts local Postgres via compose, applies migrations, and runs only the API with `.env`.
-- `just build mobile` builds the SwiftUI app for slim sim UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`.
+- `just build mobile` builds the SwiftUI app for the machine gold slim sim (`SIMSLIM_UDID`; see README SimSlim).
 - `just test mobile` runs Swift tests on that sim.
 - `just run mobile` builds and launches only the app on that sim. Start the API separately or use `just run`.
 
@@ -137,6 +137,10 @@ The README leaves these unlocked. Do not pick them in code. M4 records a ticket 
 - Who may propose a buy. Any member, voter set only, or creator only.
 - Failed Jupiter `/execute` after a passed vote.
 - Creator leave and group dissolve.
+
+## Ops
+
+- [Sweep USDC out of Privy wallets](ops-sweep-wallets.md) (`./scripts/sweep-wallets.sh`)
 
 ## Milestone files
 

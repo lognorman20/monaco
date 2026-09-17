@@ -3,8 +3,9 @@
     {
       "groupId": "g1",
       "name": "Weekend investors",
-      "percentReturn": "+12.4%",
-      "dollarPnl": "+$48.20"
+      "potValueUsd": "548.20",
+      "percentReturn": "0.124",
+      "dollarPnl": "+48.20"
     }
   ],
   "people": [

@@ -45,6 +45,11 @@ func testTxSignature(iso *postgres.TestIsolation, label string) string {
 	return fmt.Sprintf("sig-%s-%s", iso.Suffix(), label)
 }
 
+func seedTestTreasuryUSDC(t *testing.T, privyClient privy.Client, treasuryAddress string, usdcMicros int64) {
+	t.Helper()
+	privy.SetTreasuryUSDCBalance(privyClient, treasuryAddress, usdcMicros)
+}
+
 func openTestSession(t *testing.T, iso *postgres.TestIsolation, sessions *SessionService, privyClient privy.Client, label, displayName string) SessionResult {
 	t.Helper()
 	token := privy.AccessToken(iso.UniqueToken(label))
@@ -72,7 +77,7 @@ func integrationApp(t *testing.T) integrationHarness {
 	buy := NewBuyService(jupiterClient, xstocksResolver)
 
 	signer := NewFakePrivyTreasurySigner()
-	swap := NewSwapService(store, buy, jupiterClient, privyClient, signer)
+	swap := NewSwapService(store, buy, jupiterClient, privyClient, signer, "")
 	swap.SetPollConfigForTests(jupiter.TestPollConfig())
 
 	return integrationHarness{

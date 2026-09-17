@@ -4,11 +4,21 @@ public struct BuyQuoteDTO: Codable, Equatable, Sendable {
     public let symbol: String
     public let usdcMicros: String
     public let routable: Bool
+    public let outputAmount: String?
+    public let priceUsdcMicros: String?
 
-    public init(symbol: String, usdcMicros: String, routable: Bool) {
+    public init(
+        symbol: String,
+        usdcMicros: String,
+        routable: Bool,
+        outputAmount: String? = nil,
+        priceUsdcMicros: String? = nil
+    ) {
         self.symbol = symbol
         self.usdcMicros = usdcMicros
         self.routable = routable
+        self.outputAmount = outputAmount
+        self.priceUsdcMicros = priceUsdcMicros
     }
 }
 

@@ -1,6 +1,6 @@
 # M5 demo script — gold slim sim
 
-Run on simulator UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF` only. Never `simctl erase`.
+Run on this machine’s gold slim sim (`$SIMSLIM_UDID`) only. Never `simctl erase`.
 
 ## Prerequisites
 

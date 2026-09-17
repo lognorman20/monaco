@@ -61,6 +61,7 @@ public struct LeaderboardRowDTO: Codable, Equatable, Sendable, Identifiable {
 public struct GroupViewDTO: Codable, Equatable, Sendable {
     public let id: String
     public let name: String
+    public let treasuryAddress: String?
     public let pot: [PotRowDTO]
     public let you: MemberSliceDTO
     public let members: [LeaderboardRowDTO]
@@ -69,6 +70,7 @@ public struct GroupViewDTO: Codable, Equatable, Sendable {
     public init(
         id: String,
         name: String,
+        treasuryAddress: String? = nil,
         pot: [PotRowDTO],
         you: MemberSliceDTO,
         members: [LeaderboardRowDTO],
@@ -76,6 +78,7 @@ public struct GroupViewDTO: Codable, Equatable, Sendable {
     ) {
         self.id = id
         self.name = name
+        self.treasuryAddress = treasuryAddress
         self.pot = pot
         self.you = you
         self.members = members

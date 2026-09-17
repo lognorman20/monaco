@@ -54,6 +54,7 @@ func createGroupForQuotes(t *testing.T, iso *postgres.TestIsolation, groupHandle
 		t.Fatalf("decode create group json: %v", err)
 	}
 	trackCreatedGroup(iso, created.GroupID)
+	privy.SetTreasuryUSDCBalance(privyClient, created.TreasuryAddress, 100_000_000)
 
 	return token, created.GroupID, session.UserID
 }

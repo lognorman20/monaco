@@ -19,6 +19,11 @@ func BuildInGroupMemberBoard(members []domain.MemberPosition, totalShares domain
 	return domain.BuildInGroupBoard(members, totalShares, potNav.TotalUsdc)
 }
 
+// BuildInGroupViewMemberBoard ranks every group member for GET /v1/groups/{id}/view.
+func BuildInGroupViewMemberBoard(members []domain.MemberPosition, totalShares domain.ShareUnits, potNav domain.PotNAV) ([]domain.MemberPnL, error) {
+	return domain.BuildInGroupViewBoard(members, totalShares, potNav.TotalUsdc)
+}
+
 // BuildAppGroupBoard ranks groups by pot percent return.
 func BuildAppGroupBoard(groups []domain.GroupBoardInput) []domain.GroupBoardRow {
 	return domain.BuildGroupBoard(groups)

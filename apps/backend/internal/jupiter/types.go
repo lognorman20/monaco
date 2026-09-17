@@ -10,6 +10,12 @@ const (
 // AAPLxMint is the Solana mainnet AAPLx token mint used in tests and docs.
 const AAPLxMint = "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"
 
+// XStockDecimals is the on-chain decimal count for xStock SPL tokens on Solana mainnet.
+const XStockDecimals = 8
+
+// XStockAtomicScale is 10^XStockDecimals for Jupiter outAmount atomics → whole shares.
+const XStockAtomicScale int64 = 100_000_000
+
 // ExecuteResult is a parsed Jupiter /execute response.
 type ExecuteResult struct {
 	Status             string

@@ -28,8 +28,9 @@ build app:
         fi
         # ensure-ios-privy-config reads .env.local via dotenvx get → Privy.local.xcconfig
         ./scripts/ensure-ios-privy-config.sh generate
+        gold_udid="$(./scripts/gold-sim-udid.sh)"
         xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
-          -destination 'platform=iOS Simulator,id=7B30D45E-62FD-42E2-871A-787B19D38CCF' \
+          -destination "platform=iOS Simulator,id=${gold_udid}" \
           -configuration Debug build
         ;;
       *)
@@ -119,7 +120,8 @@ run *app:
           wait "${backend_pid}" 2>/dev/null || true
         fi
       }
-      trap cleanup EXIT INT TERM
+      # INT/TERM only — ios-sim exits after launch; do not kill API on mobile recipe return.
+      trap cleanup INT TERM
       echo "Starting backend (background) and mobile (foreground)..."
       (cd apps/backend && go run ./cmd/api) 2>&1 | tee -a "${MONACO_LOG_DIR}/backend.log" &
       backend_pid=$!
@@ -129,9 +131,10 @@ run *app:
       fi
       export MONACO_LOG_DIR
       just run mobile
-      cleanup
-      trap - EXIT INT TERM
-      exit 0
+      echo ""
+      echo "Simulator launched. Backend still running — Ctrl+C to stop."
+      wait "${backend_pid}" 2>/dev/null || true
+      trap - INT TERM
     fi
     case "{{app}}" in
       backend)
@@ -217,8 +220,9 @@ reset *target:
           echo "error: apps/mobile is not scaffolded yet (M0-T4)."
           exit 1
         fi
+        gold_udid="$(./scripts/gold-sim-udid.sh)"
         xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
-          -destination 'platform=iOS Simulator,id=7B30D45E-62FD-42E2-871A-787B19D38CCF' \
+          -destination "platform=iOS Simulator,id=${gold_udid}" \
           clean
         echo "xcodebuild clean complete"
         ;;
