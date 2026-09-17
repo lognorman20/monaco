@@ -110,6 +110,8 @@ run *app:
       echo "Local Postgres is ready."
       echo "  DATABASE_URL=${DATABASE_URL}"
       echo ""
+      source ./scripts/run-with-logs.sh
+      monaco_init_logs
       backend_pid=""
       cleanup() {
         if [[ -n "${backend_pid}" ]] && kill -0 "${backend_pid}" 2>/dev/null; then
@@ -119,12 +121,13 @@ run *app:
       }
       trap cleanup EXIT INT TERM
       echo "Starting backend (background) and mobile (foreground)..."
-      (cd apps/backend && go run ./cmd/api) &
+      (cd apps/backend && go run ./cmd/api) 2>&1 | tee -a "${MONACO_LOG_DIR}/backend.log" &
       backend_pid=$!
       if ! kill -0 "${backend_pid}" 2>/dev/null; then
         echo "error: backend failed to start"
         exit 1
       fi
+      export MONACO_LOG_DIR
       just run mobile
       cleanup
       trap - EXIT INT TERM
@@ -144,8 +147,10 @@ run *app:
         echo "  DATABASE_URL=${DATABASE_URL}"
         echo "  psql: docker compose exec postgres psql -U ${POSTGRES_USER:-monaco} -d ${POSTGRES_DB:-monaco}"
         echo ""
+        source ./scripts/run-with-logs.sh
+        monaco_init_logs
         if [[ -f apps/backend/go.mod ]]; then
-          (cd apps/backend && go run ./cmd/api)
+          (cd apps/backend && go run ./cmd/api) 2>&1 | tee -a "${MONACO_LOG_DIR}/backend.log"
         else
           echo "M0: apps/backend not scaffolded yet. DB is up; wire the API in M0-T3."
           exit 1
@@ -157,7 +162,9 @@ run *app:
           exit 1
         fi
         # Privy: xcconfig + SIMCTL_CHILD_* via with-ios-privy-env, then gold ios-sim
-        ./scripts/ios-sim
+        source ./scripts/run-with-logs.sh
+        monaco_init_logs
+        ./scripts/ios-sim 2>&1 | tee -a "${MONACO_LOG_DIR}/mobile.log"
         ;;
       *)
         echo "error: unknown app '{{app}}' (use backend or mobile)"

@@ -25,6 +25,7 @@ Secrets, private keys, and pre-commit hooks: see **[Local env](#local-env)** bel
 | `just run` | Full stack: Postgres + API + iOS app (dotenvx re-exec) |
 | `just run backend` | API only (dotenvx) |
 | `just run mobile` | iOS on gold sim — Privy xcconfig + `SIMCTL_CHILD_*` via `./scripts/ios-sim` |
+| Logs | `just run*` tee stdout/stderr to `.logs/<timestamp>/` (`backend.log`, `mobile.log`) |
 | `just stop` | Stop API + iOS app (kill port 8080, `simctl terminate` on gold sim) |
 | `just stop backend` | Stop API only |
 | `just stop mobile` | Terminate Monaco on gold sim; stop `xcodebuild` if running |
