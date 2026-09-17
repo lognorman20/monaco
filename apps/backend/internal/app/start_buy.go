@@ -107,22 +107,30 @@ type ExecuteOnPassResult struct {
 // ExecuteOnPass builds, signs, POSTs Jupiter execute, polls Success code 0, and persists the buy.
 // Only proposals with status passed may execute. Idempotency on proposal id is wired for M4-T21.
 func (s *ExecuteOnPassService) ExecuteOnPass(ctx context.Context, proposal Proposal) (ExecuteOnPassResult, error) {
+	logExecuteOnPassStart(proposal.ID, proposal.GroupID, proposal.Symbol, proposal.UsdcMicros)
+
 	if proposal.Status != ProposalPassed {
+		logExecuteOnPassBranchWarn("execute on pass rejected", "proposal not passed", "proposal_id", proposal.ID, "status", proposal.Status)
 		return ExecuteOnPassResult{}, ErrProposalNotPassed
 	}
 	if proposal.ID == "" || proposal.GroupID == "" {
+		logExecuteOnPassBranchWarn("execute on pass rejected", "missing ids")
 		return ExecuteOnPassResult{}, fmt.Errorf("proposal id and group id are required")
 	}
 	if proposal.Symbol == "" {
+		logExecuteOnPassBranchWarn("execute on pass rejected", "symbol required", "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, fmt.Errorf("symbol is required")
 	}
 	if proposal.UsdcMicros <= 0 {
+		logExecuteOnPassBranchWarn("execute on pass rejected", "usdc not positive", "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, fmt.Errorf("usdc must be positive")
 	}
 
 	if existing, ok, err := s.existingBuyForProposal(ctx, proposal.ID); err != nil {
+		logExecuteOnPassBranchError("execute on pass lookup existing failed", err, "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, err
 	} else if ok {
+		logExecuteOnPassIdempotent(proposal.ID, existing.ID)
 		return ExecuteOnPassResult{Transaction: existing, Created: false}, nil
 	}
 
@@ -133,18 +141,22 @@ func (s *ExecuteOnPassService) ExecuteOnPass(ctx context.Context, proposal Propo
 		USDCAmount: proposal.UsdcMicros,
 	})
 	if err != nil {
+		logExecuteOnPassBranchError("execute on pass buy failed", err, "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, err
 	}
 
 	linked, _, err := s.linkBuyToProposal(ctx, proposal.ID, executeResult.Transaction)
 	if err != nil {
+		logExecuteOnPassBranchError("execute on pass link failed", err, "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, err
 	}
 
 	if err := s.recordTreasuryHoldingsAndNavSnapshot(ctx, proposal, linked, executeResult.Created); err != nil {
+		logExecuteOnPassBranchError("execute on pass record holdings failed", err, "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, err
 	}
 
+	logExecuteOnPassSuccess(proposal.ID, linked.ID, executeResult.Created)
 	return ExecuteOnPassResult{
 		Transaction: linked,
 		Created:     executeResult.Created,

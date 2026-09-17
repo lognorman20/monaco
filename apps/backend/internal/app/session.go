@@ -50,21 +50,27 @@ type MemberWallet struct {
 
 // OpenSession verifies a Privy token, upserts the user, and ensures a member wallet.
 func (s *SessionService) OpenSession(ctx context.Context, accessToken string) (SessionResult, error) {
+	logSessionOpenStart()
+
 	identity, err := s.privy.VerifySession(ctx, privy.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
+			logSessionBranchWarn("session open rejected", "invalid token")
 			return SessionResult{}, privy.ErrInvalidToken
 		}
+		logSessionBranchError("session open verify failed", err)
 		return SessionResult{}, fmt.Errorf("verify session: %w", err)
 	}
 
 	user, err := s.store.UpsertUser(ctx, identity.PrivyUserID, identity.DisplayName)
 	if err != nil {
+		logSessionBranchError("session open upsert user failed", err)
 		return SessionResult{}, err
 	}
 
 	wallet, err := s.EnsureMemberWallet(ctx, identity.PrivyUserID, user.ID)
 	if err != nil {
+		logSessionBranchError("session open ensure wallet failed", err, "user_id", user.ID)
 		return SessionResult{}, err
 	}
 
@@ -73,6 +79,7 @@ func (s *SessionService) OpenSession(ctx context.Context, accessToken string) (S
 		displayName = user.DisplayName.String
 	}
 
+	logSessionOpenSuccess(user.ID)
 	return SessionResult{
 		UserID:              user.ID,
 		DisplayName:         displayName,
@@ -82,27 +89,35 @@ func (s *SessionService) OpenSession(ctx context.Context, accessToken string) (S
 
 // GetMe returns the authenticated user's profile and member wallet address.
 func (s *SessionService) GetMe(ctx context.Context, accessToken string) (MeResult, error) {
+	logSessionGetMeStart()
+
 	identity, err := s.privy.VerifySession(ctx, privy.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
+			logSessionBranchWarn("session get me rejected", "invalid token")
 			return MeResult{}, privy.ErrInvalidToken
 		}
+		logSessionBranchError("session get me verify failed", err)
 		return MeResult{}, fmt.Errorf("verify session: %w", err)
 	}
 
 	user, found, err := s.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
 	if err != nil {
+		logSessionBranchError("session get me lookup user failed", err)
 		return MeResult{}, err
 	}
 	if !found {
+		logSessionBranchWarn("session get me rejected", "user not found")
 		return MeResult{}, ErrUserNotFound
 	}
 
 	wallet, found, err := s.store.GetMemberWalletByUserID(ctx, user.ID)
 	if err != nil {
+		logSessionBranchError("session get me lookup wallet failed", err, "user_id", user.ID)
 		return MeResult{}, err
 	}
 	if !found {
+		logSessionBranchWarn("session get me rejected", "wallet not found", "user_id", user.ID)
 		return MeResult{}, ErrUserNotFound
 	}
 
@@ -111,6 +126,7 @@ func (s *SessionService) GetMe(ctx context.Context, accessToken string) (MeResul
 		displayName = user.DisplayName.String
 	}
 
+	logSessionGetMeSuccess(user.ID)
 	return MeResult{
 		UserID:              user.ID,
 		DisplayName:         displayName,
@@ -121,27 +137,33 @@ func (s *SessionService) GetMe(ctx context.Context, accessToken string) (MeResul
 // EnsureMemberWallet provisions a member wallet once per user and returns the persisted row.
 func (s *SessionService) EnsureMemberWallet(ctx context.Context, privyUserID string, userID string) (MemberWallet, error) {
 	if userID == "" {
+		logSessionBranchWarn("session ensure wallet rejected", "user id required")
 		return MemberWallet{}, fmt.Errorf("user_id is required")
 	}
 
 	existing, found, err := s.store.GetMemberWalletByUserID(ctx, userID)
 	if err != nil {
+		logSessionBranchError("session ensure wallet lookup failed", err, "user_id", userID)
 		return MemberWallet{}, err
 	}
 	if found {
+		logSessionEnsureWalletExisting(userID)
 		return memberWalletFromStore(existing), nil
 	}
 
 	ref, err := s.privy.EnsureMemberWallet(ctx, privyUserID, privy.UserID(userID))
 	if err != nil {
+		logSessionBranchError("session ensure wallet privy failed", err, "user_id", userID)
 		return MemberWallet{}, fmt.Errorf("privy ensure member wallet: %w", err)
 	}
 
 	inserted, err := s.store.InsertMemberWallet(ctx, userID, ref.PrivyWalletID, ref.SolanaAddress)
 	if err != nil {
+		logSessionBranchError("session ensure wallet insert failed", err, "user_id", userID)
 		return MemberWallet{}, err
 	}
 
+	logSessionEnsureWalletCreated(userID)
 	return memberWalletFromStore(inserted), nil
 }
 

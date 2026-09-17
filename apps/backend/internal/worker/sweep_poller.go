@@ -69,8 +69,11 @@ func Run(ctx context.Context, poller *SweepPoller, interval time.Duration) {
 		interval = DefaultPollInterval
 	}
 
+	logSweepPollerStarted(interval)
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	defer logSweepPollerStopped()
 
 	for {
 		select {
@@ -92,51 +95,82 @@ func (p *SweepPoller) Tick(ctx context.Context) error {
 	_ = p.clock.Now()
 	pending, err := p.store.ListPendingDeposits(ctx)
 	if err != nil {
+		logSweepPollerListPendingFailed(err)
 		return err
 	}
 
+	logSweepPollerTickStart(len(pending))
+
 	for _, deposit := range pending {
 		if err := p.processPendingDeposit(ctx, deposit); err != nil {
+			logSweepPollerTickEnd(len(pending), err)
 			return err
 		}
 	}
+
+	logSweepPollerTickEnd(len(pending), nil)
 	return nil
 }
 
 func (p *SweepPoller) processPendingDeposit(ctx context.Context, deposit postgres.DepositRow) error {
+	txSignature := depositBroadcastSignature(deposit)
+	logSweepDepositProcessing(
+		deposit.ID,
+		deposit.GroupID,
+		deposit.UserID,
+		deposit.Amount,
+		deposit.FromAddress,
+		deposit.Status,
+		txSignature != "",
+	)
+
 	treasury, found, err := p.store.GetTreasuryByGroupID(ctx, deposit.GroupID)
 	if err != nil {
+		logSweepDepositFailed(deposit.ID, deposit.GroupID, "treasury_lookup", err)
 		return err
 	}
 	if !found {
-		return fmt.Errorf("treasury not found for group %s", deposit.GroupID)
+		err := fmt.Errorf("treasury not found for group %s", deposit.GroupID)
+		logSweepDepositFailed(deposit.ID, deposit.GroupID, "treasury_not_found", err)
+		return err
 	}
 
-	txSignature := depositBroadcastSignature(deposit)
 	if txSignature == "" {
 		balance, err := p.privy.MemberUSDCBalance(ctx, deposit.FromAddress)
+		logSweepBalanceCheck(deposit.ID, deposit.FromAddress, balance, deposit.Amount, err)
 		if err != nil {
+			logSweepDepositFailed(deposit.ID, deposit.GroupID, "balance_check", err)
 			return err
 		}
 		if balance < deposit.Amount {
+			logSweepDepositSkipped(deposit.ID, deposit.GroupID, "insufficient_balance",
+				"balance", balance,
+				"required", deposit.Amount,
+			)
 			return nil
 		}
 
-		logSweepAttempt(deposit.GroupID, deposit.UserID, deposit.ID, deposit.Amount)
+		logSweepAttempt(deposit.GroupID, deposit.UserID, deposit.ID, deposit.Amount, deposit.FromAddress, treasury.SolanaAddress)
 
 		req, err := privy.BuildSweepRequest(deposit.FromAddress, treasury.SolanaAddress, deposit.Amount, p.relayer)
 		if err != nil {
+			logSweepDepositFailed(deposit.ID, deposit.GroupID, "build_sweep_request", err)
 			return err
 		}
 		result, err := p.privy.SubmitSweep(ctx, req)
 		if err != nil {
+			logSweepDepositFailed(deposit.ID, deposit.GroupID, "submit_sweep", err)
 			return err
 		}
 		txSignature = result.TxSignature
+		logSweepBroadcastSubmitted(deposit.ID, deposit.GroupID, txSignature, treasury.SolanaAddress)
 
 		if err := p.store.SetDepositBroadcastSignature(ctx, deposit.ID, txSignature); err != nil {
+			logSweepDepositFailed(deposit.ID, deposit.GroupID, "persist_broadcast_signature", err)
 			return err
 		}
+	} else {
+		logSweepDepositResuming(deposit.ID, deposit.GroupID, txSignature)
 	}
 
 	return p.confirmAndObserveSweep(ctx, deposit, treasury.SolanaAddress, txSignature)
@@ -151,10 +185,15 @@ func depositBroadcastSignature(deposit postgres.DepositRow) string {
 
 func (p *SweepPoller) confirmAndObserveSweep(ctx context.Context, deposit postgres.DepositRow, treasuryAddress, txSignature string) error {
 	confirmed, err := p.rpc.IsConfirmed(ctx, txSignature)
+	logSweepConfirmationCheck(deposit.ID, txSignature, confirmed, err)
 	if err != nil {
+		logSweepDepositFailed(deposit.ID, deposit.GroupID, "confirmation_check", err)
 		return err
 	}
 	if !confirmed {
+		logSweepDepositSkipped(deposit.ID, deposit.GroupID, "awaiting_confirmation",
+			"tx_signature", txSignature,
+		)
 		return nil
 	}
 
@@ -169,5 +208,11 @@ func (p *SweepPoller) confirmAndObserveSweep(ctx context.Context, deposit postgr
 		UserID:      deposit.UserID,
 		GroupID:     deposit.GroupID,
 	})
-	return err
+	if err != nil {
+		logSweepDepositFailed(deposit.ID, deposit.GroupID, "observe_sweep", err)
+		return err
+	}
+
+	logSweepDepositCredited(deposit.ID, deposit.GroupID, deposit.UserID, txSignature)
+	return nil
 }

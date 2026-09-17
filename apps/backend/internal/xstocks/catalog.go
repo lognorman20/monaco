@@ -75,18 +75,28 @@ type catalogAssetNode struct {
 func (s *HTTPCatalogSearcher) Search(ctx context.Context, query string) ([]CatalogAsset, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return nil, fmt.Errorf("%w: query is required", ErrInvalidResponse)
+		err := fmt.Errorf("%w: query is required", ErrInvalidResponse)
+		logCatalogSearch(query, 0, err)
+		return nil, err
 	}
 
 	if looksLikeTickerQuery(query) {
 		if asset, err := s.searchBySymbol(ctx, query); err != nil {
+			logCatalogSearch(query, 0, err)
 			return nil, err
 		} else if asset != nil {
+			logCatalogSearch(query, 1, nil)
 			return []CatalogAsset{*asset}, nil
 		}
 	}
 
-	return s.searchPaginatedList(ctx, query)
+	results, err := s.searchPaginatedList(ctx, query)
+	if err != nil {
+		logCatalogSearch(query, 0, err)
+		return nil, err
+	}
+	logCatalogSearch(query, len(results), nil)
+	return results, nil
 }
 
 func (s *HTTPCatalogSearcher) searchBySymbol(ctx context.Context, query string) (*CatalogAsset, error) {

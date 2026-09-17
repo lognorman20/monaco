@@ -91,84 +91,110 @@ func NewDepositService(store *postgres.Store, privyClient privy.Client, pythClie
 
 // CreateDeposit records a pending deposit intent for an authenticated group member.
 func (d *DepositService) CreateDeposit(ctx context.Context, accessToken string, groupID string, amount int64) (CreateDepositResult, error) {
+	logDepositCreateStart(groupID, amount)
+
 	if groupID == "" {
+		logDepositBranchWarn("deposit create rejected", "group id required")
 		return CreateDepositResult{}, fmt.Errorf("group id is required")
 	}
 	if amount <= 0 {
+		logDepositBranchWarn("deposit create rejected", "amount not positive", "group_id", groupID)
 		return CreateDepositResult{}, fmt.Errorf("amount must be positive")
 	}
 
 	identity, err := d.privy.VerifySession(ctx, privy.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
+			logDepositBranchWarn("deposit create rejected", "invalid token", "group_id", groupID)
 			return CreateDepositResult{}, privy.ErrInvalidToken
 		}
+		logDepositBranchError("deposit create verify session failed", err, "group_id", groupID)
 		return CreateDepositResult{}, fmt.Errorf("verify session: %w", err)
 	}
 
 	user, found, err := d.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
 	if err != nil {
+		logDepositBranchError("deposit create lookup user failed", err, "group_id", groupID)
 		return CreateDepositResult{}, err
 	}
 	if !found {
+		logDepositBranchWarn("deposit create rejected", "user not found", "group_id", groupID)
 		return CreateDepositResult{}, ErrUserNotFound
 	}
 
 	group, found, err := d.store.GetGroupByID(ctx, groupID)
 	if err != nil {
+		logDepositBranchError("deposit create lookup group failed", err, "group_id", groupID, "user_id", user.ID)
 		return CreateDepositResult{}, err
 	}
 	if !found {
+		logDepositBranchWarn("deposit create rejected", "group not found", "group_id", groupID, "user_id", user.ID)
 		return CreateDepositResult{}, ErrGroupNotFound
 	}
 	if group.CreatorUserID != user.ID {
+		logDepositBranchWarn("deposit create rejected", "not group member", "group_id", groupID, "user_id", user.ID)
 		return CreateDepositResult{}, ErrNotGroupMember
 	}
 
 	wallet, found, err := d.store.GetMemberWalletByUserID(ctx, user.ID)
 	if err != nil {
+		logDepositBranchError("deposit create lookup wallet failed", err, "group_id", groupID, "user_id", user.ID)
 		return CreateDepositResult{}, err
 	}
 	if !found {
+		logDepositBranchWarn("deposit create rejected", "wallet not found", "group_id", groupID, "user_id", user.ID)
 		return CreateDepositResult{}, ErrUserNotFound
 	}
 
 	row, err := d.store.InsertDeposit(ctx, user.ID, groupID, amount, wallet.SolanaAddress)
 	if err != nil {
+		logDepositBranchError("deposit create insert failed", err, "group_id", groupID, "user_id", user.ID)
 		return CreateDepositResult{}, err
 	}
 
+	logDepositCreateSuccess(user.ID, groupID, row.ID, amount)
 	return CreateDepositResult{Deposit: depositFromRow(row)}, nil
 }
 
 // ObserveSweep credits position share units on confirmed treasury arrival, idempotent on signature.
 func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) (ObserveSweepResult, error) {
+	logDepositObserveSweepStart(sweep.DepositID, sweep.GroupID, sweep.UserID, sweep.Amount, sweep.TxSignature)
+
 	if sweep.TxSignature == "" {
+		logDepositBranchWarn("deposit observe sweep rejected", "tx signature required", "deposit_id", sweep.DepositID)
 		return ObserveSweepResult{}, fmt.Errorf("tx signature is required")
 	}
 	if sweep.DepositID == "" {
+		logDepositBranchWarn("deposit observe sweep rejected", "deposit id required")
 		return ObserveSweepResult{}, fmt.Errorf("deposit id is required")
 	}
 	if sweep.Amount <= 0 {
+		logDepositBranchWarn("deposit observe sweep rejected", "amount not positive", "deposit_id", sweep.DepositID)
 		return ObserveSweepResult{}, fmt.Errorf("amount must be positive")
 	}
 
 	treasury, found, err := d.store.GetTreasuryByGroupID(ctx, sweep.GroupID)
 	if err != nil {
+		logDepositBranchError("deposit observe sweep lookup treasury failed", err, "deposit_id", sweep.DepositID, "group_id", sweep.GroupID)
 		return ObserveSweepResult{}, err
 	}
 	if !found {
+		logDepositBranchWarn("deposit observe sweep rejected", "group not found", "deposit_id", sweep.DepositID, "group_id", sweep.GroupID)
 		return ObserveSweepResult{}, ErrGroupNotFound
 	}
 	if sweep.ToAddress != treasury.SolanaAddress {
+		logDepositBranchWarn("deposit observe sweep rejected", "invalid sweep target", "deposit_id", sweep.DepositID, "group_id", sweep.GroupID)
 		return ObserveSweepResult{}, ErrInvalidSweepTarget
 	}
 
 	if existing, found, err := d.store.GetDepositByTxSignature(ctx, sweep.TxSignature); err != nil {
+		logDepositBranchError("deposit observe sweep lookup by signature failed", err, "deposit_id", sweep.DepositID, "tx_signature", sweep.TxSignature)
 		return ObserveSweepResult{}, err
 	} else if found {
+		logDepositObserveSweepIdempotent(sweep.DepositID, sweep.TxSignature)
 		position, hasPosition, err := d.store.GetPosition(ctx, existing.UserID, existing.GroupID)
 		if err != nil {
+			logDepositBranchError("deposit observe sweep load position failed", err, "deposit_id", sweep.DepositID)
 			return ObserveSweepResult{}, err
 		}
 		if !hasPosition {
@@ -251,10 +277,12 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 	}
 
 	if err := tx.Commit(); err != nil {
+		logDepositBranchError("deposit observe sweep commit failed", err, "deposit_id", sweep.DepositID)
 		return ObserveSweepResult{}, fmt.Errorf("commit observe sweep: %w", err)
 	}
 	committed = true
 
+	logDepositObserveSweepConfirmed(sweep.DepositID, sweep.GroupID, sweep.UserID, sweep.TxSignature, newlyConfirmed)
 	return ObserveSweepResult{
 		Deposit:  depositFromRow(confirmed),
 		Position: positionFromRowPostgres(positionRow),

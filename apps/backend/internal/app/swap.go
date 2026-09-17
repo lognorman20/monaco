@@ -101,6 +101,8 @@ func (s *SwapService) TreasuryBalancesFor(treasuryAddress string) TreasuryBalanc
 
 // DevExecuteBuy quotes, signs, executes, polls, and persists a treasury buy.
 func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyRequest) (DevExecuteBuyResult, error) {
+	logSwapBuyStart(req.GroupID, req.UserID, req.Symbol, req.USDCAmount)
+
 	start, err := s.buy.StartBuy(ctx, StartBuyRequest{
 		GroupID:    req.GroupID,
 		UserID:     req.UserID,
@@ -108,6 +110,7 @@ func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyReques
 		USDCAmount: req.USDCAmount,
 	})
 	if err != nil {
+		logSwapBranchError("swap buy start buy failed", err, "group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol)
 		return DevExecuteBuyResult{}, err
 	}
 
@@ -156,7 +159,9 @@ func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyReques
 		return DevExecuteBuyResult{}, err
 	}
 	if !fill.IsConfirmedSuccess() {
-		return DevExecuteBuyResult{}, fmt.Errorf("jupiter buy not confirmed: status=%s code=%d", fill.Status, fill.Code)
+		err := fmt.Errorf("jupiter buy not confirmed: status=%s code=%d", fill.Status, fill.Code)
+		logSwapBranchError("swap buy poll not confirmed", err, "group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol)
+		return DevExecuteBuyResult{}, err
 	}
 	logSwapPollTransition(req.GroupID, req.UserID, req.Symbol, fill.Signature, jupiter.ExecuteStatusPending, fill.Status, fill.Code)
 
@@ -194,12 +199,15 @@ func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyReques
 		}
 	}
 
+	logSwapBuySuccess(req.GroupID, req.UserID, req.Symbol, row.ID, created)
 	return DevExecuteBuyResult{Transaction: row, Created: created}, nil
 }
 
 // SellToUSDC quotes, signs, executes, polls, and persists a treasury sell.
 // Confirmed sells are idempotent on tx_signature via postgres.ConfirmSellTransaction.
 func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (SellToUSDCResult, error) {
+	logSwapSellStart(req.GroupID, req.UserID, req.Symbol, req.Amount)
+
 	treasury, err := s.privy.EnsureTreasury(ctx, privy.GroupID(req.GroupID))
 	if err != nil {
 		return SellToUSDCResult{}, err
@@ -217,6 +225,7 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 		return SellToUSDCResult{}, err
 	}
 	if !quote.Routable {
+		logSwapRefusal(req.GroupID, req.UserID, req.Symbol, "no route")
 		return SellToUSDCResult{}, ErrQuoteNotRoutable
 	}
 
@@ -251,7 +260,9 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 		return SellToUSDCResult{}, err
 	}
 	if !fill.IsConfirmedSuccess() {
-		return SellToUSDCResult{}, fmt.Errorf("jupiter sell not confirmed: status=%s code=%d", fill.Status, fill.Code)
+		err := fmt.Errorf("jupiter sell not confirmed: status=%s code=%d", fill.Status, fill.Code)
+		logSwapBranchError("swap sell poll not confirmed", err, "group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol)
+		return SellToUSDCResult{}, err
 	}
 	logSwapPollTransition(req.GroupID, req.UserID, req.Symbol, fill.Signature, jupiter.ExecuteStatusPending, fill.Status, fill.Code)
 
@@ -284,6 +295,7 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 		}
 	}
 
+	logSwapSellSuccess(req.GroupID, req.UserID, req.Symbol, row.ID, created)
 	return SellToUSDCResult{Transaction: row, Created: created}, nil
 }
 

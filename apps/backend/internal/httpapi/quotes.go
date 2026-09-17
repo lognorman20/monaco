@@ -71,39 +71,42 @@ func ProposalQuoteOK(ctx context.Context, buy *app.BuyService, in ProposalQuoteI
 
 // QuoteHandler handles POST /v1/groups/{id}/quotes.
 func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "POST /v1/groups/{id}/quotes")
+
 	token, ok := bearerToken(r)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "missing or invalid authorization")
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
 		return
 	}
 
 	groupID := strings.TrimSpace(r.PathValue("id"))
 	if groupID == "" {
-		writeJSONError(w, http.StatusNotFound, "group not found")
+		logJSONError(ctx, log, "missing_group_id", w, http.StatusNotFound, "group not found")
 		return
 	}
 
 	var req quoteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body", "group_id", groupID)
 		return
 	}
 	if strings.TrimSpace(req.Symbol) == "" {
-		writeJSONError(w, http.StatusBadRequest, "symbol is required")
+		logJSONError(ctx, log, "missing_symbol", w, http.StatusBadRequest, "symbol is required", "group_id", groupID)
 		return
 	}
 	if req.USDC <= 0 {
-		writeJSONError(w, http.StatusBadRequest, "usdc must be positive")
+		logJSONError(ctx, log, "invalid_usdc", w, http.StatusBadRequest, "usdc must be positive", "group_id", groupID, "symbol", req.Symbol)
 		return
 	}
 
-	userID, err := h.authorizeGroupMember(r.Context(), token, groupID)
+	userID, err := h.authorizeGroupMember(ctx, token, groupID)
 	if err != nil {
-		writeQuoteError(w, err)
+		writeQuoteError(ctx, log, w, err, "group_id", groupID, "symbol", req.Symbol)
 		return
 	}
 
-	routable, err := ProposalQuoteOK(r.Context(), h.Buy, ProposalQuoteInput{
+	routable, err := ProposalQuoteOK(ctx, h.Buy, ProposalQuoteInput{
 		GroupID:    groupID,
 		UserID:     userID,
 		Symbol:     req.Symbol,
@@ -111,10 +114,10 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, xstocks.ErrNotFound) {
-			writeJSONError(w, http.StatusNotFound, "symbol not found")
+			logJSONError(ctx, log, "symbol_not_found", w, http.StatusNotFound, "symbol not found", "group_id", groupID, "symbol", req.Symbol, "user_id", userID)
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		logJSONError(ctx, log, "quote_check_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "symbol", req.Symbol, "user_id", userID, "err", err.Error())
 		return
 	}
 
@@ -125,6 +128,13 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 		USDCMicros: strconv.FormatInt(req.USDC, 10),
 		Routable:   routable,
 	})
+	logJSONOK(ctx, log, "quoted",
+		"group_id", groupID,
+		"user_id", userID,
+		"symbol", req.Symbol,
+		"usdc", req.USDC,
+		"routable", routable,
+	)
 }
 
 func (h *QuoteHandlers) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {
@@ -166,17 +176,18 @@ func (h *QuoteHandlers) authorizeGroupMember(ctx context.Context, accessToken, g
 	return user.ID, nil
 }
 
-func writeQuoteError(w http.ResponseWriter, err error) {
+func writeQuoteError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, attrs ...any) {
 	switch {
 	case errors.Is(err, privy.ErrInvalidToken):
-		writeJSONError(w, http.StatusUnauthorized, "invalid or expired access token")
+		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)
 	case errors.Is(err, app.ErrUserNotFound):
-		writeJSONError(w, http.StatusNotFound, "user not found")
+		logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", attrs...)
 	case errors.Is(err, app.ErrGroupNotFound):
-		writeJSONError(w, http.StatusNotFound, "group not found")
+		logJSONError(ctx, log, "group_not_found", w, http.StatusNotFound, "group not found", attrs...)
 	case errors.Is(err, app.ErrNotGroupMember):
-		writeJSONError(w, http.StatusForbidden, "not a group member")
+		logJSONError(ctx, log, "not_group_member", w, http.StatusForbidden, "not a group member", attrs...)
 	default:
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		all := append(attrs, "err", err.Error())
+		logJSONError(ctx, log, "internal_error", w, http.StatusInternalServerError, "internal server error", all...)
 	}
 }

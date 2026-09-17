@@ -60,7 +60,9 @@ type solanaSignatureStatusesResponse struct {
 func (r *HTTPSolanaRPC) IsConfirmed(ctx context.Context, txSignature string) (bool, error) {
 	txSignature = strings.TrimSpace(txSignature)
 	if txSignature == "" {
-		return false, fmt.Errorf("transaction signature is required")
+		err := fmt.Errorf("transaction signature is required")
+		logSolanaRPCConfirmationCheck(txSignature, false, "", err)
+		return false, err
 	}
 
 	payload, err := json.Marshal(solanaRPCRequest{
@@ -84,6 +86,7 @@ func (r *HTTPSolanaRPC) IsConfirmed(ctx context.Context, txSignature string) (bo
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
+		logSolanaRPCConfirmationCheck(txSignature, false, "", err)
 		return false, err
 	}
 	defer resp.Body.Close()
@@ -93,7 +96,9 @@ func (r *HTTPSolanaRPC) IsConfirmed(ctx context.Context, txSignature string) (bo
 		return false, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return false, fmt.Errorf("solana rpc status %d: %s", resp.StatusCode, string(respBody))
+		err := fmt.Errorf("solana rpc status %d: %s", resp.StatusCode, string(respBody))
+		logSolanaRPCConfirmationCheck(txSignature, false, "", err)
+		return false, err
 	}
 
 	var rpcResp solanaSignatureStatusesResponse
@@ -101,20 +106,27 @@ func (r *HTTPSolanaRPC) IsConfirmed(ctx context.Context, txSignature string) (bo
 		return false, err
 	}
 	if rpcResp.Error != nil {
-		return false, fmt.Errorf("solana rpc error: %s", rpcResp.Error.Message)
+		err := fmt.Errorf("solana rpc error: %s", rpcResp.Error.Message)
+		logSolanaRPCConfirmationCheck(txSignature, false, "", err)
+		return false, err
 	}
 	if len(rpcResp.Result.Value) == 0 || rpcResp.Result.Value[0] == nil {
+		logSolanaRPCConfirmationCheck(txSignature, false, "", nil)
 		return false, nil
 	}
 
 	status := rpcResp.Result.Value[0]
 	if status.Err != nil {
-		return false, fmt.Errorf("transaction failed on chain: %v", status.Err)
+		err := fmt.Errorf("transaction failed on chain: %v", status.Err)
+		logSolanaRPCConfirmationCheck(txSignature, false, status.ConfirmationStatus, err)
+		return false, err
 	}
 	switch status.ConfirmationStatus {
 	case "confirmed", "finalized":
+		logSolanaRPCConfirmationCheck(txSignature, true, status.ConfirmationStatus, nil)
 		return true, nil
 	default:
+		logSolanaRPCConfirmationCheck(txSignature, false, status.ConfirmationStatus, nil)
 		return false, nil
 	}
 }

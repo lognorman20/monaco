@@ -102,6 +102,8 @@ func (c *HTTPClient) doPrivyRequestWithAuthorization(ctx context.Context, method
 		return nil, 0, fmt.Errorf("%w: PRIVY_AUTHORIZATION_PRIVATE_KEY is required for wallet rpc", ErrAPI)
 	}
 
+	logAPIStart(method, path, idempotencyKey != "")
+
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -139,14 +141,17 @@ func (c *HTTPClient) doPrivyRequestWithAuthorization(ctx context.Context, method
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		logAPIResult(method, path, 0, err)
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logAPIResult(method, path, resp.StatusCode, err)
 		return nil, resp.StatusCode, err
 	}
+	logAPIResult(method, path, resp.StatusCode, nil)
 	return respBody, resp.StatusCode, nil
 }
 
@@ -251,29 +256,39 @@ func (c *HTTPClient) getLatestBlockhash(ctx context.Context) ([]byte, error) {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		logSolanaRPC("getLatestBlockhash", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logSolanaRPC("getLatestBlockhash", err)
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("%w: solana rpc status %d: %s", ErrAPI, resp.StatusCode, string(respBody))
+		rpcErr := fmt.Errorf("%w: solana rpc status %d: %s", ErrAPI, resp.StatusCode, string(respBody))
+		logSolanaRPC("getLatestBlockhash", rpcErr)
+		return nil, rpcErr
 	}
 
 	var rpcResp solanaBlockhashResponse
 	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
+		logSolanaRPC("getLatestBlockhash", err)
 		return nil, err
 	}
 	if rpcResp.Error != nil {
-		return nil, fmt.Errorf("%w: solana rpc error: %s", ErrAPI, rpcResp.Error.Message)
+		rpcErr := fmt.Errorf("%w: solana rpc error: %s", ErrAPI, rpcResp.Error.Message)
+		logSolanaRPC("getLatestBlockhash", rpcErr)
+		return nil, rpcErr
 	}
 	blockhash := strings.TrimSpace(rpcResp.Result.Value.Blockhash)
 	if blockhash == "" {
-		return nil, fmt.Errorf("%w: solana rpc missing blockhash", ErrAPI)
+		rpcErr := fmt.Errorf("%w: solana rpc missing blockhash", ErrAPI)
+		logSolanaRPC("getLatestBlockhash", rpcErr)
+		return nil, rpcErr
 	}
+	logSolanaRPC("getLatestBlockhash", nil)
 	return decodeBase58Pubkey(blockhash)
 }
 

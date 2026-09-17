@@ -42,24 +42,30 @@ type GetGroupResult struct {
 // CreateGroup inserts a group row and provisions its treasury wallet.
 func (g *GroupService) CreateGroup(ctx context.Context, accessToken string, name string) (CreateGroupResult, error) {
 	if name == "" {
+		logGroupBranchWarn("group create rejected", "name required")
 		return CreateGroupResult{}, fmt.Errorf("name is required")
 	}
 
 	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
+			logGroupBranchWarn("group create rejected", "invalid token", "name", name)
 			return CreateGroupResult{}, privy.ErrInvalidToken
 		}
+		logGroupBranchError("group create verify session failed", err, "name", name)
 		return CreateGroupResult{}, fmt.Errorf("verify session: %w", err)
 	}
 
 	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
 	if err != nil {
+		logGroupBranchError("group create lookup user failed", err, "name", name)
 		return CreateGroupResult{}, err
 	}
 	if !found {
+		logGroupBranchWarn("group create rejected", "user not found", "name", name)
 		return CreateGroupResult{}, ErrUserNotFound
 	}
+	logGroupCreateStart(user.ID, name)
 
 	tx, err := g.store.BeginTx(ctx)
 	if err != nil {
@@ -88,10 +94,12 @@ func (g *GroupService) CreateGroup(ctx context.Context, accessToken string, name
 	}
 
 	if err := tx.Commit(); err != nil {
+		logGroupBranchError("group create commit failed", err, "user_id", user.ID, "name", name)
 		return CreateGroupResult{}, fmt.Errorf("commit create group: %w", err)
 	}
 	committed = true
 
+	logGroupCreateSuccess(group.ID, user.ID, name)
 	return CreateGroupResult{
 		GroupID:         group.ID,
 		Name:            group.Name,
@@ -102,30 +110,38 @@ func (g *GroupService) CreateGroup(ctx context.Context, accessToken string, name
 // GetGroup returns group name and treasury address for an authenticated creator.
 func (g *GroupService) GetGroup(ctx context.Context, accessToken string, groupID string) (GetGroupResult, error) {
 	if groupID == "" {
+		logGroupBranchWarn("group get rejected", "group id required")
 		return GetGroupResult{}, fmt.Errorf("group id is required")
 	}
 
 	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
+			logGroupBranchWarn("group get rejected", "invalid token", "group_id", groupID)
 			return GetGroupResult{}, privy.ErrInvalidToken
 		}
+		logGroupBranchError("group get verify session failed", err, "group_id", groupID)
 		return GetGroupResult{}, fmt.Errorf("verify session: %w", err)
 	}
 
 	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
 	if err != nil {
+		logGroupBranchError("group get lookup user failed", err, "group_id", groupID)
 		return GetGroupResult{}, err
 	}
 	if !found {
+		logGroupBranchWarn("group get rejected", "user not found", "group_id", groupID)
 		return GetGroupResult{}, ErrUserNotFound
 	}
+	logGroupGetStart(user.ID, groupID)
 
 	group, found, err := g.store.GetGroupByID(ctx, groupID)
 	if err != nil {
+		logGroupBranchError("group get lookup group failed", err, "group_id", groupID, "user_id", user.ID)
 		return GetGroupResult{}, err
 	}
 	if !found || group.CreatorUserID != user.ID {
+		logGroupBranchWarn("group get rejected", "group not found or not creator", "group_id", groupID, "user_id", user.ID)
 		return GetGroupResult{}, ErrGroupNotFound
 	}
 
@@ -137,6 +153,7 @@ func (g *GroupService) GetGroup(ctx context.Context, accessToken string, groupID
 		return GetGroupResult{}, ErrGroupNotFound
 	}
 
+	logGroupGetSuccess(groupID)
 	return GetGroupResult{
 		Name:            group.Name,
 		TreasuryAddress: treasury.SolanaAddress,

@@ -55,8 +55,10 @@ func (f *fakePrivyClient) VerifySession(ctx context.Context, token AccessToken) 
 	identity, ok := f.validTokens[token]
 	f.mu.Unlock()
 	if !ok || identity.PrivyUserID == "" {
+		logFake("verify_session", "ok", false)
 		return Identity{}, ErrInvalidToken
 	}
+	logFake("verify_session", "ok", true, "privy_user_id", identity.PrivyUserID)
 	return identity, nil
 }
 
@@ -70,6 +72,7 @@ func (f *fakePrivyClient) EnsureMemberWallet(ctx context.Context, privyUserID st
 	f.mu.Lock()
 	if existing, ok := f.memberWallets[userID]; ok {
 		f.mu.Unlock()
+		logFake("ensure_member_wallet", "user_id", userID, "cached", true)
 		return existing, nil
 	}
 
@@ -80,6 +83,7 @@ func (f *fakePrivyClient) EnsureMemberWallet(ctx context.Context, privyUserID st
 	}
 	f.memberWallets[userID] = ref
 	f.mu.Unlock()
+	logFake("ensure_member_wallet", "user_id", userID, "cached", false, "wallet_id", ref.PrivyWalletID)
 	return ref, nil
 }
 
@@ -92,6 +96,7 @@ func (f *fakePrivyClient) EnsureTreasury(ctx context.Context, groupID GroupID) (
 	f.mu.Lock()
 	if existing, ok := f.treasuries[groupID]; ok {
 		f.mu.Unlock()
+		logFake("ensure_treasury", "group_id", groupID, "cached", true)
 		return existing, nil
 	}
 
@@ -102,6 +107,7 @@ func (f *fakePrivyClient) EnsureTreasury(ctx context.Context, groupID GroupID) (
 	}
 	f.treasuries[groupID] = ref
 	f.mu.Unlock()
+	logFake("ensure_treasury", "group_id", groupID, "cached", false, "wallet_id", ref.PrivyWalletID)
 	return ref, nil
 }
 
@@ -109,14 +115,18 @@ func (f *fakePrivyClient) MemberUSDCBalance(ctx context.Context, memberAddress s
 	_ = ctx
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.memberBalances[memberAddress], nil
+	balance := f.memberBalances[memberAddress]
+	logFake("member_usdc_balance", "address", memberAddress, "balance", balance)
+	return balance, nil
 }
 
 func (f *fakePrivyClient) TreasuryUSDCBalance(ctx context.Context, treasuryAddress string) (int64, error) {
 	_ = ctx
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.treasuryBalances[treasuryAddress], nil
+	balance := f.treasuryBalances[treasuryAddress]
+	logFake("treasury_usdc_balance", "address", treasuryAddress, "balance", balance)
+	return balance, nil
 }
 
 func (f *fakePrivyClient) VerifyPayoutProof(ctx context.Context, userID string, proof PayoutProof) error {
@@ -150,6 +160,7 @@ func (f *fakePrivyClient) PayUSDC(ctx context.Context, req PayUSDCRequest) (PayU
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	logFake("pay_usdc", "amount", req.Amount, "to", req.ToAddress)
 	f.lastPayout = req
 	f.payoutCount++
 	balance := f.treasuryBalances[req.TreasuryAddress]
@@ -175,6 +186,7 @@ func (f *fakePrivyClient) SubmitSweep(ctx context.Context, req SweepRequest) (Sw
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	logFake("submit_sweep", "amount", req.Amount, "member", req.MemberAddress, "treasury", req.TreasuryAddress)
 	f.lastSweep = req
 	f.sweepCount++
 	f.memberBalances[req.MemberAddress] -= req.Amount

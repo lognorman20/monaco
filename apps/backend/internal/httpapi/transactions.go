@@ -54,21 +54,24 @@ type costBasisBySymbolResponse struct {
 
 // GetTransactionHandler handles GET /v1/transactions/{id}.
 func (h *TransactionHandlers) GetTransactionHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "GET /v1/transactions/{id}")
+
 	token, ok := bearerToken(r)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "missing or invalid authorization")
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
 		return
 	}
 
 	transactionID := strings.TrimSpace(r.PathValue("id"))
 	if transactionID == "" {
-		writeJSONError(w, http.StatusBadRequest, "transaction id is required")
+		logJSONError(ctx, log, "missing_transaction_id", w, http.StatusBadRequest, "transaction id is required")
 		return
 	}
 
-	row, err := h.getTransactionForMember(r.Context(), token, transactionID)
+	row, err := h.getTransactionForMember(ctx, token, transactionID)
 	if err != nil {
-		writeTransactionError(w, err)
+		writeTransactionError(ctx, log, w, err, "transaction_id", transactionID)
 		return
 	}
 
@@ -91,37 +94,45 @@ func (h *TransactionHandlers) GetTransactionHandler(w http.ResponseWriter, r *ht
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
+	logJSONOK(ctx, log, "ok",
+		"transaction_id", row.ID,
+		"group_id", row.GroupID,
+		"status", row.Status,
+	)
 }
 
 // GetTreasuryTokenBalancesHandler handles GET /v1/groups/{id}/treasury/tokens.
 func (h *TransactionHandlers) GetTreasuryTokenBalancesHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "GET /v1/groups/{id}/treasury/tokens")
+
 	token, ok := bearerToken(r)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "missing or invalid authorization")
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
 		return
 	}
 
 	groupID := strings.TrimSpace(r.PathValue("id"))
 	if groupID == "" {
-		writeJSONError(w, http.StatusBadRequest, "group id is required")
+		logJSONError(ctx, log, "missing_group_id", w, http.StatusBadRequest, "group id is required")
 		return
 	}
 
-	treasuryAddress, err := h.authorizeGroupMember(r.Context(), token, groupID)
+	treasuryAddress, err := h.authorizeGroupMember(ctx, token, groupID)
 	if err != nil {
-		writeTransactionError(w, err)
+		writeTransactionError(ctx, log, w, err, "group_id", groupID)
 		return
 	}
 
-	usdcBalance, err := h.Privy.TreasuryUSDCBalance(r.Context(), treasuryAddress)
+	usdcBalance, err := h.Privy.TreasuryUSDCBalance(ctx, treasuryAddress)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		logJSONError(ctx, log, "treasury_usdc_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
 		return
 	}
 
-	holdings, err := h.Store.ListNetTokenHoldingsByGroup(r.Context(), groupID)
+	holdings, err := h.Store.ListNetTokenHoldingsByGroup(ctx, groupID)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		logJSONError(ctx, log, "list_holdings_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
 		return
 	}
 
@@ -142,45 +153,49 @@ func (h *TransactionHandlers) GetTreasuryTokenBalancesHandler(w http.ResponseWri
 		UsdcBalance:     usdcBalance,
 		Tokens:          tokens,
 	})
+	logJSONOK(ctx, log, "ok", "group_id", groupID, "token_count", len(tokens), "usdc_balance", usdcBalance)
 }
 
 // GetCostBasisBySymbolHandler handles GET /v1/groups/{id}/cost-basis/{symbol}.
 func (h *TransactionHandlers) GetCostBasisBySymbolHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "GET /v1/groups/{id}/cost-basis/{symbol}")
+
 	token, ok := bearerToken(r)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "missing or invalid authorization")
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
 		return
 	}
 
 	groupID := strings.TrimSpace(r.PathValue("id"))
 	symbol := strings.TrimSpace(r.PathValue("symbol"))
 	if groupID == "" {
-		writeJSONError(w, http.StatusBadRequest, "group id is required")
+		logJSONError(ctx, log, "missing_group_id", w, http.StatusBadRequest, "group id is required")
 		return
 	}
 	if symbol == "" {
-		writeJSONError(w, http.StatusBadRequest, "symbol is required")
+		logJSONError(ctx, log, "missing_symbol", w, http.StatusBadRequest, "symbol is required", "group_id", groupID)
 		return
 	}
 
-	if _, err := h.authorizeGroupMember(r.Context(), token, groupID); err != nil {
-		writeTransactionError(w, err)
+	if _, err := h.authorizeGroupMember(ctx, token, groupID); err != nil {
+		writeTransactionError(ctx, log, w, err, "group_id", groupID, "symbol", symbol)
 		return
 	}
 
-	outputMint, err := h.XStocks.ResolveSolanaMint(r.Context(), symbol)
+	outputMint, err := h.XStocks.ResolveSolanaMint(ctx, symbol)
 	if err != nil {
-		writeJSONError(w, http.StatusNotFound, "symbol not found")
+		logJSONError(ctx, log, "symbol_not_found", w, http.StatusNotFound, "symbol not found", "group_id", groupID, "symbol", symbol)
 		return
 	}
 
-	price, amount, found, err := h.Store.GetFillDerivedCostBasisByOutputMint(r.Context(), groupID, outputMint)
+	price, amount, found, err := h.Store.GetFillDerivedCostBasisByOutputMint(ctx, groupID, outputMint)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		logJSONError(ctx, log, "cost_basis_lookup_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "symbol", symbol, "err", err.Error())
 		return
 	}
 	if !found {
-		writeJSONError(w, http.StatusNotFound, "cost basis not found")
+		logJSONError(ctx, log, "cost_basis_not_found", w, http.StatusNotFound, "cost basis not found", "group_id", groupID, "symbol", symbol)
 		return
 	}
 
@@ -192,6 +207,7 @@ func (h *TransactionHandlers) GetCostBasisBySymbolHandler(w http.ResponseWriter,
 		CostBasisPrice:  price,
 		CostBasisAmount: amount,
 	})
+	logJSONOK(ctx, log, "ok", "group_id", groupID, "symbol", symbol)
 }
 
 func (h *TransactionHandlers) getTransactionForMember(ctx context.Context, accessToken, transactionID string) (postgres.TransactionRow, error) {
@@ -246,18 +262,19 @@ func (h *TransactionHandlers) authorizeGroupMember(ctx context.Context, accessTo
 
 var errTransactionNotFound = errors.New("transaction not found")
 
-func writeTransactionError(w http.ResponseWriter, err error) {
+func writeTransactionError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, attrs ...any) {
 	switch {
 	case errors.Is(err, privy.ErrInvalidToken):
-		writeJSONError(w, http.StatusUnauthorized, "invalid or expired access token")
+		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)
 	case errors.Is(err, app.ErrUserNotFound):
-		writeJSONError(w, http.StatusNotFound, "user not found")
+		logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", attrs...)
 	case errors.Is(err, app.ErrGroupNotFound):
-		writeJSONError(w, http.StatusNotFound, "group not found")
+		logJSONError(ctx, log, "group_not_found", w, http.StatusNotFound, "group not found", attrs...)
 	case errors.Is(err, errTransactionNotFound):
-		writeJSONError(w, http.StatusNotFound, "transaction not found")
+		logJSONError(ctx, log, "transaction_not_found", w, http.StatusNotFound, "transaction not found", attrs...)
 	default:
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		all := append(attrs, "err", err.Error())
+		logJSONError(ctx, log, "internal_error", w, http.StatusInternalServerError, "internal server error", all...)
 	}
 }
 

@@ -69,14 +69,22 @@ type orderResponse struct {
 
 // OrderBuy fetches an unsigned buy transaction for the treasury taker.
 func (c *HTTPClient) OrderBuy(ctx context.Context, params OrderBuyParams) (BuyOrder, error) {
+	logOrderAttempt(params.GroupID, params.UserID, params.Symbol, params.Amount)
+
 	if params.Amount <= 0 {
-		return BuyOrder{}, fmt.Errorf("jupiter: amount must be positive")
+		err := fmt.Errorf("jupiter: amount must be positive")
+		logOrderResult(params.GroupID, params.UserID, params.Symbol, "", err)
+		return BuyOrder{}, err
 	}
 	if strings.TrimSpace(params.Taker) == "" {
-		return BuyOrder{}, fmt.Errorf("jupiter: taker is required")
+		err := fmt.Errorf("jupiter: taker is required")
+		logOrderResult(params.GroupID, params.UserID, params.Symbol, "", err)
+		return BuyOrder{}, err
 	}
 	if strings.TrimSpace(params.OutputMint) == "" {
-		return BuyOrder{}, fmt.Errorf("jupiter: output mint is required")
+		err := fmt.Errorf("jupiter: output mint is required")
+		logOrderResult(params.GroupID, params.UserID, params.Symbol, "", err)
+		return BuyOrder{}, err
 	}
 
 	inputMint := params.InputMint
@@ -100,19 +108,29 @@ func (c *HTTPClient) OrderBuy(ctx context.Context, params OrderBuyParams) (BuyOr
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		logOrderResult(params.GroupID, params.UserID, params.Symbol, "", err)
 		return BuyOrder{}, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logOrderResult(params.GroupID, params.UserID, params.Symbol, "", err)
 		return BuyOrder{}, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return BuyOrder{}, fmt.Errorf("jupiter: order status %d: %s", resp.StatusCode, string(body))
+		err := fmt.Errorf("jupiter: order status %d: %s", resp.StatusCode, string(body))
+		logOrderResult(params.GroupID, params.UserID, params.Symbol, "", err)
+		return BuyOrder{}, err
 	}
 
-	return ParseBuyOrderResponse(body)
+	order, err := ParseBuyOrderResponse(body)
+	if err != nil {
+		logOrderResult(params.GroupID, params.UserID, params.Symbol, "", err)
+		return BuyOrder{}, err
+	}
+	logOrderResult(params.GroupID, params.UserID, params.Symbol, order.RequestID, nil)
+	return order, nil
 }
 
 // ParseBuyOrderResponse parses Jupiter /order JSON into a buy order.
@@ -170,26 +188,32 @@ func (c *HTTPClient) postExecute(ctx context.Context, groupID, userID, symbol, r
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		logExecuteResult(groupID, userID, symbol, requestID, "", 0, err)
 		return ExecuteResult{}, err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logExecuteResult(groupID, userID, symbol, requestID, "", 0, err)
 		return ExecuteResult{}, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return ExecuteResult{}, fmt.Errorf("jupiter: execute status %d: %s", resp.StatusCode, string(body))
+		err := fmt.Errorf("jupiter: execute status %d: %s", resp.StatusCode, string(body))
+		logExecuteResult(groupID, userID, symbol, requestID, "", resp.StatusCode, err)
+		return ExecuteResult{}, err
 	}
 
 	result, err := ParseExecuteResponse(body)
 	if err != nil {
+		logExecuteResult(groupID, userID, symbol, requestID, "", 0, err)
 		return ExecuteResult{}, err
 	}
 	result.RequestID = requestID
 	if result.Signature != "" {
 		logExecuteSubmit(groupID, userID, symbol, result.Signature, requestID)
 	}
+	logExecuteResult(groupID, userID, symbol, requestID, result.Status, result.Code, nil)
 	return result, nil
 }
 

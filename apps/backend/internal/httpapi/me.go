@@ -23,23 +23,26 @@ type meResponse struct {
 
 // MeHandler handles GET /v1/me.
 func (h *MeHandlers) MeHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "GET /v1/me")
+
 	token, ok := bearerToken(r)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "missing or invalid authorization")
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
 		return
 	}
 
-	result, err := h.Sessions.GetMe(r.Context(), token)
+	result, err := h.Sessions.GetMe(ctx, token)
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
-			writeJSONError(w, http.StatusUnauthorized, "invalid or expired access token")
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 			return
 		}
 		if errors.Is(err, app.ErrUserNotFound) {
-			writeJSONError(w, http.StatusNotFound, "user not found")
+			logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		logJSONError(ctx, log, "get_me_failed", w, http.StatusInternalServerError, "internal server error", "err", err.Error())
 		return
 	}
 
@@ -50,6 +53,7 @@ func (h *MeHandlers) MeHandler(w http.ResponseWriter, r *http.Request) {
 		DisplayName:         result.DisplayName,
 		MemberWalletAddress: result.MemberWalletAddress,
 	})
+	logJSONOK(ctx, log, "ok", "user_id", result.UserID)
 }
 
 func bearerToken(r *http.Request) (string, bool) {

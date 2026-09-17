@@ -33,36 +33,39 @@ type searchAssetsResponse struct {
 
 // SearchAssetsHandler handles GET /v1/groups/{id}/assets?query=.
 func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "GET /v1/groups/{id}/assets")
+
 	token, ok := bearerToken(r)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "missing or invalid authorization")
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
 		return
 	}
 
 	groupID := strings.TrimSpace(r.PathValue("id"))
 	if groupID == "" {
-		writeJSONError(w, http.StatusNotFound, "group not found")
+		logJSONError(ctx, log, "missing_group_id", w, http.StatusNotFound, "group not found")
 		return
 	}
 
 	query := strings.TrimSpace(r.URL.Query().Get("query"))
 	if query == "" {
-		writeJSONError(w, http.StatusBadRequest, "query is required")
+		logJSONError(ctx, log, "missing_query", w, http.StatusBadRequest, "query is required", "group_id", groupID)
 		return
 	}
 
-	if _, err := h.authorizeGroupMember(r.Context(), token, groupID); err != nil {
-		writeCatalogError(w, err)
+	if _, err := h.authorizeGroupMember(ctx, token, groupID); err != nil {
+		writeCatalogError(ctx, log, w, err, "group_id", groupID, "query", query)
 		return
 	}
 
-	assets, err := h.Catalog.Search(r.Context(), query)
+	assets, err := h.Catalog.Search(ctx, query)
 	if err != nil {
 		if errors.Is(err, xstocks.ErrInvalidResponse) {
-			writeJSONError(w, http.StatusBadRequest, "invalid catalog query")
+			logJSONError(ctx, log, "invalid_catalog_query", w, http.StatusBadRequest, "invalid catalog query", "group_id", groupID, "query", query)
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		logJSONError(ctx, log, "catalog_search_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "query", query, "err", err.Error())
 		return
 	}
 
@@ -80,6 +83,7 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
+	logJSONOK(ctx, log, "ok", "group_id", groupID, "query", query, "result_count", len(resp.Assets))
 }
 
 func (h *CatalogHandlers) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {
@@ -117,17 +121,18 @@ func (h *CatalogHandlers) authorizeGroupMember(ctx context.Context, accessToken,
 	return treasury.SolanaAddress, nil
 }
 
-func writeCatalogError(w http.ResponseWriter, err error) {
+func writeCatalogError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, attrs ...any) {
 	switch {
 	case errors.Is(err, privy.ErrInvalidToken):
-		writeJSONError(w, http.StatusUnauthorized, "invalid or expired access token")
+		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)
 	case errors.Is(err, app.ErrUserNotFound):
-		writeJSONError(w, http.StatusNotFound, "user not found")
+		logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", attrs...)
 	case errors.Is(err, app.ErrGroupNotFound):
-		writeJSONError(w, http.StatusNotFound, "group not found")
+		logJSONError(ctx, log, "group_not_found", w, http.StatusNotFound, "group not found", attrs...)
 	case errors.Is(err, app.ErrNotGroupMember):
-		writeJSONError(w, http.StatusForbidden, "not a group member")
+		logJSONError(ctx, log, "not_group_member", w, http.StatusForbidden, "not a group member", attrs...)
 	default:
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		all := append(attrs, "err", err.Error())
+		logJSONError(ctx, log, "internal_error", w, http.StatusInternalServerError, "internal server error", all...)
 	}
 }

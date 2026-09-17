@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
@@ -71,25 +72,32 @@ func DefaultGroupRules() GroupRules {
 
 func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToken, name string, rules GroupRules, joinPassword string) (CreateGroupResult, error) {
 	if name == "" {
+		logGovernanceBranchWarn("governance create group rejected", "name required")
 		return CreateGroupResult{}, fmt.Errorf("name is required")
 	}
 	if err := validateCreateRules(rules, joinPassword); err != nil {
+		logGovernanceBranchWarn("governance create group rejected", "invalid rules")
 		return CreateGroupResult{}, err
 	}
 	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
+			logGovernanceBranchWarn("governance create group rejected", "invalid token", "name", name)
 			return CreateGroupResult{}, privy.ErrInvalidToken
 		}
+		logGovernanceBranchError("governance create group verify session failed", err, "name", name)
 		return CreateGroupResult{}, fmt.Errorf("verify session: %w", err)
 	}
 	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
 	if err != nil {
+		logGovernanceBranchError("governance create group lookup user failed", err, "name", name)
 		return CreateGroupResult{}, err
 	}
 	if !found {
+		logGovernanceBranchWarn("governance create group rejected", "user not found", "name", name)
 		return CreateGroupResult{}, ErrUserNotFound
 	}
+	logGovernanceCreateGroupStart(user.ID, name)
 	passwordHash, err := hashJoinPassword(rules.JoinPolicy.Mode, joinPassword)
 	if err != nil {
 		return CreateGroupResult{}, err
@@ -124,45 +132,58 @@ func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToke
 		return CreateGroupResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
+		logGovernanceBranchError("governance create group commit failed", err, "user_id", user.ID, "name", name)
 		return CreateGroupResult{}, fmt.Errorf("commit create group: %w", err)
 	}
 	committed = true
+	logGovernanceCreateGroupSuccess(group.ID, user.ID, name)
 	return CreateGroupResult{GroupID: group.ID, Name: group.Name, TreasuryAddress: treasuryRef.SolanaAddress}, nil
 }
 
 func (g *GovernanceService) JoinGroup(ctx context.Context, accessToken, groupID, password string) error {
 	if groupID == "" {
+		logGovernanceBranchWarn("governance join group rejected", "group id required")
 		return fmt.Errorf("group id is required")
 	}
 	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
+			logGovernanceBranchWarn("governance join group rejected", "invalid token", "group_id", groupID)
 			return privy.ErrInvalidToken
 		}
+		logGovernanceBranchError("governance join group verify session failed", err, "group_id", groupID)
 		return fmt.Errorf("verify session: %w", err)
 	}
 	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
 	if err != nil {
+		logGovernanceBranchError("governance join group lookup user failed", err, "group_id", groupID)
 		return err
 	}
 	if !found {
+		logGovernanceBranchWarn("governance join group rejected", "user not found", "group_id", groupID)
 		return ErrUserNotFound
 	}
+	logGovernanceJoinGroupStart(user.ID, groupID)
 	rules, found, err := g.store.GetGroupRules(ctx, groupID)
 	if err != nil {
+		logGovernanceBranchError("governance join group lookup rules failed", err, "group_id", groupID, "user_id", user.ID)
 		return err
 	}
 	if !found {
+		logGovernanceBranchWarn("governance join group rejected", "group not found", "group_id", groupID, "user_id", user.ID)
 		return ErrGroupNotFound
 	}
 	if err := verifyJoinPassword(rules.JoinPolicy, password); err != nil {
+		logGovernanceBranchWarn("governance join group rejected", "wrong password", "group_id", groupID, "user_id", user.ID)
 		return err
 	}
 	alreadyMember, err := g.store.IsGroupMember(ctx, groupID, user.ID)
 	if err != nil {
+		logGovernanceBranchError("governance join group membership check failed", err, "group_id", groupID, "user_id", user.ID)
 		return err
 	}
 	if alreadyMember {
+		logGovernanceJoinGroupAlreadyMember(user.ID, groupID)
 		return nil
 	}
 	tx, err := g.store.BeginTx(ctx)
@@ -179,9 +200,11 @@ func (g *GovernanceService) JoinGroup(ctx context.Context, accessToken, groupID,
 		return err
 	}
 	if err := tx.Commit(); err != nil {
+		logGovernanceBranchError("governance join group commit failed", err, "group_id", groupID, "user_id", user.ID)
 		return fmt.Errorf("commit join group: %w", err)
 	}
 	committed = true
+	logGovernanceJoinGroupSuccess(user.ID, groupID)
 	return nil
 }
 
@@ -243,24 +266,32 @@ func verifyJoinPassword(policy JoinPolicy, password string) error {
 
 // CreateProposal inserts an open buy proposal when the quote is routable (M4-T13).
 func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposalInput) (Proposal, error) {
+	logGovernanceCreateProposalStart(in.GroupID, in.ProposerID, in.Symbol, in.UsdcMicros)
+
 	if in.GroupID == "" || in.ProposerID == "" {
+		logGovernanceBranchWarn("governance create proposal rejected", "missing ids")
 		return Proposal{}, fmt.Errorf("group_id and proposer_id are required")
 	}
 	if in.Symbol == "" {
+		logGovernanceBranchWarn("governance create proposal rejected", "symbol required", "group_id", in.GroupID)
 		return Proposal{}, fmt.Errorf("symbol is required")
 	}
 	if in.UsdcMicros <= 0 {
+		logGovernanceBranchWarn("governance create proposal rejected", "usdc not positive", "group_id", in.GroupID)
 		return Proposal{}, fmt.Errorf("usdc must be positive")
 	}
 	if g.buy == nil {
+		logGovernanceBranchWarn("governance create proposal rejected", "buy service missing", "group_id", in.GroupID)
 		return Proposal{}, fmt.Errorf("buy service is required")
 	}
 
 	member, err := g.store.IsGroupMember(ctx, in.GroupID, in.ProposerID)
 	if err != nil {
+		logGovernanceBranchError("governance create proposal membership check failed", err, "group_id", in.GroupID, "proposer_id", in.ProposerID)
 		return Proposal{}, err
 	}
 	if !member {
+		logGovernanceBranchWarn("governance create proposal rejected", "not group member", "group_id", in.GroupID, "proposer_id", in.ProposerID)
 		return Proposal{}, ErrNotGroupMember
 	}
 
@@ -277,6 +308,7 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		return Proposal{}, err
 	}
 	if !domain.MemberMayVote(voterSet, in.ProposerID, voterIDs) {
+		logGovernanceBranchWarn("governance create proposal rejected", "not eligible proposer", "group_id", in.GroupID, "proposer_id", in.ProposerID)
 		return Proposal{}, ErrNotEligibleProposer
 	}
 
@@ -288,8 +320,10 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 	})
 	if err != nil {
 		if errors.Is(err, ErrQuoteNotRoutable) {
+			logGovernanceBranchWarn("governance create proposal rejected", "quote not routable", "group_id", in.GroupID, "proposer_id", in.ProposerID, "symbol", in.Symbol)
 			return Proposal{}, ErrQuoteNotRoutable
 		}
+		logGovernanceBranchError("governance create proposal start buy failed", err, "group_id", in.GroupID, "proposer_id", in.ProposerID)
 		return Proposal{}, err
 	}
 
@@ -312,48 +346,61 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		return Proposal{}, err
 	}
 	if err := tx.Commit(); err != nil {
+		logGovernanceBranchError("governance create proposal commit failed", err, "group_id", in.GroupID, "proposer_id", in.ProposerID)
 		return Proposal{}, fmt.Errorf("commit create proposal: %w", err)
 	}
 	committed = true
 
+	logGovernanceCreateProposalSuccess(row.ID, in.GroupID, in.ProposerID)
 	return proposalFromRow(row), nil
 }
 
 // CastVote persists a ballot and tallies to passed, failed, or expired (M4-T14).
 func (g *GovernanceService) CastVote(ctx context.Context, in CastVoteInput) (Proposal, error) {
+	logGovernanceCastVoteStart(in.ProposalID, in.VoterID, string(in.Choice))
+
 	if in.ProposalID == "" || in.VoterID == "" {
+		logGovernanceBranchWarn("governance cast vote rejected", "missing ids")
 		return Proposal{}, fmt.Errorf("proposal_id and voter_id are required")
 	}
 	switch in.Choice {
 	case domain.VoteYes, domain.VoteNo:
 	default:
+		logGovernanceBranchWarn("governance cast vote rejected", "invalid choice", "proposal_id", in.ProposalID)
 		return Proposal{}, fmt.Errorf("invalid vote choice")
 	}
 
 	row, found, err := g.store.GetProposalByID(ctx, in.ProposalID)
 	if err != nil {
+		logGovernanceBranchError("governance cast vote lookup proposal failed", err, "proposal_id", in.ProposalID)
 		return Proposal{}, err
 	}
 	if !found {
+		logGovernanceBranchWarn("governance cast vote rejected", "proposal not found", "proposal_id", in.ProposalID)
 		return Proposal{}, ErrProposalNotFound
 	}
 	proposal := proposalFromRow(row)
 
 	_, foundVote, err := g.store.GetVoteByProposalAndVoter(ctx, in.ProposalID, in.VoterID)
 	if err != nil {
+		logGovernanceBranchError("governance cast vote lookup existing failed", err, "proposal_id", in.ProposalID, "voter_id", in.VoterID)
 		return Proposal{}, err
 	}
 	if foundVote {
+		logGovernanceCastVoteIdempotent(in.ProposalID, in.VoterID)
 		return proposal, nil
 	}
 
 	if proposal.Status == ProposalOpen && g.now().UTC().Unix() >= proposal.ExpiresAt {
+		slog.Info("governance cast vote finalize expired", "proposal_id", in.ProposalID)
 		proposal, err = g.FinalizeExpiredProposal(ctx, in.ProposalID)
 		if err != nil {
+			logGovernanceBranchError("governance cast vote finalize expired failed", err, "proposal_id", in.ProposalID)
 			return Proposal{}, err
 		}
 	}
 	if proposal.Status != ProposalOpen {
+		logGovernanceBranchWarn("governance cast vote rejected", "proposal not open", "proposal_id", in.ProposalID, "status", proposal.Status)
 		return proposal, ErrProposalNotOpen
 	}
 
@@ -370,6 +417,7 @@ func (g *GovernanceService) CastVote(ctx context.Context, in CastVoteInput) (Pro
 		return Proposal{}, err
 	}
 	if !domain.MemberMayVote(voterSet, in.VoterID, voterIDs) {
+		logGovernanceBranchWarn("governance cast vote rejected", "not eligible voter", "proposal_id", in.ProposalID, "voter_id", in.VoterID)
 		return Proposal{}, ErrNotEligibleVoter
 	}
 
@@ -388,19 +436,27 @@ func (g *GovernanceService) CastVote(ctx context.Context, in CastVoteInput) (Pro
 		return Proposal{}, err
 	}
 
+	prevStatus := proposal.Status
 	updated, err := g.tallyAndPersistTx(ctx, tx, proposal, rules, voterIDs)
 	if err != nil {
+		logGovernanceBranchError("governance cast vote tally failed", err, "proposal_id", in.ProposalID)
 		return Proposal{}, err
 	}
 	if err := tx.Commit(); err != nil {
+		logGovernanceBranchError("governance cast vote commit failed", err, "proposal_id", in.ProposalID)
 		return Proposal{}, fmt.Errorf("commit cast vote: %w", err)
 	}
 	committed = true
+	if updated.Status != prevStatus {
+		logGovernanceProposalStatusTransition(in.ProposalID, prevStatus, updated.Status)
+	}
+	slog.Info("governance cast vote success", "proposal_id", in.ProposalID, "voter_id", in.VoterID, "status", updated.Status)
 	return updated, nil
 }
 
 // FinalizeExpiredProposal marks an open past-deadline proposal expired with no swap (M4-T17).
 func (g *GovernanceService) FinalizeExpiredProposal(ctx context.Context, proposalID string) (Proposal, error) {
+	slog.Info("governance finalize expired start", "proposal_id", proposalID)
 	tx, err := g.store.BeginTx(ctx)
 	if err != nil {
 		return Proposal{}, err
@@ -417,9 +473,13 @@ func (g *GovernanceService) FinalizeExpiredProposal(ctx context.Context, proposa
 		return Proposal{}, err
 	}
 	if err := tx.Commit(); err != nil {
+		logGovernanceBranchError("governance finalize expired commit failed", err, "proposal_id", proposalID)
 		return Proposal{}, fmt.Errorf("commit finalize expired proposal: %w", err)
 	}
 	committed = true
+	if proposal.Status == ProposalExpired {
+		logGovernanceProposalStatusTransition(proposalID, ProposalOpen, ProposalExpired)
+	}
 	return proposal, nil
 }
 
@@ -466,6 +526,7 @@ func (g *GovernanceService) finalizeOpenProposalTx(ctx context.Context, tx *sql.
 	}
 	if ok {
 		proposal.Status = ProposalExpired
+		slog.Info("governance proposal expired", "proposal_id", proposalID)
 	}
 	return proposal, nil
 }
@@ -504,6 +565,7 @@ func (g *GovernanceService) tallyAndPersistTx(ctx context.Context, tx *sql.Tx, p
 		return Proposal{}, err
 	}
 	if ok {
+		logGovernanceProposalStatusTransition(proposal.ID, ProposalOpen, nextStatus)
 		proposal.Status = nextStatus
 	}
 	return proposal, nil

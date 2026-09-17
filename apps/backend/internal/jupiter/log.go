@@ -49,3 +49,61 @@ func logPollTransition(groupID, userID, symbol, txSignature, fromStatus, toStatu
 	}
 	slog.Info("jupiter poll transition", args...)
 }
+
+func logQuoteSuccess(groupID, userID, symbol, requestID string, routable bool) {
+	slog.Info("jupiter quote result",
+		"group_id", groupID,
+		"user_id", userID,
+		"symbol", symbol,
+		"request_id", requestID,
+		"routable", routable,
+	)
+}
+
+func logOrderAttempt(groupID, userID, symbol string, amount int64) {
+	slog.Info("jupiter order attempt",
+		"group_id", groupID,
+		"user_id", userID,
+		"symbol", symbol,
+		"amount", amount,
+	)
+}
+
+func logOrderResult(groupID, userID, symbol, requestID string, err error) {
+	if err != nil {
+		slog.Warn("jupiter order failed",
+			"group_id", groupID,
+			"user_id", userID,
+			"symbol", symbol,
+			"err", err,
+		)
+		return
+	}
+	slog.Info("jupiter order result",
+		"group_id", groupID,
+		"user_id", userID,
+		"symbol", symbol,
+		"request_id", requestID,
+	)
+}
+
+func logExecuteResult(groupID, userID, symbol, requestID, status string, code int, err error) {
+	if err != nil {
+		slog.Warn("jupiter execute failed",
+			"group_id", groupID,
+			"user_id", userID,
+			"symbol", symbol,
+			"request_id", requestID,
+			"err", err,
+		)
+		return
+	}
+	slog.Info("jupiter execute result",
+		"group_id", groupID,
+		"user_id", userID,
+		"symbol", symbol,
+		"request_id", requestID,
+		"status", status,
+		"code", code,
+	)
+}

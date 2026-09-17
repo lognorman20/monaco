@@ -51,43 +51,46 @@ type joinGroupRequest struct {
 
 // CreateGroupHandler handles POST /v1/groups.
 func (h *GroupHandlers) CreateGroupHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "POST /v1/groups")
+
 	token, ok := bearerToken(r)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "missing or invalid authorization")
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
 		return
 	}
 
 	var req createGroupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		writeJSONError(w, http.StatusBadRequest, "name is required")
+		logJSONError(ctx, log, "missing_name", w, http.StatusBadRequest, "name is required")
 		return
 	}
 
 	rules, joinPassword, err := parseCreateGroupRules(req)
 	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, err.Error())
+		logJSONError(ctx, log, "invalid_rules", w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	result, err := h.Governance.CreateGroupWithRules(r.Context(), token, req.Name, rules, joinPassword)
+	result, err := h.Governance.CreateGroupWithRules(ctx, token, req.Name, rules, joinPassword)
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
-			writeJSONError(w, http.StatusUnauthorized, "invalid or expired access token")
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 			return
 		}
 		if errors.Is(err, app.ErrUserNotFound) {
-			writeJSONError(w, http.StatusNotFound, "user not found")
+			logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found")
 			return
 		}
 		if errors.Is(err, app.ErrInvalidGroupRules) {
-			writeJSONError(w, http.StatusBadRequest, "invalid group rules")
+			logJSONError(ctx, log, "invalid_group_rules", w, http.StatusBadRequest, "invalid group rules")
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		logJSONError(ctx, log, "create_group_failed", w, http.StatusInternalServerError, "internal server error", "err", err.Error())
 		return
 	}
 
@@ -98,76 +101,84 @@ func (h *GroupHandlers) CreateGroupHandler(w http.ResponseWriter, r *http.Reques
 		Name:            result.Name,
 		TreasuryAddress: result.TreasuryAddress,
 	})
+	logJSONOK(ctx, log, "group_created", "group_id", result.GroupID)
 }
 
 // JoinGroupHandler handles POST /v1/groups/{id}/join.
 func (h *GroupHandlers) JoinGroupHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "POST /v1/groups/{id}/join")
+
 	token, ok := bearerToken(r)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "missing or invalid authorization")
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
 		return
 	}
 
 	groupID := r.PathValue("id")
 	if strings.TrimSpace(groupID) == "" {
-		writeJSONError(w, http.StatusNotFound, "group not found")
+		logJSONError(ctx, log, "missing_group_id", w, http.StatusNotFound, "group not found")
 		return
 	}
 
 	var req joinGroupRequest
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSONError(w, http.StatusBadRequest, "invalid request body")
+			logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body", "group_id", groupID)
 			return
 		}
 	}
 
-	err := h.Governance.JoinGroup(r.Context(), token, groupID, req.Password)
+	err := h.Governance.JoinGroup(ctx, token, groupID, req.Password)
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
-			writeJSONError(w, http.StatusUnauthorized, "invalid or expired access token")
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
 		if errors.Is(err, app.ErrUserNotFound) || errors.Is(err, app.ErrGroupNotFound) {
-			writeJSONError(w, http.StatusNotFound, "group not found")
+			logJSONError(ctx, log, "group_not_found", w, http.StatusNotFound, "group not found", "group_id", groupID)
 			return
 		}
 		if errors.Is(err, app.ErrWrongJoinPassword) {
-			writeJSONError(w, http.StatusForbidden, "wrong join password")
+			logJSONError(ctx, log, "wrong_join_password", w, http.StatusForbidden, "wrong join password", "group_id", groupID)
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		logJSONError(ctx, log, "join_group_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+	logNoContent(ctx, log, "joined", "group_id", groupID)
 }
 
 // GetGroupHandler handles GET /v1/groups/{id}.
 func (h *GroupHandlers) GetGroupHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "GET /v1/groups/{id}")
+
 	token, ok := bearerToken(r)
 	if !ok {
-		writeJSONError(w, http.StatusUnauthorized, "missing or invalid authorization")
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
 		return
 	}
 
 	groupID := r.PathValue("id")
 	if strings.TrimSpace(groupID) == "" {
-		writeJSONError(w, http.StatusNotFound, "group not found")
+		logJSONError(ctx, log, "missing_group_id", w, http.StatusNotFound, "group not found")
 		return
 	}
 
-	result, err := h.Groups.GetGroup(r.Context(), token, groupID)
+	result, err := h.Groups.GetGroup(ctx, token, groupID)
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
-			writeJSONError(w, http.StatusUnauthorized, "invalid or expired access token")
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
 		if errors.Is(err, app.ErrUserNotFound) || errors.Is(err, app.ErrGroupNotFound) {
-			writeJSONError(w, http.StatusNotFound, "group not found")
+			logJSONError(ctx, log, "group_not_found", w, http.StatusNotFound, "group not found", "group_id", groupID)
 			return
 		}
-		writeJSONError(w, http.StatusInternalServerError, "internal server error")
+		logJSONError(ctx, log, "get_group_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
 		return
 	}
 
@@ -177,6 +188,7 @@ func (h *GroupHandlers) GetGroupHandler(w http.ResponseWriter, r *http.Request) 
 		Name:            result.Name,
 		TreasuryAddress: result.TreasuryAddress,
 	})
+	logJSONOK(ctx, log, "ok", "group_id", groupID)
 }
 
 func parseCreateGroupRules(req createGroupRequest) (app.GroupRules, string, error) {

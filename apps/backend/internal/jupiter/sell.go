@@ -88,6 +88,8 @@ func (c *HTTPClient) QuoteSell(ctx context.Context, params QuoteSellParams) (Sel
 	}
 	if !quote.Routable {
 		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, "no route")
+	} else {
+		logQuoteSuccess(params.GroupID, params.UserID, params.Symbol, quote.RequestID, true)
 	}
 	return quote, nil
 }
