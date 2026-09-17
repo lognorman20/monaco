@@ -50,6 +50,7 @@ test app:
         source ./scripts/assert-local-database-url.sh
         docker compose up -d --wait
         ./scripts/apply-migrations.sh
+        ./scripts/ensure-test-database.sh
         ./scripts/verify-local-db.sh
         if [[ -f apps/backend/go.mod ]]; then
           (cd apps/backend && go test -p 1 ./...)

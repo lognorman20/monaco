@@ -15,6 +15,7 @@ echo "starting Postgres..."
 docker compose up -d --wait
 
 ./scripts/apply-migrations.sh
+./scripts/ensure-test-database.sh
 ./scripts/verify-local-db.sh
 
 echo "local Postgres reset complete."

@@ -18,7 +18,7 @@
 - Monaco is a mobile app for group treasury investing in tokenized stocks (xStock via Jupiter swaps).
 - Apps live at `apps/backend` (Go API) and `apps/mobile` (Swift/iOS). Host-runnable Swift unit tests live in `packages/mobile-core`.
 - Go and Swift integrate via HTTP API contract only; mobile never calls xStocks, Jupiter, Pyth Hermes, or Solana RPC for product flows (plus Privy Swift for auth/wallets).
-- Local development database is Docker Compose Postgres; do not use hosted or production Supabase for local testing.
+- Local development database is Docker Compose Postgres; do not use hosted or production Supabase for local testing. App `DATABASE_URL` is `monaco`; `just test backend` / Go tests auto-use sibling `monaco_test` (derived, no extra env).
 - Privy handles auth and per-user wallets; deposits flow user wallet → Privy wallet → group treasury. No `FAKE*` wallet address rows in local DB—they break the deposit poller.
 - Leaderboard and P&L (within a group and across groups) are core product focus, with portfolio views and partial USDC redeem.
 - `PHANTOM_APP_ID` belongs in Cursor Phantom MCP config, not Monaco `.env` — Phantom MCP is an agent test harness with a separate wallet from Privy product wallets. Refund leftover agent-test USDC to Phantom when QA funding runs finish.

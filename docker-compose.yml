@@ -12,6 +12,7 @@ services:
       - "${POSTGRES_PORT:-54322}:5432"
     volumes:
       - monaco_pg_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-monaco} -d ${POSTGRES_DB:-monaco}"]
       interval: 2s
