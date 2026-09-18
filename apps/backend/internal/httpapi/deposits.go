@@ -120,6 +120,9 @@ func (h *DepositHandlers) FundGroupHandler(w http.ResponseWriter, r *http.Reques
 
 	result, err := h.Deposits.FundGroup(ctx, token, groupID, req.Amount)
 	if err != nil {
+		if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
+			return
+		}
 		if errors.Is(err, privy.ErrInvalidToken) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return

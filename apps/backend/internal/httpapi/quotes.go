@@ -266,7 +266,9 @@ func (h *QuoteHandlers) authorizeGroupMember(ctx context.Context, accessToken, g
 	if !found {
 		return "", app.ErrGroupNotFound
 	}
-	_ = group
+	if group.IsFaker {
+		return "", app.ErrFakerGroupReadOnly
+	}
 	member, err := h.Store.IsGroupMember(ctx, groupID, user.ID)
 	if err != nil {
 		return "", err
@@ -287,6 +289,9 @@ func (h *QuoteHandlers) authorizeGroupMember(ctx context.Context, accessToken, g
 }
 
 func writeQuoteError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, attrs ...any) {
+	if writeFakerReadOnly(ctx, log, w, err, attrs...) {
+		return
+	}
 	switch {
 	case errors.Is(err, privy.ErrInvalidToken):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)
