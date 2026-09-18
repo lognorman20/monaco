@@ -16,6 +16,7 @@ type ProposalRow struct {
 	GroupID              string
 	ProposerID           string
 	Symbol               string
+	Thesis               string
 	Kind                 domain.ProposalKind
 	UsdcMicros           int64
 	TokenAmount          int64
@@ -31,6 +32,7 @@ type InsertProposalParams struct {
 	GroupID              string
 	ProposerID           string
 	Symbol               string
+	Thesis               string
 	Kind                 domain.ProposalKind
 	UsdcMicros           int64
 	TokenAmount          int64
@@ -40,7 +42,7 @@ type InsertProposalParams struct {
 }
 
 const proposalSelectColumns = `id, group_id, proposer_id, symbol, kind, usdc_micros, token_amount,
-  agent_display_name, allocation_usdc_micros, status, expires_at, created_at`
+  agent_display_name, allocation_usdc_micros, status, expires_at, created_at, thesis`
 
 func scanProposalRow(scanner interface{ Scan(dest ...any) error }) (ProposalRow, error) {
 	var row ProposalRow
@@ -60,6 +62,7 @@ func scanProposalRow(scanner interface{ Scan(dest ...any) error }) (ProposalRow,
 		&statusRaw,
 		&row.ExpiresAt,
 		&row.CreatedAt,
+		&row.Thesis,
 	); err != nil {
 		return ProposalRow{}, err
 	}
@@ -171,8 +174,8 @@ func (s *Store) InsertProposalTx(ctx context.Context, tx *sql.Tx, params InsertP
 	insertSQL := `
 INSERT INTO proposals (
   group_id, proposer_id, symbol, kind, usdc_micros, token_amount,
-  agent_display_name, allocation_usdc_micros, status, expires_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'open', $9)
+  agent_display_name, allocation_usdc_micros, status, expires_at, thesis
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'open', $9, $10)
 RETURNING ` + proposalSelectColumns
 
 	row, err := scanProposalRow(tx.QueryRowContext(ctx, insertSQL,
@@ -185,6 +188,7 @@ RETURNING ` + proposalSelectColumns
 		agentName,
 		allocation,
 		params.ExpiresAt,
+		params.Thesis,
 	))
 	if err != nil {
 		return ProposalRow{}, fmt.Errorf("insert proposal: %w", err)

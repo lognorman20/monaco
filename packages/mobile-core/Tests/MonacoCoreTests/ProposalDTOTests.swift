@@ -2,6 +2,13 @@ import XCTest
 @testable import MonacoCore
 
 final class ProposalDTOTests: XCTestCase {
+    func testThesisDecodesFromDetailAndIsOptionalForList() throws {
+        let detail = Data(#"{"id":"p-1","symbol":"AAPLx","usdcMicros":"1","status":"open","thesis":"Growth"}"#.utf8)
+        let list = Data(#"{"id":"p-1","symbol":"AAPLx","usdcMicros":"1","status":"open"}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(ProposalDTO.self, from: detail).thesis, "Growth")
+        XCTAssertNil(try JSONDecoder().decode(ProposalDTO.self, from: list).thesis)
+    }
+
     func testProposalDTO_decodesOpenPassedFailedExpiredStatuses() throws {
         // Arrange
         let statuses = ["open", "passed", "failed", "expired"]

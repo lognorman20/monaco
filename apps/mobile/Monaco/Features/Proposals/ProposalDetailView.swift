@@ -95,6 +95,15 @@ struct ProposalDetailView: View {
             }
         }
 
+        if let thesis = proposal.thesis, !thesis.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            Section("Thesis") {
+                Text(thesis)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .accessibilityIdentifier("proposal-thesis-text")
+            }
+        }
+
         if let summary = proposal.voteSummary {
             Section("Vote outcome") {
                 LabeledContent("Threshold", value: summary.threshold.capitalized)

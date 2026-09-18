@@ -76,6 +76,7 @@ type Proposal struct {
 	GroupID     string
 	ProposerID  string
 	Symbol      string
+	Thesis      string
 	Kind        ProposalKind
 	UsdcMicros  int64
 	TokenAmount int64

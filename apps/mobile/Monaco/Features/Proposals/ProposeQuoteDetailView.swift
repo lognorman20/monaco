@@ -7,6 +7,7 @@ struct ProposeQuoteDetailView: View {
     let symbol: String
     let usdcMicros: Int64
     let treasuryTotalMicros: Int64?
+    var thesis: String = ""
 
     private let apiClient = MonacoAPIClient()
     /// xStock SPL tokens use 8 on-chain decimals (Jupiter outAmount atomics).
@@ -124,13 +125,16 @@ struct ProposeQuoteDetailView: View {
                 groupId: groupId,
                 kind: "buy",
                 symbol: quote.symbol,
-                usdcMicros: usdcMicros
+                usdcMicros: usdcMicros,
+                thesis: thesis
             )
             toast = MonacoToast(message: proposalSubmittedMessage(id: response.proposalId), isSuccess: true)
         } catch MonacoAPIError.apiError(_, let message) where message == "amount exceeds treasury total available" {
             toast = MonacoToast(message: "Amount exceeds treasury total available.")
         } catch MonacoAPIError.apiError(_, let message) where message == "quote not routable" {
             toast = MonacoToast(message: "No route available right now.")
+        } catch MonacoAPIError.apiError(_, let message) {
+            toast = MonacoToast(message: message)
         } catch MonacoAPIError.httpStatus(let code) {
             toast = MonacoToast(message: "Proposal failed (HTTP \(code)).")
         } catch {

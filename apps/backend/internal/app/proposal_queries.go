@@ -57,6 +57,7 @@ type ProposalDetailResult struct {
 	ID                   string
 	GroupID              string
 	Symbol               string
+	Thesis               string
 	Kind                 domain.ProposalKind
 	UsdcMicros           int64
 	TokenAmount          int64
@@ -296,6 +297,7 @@ func (g *GovernanceService) GetProposalDetail(ctx context.Context, accessToken, 
 		ID:                   row.ID,
 		GroupID:              row.GroupID,
 		Symbol:               row.Symbol,
+		Thesis:               row.Thesis,
 		Kind:                 row.Kind,
 		UsdcMicros:           row.UsdcMicros,
 		TokenAmount:          row.TokenAmount,

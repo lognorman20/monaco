@@ -662,7 +662,8 @@ final class MonacoAPIClient {
         usdcMicros: Int64? = nil,
         tokenAmount: Int64? = nil,
         agentDisplayName: String? = nil,
-        allocationUsdcMicros: Int64? = nil
+        allocationUsdcMicros: Int64? = nil,
+        thesis: String = ""
     ) async throws -> CreateProposalResponse {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/proposals")
         var request = URLRequest(url: url)
@@ -676,7 +677,8 @@ final class MonacoAPIClient {
                 usdc: usdcMicros,
                 tokenAmount: tokenAmount,
                 agentDisplayName: agentDisplayName,
-                allocationUsdcMicros: allocationUsdcMicros
+                allocationUsdcMicros: allocationUsdcMicros,
+                thesis: thesis
             )
         )
 
@@ -934,9 +936,10 @@ private struct ProposalRequest: Encodable {
     let tokenAmount: Int64?
     let agentDisplayName: String?
     let allocationUsdcMicros: Int64?
+    let thesis: String
 
     enum CodingKeys: String, CodingKey {
-        case kind, symbol, usdc, tokenAmount, agentDisplayName, allocationUsdcMicros
+        case kind, symbol, usdc, tokenAmount, agentDisplayName, allocationUsdcMicros, thesis
     }
 
     func encode(to encoder: Encoder) throws {
@@ -947,6 +950,7 @@ private struct ProposalRequest: Encodable {
         if let tokenAmount { try container.encode(tokenAmount, forKey: .tokenAmount) }
         if let agentDisplayName { try container.encode(agentDisplayName, forKey: .agentDisplayName) }
         if let allocationUsdcMicros { try container.encode(allocationUsdcMicros, forKey: .allocationUsdcMicros) }
+        if !thesis.isEmpty { try container.encode(thesis, forKey: .thesis) }
     }
 }
 

@@ -24,10 +24,11 @@ type ProposalHandlers struct {
 }
 
 type createProposalRequest struct {
-	Kind                 string   `json:"kind"`
-	Symbol               string   `json:"symbol"`
-	USDC                 int64    `json:"usdc"`
-	TokenAmount          int64    `json:"tokenAmount"`
+	Kind                 string `json:"kind"`
+	Thesis               string `json:"thesis"`
+	Symbol               string `json:"symbol"`
+	USDC                 int64  `json:"usdc"`
+	TokenAmount          int64  `json:"tokenAmount"`
 	AgentDisplayName     string `json:"agentDisplayName"`
 	AllocationUsdcMicros int64  `json:"allocationUsdcMicros"`
 }
@@ -107,6 +108,7 @@ func (h *ProposalHandlers) CreateProposalHandler(w http.ResponseWriter, r *http.
 		GroupID:              groupID,
 		ProposerID:           userID,
 		Symbol:               strings.TrimSpace(req.Symbol),
+		Thesis:               req.Thesis,
 		Kind:                 app.ProposalKind(kind),
 		UsdcMicros:           req.USDC,
 		TokenAmount:          req.TokenAmount,
@@ -217,6 +219,7 @@ type proposalDetailResponse struct {
 	ID                   string                      `json:"id"`
 	GroupID              string                      `json:"groupId"`
 	Symbol               string                      `json:"symbol"`
+	Thesis               string                      `json:"thesis"`
 	Kind                 string                      `json:"kind"`
 	UsdcMicros           string                      `json:"usdcMicros,omitempty"`
 	TokenAmount          string                      `json:"tokenAmount,omitempty"`
@@ -371,6 +374,7 @@ func (h *ProposalHandlers) GetProposalDetailHandler(w http.ResponseWriter, r *ht
 	detailResp := proposalDetailResponse{
 		ID:           detail.ID,
 		GroupID:      detail.GroupID,
+		Thesis:       detail.Thesis,
 		Symbol:       detail.Symbol,
 		Kind:         detailKind,
 		Status:       string(detail.Status),
@@ -440,6 +444,8 @@ func writeProposalError(ctx context.Context, log *requestLog, w http.ResponseWri
 
 func writeProposalCreateError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, attrs ...any) {
 	switch {
+	case errors.Is(err, app.ErrProposalThesisTooLong):
+		logJSONError(ctx, log, "thesis_too_long", w, http.StatusBadRequest, err.Error(), attrs...)
 	case errors.Is(err, privy.ErrInvalidToken):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)
 	case errors.Is(err, app.ErrUserNotFound):

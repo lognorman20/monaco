@@ -409,7 +409,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         symbol: String,
         usdc: Int64? = nil,
         kind: String = "buy",
-        tokenAmount: Int64? = nil
+        tokenAmount: Int64? = nil,
+        thesis: String = ""
     ) async throws -> CreateProposalResponseDTO {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/proposals")
         var request = URLRequest(url: url)
@@ -417,7 +418,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = try JSONEncoder().encode(
-            ProposalRequestDTO(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount)
+            ProposalRequestDTO(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount, thesis: thesis)
         )
 
         let (data, response) = try await session.data(for: request)
@@ -626,9 +627,10 @@ public final class MonacoAPIClient: @unchecked Sendable {
         let kind: String?
         let usdc: Int64?
         let tokenAmount: Int64?
+        let thesis: String
 
         enum CodingKeys: String, CodingKey {
-            case symbol, kind, usdc, tokenAmount
+            case symbol, kind, usdc, tokenAmount, thesis
         }
 
         func encode(to encoder: Encoder) throws {
@@ -637,6 +639,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
             if let kind { try container.encode(kind, forKey: .kind) }
             if let usdc { try container.encode(usdc, forKey: .usdc) }
             if let tokenAmount { try container.encode(tokenAmount, forKey: .tokenAmount) }
+            if !thesis.isEmpty { try container.encode(thesis, forKey: .thesis) }
         }
     }
 

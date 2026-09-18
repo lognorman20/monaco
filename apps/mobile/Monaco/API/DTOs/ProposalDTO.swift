@@ -7,6 +7,7 @@ struct ProposalDTO: Codable, Equatable, Identifiable {
     let usdcMicros: String?
     let tokenAmount: String?
     let status: String
+    let thesis: String?
     let canVote: Bool?
     let proposerId: String?
     let proposerName: String?

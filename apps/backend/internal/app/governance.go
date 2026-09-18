@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
@@ -89,6 +91,7 @@ type CreateProposalInput struct {
 	GroupID              string
 	ProposerID           string
 	Symbol               string
+	Thesis               string
 	Kind                 domain.ProposalKind
 	UsdcMicros           int64
 	TokenAmount          int64
@@ -595,6 +598,8 @@ func validateCreateRules(rules GroupRules) error {
 	return nil
 }
 
+var ErrProposalThesisTooLong = errors.New("thesis must be 2000 characters or fewer")
+
 // CreateProposal inserts an open buy or sell proposal when the quote is routable.
 func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposalInput) (Proposal, error) {
 	kind := in.Kind
@@ -602,6 +607,10 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		kind = domain.ProposalKindBuy
 	}
 	logGovernanceCreateProposalStart(in.GroupID, in.ProposerID, in.Symbol, in.UsdcMicros)
+	in.Thesis = strings.TrimSpace(in.Thesis)
+	if utf8.RuneCountInString(in.Thesis) > 2000 {
+		return Proposal{}, ErrProposalThesisTooLong
+	}
 
 	if in.GroupID == "" || in.ProposerID == "" {
 		logGovernanceBranchWarn("governance create proposal rejected", "missing ids")
@@ -717,6 +726,7 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		GroupID:              in.GroupID,
 		ProposerID:           in.ProposerID,
 		Symbol:               in.Symbol,
+		Thesis:               in.Thesis,
 		Kind:                 kind,
 		UsdcMicros:           in.UsdcMicros,
 		TokenAmount:          in.TokenAmount,
@@ -1020,6 +1030,7 @@ func proposalFromRow(row postgres.ProposalRow) Proposal {
 		GroupID:     row.GroupID,
 		ProposerID:  row.ProposerID,
 		Symbol:      row.Symbol,
+		Thesis:      row.Thesis,
 		Kind:        row.Kind,
 		UsdcMicros:  row.UsdcMicros,
 		TokenAmount: row.TokenAmount,

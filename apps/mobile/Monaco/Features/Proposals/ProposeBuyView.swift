@@ -16,6 +16,7 @@ struct ProposeBuyView: View {
     @State private var catalogOffset = 0
     @State private var selectedSymbol: String?
     @State private var amountText = ""
+    @State private var thesis = ""
     @State private var errorMessage: String?
     @State private var isLoadingCatalog = false
     @State private var isLoadingMore = false
@@ -71,6 +72,15 @@ struct ProposeBuyView: View {
             }
 
             if let selectedSymbol {
+                Section("Thesis") {
+                    TextField("Why should the club buy this?", text: $thesis, axis: .vertical)
+                        .lineLimit(3...8)
+                        .accessibilityIdentifier("proposal-thesis-field")
+                    Text("Optional · Up to 2,000 characters")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Amount (USDC) — \(selectedSymbol)") {
                     TextField("Amount", text: $amountText)
                         .keyboardType(.decimalPad)
@@ -89,7 +99,8 @@ struct ProposeBuyView: View {
                                 groupId: groupId,
                                 symbol: selectedSymbol,
                                 usdcMicros: usdcMicros,
-                                treasuryTotalMicros: treasuryTotalMicros
+                                treasuryTotalMicros: treasuryTotalMicros,
+                                thesis: thesis
                             )
                         } label: {
                             Text("Get quote")
