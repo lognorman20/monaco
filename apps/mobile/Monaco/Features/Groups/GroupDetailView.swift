@@ -6,10 +6,14 @@ struct GroupDetailView: View {
     let groupId: String
     let groupName: String?
     let initialView: GroupViewDTO?
+    var onLeft: () async -> Void = {}
 
     private let apiClient = MonacoAPIClient()
+    @Environment(\.dismiss) private var dismiss
 
     @State private var groupView: GroupViewDTO?
+    @State private var showLeaveConfirmation = false
+    @State private var isLeaving = false
     @State private var activityItems: [GroupActivityItemDTO] = []
     @State private var activityLoading = true
     @State private var activityError: String?
@@ -24,12 +28,14 @@ struct GroupDetailView: View {
         auth: PrivyAuthService,
         groupId: String,
         groupName: String? = nil,
-        initialView: GroupViewDTO? = nil
+        initialView: GroupViewDTO? = nil,
+        onLeft: @escaping () async -> Void = {}
     ) {
         self.auth = auth
         self.groupId = groupId
         self.groupName = groupName
         self.initialView = initialView
+        self.onLeft = onLeft
         _isLoading = State(initialValue: initialView == nil)
     }
 
@@ -54,6 +60,11 @@ struct GroupDetailView: View {
                 await loadActivity()
             }
             .monacoToast($toast)
+            .confirmationDialog("Leave this club?", isPresented: $showLeaveConfirmation, titleVisibility: .visible) {
+                Button("Leave club", role: .destructive) { Task { await leaveGroup() } }
+            } message: {
+                Text("You will lose access to this club's board. Your deposit history stays on record.")
+            }
     }
 
     @ViewBuilder
@@ -136,6 +147,11 @@ struct GroupDetailView: View {
                     Label("Propose buy", systemImage: "chart.line.uptrend.xyaxis")
                 }
                 .accessibilityIdentifier("group-action-propose")
+                Button(role: .destructive) { showLeaveConfirmation = true } label: {
+                    Label(isLeaving ? "Leaving…" : "Leave club", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+                .disabled(isLeaving)
+                .accessibilityIdentifier("group-action-leave")
             }
         }
         .monacoInsetList()
@@ -205,6 +221,34 @@ struct GroupDetailView: View {
     private func surfaceDepositFailureToasts(from items: [GroupActivityItemDTO]) {
         guard let failure = DepositFailureToastTracker.consumeNewFailures(from: items).first else { return }
         toast = MonacoToast(message: DepositFailureToastTracker.message(for: failure))
+    }
+
+    private func leaveGroup() async {
+        guard let token = auth.accessToken, !isLeaving else { return }
+        isLeaving = true
+        defer { isLeaving = false }
+        do {
+            try await apiClient.leaveGroup(accessToken: token, groupId: groupId)
+            await onLeft()
+            dismiss()
+        } catch MonacoAPIError.leaveBlocked(let reason) {
+            toast = MonacoToast(message: leaveBlockedMessage(for: reason))
+        } catch MonacoAPIError.httpStatus(let code) {
+            toast = MonacoToast(message: "Could not leave club (HTTP \(code)).")
+        } catch {
+            toast = MonacoToast(message: "Could not leave club.")
+        }
+    }
+
+    private func leaveBlockedMessage(for reason: LeaveGroupBlockReason) -> String {
+        switch reason {
+        case .shareUnitsRemaining: return "Redeem your slice before leaving."
+        case .lastMemberWithTreasury: return "You are the only member and the treasury still holds value."
+        case .pendingRedeem: return "Finish your pending redeem before leaving."
+        case .soleRemainingVote: return "Cast your vote on open proposals before leaving."
+        case .creatorMustTransfer: return "Transfer club ownership before leaving."
+        case .unknown: return "You cannot leave this club right now."
+        }
     }
 
     private func retryTransaction(_ item: GroupActivityItemDTO) async {

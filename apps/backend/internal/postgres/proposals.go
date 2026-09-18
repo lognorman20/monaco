@@ -314,6 +314,59 @@ LIMIT 100`
 	return out, rows.Err()
 }
 
+// ListProposalsByGroupIDTx returns proposals for groupID filtered by statuses within tx.
+func (s *Store) ListProposalsByGroupIDTx(ctx context.Context, tx *sql.Tx, groupID string, statuses []domain.ProposalStatus) ([]ProposalRow, error) {
+	if groupID == "" {
+		return nil, fmt.Errorf("group_id is required")
+	}
+	if len(statuses) == 0 {
+		return []ProposalRow{}, nil
+	}
+
+	statusValues := make([]string, 0, len(statuses))
+	for _, status := range statuses {
+		statusValues = append(statusValues, string(status))
+	}
+
+	const selectSQL = `
+SELECT id, group_id, proposer_id, symbol, usdc_micros, status, expires_at, created_at
+FROM proposals
+WHERE group_id = $1 AND status = ANY($2::text[])
+ORDER BY created_at DESC
+LIMIT 100`
+
+	rows, err := tx.QueryContext(ctx, selectSQL, groupID, statusValues)
+	if err != nil {
+		return nil, fmt.Errorf("list proposals by group tx: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ProposalRow
+	for rows.Next() {
+		var row ProposalRow
+		var status string
+		if err := rows.Scan(
+			&row.ID,
+			&row.GroupID,
+			&row.ProposerID,
+			&row.Symbol,
+			&row.UsdcMicros,
+			&status,
+			&row.ExpiresAt,
+			&row.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan proposal: %w", err)
+		}
+		parsedStatus, err := domain.ParseProposalStatus(status)
+		if err != nil {
+			return nil, err
+		}
+		row.Status = parsedStatus
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 // ListPassedProposalsPendingExecute returns passed proposals without a confirmed buy row.
 func (s *Store) ListPassedProposalsPendingExecute(ctx context.Context, limit int) ([]ProposalRow, error) {
 	if limit <= 0 {

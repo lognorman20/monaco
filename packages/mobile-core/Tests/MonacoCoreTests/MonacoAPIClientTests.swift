@@ -86,6 +86,15 @@ final class MonacoAPIClientTests: XCTestCase {
         XCTAssertEqual(home.people, [])
     }
 
+    func testAPIClient_leaveGroup_callsV1Leave() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 204, httpVersion: nil, headerFields: nil)!
+            return (response, Data())
+        }
+        let client = MonacoAPIClient(baseURL: URL(string: "https://api.test")!, session: makeMockURLSession(), accessTokenProvider: { TestFixtures.fixtureSessionToken })
+        try await client.leaveGroup(groupId: "550e8400-e29b-41d4-a716-446655440000")
+    }
+
     func testMeDTO_decodesFixtureJSON() throws {
         // Arrange
         let fixtureURL = try XCTUnwrap(

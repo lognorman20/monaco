@@ -552,6 +552,135 @@ func TestGET_groupActivity_returnsMixedStatuses(t *testing.T) {
 	}
 }
 
+func createOpenGroupWithJoiner(t *testing.T, groupHandlers *GroupHandlers, authHandlers *AuthHandlers, privyClient privy.Client, iso *postgres.TestIsolation, creatorLabel, joinerLabel string) (createGroupResponse, authSessionResponse, privy.AccessToken, privy.AccessToken) {
+	t.Helper()
+	_, creatorToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, creatorLabel, "Creator")
+	createRec := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Leave Test Club"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	groupHandlers.CreateGroupHandler(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create group status = %d, want 200; body = %s", createRec.Code, createRec.Body.String())
+	}
+	var created createGroupResponse
+	_ = json.Unmarshal(createRec.Body.Bytes(), &created)
+	trackCreatedGroup(iso, created.GroupID)
+	joinerSession, joinerToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, joinerLabel, "Joiner")
+	joinRec := httptest.NewRecorder()
+	joinReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/join", strings.NewReader(`{}`))
+	joinReq.SetPathValue("id", created.GroupID)
+	joinReq.Header.Set("Content-Type", "application/json")
+	joinReq.Header.Set("Authorization", "Bearer "+string(joinerToken))
+	groupHandlers.JoinGroupHandler(joinRec, joinReq)
+	if joinRec.Code != http.StatusNoContent {
+		t.Fatalf("join status = %d, want 204; body = %s", joinRec.Code, joinRec.Body.String())
+	}
+	return created, joinerSession, creatorToken, joinerToken
+}
+
+func TestPOST_leave_joinedMember_removesMembership(t *testing.T) {
+	t.Parallel()
+	groupHandlers, authHandlers, privyClient, db, iso := integrationGroupApp(t)
+	created, _, creatorToken, joinerToken := createOpenGroupWithJoiner(t, groupHandlers, authHandlers, privyClient, iso, "leave-happy-creator", "leave-happy-joiner")
+	leaveRec := httptest.NewRecorder()
+	leaveReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/leave", nil)
+	leaveReq.SetPathValue("id", created.GroupID)
+	leaveReq.Header.Set("Authorization", "Bearer "+string(joinerToken))
+	groupHandlers.LeaveGroupHandler(leaveRec, leaveReq)
+	if leaveRec.Code != http.StatusNoContent {
+		t.Fatalf("leave status = %d, want 204; body = %s", leaveRec.Code, leaveRec.Body.String())
+	}
+	var memberCount int
+	_ = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM group_members WHERE group_id = $1", created.GroupID).Scan(&memberCount)
+	if memberCount != 1 {
+		t.Fatalf("member count = %d, want 1", memberCount)
+	}
+	viewRec := httptest.NewRecorder()
+	viewReq := httptest.NewRequest(http.MethodGet, "/v1/groups/"+created.GroupID+"/view", nil)
+	viewReq.SetPathValue("id", created.GroupID)
+	viewReq.Header.Set("Authorization", "Bearer "+string(joinerToken))
+	groupHandlers.GetGroupViewHandler(viewRec, viewReq)
+	if viewRec.Code != http.StatusNotFound {
+		t.Fatalf("leaver view status = %d, want 404", viewRec.Code)
+	}
+	creatorViewRec := httptest.NewRecorder()
+	creatorViewReq := httptest.NewRequest(http.MethodGet, "/v1/groups/"+created.GroupID+"/view", nil)
+	creatorViewReq.SetPathValue("id", created.GroupID)
+	creatorViewReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	groupHandlers.GetGroupViewHandler(creatorViewRec, creatorViewReq)
+	if creatorViewRec.Code != http.StatusOK {
+		t.Fatalf("creator view status = %d, want 200", creatorViewRec.Code)
+	}
+}
+
+func TestPOST_leave_withShareUnits_returns409(t *testing.T) {
+	t.Parallel()
+	groupHandlers, authHandlers, privyClient, db, iso := integrationGroupApp(t)
+	created, joinerSession, _, joinerToken := createOpenGroupWithJoiner(t, groupHandlers, authHandlers, privyClient, iso, "leave-shares-creator", "leave-shares-joiner")
+	store := postgres.NewStore(db)
+	tx, _ := store.BeginTx(context.Background())
+	_, _ = store.IncrementPositionTx(context.Background(), tx, joinerSession.UserID, created.GroupID, 500_000, 500_000)
+	_ = tx.Commit()
+	leaveRec := httptest.NewRecorder()
+	leaveReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/leave", nil)
+	leaveReq.SetPathValue("id", created.GroupID)
+	leaveReq.Header.Set("Authorization", "Bearer "+string(joinerToken))
+	groupHandlers.LeaveGroupHandler(leaveRec, leaveReq)
+	if leaveRec.Code != http.StatusConflict {
+		t.Fatalf("leave status = %d, want 409", leaveRec.Code)
+	}
+}
+
+func TestPOST_leave_creatorWithOtherMembers_returns409(t *testing.T) {
+	t.Parallel()
+	groupHandlers, authHandlers, privyClient, db, iso := integrationGroupApp(t)
+	created, _, creatorToken, _ := createOpenGroupWithJoiner(t, groupHandlers, authHandlers, privyClient, iso, "leave-creator-block", "leave-creator-joiner")
+	leaveRec := httptest.NewRecorder()
+	leaveReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/leave", nil)
+	leaveReq.SetPathValue("id", created.GroupID)
+	leaveReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	groupHandlers.LeaveGroupHandler(leaveRec, leaveReq)
+	if leaveRec.Code != http.StatusConflict {
+		t.Fatalf("leave status = %d, want 409; body = %s", leaveRec.Code, leaveRec.Body.String())
+	}
+	var payload map[string]string
+	_ = json.Unmarshal(leaveRec.Body.Bytes(), &payload)
+	if payload["reason"] != "creator_must_transfer" {
+		t.Fatalf("reason = %q, want creator_must_transfer", payload["reason"])
+	}
+	var creatorUserID string
+	_ = db.QueryRowContext(context.Background(), "SELECT creator_user_id FROM groups WHERE id = $1", created.GroupID).Scan(&creatorUserID)
+	var memberCount int
+	_ = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM group_members WHERE group_id = $1", created.GroupID).Scan(&memberCount)
+	if memberCount != 2 {
+		t.Fatalf("member count = %d, want 2", memberCount)
+	}
+}
+
+func TestPOST_leave_lastMemberWithTreasury_returns409(t *testing.T) {
+	t.Parallel()
+	groupHandlers, authHandlers, privyClient, db, iso := integrationGroupApp(t)
+	creatorSession, creatorToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "leave-last-creator", "Creator")
+	createRec := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Solo Treasury Club"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	groupHandlers.CreateGroupHandler(createRec, createReq)
+	var created createGroupResponse
+	_ = json.Unmarshal(createRec.Body.Bytes(), &created)
+	trackCreatedGroup(iso, created.GroupID)
+	_, _ = db.ExecContext(context.Background(), `INSERT INTO positions (user_id, group_id, share_units, amount_deposited, amount_withdrawn) VALUES ($1,$2,0,1000000,0) ON CONFLICT (user_id, group_id) DO UPDATE SET amount_deposited = EXCLUDED.amount_deposited`, creatorSession.UserID, created.GroupID)
+	leaveRec := httptest.NewRecorder()
+	leaveReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/leave", nil)
+	leaveReq.SetPathValue("id", created.GroupID)
+	leaveReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	groupHandlers.LeaveGroupHandler(leaveRec, leaveReq)
+	if leaveRec.Code != http.StatusConflict {
+		t.Fatalf("leave status = %d, want 409", leaveRec.Code)
+	}
+}
+
 func TestGET_group_missingAuth_returns401(t *testing.T) {
 	t.Parallel()
 	// Arrange

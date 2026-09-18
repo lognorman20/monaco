@@ -70,7 +70,7 @@ struct HomeView: View {
                 ForEach(home.groups) { row in
                     NavigationLink {
                         if row.isJoined {
-                            GroupDetailView(auth: auth, groupId: row.groupId, groupName: row.name)
+                            GroupDetailView(auth: auth, groupId: row.groupId, groupName: row.name, onLeft: onRefresh)
                         } else {
                             JoinGroupView(auth: auth, groupId: row.groupId)
                         }

@@ -166,6 +166,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/home", homeHandlers.HomeHandler)
 	mux.HandleFunc("POST /v1/groups", groupHandlers.CreateGroupHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/join", groupHandlers.JoinGroupHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/leave", groupHandlers.LeaveGroupHandler)
 	mux.HandleFunc("GET /v1/groups/{id}", groupHandlers.GetGroupHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/view", groupHandlers.GetGroupViewHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/activity", groupHandlers.ListGroupActivityHandler)

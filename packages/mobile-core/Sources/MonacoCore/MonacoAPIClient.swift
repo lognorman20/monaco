@@ -1,8 +1,18 @@
 import Foundation
 
+public enum LeaveGroupBlockReason: String, Equatable {
+    case shareUnitsRemaining = "share_units_remaining"
+    case lastMemberWithTreasury = "last_member_with_treasury"
+    case pendingRedeem = "pending_redeem"
+    case soleRemainingVote = "sole_remaining_vote"
+    case creatorMustTransfer = "creator_must_transfer"
+    case unknown
+}
+
 public enum MonacoAPIError: Error, Equatable {
     case invalidResponse
     case httpStatus(Int)
+    case leaveBlocked(LeaveGroupBlockReason)
 }
 
 public typealias AccessTokenProvider = @Sendable () async throws -> String?
@@ -140,6 +150,20 @@ public final class MonacoAPIClient: @unchecked Sendable {
         }
     }
 
+    public func leaveGroup(groupId: String) async throws {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/leave")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        try await applyAuthorizationHeader(to: &request)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
+        switch http.statusCode {
+        case 204: return
+        case 409: throw MonacoAPIError.leaveBlocked(parseLeaveConflict(from: data))
+        default: throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+    }
+
     public func getGroupView(groupId: String) async throws -> GroupViewDTO {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/view")
         var request = URLRequest(url: url)
@@ -215,6 +239,12 @@ public final class MonacoAPIClient: @unchecked Sendable {
 
     private struct VoteRequestDTO: Encodable {
         let choice: String
+    }
+
+    private func parseLeaveConflict(from data: Data) -> LeaveGroupBlockReason {
+        struct Body: Decodable { let reason: String? }
+        guard let body = try? JSONDecoder().decode(Body.self, from: data), let reason = body.reason, let parsed = LeaveGroupBlockReason(rawValue: reason) else { return .unknown }
+        return parsed
     }
 
     private func applyAuthorizationHeader(to request: inout URLRequest) async throws {
