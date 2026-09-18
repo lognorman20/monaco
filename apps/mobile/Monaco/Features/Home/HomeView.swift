@@ -5,11 +5,14 @@ import SwiftUI
 /// Home dashboard: net worth, my cabals, P&L chart, leaderboard, missed proposals.
 struct HomeView: View {
     @ObservedObject var auth: PrivyAuthService
+    @Environment(\.monacoSessionRevision) private var sessionRevision
     var onRefresh: () async -> Void = {}
 
     private let apiClient = MonacoAPIClient()
 
-    @State private var dashboard: HomeDashboardDTO?
+    @StateObject private var dashboardState = RefreshableSnapshot<HomeDashboardDTO>()
+    private var dashboard: HomeDashboardDTO? { dashboardState.value }
+    @State private var refreshToast: MonacoToast?
     @State private var leaderboardRange: HomeLeaderboardRange = .all
     @State private var errorMessage: String?
     @State private var isLoading = true
@@ -40,16 +43,14 @@ struct HomeView: View {
         }
         .background(MonacoTheme.background)
         .navigationTitle("Home")
-        .task {
+        .monacoToast($refreshToast)
+        .task(id: "\(sessionRevision)-\(leaderboardRange.rawValue)") {
             await loadDashboard()
         }
         .refreshable {
-            await loadDashboard()
             await onRefresh()
         }
-        .onChange(of: leaderboardRange) { _, _ in
-            Task { await reloadLeaderboard() }
-        }
+
     }
 
     @ViewBuilder
@@ -68,11 +69,11 @@ struct HomeView: View {
 
     private func netWorthSection(_ dashboard: HomeDashboardDTO) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Net worth")
+            Text("Your net worth")
                 .font(.caption.bold())
                 .foregroundStyle(MonacoTheme.secondaryText)
             Text("$\(dashboard.netWorthUsd)")
-                .font(.largeTitle.bold().monospacedDigit())
+                .font(.system(.largeTitle, design: .rounded, weight: .bold).monospacedDigit())
                 .foregroundStyle(MonacoTheme.primaryText)
             HStack(spacing: 12) {
                 Text(dashboard.netWorthDollarPnl)
@@ -84,8 +85,8 @@ struct HomeView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .monacoSurfaceCard()
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("home-net-worth")
     }
 
@@ -96,10 +97,9 @@ struct HomeView: View {
                 .foregroundStyle(MonacoTheme.primaryText)
 
             if dashboard.myGroups.isEmpty {
-                MonacoEmptyStateCard(
-                    message: "No cabals yet. Create or join one from the Groups tab.",
-                    systemImage: "person.3"
-                )
+                Text("Create or join a cabal in the Cabals tab to start investing with friends.")
+                    .font(.subheadline)
+                    .foregroundStyle(MonacoTheme.secondaryText)
             } else {
                 ForEach(dashboard.myGroups) { row in
                     NavigationLink {
@@ -133,21 +133,20 @@ struct HomeView: View {
                 }
             }
         }
-        .padding()
-        .monacoSurfaceCard()
+        .padding(.vertical, 8)
     }
 
     private func pnlChartSection(_ dashboard: HomeDashboardDTO) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Hourly P&L")
+            Text("Your last hour")
                 .font(.headline)
                 .foregroundStyle(MonacoTheme.primaryText)
 
             if dashboard.pnlSeries1H.count < 2 {
-                MonacoEmptyStateCard(
-                    message: "No recent P&L history yet. Activity will appear here after deposits or trades.",
-                    systemImage: "chart.line.uptrend.xyaxis"
-                )
+                Text("Your chart builds as you add money and trade.")
+                    .font(.subheadline)
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
             } else {
                 Chart(dashboard.pnlSeries1H) { point in
                     AreaMark(
@@ -187,10 +186,9 @@ struct HomeView: View {
             .monacoSegmentedBoardPicker()
 
             if dashboard.leaderboard.people.isEmpty {
-                MonacoEmptyStateCard(
-                    message: "No leaderboard rows yet. Join a funded cabal to compete.",
-                    systemImage: "chart.bar"
-                )
+                Text("Returns appear here once cabals are funded.")
+                    .font(.subheadline)
+                    .foregroundStyle(MonacoTheme.secondaryText)
             } else {
                 ForEach(dashboard.leaderboard.people) { row in
                     NavigationLink {
@@ -213,21 +211,19 @@ struct HomeView: View {
                 }
             }
         }
-        .padding()
-        .monacoSurfaceCard()
+        .padding(.vertical, 8)
     }
 
     private func missedProposalsSection(_ dashboard: HomeDashboardDTO) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Missed proposals")
+            Text("Your vote is needed")
                 .font(.headline)
                 .foregroundStyle(MonacoTheme.primaryText)
 
             if dashboard.missedProposals.isEmpty {
-                MonacoEmptyStateCard(
-                    message: "You're caught up. No open proposals waiting for your vote.",
-                    systemImage: "checkmark.circle"
-                )
+                Label("No proposals waiting for your vote.", systemImage: "checkmark.circle")
+                    .font(.subheadline)
+                    .foregroundStyle(MonacoTheme.secondaryText)
             } else {
                 ForEach(dashboard.missedProposals) { row in
                     NavigationLink {
@@ -253,8 +249,7 @@ struct HomeView: View {
                 }
             }
         }
-        .padding()
-        .monacoSurfaceCard()
+        .padding(.vertical, 8)
     }
 
     @ViewBuilder
@@ -290,49 +285,32 @@ struct HomeView: View {
         errorMessage = nil
 
         do {
-            dashboard = try await apiClient.getHomeDashboard(
-                accessToken: accessToken,
-                leaderboardRange: leaderboardRange
-            )
+            try await dashboardState.refresh {
+                try await apiClient.getHomeDashboard(
+                    accessToken: accessToken,
+                    leaderboardRange: leaderboardRange
+                )
+            }
+        } catch is CancellationError {
+            return
+        } catch let error as URLError where error.code == .cancelled {
+            return
         } catch MonacoAPIError.httpStatus(let status) where status == 401 {
             await auth.logout()
         } catch {
             errorMessage = "Could not load home dashboard."
-            dashboard = nil
+            if dashboard != nil {
+                refreshToast = MonacoToast(message: "Could not refresh Home. Pull down to retry.")
+            }
         }
 
         isLoading = false
     }
 
-    private func reloadLeaderboard() async {
-        guard let accessToken = auth.accessToken else { return }
-        guard let current = dashboard else {
-            await loadDashboard()
-            return
-        }
-        do {
-            let updated = try await apiClient.getHomeDashboard(
-                accessToken: accessToken,
-                leaderboardRange: leaderboardRange
-            )
-            dashboard = HomeDashboardDTO(
-                netWorthUsd: current.netWorthUsd,
-                netWorthDollarPnl: current.netWorthDollarPnl,
-                netWorthPercentReturn: current.netWorthPercentReturn,
-                myGroups: current.myGroups,
-                pnlSeries1H: current.pnlSeries1H,
-                leaderboard: updated.leaderboard,
-                missedProposals: current.missedProposals
-            )
-        } catch {
-            // Keep existing dashboard; pull-to-refresh can retry.
-        }
-    }
 }
 
 #Preview {
     NavigationStack {
-        HomeView(auth: PrivyAuthService())
-            .monacoRootAppearance()
+        HomeView(auth: PrivyAuthService()).monacoRootAppearance()
     }
 }

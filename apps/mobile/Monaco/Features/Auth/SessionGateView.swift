@@ -1,3 +1,4 @@
+import MonacoCore
 import SwiftUI
 
 /// Opens backend session then loads app home for signed-in users.
@@ -6,10 +7,12 @@ struct SessionGateView: View {
 
     private let apiClient = MonacoAPIClient()
 
-    @State private var home: HomeViewDTO?
+    @StateObject private var sharedState = MonacoSessionState()
+    private var home: HomeViewDTO? { sharedState.value?.home }
     @State private var profile: MeResponse?
     @State private var showOnboarding = false
     @State private var errorMessage: String?
+    @State private var refreshToast: MonacoToast?
     @State private var isLoading = true
     @State private var sessionStore = MonacoSessionStore()
 
@@ -25,7 +28,10 @@ struct SessionGateView: View {
                     await completeOnboarding()
                 }
             } else if let home, let profile {
-                MainTabView(auth: auth, home: home, profile: profile, onRefresh: refreshHome)
+                MainTabView(auth: auth, home: home, profile: sharedState.value?.profile ?? profile, onRefresh: refreshHome)
+                    .environment(\.monacoSessionSnapshot, sharedState.value)
+                    .environment(\.monacoSessionRevision, sharedState.revision)
+                    .environment(\.refreshMonacoSession, refreshHome)
             } else if let errorMessage {
                 VStack(alignment: .leading, spacing: 12) {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
@@ -42,6 +48,10 @@ struct SessionGateView: View {
                 .padding()
             }
         }
+        .monacoToast($refreshToast)
+        .onReceive(NotificationCenter.default.publisher(for: .monacoSessionChanged)) { _ in
+            Task { await refreshHome() }
+        }
         .task(id: auth.accessToken) {
             await openSessionAndLoadHome()
         }
@@ -53,7 +63,7 @@ struct SessionGateView: View {
 
     private func openSessionAndLoadHome() async {
         guard let accessToken = auth.accessToken else {
-            home = nil
+            sharedState.clear()
             profile = nil
             showOnboarding = false
             errorMessage = "Missing sign-in token."
@@ -63,12 +73,13 @@ struct SessionGateView: View {
 
         isLoading = true
         errorMessage = nil
-        home = nil
+        sharedState.clear()
         profile = nil
         showOnboarding = false
 
         do {
             let session = try await apiClient.openSession(accessToken: accessToken)
+            guard auth.accessToken == accessToken, !Task.isCancelled else { return }
             if auth.shouldInvalidateBackendSession(serverUserId: session.userId) {
                 await auth.logout()
                 return
@@ -76,6 +87,7 @@ struct SessionGateView: View {
             auth.recordBackendSession(userId: session.userId)
 
             let me = try await apiClient.me(accessToken: accessToken)
+            guard auth.accessToken == accessToken, !Task.isCancelled else { return }
             profile = me
 
             if needsOnboarding(profile: me) {
@@ -86,11 +98,14 @@ struct SessionGateView: View {
 
             await loadHome(accessToken: accessToken)
         } catch MonacoAPIError.httpStatus(let status) where status == 401 {
+            guard auth.accessToken == accessToken, !Task.isCancelled else { return }
             await auth.logout()
         } catch MonacoAPIError.httpStatus(let status) {
+            guard auth.accessToken == accessToken, !Task.isCancelled else { return }
             errorMessage = "Could not open session (HTTP \(status))."
             isLoading = false
         } catch {
+            guard auth.accessToken == accessToken, !Task.isCancelled else { return }
             errorMessage = "Could not connect to Monaco."
             isLoading = false
         }
@@ -107,14 +122,19 @@ struct SessionGateView: View {
         }
 
         do {
-            profile = try await apiClient.me(accessToken: accessToken)
+            let me = try await apiClient.me(accessToken: accessToken)
+            guard auth.accessToken == accessToken, !Task.isCancelled else { return }
+            profile = me
             await loadHome(accessToken: accessToken)
         } catch MonacoAPIError.httpStatus(let status) where status == 401 {
+            guard auth.accessToken == accessToken, !Task.isCancelled else { return }
             await auth.logout()
         } catch MonacoAPIError.httpStatus(let status) {
+            guard auth.accessToken == accessToken, !Task.isCancelled else { return }
             errorMessage = "Could not refresh profile (HTTP \(status))."
             isLoading = false
         } catch {
+            guard auth.accessToken == accessToken, !Task.isCancelled else { return }
             errorMessage = "Could not connect to Monaco."
             isLoading = false
         }
@@ -137,18 +157,30 @@ struct SessionGateView: View {
         }
 
         do {
-            home = try await apiClient.getHome(accessToken: token)
+            try await sharedState.refresh {
+                async let boards = apiClient.getHome(accessToken: token)
+                async let me = apiClient.me(accessToken: token)
+                let snapshot = try await MonacoSessionSnapshot(home: boards, profile: me)
+                guard auth.accessToken == token else { throw CancellationError() }
+                return snapshot
+            }
+            guard auth.accessToken == token, !Task.isCancelled else { return }
+            profile = sharedState.value?.profile ?? profile
             errorMessage = nil
         } catch MonacoAPIError.httpStatus(let status) where status == 401 {
+            guard auth.accessToken == token, !Task.isCancelled else { return }
             await auth.logout()
         } catch MonacoAPIError.httpStatus(let status) {
-            errorMessage = "Could not load home (HTTP \(status))."
-            home = nil
+            guard auth.accessToken == token, !Task.isCancelled else { return }
+            errorMessage = "Could not refresh your cabals (HTTP \(status))."
         } catch {
-            errorMessage = "Could not load your boards."
-            home = nil
+            guard auth.accessToken == token, !Task.isCancelled else { return }
+            errorMessage = "Could not refresh your cabals."
         }
 
+        if sharedState.value != nil, let errorMessage {
+            refreshToast = MonacoToast(message: errorMessage + " Pull down to retry.")
+        }
         isLoading = false
     }
 }

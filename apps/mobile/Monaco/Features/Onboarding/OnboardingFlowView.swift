@@ -133,6 +133,7 @@ struct OnboardingFlowView: View {
             onboardingProgress
 
             Text(title)
+                .accessibilityIdentifier(stepIdentifier)
                 .font(.largeTitle.bold())
                 .accessibilityAddTraits(.isHeader)
                 .foregroundStyle(MonacoTheme.primaryText)
@@ -171,7 +172,6 @@ struct OnboardingFlowView: View {
             .accessibilityIdentifier("onboarding-skip-button")
         }
         .padding(.horizontal, 24)
-        .accessibilityIdentifier(stepIdentifier)
     }
 
     private var onboardingProgress: some View {

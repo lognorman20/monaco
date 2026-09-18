@@ -1,3 +1,4 @@
+import MonacoCore
 import SwiftUI
 
 /// Market browse: search, popular strip, paginated catalog with prices.
@@ -122,7 +123,7 @@ struct AssetsView: View {
                 Task { await loadCatalog(reset: true) }
             }
         } else if assets.isEmpty {
-            Text(searchQuery.isEmpty ? "Browse tokenized stocks." : "No matches for \"\(searchQuery)\".")
+            Text(searchQuery.isEmpty ? "No stocks are available right now. Pull down to refresh." : "No matches for \"\(searchQuery)\".")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         } else {
@@ -148,7 +149,7 @@ struct AssetsView: View {
                     .font(.caption)
                     .foregroundStyle(MonacoTheme.secondaryText)
                 if !asset.routable {
-                    Text("No route")
+                    Text("Unavailable to buy")
                         .font(.caption2)
                         .foregroundStyle(MonacoTheme.warning)
                 }
@@ -224,6 +225,7 @@ struct AssetsView: View {
                 limit: pageSize,
                 offset: offset
             )
+            guard !Task.isCancelled, query == searchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
             if reset {
                 assets = response.assets
             } else {
@@ -232,6 +234,7 @@ struct AssetsView: View {
             catalogOffset = assets.count
             hasMoreAssets = response.hasMore
         } catch {
+            guard !Task.isCancelled else { return }
             if reset {
                 catalogLoadFailed = true
                 assets = []

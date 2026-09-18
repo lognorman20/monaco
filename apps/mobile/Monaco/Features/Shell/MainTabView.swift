@@ -1,3 +1,4 @@
+import MonacoCore
 import SwiftUI
 
 /// Post-auth five-tab shell: Home, Profile, Groups, Assets, Settings.
@@ -7,6 +8,7 @@ struct MainTabView: View {
     let profile: MeResponse
     var onRefresh: () async -> Void = {}
 
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab = MainTab.home
 
     var body: some View {
@@ -22,6 +24,7 @@ struct MainTabView: View {
 
             NavigationStack {
                 ProfileTabView(auth: auth, profile: profile)
+                    .refreshable { await onRefresh() }
             }
             .tabItem {
                 Label(MainTab.profile.title, systemImage: MainTab.profile.systemImage)
@@ -53,6 +56,7 @@ struct MainTabView: View {
                     memberWalletAddress: profile.memberWalletAddress,
                     treasuryAddress: nil
                 )
+                .refreshable { await onRefresh() }
             }
             .tabItem {
                 Label(MainTab.settings.title, systemImage: MainTab.settings.systemImage)
@@ -61,6 +65,19 @@ struct MainTabView: View {
             .accessibilityIdentifier("tab-settings")
         }
         .tint(MonacoTheme.accent)
+        .onChange(of: selectedTab) { _, _ in
+            Task { await onRefresh() }
+        }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            await onRefresh()
+            // Sweeps settle in the background, without an in-app submit action.
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(30)) }
+                catch { return }
+                await onRefresh()
+            }
+        }
     }
 }
 
@@ -75,7 +92,7 @@ private enum MainTab: Hashable {
         switch self {
         case .home: "Home"
         case .profile: "Profile"
-        case .groups: "Groups"
+        case .groups: "Cabals"
         case .assets: "Assets"
         case .settings: "Settings"
         }

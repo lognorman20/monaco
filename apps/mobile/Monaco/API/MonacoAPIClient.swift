@@ -1,3 +1,4 @@
+import MonacoCore
 import Foundation
 
 enum LeaveGroupBlockReason: String, Equatable {
@@ -90,7 +91,9 @@ final class MonacoAPIClient {
         guard http.statusCode == 200 else {
             throw MonacoAPIError.httpStatus(http.statusCode)
         }
-        return try JSONDecoder().decode(MeResponse.self, from: data)
+        let profile = try JSONDecoder().decode(MeResponse.self, from: data)
+        NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
+        return profile
     }
 
     func getHome(accessToken: String) async throws -> HomeViewDTO {
@@ -471,7 +474,9 @@ final class MonacoAPIClient {
         guard http.statusCode == 200 else {
             throw MonacoAPIError.httpStatus(http.statusCode)
         }
-        return try JSONDecoder().decode(CreateGroupResponse.self, from: data)
+        let result = try JSONDecoder().decode(CreateGroupResponse.self, from: data)
+        NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
+        return result
     }
 
     func leaveGroup(accessToken: String, groupId: String) async throws {
@@ -482,7 +487,9 @@ final class MonacoAPIClient {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
         switch http.statusCode {
-        case 204: return
+        case 204:
+            NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
+            return
         case 409: throw MonacoAPIError.leaveBlocked(parseLeaveConflict(from: data))
         default: throw MonacoAPIError.httpStatus(http.statusCode)
         }
@@ -498,8 +505,13 @@ final class MonacoAPIClient {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
         switch http.statusCode {
-        case 204: return .joined
-        case 202: return try JSONDecoder().decode(JoinGroupStatusResponse.self, from: data).status
+        case 204:
+            NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
+            return .joined
+        case 202:
+            let status = try JSONDecoder().decode(JoinGroupStatusResponse.self, from: data).status
+            NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
+            return status
         case 403: throw MonacoAPIError.httpStatus(403)
         case 404: throw MonacoAPIError.httpStatus(404)
         default: throw MonacoAPIError.httpStatus(http.statusCode)
@@ -534,6 +546,7 @@ final class MonacoAPIClient {
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
         guard http.statusCode == 204 else { throw MonacoAPIError.httpStatus(http.statusCode) }
+        NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
     }
 
 
@@ -771,7 +784,9 @@ final class MonacoAPIClient {
         guard http.statusCode == 200 else {
             throw proposalCreateError(status: http.statusCode, data: data)
         }
-        return try JSONDecoder().decode(CreateProposalResponse.self, from: data)
+        let result = try JSONDecoder().decode(CreateProposalResponse.self, from: data)
+        NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
+        return result
     }
 
     private func proposalCreateError(status: Int, data: Data) -> MonacoAPIError {
@@ -885,6 +900,7 @@ final class MonacoAPIClient {
         guard http.statusCode == 200 || http.statusCode == 204 else {
             throw MonacoAPIError.httpStatus(http.statusCode)
         }
+        NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
     }
 
     func postRedeem(

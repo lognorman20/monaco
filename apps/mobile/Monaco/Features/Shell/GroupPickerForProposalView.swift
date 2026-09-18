@@ -1,13 +1,16 @@
+import MonacoCore
 import SwiftUI
 
 /// Pick a joined cabal before opening propose-buy with a pre-selected stock.
 struct GroupPickerForProposalView: View {
     @ObservedObject var auth: PrivyAuthService
     let home: HomeViewDTO
+    @Environment(\.monacoSessionSnapshot) private var sharedSnapshot
+    @Environment(\.refreshMonacoSession) private var refreshSession
     let symbol: String
 
     private var joinedGroups: [HomeGroupBoardRowDTO] {
-        home.groups.filter(\.isJoined)
+        (sharedSnapshot?.home ?? home).groups.filter(\.isJoined)
     }
 
     var body: some View {
@@ -27,7 +30,7 @@ struct GroupPickerForProposalView: View {
                                 Text(row.name)
                                     .font(.body.bold())
                                     .foregroundStyle(MonacoTheme.primaryText)
-                                Text("Treasury $\(row.potValueUsd)")
+                                Text("Cabal pot $\(row.potValueUsd)")
                                     .font(.caption)
                                     .foregroundStyle(MonacoTheme.secondaryText)
                             }
@@ -37,14 +40,16 @@ struct GroupPickerForProposalView: View {
                 } header: {
                     Text("Choose cabal")
                 } footer: {
-                    Text("You'll continue to propose buy with \(AssetSymbolFormatter.format(symbol)) pre-selected.")
+                    Text("Choose the cabal you want to buy \(AssetSymbolFormatter.format(symbol)) with.")
                         .foregroundStyle(MonacoTheme.secondaryText)
                 }
             }
         }
         .monacoInsetList()
         .background(MonacoTheme.background)
-        .navigationTitle("Pick cabal")
+        .refreshable { await refreshSession() }
+        .task { await refreshSession() }
+        .navigationTitle("Choose a cabal")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
