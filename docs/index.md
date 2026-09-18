@@ -1,6 +1,6 @@
 # How to build Monaco in milestones
 
-Monaco is an iOS app where friends form a group, pool USDC, and buy tokenized US stocks on Solana. This folder is the build backlog for that app. It is a how-to, not an architecture essay. The product rules live in the root `README.md`.
+Monaco is an iOS app where friends form a group, pool USDC, and buy tokenized US stocks on Solana. This folder is the build backlog for that app. It is a how-to, not an architecture essay. Product rules live in [`docs/product.md`](product.md). How to clone and run lives in the root [`README.md`](../README.md).
 
 Each milestone file lists ticket titles plus **Ticket details** blocks (Owns, Depends on, acceptance, out of scope) so agents can pick work without reading the whole milestone. Do not start a later milestone until the earlier one passes both its automated commands and its manual checks.
 
@@ -101,6 +101,7 @@ monaco/
 │   └── migrations/          SQL applied to local Postgres
 ├── docs/
 │   ├── index.md
+│   ├── product.md           product + architecture
 │   └── milestones/
 └── scripts/
 ```
@@ -134,14 +135,15 @@ Never `simctl erase` for QA. Agent-driven QA must export `SIMSLIM_UDID` and pass
 
 ## Open decisions
 
-The README leaves these unlocked. Do not pick them in code. M4 records a ticket for each.
+[`docs/product.md`](product.md) leaves these unlocked. Do not pick them in code. M4 records a ticket for each.
 
 - Who may propose a buy. Any member, voter set only, or creator only.
 - Failed Jupiter `/execute` after a passed vote.
 - Creator leave and group dissolve.
 
-## Ops
+## Product and ops
 
+- [Product and architecture](product.md)
 - [Sweep USDC out of Privy wallets](ops-sweep-wallets.md) (`./scripts/sweep-wallets.sh`)
 
 ## Milestone files

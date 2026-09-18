@@ -1,6 +1,6 @@
 # About the planned Monaco system
 
-This is Phase A grounding for architects. The repo today is docs plus local Postgres plumbing. `apps/backend`, `apps/mobile`, and `packages/domain` are not on disk yet. Product rules live in the root `README.md`. Build sequence lives in `docs/index.md`. This note is the traced mental model, not a type sketch.
+This is Phase A grounding for architects. The repo today is docs plus local Postgres plumbing. `apps/backend`, `apps/mobile`, and `packages/domain` are not on disk yet. Product rules live in `docs/product.md`. Clone/run lives in the root `README.md`. Build sequence lives in `docs/index.md`. This note is the traced mental model, not a type sketch.
 
 ## Overview
 

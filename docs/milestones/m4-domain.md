@@ -73,7 +73,7 @@ Keep rules in `packages/domain`, not scattered handler ifs. `packages/domain` st
 
 **Claim units on deposit.** M2 credits `share_units` and `amount_deposited` 1:1 with swept USDC while the pot is USDC only. Once the treasury holds marked xStock, M4 mints `share_units` from current pot NAV so a later deposit does not absorb unrealized gain (README Alex/Blair example). That ratio is internal ledger math only. User copy says claim units or omits price. Never say share price or NAV to users.
 
-Formulas from the README.
+Formulas from [`docs/product.md`](../product.md).
 
 - USDC-only pot: `share_units` and `amount_deposited` increase by swept USDC (M2 path).
 - Marked pot: `share_units credited = USDC swept in × total share_units / pot NAV`

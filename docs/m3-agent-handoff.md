@@ -375,7 +375,8 @@ supabase/migrations/               transactions table
 | M3 plan | [`docs/milestones/m3-jupiter.md`](milestones/m3-jupiter.md) |
 | M2 plan | [`docs/milestones/m2-deposits.md`](milestones/m2-deposits.md) |
 | M2 handoff | [`docs/m2-agent-handoff.md`](m2-agent-handoff.md) |
-| Product README | [`README.md`](../README.md) |
+| Product brief | [`docs/product.md`](product.md) |
+| Clone / run | [`README.md`](../README.md) |
 | Agent prefs | [`AGENTS.md`](../AGENTS.md) |
 | Worktree orchestrate | [`.cursor/skills/worktree-orchestrate/SKILL.md`](../.cursor/skills/worktree-orchestrate/SKILL.md) |
 | iOS sim QA | [`.cursor/skills/ios-simslim-fast-qa/SKILL.md`](../.cursor/skills/ios-simslim-fast-qa/SKILL.md) |

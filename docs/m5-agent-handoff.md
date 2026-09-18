@@ -38,7 +38,7 @@ curl -s http://127.0.0.1:8080/health
 
 ## 2. M5 goal
 
-Replace M1/M2 scaffold and debug screens with **demo-ready SwiftUI product**. Social investing copy throughout. README hackathon demo checklist is the ship bar.
+Replace M1/M2 scaffold and debug screens with **demo-ready SwiftUI product**. Social investing copy throughout. docs/product.md hackathon demo checklist is the ship bar.
 
 **Depends on M4:** seven demo steps need live backend JSON — session, home, groups, deposit, catalog/quotes, proposals/votes, redeem.
 
@@ -206,7 +206,7 @@ Orchestrate like M4:
 - One agent per overlapping task. Keep furthest-along.
 
 Product:
-- Replace scaffold/debug with demo-ready SwiftUI. Social investing copy. README hackathon demo = ship bar.
+- Replace scaffold/debug with demo-ready SwiftUI. Social investing copy. docs/product.md hackathon demo = ship bar.
 - Swift HTTP to apps/backend only + Privy Swift. NEVER Jupiter/xStocks/Pyth/Solana RPC from product code.
 - Hand-written Codable DTOs matching Go JSON. No packages/domain. No NAV/equity math in Swift.
 - Show API errors for M4-T39–T41 open decisions. Do NOT invent proposer/retry/dissolve UX.

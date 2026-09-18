@@ -1,6 +1,6 @@
 # M5. Mobile product UI
 
-**Goal.** Replace scaffold and debug screens with the demo-ready SwiftUI product. Social investing copy throughout. Invite friends, add money, buy Apple. The README hackathon demo checklist is the ship bar.
+**Goal.** Replace scaffold and debug screens with the demo-ready SwiftUI product. Social investing copy throughout. Invite friends, add money, buy Apple. The [`docs/product.md`](../product.md) hackathon demo checklist is the ship bar.
 
 **Depends on.** M4 domain APIs for the seven demo steps. M1 Privy sign-in. M2 deposit sweep. Hide M1 address debug UI on the main flow. Keep explorer links under Settings, Advanced. M1 email and password login may stay on the launch screen for internal testers.
 
@@ -1512,7 +1512,7 @@ Implement in order. No drive-by refactors. Lock choices below; do not invent pro
 1. Edit **only** **Owns** paths: `docs/`. No drive-by refactors.
 2. Build SwiftUI screen in **Owns**; call `MonacoAPIClient` only (no xStocks/Jupiter/Pyth/Solana RPC).
 3. Compile gate: `just build mobile` and `just test mobile` exit 0.
-4. **Manual (after automated green):** README hackathon demo checklist on `$SIMSLIM_UDID`
+4. **Manual (after automated green):** docs/product.md hackathon demo checklist on `$SIMSLIM_UDID`
 
 **API / data contract**
 **Mobile consumes existing backend JSON only.** No direct calls to xStocks, Jupiter, Pyth, or Solana RPC from Swift. Use `MonacoAPIClient` methods matching backend routes in milestone doc.
@@ -1537,7 +1537,7 @@ Implement in order. No drive-by refactors. Lock choices below; do not invent pro
 - `just test mobile`
 
 **Manual (only for this ticket):**
-- README hackathon demo checklist on `$SIMSLIM_UDID`
+- docs/product.md hackathon demo checklist on `$SIMSLIM_UDID`
 
 **Done when (zero wiggle room):**
 - [ ] Every **Acceptance Criteria** checkbox is satisfied.
@@ -1635,7 +1635,7 @@ None in Swift for M5. Fairness and ranking invariants live in M4 `packages/domai
 
 ## Manual verification
 
-README hackathon demo checklist. Two accounts on this machine’s gold slim sim (`$SIMSLIM_UDID`). Run `just run` for full stack.
+docs/product.md hackathon demo checklist. Two accounts on this machine’s gold slim sim (`$SIMSLIM_UDID`). Run `just run` for full stack.
 
 1. Create group with join policy, voter set, threshold, and expiry.
 2. Join second account. Two names on in-group board.
