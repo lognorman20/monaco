@@ -41,9 +41,12 @@ func pinnedCatalogOrder(symbol string) (rank int, pinned bool) {
 	return rank, pinned
 }
 
-// sortCatalogMatches puts pinned symbols first (stable within pinned and unpinned groups).
+// sortCatalogMatches orders by routability, pinned popularity proxy, then symbol.
 func sortCatalogMatches(matches []CatalogAsset) {
 	sort.SliceStable(matches, func(i, j int) bool {
+		if matches[i].Routable != matches[j].Routable {
+			return matches[i].Routable
+		}
 		ri, iPinned := pinnedCatalogOrder(matches[i].Symbol)
 		rj, jPinned := pinnedCatalogOrder(matches[j].Symbol)
 		if iPinned && jPinned {
@@ -52,6 +55,8 @@ func sortCatalogMatches(matches []CatalogAsset) {
 		if iPinned != jPinned {
 			return iPinned
 		}
-		return false
+		si := strings.ToLower(strings.TrimSpace(matches[i].Symbol))
+		sj := strings.ToLower(strings.TrimSpace(matches[j].Symbol))
+		return si < sj
 	})
 }

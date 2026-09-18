@@ -151,6 +151,11 @@ struct ProposeBuyView: View {
                     VStack(alignment: .leading) {
                         Text(asset.symbol).font(.body.bold())
                         Text(asset.displayName).font(.caption).foregroundStyle(.secondary)
+                        if !asset.isTradable {
+                            Text("No quote")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
                     }
                     Spacer()
                     Button("Buy") {
@@ -160,6 +165,7 @@ struct ProposeBuyView: View {
                     .controlSize(.small)
                     .accessibilityIdentifier("proposal-buy-\(asset.symbol)")
                 }
+                .opacity(asset.isTradable ? 1 : 0.55)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     selectAsset(asset.symbol)
@@ -252,13 +258,10 @@ struct ProposeBuyView: View {
                 limit: pageSize,
                 offset: offset
             )
-            let sorted = response.assets.sorted {
-                $0.symbol.localizedCaseInsensitiveCompare($1.symbol) == .orderedAscending
-            }
             if reset {
-                assets = sorted
+                assets = response.assets
             } else {
-                assets.append(contentsOf: sorted)
+                assets.append(contentsOf: response.assets)
             }
             catalogOffset = assets.count
             hasMoreAssets = response.hasMore

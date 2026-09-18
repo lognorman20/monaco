@@ -108,6 +108,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 		slog.Info("pyth client skipped", "reason", "PYTH_API_KEY unset")
 	}
 	catalogSearcher := xstocks.NewHTTPCatalogSearcher()
+	jupiterClient := jupiter.NewHTTPClientWithPayer(relayer.PublicKey())
+	catalogRoutability := xstocks.NewCachedRoutabilityProber(
+		app.NewJupiterCatalogRoutabilityProber(jupiterClient),
+		xstocks.NewRoutabilityCache(xstocks.DefaultRoutabilityCacheTTL),
+	)
+	catalogSearcher.SetRoutabilityProber(catalogRoutability)
 	symbols := app.NewSymbolResolver(catalogSearcher)
 	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
 	sessions := app.NewSessionService(store, privyClient)
@@ -119,7 +125,6 @@ func boot(ctx context.Context) (*bootResult, error) {
 	homeHandlers := &httpapi.HomeHandlers{Home: home}
 	groupHandlers := &httpapi.GroupHandlers{Groups: groups, Governance: governance, Home: home}
 	depositHandlers := &httpapi.DepositHandlers{Deposits: deposits}
-	jupiterClient := jupiter.NewHTTPClientWithPayer(relayer.PublicKey())
 	xstocksResolver := xstocks.NewHTTPResolver()
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	signer := app.NewPrivyTreasurySigner(privyClient)
