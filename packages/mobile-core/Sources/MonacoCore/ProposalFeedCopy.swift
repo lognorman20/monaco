@@ -9,6 +9,7 @@ public enum ProposalFeedCopy {
     public static let emptyClosed = "No closed votes yet."
     public static let loadFailed = "Could not load proposals."
 
+    public static let needsYourVote = "Needs your vote"
     public static let voteYes = "Vote yes"
     public static let voteNo = "Vote no"
     public static let voteRecorded = "Vote recorded"
@@ -50,13 +51,37 @@ public enum ProposalFeedCopy {
         "Sell \(shares) \(symbol)"
     }
 
-    /// Card headline for either side: "Buy $25.00 of AAPLx" or "Sell 0.5 AAPLx".
+    public static let agentTitle = "Cabal agent"
+
+    /// Card title: the stock for trades, the agent's name for agent governance proposals.
+    public static func title(for proposal: ProposalDTO) -> String {
+        if proposal.isTrade {
+            return AssetSymbolFormatter.format(proposal.symbol)
+        }
+        let name = proposal.agentDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? agentTitle : name
+    }
+
+    /// Card headline per kind, e.g. "Buy $25.00 of AAPLx", "Sell 0.5 AAPLx",
+    /// "Add agent Scout with $500.00 budget", "Pause the cabal trading agent".
     public static func headline(for proposal: ProposalDTO) -> String {
         let symbol = AssetSymbolFormatter.format(proposal.symbol)
-        if proposal.isSell {
+        switch proposal.resolvedKind {
+        case "sell":
             return sellHeadline(symbol: symbol, shares: ProposalShareFormatter.shares(fromAtomics: proposal.tokenAmount ?? "0"))
+        case "add_agent":
+            let name = proposal.agentDisplayName ?? proposal.symbol
+            let budget = ProposalAmountFormatter.dollars(fromMicros: proposal.allocationUsdcMicros ?? "0")
+            return "Add agent \(name) with \(budget) budget"
+        case "pause_agent":
+            return "Pause the cabal trading agent"
+        case "resume_agent":
+            return "Resume the cabal trading agent"
+        case "revoke_agent":
+            return "Revoke the cabal trading agent"
+        default:
+            return buyHeadline(symbol: symbol, amount: ProposalAmountFormatter.dollars(fromMicros: proposal.usdcMicros ?? "0"))
         }
-        return buyHeadline(symbol: symbol, amount: ProposalAmountFormatter.dollars(fromMicros: proposal.usdcMicros ?? "0"))
     }
 
     public static func openCount(_ count: Int) -> String {
@@ -66,11 +91,13 @@ public enum ProposalFeedCopy {
     /// Every static string plus representative formatted ones, for copy audits.
     public static let auditedStrings: [String] = [
         feedTitle, feedLinkTitle, emptyOpen, emptyClosed, loadFailed,
-        voteYes, voteNo, voteRecorded, voteClosed, voteNotEligible, voteFailed,
+        needsYourVote, voteYes, voteNo, voteRecorded, voteClosed, voteNotEligible, voteFailed,
         commentsTitle, emptyThread, composerPlaceholder, reply, send,
         commentPosted, replyPosted, commentsLoadFailed, commentTooLong,
         commentRejected, commentRateLimited, commentUnavailable, commentFailed,
         replyingTo("Ada"), commentCount(2), proposedBy("Ada"),
-        buyHeadline(symbol: "AAPLx", amount: "$25.00"), sellHeadline(symbol: "AAPLx", shares: "0.5"), openCount(3),
+        buyHeadline(symbol: "AAPLx", amount: "$25.00"), sellHeadline(symbol: "AAPLx", shares: "0.5"), openCount(3), agentTitle,
+        headline(for: ProposalDTO(id: "a", symbol: "", status: "open", kind: "add_agent", agentDisplayName: "Scout", allocationUsdcMicros: "500000000")),
+        headline(for: ProposalDTO(id: "p", symbol: "", status: "open", kind: "pause_agent")),
     ]
 }

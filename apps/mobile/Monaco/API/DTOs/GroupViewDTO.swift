@@ -1,4 +1,5 @@
 import Foundation
+import MonacoCore
 
 struct PotRowDTO: Codable, Equatable, Identifiable {
     let symbol: String

@@ -1,3 +1,4 @@
+import MonacoCore
 import SwiftUI
 
 struct ProposalStatusChip: View {
@@ -9,40 +10,34 @@ struct ProposalStatusChip: View {
             .font(.caption.bold())
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(backgroundColor.opacity(0.15))
-            .foregroundStyle(backgroundColor)
+            .background(tint.opacity(0.15))
+            .foregroundStyle(tint)
             .clipShape(Capsule())
             .accessibilityIdentifier("proposal-status-\(kind.lowercased())-\(status.lowercased())")
     }
 
-    private var chipStyle: ProposalStatusChipStyle? {
-        ProposalStatusChipStyle(status: status)
+    private var display: ProposalStatusDisplay? {
+        ProposalStatusDisplay.from(status: status)
     }
 
     private var label: String {
+        let state = display?.label ?? status.capitalized
         switch kind.lowercased() {
-        case "sell":
-            return "Sell \(chipStyle?.label ?? status.capitalized)"
-        case "add_agent":
-            return "Add agent \(chipStyle?.label ?? status.capitalized)"
-        case "pause_agent":
-            return "Pause agent \(chipStyle?.label ?? status.capitalized)"
-        case "resume_agent":
-            return "Resume agent \(chipStyle?.label ?? status.capitalized)"
-        case "revoke_agent":
-            return "Revoke agent \(chipStyle?.label ?? status.capitalized)"
-        default:
-            return "Buy \(chipStyle?.label ?? status.capitalized)"
+        case "sell": return "Sell \(state)"
+        case "add_agent": return "Add agent \(state)"
+        case "pause_agent": return "Pause agent \(state)"
+        case "resume_agent": return "Resume agent \(state)"
+        case "revoke_agent": return "Revoke agent \(state)"
+        default: return "Buy \(state)"
         }
     }
 
-    private var backgroundColor: Color {
-        switch chipStyle {
-        case .open: .blue
-        case .passed: .green
-        case .failed: .red
-        case .expired: .gray
-        case .none: .secondary
+    private var tint: Color {
+        switch display {
+        case .open: MonacoTheme.accent
+        case .passed: MonacoTheme.success
+        case .failed: MonacoTheme.destructive
+        case .expired, .none: MonacoTheme.secondaryText
         }
     }
 }

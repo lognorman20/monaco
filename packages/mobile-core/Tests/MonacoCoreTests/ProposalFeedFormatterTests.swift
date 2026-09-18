@@ -130,6 +130,33 @@ final class ProposalFeedFormatterTests: XCTestCase {
         XCTAssertEqual(headline, "Buy $25.00 of AAPLx")
     }
 
+    func testHeadline_addAgentProposal_namesAgentAndBudget() {
+        // Arrange
+        let proposal = ProposalDTO(id: "p", symbol: "", status: "open", kind: "add_agent", agentDisplayName: "Scout", allocationUsdcMicros: "500000000")
+
+        // Act
+        let headline = ProposalFeedCopy.headline(for: proposal)
+        let title = ProposalFeedCopy.title(for: proposal)
+
+        // Assert
+        XCTAssertEqual(headline, "Add agent Scout with $500.00 budget")
+        XCTAssertEqual(title, "Scout")
+        XCTAssertFalse(proposal.isTrade)
+    }
+
+    func testHeadline_pauseAgentWithoutName_usesGenericTitle() {
+        // Arrange
+        let proposal = ProposalDTO(id: "p", symbol: "", status: "open", kind: "pause_agent")
+
+        // Act
+        let headline = ProposalFeedCopy.headline(for: proposal)
+        let title = ProposalFeedCopy.title(for: proposal)
+
+        // Assert
+        XCTAssertEqual(headline, "Pause the cabal trading agent")
+        XCTAssertEqual(title, ProposalFeedCopy.agentTitle)
+    }
+
     func testShares_wholeAndFractional() {
         // Act / Assert
         XCTAssertEqual(ProposalShareFormatter.shares(fromAtomics: "300000000"), "3")

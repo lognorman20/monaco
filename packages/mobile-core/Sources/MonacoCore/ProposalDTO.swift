@@ -8,6 +8,11 @@ public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
     public let kind: String?
     public let usdcMicros: String?
     public let tokenAmount: String?
+    /// Agent governance proposals (`add_agent`, `pause_agent`, ...) name the agent and its budget.
+    public let agentDisplayName: String?
+    public let allocationUsdcMicros: String?
+    /// One-time plaintext API key on a passed `add_agent` proposal detail; never on list items.
+    public let mintedAgentKey: String?
     public let status: String
     public let canVote: Bool?
     public let thesis: String?
@@ -28,6 +33,9 @@ public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
         kind: String? = nil,
         usdcMicros: String? = nil,
         tokenAmount: String? = nil,
+        agentDisplayName: String? = nil,
+        allocationUsdcMicros: String? = nil,
+        mintedAgentKey: String? = nil,
         canVote: Bool? = nil,
         thesis: String? = nil,
         proposerId: String? = nil,
@@ -45,6 +53,9 @@ public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
         self.kind = kind
         self.usdcMicros = usdcMicros
         self.tokenAmount = tokenAmount
+        self.agentDisplayName = agentDisplayName
+        self.allocationUsdcMicros = allocationUsdcMicros
+        self.mintedAgentKey = mintedAgentKey
         self.status = status
         self.canVote = canVote
         self.thesis = thesis
@@ -66,6 +77,11 @@ public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
 
     public var isSell: Bool {
         resolvedKind == "sell"
+    }
+
+    /// Buy or sell of a stock; agent governance kinds have no trade execution.
+    public var isTrade: Bool {
+        resolvedKind == "buy" || resolvedKind == "sell"
     }
 
     public var isOpen: Bool {
