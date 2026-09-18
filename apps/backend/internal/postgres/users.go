@@ -119,3 +119,32 @@ WHERE id = ANY($1::uuid[])`
 	}
 	return names, nil
 }
+
+// UpdateUserDisplayName sets display_name for userID and returns the updated row.
+func (s *Store) UpdateUserDisplayName(ctx context.Context, userID string, displayName string) (User, error) {
+	if userID == "" {
+		return User{}, fmt.Errorf("user id is required")
+	}
+
+	const updateSQL = `
+UPDATE users
+SET display_name = $2
+WHERE id = $1
+RETURNING id, privy_user_id, display_name, created_at`
+
+	var user User
+	err := s.db.QueryRowContext(ctx, updateSQL, userID, displayName).Scan(
+		&user.ID,
+		&user.PrivyUserID,
+		&user.DisplayName,
+		&user.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return User{}, fmt.Errorf("user not found")
+		}
+		return User{}, fmt.Errorf("update user display name: %w", err)
+	}
+
+	return user, nil
+}
