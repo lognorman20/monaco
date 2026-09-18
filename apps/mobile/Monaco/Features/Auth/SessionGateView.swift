@@ -24,8 +24,8 @@ struct SessionGateView: View {
                 OnboardingFlowView(auth: auth, initialProfile: profile) {
                     await completeOnboarding()
                 }
-            } else if let home {
-                HomeView(auth: auth, home: home, onRefresh: refreshHome)
+            } else if let home, let profile {
+                MainTabView(auth: auth, home: home, profile: profile, onRefresh: refreshHome)
             } else if let errorMessage {
                 VStack(alignment: .leading, spacing: 12) {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
@@ -99,7 +99,25 @@ struct SessionGateView: View {
     private func completeOnboarding() async {
         showOnboarding = false
         isLoading = true
-        await loadHome()
+
+        guard let accessToken = auth.accessToken else {
+            errorMessage = "Missing sign-in token."
+            isLoading = false
+            return
+        }
+
+        do {
+            profile = try await apiClient.me(accessToken: accessToken)
+            await loadHome(accessToken: accessToken)
+        } catch MonacoAPIError.httpStatus(let status) where status == 401 {
+            await auth.logout()
+        } catch MonacoAPIError.httpStatus(let status) {
+            errorMessage = "Could not refresh profile (HTTP \(status))."
+            isLoading = false
+        } catch {
+            errorMessage = "Could not connect to Monaco."
+            isLoading = false
+        }
     }
 
     private func needsOnboarding(profile: MeResponse) -> Bool {
