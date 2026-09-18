@@ -15,6 +15,7 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/config"
+	"github.com/monaco/monaco/apps/backend/internal/faker"
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
@@ -224,6 +225,20 @@ func boot(ctx context.Context) (*bootResult, error) {
 
 	groupChat := app.NewGroupChatService(store, privyClient)
 	groupMessageHandlers := &httpapi.GroupMessageHandlers{Chat: groupChat}
+	fakerHandlers := &httpapi.DevFakerHandlers{
+		Enabled:     config.FakerEnabled(),
+		DatabaseURL: cfg.DatabaseURL,
+		Store:       store,
+		Privy:       privyClient,
+		Seeder:      faker.NewSeeder(store, faker.PythMarkSource(pythClient)),
+	}
+	if fakerHandlers.Enabled {
+		if config.IsLocalDatabaseURL(cfg.DatabaseURL) {
+			slog.Warn("faker seed endpoint enabled", "route", "POST /v1/dev/faker")
+		} else {
+			slog.Error("FAKER_ENABLED set but DATABASE_URL is not local; faker endpoint will refuse requests")
+		}
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", httpapi.HealthHandler)
@@ -277,7 +292,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("POST /v1/groups/{id}/agents/intents", agentHandlers.SubmitAgentIntentHandler)
 	mux.HandleFunc("GET /v1/proposals/{id}/comments", proposalHandlers.ListProposalCommentsHandler)
 	mux.HandleFunc("POST /v1/proposals/{id}/comments", proposalHandlers.CreateProposalCommentHandler)
-	logRoutesReady(apiRoutes)
+	routes := registerDevFakerRoute(mux, fakerHandlers, apiRoutes)
+	logRoutesReady(routes)
 
 	poller := worker.NewSweepPoller(store, privyClient, solanaRPC, deposits, relayer.PrivateKey(), nil)
 	pollerCtx, stopPoller := context.WithCancel(context.Background())
@@ -354,4 +370,14 @@ func main() {
 		slog.Warn("database close failed", "err", err)
 	}
 	slog.Info("shutdown complete")
+}
+
+// registerDevFakerRoute adds POST /v1/dev/faker only when FAKER_ENABLED is set (#153), so
+// production muxes never expose the seed route. Returns the route list for startup logging.
+func registerDevFakerRoute(mux *http.ServeMux, h *httpapi.DevFakerHandlers, routes []string) []string {
+	if h == nil || !h.Enabled {
+		return routes
+	}
+	mux.HandleFunc("POST /v1/dev/faker", h.FakerHandler)
+	return append(append([]string(nil), routes...), "POST /v1/dev/faker")
 }
