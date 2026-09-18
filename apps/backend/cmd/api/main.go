@@ -56,6 +56,10 @@ var apiRoutes = []string{
 	"GET /v1/groups/{id}/treasury/tokens",
 	"GET /v1/groups/{id}/cost-basis/{symbol}",
 	"GET /v1/groups/{id}/assets",
+	"GET /v1/assets",
+	"GET /v1/assets/popular",
+	"GET /v1/assets/{symbol}",
+	"GET /v1/assets/{symbol}/chart",
 	"POST /v1/groups/{id}/quotes",
 	"POST /v1/groups/{id}/proposals",
 	"GET /v1/proposals/{id}",
@@ -145,6 +149,19 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Privy:   privyClient,
 		Catalog: catalogSearcher,
 	}
+	var assetPriceClient pyth.AssetPriceClient
+	if pythClient != nil {
+		if hermes, ok := pythClient.(*pyth.HermesClient); ok {
+			assetPriceClient = hermes
+		}
+	}
+	assetsHandlers := &httpapi.AssetsHandlers{
+		Store:   store,
+		Privy:   privyClient,
+		Catalog: catalogSearcher,
+		Pyth:    assetPriceClient,
+		Jupiter: jupiterClient,
+	}
 	quoteHandlers := &httpapi.QuoteHandlers{
 		Store: store,
 		Privy: privyClient,
@@ -186,6 +203,10 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/groups/{id}/treasury/tokens", transactionHandlers.GetTreasuryTokenBalancesHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/cost-basis/{symbol}", transactionHandlers.GetCostBasisBySymbolHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/assets", catalogHandlers.SearchAssetsHandler)
+	mux.HandleFunc("GET /v1/assets", assetsHandlers.ListAssetsHandler)
+	mux.HandleFunc("GET /v1/assets/popular", assetsHandlers.PopularAssetsHandler)
+	mux.HandleFunc("GET /v1/assets/{symbol}", assetsHandlers.GetAssetHandler)
+	mux.HandleFunc("GET /v1/assets/{symbol}/chart", assetsHandlers.GetAssetChartHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/quotes", quoteHandlers.QuoteHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/proposals", proposalHandlers.ListGroupProposalsHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/proposals", proposalHandlers.CreateProposalHandler)
