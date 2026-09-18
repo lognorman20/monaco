@@ -126,9 +126,9 @@ fi
 
 # --- git hook ---
 if [[ -d .git && ! -f .git/hooks/pre-commit ]]; then
-  if ask_yes "Install the dotenvx pre-commit hook (blocks plaintext .env commits)?"; then
-    chmod +x scripts/githooks/pre-commit
-    cp scripts/githooks/pre-commit .git/hooks/pre-commit
+  if ask_yes "Install the pre-commit hook (blocks plaintext .env commits)?"; then
+    chmod +x scripts/githooks/pre-commit scripts/githooks/check-staged-env.sh
+    ln -sfn ../../scripts/githooks/pre-commit .git/hooks/pre-commit
     say "installed .git/hooks/pre-commit"
   fi
 fi

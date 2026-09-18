@@ -4,9 +4,5 @@ set -euo pipefail
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
 
-if ! command -v dotenvx >/dev/null 2>&1; then
-  echo "error: dotenvx not on PATH. Install: https://dotenvx.com/docs/install"
-  exit 1
-fi
-
-dotenvx precommit
+# Staged paths only. Full-tree `dotenvx precommit` walks .worktrees and takes ~10s+.
+git diff --cached --name-only --diff-filter=ACM | ./scripts/githooks/check-staged-env.sh

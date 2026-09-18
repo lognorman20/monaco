@@ -501,7 +501,7 @@ Private keys: `DOTENV_PRIVATE_KEY` for `.env` / `.env.local`; `DOTENV_PRIVATE_KE
 
 Encrypted `.env*` files (public key in repo) may be committed. Never commit `.env.keys`, `.env.local`, or private keys. `.gitignore` covers `.env`; keep `.env.keys` and `.env.local` out of git locally.
 
-A pre-commit hook runs `dotenvx precommit` and blocks commits of plaintext `.env*` files. Reinstall after clone: `chmod +x scripts/githooks/pre-commit && cp scripts/githooks/pre-commit .git/hooks/pre-commit` (or `dotenvx precommit --install`).
+A pre-commit hook checks **staged** `.env*` files only (not `.worktrees` or the rest of the tree) and blocks plaintext secrets / `.env.keys`. `.env.example` is allowed. Reinstall after clone: `ln -sfn ../../scripts/githooks/pre-commit .git/hooks/pre-commit`. Do not run `dotenvx precommit --install` — that full-tree scan is slow.
 
 ## Hackathon demo checklist
 
