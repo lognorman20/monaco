@@ -20,7 +20,7 @@ struct PrivyAuthSettings: Equatable {
     static var current: PrivyAuthSettings {
         let environment = ProcessInfo.processInfo.environment
         return PrivyAuthSettings(
-            appID: value(for: "PRIVY_APP_ID", environment: environment),
+            appID: resolvedAppID(from: environment),
             appClientID: resolvedClientID(from: environment),
             smsLoginEnabled: parseBool(
                 firstNonEmpty(
@@ -39,14 +39,26 @@ struct PrivyAuthSettings: Equatable {
         )
     }
 
-    private static func resolvedClientID(from environment: [String: String]) -> String {
-        let clientID = value(for: "PRIVY_APP_CLIENT_ID", environment: environment)
-        if isValidPrivyIOSClientID(clientID) {
-            return clientID
+    private static func resolvedAppID(from environment: [String: String]) -> String {
+        let envAppID = trimmed(environment["PRIVY_APP_ID"])
+        if !envAppID.isEmpty {
+            return envAppID
         }
-        let authID = value(for: "PRIVY_AUTH_ID", environment: environment)
-        if isValidPrivyIOSClientID(authID) {
-            return authID
+        return plistString("PRIVY_APP_ID")
+    }
+
+    private static func resolvedClientID(from environment: [String: String]) -> String {
+        let envClientID = trimmed(environment["PRIVY_APP_CLIENT_ID"])
+        if isValidPrivyIOSClientID(envClientID) {
+            return envClientID
+        }
+        let envAuthID = trimmed(environment["PRIVY_AUTH_ID"])
+        if isValidPrivyIOSClientID(envAuthID) {
+            return envAuthID
+        }
+        let plistClientID = plistString("PRIVY_APP_CLIENT_ID")
+        if isValidPrivyIOSClientID(plistClientID) {
+            return plistClientID
         }
         return ""
     }

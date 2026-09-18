@@ -40,13 +40,13 @@ public struct PrivyAuthConfig: Equatable, Sendable {
     }
 
     private static func resolvedClientID(from environment: [String: String]) -> String {
-        let clientID = environment["PRIVY_APP_CLIENT_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if isValidPrivyIOSClientID(clientID) {
-            return clientID
+        let envClientID = environment["PRIVY_APP_CLIENT_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if isValidPrivyIOSClientID(envClientID) {
+            return envClientID
         }
-        let authID = environment["PRIVY_AUTH_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if isValidPrivyIOSClientID(authID) {
-            return authID
+        let envAuthID = environment["PRIVY_AUTH_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if isValidPrivyIOSClientID(envAuthID) {
+            return envAuthID
         }
         return ""
     }

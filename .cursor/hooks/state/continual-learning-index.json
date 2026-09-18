@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "lastUpdatedAtMs": 1789686769565,
+  "lastUpdatedAtMs": 1789703634126,
   "transcripts": {
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/06eb4754-0a7a-4ce4-98a4-c18eb70d557f/06eb4754-0a7a-4ce4-98a4-c18eb70d557f.jsonl": {
       "mtimeMs": 1789452222708
@@ -194,6 +194,9 @@
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/15d4900d-f263-406c-b889-4bbeca022aef/15d4900d-f263-406c-b889-4bbeca022aef.jsonl": {
       "mtimeMs": 1789564360609
     },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/177f41d5-ebd7-43f6-892b-c4f0bae53fb8/177f41d5-ebd7-43f6-892b-c4f0bae53fb8.jsonl": {
+      "mtimeMs": 1789694978943
+    },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/18356cfc-3e3d-4767-a4bd-5fbe91a11166/18356cfc-3e3d-4767-a4bd-5fbe91a11166.jsonl": {
       "mtimeMs": 1789631811939
     },
@@ -322,6 +325,45 @@
     },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/1fae9247-a341-461b-ab37-2adc09ecfe58/1fae9247-a341-461b-ab37-2adc09ecfe58.jsonl": {
       "mtimeMs": 1789541638957
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/29e4f0e1-4a89-4e06-ad21-ebf3e0ffce53/29e4f0e1-4a89-4e06-ad21-ebf3e0ffce53.jsonl": {
+      "mtimeMs": 1789703557926
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/29e4f0e1-4a89-4e06-ad21-ebf3e0ffce53/subagents/0b008315-fddf-4d14-9618-5e5d4238ac24.jsonl": {
+      "mtimeMs": 1789702615044
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/29e4f0e1-4a89-4e06-ad21-ebf3e0ffce53/subagents/134076e3-6027-4ccb-a685-983772dbe6e5.jsonl": {
+      "mtimeMs": 1789703475800
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/29e4f0e1-4a89-4e06-ad21-ebf3e0ffce53/subagents/15e5e97a-a007-46a9-a652-e986ed136e7c.jsonl": {
+      "mtimeMs": 1789702881170
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/29e4f0e1-4a89-4e06-ad21-ebf3e0ffce53/subagents/1735592e-311f-494c-9edc-a90b4df9a31c.jsonl": {
+      "mtimeMs": 1789703109149
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/29e4f0e1-4a89-4e06-ad21-ebf3e0ffce53/subagents/21bda163-c47e-4445-a988-28c3ac84637e.jsonl": {
+      "mtimeMs": 1789702938945
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/29e4f0e1-4a89-4e06-ad21-ebf3e0ffce53/subagents/25a5b272-baf4-492c-8756-8f7836e22fc4.jsonl": {
+      "mtimeMs": 1789702670766
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/29e4f0e1-4a89-4e06-ad21-ebf3e0ffce53/subagents/2d1057c1-106e-4f27-b9f9-1f1bb5378205.jsonl": {
+      "mtimeMs": 1789703051678
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/29e4f0e1-4a89-4e06-ad21-ebf3e0ffce53/subagents/3f530f4c-7945-4daf-acd1-3401215dc5a1.jsonl": {
+      "mtimeMs": 1789703494719
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/29e4f0e1-4a89-4e06-ad21-ebf3e0ffce53/subagents/4facedd7-ca9f-4034-9955-05a4db00c03f.jsonl": {
+      "mtimeMs": 1789703546125
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/29e4f0e1-4a89-4e06-ad21-ebf3e0ffce53/subagents/77ff9f29-c040-4ce9-9607-e4e8756c2774.jsonl": {
+      "mtimeMs": 1789702188845
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/29e4f0e1-4a89-4e06-ad21-ebf3e0ffce53/subagents/94658124-0762-41ae-8500-3c50f786bb63.jsonl": {
+      "mtimeMs": 1789702450792
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/29e4f0e1-4a89-4e06-ad21-ebf3e0ffce53/subagents/cb088a7a-7fd0-4ef3-a2e4-c345ae148b3e.jsonl": {
+      "mtimeMs": 1789702249449
     },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/2b9b03a8-840d-49c8-8292-c86b58b13459/2b9b03a8-840d-49c8-8292-c86b58b13459.jsonl": {
       "mtimeMs": 1789625328761
@@ -710,6 +752,21 @@
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/722b14da-2347-42f8-bb30-e5461f1e4c95/subagents/f6f11f2b-3272-493a-b3a1-cd7d206f9b92.jsonl": {
       "mtimeMs": 1789545581408
     },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/734eaba6-6269-4b3f-8fff-d4e9ad49bb34/734eaba6-6269-4b3f-8fff-d4e9ad49bb34.jsonl": {
+      "mtimeMs": 1789703607158
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/734eaba6-6269-4b3f-8fff-d4e9ad49bb34/subagents/0e65f37f-b1a5-4479-942e-938a6bcb388f.jsonl": {
+      "mtimeMs": 1789703118983
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/734eaba6-6269-4b3f-8fff-d4e9ad49bb34/subagents/744956f4-e389-4634-b604-29b5eb7acaaa.jsonl": {
+      "mtimeMs": 1789703212343
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/734eaba6-6269-4b3f-8fff-d4e9ad49bb34/subagents/e8227930-0ca8-4392-9beb-25794e533f3e.jsonl": {
+      "mtimeMs": 1789703513516
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/734eaba6-6269-4b3f-8fff-d4e9ad49bb34/subagents/f53c4090-1ebf-4d0f-bb79-18d2168231e4.jsonl": {
+      "mtimeMs": 1789703600640
+    },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/73890605-14da-4d6f-a4de-fe122e83a157/73890605-14da-4d6f-a4de-fe122e83a157.jsonl": {
       "mtimeMs": 1789445902935
     },
@@ -768,7 +825,13 @@
       "mtimeMs": 1789560529684
     },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/94463097-7c07-4ec3-bc78-9a5ebbc81f46.jsonl": {
-      "mtimeMs": 1789686744252
+      "mtimeMs": 1789691232333
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/074dfa95-a59c-43c8-88f0-cb50ab7d93f8.jsonl": {
+      "mtimeMs": 1789689304968
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/0844d295-d689-40f7-b562-ec852491c9dc.jsonl": {
+      "mtimeMs": 1789689801969
     },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/0c86feb7-2ce7-4d9e-8539-ea330ff37b79.jsonl": {
       "mtimeMs": 1789685848290
@@ -776,11 +839,32 @@
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/2733a9de-54aa-411b-850d-9ad9c3b356f3.jsonl": {
       "mtimeMs": 1789686189008
     },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/3bbf97b7-f9a9-4965-839b-ef4a012a0add.jsonl": {
+      "mtimeMs": 1789687754994
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/5fc18ba2-e49f-48b4-87c0-d4387e284beb.jsonl": {
+      "mtimeMs": 1789690928706
+    },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/60de3ec5-e5ca-48e0-b9f9-8c8b0ba0dfde.jsonl": {
       "mtimeMs": 1789686391814
     },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/aa7a658a-9a31-497a-b2dd-aa59455ac3d2.jsonl": {
+      "mtimeMs": 1789690782464
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/aaf31ebd-3b08-4ecc-8954-629f4bc60c93.jsonl": {
+      "mtimeMs": 1789689924979
+    },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/b1b087f0-de1e-4441-9a72-749e35142824.jsonl": {
-      "mtimeMs": 1789686735097
+      "mtimeMs": 1789686773046
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/b37f686a-b424-4e69-807b-a24f6c24a396.jsonl": {
+      "mtimeMs": 1789689638550
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/bf89fc8e-d503-4c15-98e2-17ea16e85f21.jsonl": {
+      "mtimeMs": 1789688309093
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/c5abfd8c-5d10-4674-8ff2-767e4cca82cd.jsonl": {
+      "mtimeMs": 1789689034819
     },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/d1649e79-3e01-434d-9e87-ba1178a5002a.jsonl": {
       "mtimeMs": 1789686729818
@@ -788,14 +872,29 @@
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/df012e0b-9cd1-46f1-8805-8eedce309e7b.jsonl": {
       "mtimeMs": 1789686223006
     },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/e1a681ee-e72e-4473-b2b7-69e31539bf51.jsonl": {
+      "mtimeMs": 1789687540499
+    },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/e2d915df-ae30-43ba-988a-af00e8ebd027.jsonl": {
       "mtimeMs": 1789686343049
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/f3fa5507-75f6-4494-8a11-76f8d8b01a2d.jsonl": {
+      "mtimeMs": 1789691223813
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/94463097-7c07-4ec3-bc78-9a5ebbc81f46/subagents/f480315f-6c70-415b-83a1-461c1641524d.jsonl": {
+      "mtimeMs": 1789687214905
     },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/99be1455-150a-45f2-a289-cf6495118b3e/99be1455-150a-45f2-a289-cf6495118b3e.jsonl": {
       "mtimeMs": 1789574554864
     },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/9ad1ae33-3106-4ebc-8d9a-a2dcfa6da45e/9ad1ae33-3106-4ebc-8d9a-a2dcfa6da45e.jsonl": {
       "mtimeMs": 1789446554662
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/9cc933eb-6fb6-4746-b759-7f8116417d35/9cc933eb-6fb6-4746-b759-7f8116417d35.jsonl": {
+      "mtimeMs": 1789702400371
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/9cc933eb-6fb6-4746-b759-7f8116417d35/subagents/de703fc5-6b46-4a0c-ad51-b8ba9e54fe20.jsonl": {
+      "mtimeMs": 1789702387276
     },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/9eb7bbf3-ddc2-4bb3-9b9f-f958f2b99458/subagents/594d3e1c-0b5d-4ba9-a74b-7fded67dc28f.jsonl": {
       "mtimeMs": 1789632446809
@@ -1172,6 +1271,9 @@
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/c22b6b19-54b9-4328-ab08-ccde98005774/subagents/caf0842b-4a6a-48e7-9f21-965576cd6504.jsonl": {
       "mtimeMs": 1789521540232
     },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/c3d574d1-33c1-457e-98d9-dc3acd342a33/c3d574d1-33c1-457e-98d9-dc3acd342a33.jsonl": {
+      "mtimeMs": 1789698784162
+    },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/c3e94c13-f823-4403-a175-68b6c34d3182/c3e94c13-f823-4403-a175-68b6c34d3182.jsonl": {
       "mtimeMs": 1789628601035
     },
@@ -1198,6 +1300,9 @@
     },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/c51a90df-5cbc-40f2-b574-0f329e1e207a/subagents/f37e0629-aac3-48b1-9173-f53a58623014.jsonl": {
       "mtimeMs": 1789449333783
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/c532efdb-e0f4-4f4d-af09-a36ea6243e29/c532efdb-e0f4-4f4d-af09-a36ea6243e29.jsonl": {
+      "mtimeMs": 1789701823358
     },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/c5850af2-45fd-45a5-b144-3c6927dba2e4/c5850af2-45fd-45a5-b144-3c6927dba2e4.jsonl": {
       "mtimeMs": 1789570415619
@@ -1628,6 +1733,9 @@
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/ddc6e374-cd12-4ecb-b011-f4f3d8f44cd6/ddc6e374-cd12-4ecb-b011-f4f3d8f44cd6.jsonl": {
       "mtimeMs": 1789565735601
     },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/de703fc5-6b46-4a0c-ad51-b8ba9e54fe20/de703fc5-6b46-4a0c-ad51-b8ba9e54fe20.jsonl": {
+      "mtimeMs": 1789702407537
+    },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/ec412f59-36cf-4b61-aaf5-3bf628568a4c/ec412f59-36cf-4b61-aaf5-3bf628568a4c.jsonl": {
       "mtimeMs": 1789436920905
     },
@@ -1646,6 +1754,9 @@
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/f1c22678-778d-4513-95db-afde1f89fe3a/f1c22678-778d-4513-95db-afde1f89fe3a.jsonl": {
       "mtimeMs": 1789528551571
     },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/f3bce53c-477d-46bc-923c-e8470112507c/f3bce53c-477d-46bc-923c-e8470112507c.jsonl": {
+      "mtimeMs": 1789696614149
+    },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/f551530f-b0fb-4a9b-882f-edf75339e1bf/f551530f-b0fb-4a9b-882f-edf75339e1bf.jsonl": {
       "mtimeMs": 1789566819075
     },
@@ -1663,6 +1774,93 @@
     },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fa2d1f7e-8bac-47e6-addd-81986b1b9ec9/fa2d1f7e-8bac-47e6-addd-81986b1b9ec9.jsonl": {
       "mtimeMs": 1789449560882
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/fadf3543-e4e0-4278-aa70-3ca6e42d8202.jsonl": {
+      "mtimeMs": 1789699719873
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/07b11aae-59ca-4f08-bf02-960298df18f6.jsonl": {
+      "mtimeMs": 1789694888339
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/087d7a2b-2161-4a31-a3b4-db2f8e3cfdb0.jsonl": {
+      "mtimeMs": 1789692580189
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/0be43909-ac88-44b0-9963-45cbecff9262.jsonl": {
+      "mtimeMs": 1789699363549
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/0fd5f577-5460-4059-97cc-93ff91912055.jsonl": {
+      "mtimeMs": 1789695900337
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/13b49575-f487-4c6c-afdc-90e4c887aed5.jsonl": {
+      "mtimeMs": 1789695937030
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/177f41d5-ebd7-43f6-892b-c4f0bae53fb8.jsonl": {
+      "mtimeMs": 1789694965946
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/1ebfd260-8a5a-4de9-b2b6-9a4e15967618.jsonl": {
+      "mtimeMs": 1789694666246
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/1fdc54db-50df-41e4-9564-7feb2d9949c8.jsonl": {
+      "mtimeMs": 1789694587136
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/2f624e6b-7267-4974-b30c-a0bbe3c87ab7.jsonl": {
+      "mtimeMs": 1789693651580
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/3ca8d71e-dc8f-4dad-a0ba-c59324410496.jsonl": {
+      "mtimeMs": 1789695092966
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/3d5e651a-0ade-4909-880a-82ddd198308d.jsonl": {
+      "mtimeMs": 1789694757945
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/5b6578d3-c056-4218-a57e-e73dfa576181.jsonl": {
+      "mtimeMs": 1789695200019
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/6db708fe-1cd8-43d3-9d06-2367c9451c75.jsonl": {
+      "mtimeMs": 1789698577393
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/74d4ddcd-428d-4c7f-8810-5e50b48960a8.jsonl": {
+      "mtimeMs": 1789695807609
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/7792368b-91a6-4e49-9e38-963e181a72c7.jsonl": {
+      "mtimeMs": 1789694711691
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/86fd730b-3f6b-46f4-9f42-df1f1af585ab.jsonl": {
+      "mtimeMs": 1789695367365
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/8ba2c671-cf58-4c9f-8609-7b4bfcaa5791.jsonl": {
+      "mtimeMs": 1789696805514
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/b1f24f92-3ce9-4975-8c94-a2d8a3e98a25.jsonl": {
+      "mtimeMs": 1789695779672
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/b240f55b-b670-460e-91fb-b99f7bd0983b.jsonl": {
+      "mtimeMs": 1789694173602
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/b5966a08-2cf1-45f0-8ac7-82bc25fc823d.jsonl": {
+      "mtimeMs": 1789695976323
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/b94e5e2a-3241-4408-b876-a323115b1186.jsonl": {
+      "mtimeMs": 1789696126140
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/ba2008d2-7b57-4ae7-a0b1-abdc9629f5aa.jsonl": {
+      "mtimeMs": 1789694304364
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/c3d574d1-33c1-457e-98d9-dc3acd342a33.jsonl": {
+      "mtimeMs": 1789698239982
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/dd742fc5-1c00-4bb0-94a2-34b4fc1d9b53.jsonl": {
+      "mtimeMs": 1789693655989
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/f08b7391-9f4d-45fa-8f2a-97142620bf62.jsonl": {
+      "mtimeMs": 1789692595244
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/f120d77e-fddb-4b89-9c22-81df54b4387a.jsonl": {
+      "mtimeMs": 1789695148784
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/f3bce53c-477d-46bc-923c-e8470112507c.jsonl": {
+      "mtimeMs": 1789693109001
+    },
+    "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fadf3543-e4e0-4278-aa70-3ca6e42d8202/subagents/f49a7229-c4e0-490d-b928-264b3e352615.jsonl": {
+      "mtimeMs": 1789695944533
     },
     "/Users/logno/.cursor/projects/Users-logno-Documents-work-github-monaco/agent-transcripts/fbe1eb70-7707-4818-989d-543d5827930e/fbe1eb70-7707-4818-989d-543d5827930e.jsonl": {
       "mtimeMs": 1789624443246

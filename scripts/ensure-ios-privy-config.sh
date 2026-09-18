@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Decrypt repo-root .env.local via dotenvx and materialize iOS Privy config.
-# Writes gitignored apps/mobile/Config/Privy.local.xcconfig (xcconfig → Info.plist at build).
+# Writes gitignored Privy.local.xcconfig + Privy.local.Info.plist (merged into app at build).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/apps/mobile/Config/Privy.local.xcconfig"
+PLIST_OUT="$ROOT/apps/mobile/Config/Privy.local.Info.plist"
 ENV_FILE="$ROOT/.env.local"
 
 load_privy_env() {
@@ -43,6 +44,29 @@ resolve_ios_client_id() {
   printf '%s' "$client_id"
 }
 
+generate_info_plist() {
+  local client_id="$1"
+  mkdir -p "$(dirname "$PLIST_OUT")"
+  cat >"$PLIST_OUT" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PRIVY_APP_ID</key>
+	<string>${PRIVY_APP_ID}</string>
+	<key>PRIVY_APP_CLIENT_ID</key>
+	<string>${client_id}</string>
+	<key>PRIVY_SMS_LOGIN_ENABLED</key>
+	<string>${PRIVY_SMS_LOGIN_ENABLED:-true}</string>
+	<key>PRIVY_EMAIL_LOGIN_ENABLED</key>
+	<string>${PRIVY_EMAIL_LOGIN_ENABLED:-true}</string>
+	<key>PRIVY_AUTHORIZATION_KEY_ID</key>
+	<string>${PRIVY_AUTHORIZATION_KEY_ID:-}</string>
+</dict>
+</plist>
+EOF
+}
+
 generate_xcconfig() {
   load_privy_env
   local client_id
@@ -56,12 +80,8 @@ PRIVY_APP_CLIENT_ID = ${client_id}
 PRIVY_SMS_LOGIN_ENABLED = ${PRIVY_SMS_LOGIN_ENABLED:-true}
 PRIVY_EMAIL_LOGIN_ENABLED = ${PRIVY_EMAIL_LOGIN_ENABLED:-true}
 PRIVY_AUTHORIZATION_KEY_ID = ${PRIVY_AUTHORIZATION_KEY_ID:-}
-INFOPLIST_KEY_PRIVY_APP_ID = \$(PRIVY_APP_ID)
-INFOPLIST_KEY_PRIVY_APP_CLIENT_ID = \$(PRIVY_APP_CLIENT_ID)
-INFOPLIST_KEY_PRIVY_SMS_LOGIN_ENABLED = \$(PRIVY_SMS_LOGIN_ENABLED)
-INFOPLIST_KEY_PRIVY_EMAIL_LOGIN_ENABLED = \$(PRIVY_EMAIL_LOGIN_ENABLED)
-INFOPLIST_KEY_PRIVY_AUTHORIZATION_KEY_ID = \$(PRIVY_AUTHORIZATION_KEY_ID)
 EOF
+  generate_info_plist "$client_id"
 }
 
 export_launch_env() {

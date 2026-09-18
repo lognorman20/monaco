@@ -2,6 +2,7 @@
 .env.keys
 .audit/
 apps/mobile/Config/Privy.local.xcconfig
+apps/mobile/Config/Privy.local.Info.plist
 bin/
 *.exe
 .DS_Store
@@ -17,3 +18,5 @@ build/
 .worktrees/
 .logs/
 *.test
+.mobai
+.xcodebuildmcp
