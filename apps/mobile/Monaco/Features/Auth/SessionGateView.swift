@@ -7,8 +7,11 @@ struct SessionGateView: View {
     private let apiClient = MonacoAPIClient()
 
     @State private var home: HomeViewDTO?
+    @State private var profile: MeResponse?
+    @State private var showOnboarding = false
     @State private var errorMessage: String?
     @State private var isLoading = true
+    @State private var sessionStore = MonacoSessionStore()
 
     var body: some View {
         Group {
@@ -17,6 +20,10 @@ struct SessionGateView: View {
                     .foregroundStyle(MonacoTheme.secondaryText)
                     .tint(MonacoTheme.accent)
                     .frame(maxWidth: .infinity, minHeight: 200)
+            } else if showOnboarding, let profile {
+                OnboardingFlowView(auth: auth, initialProfile: profile) {
+                    await completeOnboarding()
+                }
             } else if let home {
                 HomeView(auth: auth, home: home, onRefresh: refreshHome)
             } else if let errorMessage {
@@ -47,6 +54,8 @@ struct SessionGateView: View {
     private func openSessionAndLoadHome() async {
         guard let accessToken = auth.accessToken else {
             home = nil
+            profile = nil
+            showOnboarding = false
             errorMessage = "Missing sign-in token."
             isLoading = false
             return
@@ -55,6 +64,8 @@ struct SessionGateView: View {
         isLoading = true
         errorMessage = nil
         home = nil
+        profile = nil
+        showOnboarding = false
 
         do {
             let session = try await apiClient.openSession(accessToken: accessToken)
@@ -63,6 +74,16 @@ struct SessionGateView: View {
                 return
             }
             auth.recordBackendSession(userId: session.userId)
+
+            let me = try await apiClient.me(accessToken: accessToken)
+            profile = me
+
+            if needsOnboarding(profile: me) {
+                showOnboarding = true
+                isLoading = false
+                return
+            }
+
             await loadHome(accessToken: accessToken)
         } catch MonacoAPIError.httpStatus(let status) where status == 401 {
             await auth.logout()
@@ -73,6 +94,20 @@ struct SessionGateView: View {
             errorMessage = "Could not connect to Monaco."
             isLoading = false
         }
+    }
+
+    private func completeOnboarding() async {
+        showOnboarding = false
+        isLoading = true
+        await loadHome()
+    }
+
+    private func needsOnboarding(profile: MeResponse) -> Bool {
+        let trimmedName = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedName.isEmpty {
+            return true
+        }
+        return !sessionStore.isOnboardingCompleted(for: profile.userId)
     }
 
     private func loadHome(accessToken: String? = nil) async {

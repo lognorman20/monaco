@@ -39,6 +39,7 @@ var apiRoutes = []string{
 	"GET /health",
 	"POST /v1/auth/session",
 	"GET /v1/me",
+	"PATCH /v1/me",
 	"GET /v1/home",
 	"POST /v1/groups",
 	"POST /v1/groups/{id}/join",
@@ -164,6 +165,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /health", httpapi.HealthHandler)
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
+	mux.HandleFunc("PATCH /v1/me", me.PatchMeHandler)
 	mux.HandleFunc("GET /v1/home", homeHandlers.HomeHandler)
 	mux.HandleFunc("GET /v1/users/{id}/groups", homeHandlers.UserSharedGroupsHandler)
 	mux.HandleFunc("POST /v1/groups", groupHandlers.CreateGroupHandler)
