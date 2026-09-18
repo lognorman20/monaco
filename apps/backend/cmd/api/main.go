@@ -41,6 +41,9 @@ var apiRoutes = []string{
 	"GET /v1/me",
 	"PATCH /v1/me",
 	"GET /v1/home",
+	"GET /v1/home/dashboard",
+	"GET /v1/home/pnl-series",
+	"GET /v1/home/missed-proposals",
 	"POST /v1/groups",
 	"POST /v1/groups/{id}/join",
 	"GET /v1/groups/{id}",
@@ -188,6 +191,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
 	mux.HandleFunc("PATCH /v1/me", me.PatchMeHandler)
 	mux.HandleFunc("GET /v1/home", homeHandlers.HomeHandler)
+	mux.HandleFunc("GET /v1/home/dashboard", homeHandlers.HomeDashboardHandler)
+	mux.HandleFunc("GET /v1/home/pnl-series", homeHandlers.HomePnLSeriesHandler)
+	mux.HandleFunc("GET /v1/home/missed-proposals", homeHandlers.HomeMissedProposalsHandler)
 	mux.HandleFunc("GET /v1/users/{id}/groups", homeHandlers.UserSharedGroupsHandler)
 	mux.HandleFunc("POST /v1/groups", groupHandlers.CreateGroupHandler)
 	mux.HandleFunc("GET /v1/groups/search", groupsTabHandlers.SearchGroupsHandler)
