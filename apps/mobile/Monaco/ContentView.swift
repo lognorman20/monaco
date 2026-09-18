@@ -16,6 +16,8 @@ struct ContentView: View {
             ProfileSampleHarness(scenario: scenario, auth: auth)
         } else if CabalsTabSampleData.isEnabled {
             CabalsTabSampleHarness(auth: auth)
+        } else if SampleProposalFeedService.isRequested {
+            SampleProposalFeedRoot()
         } else {
             AuthGateView(auth: auth)
         }

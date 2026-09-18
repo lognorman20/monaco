@@ -748,63 +748,6 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(RetryTransactionResponse.self, from: data)
     }
 
-    func listGroupProposals(accessToken: String, groupId: String, tab: String) async throws -> ProposalListResponse {
-        var components = URLComponents(
-            url: baseURL.appending(path: "v1/groups/\(groupId)/proposals"),
-            resolvingAgainstBaseURL: false
-        )!
-        components.queryItems = [URLQueryItem(name: "tab", value: tab)]
-        guard let url = components.url else {
-            throw MonacoAPIError.invalidResponse
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
-
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(ProposalListResponse.self, from: data)
-    }
-
-    func getProposalDetail(accessToken: String, proposalId: String) async throws -> ProposalDTO {
-        let url = baseURL.appending(path: "v1/proposals/\(proposalId)")
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
-
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(ProposalDTO.self, from: data)
-    }
-
-    func castVote(accessToken: String, proposalId: String, choice: String) async throws {
-        let url = baseURL.appending(path: "v1/proposals/\(proposalId)/votes")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
-        request.httpBody = try JSONEncoder().encode(VoteRequest(choice: choice))
-
-        let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 || http.statusCode == 204 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-    }
-
     func postRedeem(
         accessToken: String,
         groupId: String,
@@ -952,10 +895,6 @@ private struct ProposalRequest: Encodable {
         if let allocationUsdcMicros { try container.encode(allocationUsdcMicros, forKey: .allocationUsdcMicros) }
         if let thesis { try container.encode(thesis, forKey: .thesis) }
     }
-}
-
-private struct VoteRequest: Encodable {
-    let choice: String
 }
 
 private struct RedeemSubmitRequest: Encodable {

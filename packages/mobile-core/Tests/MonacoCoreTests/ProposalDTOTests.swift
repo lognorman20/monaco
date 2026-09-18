@@ -151,6 +151,23 @@ final class ProposalDTOTests: XCTestCase {
         XCTAssertFalse(decoded.showsVoteActions)
     }
 
+    func testProposalDTO_addAgentDetail_decodesAgentFieldsAndMintedKey() throws {
+        // Arrange
+        let json = """
+        {"id":"prop-a","symbol":"","kind":"add_agent","agentDisplayName":"Scout","allocationUsdcMicros":"500000000","mintedAgentKey":"mk_live_123","status":"passed","commentCount":1}
+        """
+
+        // Act
+        let decoded = try JSONDecoder().decode(ProposalDTO.self, from: Data(json.utf8))
+
+        // Assert
+        XCTAssertEqual(decoded.resolvedKind, "add_agent")
+        XCTAssertEqual(decoded.agentDisplayName, "Scout")
+        XCTAssertEqual(decoded.allocationUsdcMicros, "500000000")
+        XCTAssertEqual(decoded.mintedAgentKey, "mk_live_123")
+        XCTAssertFalse(decoded.isTrade)
+    }
+
     func testShowsVoteActions_closedProposalWithStaleCanVote_isFalse() {
         // Arrange
         let proposal = ProposalDTO(id: "p", symbol: "AAPLx", status: "failed", usdcMicros: "1", canVote: true)
