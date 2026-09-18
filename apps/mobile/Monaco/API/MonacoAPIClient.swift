@@ -109,6 +109,85 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(HomeViewDTO.self, from: data)
     }
 
+    func searchGroups(accessToken: String, query: String, limit: Int = 25, offset: Int = 0) async throws -> GroupSearchResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/groups/search"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "offset", value: String(offset)),
+        ]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(GroupSearchResponse.self, from: data)
+    }
+
+    func getGroupLeaderboard(accessToken: String, limit: Int = 25, offset: Int = 0) async throws -> GroupLeaderboardResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/groups/leaderboard"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "offset", value: String(offset)),
+        ]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(GroupLeaderboardResponse.self, from: data)
+    }
+
+    func getGroupPnLHistory(accessToken: String, groupId: String, days: Int = 90) async throws -> GroupPnLHistoryResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/groups/\(groupId)/pnl-history"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "days", value: String(days))]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(GroupPnLHistoryResponse.self, from: data)
+    }
+
     func getUserSharedGroups(accessToken: String, userId: String) async throws -> [HomeGroupBoardRowDTO] {
         let url = baseURL.appending(path: "v1/users/\(userId)/groups")
         var request = URLRequest(url: url)

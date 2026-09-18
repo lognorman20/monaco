@@ -44,7 +44,10 @@ var apiRoutes = []string{
 	"POST /v1/groups",
 	"POST /v1/groups/{id}/join",
 	"GET /v1/groups/{id}",
+	"GET /v1/groups/search",
+	"GET /v1/groups/leaderboard",
 	"GET /v1/groups/{id}/view",
+	"GET /v1/groups/{id}/pnl-history",
 	"GET /v1/groups/{id}/activity",
 	"GET /v1/groups/{id}/proposals",
 	"POST /v1/groups/{id}/deposits",
@@ -128,6 +131,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	auth := &httpapi.AuthHandlers{Sessions: sessions}
 	me := &httpapi.MeHandlers{Sessions: sessions}
 	homeHandlers := &httpapi.HomeHandlers{Home: home}
+	groupsTabHandlers := &httpapi.GroupsTabHandlers{Home: home}
 	groupHandlers := &httpapi.GroupHandlers{Groups: groups, Governance: governance, Home: home}
 	depositHandlers := &httpapi.DepositHandlers{Deposits: deposits}
 	xstocksResolver := xstocks.NewHTTPResolver()
@@ -186,6 +190,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/home", homeHandlers.HomeHandler)
 	mux.HandleFunc("GET /v1/users/{id}/groups", homeHandlers.UserSharedGroupsHandler)
 	mux.HandleFunc("POST /v1/groups", groupHandlers.CreateGroupHandler)
+	mux.HandleFunc("GET /v1/groups/search", groupsTabHandlers.SearchGroupsHandler)
+	mux.HandleFunc("GET /v1/groups/leaderboard", groupsTabHandlers.GroupLeaderboardHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/join", groupHandlers.JoinGroupHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/leave", groupHandlers.LeaveGroupHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/join-requests", groupHandlers.ListJoinRequestsHandler)
@@ -193,6 +199,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("POST /v1/groups/{id}/join-requests/{requestId}/deny", groupHandlers.DenyJoinRequestHandler)
 	mux.HandleFunc("GET /v1/groups/{id}", groupHandlers.GetGroupHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/view", groupHandlers.GetGroupViewHandler)
+	mux.HandleFunc("GET /v1/groups/{id}/pnl-history", groupsTabHandlers.GroupPnLHistoryHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/activity", groupHandlers.ListGroupActivityHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/deposits", depositHandlers.CreateDepositHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/share-units", depositHandlers.GetMemberShareUnitsHandler)
