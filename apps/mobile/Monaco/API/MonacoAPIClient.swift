@@ -75,6 +75,24 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(MeResponse.self, from: data)
     }
 
+    func updateProfile(accessToken: String, displayName: String) async throws -> MeResponse {
+        let url = baseURL.appending(path: "v1/me")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        request.httpBody = try JSONEncoder().encode(UpdateProfileRequest(displayName: displayName))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(MeResponse.self, from: data)
+    }
+
     func getHome(accessToken: String) async throws -> HomeViewDTO {
         let url = baseURL.appending(path: "v1/home")
         var request = URLRequest(url: url)
@@ -531,6 +549,10 @@ final class MonacoAPIClient {
 
 private struct SessionRequest: Encodable {
     let accessToken: String
+}
+
+private struct UpdateProfileRequest: Encodable {
+    let displayName: String
 }
 
 private struct CreateGroupJoinPolicyRequest: Encodable {
