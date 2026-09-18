@@ -141,9 +141,9 @@ func TestPOST_groupMessages_member_returns201WithAuthorAndTrimmedBody(t *testing
 	if msg.AuthorName != "Quotes User" || !msg.Mine || msg.GroupID != a.groupID || msg.ID == "" {
 		t.Fatalf("unexpected message: %+v", msg)
 	}
-	createdAt, err := time.Parse(time.RFC3339, msg.CreatedAt)
-	if err != nil || createdAt.Location() != time.UTC {
-		t.Fatalf("createdAt = %q, want RFC3339 UTC (err %v)", msg.CreatedAt, err)
+	createdAt, err := time.Parse(time.RFC3339Nano, msg.CreatedAt)
+	if err != nil || createdAt.Location() != time.UTC || len(msg.CreatedAt) != len("2026-09-18T15:04:05.000000Z") {
+		t.Fatalf("createdAt = %q, want fixed-width microsecond RFC3339 UTC (err %v)", msg.CreatedAt, err)
 	}
 }
 
