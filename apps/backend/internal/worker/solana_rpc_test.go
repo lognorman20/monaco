@@ -84,3 +84,69 @@ func TestHTTPSolanaRPC_GetBalance_returnsLamports(t *testing.T) {
 		t.Fatalf("balance = %d, want %d", got, wantBalance)
 	}
 }
+
+func TestHTTPSolanaRPC_GetSPLTokenBalance_sumsMatchingMintAccounts(t *testing.T) {
+	const owner = "Relayer11111111111111111111111111111111111"
+	const mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": map[string]any{
+				"value": []map[string]any{
+					{
+						"account": map[string]any{
+							"data": map[string]any{
+								"parsed": map[string]any{
+									"info": map[string]any{
+										"mint": mint,
+										"tokenAmount": map[string]any{
+											"amount": "1500000",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	rpc := NewHTTPSolanaRPC("mainnet-beta")
+	rpc.endpoint = server.URL
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	got, err := rpc.GetSPLTokenBalance(ctx, owner, mint)
+	if err != nil {
+		t.Fatalf("GetSPLTokenBalance: %v", err)
+	}
+	if got != 1_500_000 {
+		t.Fatalf("balance = %d, want %d", got, 1_500_000)
+	}
+}
+
+func TestHTTPSolanaRPC_GetSPLTokenBalance_returnsZeroWhenNoAccounts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": map[string]any{
+				"value": []any{},
+			},
+		})
+	}))
+	defer server.Close()
+
+	rpc := NewHTTPSolanaRPC("mainnet-beta")
+	rpc.endpoint = server.URL
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	got, err := rpc.GetSPLTokenBalance(ctx, "Relayer11111111111111111111111111111111111", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+	if err != nil {
+		t.Fatalf("GetSPLTokenBalance: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("balance = %d, want 0", got)
+	}
+}

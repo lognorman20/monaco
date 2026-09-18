@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "XcodeBuildMCP": {
+      "command": "npx",
+      "args": ["-y", "xcodebuildmcp@latest", "mcp"]
+    },
+    "pyth": {
+      "url": "https://mcp.pyth.network/mcp"
+    }
+  }
+}

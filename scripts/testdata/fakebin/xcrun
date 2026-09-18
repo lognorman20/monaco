@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Test double for xcrun simctl. Reads fixtures from FAKE_SIMCTL_DIR.
+set -euo pipefail
+if [[ "${1:-}" != "simctl" ]]; then
+  echo "fake xcrun: expected simctl" >&2
+  exit 1
+fi
+shift
+dir="${FAKE_SIMCTL_DIR:?}"
+if [[ "${1:-}" == "list" && "${2:-}" == "devices" && "${3:-}" == "available" ]]; then
+  if [[ "${4:-}" == "-j" ]]; then
+    cat "$dir/devices.json"
+    exit 0
+  fi
+  cat "$dir/devices.txt"
+  exit 0
+fi
+echo "fake xcrun: unhandled $*" >&2
+exit 1

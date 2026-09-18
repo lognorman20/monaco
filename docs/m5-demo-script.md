@@ -1,6 +1,6 @@
-# M5 demo script — gold slim sim
+# M5 demo script
 
-Run on this machine’s gold slim sim (`$SIMSLIM_UDID`) only. Never `simctl erase`.
+Run on the simulator from `./scripts/resolve-ios-sim.sh` for a human demo. Agent gold QA uses `./scripts/gold-sim-udid.sh` and requires `SIMSLIM_UDID`. Never `simctl erase`.
 
 ## Prerequisites
 

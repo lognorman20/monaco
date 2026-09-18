@@ -16,7 +16,7 @@ Read first, in order:
 4. AGENTS.md
 5. .cursor/skills/ios-simslim-fast-qa/SKILL.md (only if you touch sim)
 
-Repo: /Users/logno/Documents/work/github/monaco
+Repo: clone root (not a personal home path)
 
 Branch:
 - Base: milestone-3 (verify tip; was 0cab6f0 — use actual `git rev-parse milestone-3`)
@@ -55,7 +55,7 @@ Signing (carry from M3):
 Gates (must stay green). Do not change just test/build recipes:
   dotenvx run -f .env.local -- just test backend
   just test mobile          # host swift test packages/mobile-core — no sim
-  just build mobile         # $SIMSLIM_UDID only
+just build mobile
   curl -s http://127.0.0.1:8080/health
 
 QA (if sim):

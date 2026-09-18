@@ -1,19 +1,57 @@
 #!/usr/bin/env bash
-# Monaco iOS sim launch with Privy env from dotenvx .env.local (gold sim via ~/.local/bin/ios-sim).
+# Monaco iOS sim launch with Privy env from dotenvx .env.local.
+# Prefers SimSlim gold when SIMSLIM_UDID exists and simslim is ready.
+# Otherwise warns and boots a stock Xcode simulator. Does not require ~/.local/bin/ios-sim.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-global_ios_sim="$(command -v ios-sim || true)"
-if [[ -z "$global_ios_sim" || "$global_ios_sim" == "$repo_root/scripts/ios-sim" ]]; then
-  global_ios_sim="${HOME}/.local/bin/ios-sim"
+if [[ "${MONACO_PRIVY_ENV:-}" != "1" ]]; then
+  exec "$repo_root/scripts/with-ios-privy-env.sh" "$0" "$@"
 fi
-if [[ ! -x "$global_ios_sim" ]]; then
-  echo "error: ios-sim not found (~/.local/bin). Use: just run mobile" >&2
+
+bundle_id="com.monaco.app"
+udid="$(./scripts/resolve-ios-sim.sh)"
+
+if command -v simslim >/dev/null 2>&1 && [[ -n "${SIMSLIM_UDID:-}" && "$udid" == "$SIMSLIM_UDID" ]]; then
+  profile="${SIMSLIM_PROFILE:-}"
+  if [[ -z "$profile" && -f "${HOME}/.config/simslim/base-slim.json" ]]; then
+    profile="${HOME}/.config/simslim/base-slim.json"
+  fi
+  if [[ -n "$profile" ]]; then
+    simslim verify "$udid" --profile "$profile" >/dev/null 2>&1 \
+      || simslim on "$udid" --profile "$profile" >/dev/null 2>&1 \
+      || echo "warning: simslim on failed. continuing with a stock boot." >&2
+  fi
+fi
+
+open -a Simulator >/dev/null 2>&1 || true
+
+xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
+  -destination "platform=iOS Simulator,id=${udid}" \
+  -configuration Debug \
+  build
+
+app_path=""
+newest=0
+shopt -s nullglob
+for candidate in "${HOME}/Library/Developer/Xcode/DerivedData"/Monaco-*/Build/Products/Debug-iphonesimulator/Monaco.app; do
+  mt="$(stat -f %m "$candidate" 2>/dev/null || echo 0)"
+  if [[ "$mt" -gt "$newest" ]]; then
+    newest="$mt"
+    app_path="$candidate"
+  fi
+done
+shopt -u nullglob
+
+if [[ ! -d "$app_path" ]]; then
+  echo "error: built app not found at ${app_path}" >&2
   exit 1
 fi
 
-# ios-sim-common resolves .xcodeproj from PWD — must run under apps/mobile.
-export WITH_IOS_PRIVY_CWD="$repo_root/apps/mobile"
-exec "$repo_root/scripts/with-ios-privy-env.sh" "$global_ios_sim" "$@"
+xcrun simctl boot "$udid" >/dev/null 2>&1 || true
+xcrun simctl bootstatus "$udid" -b
+xcrun simctl install "$udid" "$app_path"
+xcrun simctl launch "$udid" "$bundle_id"
+echo "launched ${bundle_id} on ${udid}"

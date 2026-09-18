@@ -1,6 +1,6 @@
 # Ops: sweep USDC out of Privy wallets
 
-One-off helper. Not the product deposit poller. Moves **mainnet USDC** from Monaco-controlled Privy Solana wallets to `--destination`.
+One-off helper. Not the product deposit poller. Sells **non-USDC SPL** (xStocks, etc.) to USDC on Jupiter, then moves **mainnet USDC** from Monaco-controlled Privy Solana wallets to `--destination`.
 
 Product path stays: member inbox → treasury (poller) → **in-app redeem**. Use this when funds are stuck in Privy and redeem cannot reach them, or when cleaning QA wallets.
 
@@ -9,7 +9,7 @@ Product path stays: member inbox → treasury (poller) → **in-app redeem**. Us
 - Same Privy app as `.env.local`. `--all` lists **every** Solana wallet in that app, including treasuries that hold live pots.
 - Live run can break share credits, pending deposits, and group NAV. Relayer pays SOL fees.
 - Confirm `DATABASE_URL` (default local compose) and Privy app id before a live run.
-- `--dry-run` does not send txs. Still talks to Privy + RPC for balances.
+- `--dry-run` does not send txs. Still talks to Privy + Solana RPC for balances and Jupiter for sell quotes.
 
 ## Run
 
@@ -42,11 +42,17 @@ Then paste `--destination` again. No `--yes`. Wrong phrase aborts.
 | --- | --- | --- |
 | `--destination` | yes | Base58 Solana address that receives USDC. |
 | `--all` | no | Privy is source of truth: paginated `GET /v1/wallets?chain_type=solana` (no `user_id`). |
-| `--dry-run` | no | Log planned sweeps. Skip `SubmitSweep`. Skip confirm. |
+| `--dry-run` | no | Log planned Jupiter sells + USDC sweeps. Skip sign/send. Skip confirm. |
 
 Without `--all`, sources are Postgres `member_wallets` and `treasuries` for `DATABASE_URL`.
 
-Skips: zero USDC, source address equal to destination. Amounts are USDC micro-units (`1_000_000` = $1).
+Per wallet:
+
+1. Skip `RELAYER_PRIVATE_KEY` fee payer (never drain).
+2. For each non-USDC SPL balance: Jupiter sell → USDC (relayer pays SOL when treasury holds 0 SOL).
+3. Sweep all USDC to `--destination`.
+
+Skips: zero USDC after sells, source address equal to destination, relayer. Native SOL is not swept. Amounts are token atomics (USDC micro-units: `1_000_000` = $1).
 
 ## Env
 
@@ -54,8 +60,9 @@ Skips: zero USDC, source address equal to destination. Amounts are USDC micro-un
 
 - `PRIVY_APP_ID`, `PRIVY_APP_SECRET`
 - `PRIVY_AUTHORIZATION_PRIVATE_KEY`, `PRIVY_AUTHORIZATION_KEY_ID` (server sign)
-- `RELAYER_PRIVATE_KEY` (fee payer; needs SOL)
-- `DATABASE_URL` (always loaded; only queried when `--all` is off)
+- `RELAYER_PRIVATE_KEY` (fee payer; needs SOL; never swept)
+- `SOLANA_RPC_URL` (optional; recommended for `--all` scans; defaults to public mainnet RPC)
+- `DATABASE_URL` (always loaded; classifies member/treasury when `--all` is on)
 
 ## After a sweep
 

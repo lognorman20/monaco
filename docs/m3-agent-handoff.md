@@ -1,6 +1,6 @@
 # M3 agent handoff — Jupiter buy/sell
 
-**Read this first.** Pick up Milestone 3 after M2 landed on `milestone-2`. Plan of record: [`docs/milestones/m3-jupiter.md`](milestones/m3-jupiter.md). Prior handoff: [`docs/m2-agent-handoff.md`](m2-agent-handoff.md). Repo root: `/Users/logno/Documents/work/github/monaco`.
+**Read this first.** Pick up Milestone 3 after M2 landed on `milestone-2`. Plan of record: [`docs/milestones/m3-jupiter.md`](milestones/m3-jupiter.md). Prior handoff: [`docs/m2-agent-handoff.md`](m2-agent-handoff.md). Repo root: the clone directory (not a personal home path).
 
 ---
 
@@ -274,11 +274,11 @@ All three wallets USDC balance **0** on-chain. No stuck member USDC remains from
 ## 8. Fast verify (copy-paste)
 
 ```bash
-cd /Users/logno/Documents/work/github/monaco
+cd <clone-root>
 
 dotenvx run -f .env.local -- just test backend
 just test mobile
-just build mobile   # $SIMSLIM_UDID only
+just build mobile
 curl -s http://127.0.0.1:8080/health
 ```
 

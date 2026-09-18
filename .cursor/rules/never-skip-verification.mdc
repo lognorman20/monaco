@@ -1,0 +1,25 @@
+---
+description: Never skip verification unless the user explicitly says to skip
+alwaysApply: true
+---
+
+# Never Skip Verification
+
+**NEVER** skip verification steps unless the user explicitly says to skip in the **current** message.
+
+Verification includes:
+- Ticket Done-when / verification commands
+- Milestone "Manual verification" / demo scripts (e.g. `docs/milestones/m4-domain.md`, `docs/milestones/m5-demo-script.md`)
+- `just test` / `just build` gates
+- Gold-sim QA / tap-through (UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`)
+- Browser verification for web UI
+
+Blocked without explicit skip in the current message:
+- Inferring skip from "gates are enough"
+- Red CI elsewhere in the repo
+- Time pressure or orchestration closeout
+- Assuming automated checks cover manual steps
+
+Orchestrators (M4/M5 worktree-orchestrate): run full manual verification sections before milestone closeout — not just workspace done gate.
+
+If verification is blocked (env, credentials, flaky infra): report what failed and what remains — do not mark done or close the milestone.

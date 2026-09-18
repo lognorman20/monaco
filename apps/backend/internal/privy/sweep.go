@@ -17,6 +17,7 @@ const (
 	usdcMintAddress      = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 	solanaMainnetCAIP2 = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
 	tokenProgramID     = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+	token2022ProgramID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 	associatedTokenProg  = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
 	systemProgramID      = "11111111111111111111111111111111"
 )

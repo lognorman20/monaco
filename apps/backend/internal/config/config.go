@@ -19,6 +19,7 @@ const (
 	envPrivyAuthorizationPrivateKey  = "PRIVY_AUTHORIZATION_PRIVATE_KEY"
 	envPrivyAuthorizationKeyID       = "PRIVY_AUTHORIZATION_KEY_ID"
 	envRelayerPrivateKey             = "RELAYER_PRIVATE_KEY"
+	envSolanaRPCURL                  = "SOLANA_RPC_URL"
 	envPythAPIKey                    = "PYTH_API_KEY"
 )
 
@@ -47,6 +48,7 @@ type Config struct {
 	PrivyAuthorizationPrivateKey  string
 	PrivyAuthorizationKeyID       string
 	RelayerPrivateKey             string
+	SolanaRPCURL                  string
 	PythAPIKey                    string
 	SolanaCluster                 string
 }
@@ -61,6 +63,7 @@ func Load() (*Config, error) {
 		PrivyAuthorizationPrivateKey: strings.TrimSpace(os.Getenv(envPrivyAuthorizationPrivateKey)),
 		PrivyAuthorizationKeyID:      strings.TrimSpace(os.Getenv(envPrivyAuthorizationKeyID)),
 		RelayerPrivateKey:            strings.TrimSpace(os.Getenv(envRelayerPrivateKey)),
+		SolanaRPCURL:                 strings.TrimSpace(os.Getenv(envSolanaRPCURL)),
 		PythAPIKey:                   strings.TrimSpace(os.Getenv(envPythAPIKey)),
 		SolanaCluster:                SolanaCluster,
 	}

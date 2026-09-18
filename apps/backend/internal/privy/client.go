@@ -43,6 +43,7 @@ func NewHTTPClient(cfg *config.Config) *HTTPClient {
 		privyAuthorizationKeyID:      cfg.PrivyAuthorizationKeyID,
 		baseURL:                      defaultBaseURL,
 		solanaCluster:                cfg.SolanaCluster,
+		solanaRPCURL:                 cfg.SolanaRPCURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},

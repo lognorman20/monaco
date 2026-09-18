@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		B463064130590361008E7964 /* Privy in Frameworks */ = {isa = PBXBuildFile; productRef = B463064030590361008E7964 /* Privy */; };
+		C0DE000330590361008E7964 /* MonacoCore in Frameworks */ = {isa = PBXBuildFile; productRef = C0DE000230590361008E7964 /* MonacoCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -58,6 +59,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B463064130590361008E7964 /* Privy in Frameworks */,
+				C0DE000330590361008E7964 /* MonacoCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -128,6 +130,7 @@
 			name = Monaco;
 			packageProductDependencies = (
 				B463064030590361008E7964 /* Privy */,
+				C0DE000230590361008E7964 /* MonacoCore */,
 			);
 			productName = Monaco;
 			productReference = B46306133059035D008E7964 /* Monaco.app */;
@@ -213,6 +216,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				B463063F30590361008E7964 /* XCRemoteSwiftPackageReference "privy-ios" */,
+				C0DE000130590361008E7964 /* XCLocalSwiftPackageReference "../../packages/mobile-core" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = B46306143059035D008E7964 /* Products */;
@@ -602,6 +606,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		C0DE000130590361008E7964 /* XCLocalSwiftPackageReference "../../packages/mobile-core" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../packages/mobile-core;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		B463063F30590361008E7964 /* XCRemoteSwiftPackageReference "privy-ios" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -618,6 +629,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B463063F30590361008E7964 /* XCRemoteSwiftPackageReference "privy-ios" */;
 			productName = Privy;
+		};
+		C0DE000230590361008E7964 /* MonacoCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C0DE000130590361008E7964 /* XCLocalSwiftPackageReference "../../packages/mobile-core" */;
+			productName = MonacoCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

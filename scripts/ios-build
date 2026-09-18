@@ -1,20 +1,14 @@
 #!/usr/bin/env bash
-# Monaco iOS compile for gold sim. Generates Privy xcconfig from .env.local first.
+# Monaco iOS compile with Privy xcconfig. Uses SimSlim gold when ready, else stock sim.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 ./scripts/ensure-ios-privy-config.sh generate
+udid="$(./scripts/resolve-ios-sim.sh)"
 
-global_ios_build="$(command -v ios-build || true)"
-if [[ -z "$global_ios_build" || "$global_ios_build" == "$repo_root/scripts/ios-build" ]]; then
-  global_ios_build="${HOME}/.local/bin/ios-build"
-fi
-if [[ ! -x "$global_ios_build" ]]; then
-  echo "error: ios-build not found (~/.local/bin). Use: just build mobile" >&2
-  exit 1
-fi
-
-cd apps/mobile
-exec "$global_ios_build" "$@"
+xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
+  -destination "platform=iOS Simulator,id=${udid}" \
+  -configuration Debug \
+  build

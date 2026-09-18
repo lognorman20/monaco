@@ -19,7 +19,7 @@ final class ProposalsAPITests: XCTestCase {
                 capturedQuery = URLComponents(url: url, resolvingAgainstBaseURL: false)?.query
             }
             let body = """
-            {"assets":[{"symbol":"AAPLx","name":"Apple xStock"}]}
+            {"assets":[{"symbol":"AAPLx","name":"Apple xStock"}],"hasMore":false}
             """
             let response = HTTPURLResponse(
                 url: request.url!,
@@ -44,6 +44,8 @@ final class ProposalsAPITests: XCTestCase {
         XCTAssertTrue(capturedQuery?.contains("query=AAPL") == true)
         XCTAssertEqual(result.assets.count, 1)
         XCTAssertEqual(result.assets[0].symbol, "AAPLx")
+        XCTAssertEqual(result.assets[0].name, "Apple xStock")
+        XCTAssertFalse(result.hasMore)
     }
 
     func testAPIClient_postQuotes_sendsSymbolAndUsdc() async throws {

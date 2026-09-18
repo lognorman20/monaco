@@ -9,6 +9,52 @@ _dotenvx := "./scripts/with-dotenv-local.sh"
 default:
     @just --list
 
+# Interactive clone setup. Asks before each install. `just install --check` reports only.
+install *flags:
+    ./scripts/install-dev.sh {{flags}}
+
+# Encrypt or decrypt repo-root .env.local via dotenvx (file ops — not with-dotenv-local re-exec).
+encrypt:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ ! -f .env.local ]]; then
+      echo "error: .env.local missing — copy .env.example to .env.local, or place a teammate encrypted .env.local plus .env.keys in the clone root." >&2
+      exit 1
+    fi
+    if ! command -v dotenvx >/dev/null 2>&1; then
+      echo "error: dotenvx not on PATH. Install: https://dotenvx.com/docs/install" >&2
+      exit 1
+    fi
+    dotenvx encrypt -f .env.local
+    if [[ -f .env.production ]]; then
+      dotenvx encrypt -f .env.production
+    fi
+
+decrypt:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ ! -f .env.local ]]; then
+      echo "error: .env.local missing — copy .env.example to .env.local, or place a teammate encrypted .env.local plus .env.keys in the clone root." >&2
+      exit 1
+    fi
+    if ! command -v dotenvx >/dev/null 2>&1; then
+      echo "error: dotenvx not on PATH. Install: https://dotenvx.com/docs/install" >&2
+      exit 1
+    fi
+    dotenvx decrypt -f .env.local
+    if [[ -f .env.production ]]; then
+      dotenvx decrypt -f .env.production
+    fi
+
+# Print decrypted .env.local keys/values (.env.production omitted).
+show-env:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{_dotenvx}} dotenvx get -f .env.local --format eval-export
+    if [[ -f .env.production ]]; then
+      echo "note: .env.production exists but is omitted (dev default)." >&2
+    fi
+
 build app:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -28,10 +74,7 @@ build app:
         fi
         # ensure-ios-privy-config reads .env.local via dotenvx get → Privy.local.xcconfig
         ./scripts/ensure-ios-privy-config.sh generate
-        gold_udid="$(./scripts/gold-sim-udid.sh)"
-        xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
-          -destination "platform=iOS Simulator,id=${gold_udid}" \
-          -configuration Debug build
+        ./scripts/ios-build
         ;;
       *)
         echo "error: unknown app '{{app}}' (use backend or mobile)"
@@ -164,7 +207,7 @@ run *app:
           echo "error: apps/mobile is not scaffolded yet (M0-T4)."
           exit 1
         fi
-        # Privy: xcconfig + SIMCTL_CHILD_* via with-ios-privy-env, then gold ios-sim
+        # Privy: xcconfig + SIMCTL_CHILD_* via with-ios-privy-env, then scripts/ios-sim
         source ./scripts/run-with-logs.sh
         monaco_init_logs
         ./scripts/ios-sim 2>&1 | tee -a "${MONACO_LOG_DIR}/mobile.log"
@@ -220,7 +263,7 @@ reset *target:
           echo "error: apps/mobile is not scaffolded yet (M0-T4)."
           exit 1
         fi
-        gold_udid="$(./scripts/gold-sim-udid.sh)"
+        gold_udid="$(./scripts/resolve-ios-sim.sh)"
         xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
           -destination "platform=iOS Simulator,id=${gold_udid}" \
           clean
@@ -234,6 +277,22 @@ reset *target:
         ;;
       *)
         echo "error: unknown target '{{target}}' (use backend, mobile, or db)"
+        exit 1
+        ;;
+    esac
+
+relayer target:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{target}}" in
+      balance)
+        if [[ "${MONACO_DOTENVX:-}" != "1" ]]; then
+          exec {{_dotenvx}} env MONACO_DOTENVX=1 just relayer balance
+        fi
+        go run -C apps/backend ./cmd/print-relayer-pubkey
+        ;;
+      *)
+        echo "error: unknown target '{{target}}' (use balance)"
         exit 1
         ;;
     esac

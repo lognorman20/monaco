@@ -7,7 +7,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 if [[ ! -f .env.local ]]; then
-  echo "error: .env.local missing — copy .env.example to .env.local and set values (dotenvx set … -f .env.local)." >&2
+  echo "error: .env.local missing — copy .env.example to .env.local, or place a teammate encrypted .env.local plus .env.keys in the clone root." >&2
   exit 1
 fi
 

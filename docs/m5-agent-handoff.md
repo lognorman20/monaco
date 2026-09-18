@@ -1,6 +1,6 @@
 # M5 agent handoff — Mobile product UI
 
-**Read this first.** Pick up Milestone 5 after M4 landed on `milestone-4`. Plan of record: [`docs/milestones/m5-mobile.md`](milestones/m5-mobile.md). Prior handoff: [`docs/m4-agent-handoff.md`](m4-agent-handoff.md). Repo root: `/Users/logno/Documents/work/github/monaco`.
+**Read this first.** Pick up Milestone 5 after M4 landed on `milestone-4`. Plan of record: [`docs/milestones/m5-mobile.md`](milestones/m5-mobile.md). Prior handoff: [`docs/m4-agent-handoff.md`](m4-agent-handoff.md). Repo root: the clone directory (not a personal home path).
 
 ---
 
@@ -184,7 +184,7 @@ Read first, in order:
 4. AGENTS.md
 5. .cursor/skills/ios-simslim-fast-qa/SKILL.md (only if you touch sim)
 
-Repo: /Users/logno/Documents/work/github/monaco
+Repo: clone root (not a personal home path)
 
 Branch:
 - Base: milestone-4 (verify tip; was 6467ea0 — use actual `git rev-parse milestone-4`)
@@ -214,7 +214,7 @@ Product:
 Gates (must stay green). Do not change just test/build recipes:
   dotenvx run -f .env.local -- just test backend
   just test mobile          # host swift test packages/mobile-core — no sim
-  just build mobile         # $SIMSLIM_UDID only
+just build mobile
   curl -s http://127.0.0.1:8080/health
 
 QA (if sim):

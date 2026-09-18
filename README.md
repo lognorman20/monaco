@@ -1,6 +1,6 @@
-# Monaco, group treasuries for tokenized stocks
+# Monaco
 
-**Monaco** is an iOS app where friends form a group, pool USDC, and buy tokenized US stocks on Solana. Built for [Stocklana](https://hackathons.solana.com/hackathons/stocklana). Submit by **18 Sep 2026, 4:00pm ET**.
+**Monaco** is an iOS app where friends form a group, pool USDC, and buy tokenized US stocks on Solana.
 
 This document is the canonical product and architecture brief. It is not legal advice.
 
@@ -8,50 +8,59 @@ Prize target is the general Stocklana pool. Judges ask whether this could be a r
 
 ## Getting started with development
 
-**Prereqs:** Docker, Go, Xcode/Swift, [dotenvx CLI](https://dotenvx.com/docs/install). iOS run: Xcode Simulator is enough (**[Without slim sim](#without-slim-sim)**). Slim gold sim + `ios-sim` / `ios-build` on PATH is optional RAM/agent wiring (**[SimSlim](#simslim-gold-simulator)**).
+**Prereqs:** macOS, Xcode (iOS 18+ simulator), Docker, Go 1.23+, [just](https://github.com/casey/just), [dotenvx CLI](https://dotenvx.com/docs/install). SimSlim is optional.
 
-**One-time env setup**
+**Clone setup**
 
-1. Copy `.env.example` → `.env.local`.
-2. Set values: `dotenvx set KEY value -f .env.local` (encrypts by default; `--plain` for non-secrets).
-3. Encrypt if needed: `dotenvx encrypt -f .env.local`.
+1. Clone this repo. `cd` into the clone. Do not hard-code another machine's home path.
+2. Place gitignored `.env.keys` in the repo root if a teammate encrypted `.env.local` for you. Also place that `.env.local`. dotenvx reads both from the clone root.
+3. If you have no `.env.local` yet, copy `.env.example` to `.env.local` and set Privy plus relayer values with `dotenvx set KEY value -f .env.local`.
+4. Run `./scripts/install-dev.sh` (or `just install`). It asks before each install (Go, just, dotenvx, optional SimSlim). `just install --check` only reports.
+5. `just run` starts Postgres, the API, and the iOS app. Privy is injected via `scripts/ensure-ios-privy-config.sh` and `SIMCTL_CHILD_*`. If SimSlim is missing, the scripts warn and boot a stock simulator.
 
-Secrets, private keys, and pre-commit hooks: see **[Local env](#local-env)** below. Do not wrap `just` with `dotenvx run` manually — recipes that need secrets re-exec under `scripts/with-dotenv-local.sh`.
+Do not wrap `just` with `dotenvx run` yourself. Recipes that need secrets re-exec under `scripts/with-dotenv-local.sh`. More on secrets: **[Local env](#local-env)**.
 
 **Privy test logins** (fixed OTP; dashboard Login Methods must have **Email** and **SMS** on). Product path is OTP, not a password field. iOS bundle `com.monaco.app` must be on the Privy iOS client or `sendCode` returns 403 `invalid_native_app_id`. Sign out in-app to switch users.
 
-| Name | Method | Login | OTP |
-| --- | --- | --- | --- |
-| Alfred | Email | `test-8081@privy.io` | `465354` |
-| QA SMS | SMS | `+15555557177` | `465354` |
 
-Demo “second account”: sign out, then the other method (or a second Privy test user). Same OTP for both of these.
+| Name        | Method       | Login                                                          | OTP      |
+| ----------- | ------------ | -------------------------------------------------------------- | -------- |
+| Alfred      | Email or SMS | `test-8081@privy.io` or `+1 555 555 7177`                      | `465354` |
+| Bartholomez | Email or SMS | `test-4952@privy.io` or `+1 555 555 9638`                      | `648588` |
+| Cayman      | Email or SMS | `test-3510@privy.io` or `+1 555 555 8215`                      | `115543` |
 
 **Commands**
 
-| Command | What it does |
-| --- | --- |
-| `just run` | Full stack: Postgres + API + iOS app (dotenvx re-exec) |
-| `just run backend` | API only (dotenvx) |
-| `just run mobile` | iOS on gold sim — Privy xcconfig + `SIMCTL_CHILD_*` via `./scripts/ios-sim` |
-| Logs | `just run*` tee stdout/stderr to `.logs/<timestamp>/` (`backend.log`, `mobile.log`) |
-| `just stop` | Stop API + iOS app (kill port 8080, `simctl terminate` on gold sim) |
-| `just stop backend` | Stop API only |
-| `just stop mobile` | Terminate Monaco on gold sim; stop `xcodebuild` if running |
-| `just reset` | Stop all + wipe local Postgres volume + re-apply migrations (dotenvx) |
-| `just reset backend` | Stop API + remove `bin/monaco-api` |
-| `just reset mobile` | Stop app + `xcodebuild clean` on gold sim |
-| `just reset db` | Wipe local Docker Postgres volume + migrations (localhost only, dotenvx) |
-| `just killports` | Kill listeners on API port (default 8080; not Postgres 54322) |
-| `just test backend` | Go tests + local DB smoke (dotenvx) |
-| `just test mobile` | Host `swift test` in `packages/mobile-core` — fast, no secrets |
-| `just build backend` | `go build` only — no dotenvx |
-| `just build mobile` | Privy xcconfig, then `xcodebuild` on gold sim |
-| `./scripts/ios-sim` | Monaco run with Privy env (prefer over bare `ios-sim`) |
-| `./scripts/ios-build` | Monaco compile with Privy xcconfig |
-| `./scripts/sweep-wallets.sh` | **Ops.** Sweep USDC out of Privy wallets. See **[Ops: sweep USDC](#ops-sweep-usdc-out-of-privy-wallets)** |
 
-Gold slim UDID is **per machine** (`SIMSLIM_UDID`). iOS sim: **[SimSlim](#simslim-gold-simulator)** or **[Without slim sim](#without-slim-sim)**.
+| Command                      | What it does                                                                                                                                                           |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `just install`               | Ask before installing missing tools. `just install --check` reports only                                                                                               |
+| `just encrypt`               | `dotenvx encrypt` on `.env.local` (and `.env.production` if present)                                                                                                   |
+| `just decrypt`               | `dotenvx decrypt` on `.env.local` (and `.env.production` if present)                                                                                                   |
+| `just show-env`              | Print decrypted `.env.local` keys/values via dotenvx (`export KEY='value'` lines; `.env.production` omitted). Needs `.env.local`, dotenvx, and `.env.keys` or Keychain |
+| `just run`                   | Full stack: Postgres + API + iOS app (dotenvx re-exec, Privy on sim)                                                                                                   |
+| `just run backend`           | API only (dotenvx)                                                                                                                                                     |
+| `just run mobile`            | iOS with Privy xcconfig + `SIMCTL_CHILD_*` via `./scripts/ios-sim`                                                                                                     |
+| Logs                         | `just run*` tee stdout/stderr to `.logs/<timestamp>/` (`backend.log`, `mobile.log`)                                                                                    |
+| `just stop`                  | Stop API + iOS app (kill port 8080, `simctl terminate` on the resolved sim)                                                                                            |
+| `just stop backend`          | Stop API only                                                                                                                                                          |
+| `just stop mobile`           | Terminate Monaco on the resolved sim; stop `xcodebuild` if running                                                                                                     |
+| `just reset`                 | Stop all + wipe local Postgres volume + re-apply migrations (dotenvx)                                                                                                  |
+| `just reset backend`         | Stop API + remove `bin/monaco-api`                                                                                                                                     |
+| `just reset mobile`          | Stop app + `xcodebuild clean` on the resolved sim                                                                                                                      |
+| `just reset db`              | Wipe local Docker Postgres volume + migrations (localhost only, dotenvx)                                                                                               |
+| `just killports`             | Kill listeners on API port (default 8080; not Postgres 54322)                                                                                                          |
+| `just test backend`          | Go tests + local DB smoke (dotenvx)                                                                                                                                    |
+| `just test mobile`           | Host `swift test` in `packages/mobile-core` — fast, no secrets                                                                                                         |
+| `just build backend`         | `go build` only — no dotenvx                                                                                                                                           |
+| `just build mobile`          | Privy xcconfig, then `xcodebuild` on the resolved sim                                                                                                                  |
+| `just relayer balance`       | Fee payer pubkey + mainnet SOL balance (dotenvx; no private key)                                                                                                       |
+| `./scripts/ios-sim`          | Monaco run with Privy env. Falls back to a stock sim if slim is missing                                                                                                |
+| `./scripts/ios-build`        | Monaco compile with Privy xcconfig                                                                                                                                     |
+| `./scripts/sweep-wallets.sh` | **Ops.** Sweep USDC out of Privy wallets. See **[Ops: sweep USDC](#ops-sweep-usdc-out-of-privy-wallets)**                                                              |
+
+
+Simulator UDID is **per machine**. Never commit one. Recipes call `scripts/resolve-ios-sim.sh`. Optional slim: **[SimSlim](#simslim-gold-simulator)**.
 
 Live deposit QA on mainnet needs a **Phantom agent wallet** (not Privy, not `.env.local`). Install, fund (~$1 SOL + ~$4 USDC on Solana), send into the member inbox, then redeem leftover back: **[Agent QA: Phantom MCP](#agent-qa-phantom-mcp)**.
 
@@ -64,6 +73,8 @@ Live deposit QA on mainnet needs a **Phantom agent wallet** (not Privy, not `.en
 - **Cash out is a primary flow.** Partial redeem to USDC at a payout address the user proved they own. Full exit is the same path with the amount at max.
 - **Shippable Friday scope.** Native SwiftUI, Go API, Supabase Postgres, Privy auth and wallets, Jupiter swaps. No custom Solana program.
 
+
+
 ## How it works
 
 1. Sign in with SMS or email and password via Privy.
@@ -72,6 +83,8 @@ Live deposit QA on mainnet needs a **Phantom agent wallet** (not Privy, not `.en
 4. Propose a buy from the xStocks catalog. The group's voter set must pass it under the creator's threshold and expiry. Then the backend swaps treasury USDC for the token on Jupiter.
 5. Live on the group screen: pot composition, your slice, dollar P&L, percent return, and the in-group member leaderboard.
 6. Redeem some or all share units whenever you want. The backend sells that slice to USDC and pays a verified payout address.
+
+
 
 ## Groups and invites
 
@@ -83,6 +96,8 @@ At create, the **group creator** sets:
 - **Voter set.** Either a named subset of members (minimum size 1, which may be only the creator) or every member.
 - **Vote threshold.** Unanimous among the voter set, or majority among the voter set.
 - **Vote expiry.** A duration the creator chooses. If the proposal does not pass before expiry, it dies and no swap runs.
+
+
 
 ## Votes and buys
 
@@ -119,6 +134,8 @@ SwiftUI (iOS 17+)
   → Jupiter Swap API v2 (USDC → xStocks)
 ```
 
+
+
 ### Wallets
 
 A **wallet** is a keypair on a chain. On Solana the public key is the **address** (base58). The private key **signs** transactions. The address holds:
@@ -130,28 +147,42 @@ You do not “log into Solana.” You hold keys that can move whatever sits at t
 
 Product copy hides this. Devs still need it for QA.
 
-| Wallet | Owner | Role |
-| --- | --- | --- |
-| Member wallet | One per user (Privy) | Deposit inbox. Unique attribution for who funded. Backend-signable via Privy. |
-| Group treasury (vault) | One per group (Privy, app-owned) | Holds USDC and tokenized stocks. All group trades execute from here. |
-| Relayer / fee payer | App | Pays SOL fees so treasury and member wallets need no SOL on the happy path. |
-| Phantom **agent** wallet | Coding-agent harness | **Not product.** Funds member inboxes for mainnet QA; leftover USDC returns here. Separate keys from Privy and from your phone Phantom. |
+
+| Wallet                   | Owner                            | Role                                                                                                                                    |
+| ------------------------ | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Member wallet            | One per user (Privy)             | Deposit inbox. Unique attribution for who funded. Backend-signable via Privy.                                                           |
+| Group treasury (vault)   | One per group (Privy, app-owned) | Holds USDC and tokenized stocks. All group trades execute from here.                                                                    |
+| Relayer / fee payer      | App                              | Pays SOL fees so treasury and member wallets need no SOL on the happy path.                                                             |
+| Phantom **agent** wallet | Coding-agent harness             | **Not product.** Funds member inboxes for mainnet QA; leftover USDC returns here. Separate keys from Privy and from your phone Phantom. |
+
+
+
 
 ### Fee payer (relayer)
 
 The app **fee payer** is a dedicated Solana keypair loaded from `RELAYER_PRIVATE_KEY` (base58 secret in `.env.local`). Never commit or log the private key. At API startup the backend derives the public key and refuses to boot unless that address holds **more than 0.001 SOL** on mainnet (gas + ATA rent for sweeps and Jupiter txs).
 
-| Item | Value |
-| --- | --- |
-| Env (secret) | `RELAYER_PRIVATE_KEY` — base58 Solana secret key (not a JSON `[1,2,...]` array) |
-| Pubkey | Derived at startup from the secret; logged as `pubkey=` on boot (no private key) |
-| Role | Jupiter swap `payer`; relayer on deposit sweeps (Privy `SubmitSweep`) |
+
+| Item            | Value                                                                                                                    |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Env (secret)    | `RELAYER_PRIVATE_KEY` — base58 Solana secret key (not a JSON `[1,2,...]` array)                                          |
+| Pubkey          | Derived at startup from the secret; logged as `pubkey=` on boot (no private key)                                         |
+| Role            | Jupiter swap `payer`; relayer on deposit sweeps (Privy `SubmitSweep`)                                                    |
 | SOL requirement | Balance **> 0.001 SOL** (`1_000_000` lamports). Fund on [Solana mainnet](https://solscan.io/) before `just run backend`. |
 
-Print the fee payer pubkey without echoing the secret:
+
+Print the fee payer pubkey and mainnet SOL/USDC balances without echoing the secret:
 
 ```bash
-dotenvx run -f .env.local -- go run ./apps/backend/cmd/print-relayer-pubkey
+just relayer balance
+```
+
+Example output:
+
+```text
+address  EpeyGQXFY9vhkxPUZbz1wVRhs5vphRQt8SeJN2Gx1DrX
+sol      0.003044217
+usdc     0.00
 ```
 
 Users never manage keys or approve individual Solana transactions in the happy path. The backend signs sweeps, swaps, and payouts.
@@ -188,11 +219,13 @@ Personal wallet first — that is how you buy SOL/USDC and top up the agent addr
 3. Write down the recovery phrase / PIN. Never paste it into git, tickets, or chat.
 4. Overview: [Get started](https://phantom.com/get-started). Help: [help.phantom.com](https://help.phantom.com).
 
+
+
 ### Install the Phantom MCP (agent wallet)
 
 This is the **wallet MCP** (`@phantom/mcp-server`): sign, transfer, swap. It is not the docs-only MCP at `https://docs.phantom.com/mcp`.
 
-Docs: [Phantom MCP server](https://docs.phantom.com/phantom-mcp-server) · [Setup](https://docs.phantom.com/phantom-mcp-server/setup) · npm [`@phantom/mcp-server`](https://www.npmjs.com/package/@phantom/mcp-server) · [Cursor MCP](https://cursor.com/docs/context/mcp)
+Docs: [Phantom MCP server](https://docs.phantom.com/phantom-mcp-server) · [Setup](https://docs.phantom.com/phantom-mcp-server/setup) · npm `[@phantom/mcp-server](https://www.npmjs.com/package/@phantom/mcp-server)` · [Cursor MCP](https://cursor.com/docs/context/mcp)
 
 **Cursor plugin (easiest):** marketplace search `phantom-connect` / Add Plugin. Bundles wallet MCP + docs MCP. See [AI-assisted development](https://docs.phantom.com/developer-powertools/ai-tools).
 
@@ -219,10 +252,12 @@ On auth, Phantom mints a **new agent wallet**. It is not your extension wallet. 
 
 The agent cannot transact on an empty wallet.
 
-| Asset | Why | Ballpark |
-| --- | --- | --- |
+
+| Asset                     | Why                                                                                                 | Ballpark            |
+| ------------------------- | --------------------------------------------------------------------------------------------------- | ------------------- |
 | SOL on **Solana mainnet** | Fees when the agent sends USDC to a member inbox (and ATA rent if the dest has no USDC account yet) | about **$1** of SOL |
-| USDC on **Solana** | What the app actually credits after sweep | about **$4** |
+| USDC on **Solana**        | What the app actually credits after sweep                                                           | about **$4**        |
+
 
 Buy or swap inside personal Phantom, then send **SOL** and **Solana USDC** to the **agent** Solana address. Or buy in-app onto the agent address if Phantom shows it. Confirm mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. Ask the agent for `wallet_balances` before the first transfer.
 
@@ -266,16 +301,18 @@ Product path is poller member-inbox → treasury, then **in-app redeem**. Use th
 ./scripts/sweep-wallets.sh --destination <solana_address> --all
 ```
 
-| Flag | Meaning |
-| --- | --- |
-| `--destination` | Required. Receives all swept USDC. |
-| `--all` | Source of truth = Privy `GET /v1/wallets?chain_type=solana` (paginated). Skips Postgres. |
-| *(omit `--all`)* | Source = local `member_wallets` + `treasuries` for the `DATABASE_URL` in `.env.local`. |
-| `--dry-run` | Print balances and `would sweep` lines. No txs. No confirm prompt. |
+
+| Flag               | Meaning                                                                                  |
+| ------------------ | ---------------------------------------------------------------------------------------- |
+| `--destination`    | Required. Receives all swept USDC.                                                       |
+| `--all`            | Source of truth = Privy `GET /v1/wallets?chain_type=solana` (paginated). Skips Postgres. |
+| *(omit* `--all`*)* | Source = local `member_wallets` + `treasuries` for the `DATABASE_URL` in `.env.local`.   |
+| `--dry-run`        | Print balances and `would sweep` lines. No txs. No confirm prompt.                       |
+
 
 Needs `.env.local` (`PRIVY_*`, `RELAYER_PRIVATE_KEY`, `DATABASE_URL`). Wrapper is `scripts/with-dotenv-local.sh`. Amounts are micro-USDC (`1000000` = $1). Zero-balance wallets skip. Destination equal to a source skips.
 
-Code: `apps/backend/cmd/sweep-member-to-address`. Full notes: [`docs/ops-sweep-wallets.md`](docs/ops-sweep-wallets.md).
+Code: `apps/backend/cmd/sweep-member-to-address`. Full notes: `[docs/ops-sweep-wallets.md](docs/ops-sweep-wallets.md)`.
 
 ## NAV and share units
 
@@ -365,6 +402,8 @@ They receive USDC equal to their redeemed fraction of the pot at that moment, no
 | Marks            | Jupiter fill + [Pyth Hermes](https://docs.pyth.network/price-feeds/core/api-instances-and-providers/hermes)  |
 
 
+
+
 ## Local env
 
 Secrets use [dotenvx](https://dotenvx.com). Install the CLI (not a repo dependency):
@@ -376,8 +415,9 @@ brew tap dotenvx/brew && brew trust dotenvx/brew && brew install dotenvx
 Or `curl -sfS https://dotenvx.sh | sh`. See [install docs](https://dotenvx.com/docs/install).
 
 1. Copy `.env.example` → `.env.local` for local dev. Optionally add `.env.production`.
-2. Encrypt: `dotenvx encrypt -f .env.local` (and `-f .env.production` if used).
-3. Set values: `dotenvx set KEY value -f .env.local` (encrypts by default; `--plain` for non-secrets).
+2. Encrypt: `just encrypt` (or `dotenvx encrypt -f .env.local`; also encrypts `.env.production` when that file exists). Decrypt: `just decrypt`.
+3. Inspect: `just show-env` prints decrypted `.env.local` as `export KEY='value'` lines via dotenvx (`.env.production` omitted). Needs `.env.local`, dotenvx, and `.env.keys` or Keychain.
+4. Set values: `dotenvx set KEY value -f .env.local` (encrypts by default; `--plain` for non-secrets).
 
 Justfile `dotenv-load` only reads plain `.env` — not dotenvx ciphertext. Recipes that need secrets re-exec once under `dotenvx run -f .env.local` (via `scripts/with-dotenv-local.sh`). Mobile Privy uses `scripts/ensure-ios-privy-config.sh` (xcconfig) + `SIMCTL_CHILD_*` at sim launch.
 
@@ -385,122 +425,73 @@ Day-to-day commands: **[Getting started with development](#getting-started-with-
 
 ### Running the stack
 
-Need `.env.local` from one-time setup above. API: `just run backend`. iOS: slim gold path below, or **[stock Simulator](#without-slim-sim)** if you never installed SimSlim.
+Need `.env.local` (and `.env.keys` when the file is encrypted) from clone setup above. API: `just run backend`. iOS: `just run mobile` always injects Privy. SimSlim is optional RAM savings, not required.
 
 #### SimSlim (gold simulator)
 
-**SimSlim** turns one iOS Simulator into a RAM-thin “gold” device (~0.9 GB vs ~4 GB stock) by disabling unused sim daemons. Pick **one** sim per machine, slim it, reuse it. Apple mints a new UUID on `simctl create` — **never commit a UDID**. Recipes read **`SIMSLIM_UDID`**.
+**SimSlim** turns one iOS Simulator into a RAM-thin “gold” device (~0.9 GB vs ~4 GB stock) by disabling unused sim daemons. Pick **one** sim per machine, slim it, reuse it. Apple mints a new UUID on `simctl create` — **never commit a UDID**. Recipes read `SIMSLIM_UDID`.
 
 Never `simctl erase` that device (wipe kills slim + the app container). Never target by device name (`iPhone 17`). Always `$SIMSLIM_UDID`.
 
-Slim is **not** required to develop. It is required for `just run mobile` / `./scripts/ios-sim` (PATH wrappers) and for agent QA that assumes gold. Humans without slim: skip to **[Without slim sim](#without-slim-sim)**.
+Slim is **not** required to develop. `just run`, `just run mobile`, and `./scripts/ios-sim` warn and use a stock simulator when SimSlim is missing or `SIMSLIM_UDID` is unset.
 
 ##### Wire SimSlim on a new machine
 
 1. **Xcode** with an **iOS 18.5+** simulator runtime (slim does not persist across reboot below 18.5).
-
 2. **Install SimSlim** (Homebrew tap; not a repo dependency):
-
-   ```bash
+  ```bash
    brew install mobai-app/tap/simslim
-   ```
-
+  ```
 3. **Create or pick one iPhone sim**, copy the UDID:
-
-   ```bash
+  ```bash
    xcrun simctl list devices available
    xcrun simctl list runtimes
    # Example — Apple assigns a new UDID:
    xcrun simctl create "Monaco Gold" com.apple.CoreSimulator.SimDeviceType.iPhone-16 <runtime-identifier>
-   ```
-
-4. **Export `SIMSLIM_UDID`** (not a secret). Shell rc **and/or** plain gitignored `.env` (Justfile `dotenv-load` reads `.env`, not dotenvx `.env.local`):
-
-   ```bash
+  ```
+4. **Export** `SIMSLIM_UDID` (not a secret). Shell rc **and/or** plain gitignored `.env` (Justfile `dotenv-load` reads `.env`, not dotenvx `.env.local`):
+  ```bash
    export SIMSLIM_UDID="<YOUR_UDID>"
    export PATH="$HOME/.local/bin:$PATH"
    # optional: echo "SIMSLIM_UDID=<YOUR_UDID>" >> .env
-   ```
-
-   `just build mobile`, `just reset mobile`, and `scripts/stop-mobile.sh` call `scripts/gold-sim-udid.sh` (fails loud if unset). `~/.local/bin/ios-sim` also honors `SIMSLIM_UDID`.
-
-5. **Slim profile.** Repo copy: [`ci/profiles/base-slim.json`](ci/profiles/base-slim.json) (`{"except": []}` = max slim). Copy to the default path the wrappers look for, or point `SIMSLIM_PROFILE` at the repo file:
-
-   ```bash
+  ```
+   `just build mobile`, `just reset mobile`, and `./scripts/ios-sim` call `scripts/resolve-ios-sim.sh` (stock fallback if slim is missing). Agent QA that must hit gold uses `scripts/gold-sim-udid.sh`, which exits 1 unless `SIMSLIM_UDID` is set and that device exists. If slim verify fails, recipes still use that UDID as a normal simulator. They do not pick a different device.
+5. **Slim profile.** Repo copy: `[ci/profiles/base-slim.json](ci/profiles/base-slim.json)` (`{"except": []}` = max slim). Copy to the default path the wrappers look for, or point `SIMSLIM_PROFILE` at the repo file:
+  ```bash
    mkdir -p ~/.config/simslim
    cp ci/profiles/base-slim.json ~/.config/simslim/base-slim.json
    simslim on "$SIMSLIM_UDID" --profile ~/.config/simslim/base-slim.json --json
-   ```
-
+  ```
    Every session before driving UI:
-
-   ```bash
-   simslim verify "$SIMSLIM_UDID" --profile ~/.config/simslim/base-slim.json \
-     || simslim on "$SIMSLIM_UDID" --profile ~/.config/simslim/base-slim.json
-   simslim doctor --requires ~/.config/simslim/base-slim.json
-   ```
-
    `except` in a profile means **keep** that daemon category on (less slim). Photos QA would use `"except": ["photos"]`. Monaco product smoke is tabs + HTTP; base-slim is enough.
-
-6. **`ios-sim` / `ios-build` on PATH.** These wrappers are **machine-local**, not in git. They live at `~/.local/bin/` and must be executable. They source `ios-sim-common.sh` in the same directory: boot `$SIMSLIM_UDID`, `simslim verify || on`, then `xcodebuild` (build) or install+`simctl launch` (sim). If you do not already have those three scripts, copy them from a machine that does, or recreate them from `.cursor/skills/ios-simslim-fast-qa/SKILL.md` (same jobs: ensure slim → build → install/launch). Confirm:
-
-   ```bash
-   command -v ios-sim ios-build simslim
-   ./scripts/ios-build   # repo root: Privy xcconfig, then ios-build
-   ```
-
-   Optional: `export SIMSLIM_PROFILE="$PWD/ci/profiles/base-slim.json"` — wrappers run with cwd `apps/mobile`, so they will not find the repo profile unless this is set or you copied it to `~/.config/simslim/base-slim.json`.
+6. **Optional PATH wrappers.** Some agent machines keep `ios-sim` / `ios-build` in `~/.local/bin`. Those are **not** in git and are **not** required. Repo `./scripts/ios-sim` and `./scripts/ios-build` call `xcodebuild` and `simctl` themselves after Privy injection.
+  Optional: `export SIMSLIM_PROFILE="$PWD/ci/profiles/base-slim.json"` if you slim from a checkout whose cwd is `apps/mobile`.
 
 Keep gold **booted** between agent sessions when you can. Clone gold after slim-once if you need a second sim (clone inherits slim + apps).
 
 ##### Daily use (slim installed)
 
-Repo scripts wrap the PATH binaries and inject Privy. Bare `ios-sim` from `apps/mobile` skips Privy.
+Repo scripts inject Privy. Bare `xcodebuild` from `apps/mobile` without `ensure-ios-privy-config.sh` skips Privy.
 
-| Command | When to use |
-| --- | --- |
-| `ios-build` / `ios-sim` (`~/.local/bin`) | Bare compile or run on `$SIMSLIM_UDID`. No Privy env. |
-| `./scripts/ios-build` | Monaco compile: Privy xcconfig from `.env.local`, then `ios-build`. |
-| `./scripts/ios-sim` | Monaco run: dotenvx Privy + `SIMCTL_CHILD_*`, then `ios-sim`. Prefer this. |
-| `just build mobile` | Compile gate; destination = `$SIMSLIM_UDID`. |
-| `just run mobile` | Full run with Privy; calls `./scripts/ios-sim`. |
-| `just run` | Postgres + API + gold sim (needs `ios-sim` on PATH). |
 
-**Agent / sim QA.** Unit tests first (`just test mobile`, no sim). Fast smoke (launch, primary nav, one critical path): `.cursor/skills/ios-simslim-fast-qa/SKILL.md` (SimSlim verify, optional MobAI tap-through). MobAI desktop + `mobai-mcp` is agent UI driving, not required to run the app. XcodeBuildMCP (this repo’s `.cursor/mcp.json`): `--simulator-id "$SIMSLIM_UDID"`.
+| Command               | When to use                                                                             |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| `./scripts/ios-build` | Monaco compile: Privy xcconfig from `.env.local`, then `xcodebuild` on the resolved sim |
+| `./scripts/ios-sim`   | Monaco run: dotenvx Privy + `SIMCTL_CHILD_*`, then build/install/launch                 |
+| `just build mobile`   | Compile gate on the resolved sim                                                        |
+| `just run mobile`     | Full run with Privy; calls `./scripts/ios-sim`                                          |
+| `just run`            | Postgres + API + iOS                                                                    |
+
+
+**Agent / sim QA.** Unit tests first (`just test mobile`, no sim). Fast smoke: `.cursor/skills/ios-simslim-fast-qa/SKILL.md`. MobAI desktop is optional. XcodeBuildMCP: `--simulator-id` from `./scripts/gold-sim-udid.sh` (requires `SIMSLIM_UDID`). Human `just run` does not.
 
 #### Without slim sim
 
 Stock Xcode Simulator runs the same app. You do not need Homebrew `simslim`, `~/.local/bin/ios-sim`, MobAI, or `$SIMSLIM_UDID`.
 
-1. Backend + DB: `just run backend` (Docker Postgres, dotenvx, API on 8080).
-2. Privy into the iOS target (once per env change):
+`just run mobile` is the path. You should see a warning that SimSlim is not installed or `SIMSLIM_UDID` is unset, then a stock sim boot. Privy xcconfig and `SIMCTL_CHILD_*` still apply.
 
-   ```bash
-   ./scripts/ensure-ios-privy-config.sh generate
-   ```
-
-   Writes gitignored `apps/mobile/Config/Privy.local.xcconfig`. Without this, the app shows “Privy not configured”.
-
-3. Open `apps/mobile/Monaco.xcodeproj` in Xcode. Scheme **Monaco**. Pick any **iOS 18+** simulator. Cmd+R.
-
-4. Or compile from CLI with **your** destination (name is fine here; this path is not agent gold QA):
-
-   ```bash
-   ./scripts/ensure-ios-privy-config.sh generate
-   xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
-     -destination 'platform=iOS Simulator,name=iPhone 16' \
-     -configuration Debug build
-   ```
-
-   Then install/launch that `.app` with `simctl` on the UDID Xcode shows, or just Run from Xcode.
-
-5. If you launch via `simctl launch` instead of Xcode, wrap so Privy reaches the sim process:
-
-   ```bash
-   ./scripts/with-ios-privy-env.sh xcrun simctl launch <YOUR_UDID> com.monaco.app
-   ```
-
-**What will fail without gold slim:** `just run` / `just run mobile` / `./scripts/ios-sim` (need `~/.local/bin/ios-sim`), `just build mobile` / `just reset mobile` / `just stop mobile` if `SIMSLIM_UDID` is unset or that sim does not exist. Stop a stock sim yourself: Xcode stop, or `xcrun simctl terminate <UDID> com.monaco.app`. Host unit tests still work: `just test mobile`.
+Xcode Cmd+R also works after `./scripts/ensure-ios-privy-config.sh generate`. Without that file the app shows “Privy not configured”.
 
 Do not `simctl erase` a sim you later want as gold. Creating extra stock sims for local play is fine.
 
@@ -524,6 +515,8 @@ Judges should spend most of the live pass on P&L. Show the in-group member board
 6. App home: this group on the group board, both people on the people board (second group optional if time).
 7. One member partial-redeems to USDC at a verified payout address. In-group board, group board, and people board update. The other member still in.
 
+
+
 ## Out of scope (MVP)
 
 - Custom on-chain vault or share-token program
@@ -534,6 +527,8 @@ Judges should spend most of the live pass on P&L. Show the in-group member board
 - Primary issuer mint or redeem APIs (Backed client, institutional gates). Secondary Jupiter path only.
 - App Store public listing, full KYC and AML, securities licensing. Demo may use TestFlight and geo-labeled test assets.
 
+
+
 ## Open decisions
 
 These were not locked in the spec session. Do not invent them in code until they are.
@@ -541,6 +536,8 @@ These were not locked in the spec session. Do not invent them in code until they
 - Who may **propose** a buy (any member, voter set only, or creator only).
 - Failed `/execute` after a passed vote (mark failed, do not retry forever).
 - Creator leave and group dissolve.
+
+
 
 ## Notes for production (not blockers for demo)
 

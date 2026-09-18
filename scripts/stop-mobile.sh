@@ -1,24 +1,25 @@
 #!/usr/bin/env bash
-# Stop Monaco iOS on gold sim: terminate, uninstall app (clears Privy keychain/session), kill xcodebuild.
-# Never simctl erase — gold slim sim ($SIMSLIM_UDID) only.
+# Stop Monaco on every available simulator that has the app. Never simctl erase.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
-gold_sim="$(./scripts/gold-sim-udid.sh)"
 bundle_id="com.monaco.app"
+udids="$(xcrun simctl list devices available | grep -Eo '[A-F0-9-]{36}' | sort -u || true)"
 
-if xcrun simctl terminate "$gold_sim" "$bundle_id" 2>/dev/null; then
-  echo "terminated ${bundle_id} on gold sim"
+if [[ -z "$udids" ]]; then
+  echo "no available iOS simulators"
 else
-  echo "Monaco not running on gold sim (or sim unavailable)"
-fi
-
-if xcrun simctl uninstall "$gold_sim" "$bundle_id" 2>/dev/null; then
-  echo "uninstalled ${bundle_id} on gold sim (cleared app container + Privy session)"
-else
-  echo "Monaco not installed on gold sim (or sim unavailable)"
+  while IFS= read -r udid; do
+    [[ -n "$udid" ]] || continue
+    if xcrun simctl terminate "$udid" "$bundle_id" 2>/dev/null; then
+      echo "terminated ${bundle_id} on ${udid}"
+    fi
+    if xcrun simctl uninstall "$udid" "$bundle_id" 2>/dev/null; then
+      echo "uninstalled ${bundle_id} on ${udid} (cleared app container + Privy session)"
+    fi
+  done <<<"$udids"
 fi
 
 if pkill -f '[x]codebuild.*Monaco\.xcodeproj' 2>/dev/null; then

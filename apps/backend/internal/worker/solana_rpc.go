@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -66,6 +67,28 @@ type solanaBalanceResponse struct {
 	} `json:"error"`
 }
 
+type solanaTokenAccountsByOwnerResponse struct {
+	Result struct {
+		Value []struct {
+			Account struct {
+				Data struct {
+					Parsed struct {
+						Info struct {
+							Mint        string `json:"mint"`
+							TokenAmount struct {
+								Amount string `json:"amount"`
+							} `json:"tokenAmount"`
+						} `json:"info"`
+					} `json:"parsed"`
+				} `json:"data"`
+			} `json:"account"`
+		} `json:"value"`
+	} `json:"result"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
 // GetBalance returns lamports for a base58 Solana address via getBalance RPC.
 func (r *HTTPSolanaRPC) GetBalance(ctx context.Context, address string) (uint64, error) {
 	address = strings.TrimSpace(address)
@@ -111,6 +134,74 @@ func (r *HTTPSolanaRPC) GetBalance(ctx context.Context, address string) (uint64,
 		return 0, fmt.Errorf("solana rpc error: %s", rpcResp.Error.Message)
 	}
 	return rpcResp.Result.Value, nil
+}
+
+// GetSPLTokenBalance returns the raw token amount for ownerAddress and mint via getTokenAccountsByOwner.
+func (r *HTTPSolanaRPC) GetSPLTokenBalance(ctx context.Context, ownerAddress, mint string) (uint64, error) {
+	ownerAddress = strings.TrimSpace(ownerAddress)
+	mint = strings.TrimSpace(mint)
+	if ownerAddress == "" {
+		return 0, fmt.Errorf("owner address is required")
+	}
+	if mint == "" {
+		return 0, fmt.Errorf("mint is required")
+	}
+
+	payload, err := json.Marshal(solanaRPCRequest{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "getTokenAccountsByOwner",
+		Params: []any{
+			ownerAddress,
+			map[string]string{"mint": mint},
+			map[string]string{"encoding": "jsonParsed"},
+		},
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, fmt.Errorf("solana rpc status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var rpcResp solanaTokenAccountsByOwnerResponse
+	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
+		return 0, err
+	}
+	if rpcResp.Error != nil {
+		return 0, fmt.Errorf("solana rpc error: %s", rpcResp.Error.Message)
+	}
+
+	var total uint64
+	for _, entry := range rpcResp.Result.Value {
+		raw := strings.TrimSpace(entry.Account.Data.Parsed.Info.TokenAmount.Amount)
+		if raw == "" || raw == "0" {
+			continue
+		}
+		amount, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid token amount %q for mint %s: %w", raw, mint, err)
+		}
+		total += amount
+	}
+	return total, nil
 }
 
 func (r *HTTPSolanaRPC) IsConfirmed(ctx context.Context, txSignature string) (bool, error) {

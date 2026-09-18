@@ -1,4 +1,5 @@
 // Ops helper: sweep USDC from Monaco-controlled wallets to --destination.
+// Non-USDC SPL holdings are sold to USDC on Jupiter first.
 // Usage: ./scripts/sweep-wallets.sh --destination <addr> [--all] [--dry-run]
 package main
 
@@ -8,16 +9,20 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/config"
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 type sweepSource struct {
-	kind    string
-	address string
+	kind     string
+	address  string
+	walletID string
 }
 
 func main() {
@@ -30,6 +35,12 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config: %v\n", err)
+		os.Exit(1)
+	}
+
+	relayer, err := config.LoadRelayer(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "relayer: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -53,56 +64,45 @@ func main() {
 		os.Exit(1)
 	}
 
-	var swept, skipped, failed int
-	for _, src := range sources {
-		if src.address == flags.destination {
-			fmt.Printf("skip %s %s (same as destination)\n", src.kind, src.address)
-			skipped++
-			continue
-		}
-		amount, err := client.MemberUSDCBalance(ctx, src.address)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "balance %s %s: %v\n", src.kind, src.address, err)
-			failed++
-			continue
-		}
-		if amount <= 0 {
-			fmt.Printf("skip %s %s (zero USDC)\n", src.kind, src.address)
-			skipped++
-			continue
-		}
-		if flags.dryRun {
-			fmt.Printf("dry-run would sweep %s from=%s dest=%s amount=%d\n", src.kind, src.address, flags.destination, amount)
-			swept++
-			continue
-		}
-		req, err := privy.BuildSweepRequest(src.address, flags.destination, amount, cfg.RelayerPrivateKey)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "build %s %s: %v\n", src.kind, src.address, err)
-			failed++
-			continue
-		}
-		result, err := client.SubmitSweep(ctx, req)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "submit %s %s amount=%d: %v\n", src.kind, src.address, amount, err)
-			failed++
-			continue
-		}
-		fmt.Printf("ok %s from=%s dest=%s amount=%d tx=%s\n", src.kind, src.address, flags.destination, amount, result.TxSignature)
-		swept++
+	jupiterClient := jupiter.NewHTTPClientWithPayer(relayer.PublicKey())
+	runner := sweepRunner{
+		flags:       flags,
+		cfg:         cfg,
+		privy:       client,
+		jupiter:     jupiterClient,
+		signer:      app.NewPrivyTreasurySigner(client),
+		relayerPub:  relayer.PublicKey(),
+		relayerKey:  cfg.RelayerPrivateKey,
+		mintCatalog: xstocks.NewHTTPCatalogSearcher(),
 	}
+
+	swept, skipped, failed, recap := runSweep(ctx, runner, sources)
+	printSweepRecap(os.Stdout, recap)
 
 	mode := "live"
 	if flags.dryRun {
 		mode = "dry-run"
 	}
-	fmt.Printf("done mode=%s swept=%d skipped=%d failed=%d dest=%s\n", mode, swept, skipped, failed, flags.destination)
+	fmt.Printf("done mode=%s swept=%d skipped=%d failed=%d dest=%s no_live_tx=%t\n",
+		mode, swept, skipped, failed, flags.destination, flags.dryRun)
 	if failed > 0 {
 		os.Exit(1)
 	}
 }
 
 func loadSweepSources(ctx context.Context, flags sweepFlags, cfg *config.Config, client *privy.HTTPClient) ([]sweepSource, string, error) {
+	db, err := sql.Open("pgx", cfg.DatabaseURL)
+	if err != nil {
+		return nil, "", err
+	}
+	defer db.Close()
+	store := postgres.NewStore(db)
+
+	memberSet, treasurySet, err := walletKindSets(ctx, store)
+	if err != nil {
+		return nil, "", err
+	}
+
 	if flags.all {
 		wallets, err := client.ListAppSolanaWallets(ctx)
 		if err != nil {
@@ -110,22 +110,56 @@ func loadSweepSources(ctx context.Context, flags sweepFlags, cfg *config.Config,
 		}
 		var sources []sweepSource
 		for _, wallet := range wallets {
-			sources = append(sources, sweepSource{kind: "privy", address: wallet.SolanaAddress})
+			sources = append(sources, sweepSource{
+				kind:     classifyWalletKind(wallet.SolanaAddress, memberSet, treasurySet, "privy"),
+				address:  wallet.SolanaAddress,
+				walletID: wallet.PrivyWalletID,
+			})
 		}
 		return sources, "privy app wallets (--all)", nil
 	}
 
-	db, err := sql.Open("pgx", cfg.DatabaseURL)
-	if err != nil {
-		return nil, "", err
-	}
-	defer db.Close()
-	store := postgres.NewStore(db)
 	sources, err := listDBSweepSources(ctx, store)
 	if err != nil {
 		return nil, "", err
 	}
 	return sources, "postgres member_wallets + treasuries", nil
+}
+
+func walletKindSets(ctx context.Context, store *postgres.Store) (members, treasuries map[string]struct{}, err error) {
+	members = map[string]struct{}{}
+	treasuries = map[string]struct{}{}
+
+	memberWallets, err := store.ListMemberWallets(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, wallet := range memberWallets {
+		if wallet.SolanaAddress != "" {
+			members[wallet.SolanaAddress] = struct{}{}
+		}
+	}
+
+	treasuryRows, err := store.ListTreasuries(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, treasury := range treasuryRows {
+		if treasury.SolanaAddress != "" {
+			treasuries[treasury.SolanaAddress] = struct{}{}
+		}
+	}
+	return members, treasuries, nil
+}
+
+func classifyWalletKind(address string, members, treasuries map[string]struct{}, fallback string) string {
+	if _, ok := members[address]; ok {
+		return "member"
+	}
+	if _, ok := treasuries[address]; ok {
+		return "treasury"
+	}
+	return fallback
 }
 
 func listDBSweepSources(ctx context.Context, store *postgres.Store) ([]sweepSource, error) {

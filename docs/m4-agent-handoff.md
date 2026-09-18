@@ -1,6 +1,6 @@
 # M4 agent handoff — Domain logic
 
-**Read this first.** Pick up Milestone 4 after M3 landed on `milestone-3`. Plan of record: [`docs/milestones/m4-domain.md`](milestones/m4-domain.md). Prior handoff: [`docs/m3-agent-handoff.md`](m3-agent-handoff.md). Repo root: `/Users/logno/Documents/work/github/monaco`.
+**Read this first.** Pick up Milestone 4 after M3 landed on `milestone-3`. Plan of record: [`docs/milestones/m4-domain.md`](milestones/m4-domain.md). Prior handoff: [`docs/m3-agent-handoff.md`](m3-agent-handoff.md). Repo root: the clone directory (not a personal home path).
 
 ---
 
@@ -209,7 +209,7 @@ Skill: [`.cursor/skills/worktree-orchestrate/SKILL.md`](../.cursor/skills/worktr
 ## 8. Fast verify (copy-paste)
 
 ```bash
-cd /Users/logno/Documents/work/github/monaco
+cd <clone-root>
 
 dotenvx run -f .env.local -- just test backend
 just test mobile

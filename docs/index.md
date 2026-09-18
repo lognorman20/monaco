@@ -74,9 +74,9 @@ M1 login screens may show Solana addresses so you can prove Privy wiring. M5 mov
 Local dev and test use Docker Compose Postgres only. Project name `monaco`. Default host port `54322`. Never point `just run`, `just run backend`, or `just test backend` at hosted Supabase or any remote prod database.
 
 - `docker-compose.yml` at the repo root runs Postgres on localhost.
-- `just run` starts compose, waits on the healthcheck, applies SQL from `supabase/migrations/`, runs the Go API, and launches the iOS app on the slim sim.
+- `just run` starts compose, waits on the healthcheck, applies SQL from `supabase/migrations/`, runs the Go API, and launches the iOS app (stock sim if SimSlim is missing).
 - `just run backend` and `just test backend` start compose, wait on the healthcheck, apply migrations, then run only the API or tests.
-- Copy `.env.example` to `.env`. `DATABASE_URL` must target `localhost`. Scripts reject hosted Supabase URLs.
+- Copy `.env.example` to `.env.local`. `DATABASE_URL` must target `localhost`. Scripts reject hosted Supabase URLs. Place `.env.keys` in the clone root when `.env.local` is encrypted.
 - Manual checks must prove the DB is local. Note the compose project name, container name `monaco-postgres`, and mapped host port.
 - There is no separate `just db` recipe. Production Supabase stays out of this repo.
 
@@ -118,17 +118,19 @@ No shared compiled package spans Go and Swift this week. HTTP is the contract.
 
 ## Just recipes
 
-App names are `backend` and `mobile`. Wire them in M0. Each later milestone extends what `just test backend` or `just test mobile` runs internally. Do not add other top-level recipes such as `just db`, `just check`, `just bootstrap`, `just test-deposits`, `smoke-*`, or `ios-build`. Do not add `just build` or `just test` umbrellas.
+App names are `backend` and `mobile`. Wire them in M0. Each later milestone extends what `just test backend` or `just test mobile` runs internally. Do not add other top-level recipes such as `just db`, `just check`, `just bootstrap`, `just test-deposits`, `smoke-*`, or `ios-build`. `just install` is the clone setup script; `just encrypt`, `just decrypt`, and `just show-env` wrap dotenvx on `.env.local`; `just relayer balance` prints fee payer pubkey and mainnet SOL (no private key). Do not add `just build` or `just test` umbrellas.
 
 - `just run` starts local Postgres, the Go API, and the iOS app together. Use this for the full local stack.
 - `just build backend` builds the Go API binary.
 - `just test backend` runs env check, `docker compose up --wait`, migrations, and API tests against local Postgres.
-- `just run backend` starts local Postgres via compose, applies migrations, and runs only the API with `.env`.
-- `just build mobile` builds the SwiftUI app for the machine gold slim sim (`SIMSLIM_UDID`; see README SimSlim).
-- `just test mobile` runs Swift tests on that sim.
-- `just run mobile` builds and launches only the app on that sim. Start the API separately or use `just run`.
+- `just run backend` starts local Postgres via compose, applies migrations, and runs only the API with `.env.local`.
+- `just build mobile` builds the SwiftUI app for the resolved simulator (`scripts/resolve-ios-sim.sh`).
+- `just test mobile` runs host `swift test` in `packages/mobile-core` (no simulator).
+- `just run mobile` builds and launches only the app on that sim, with Privy env injected. Start the API separately or use `just run`.
+- `just encrypt` / `just decrypt` run `dotenvx encrypt` / `dotenvx decrypt` on `.env.local` (and `.env.production` when present).
+- `just show-env` prints decrypted keys/values from `.env.local` only (`.env.production` omitted).
 
-Never pass an iOS destination by name such as `iPhone 17`. Never `simctl erase` for QA.
+Never `simctl erase` for QA. Agent-driven QA must export `SIMSLIM_UDID` and pass `--simulator-id` from `scripts/gold-sim-udid.sh`. Human `just run` uses `scripts/resolve-ios-sim.sh` and may use a stock sim.
 
 ## Open decisions
 
