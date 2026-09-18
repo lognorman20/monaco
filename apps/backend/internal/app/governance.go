@@ -11,8 +11,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/packages/domain"
-	"golang.org/x/crypto/bcrypt"
-)
+	)
 
 type GovernanceService struct {
 	store *postgres.Store
@@ -40,7 +39,6 @@ func (g *GovernanceService) SetClock(now func() time.Time) {
 }
 
 var ErrInvalidGroupRules = errors.New("invalid group rules")
-var ErrWrongJoinPassword = errors.New("wrong join password")
 
 type LeaveBlockReason string
 
@@ -57,7 +55,8 @@ type LeaveGroupError struct{ Reason LeaveBlockReason }
 func (e *LeaveGroupError) Error() string { return string(e.Reason) }
 
 var ErrNotGroupMemberForLeave = errors.New("not a group member")
-
+var ErrNotGroupAdmin = errors.New("not group admin")
+var ErrJoinRequestNotFound = errors.New("join request not found")
 var ErrProposalNotFound = errors.New("proposal not found")
 var ErrProposalNotOpen = errors.New("proposal not open")
 var ErrNotEligibleVoter = errors.New("not eligible to vote")
@@ -88,12 +87,12 @@ func DefaultGroupRules() GroupRules {
 	}
 }
 
-func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToken, name string, rules GroupRules, joinPassword string) (CreateGroupResult, error) {
+func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToken, name string, rules GroupRules) (CreateGroupResult, error) {
 	if name == "" {
 		logGovernanceBranchWarn("governance create group rejected", "name required")
 		return CreateGroupResult{}, fmt.Errorf("name is required")
 	}
-	if err := validateCreateRules(rules, joinPassword); err != nil {
+	if err := validateCreateRules(rules); err != nil {
 		logGovernanceBranchWarn("governance create group rejected", "invalid rules")
 		return CreateGroupResult{}, err
 	}
@@ -116,10 +115,6 @@ func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToke
 		return CreateGroupResult{}, ErrUserNotFound
 	}
 	logGovernanceCreateGroupStart(user.ID, name)
-	passwordHash, err := hashJoinPassword(rules.JoinPolicy.Mode, joinPassword)
-	if err != nil {
-		return CreateGroupResult{}, err
-	}
 	tx, err := g.store.BeginTx(ctx)
 	if err != nil {
 		return CreateGroupResult{}, err
@@ -130,7 +125,7 @@ func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToke
 			_ = tx.Rollback()
 		}
 	}()
-	group, err := g.store.InsertGroupWithRulesTx(ctx, tx, name, user.ID, rules, passwordHash)
+	group, err := g.store.InsertGroupWithRulesTx(ctx, tx, name, user.ID, rules)
 	if err != nil {
 		return CreateGroupResult{}, err
 	}
@@ -158,51 +153,117 @@ func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToke
 	return CreateGroupResult{GroupID: group.ID, Name: group.Name, TreasuryAddress: treasuryRef.SolanaAddress}, nil
 }
 
-func (g *GovernanceService) JoinGroup(ctx context.Context, accessToken, groupID, password string) error {
+
+func (g *GovernanceService) JoinGroup(ctx context.Context, accessToken, groupID string) (JoinGroupOutcome, error) {
 	if groupID == "" {
-		logGovernanceBranchWarn("governance join group rejected", "group id required")
-		return fmt.Errorf("group id is required")
+		return "", fmt.Errorf("group id is required")
 	}
 	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
-			logGovernanceBranchWarn("governance join group rejected", "invalid token", "group_id", groupID)
-			return privy.ErrInvalidToken
+			return "", privy.ErrInvalidToken
 		}
-		logGovernanceBranchError("governance join group verify session failed", err, "group_id", groupID)
-		return fmt.Errorf("verify session: %w", err)
+		return "", fmt.Errorf("verify session: %w", err)
 	}
 	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
 	if err != nil {
-		logGovernanceBranchError("governance join group lookup user failed", err, "group_id", groupID)
-		return err
+		return "", err
 	}
 	if !found {
-		logGovernanceBranchWarn("governance join group rejected", "user not found", "group_id", groupID)
-		return ErrUserNotFound
+		return "", ErrUserNotFound
 	}
-	logGovernanceJoinGroupStart(user.ID, groupID)
 	rules, found, err := g.store.GetGroupRules(ctx, groupID)
 	if err != nil {
-		logGovernanceBranchError("governance join group lookup rules failed", err, "group_id", groupID, "user_id", user.ID)
-		return err
+		return "", err
 	}
 	if !found {
-		logGovernanceBranchWarn("governance join group rejected", "group not found", "group_id", groupID, "user_id", user.ID)
-		return ErrGroupNotFound
-	}
-	if err := verifyJoinPassword(rules.JoinPolicy, password); err != nil {
-		logGovernanceBranchWarn("governance join group rejected", "wrong password", "group_id", groupID, "user_id", user.ID)
-		return err
+		return "", ErrGroupNotFound
 	}
 	alreadyMember, err := g.store.IsGroupMember(ctx, groupID, user.ID)
 	if err != nil {
-		logGovernanceBranchError("governance join group membership check failed", err, "group_id", groupID, "user_id", user.ID)
-		return err
+		return "", err
 	}
 	if alreadyMember {
-		logGovernanceJoinGroupAlreadyMember(user.ID, groupID)
-		return nil
+		return JoinOutcomeAlreadyMember, nil
+	}
+	switch rules.JoinPolicy.Mode {
+	case JoinModeOpen:
+		if err := g.insertMember(ctx, groupID, user.ID); err != nil {
+			return "", err
+		}
+		return JoinOutcomeJoined, nil
+	case JoinModeRequest:
+		if _, pending, err := g.store.GetPendingJoinRequest(ctx, groupID, user.ID); err != nil {
+			return "", err
+		} else if pending {
+			return JoinOutcomePending, nil
+		}
+		if _, err := g.store.InsertJoinRequest(ctx, groupID, user.ID); err != nil {
+			if _, pending, pendingErr := g.store.GetPendingJoinRequest(ctx, groupID, user.ID); pendingErr == nil && pending {
+				return JoinOutcomePending, nil
+			}
+			return "", err
+		}
+		return JoinOutcomePending, nil
+	default:
+		return "", fmt.Errorf("invalid join mode")
+	}
+}
+
+func (g *GovernanceService) insertMember(ctx context.Context, groupID, userID string) error {
+	tx, err := g.store.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := g.store.InsertGroupMemberTx(ctx, tx, groupID, userID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit join group: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func (g *GovernanceService) ListPendingJoinRequests(ctx context.Context, accessToken, groupID string) ([]JoinRequest, error) {
+	if _, _, err := g.authenticatedGroupAdmin(ctx, accessToken, groupID); err != nil {
+		return nil, err
+	}
+	rows, err := g.store.ListPendingJoinRequests(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]JoinRequest, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, JoinRequest{ID: row.ID, UserID: row.UserID, DisplayName: row.DisplayName, RequestedAt: row.CreatedAt})
+	}
+	return items, nil
+}
+
+func (g *GovernanceService) ApproveJoinRequest(ctx context.Context, accessToken, groupID, requestID string) error {
+	return g.decideJoinRequest(ctx, accessToken, groupID, requestID, domain.JoinRequestApproved)
+}
+
+func (g *GovernanceService) DenyJoinRequest(ctx context.Context, accessToken, groupID, requestID string) error {
+	return g.decideJoinRequest(ctx, accessToken, groupID, requestID, domain.JoinRequestDenied)
+}
+
+func (g *GovernanceService) decideJoinRequest(ctx context.Context, accessToken, groupID, requestID string, status domain.JoinRequestStatus) error {
+	if _, _, err := g.authenticatedGroupAdmin(ctx, accessToken, groupID); err != nil {
+		return err
+	}
+	row, found, err := g.store.GetJoinRequestByID(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	if !found || row.GroupID != groupID || row.Status != domain.JoinRequestPending {
+		return ErrJoinRequestNotFound
 	}
 	tx, err := g.store.BeginTx(ctx)
 	if err != nil {
@@ -214,15 +275,27 @@ func (g *GovernanceService) JoinGroup(ctx context.Context, accessToken, groupID,
 			_ = tx.Rollback()
 		}
 	}()
-	if err := g.store.InsertGroupMemberTx(ctx, tx, groupID, user.ID); err != nil {
+	if err := g.store.UpdateJoinRequestStatusTx(ctx, tx, requestID, status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrJoinRequestNotFound
+		}
 		return err
 	}
+	if status == domain.JoinRequestApproved {
+		member, err := g.store.IsGroupMember(ctx, groupID, row.UserID)
+		if err != nil {
+			return err
+		}
+		if !member {
+			if err := g.store.InsertGroupMemberTx(ctx, tx, groupID, row.UserID); err != nil {
+			 return err
+			}
+		}
+	}
 	if err := tx.Commit(); err != nil {
-		logGovernanceBranchError("governance join group commit failed", err, "group_id", groupID, "user_id", user.ID)
-		return fmt.Errorf("commit join group: %w", err)
+		return fmt.Errorf("commit join request decision: %w", err)
 	}
 	committed = true
-	logGovernanceJoinGroupSuccess(user.ID, groupID)
 	return nil
 }
 
@@ -418,12 +491,37 @@ func (g *GovernanceService) hasSoleRemainingVoteTx(ctx context.Context, tx *sql.
 	return false, nil
 }
 
-func validateCreateRules(rules GroupRules, joinPassword string) error {
+func (g *GovernanceService) authenticatedGroupAdmin(ctx context.Context, accessToken, groupID string) (postgres.User, postgres.Group, error) {
+	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			return postgres.User{}, postgres.Group{}, privy.ErrInvalidToken
+		}
+		return postgres.User{}, postgres.Group{}, fmt.Errorf("verify session: %w", err)
+	}
+	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	if err != nil {
+		return postgres.User{}, postgres.Group{}, err
+	}
+	if !found {
+		return postgres.User{}, postgres.Group{}, ErrUserNotFound
+	}
+	group, groupFound, err := g.store.GetGroupByID(ctx, groupID)
+	if err != nil {
+		return postgres.User{}, postgres.Group{}, err
+	}
+	if !groupFound {
+		return postgres.User{}, postgres.Group{}, ErrGroupNotFound
+	}
+	if group.CreatorUserID != user.ID {
+		return postgres.User{}, postgres.Group{}, ErrNotGroupAdmin
+	}
+	return user, group, nil
+}
+
+func validateCreateRules(rules GroupRules) error {
 	if rules.VoteExpirySeconds <= 0 {
 		return fmt.Errorf("%w: vote expiry must be positive", ErrInvalidGroupRules)
-	}
-	if rules.JoinPolicy.Mode == JoinModePassword && joinPassword == "" {
-		return fmt.Errorf("%w: password required for password join mode", ErrInvalidGroupRules)
 	}
 	if err := domain.ValidateVoterSet(rules.VoterSet); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidGroupRules, err)
@@ -434,7 +532,7 @@ func validateCreateRules(rules GroupRules, joinPassword string) error {
 		return fmt.Errorf("%w: invalid threshold", ErrInvalidGroupRules)
 	}
 	switch rules.JoinPolicy.Mode {
-	case JoinModeOpen, JoinModePassword:
+	case JoinModeOpen, JoinModeRequest:
 	default:
 		return fmt.Errorf("%w: invalid join mode", ErrInvalidGroupRules)
 	}
@@ -444,34 +542,6 @@ func validateCreateRules(rules GroupRules, joinPassword string) error {
 		return fmt.Errorf("%w: invalid voter set mode", ErrInvalidGroupRules)
 	}
 	return nil
-}
-
-func hashJoinPassword(mode JoinMode, joinPassword string) (string, error) {
-	if mode != JoinModePassword {
-		return "", nil
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(joinPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return "", fmt.Errorf("hash join password: %w", err)
-	}
-	return string(hash), nil
-}
-
-func verifyJoinPassword(policy JoinPolicy, password string) error {
-	switch policy.Mode {
-	case JoinModeOpen:
-		return nil
-	case JoinModePassword:
-		if policy.PasswordHash == "" {
-			return fmt.Errorf("group join password not configured")
-		}
-		if err := bcrypt.CompareHashAndPassword([]byte(policy.PasswordHash), []byte(password)); err != nil {
-			return ErrWrongJoinPassword
-		}
-		return nil
-	default:
-		return fmt.Errorf("invalid join mode")
-	}
 }
 
 // CreateProposal inserts an open buy proposal when the quote is routable (M4-T13).
