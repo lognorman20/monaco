@@ -24,95 +24,95 @@ struct GroupsTabView: View {
     }
 
     var body: some View {
-        List {
-            Section {
-                GroupsPnLChartView(series: chartSeries)
-            } header: {
-                Text("P&L over time")
-            }
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 28) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Invest together.")
+                        .font(MonacoTheme.display(32))
+                    Text("Your people. A shared portfolio.")
+                        .font(.subheadline)
+                        .foregroundStyle(MonacoTheme.secondaryText)
+                }
+                .padding(.top, 8)
 
-            if !myGroups.isEmpty {
-                Section {
+                if !myGroups.isEmpty {
+                    sectionHeading("Your cabals", detail: "\(myGroups.count) joined")
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             ForEach(myGroups) { row in
                                 NavigationLink {
                                     GroupDetailView(auth: auth, groupId: row.groupId, groupName: row.name, onLeft: onRefresh)
-                                } label: {
-                                    myGroupCard(row)
-                                }
+                                } label: { myGroupCard(row) }
                                 .buttonStyle(.plain)
                                 .accessibilityIdentifier("my-group-card-\(row.groupId)")
                             }
                         }
-                        .padding(.vertical, 4)
                     }
-                } header: {
-                    Text("My cabals")
+                    .contentMargins(.trailing, 4)
                 }
-            }
 
-            Section {
-                TextField("Search cabals by name", text: $searchText)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("groups-search-field")
-                    .onChange(of: searchText) { _, newValue in
-                        scheduleSearch(for: newValue)
+                VStack(alignment: .leading, spacing: 18) {
+                    sectionHeading("Cabal performance", detail: "Pot value")
+                    GroupsPnLChartView(series: chartSeries)
+                }
+                .padding(20)
+                .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: 24))
+
+                VStack(alignment: .leading, spacing: 16) {
+                    sectionHeading("Find your people", detail: "")
+                    HStack(spacing: 12) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(MonacoTheme.secondaryText)
+                        TextField("Search cabals by name", text: $searchText)
+                            .textInputAutocapitalization(.words)
+                            .autocorrectionDisabled()
+                            .accessibilityIdentifier("groups-search-field")
+                            .onChange(of: searchText) { _, value in scheduleSearch(for: value) }
                     }
+                    .padding(16)
+                    .background(MonacoTheme.surface, in: Capsule())
+                    .overlay(Capsule().strokeBorder(MonacoTheme.border, lineWidth: 1))
 
-                if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("Type to discover cabals across Monaco.")
-                        .font(.footnote)
-                        .foregroundStyle(MonacoTheme.secondaryText)
-                } else if searchResults.isEmpty {
-                    Text("No cabals match that name.")
-                        .font(.footnote)
-                        .foregroundStyle(MonacoTheme.secondaryText)
-                } else {
-                    ForEach(searchResults) { row in
-                        NavigationLink {
-                            if isJoined(row.groupId) {
-                                GroupDetailView(auth: auth, groupId: row.groupId, groupName: row.name, onLeft: onRefresh)
-                            } else {
-                                JoinGroupView(auth: auth, groupId: row.groupId)
-                            }
-                        } label: {
-                            searchResultRow(row)
+                    if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        if searchResults.isEmpty {
+                            Text("No cabals match that name.")
+                                .font(.subheadline).foregroundStyle(MonacoTheme.secondaryText)
                         }
-                        .accessibilityIdentifier("groups-search-row-\(row.groupId)")
+                        ForEach(searchResults) { row in
+                            NavigationLink {
+                                if isJoined(row.groupId) {
+                                    GroupDetailView(auth: auth, groupId: row.groupId, groupName: row.name, onLeft: onRefresh)
+                                } else { JoinGroupView(auth: auth, groupId: row.groupId) }
+                            } label: { searchResultRow(row).padding(.vertical, 8).contentShape(Rectangle()) }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("groups-search-row-\(row.groupId)")
+                        }
                     }
                 }
-            } header: {
-                Text("Search")
-            }
 
-            Section {
-                if leaderboard.isEmpty {
-                    Text("Funded cabals with deposits rank here by percent return.")
-                        .font(.footnote)
-                        .foregroundStyle(MonacoTheme.secondaryText)
-                } else {
+                VStack(alignment: .leading, spacing: 16) {
+                    sectionHeading("The leaderboard", detail: "All cabals")
+                    if leaderboard.isEmpty {
+                        Text("Funded cabals rank here by their return.")
+                            .font(.subheadline).foregroundStyle(MonacoTheme.secondaryText)
+                    }
                     ForEach(leaderboard) { row in
                         NavigationLink {
                             if isJoined(row.groupId) {
                                 GroupDetailView(auth: auth, groupId: row.groupId, groupName: row.name, onLeft: onRefresh)
-                            } else {
-                                JoinGroupView(auth: auth, groupId: row.groupId)
-                            }
-                        } label: {
-                            leaderboardRow(row)
-                        }
+                            } else { JoinGroupView(auth: auth, groupId: row.groupId) }
+                        } label: { leaderboardRow(row).padding(.vertical, 10).contentShape(Rectangle()) }
+                        .buttonStyle(.plain)
                         .accessibilityIdentifier("groups-leaderboard-row-\(row.groupId)")
                     }
                 }
-            } header: {
-                Text("All cabals")
             }
+            .padding(20)
+            .padding(.bottom, 16)
         }
-        .monacoInsetList()
+        .foregroundStyle(MonacoTheme.primaryText)
         .background(MonacoTheme.background)
         .navigationTitle("Cabals")
+        .navigationBarTitleDisplayMode(.inline)
         .monacoToast($refreshToast)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
@@ -153,24 +153,32 @@ struct GroupsTabView: View {
         myGroups.contains { $0.groupId == groupId }
     }
 
-    @ViewBuilder
-    private func myGroupCard(_ row: HomeGroupBoardRowDTO) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(row.name)
-                .font(.subheadline.bold())
-                .foregroundStyle(MonacoTheme.primaryText)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-            Text("$\(row.potValueUsd)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(MonacoTheme.primaryText)
-            Text(row.dollarPnl)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(pnlColor(for: row.dollarPnl))
+    private func sectionHeading(_ title: String, detail: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).font(MonacoTheme.display(20)).accessibilityAddTraits(.isHeader)
+            Spacer()
+            if !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(MonacoTheme.secondaryText) }
         }
-        .frame(width: 140, alignment: .leading)
-        .padding(12)
-        .monacoSurfaceCard()
+    }
+
+    private func myGroupCard(_ row: HomeGroupBoardRowDTO) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                MonacoIdentityMark(title: row.name, size: 48)
+                Spacer()
+                Image(systemName: "arrow.up.right").font(.subheadline.weight(.semibold))
+            }
+            Text(row.name).font(MonacoTheme.display(20)).lineLimit(2)
+                .frame(minHeight: 52, alignment: .topLeading)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("$\(row.potValueUsd)").font(.title3.weight(.semibold).monospacedDigit())
+                Text("\(row.dollarPnl) P&L").font(.caption.monospacedDigit()).foregroundStyle(pnlColor(for: row.dollarPnl))
+            }
+        }
+        .padding(20)
+        .frame(width: 230, alignment: .leading)
+        .background(MonacoTheme.mint.opacity(0.65), in: RoundedRectangle(cornerRadius: 26))
+        .foregroundStyle(MonacoTheme.primaryText)
     }
 
     @ViewBuilder

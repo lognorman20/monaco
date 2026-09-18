@@ -2,7 +2,7 @@ import MonacoCore
 import Charts
 import SwiftUI
 
-/// Per-stock detail: price, chart, Jupiter liquidity snippet, and buy entry.
+/// Per-stock detail: identity, real price history, trade availability, and buy entry.
 struct AssetDetailView: View {
     @ObservedObject var auth: PrivyAuthService
     let home: HomeViewDTO
@@ -20,7 +20,7 @@ struct AssetDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 24) {
                 if isLoading && detail == nil {
                     ProgressView("Loading stock…")
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -29,13 +29,13 @@ struct AssetDetailView: View {
                     headerSection(detail)
                     chartSection
                     liquiditySection(detail.liquidity)
-                    buySection
+                    buySection(detail)
                 } else if let errorMessage {
                     MonacoEmptyStateCard(message: errorMessage, systemImage: "exclamationmark.triangle")
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 20)
         }
         .background(MonacoTheme.background)
         .navigationTitle(detail?.displaySymbol ?? symbol)
@@ -54,32 +54,42 @@ struct AssetDetailView: View {
         }
     }
 
-    @ViewBuilder
     private func headerSection(_ detail: AssetDetailDTO) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(detail.displayName)
-                .font(.title3.bold())
-                .foregroundStyle(MonacoTheme.primaryText)
-            Text(MarketFormatters.usd(fromMicros: detail.priceUsdcMicros))
-                .font(.title.bold().monospacedDigit())
-                .foregroundStyle(MonacoTheme.primaryText)
-            if let change = MarketFormatters.percentChange(detail.change24h) {
-                Text("\(change) past 24h")
-                    .font(.subheadline)
-                    .foregroundStyle(change.hasPrefix("-") ? MonacoTheme.warning : MonacoTheme.success)
+        VStack(alignment: .leading, spacing: 24) {
+            HStack(spacing: 14) {
+                MonacoIdentityMark(title: detail.displaySymbol, size: 60)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(detail.displaySymbol)
+                        .font(MonacoTheme.display(26))
+                    Text(detail.displayName)
+                        .font(.subheadline)
+                        .foregroundStyle(MonacoTheme.secondaryText)
+                }
             }
-            if !detail.routable {
-                Label("Not available to buy right now", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(MonacoTheme.warning)
+            VStack(alignment: .leading, spacing: 12) {
+                Text(MarketFormatters.usd(fromMicros: detail.priceUsdcMicros))
+                    .font(MonacoTheme.display(44).monospacedDigit())
+                    .minimumScaleFactor(0.65)
+                    .lineLimit(1)
+                if let change = MarketFormatters.percentChange(detail.change24h) {
+                    Text("\(change) past 24h")
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(change.hasPrefix("-") ? MonacoTheme.warning : MonacoTheme.success)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(change.hasPrefix("-") ? MonacoTheme.peach : MonacoTheme.mint, in: Capsule())
+                }
             }
         }
+        .foregroundStyle(MonacoTheme.primaryText)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
     private var chartSection: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Text("Price history")
+                .font(MonacoTheme.display(21))
             Picker("Range", selection: $chartRange) {
                 ForEach(AssetChartRange.allCases) { range in
                     Text(range.title).tag(range)
@@ -96,7 +106,7 @@ struct AssetDetailView: View {
                         x: .value("Time", Date(timeIntervalSince1970: TimeInterval(point.timestamp))),
                         y: .value("Price", Double(point.priceUsdcMicros) / 1_000_000)
                     )
-                    .foregroundStyle(MonacoTheme.accent)
+                    .foregroundStyle(MonacoTheme.primaryText)
                 }
                 .chartYAxis {
                     AxisMarks(position: .leading)
@@ -109,54 +119,40 @@ struct AssetDetailView: View {
                 )
             }
         }
-        .padding(16)
-        .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(20)
+        .monacoSurfaceCard()
     }
 
-    @ViewBuilder
     private func liquiditySection(_ liquidity: AssetLiquidityDTO) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(liquidity.label)
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Trade availability")
+                .font(MonacoTheme.display(21))
                 .foregroundStyle(MonacoTheme.primaryText)
-            if liquidity.routable {
-                if let outAmount = liquidity.buyProbeOutAmount {
-                    Text("$1 USDC probe → \(outAmount) token atomics out")
-                        .font(.footnote)
-                        .foregroundStyle(MonacoTheme.secondaryText)
-                }
-                if let sellOut = liquidity.sellProbeOutAmount {
-                    Text("1 share sell probe → \(sellOut) USDC atomics out")
-                        .font(.footnote)
-                        .foregroundStyle(MonacoTheme.secondaryText)
-                }
-                if let spread = liquidity.spreadBps {
-                    Text("Spread vs mark: \(spread) bps")
-                        .font(.footnote)
-                        .foregroundStyle(MonacoTheme.secondaryText)
-                }
-            } else {
-                Text("Not available to buy")
+            Label(liquidity.routable ? "Available to propose" : "Not available to buy right now",
+                  systemImage: liquidity.routable ? "checkmark.circle.fill" : "clock")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(liquidity.routable ? MonacoTheme.primaryText : MonacoTheme.secondaryText)
+            if let spread = liquidity.spreadBps {
+                LabeledContent("Spread vs. market price", value: "\(spread) bps")
                     .font(.footnote)
-                    .foregroundStyle(MonacoTheme.warning)
+                    .foregroundStyle(MonacoTheme.secondaryText)
             }
         }
-        .padding(16)
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(MonacoTheme.mint, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
-    @ViewBuilder
-    private var buySection: some View {
+    private func buySection(_ detail: AssetDetailDTO) -> some View {
         NavigationLink {
             GroupPickerForProposalView(auth: auth, home: home, symbol: symbol)
         } label: {
-            Text("Buy")
+            Text(detail.routable ? "Buy" : "Unavailable to buy")
                 .font(.headline)
                 .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(MonacoTheme.accent)
+        .buttonStyle(.monacoPrimary)
+        .disabled(!detail.routable)
         .accessibilityIdentifier("asset-detail-buy")
     }
 

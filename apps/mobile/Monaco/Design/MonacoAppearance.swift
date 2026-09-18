@@ -11,8 +11,8 @@ enum MonacoAppearance {
 
         let navigationBar = UINavigationBarAppearance()
         navigationBar.configureWithOpaqueBackground()
-        navigationBar.backgroundColor = surface
-        navigationBar.shadowColor = border
+        navigationBar.backgroundColor = background
+        navigationBar.shadowColor = .clear
         navigationBar.titleTextAttributes = [.foregroundColor: primaryText]
         navigationBar.largeTitleTextAttributes = [.foregroundColor: primaryText]
 
@@ -20,6 +20,16 @@ enum MonacoAppearance {
         UINavigationBar.appearance().scrollEdgeAppearance = navigationBar
         UINavigationBar.appearance().compactAppearance = navigationBar
         UINavigationBar.appearance().tintColor = UIColor(MonacoTheme.accent)
+
+        let tabBar = UITabBarAppearance()
+        tabBar.configureWithOpaqueBackground()
+        tabBar.backgroundColor = surface
+        tabBar.shadowColor = border
+        tabBar.stackedLayoutAppearance.selected.iconColor = primaryText
+        tabBar.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: primaryText]
+        tabBar.stackedLayoutAppearance.normal.iconColor = UIColor(MonacoTheme.secondaryText)
+        UITabBar.appearance().standardAppearance = tabBar
+        UITabBar.appearance().scrollEdgeAppearance = tabBar
 
         UITableView.appearance().backgroundColor = background
         UITableView.appearance().separatorColor = border
@@ -61,10 +71,10 @@ extension View {
     func monacoSurfaceCard() -> some View {
         self
             .padding()
-            .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(MonacoTheme.border, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(MonacoTheme.border.opacity(0.6), lineWidth: 0.5)
             }
     }
 
@@ -167,39 +177,47 @@ struct MonacoEmptyStateCard: View {
 
 struct MonacoPrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.body.weight(.semibold))
             .foregroundStyle(isEnabled ? MonacoTheme.primaryButtonLabel : MonacoTheme.disabled)
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.vertical, 13)
+            .frame(minHeight: 48)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                Capsule()
                     .fill(isEnabled ? MonacoTheme.primaryButtonFill : MonacoTheme.disabled.opacity(0.35))
             )
             .opacity(configuration.isPressed ? 0.85 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.75), value: configuration.isPressed)
     }
 }
 
 struct MonacoSecondaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.body.weight(.semibold))
             .foregroundStyle(isEnabled ? MonacoTheme.secondaryButtonLabel : MonacoTheme.disabled)
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.vertical, 13)
+            .frame(minHeight: 48)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                Capsule()
                     .fill(MonacoTheme.secondaryButtonFill)
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                Capsule()
                     .strokeBorder(isEnabled ? MonacoTheme.border : MonacoTheme.disabled.opacity(0.5), lineWidth: 1)
             }
             .opacity(configuration.isPressed ? 0.85 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.75), value: configuration.isPressed)
     }
 }
 
@@ -213,22 +231,26 @@ extension ButtonStyle where Self == MonacoSecondaryButtonStyle {
 
 struct MonacoDestructiveButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.body.weight(.semibold))
             .foregroundStyle(isEnabled ? MonacoTheme.destructive : MonacoTheme.disabled)
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.vertical, 13)
+            .frame(minHeight: 48)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                Capsule()
                     .fill(MonacoTheme.surface)
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                Capsule()
                     .strokeBorder(isEnabled ? MonacoTheme.destructive : MonacoTheme.disabled.opacity(0.5), lineWidth: 1)
             }
             .opacity(configuration.isPressed ? 0.85 : 1)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.75), value: configuration.isPressed)
     }
 }
 

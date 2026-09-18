@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Market browse: search, popular strip, paginated catalog with prices.
 struct AssetsView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject var auth: PrivyAuthService
     let home: HomeViewDTO
     var onRefresh: () async -> Void = {}
@@ -23,57 +24,75 @@ struct AssetsView: View {
     @State private var popularLoadFailed = false
     @State private var searchTask: Task<Void, Never>?
 
-    var body: some View {
-        List {
-            Section {
-                TextField("Search stocks", text: $searchQuery)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("assets-search-field")
-            }
+    @ScaledMetric(relativeTo: .body) private var popularCardWidth = 190.0
 
-            if !popularAssets.isEmpty || isLoadingPopular || popularLoadFailed {
-                Section("Popular") {
-                    if isLoadingPopular && popularAssets.isEmpty {
-                        ProgressView()
-                    } else if popularLoadFailed && popularAssets.isEmpty {
-                        Label("Could not load popular stocks.", systemImage: "exclamationmark.triangle.fill")
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                    } else {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(popularAssets) { asset in
-                                    NavigationLink {
-                                        AssetDetailView(auth: auth, home: home, symbol: asset.symbol)
-                                    } label: {
-                                        popularCard(asset)
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 28) {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("Find your next idea.")
+                        .font(MonacoTheme.display(30))
+                        .foregroundStyle(MonacoTheme.primaryText)
+                    HStack(spacing: 12) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(MonacoTheme.secondaryText)
+                        TextField("Search stocks", text: $searchQuery)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                            .accessibilityIdentifier("assets-search-field")
+                    }
+                    .padding(18)
+                    .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: 20))
+                }
+
+                if !popularAssets.isEmpty || isLoadingPopular || popularLoadFailed {
+                    VStack(alignment: .leading, spacing: 14) {
+                        sectionTitle("Popular stocks", subtitle: "Explore the market")
+                        if isLoadingPopular && popularAssets.isEmpty {
+                            ProgressView()
+                        } else if popularLoadFailed && popularAssets.isEmpty {
+                            Label("Could not load popular stocks.", systemImage: "exclamationmark.triangle.fill")
+                                .font(.footnote)
+                                .foregroundStyle(MonacoTheme.warning)
+                        } else {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 12) {
+                                    ForEach(Array(popularAssets.enumerated()), id: \.element.id) { index, asset in
+                                        NavigationLink {
+                                            AssetDetailView(auth: auth, home: home, symbol: asset.symbol)
+                                        } label: {
+                                            popularCard(asset, index: index)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityIdentifier("assets-popular-\(asset.symbol)")
                                     }
-                                    .buttonStyle(.plain)
-                                    .accessibilityIdentifier("assets-popular-\(asset.symbol)")
                                 }
                             }
-                            .padding(.vertical, 4)
+                            .contentMargins(.vertical, 2)
                         }
                     }
                 }
-            }
 
-            Section("Market") {
-                catalogContent
-
-                if hasMoreAssets && !isLoadingCatalog {
-                    Button(isLoadingMore ? "Loading…" : "Load more") {
-                        Task { await loadCatalog(reset: false) }
+                VStack(alignment: .leading, spacing: 18) {
+                    sectionTitle("All stocks", subtitle: "Make your next move")
+                    catalogContent
+                    if hasMoreAssets && !isLoadingCatalog {
+                        Button(isLoadingMore ? "Loading…" : "Load more") {
+                            Task { await loadCatalog(reset: false) }
+                        }
+                        .buttonStyle(.monacoPrimary)
+                        .disabled(isLoadingMore)
+                        .accessibilityIdentifier("assets-load-more")
                     }
-                    .disabled(isLoadingMore)
-                    .accessibilityIdentifier("assets-load-more")
                 }
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 28)
         }
-        .monacoInsetList()
         .background(MonacoTheme.background)
         .navigationTitle("Assets")
+        .navigationBarTitleDisplayMode(.inline)
         .onChange(of: searchQuery) { _, _ in
             scheduleCatalogSearch(reset: true)
         }
@@ -91,19 +110,51 @@ struct AssetsView: View {
         }
     }
 
-    @ViewBuilder
-    private func popularCard(_ asset: MarketAssetDTO) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(asset.displaySymbol)
-                .font(.subheadline.bold())
+    private func sectionTitle(_ title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(MonacoTheme.display(23))
                 .foregroundStyle(MonacoTheme.primaryText)
-            Text(MarketFormatters.usd(fromMicros: asset.priceUsdcMicros))
-                .font(.caption.monospacedDigit())
+            Text(subtitle)
+                .font(.subheadline)
                 .foregroundStyle(MonacoTheme.secondaryText)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func popularCard(_ asset: MarketAssetDTO, index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            MonacoIdentityMark(title: asset.displaySymbol, size: 52)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(asset.displaySymbol)
+                    .font(MonacoTheme.display(23))
+                    .foregroundStyle(MonacoTheme.primaryText)
+                Text(asset.displayName)
+                    .font(.caption)
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .lineLimit(2)
+                    .frame(minHeight: 32, alignment: .top)
+                if !asset.routable {
+                    Text("Unavailable to buy")
+                        .font(.caption2)
+                        .foregroundStyle(MonacoTheme.warning)
+                }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(MarketFormatters.usd(fromMicros: asset.priceUsdcMicros))
+                    .font(.headline.monospacedDigit())
+                    .foregroundStyle(MonacoTheme.primaryText)
+                if let change = MarketFormatters.percentChange(asset.change24h) {
+                    Text("\(change) · 24h")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(change.hasPrefix("-") ? MonacoTheme.warning : MonacoTheme.success)
+                }
+            }
+        }
+        .padding(20)
+        .frame(width: popularCardWidth, alignment: .leading)
+        .background(index.isMultiple(of: 2) ? MonacoTheme.mint : MonacoTheme.peach,
+                    in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder
@@ -133,6 +184,7 @@ struct AssetsView: View {
                 } label: {
                     assetRow(asset)
                 }
+                .buttonStyle(.plain)
                 .accessibilityIdentifier("assets-row-\(asset.symbol)")
             }
         }
@@ -140,7 +192,11 @@ struct AssetsView: View {
 
     @ViewBuilder
     private func assetRow(_ asset: MarketAssetDTO) -> some View {
-        HStack {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(spacing: 14))
+        layout {
+            MonacoIdentityMark(title: asset.displaySymbol)
             VStack(alignment: .leading, spacing: 4) {
                 Text(asset.displaySymbol)
                     .font(.body.bold())
@@ -154,8 +210,8 @@ struct AssetsView: View {
                         .foregroundStyle(MonacoTheme.warning)
                 }
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 4) {
+            if !dynamicTypeSize.isAccessibilitySize { Spacer() }
+            VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 4) {
                 Text(MarketFormatters.usd(fromMicros: asset.priceUsdcMicros))
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(MonacoTheme.primaryText)
@@ -166,7 +222,9 @@ struct AssetsView: View {
                 }
             }
         }
-        .opacity(asset.routable ? 1 : 0.7)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 
     private func scheduleCatalogSearch(reset: Bool) {
