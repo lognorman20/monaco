@@ -1,3 +1,4 @@
+import MonacoCore
 import Charts
 import SwiftUI
 
@@ -5,6 +6,7 @@ import SwiftUI
 struct AssetDetailView: View {
     @ObservedObject var auth: PrivyAuthService
     let home: HomeViewDTO
+    @Environment(\.refreshMonacoSession) private var refreshSession
     let symbol: String
 
     private let apiClient = MonacoAPIClient()
@@ -39,6 +41,7 @@ struct AssetDetailView: View {
         .navigationTitle(detail?.displaySymbol ?? symbol)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
+            await refreshSession()
             await loadDetail()
             await loadChart()
         }
@@ -66,7 +69,7 @@ struct AssetDetailView: View {
                     .foregroundStyle(change.hasPrefix("-") ? MonacoTheme.warning : MonacoTheme.success)
             }
             if !detail.routable {
-                Label("No Jupiter route", systemImage: "exclamationmark.triangle.fill")
+                Label("Not available to buy right now", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(MonacoTheme.warning)
             }
@@ -133,7 +136,7 @@ struct AssetDetailView: View {
                         .foregroundStyle(MonacoTheme.secondaryText)
                 }
             } else {
-                Text("No route")
+                Text("Not available to buy")
                     .font(.footnote)
                     .foregroundStyle(MonacoTheme.warning)
             }

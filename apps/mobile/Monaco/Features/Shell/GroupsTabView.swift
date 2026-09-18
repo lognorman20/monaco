@@ -5,6 +5,7 @@ import SwiftUI
 struct GroupsTabView: View {
     @ObservedObject var auth: PrivyAuthService
     let home: HomeViewDTO
+    @Environment(\.monacoSessionRevision) private var sessionRevision
     var onRefresh: () async -> Void = {}
 
     private let apiClient = MonacoAPIClient()
@@ -14,6 +15,8 @@ struct GroupsTabView: View {
     @State private var leaderboard: [GroupLeaderboardRow] = []
     @State private var chartSeries: [GroupPnLChartSeries] = []
     @State private var isLoadingTabData = false
+    @State private var loadID = UUID()
+    @State private var refreshToast: MonacoToast?
     @State private var searchTask: Task<Void, Never>?
 
     private var myGroups: [HomeGroupBoardRowDTO] {
@@ -69,7 +72,7 @@ struct GroupsTabView: View {
                 } else {
                     ForEach(searchResults) { row in
                         NavigationLink {
-                            if row.isJoined {
+                            if isJoined(row.groupId) {
                                 GroupDetailView(auth: auth, groupId: row.groupId, groupName: row.name, onLeft: onRefresh)
                             } else {
                                 JoinGroupView(auth: auth, groupId: row.groupId)
@@ -92,7 +95,7 @@ struct GroupsTabView: View {
                 } else {
                     ForEach(leaderboard) { row in
                         NavigationLink {
-                            if row.isJoined {
+                            if isJoined(row.groupId) {
                                 GroupDetailView(auth: auth, groupId: row.groupId, groupName: row.name, onLeft: onRefresh)
                             } else {
                                 JoinGroupView(auth: auth, groupId: row.groupId)
@@ -109,7 +112,8 @@ struct GroupsTabView: View {
         }
         .monacoInsetList()
         .background(MonacoTheme.background)
-        .navigationTitle("Groups")
+        .navigationTitle("Cabals")
+        .monacoToast($refreshToast)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Menu {
@@ -136,13 +140,17 @@ struct GroupsTabView: View {
                     .tint(MonacoTheme.accent)
             }
         }
-        .task(id: home.groups.map(\.groupId)) {
+        .task(id: sessionRevision) {
             await loadTabData()
         }
+        .onDisappear { searchTask?.cancel() }
         .refreshable {
             await onRefresh()
-            await loadTabData()
         }
+    }
+
+    private func isJoined(_ groupId: String) -> Bool {
+        myGroups.contains { $0.groupId == groupId }
     }
 
     @ViewBuilder
@@ -172,14 +180,14 @@ struct GroupsTabView: View {
                 Text(row.name)
                     .font(.body.bold())
                     .foregroundStyle(MonacoTheme.primaryText)
-                if !row.isJoined {
+                if !isJoined(row.groupId) {
                     Text(row.joinMode == "request" ? "Admin approval required" : "Open cabal")
                         .font(.caption)
                         .foregroundStyle(MonacoTheme.secondaryText)
                 }
             }
             Spacer()
-            if !row.isJoined {
+            if !isJoined(row.groupId) {
                 Text("Join")
                     .font(.caption.bold())
                     .foregroundStyle(MonacoTheme.accent)
@@ -255,8 +263,10 @@ struct GroupsTabView: View {
         guard let accessToken = auth.accessToken else { return }
         do {
             let response = try await apiClient.searchGroups(accessToken: accessToken, query: query)
+            guard !Task.isCancelled, searchText.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
             searchResults = response.groups
         } catch {
+            guard !Task.isCancelled else { return }
             searchResults = []
         }
     }
@@ -264,15 +274,19 @@ struct GroupsTabView: View {
     @MainActor
     private func loadTabData() async {
         guard let accessToken = auth.accessToken else { return }
-        isLoadingTabData = true
-        defer { isLoadingTabData = false }
+        let requestID = UUID()
+        loadID = requestID
+        isLoadingTabData = leaderboard.isEmpty && chartSeries.isEmpty
+        defer { if loadID == requestID { isLoadingTabData = false } }
 
         async let leaderboardTask: Void = {
             do {
                 let response = try await apiClient.getGroupLeaderboard(accessToken: accessToken)
+                guard !Task.isCancelled, loadID == requestID else { return }
                 leaderboard = response.groups
             } catch {
-                leaderboard = []
+                guard !Task.isCancelled, loadID == requestID else { return }
+                refreshToast = MonacoToast(message: "Could not refresh cabal rankings. Pull down to retry.")
             }
         }()
 
@@ -290,9 +304,14 @@ struct GroupsTabView: View {
                     }
                     loaded.append(GroupPnLChartSeries(groupId: group.groupId, name: group.name, points: points))
                 } catch {
-                    continue
+                    guard !Task.isCancelled, loadID == requestID else { return }
+                    if let previous = chartSeries.first(where: { $0.groupId == group.groupId }) {
+                        loaded.append(previous)
+                    }
+                    refreshToast = MonacoToast(message: "Could not refresh cabal history. Pull down to retry.")
                 }
             }
+            guard !Task.isCancelled, loadID == requestID else { return }
             chartSeries = loaded
         }()
 

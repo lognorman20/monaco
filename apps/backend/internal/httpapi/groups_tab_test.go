@@ -40,7 +40,8 @@ func TestGET_groups_search_returnsMatchingClub(t *testing.T) {
 	handlers, authHandlers, groupHandlers, privyClient, _, iso := integrationGroupsTabApp(t)
 	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "searcher", "Search User")
 
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Alpha Investors"}`))
+	name := "Alpha Investors " + iso.Suffix()
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"`+name+`"}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("Authorization", "Bearer "+string(token))
 	createRec := httptest.NewRecorder()
@@ -54,7 +55,7 @@ func TestGET_groups_search_returnsMatchingClub(t *testing.T) {
 	}
 	trackCreatedGroup(iso, created.GroupID)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/groups/search?q=alpha", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/groups/search?q="+iso.Suffix(), nil)
 	req.Header.Set("Authorization", "Bearer "+string(token))
 	rec := httptest.NewRecorder()
 
@@ -77,8 +78,8 @@ func TestGET_groups_search_returnsMatchingClub(t *testing.T) {
 	if payload.Groups[0].GroupID != created.GroupID {
 		t.Fatalf("groupId = %q, want %q", payload.Groups[0].GroupID, created.GroupID)
 	}
-	if payload.Groups[0].Name != "Alpha Investors" {
-		t.Fatalf("name = %q, want Alpha Investors", payload.Groups[0].Name)
+	if payload.Groups[0].Name != name {
+		t.Fatalf("name = %q, want %q", payload.Groups[0].Name, name)
 	}
 	if !payload.Groups[0].IsJoined {
 		t.Fatal("expected isJoined=true for creator")
