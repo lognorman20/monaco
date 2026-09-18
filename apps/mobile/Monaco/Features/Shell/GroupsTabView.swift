@@ -173,7 +173,7 @@ struct GroupsTabView: View {
                     .font(.body.bold())
                     .foregroundStyle(MonacoTheme.primaryText)
                 if !row.isJoined {
-                    Text(row.joinMode == "password" ? "Password required" : "Open cabal")
+                    Text(row.joinMode == "request" ? "Admin approval required" : "Open cabal")
                         .font(.caption)
                         .foregroundStyle(MonacoTheme.secondaryText)
                 }
