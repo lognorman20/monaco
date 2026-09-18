@@ -27,7 +27,7 @@ struct ProposeBuyView: View {
     var body: some View {
         Form {
             Section {
-                Text("Buy Apple with your club — search a stock, check the quote, then propose.")
+                Text("Buy Apple with your cabal — search a stock, check the quote, then propose.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

@@ -17,28 +17,28 @@ struct JoinGroupView: View {
     var body: some View {
         Form {
             Section {
-                TextField("Group ID", text: $groupId)
+                TextField("Cabal ID", text: $groupId)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .font(.body.monospaced())
                     .disabled(isJoining || didJoin || requestPending)
             } footer: {
-                Text("Paste the group ID your friend shared.")
+                Text("Paste the cabal ID your friend shared.")
             }
             Section {
-                Button(isJoining ? "Joining…" : "Join group") {
+                Button(isJoining ? "Joining…" : "Join cabal") {
                     Task { await joinGroup() }
                 }
                 .disabled(isJoining || didJoin || requestPending || groupId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .monacoToast($toast)
-        .navigationTitle("Join group")
+        .navigationTitle("Join cabal")
     }
 
     private func joinGroup() async {
         guard let accessToken = auth.accessToken else {
-            toast = MonacoToast(message: "Sign in to join a group.")
+            toast = MonacoToast(message: "Sign in to join a cabal.")
             return
         }
         let trimmedId = groupId.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -50,20 +50,20 @@ struct JoinGroupView: View {
             case .joined, .alreadyMember:
                 didJoin = true
                 toast = MonacoToast(
-                    message: "You're in! Head home to see your club on the board.",
+                    message: "You're in! Head home to see your cabal on the board.",
                     isSuccess: true
                 )
             case .pending:
                 requestPending = true
                 toast = MonacoToast(
-                    message: "Request sent. The club admin will approve your join.",
+                    message: "Request sent. The cabal admin will approve your join.",
                     isSuccess: true
                 )
             }
         } catch MonacoAPIError.httpStatus(404) {
-            toast = MonacoToast(message: "Group not found. Check the ID and try again.")
+            toast = MonacoToast(message: "Cabal not found. Check the ID and try again.")
         } catch {
-            toast = MonacoToast(message: "Could not join group. Try again.")
+            toast = MonacoToast(message: "Could not join cabal. Try again.")
         }
     }
 }

@@ -205,17 +205,17 @@ func writeLeaveConflict(w http.ResponseWriter, reason app.LeaveBlockReason, mess
 func leaveConflictMessage(reason app.LeaveBlockReason) string {
 	switch reason {
 	case app.LeaveBlockShareUnits:
-		return "redeem your slice before leaving the group"
+		return "redeem your slice before leaving the cabal"
 	case app.LeaveBlockLastMemberTreasury:
-		return "sole member cannot leave while the group treasury holds value"
+		return "sole member cannot leave while the cabal treasury holds value"
 	case app.LeaveBlockPendingRedeem:
 		return "finish or cancel your pending redeem before leaving"
 	case app.LeaveBlockSoleRemainingVote:
 		return "cast your vote or wait for open proposals to settle before leaving"
 	case app.LeaveBlockCreatorMustTransfer:
-		return "transfer group ownership before leaving as creator"
+		return "transfer cabal ownership before leaving as creator"
 	default:
-		return "cannot leave group"
+		return "cannot leave cabal"
 	}
 }
 

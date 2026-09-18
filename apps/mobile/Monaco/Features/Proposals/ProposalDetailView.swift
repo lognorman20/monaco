@@ -76,7 +76,7 @@ struct ProposalDetailView: View {
                 Spacer()
                 ProposalStatusChip(status: proposal.status)
             }
-            Text("Club buy proposal for \(formattedUsdc(proposal)) USDC")
+            Text("Cabal buy proposal for \(formattedUsdc(proposal)) USDC")
                 .font(.subheadline)
                 .foregroundStyle(MonacoTheme.secondaryText)
 

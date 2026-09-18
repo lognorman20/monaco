@@ -78,12 +78,12 @@ struct CreateGroupView: View {
     var body: some View {
         Form {
             Section {
-                TextField("Group name", text: $groupName)
+                TextField("Cabal name", text: $groupName)
                     .textInputAutocapitalization(.words)
                     .disabled(isCreating || createdGroup != nil)
                     .accessibilityIdentifier("create-group-name")
             } header: {
-                Text("Name your club")
+                Text("Name your cabal")
             } footer: {
                 Text("Pick a name your friends will recognize.")
             }
@@ -151,7 +151,7 @@ struct CreateGroupView: View {
                 }
             }
         }
-        .navigationTitle("Create group")
+        .navigationTitle("Create cabal")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: auth.accessToken) {
             await loadCreatorProfile()
@@ -183,13 +183,13 @@ struct CreateGroupView: View {
 
     private func createGroup() async {
         guard let accessToken = auth.accessToken else {
-            errorMessage = "Sign in to create a group."
+            errorMessage = "Sign in to create a cabal."
             return
         }
 
         let trimmedName = groupName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
-            errorMessage = "Group name is required."
+            errorMessage = "Cabal name is required."
             return
         }
 
@@ -218,9 +218,9 @@ struct CreateGroupView: View {
             )
             createdGroup = created
         } catch MonacoAPIError.httpStatus(let status) {
-            errorMessage = "Could not create group (HTTP \(status))."
+            errorMessage = "Could not create cabal (HTTP \(status))."
         } catch {
-            errorMessage = "Could not create group. Try again."
+            errorMessage = "Could not create cabal. Try again."
         }
 
         isCreating = false

@@ -46,9 +46,9 @@ public enum ScreenSnapshotRenderer {
     }
 
     public static func appHome(from view: HomeViewDTO) -> String {
-        var lines: [String] = ["# Home", "", "## Groups"]
+        var lines: [String] = ["# Home", "", "## Cabals"]
         if view.groups.isEmpty {
-            lines.append("No clubs yet. Create or join one to start investing together.")
+            lines.append("No cabals yet. Create or join one to start investing together.")
         } else {
             for row in view.groups {
                 lines.append("\(row.name) | $\(row.potValueUsd) | \(row.dollarPnl)")

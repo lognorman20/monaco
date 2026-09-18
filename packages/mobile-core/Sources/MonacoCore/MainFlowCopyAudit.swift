@@ -10,6 +10,9 @@ public enum MainFlowCopyAudit {
         "mint ",
         "nav",
         "xstock",
+        "club",
+        " group",
+        "group ",
     ]
 
     public static func stringsAreClean(_ strings: [String]) -> Bool {
@@ -22,9 +25,9 @@ public enum MainFlowCopyAudit {
 
 public enum MainFlowCopyManifest {
     public static let mainFlowStrings: [String] = [
-        "Add money to grow your club's pot.",
-        "Create club",
-        "Join club",
+        "Add money to grow your cabal's pot.",
+        "Create cabal",
+        "Join cabal",
         "Propose buy",
         "Vote yes",
         "Vote no",
@@ -32,6 +35,6 @@ public enum MainFlowCopyManifest {
         "Your slice",
         "Member board",
         "Sweep in progress",
-        "No clubs yet. Create or join one to start investing together.",
+        "No cabals yet. Create or join one to start investing together.",
     ]
 }

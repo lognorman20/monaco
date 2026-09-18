@@ -46,7 +46,7 @@ struct GroupDetailView: View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(MonacoTheme.background)
-            .navigationTitle(groupView?.name ?? groupName ?? "Club")
+            .navigationTitle(groupView?.name ?? groupName ?? "Cabal")
             .navigationBarTitleDisplayMode(.inline)
             .task(id: loadTaskID) {
                 if let initialView, groupView == nil {
@@ -65,10 +65,10 @@ struct GroupDetailView: View {
                 await loadJoinRequests()
             }
             .monacoToast($toast)
-            .confirmationDialog("Leave this club?", isPresented: $showLeaveConfirmation, titleVisibility: .visible) {
-                Button("Leave club", role: .destructive) { Task { await leaveGroup() } }
+            .confirmationDialog("Leave this cabal?", isPresented: $showLeaveConfirmation, titleVisibility: .visible) {
+                Button("Leave cabal", role: .destructive) { Task { await leaveGroup() } }
             } message: {
-                Text("You will lose access to this club's board. Your deposit history stays on record.")
+                Text("You will lose access to this cabal's board. Your deposit history stays on record.")
             }
     }
 
@@ -86,12 +86,12 @@ struct GroupDetailView: View {
                 .buttonStyle(.monacoPrimary)
             }
         } else if isLoading {
-            ProgressView("Loading club…")
+            ProgressView("Loading cabal…")
                 .foregroundStyle(MonacoTheme.secondaryText)
                 .tint(MonacoTheme.accent)
         } else {
             statusCard {
-                Text("Could not load club.")
+                Text("Could not load cabal.")
                     .foregroundStyle(MonacoTheme.secondaryText)
                 Button("Try again") {
                     Task { await loadGroup() }
@@ -170,7 +170,7 @@ struct GroupDetailView: View {
                 }
                 .accessibilityIdentifier("group-action-propose")
                 Button(role: .destructive) { showLeaveConfirmation = true } label: {
-                    Label(isLeaving ? "Leaving…" : "Leave club", systemImage: "rectangle.portrait.and.arrow.right")
+                    Label(isLeaving ? "Leaving…" : "Leave cabal", systemImage: "rectangle.portrait.and.arrow.right")
                 }
                 .disabled(isLeaving)
                 .accessibilityIdentifier("group-action-leave")
@@ -196,9 +196,9 @@ struct GroupDetailView: View {
         } catch is CancellationError {
             return
         } catch MonacoAPIError.httpStatus(let code) {
-            errorMessage = "Could not load club (HTTP \(code))."
+            errorMessage = "Could not load cabal (HTTP \(code))."
         } catch {
-            errorMessage = "Could not load club."
+            errorMessage = "Could not load cabal."
         }
     }
 
@@ -256,9 +256,9 @@ struct GroupDetailView: View {
         } catch MonacoAPIError.leaveBlocked(let reason) {
             toast = MonacoToast(message: leaveBlockedMessage(for: reason))
         } catch MonacoAPIError.httpStatus(let code) {
-            toast = MonacoToast(message: "Could not leave club (HTTP \(code)).")
+            toast = MonacoToast(message: "Could not leave cabal (HTTP \(code)).")
         } catch {
-            toast = MonacoToast(message: "Could not leave club.")
+            toast = MonacoToast(message: "Could not leave cabal.")
         }
     }
 
@@ -268,8 +268,8 @@ struct GroupDetailView: View {
         case .lastMemberWithTreasury: return "You are the only member and the treasury still holds value."
         case .pendingRedeem: return "Finish your pending redeem before leaving."
         case .soleRemainingVote: return "Cast your vote on open proposals before leaving."
-        case .creatorMustTransfer: return "Transfer club ownership before leaving."
-        case .unknown: return "You cannot leave this club right now."
+        case .creatorMustTransfer: return "Transfer cabal ownership before leaving."
+        case .unknown: return "You cannot leave this cabal right now."
         }
     }
 

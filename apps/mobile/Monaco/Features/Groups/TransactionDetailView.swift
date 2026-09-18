@@ -87,7 +87,7 @@ struct TransactionDetailView: View {
 
             Section("Identifiers") {
                 LabeledContent("Deposit ID", value: deposit.depositId)
-                LabeledContent("Group ID", value: deposit.groupId)
+                LabeledContent("Cabal ID", value: deposit.groupId)
             }
         } else if let errorMessage {
             errorSection(errorMessage)
@@ -140,7 +140,7 @@ struct TransactionDetailView: View {
 
         Section("Identifiers") {
             LabeledContent("Transaction ID", value: transaction.transactionId)
-            LabeledContent("Group ID", value: transaction.groupId)
+            LabeledContent("Cabal ID", value: transaction.groupId)
             copyableRow(label: "Proposal ID", value: transaction.proposalId)
             copyableRow(label: "Input mint", value: transaction.inputMint)
             copyableRow(label: "Output mint", value: transaction.outputMint)

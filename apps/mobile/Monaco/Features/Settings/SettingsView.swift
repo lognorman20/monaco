@@ -56,7 +56,7 @@ struct AdvancedSettingsView: View {
                         addressRow(title: "Your deposit address", value: memberWalletAddress)
                     }
                     if let treasuryAddress {
-                        addressRow(title: "Club treasury", value: treasuryAddress)
+                        addressRow(title: "Cabal treasury", value: treasuryAddress)
                     }
                 }
             }

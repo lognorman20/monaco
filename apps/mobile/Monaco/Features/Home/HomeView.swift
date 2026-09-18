@@ -11,7 +11,7 @@ struct HomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             Picker("Board", selection: $selectedTab) {
-                Text("Groups").tag(0)
+                Text("Cabals").tag(0)
                 Text("People").tag(1)
             }
             .pickerStyle(.segmented)
@@ -40,12 +40,12 @@ struct HomeView: View {
                     NavigationLink {
                         CreateGroupView(auth: auth)
                     } label: {
-                        Label("Create club", systemImage: "plus")
+                        Label("Create cabal", systemImage: "plus")
                     }
                     NavigationLink {
                         JoinGroupView(auth: auth)
                     } label: {
-                        Label("Join club", systemImage: "person.badge.plus")
+                        Label("Join cabal", systemImage: "person.badge.plus")
                     }
                 } label: {
                     Image(systemName: "plus.circle")
@@ -63,7 +63,7 @@ struct HomeView: View {
         List {
             if home.groups.isEmpty {
                 MonacoEmptyStateCard(
-                    message: "No clubs yet. Create or join one to start investing together.",
+                    message: "No cabals yet. Create or join one to start investing together.",
                     systemImage: "person.3"
                 )
             } else {

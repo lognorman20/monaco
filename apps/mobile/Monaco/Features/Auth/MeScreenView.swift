@@ -31,7 +31,7 @@ struct MeScreenView: View {
             NavigationLink {
                 CreateGroupView(auth: auth)
             } label: {
-                Label("Create group", systemImage: "person.3.fill")
+                Label("Create cabal", systemImage: "person.3.fill")
             }
             .buttonStyle(.monacoPrimary)
 
