@@ -246,6 +246,7 @@ struct GroupDetailView: View {
         case .lastMemberWithTreasury: return "You are the only member and the treasury still holds value."
         case .pendingRedeem: return "Finish your pending redeem before leaving."
         case .soleRemainingVote: return "Cast your vote on open proposals before leaving."
+        case .creatorMustTransfer: return "Transfer club ownership before leaving."
         case .unknown: return "You cannot leave this club right now."
         }
     }

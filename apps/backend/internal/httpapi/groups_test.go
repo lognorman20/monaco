@@ -632,6 +632,32 @@ func TestPOST_leave_withShareUnits_returns409(t *testing.T) {
 	}
 }
 
+func TestPOST_leave_creatorWithOtherMembers_returns409(t *testing.T) {
+	t.Parallel()
+	groupHandlers, authHandlers, privyClient, db, iso := integrationGroupApp(t)
+	created, _, creatorToken, _ := createOpenGroupWithJoiner(t, groupHandlers, authHandlers, privyClient, iso, "leave-creator-block", "leave-creator-joiner")
+	leaveRec := httptest.NewRecorder()
+	leaveReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/leave", nil)
+	leaveReq.SetPathValue("id", created.GroupID)
+	leaveReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	groupHandlers.LeaveGroupHandler(leaveRec, leaveReq)
+	if leaveRec.Code != http.StatusConflict {
+		t.Fatalf("leave status = %d, want 409; body = %s", leaveRec.Code, leaveRec.Body.String())
+	}
+	var payload map[string]string
+	_ = json.Unmarshal(leaveRec.Body.Bytes(), &payload)
+	if payload["reason"] != "creator_must_transfer" {
+		t.Fatalf("reason = %q, want creator_must_transfer", payload["reason"])
+	}
+	var creatorUserID string
+	_ = db.QueryRowContext(context.Background(), "SELECT creator_user_id FROM groups WHERE id = $1", created.GroupID).Scan(&creatorUserID)
+	var memberCount int
+	_ = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM group_members WHERE group_id = $1", created.GroupID).Scan(&memberCount)
+	if memberCount != 2 {
+		t.Fatalf("member count = %d, want 2", memberCount)
+	}
+}
+
 func TestPOST_leave_lastMemberWithTreasury_returns409(t *testing.T) {
 	t.Parallel()
 	groupHandlers, authHandlers, privyClient, db, iso := integrationGroupApp(t)

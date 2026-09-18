@@ -5,6 +5,7 @@ public enum LeaveGroupBlockReason: String, Equatable {
     case lastMemberWithTreasury = "last_member_with_treasury"
     case pendingRedeem = "pending_redeem"
     case soleRemainingVote = "sole_remaining_vote"
+    case creatorMustTransfer = "creator_must_transfer"
     case unknown
 }
 

@@ -16,6 +16,48 @@ type PositionRow struct {
 	AmountWithdrawn int64
 }
 
+// GetPositionForUpdateTx row-locks the position for a user in a group within tx.
+func (s *Store) GetPositionForUpdateTx(ctx context.Context, tx *sql.Tx, userID, groupID string) (PositionRow, bool, error) {
+	if userID == "" || groupID == "" {
+		return PositionRow{}, false, fmt.Errorf("user_id and group_id are required")
+	}
+
+	const selectSQL = `
+SELECT user_id, group_id, share_units, amount_deposited, amount_withdrawn
+FROM positions
+WHERE user_id = $1 AND group_id = $2
+FOR UPDATE`
+
+	var row PositionRow
+	err := tx.QueryRowContext(ctx, selectSQL, userID, groupID).Scan(
+		&row.UserID,
+		&row.GroupID,
+		&row.ShareUnits,
+		&row.AmountDeposited,
+		&row.AmountWithdrawn,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PositionRow{}, false, nil
+	}
+	if err != nil {
+		return PositionRow{}, false, fmt.Errorf("get position for update: %w", err)
+	}
+	return row, true, nil
+}
+
+// NetUSDCInByGroupTx returns net deposited USDC micros for groupID within tx.
+func (s *Store) NetUSDCInByGroupTx(ctx context.Context, tx *sql.Tx, groupID string) (int64, error) {
+	if groupID == "" {
+		return 0, fmt.Errorf("group_id is required")
+	}
+	const selectSQL = `SELECT COALESCE(SUM(amount_deposited - amount_withdrawn), 0) FROM positions WHERE group_id = $1`
+	var total int64
+	if err := tx.QueryRowContext(ctx, selectSQL, groupID).Scan(&total); err != nil {
+		return 0, fmt.Errorf("net usdc in by group tx: %w", err)
+	}
+	return total, nil
+}
+
 // GetPositionTx returns the position for a user in a group within a transaction.
 func (s *Store) GetPositionTx(ctx context.Context, tx *sql.Tx, userID, groupID string) (PositionRow, bool, error) {
 	if userID == "" || groupID == "" {

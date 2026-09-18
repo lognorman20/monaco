@@ -44,6 +44,28 @@ func (s *Store) IsGroupMember(ctx context.Context, groupID, userID string) (bool
 	return true, nil
 }
 
+// ListGroupMemberIDsForUpdateTx returns member user ids with row locks within tx.
+func (s *Store) ListGroupMemberIDsForUpdateTx(ctx context.Context, tx *sql.Tx, groupID string) ([]string, error) {
+	if groupID == "" {
+		return nil, fmt.Errorf("group_id is required")
+	}
+	const selectSQL = `SELECT user_id FROM group_members WHERE group_id = $1 ORDER BY joined_at FOR UPDATE`
+	rows, err := tx.QueryContext(ctx, selectSQL, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("list group members for update: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan group member: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // ListGroupMemberIDs returns user ids for groupID.
 func (s *Store) ListGroupMemberIDs(ctx context.Context, groupID string) ([]string, error) {
 	if groupID == "" {
@@ -81,6 +103,28 @@ func (s *Store) InsertGroupVotersTx(ctx context.Context, tx *sql.Tx, groupID str
 		}
 	}
 	return nil
+}
+
+// ListGroupVoterIDsTx returns user ids in group_voters for groupID within tx.
+func (s *Store) ListGroupVoterIDsTx(ctx context.Context, tx *sql.Tx, groupID string) ([]string, error) {
+	if groupID == "" {
+		return nil, fmt.Errorf("group_id is required")
+	}
+	const selectSQL = `SELECT user_id FROM group_voters WHERE group_id = $1 ORDER BY user_id`
+	rows, err := tx.QueryContext(ctx, selectSQL, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("list group voters tx: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan group voter: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // ListGroupVoterIDs returns user ids in group_voters for groupID.

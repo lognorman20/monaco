@@ -78,6 +78,23 @@ func IsUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
+// HasActiveRedeemJobForUserTx reports unsettled redeem jobs within tx.
+func (s *Store) HasActiveRedeemJobForUserTx(ctx context.Context, tx *sql.Tx, userID, groupID string) (bool, error) {
+	if userID == "" || groupID == "" {
+		return false, fmt.Errorf("user_id and group_id are required")
+	}
+	const selectSQL = `SELECT 1 FROM redeem_jobs WHERE user_id = $1 AND group_id = $2 AND status <> 'settled' LIMIT 1`
+	var exists int
+	err := tx.QueryRowContext(ctx, selectSQL, userID, groupID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("has active redeem job tx: %w", err)
+	}
+	return true, nil
+}
+
 // HasActiveRedeemJobForUser reports whether userID has an unsettled redeem job in groupID.
 func (s *Store) HasActiveRedeemJobForUser(ctx context.Context, userID, groupID string) (bool, error) {
 	if userID == "" || groupID == "" {

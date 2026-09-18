@@ -45,10 +45,11 @@ var ErrWrongJoinPassword = errors.New("wrong join password")
 type LeaveBlockReason string
 
 const (
-	LeaveBlockShareUnits         LeaveBlockReason = "share_units_remaining"
-	LeaveBlockLastMemberTreasury LeaveBlockReason = "last_member_with_treasury"
-	LeaveBlockPendingRedeem      LeaveBlockReason = "pending_redeem"
-	LeaveBlockSoleRemainingVote  LeaveBlockReason = "sole_remaining_vote"
+	LeaveBlockShareUnits          LeaveBlockReason = "share_units_remaining"
+	LeaveBlockLastMemberTreasury  LeaveBlockReason = "last_member_with_treasury"
+	LeaveBlockPendingRedeem       LeaveBlockReason = "pending_redeem"
+	LeaveBlockSoleRemainingVote   LeaveBlockReason = "sole_remaining_vote"
+	LeaveBlockCreatorMustTransfer LeaveBlockReason = "creator_must_transfer"
 )
 
 type LeaveGroupError struct{ Reason LeaveBlockReason }
@@ -227,7 +228,7 @@ func (g *GovernanceService) JoinGroup(ctx context.Context, accessToken, groupID,
 
 // LeaveGroup removes a member when leave policy preconditions pass.
 // Positions rows are kept for deposit history; non-members are excluded from boards via group_members.
-// Creators may leave when another member exists; we do not transfer creator_user_id.
+// Creators with other members must transfer ownership before leaving.
 func (g *GovernanceService) LeaveGroup(ctx context.Context, accessToken, groupID string) error {
 	if groupID == "" {
 		return fmt.Errorf("group id is required")
@@ -261,9 +262,6 @@ func (g *GovernanceService) LeaveGroup(ctx context.Context, accessToken, groupID
 		return ErrNotGroupMemberForLeave
 	}
 	logGovernanceLeaveGroupStart(user.ID, groupID)
-	if err := g.validateLeavePolicy(ctx, groupID, user.ID); err != nil {
-		return err
-	}
 	tx, err := g.store.BeginTx(ctx)
 	if err != nil {
 		return err
@@ -274,6 +272,30 @@ func (g *GovernanceService) LeaveGroup(ctx context.Context, accessToken, groupID
 			_ = tx.Rollback()
 		}
 	}()
+	lockedGroup, lockedFound, err := g.store.GetGroupByIDForUpdateTx(ctx, tx, groupID)
+	if err != nil {
+		return err
+	}
+	if !lockedFound {
+		return ErrGroupNotFound
+	}
+	memberIDs, err := g.store.ListGroupMemberIDsForUpdateTx(ctx, tx, groupID)
+	if err != nil {
+		return err
+	}
+	isMember := false
+	for _, memberID := range memberIDs {
+		if memberID == user.ID {
+			isMember = true
+			break
+		}
+	}
+	if !isMember {
+		return ErrNotGroupMemberForLeave
+	}
+	if err := g.validateLeavePolicyTx(ctx, tx, groupID, user.ID, lockedGroup.CreatorUserID, memberIDs); err != nil {
+		return err
+	}
 	if err := g.store.DeleteGroupMemberTx(ctx, tx, groupID, user.ID); err != nil {
 		return err
 	}
@@ -285,31 +307,30 @@ func (g *GovernanceService) LeaveGroup(ctx context.Context, accessToken, groupID
 	return nil
 }
 
-func (g *GovernanceService) validateLeavePolicy(ctx context.Context, groupID, userID string) error {
-	position, hasPosition, err := g.store.GetPosition(ctx, userID, groupID)
+func (g *GovernanceService) validateLeavePolicyTx(ctx context.Context, tx *sql.Tx, groupID, userID, creatorUserID string, memberIDs []string) error {
+	if userID == creatorUserID && len(memberIDs) > 1 {
+		return &LeaveGroupError{Reason: LeaveBlockCreatorMustTransfer}
+	}
+	position, hasPosition, err := g.store.GetPositionForUpdateTx(ctx, tx, userID, groupID)
 	if err != nil {
 		return err
 	}
 	if hasPosition && position.ShareUnits > 0 {
 		return &LeaveGroupError{Reason: LeaveBlockShareUnits}
 	}
-	activeRedeem, err := g.store.HasActiveRedeemJobForUser(ctx, userID, groupID)
+	activeRedeem, err := g.store.HasActiveRedeemJobForUserTx(ctx, tx, userID, groupID)
 	if err != nil {
 		return err
 	}
 	if activeRedeem {
 		return &LeaveGroupError{Reason: LeaveBlockPendingRedeem}
 	}
-	memberIDs, err := g.store.ListGroupMemberIDs(ctx, groupID)
-	if err != nil {
-		return err
-	}
 	if len(memberIDs) == 1 {
-		treasuryUSDC, err := g.groupTreasuryUSDC(ctx, groupID)
+		treasuryUSDC, err := g.groupTreasuryUSDCForLeaveTx(ctx, tx, groupID)
 		if err != nil {
 			return err
 		}
-		totalShares, err := g.store.SumShareUnitsByGroup(ctx, groupID)
+		totalShares, err := g.store.SumShareUnitsByGroupTx(ctx, tx, groupID)
 		if err != nil {
 			return err
 		}
@@ -317,14 +338,14 @@ func (g *GovernanceService) validateLeavePolicy(ctx context.Context, groupID, us
 			return &LeaveGroupError{Reason: LeaveBlockLastMemberTreasury}
 		}
 	}
-	rules, found, err := g.store.GetGroupRules(ctx, groupID)
+	rules, found, err := g.store.GetGroupRulesTx(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
 	if !found {
 		return ErrGroupNotFound
 	}
-	soleVote, err := g.hasSoleRemainingVote(ctx, groupID, userID, rules)
+	soleVote, err := g.hasSoleRemainingVoteTx(ctx, tx, groupID, userID, rules, memberIDs)
 	if err != nil {
 		return err
 	}
@@ -334,15 +355,33 @@ func (g *GovernanceService) validateLeavePolicy(ctx context.Context, groupID, us
 	return nil
 }
 
-func (g *GovernanceService) hasSoleRemainingVote(ctx context.Context, groupID, userID string, rules GroupRules) (bool, error) {
-	proposals, err := g.store.ListProposalsByGroupID(ctx, groupID, []domain.ProposalStatus{ProposalOpen})
+func (g *GovernanceService) groupTreasuryUSDCForLeaveTx(ctx context.Context, tx *sql.Tx, groupID string) (int64, error) {
+	netUsdcIn, err := g.store.NetUSDCInByGroupTx(ctx, tx, groupID)
+	if err != nil {
+		return 0, err
+	}
+	treasury, found, err := g.store.GetTreasuryByGroupID(ctx, groupID)
+	if err != nil {
+		return 0, err
+	}
+	if found {
+		balance, err := g.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
+		if err == nil && balance > 0 {
+			return balance, nil
+		}
+	}
+	return netUsdcIn, nil
+}
+
+func (g *GovernanceService) hasSoleRemainingVoteTx(ctx context.Context, tx *sql.Tx, groupID, userID string, rules GroupRules, memberIDs []string) (bool, error) {
+	proposals, err := g.store.ListProposalsByGroupIDTx(ctx, tx, groupID, []domain.ProposalStatus{ProposalOpen})
 	if err != nil {
 		return false, err
 	}
 	if len(proposals) == 0 {
 		return false, nil
 	}
-	voterSet, voterIDs, err := g.resolveVoterSet(ctx, groupID, rules)
+	voterSet, voterIDs, err := g.resolveVoterSetTx(ctx, tx, groupID, rules, memberIDs)
 	if err != nil {
 		return false, err
 	}
@@ -353,7 +392,7 @@ func (g *GovernanceService) hasSoleRemainingVote(ctx context.Context, groupID, u
 		if proposal.Status == ProposalOpen && g.now().UTC().Unix() >= proposal.ExpiresAt.Unix() {
 			continue
 		}
-		votes, err := g.store.ListVotesForProposal(ctx, proposal.ID)
+		votes, err := g.store.ListVotesForProposalTx(ctx, tx, proposal.ID)
 		if err != nil {
 			return false, err
 		}
@@ -707,6 +746,23 @@ func (g *GovernanceService) resolveVoterSet(ctx context.Context, groupID string,
 		return vs, ids, nil
 	case VoterSetNamed:
 		ids, err := g.store.ListGroupVoterIDs(ctx, groupID)
+		if err != nil {
+			return VoterSet{}, nil, err
+		}
+		vs.MemberIDs = ids
+		return vs, ids, nil
+	default:
+		return VoterSet{}, nil, fmt.Errorf("invalid voter set mode")
+	}
+}
+
+func (g *GovernanceService) resolveVoterSetTx(ctx context.Context, tx *sql.Tx, groupID string, rules GroupRules, memberIDs []string) (VoterSet, []string, error) {
+	vs := rules.VoterSet
+	switch vs.Mode {
+	case VoterSetAllMembers:
+		return vs, memberIDs, nil
+	case VoterSetNamed:
+		ids, err := g.store.ListGroupVoterIDsTx(ctx, tx, groupID)
 		if err != nil {
 			return VoterSet{}, nil, err
 		}

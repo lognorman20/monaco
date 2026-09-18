@@ -205,6 +205,8 @@ func leaveConflictMessage(reason app.LeaveBlockReason) string {
 		return "finish or cancel your pending redeem before leaving"
 	case app.LeaveBlockSoleRemainingVote:
 		return "cast your vote or wait for open proposals to settle before leaving"
+	case app.LeaveBlockCreatorMustTransfer:
+		return "transfer group ownership before leaving as creator"
 	default:
 		return "cannot leave group"
 	}
