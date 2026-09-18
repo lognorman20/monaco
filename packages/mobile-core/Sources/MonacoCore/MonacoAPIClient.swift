@@ -64,6 +64,30 @@ public final class MonacoAPIClient: @unchecked Sendable {
         return try JSONDecoder().decode(HomeViewDTO.self, from: data)
     }
 
+    public func getHomeDashboard(leaderboardRange: HomeLeaderboardRange = .all) async throws -> HomeDashboardDTO {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/home/dashboard"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "leaderboardRange", value: leaderboardRange.rawValue),
+        ]
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(HomeDashboardDTO.self, from: data)
+    }
+
     public func searchAssets(
         groupId: String,
         query: String,
