@@ -1,0 +1,16 @@
+{
+  "groupId": "550e8400-e29b-41d4-a716-446655440001",
+  "name": "Weekend investors",
+  "points": [
+    {
+      "at": "2026-01-01T12:00:00Z",
+      "potValueUsd": "500.00",
+      "dollarPnl": "+0.00"
+    },
+    {
+      "at": "2026-01-15T12:00:00Z",
+      "potValueUsd": "548.20",
+      "dollarPnl": "+48.20"
+    }
+  ]
+}
