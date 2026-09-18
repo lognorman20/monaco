@@ -1,7 +1,23 @@
 import XCTest
-@testable import MonacoCore
+import MonacoCore
 
 final class AssetsDTOTests: XCTestCase {
+    func testChartRangesExposeNativePickerIdentityAndTitles() {
+        XCTAssertEqual(AssetChartRange.allCases.map(\.id), ["1D", "1W", "1M"])
+        XCTAssertEqual(AssetChartRange.allCases.map(\.title), ["1D", "1W", "1M"])
+    }
+
+    func testAssetDetailDecodesLiquidityWithoutOptionalSellInput() throws {
+        let json = """
+        {"symbol":"AAPLx","name":"Apple","solanaMint":"mint","routable":true,
+         "liquidity":{"label":"available","routable":true,"buyProbeUsdcMicros":1000000}}
+        """
+        let detail = try JSONDecoder().decode(AssetDetailDTO.self, from: Data(json.utf8))
+        XCTAssertNil(detail.liquidity.sellProbeInAmount)
+        XCTAssertNil(detail.liquidity.sellProbeOutAmount)
+        XCTAssertNil(detail.priceUsdcMicros)
+    }
+
     func testMarketAssetDTO_decodesPricedCatalogRow() throws {
         let json = """
         {

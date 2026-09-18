@@ -1,29 +1,10 @@
 import Foundation
+import MonacoCore
 
-struct HomeViewDTO: Codable, Equatable {
-    let groups: [HomeGroupBoardRowDTO]
-    let people: [HomePeopleBoardRowDTO]
-}
-
-struct HomeGroupBoardRowDTO: Codable, Equatable, Identifiable {
-    let groupId: String
-    let name: String
-    let potValueUsd: String
-    let percentReturn: String?
-    let dollarPnl: String
-    let isJoined: Bool
-
-    var id: String { groupId }
-}
-
-struct HomePeopleBoardRowDTO: Codable, Equatable, Identifiable {
-    let userId: String
-    let displayName: String
-    let percentReturn: String?
-    let dollarPnl: String
-
-    var id: String { userId }
-}
+// The shared package owns the wire schema; aliases preserve native call sites.
+typealias HomeViewDTO = MonacoCore.HomeViewDTO
+typealias HomeGroupBoardRowDTO = MonacoCore.HomeGroupBoardRowDTO
+typealias HomePeopleBoardRowDTO = MonacoCore.HomePeopleBoardRowDTO
 
 struct UserSharedGroupsResponse: Codable, Equatable {
     let groups: [HomeGroupBoardRowDTO]

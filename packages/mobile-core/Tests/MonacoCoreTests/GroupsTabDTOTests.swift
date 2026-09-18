@@ -1,5 +1,5 @@
 import XCTest
-@testable import MonacoCore
+import MonacoCore
 
 final class GroupsTabDTOTests: XCTestCase {
     func testGroupSearchResponseDTO_decodesGroups() throws {
@@ -17,6 +17,7 @@ final class GroupsTabDTOTests: XCTestCase {
         XCTAssertEqual(dto.groups[0].name, "Weekend investors")
         XCTAssertTrue(dto.groups[0].isJoined)
         XCTAssertEqual(dto.groups[0].joinMode, "open")
+        XCTAssertEqual(dto.groups[0].groupId, dto.groups[0].id)
     }
 
     func testGroupLeaderboardResponseDTO_decodesRankedRows() throws {
@@ -32,6 +33,7 @@ final class GroupsTabDTOTests: XCTestCase {
         // Assert
         XCTAssertEqual(dto.groups.count, 1)
         XCTAssertEqual(dto.groups[0].rank, 1)
+        XCTAssertEqual(dto.groups[0].groupId, dto.groups[0].id)
         XCTAssertEqual(dto.groups[0].potValueUsd, "548.20")
     }
 
@@ -48,6 +50,7 @@ final class GroupsTabDTOTests: XCTestCase {
         // Assert
         XCTAssertEqual(dto.name, "Weekend investors")
         XCTAssertEqual(dto.points.count, 2)
+        XCTAssertEqual(dto.groupId, dto.groupID)
         XCTAssertEqual(dto.points[1].dollarPnl, "+48.20")
     }
 }
