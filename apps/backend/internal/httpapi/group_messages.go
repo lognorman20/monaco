@@ -8,11 +8,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 )
+
+// groupMessageTimeLayout is fixed-width RFC3339 with microseconds in UTC, so clients can
+// order messages within the same second and compare timestamps as strings.
+const groupMessageTimeLayout = "2006-01-02T15:04:05.000000Z07:00"
 
 // maxGroupMessageRequestBytes caps POST bodies well above the 2000-character message limit
 // (4 bytes per rune plus JSON overhead) so oversized payloads fail before decode.
@@ -134,7 +137,7 @@ func toGroupMessageResponse(m app.GroupMessage) groupMessageResponse {
 		AuthorID:   m.AuthorID,
 		AuthorName: m.AuthorName,
 		Body:       m.Body,
-		CreatedAt:  m.CreatedAt.UTC().Format(time.RFC3339),
+		CreatedAt:  m.CreatedAt.UTC().Format(groupMessageTimeLayout),
 		Mine:       m.Mine,
 	}
 }

@@ -738,4 +738,61 @@ public final class MonacoAPIClient: @unchecked Sendable {
         guard let token = try await accessTokenProvider(), !token.isEmpty else { return }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
+
+    /// `GET /v1/groups/{id}/messages` — newest first. Pass `before` from a prior page's `nextCursor`.
+    public func listGroupMessages(
+        groupId: String,
+        before: String? = nil,
+        limit: Int = 30
+    ) async throws -> GroupMessagesPageDTO {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/groups/\(groupId)/messages"),
+            resolvingAgainstBaseURL: false
+        )!
+        var items = [URLQueryItem(name: "limit", value: String(limit))]
+        if let before, !before.isEmpty {
+            items.append(URLQueryItem(name: "before", value: before))
+        }
+        components.queryItems = items
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(GroupMessagesPageDTO.self, from: data)
+    }
+
+    /// `POST /v1/groups/{id}/messages` — returns the stored message (201).
+    public func postGroupMessage(groupId: String, body: String) async throws -> GroupMessageDTO {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/messages")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try await applyAuthorizationHeader(to: &request)
+        request.httpBody = try JSONEncoder().encode(GroupMessageRequestDTO(body: body))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 201 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(GroupMessageDTO.self, from: data)
+    }
+
+    private struct GroupMessageRequestDTO: Encodable {
+        let body: String
+    }
+
 }
