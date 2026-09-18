@@ -8,6 +8,9 @@ public enum ProductFeatureSourceManifest {
         GET v1/groups assets query
         POST v1/groups quotes proposals
         POST v1/proposals votes
+        GET v1/groups proposals tab
+        GET v1/proposals comments
+        POST v1/proposals comments parentId
         """,
     ]
 }
