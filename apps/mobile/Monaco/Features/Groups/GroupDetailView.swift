@@ -5,6 +5,7 @@ private enum CabalActionDestination: Hashable {
     case deposit
     case propose
     case sell
+    case chat
 }
 
 struct GroupDetailView: View {
@@ -166,6 +167,15 @@ struct GroupDetailView: View {
                     .buttonStyle(.monacoSecondary)
                     .accessibilityIdentifier("group-action-sell")
                 }
+
+                Button {
+                    cabalActionDestination = .chat
+                } label: {
+                    Label("Cabal chat", systemImage: "bubble.left.and.bubble.right")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.monacoSecondary)
+                .accessibilityIdentifier("group-action-chat")
             }
             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
             .listRowBackground(Color.clear)
@@ -211,6 +221,10 @@ struct GroupDetailView: View {
                         await loadActivity()
                     }
                 )
+            }
+        case .chat:
+            if let view = groupView {
+                GroupChatView(auth: auth, groupId: groupId, groupName: view.name)
             }
         }
     }
