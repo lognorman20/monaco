@@ -25,11 +25,11 @@ type person struct {
 
 // deposit is one confirmed (or pending/failed) deposit into a club.
 type depositSpec struct {
-	Who       string  // person slug
-	USDC      int64   // whole USDC
-	HoursAgo  float64 // relative to seed time
-	SharePx   float64 // NAV per share at deposit (share_units = amount / SharePx)
-	Status    string  // "" = confirmed
+	Who      string  // person slug
+	USDC     int64   // whole USDC
+	HoursAgo float64 // relative to seed time
+	SharePx  float64 // NAV per share at deposit (share_units = amount / SharePx)
+	Status   string  // "" = confirmed
 }
 
 type voteSpec struct {
