@@ -26,6 +26,7 @@ type catalogAssetResponse struct {
 	Symbol     string `json:"symbol"`
 	Name       string `json:"name"`
 	SolanaMint string `json:"solanaMint"`
+	Routable   bool   `json:"routable"`
 }
 
 type searchAssetsResponse struct {
@@ -78,6 +79,7 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 			Symbol:     asset.Symbol,
 			Name:       asset.Name,
 			SolanaMint: asset.SolanaMint,
+			Routable:   asset.Routable,
 		})
 	}
 

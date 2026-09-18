@@ -19,6 +19,7 @@ type CatalogAsset struct {
 	Symbol     string
 	Name       string
 	SolanaMint string
+	Routable   bool
 }
 
 // CatalogSearchPage is one page of catalog search results.
@@ -35,9 +36,10 @@ type CatalogSearcher interface {
 
 // HTTPCatalogSearcher lists assets from the xStocks public API and filters locally.
 type HTTPCatalogSearcher struct {
-	baseURL    string
-	httpClient *http.Client
-	mintIndex  mintIndex
+	baseURL     string
+	httpClient  *http.Client
+	mintIndex   mintIndex
+	routability RoutabilityProber
 }
 
 // NewHTTPCatalogSearcher returns a catalog searcher backed by the production API.
@@ -49,6 +51,11 @@ func NewHTTPCatalogSearcher() *HTTPCatalogSearcher {
 		},
 		mintIndex: mintIndex{byMint: make(map[string]CatalogAsset)},
 	}
+}
+
+// SetRoutabilityProber configures Jupiter routability ranking for catalog search results.
+func (s *HTTPCatalogSearcher) SetRoutabilityProber(prober RoutabilityProber) {
+	s.routability = prober
 }
 
 // NewHTTPCatalogSearcherWithClient injects a custom base URL and HTTP client for tests.
@@ -75,6 +82,9 @@ type catalogPageInfo struct {
 	HasNextPage bool `json:"hasNextPage"`
 }
 
+// catalogAssetNode mirrors xStocks public API asset rows. As of 2026-03 the API exposes
+// symbol, name, and chain deployments (Solana mint) only — no volume, holder count, or
+// popularity fields; pinned symbols and Jupiter routability probes supply ranking signals.
 type catalogAssetNode struct {
 	Symbol      string       `json:"symbol"`
 	Name        string       `json:"name"`
@@ -96,8 +106,10 @@ func (s *HTTPCatalogSearcher) Search(ctx context.Context, query string, limit, o
 			logCatalogSearch(query, 0, err)
 			return CatalogSearchPage{}, err
 		} else if asset != nil {
+			matches := []CatalogAsset{*asset}
+			rankCatalogAssets(ctx, s.routability, matches)
 			logCatalogSearch(query, 1, nil)
-			return CatalogSearchPage{Assets: []CatalogAsset{*asset}, HasMore: false}, nil
+			return CatalogSearchPage{Assets: matches, HasMore: false}, nil
 		}
 	}
 
@@ -170,7 +182,7 @@ func (s *HTTPCatalogSearcher) searchPaginatedList(ctx context.Context, query str
 		hasNextPage = list.Page.HasNextPage
 	}
 
-	sortCatalogMatches(matches)
+	rankCatalogAssets(ctx, s.routability, matches)
 
 	hasMore := len(matches) > offset+limit
 	if offset >= len(matches) {
@@ -315,9 +327,10 @@ func catalogNodeMatches(node catalogAssetNode, needle string) bool {
 }
 
 type fakeCatalogSearcher struct {
-	mu      sync.Mutex
-	assets  []CatalogAsset
-	listErr error
+	mu          sync.Mutex
+	assets      []CatalogAsset
+	listErr     error
+	routability RoutabilityProber
 }
 
 // NewFakeCatalogSearcher returns an in-memory catalog searcher for tests.
@@ -335,6 +348,17 @@ func RegisterCatalogAsset(searcher CatalogSearcher, asset CatalogAsset) {
 	}
 	fake.mu.Lock()
 	fake.assets = append(fake.assets, asset)
+	fake.mu.Unlock()
+}
+
+// SetFakeCatalogRoutabilityProber configures routability ranking on a fake catalog searcher.
+func SetFakeCatalogRoutabilityProber(searcher CatalogSearcher, prober RoutabilityProber) {
+	fake, ok := searcher.(*fakeCatalogSearcher)
+	if !ok {
+		panic("xstocks: SetFakeCatalogRoutabilityProber requires NewFakeCatalogSearcher")
+	}
+	fake.mu.Lock()
+	fake.routability = prober
 	fake.mu.Unlock()
 }
 
@@ -366,6 +390,7 @@ func (f *fakeCatalogSearcher) Search(ctx context.Context, query string, limit, o
 		return CatalogSearchPage{}, err
 	}
 	assets := append([]CatalogAsset(nil), f.assets...)
+	prober := f.routability
 	f.mu.Unlock()
 
 	needle := strings.ToLower(query)
@@ -378,7 +403,7 @@ func (f *fakeCatalogSearcher) Search(ctx context.Context, query string, limit, o
 		}
 	}
 
-	sortCatalogMatches(matches)
+	rankCatalogAssets(ctx, prober, matches)
 
 	hasMore := len(matches) > offset+limit
 	if offset >= len(matches) {

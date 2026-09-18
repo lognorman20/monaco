@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
@@ -13,6 +14,9 @@ import (
 
 // ErrQuoteNotRoutable means Jupiter returned no route for the requested buy.
 var ErrQuoteNotRoutable = errors.New("quote not routable")
+
+// CatalogRoutabilityProbeMicros is the USDC amount used for Jupiter catalog routability probes.
+const CatalogRoutabilityProbeMicros = 1_000_000
 
 // ErrProposalNotPassed means Jupiter execute requires a passed proposal tally.
 var ErrProposalNotPassed = errors.New("proposal not passed")
@@ -46,6 +50,32 @@ func NewBuyService(jupiterClient jupiter.Client, resolver xstocks.Resolver) *Buy
 		jupiter: jupiterClient,
 		xstocks: resolver,
 	}
+}
+
+// JupiterCatalogRoutabilityProber probes Jupiter for USDC→xStock routes during catalog ranking.
+type JupiterCatalogRoutabilityProber struct {
+	jupiter jupiter.Client
+}
+
+// NewJupiterCatalogRoutabilityProber returns a catalog prober backed by Jupiter quotes.
+func NewJupiterCatalogRoutabilityProber(jupiterClient jupiter.Client) *JupiterCatalogRoutabilityProber {
+	return &JupiterCatalogRoutabilityProber{jupiter: jupiterClient}
+}
+
+// IsRoutable reports whether Jupiter can quote a small USDC buy into the asset mint.
+func (p *JupiterCatalogRoutabilityProber) IsRoutable(ctx context.Context, asset xstocks.CatalogAsset) bool {
+	if p == nil || p.jupiter == nil || strings.TrimSpace(asset.SolanaMint) == "" {
+		return false
+	}
+	quote, err := p.jupiter.QuoteBuy(ctx, jupiter.QuoteBuyParams{
+		Symbol:     asset.Symbol,
+		OutputMint: asset.SolanaMint,
+		USDCAmount: CatalogRoutabilityProbeMicros,
+	})
+	if err != nil {
+		return false
+	}
+	return quote.Routable
 }
 
 // ResolveOutputMint returns the Solana mint for a catalog symbol.

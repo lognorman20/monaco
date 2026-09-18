@@ -57,3 +57,36 @@ func TestGET_assets_paginatesCatalogResults(t *testing.T) {
 		t.Fatal("expected hasMore=true")
 	}
 }
+
+func TestGET_assets_includesRoutableField(t *testing.T) {
+	t.Parallel()
+
+	catalogHandlers, groupHandlers, authHandlers, _, iso := integrationCatalogApp(t)
+	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Privy)
+	xstocks.RegisterCatalogAsset(catalogHandlers.Catalog, xstocks.CatalogAsset{
+		Symbol:     "AAPLx",
+		Name:       "Apple",
+		SolanaMint: "MintAAPL",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/groups/"+groupID+"/assets?limit=5", nil)
+	req.SetPathValue("id", groupID)
+	req.Header.Set("Authorization", "Bearer "+string(token))
+	rec := httptest.NewRecorder()
+	catalogHandlers.SearchAssetsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+
+	var payload searchAssetsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if len(payload.Assets) != 1 {
+		t.Fatalf("assets len = %d, want 1", len(payload.Assets))
+	}
+	if !payload.Assets[0].Routable {
+		t.Fatal("expected routable=true when no prober is configured on fake catalog")
+	}
+}
