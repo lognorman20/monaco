@@ -73,7 +73,7 @@ struct ProposeBuyView: View {
 
             if let selectedSymbol {
                 Section("Thesis") {
-                    TextField("Why should the club buy this?", text: $thesis, axis: .vertical)
+                    TextField("Why should the cabal buy this?", text: $thesis, axis: .vertical)
                         .lineLimit(3...8)
                         .accessibilityIdentifier("proposal-thesis-field")
                     Text("Optional · Up to 2,000 characters")
