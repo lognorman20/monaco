@@ -1,27 +1,36 @@
 package app
 
 import (
+	"time"
+
 	"github.com/monaco/monaco/packages/domain"
 )
 
-// GroupRules is the governance settings for a group.
 type GroupRules = domain.GroupRules
-
-// JoinPolicy controls how members join a group.
 type JoinPolicy = domain.JoinPolicy
-
-// JoinMode is persisted on groups.join_mode.
 type JoinMode = domain.JoinMode
 
 const (
-	JoinModeOpen     = domain.JoinModeOpen
-	JoinModePassword = domain.JoinModePassword
+	JoinModeOpen    = domain.JoinModeOpen
+	JoinModeRequest = domain.JoinModeRequest
 )
 
-// VoterSet names who may vote on proposals.
-type VoterSet = domain.VoterSet
+type JoinGroupOutcome string
 
-// VoterSetMode is persisted on groups.voter_set_mode.
+const (
+	JoinOutcomeJoined        JoinGroupOutcome = "joined"
+	JoinOutcomePending       JoinGroupOutcome = "pending"
+	JoinOutcomeAlreadyMember JoinGroupOutcome = "already_member"
+)
+
+type JoinRequest struct {
+	ID          string
+	UserID      string
+	DisplayName string
+	RequestedAt time.Time
+}
+
+type VoterSet = domain.VoterSet
 type VoterSetMode = domain.VoterSetMode
 
 const (
@@ -29,7 +38,6 @@ const (
 	VoterSetNamed      = domain.VoterSetNamed
 )
 
-// VoteThreshold is persisted on groups.threshold.
 type VoteThreshold = domain.VoteThreshold
 
 const (
@@ -37,10 +45,7 @@ const (
 	ThresholdMajority  = domain.ThresholdMajority
 )
 
-// VoteExpirySeconds is persisted on groups.vote_expiry_seconds.
 type VoteExpirySeconds = domain.VoteExpirySeconds
-
-// ProposalStatus is persisted on proposals.status.
 type ProposalStatus = domain.ProposalStatus
 
 const (
@@ -50,8 +55,5 @@ const (
 	ProposalExpired = domain.ProposalExpired
 )
 
-// WithdrawalStatus is persisted on withdrawals.status.
 type WithdrawalStatus = domain.WithdrawalStatus
-
-// Proposal is a buy vote under consideration in a group.
 type Proposal = domain.Proposal

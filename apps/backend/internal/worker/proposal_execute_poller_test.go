@@ -38,7 +38,7 @@ func TestProposalExecutePoller_executesPassedProposal(t *testing.T) {
 
 	const usdcAmount int64 = 2_000_000
 
-	group, err := governance.CreateGroupWithRules(ctx, string(token), "Execute Poller "+testApp.ISO.Suffix(), app.DefaultGroupRules(), "")
+	group, err := governance.CreateGroupWithRules(ctx, string(token), "Execute Poller "+testApp.ISO.Suffix(), app.DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}

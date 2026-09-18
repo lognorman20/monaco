@@ -2,14 +2,14 @@ import SwiftUI
 
 enum JoinPolicyMode: String, CaseIterable, Identifiable {
     case open
-    case password
+    case request
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
         case .open: "Anyone can join"
-        case .password: "Password required"
+        case .request: "Admin approval required"
         }
     }
 }
@@ -66,7 +66,6 @@ struct CreateGroupView: View {
 
     @State private var groupName = ""
     @State private var joinPolicy: JoinPolicyMode = .open
-    @State private var joinPassword = ""
     @State private var voterSet: VoterSetMode = .allMembers
     @State private var threshold: VoteThresholdMode = .majority
     @State private var voteExpiry: VoteExpiryOption = .oneDay
@@ -98,11 +97,6 @@ struct CreateGroupView: View {
                 .pickerStyle(.inline)
                 .disabled(isCreating || createdGroup != nil)
 
-                if joinPolicy == .password {
-                    SecureField("Join password", text: $joinPassword)
-                        .disabled(isCreating || createdGroup != nil)
-                        .accessibilityIdentifier("create-group-join-password")
-                }
             }
 
             Section("Who votes on buys?") {
@@ -167,9 +161,6 @@ struct CreateGroupView: View {
     private var canSubmit: Bool {
         let trimmedName = groupName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { return false }
-        if joinPolicy == .password {
-            return !joinPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
         if voterSet == .namedSubset {
             return creatorUserId != nil
         }
@@ -202,11 +193,6 @@ struct CreateGroupView: View {
             return
         }
 
-        if joinPolicy == .password && joinPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            errorMessage = "Enter a join password."
-            return
-        }
-
         var memberIds: [String] = []
         if voterSet == .namedSubset {
             guard let creatorUserId else {
@@ -225,7 +211,6 @@ struct CreateGroupView: View {
                 accessToken: accessToken,
                 name: trimmedName,
                 joinPolicyMode: joinPolicy.rawValue,
-                joinPassword: joinPolicy == .password ? joinPassword : nil,
                 voterSetMode: voterSet.rawValue,
                 voterMemberIds: memberIds,
                 threshold: threshold.rawValue,

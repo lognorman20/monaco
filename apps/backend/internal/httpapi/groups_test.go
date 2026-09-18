@@ -359,7 +359,7 @@ func TestPOST_groups_persistsJoinPolicyVoterSetThresholdExpiry(t *testing.T) {
 	// Arrange
 	groupHandlers, authHandlers, privyClient, db, iso := integrationGroupApp(t)
 	user, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "rules-creator", "Creator")
-	body := `{"name":"Rules Fund","joinPolicy":{"mode":"password","password":"potluck"},"voterSet":{"mode":"named_subset","memberIds":["` + user.UserID + `"]},"threshold":"unanimous","voteExpirySeconds":3600}`
+	body := `{"name":"Rules Fund","joinPolicy":{"mode":"request"},"voterSet":{"mode":"named_subset","memberIds":["` + user.UserID + `"]},"threshold":"unanimous","voteExpirySeconds":3600}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+string(token))
@@ -377,15 +377,11 @@ func TestPOST_groups_persistsJoinPolicyVoterSetThresholdExpiry(t *testing.T) {
 	trackCreatedGroup(iso, payload.GroupID)
 	var joinMode, voterSetMode, threshold string
 	var voteExpirySeconds int64
-	var passwordHash string
-	if err := db.QueryRowContext(context.Background(), `SELECT join_mode, voter_set_mode, threshold, vote_expiry_seconds, COALESCE(join_password_hash, '') FROM groups WHERE id = $1`, payload.GroupID).Scan(&joinMode, &voterSetMode, &threshold, &voteExpirySeconds, &passwordHash); err != nil {
+	if err := db.QueryRowContext(context.Background(), `SELECT join_mode, voter_set_mode, threshold, vote_expiry_seconds FROM groups WHERE id = $1`, payload.GroupID).Scan(&joinMode, &voterSetMode, &threshold, &voteExpirySeconds); err != nil {
 		t.Fatalf("select group rules: %v", err)
 	}
-	if joinMode != "password" || voterSetMode != "named_subset" || threshold != "unanimous" || voteExpirySeconds != 3600 {
+	if joinMode != "request" || voterSetMode != "named_subset" || threshold != "unanimous" || voteExpirySeconds != 3600 {
 		t.Fatalf("unexpected persisted rules")
-	}
-	if passwordHash == "" || passwordHash == "potluck" {
-		t.Fatal("expected hashed join password")
 	}
 }
 
@@ -421,63 +417,57 @@ func TestPOST_join_openGroup_addsMemberWithoutPassword(t *testing.T) {
 	}
 }
 
-func TestPOST_join_passwordGroup_requiresCorrectPassword(t *testing.T) {
+func TestPOST_join_requestGroup_createsPendingRequest(t *testing.T) {
 	t.Parallel()
-	// Arrange
 	groupHandlers, authHandlers, privyClient, db, iso := integrationGroupApp(t)
-	_, creatorToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "pw-creator", "Creator")
+	_, creatorToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "req-creator", "Creator")
 	createRec := httptest.NewRecorder()
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Secret Club","joinPolicy":{"mode":"password","password":"potluck"}}`))
-	createReq.Header.Set("Content-Type", "application/json")
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Request Club","joinPolicy":{"mode":"request"}}`))
 	createReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
 	groupHandlers.CreateGroupHandler(createRec, createReq)
 	var created createGroupResponse
 	_ = json.Unmarshal(createRec.Body.Bytes(), &created)
 	trackCreatedGroup(iso, created.GroupID)
-	_, joinerToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "pw-joiner", "Joiner")
+	_, joinerToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "req-joiner", "Joiner")
 	joinRec := httptest.NewRecorder()
-	joinReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/join", strings.NewReader(`{"password":"potluck"}`))
+	joinReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/join", strings.NewReader(`{}`))
 	joinReq.SetPathValue("id", created.GroupID)
-	joinReq.Header.Set("Content-Type", "application/json")
 	joinReq.Header.Set("Authorization", "Bearer "+string(joinerToken))
-	// Act
 	groupHandlers.JoinGroupHandler(joinRec, joinReq)
-	// Assert
-	if joinRec.Code != http.StatusNoContent {
-		t.Fatalf("join status = %d, want 204", joinRec.Code)
-	}
-	var memberCount int
-	_ = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM group_members WHERE group_id = $1", created.GroupID).Scan(&memberCount)
-	if memberCount != 2 {
-		t.Fatalf("expected 2 members, got %d", memberCount)
-	}
+	if joinRec.Code != http.StatusAccepted { t.Fatalf("join status = %d, want 202", joinRec.Code) }
+	var pendingCount int
+	_ = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM group_join_requests WHERE group_id = $1 AND status = 'pending'", created.GroupID).Scan(&pendingCount)
+	if pendingCount != 1 { t.Fatalf("expected 1 pending join request, got %d", pendingCount) }
 }
 
-func TestPOST_join_wrongPassword_returns403(t *testing.T) {
+func TestPOST_join_requestGroup_adminApproveAddsMember(t *testing.T) {
 	t.Parallel()
-	// Arrange
-	groupHandlers, authHandlers, privyClient, _, iso := integrationGroupApp(t)
-	_, creatorToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "badpw-creator", "Creator")
+	groupHandlers, authHandlers, privyClient, db, iso := integrationGroupApp(t)
+	_, creatorToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "approve-creator", "Creator")
 	createRec := httptest.NewRecorder()
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Locked Club","joinPolicy":{"mode":"password","password":"potluck"}}`))
-	createReq.Header.Set("Content-Type", "application/json")
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Approve Club","joinPolicy":{"mode":"request"}}`))
 	createReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
 	groupHandlers.CreateGroupHandler(createRec, createReq)
 	var created createGroupResponse
 	_ = json.Unmarshal(createRec.Body.Bytes(), &created)
 	trackCreatedGroup(iso, created.GroupID)
-	_, joinerToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "badpw-joiner", "Joiner")
-	joinRec := httptest.NewRecorder()
-	joinReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/join", strings.NewReader(`{"password":"wrong"}`))
+	joiner, joinerToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "approve-joiner", "Joiner")
+	joinReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/join", strings.NewReader(`{}`))
 	joinReq.SetPathValue("id", created.GroupID)
-	joinReq.Header.Set("Content-Type", "application/json")
 	joinReq.Header.Set("Authorization", "Bearer "+string(joinerToken))
-	// Act
-	groupHandlers.JoinGroupHandler(joinRec, joinReq)
-	// Assert
-	if joinRec.Code != http.StatusForbidden {
-		t.Fatalf("join status = %d, want 403", joinRec.Code)
-	}
+	groupHandlers.JoinGroupHandler(httptest.NewRecorder(), joinReq)
+	var requestID string
+	_ = db.QueryRowContext(context.Background(), "SELECT id FROM group_join_requests WHERE group_id = $1 AND user_id = $2", created.GroupID, joiner.UserID).Scan(&requestID)
+	approveReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/join-requests/"+requestID+"/approve", nil)
+	approveReq.SetPathValue("id", created.GroupID)
+	approveReq.SetPathValue("requestId", requestID)
+	approveReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	approveRec := httptest.NewRecorder()
+	groupHandlers.ApproveJoinRequestHandler(approveRec, approveReq)
+	if approveRec.Code != http.StatusNoContent { t.Fatalf("approve status = %d, want 204", approveRec.Code) }
+	var memberCount int
+	_ = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM group_members WHERE group_id = $1", created.GroupID).Scan(&memberCount)
+	if memberCount != 2 { t.Fatalf("expected 2 members after approval, got %d", memberCount) }
 }
 
 func TestGET_groupActivity_returnsMixedStatuses(t *testing.T) {

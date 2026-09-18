@@ -17,6 +17,9 @@ struct GroupDetailView: View {
     @State private var errorMessage: String?
     @State private var toast: MonacoToast?
     @State private var isLoading: Bool
+    @State private var joinRequests: [JoinRequestDTO] = []
+    @State private var joinRequestsLoading = false
+    @State private var decidingRequestIDs: Set<String> = []
 
     private let activityPollInterval: Duration = .seconds(15)
 
@@ -47,11 +50,13 @@ struct GroupDetailView: View {
                     await loadGroup()
                 }
                 await loadActivity()
+                await loadJoinRequests()
                 await pollActivityWhileVisible()
             }
             .refreshable {
                 await loadGroup()
                 await loadActivity()
+                await loadJoinRequests()
             }
             .monacoToast($toast)
     }
@@ -108,6 +113,23 @@ struct GroupDetailView: View {
             )
             YouSectionView(slice: view.you)
             MemberBoardSection(members: view.members)
+
+            if joinRequestsLoading || !joinRequests.isEmpty {
+                Section("Join requests") {
+                    if joinRequestsLoading && joinRequests.isEmpty { ProgressView("Loading requests…") }
+                    ForEach(joinRequests) { request in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(request.displayName.isEmpty ? "Member" : request.displayName).font(.headline)
+                            HStack {
+                                Button("Approve") { Task { await decideJoinRequest(request, approve: true) } }
+                                    .disabled(decidingRequestIDs.contains(request.id))
+                                Button("Deny", role: .destructive) { Task { await decideJoinRequest(request, approve: false) } }
+                                    .disabled(decidingRequestIDs.contains(request.id))
+                            }
+                        }
+                    }
+                }
+            }
 
             GroupActivitySection(
                 auth: auth,
@@ -233,6 +255,41 @@ struct GroupDetailView: View {
             toast = MonacoToast(message: "Retry failed (HTTP \(code)).")
         } catch {
             toast = MonacoToast(message: "Retry failed. Try again.")
+        }
+    }
+
+    private func loadJoinRequests() async {
+        guard let token = auth.accessToken else { return }
+        joinRequestsLoading = true
+        defer { joinRequestsLoading = false }
+        do {
+            joinRequests = try await apiClient.listJoinRequests(accessToken: token, groupId: groupId)
+        } catch MonacoAPIError.httpStatus(403) {
+            joinRequests = []
+        } catch {
+            joinRequests = []
+        }
+    }
+
+    private func decideJoinRequest(_ request: JoinRequestDTO, approve: Bool) async {
+        guard let token = auth.accessToken else {
+            toast = MonacoToast(message: "Missing sign-in token.")
+            return
+        }
+        guard !decidingRequestIDs.contains(request.id) else { return }
+        decidingRequestIDs.insert(request.id)
+        defer { decidingRequestIDs.remove(request.id) }
+        do {
+            if approve {
+                try await apiClient.approveJoinRequest(accessToken: token, groupId: groupId, requestId: request.id)
+            } else {
+                try await apiClient.denyJoinRequest(accessToken: token, groupId: groupId, requestId: request.id)
+            }
+            toast = MonacoToast(message: approve ? "Member approved." : "Join request denied.")
+            await loadJoinRequests()
+            await loadGroup()
+        } catch {
+            toast = MonacoToast(message: "Could not update request.")
         }
     }
 }

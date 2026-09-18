@@ -27,7 +27,7 @@ func TestListGroupActivity_includesDepositsBuysSellsAndMixedStatuses(t *testing.
 		DisplayName: "Activity User",
 	})
 
-	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "activity"), DefaultGroupRules(), "")
+	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "activity"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestListGroupActivity_emptyWhenNoRows(t *testing.T) {
 	})
 	openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "activity-empty", "Empty User")
 
-	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "empty"), DefaultGroupRules(), "")
+	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "empty"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestListGroupActivity_sortsNewestFirst(t *testing.T) {
 	})
 	openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "activity-sort", "Sort User")
 
-	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "sort"), DefaultGroupRules(), "")
+	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "sort"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}

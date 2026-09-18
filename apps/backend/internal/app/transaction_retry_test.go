@@ -39,7 +39,7 @@ func TestRetryFailedSwap_rejectsNonFailedTransaction(t *testing.T) {
 	sessions := NewSessionService(h.Store, h.Privy)
 	session := openTestSession(t, h.ISO, sessions, h.Privy, "retry-reject", "Retry Reject")
 	governance := NewGovernanceService(h.Store, h.Privy)
-	group, err := governance.CreateGroupWithRules(ctx, h.ISO.UniqueToken("retry-reject"), testGroupName(h.ISO, "retry-reject"), DefaultGroupRules(), "")
+	group, err := governance.CreateGroupWithRules(ctx, h.ISO.UniqueToken("retry-reject"), testGroupName(h.ISO, "retry-reject"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestRetryFailedSwap_buySuccessCreatesNewConfirmedRow(t *testing.T) {
 	sessions := NewSessionService(h.Store, h.Privy)
 	session := openTestSession(t, h.ISO, sessions, h.Privy, "retry-buy", "Retry Buy")
 	governance := NewGovernanceService(h.Store, h.Privy)
-	group, err := governance.CreateGroupWithRules(ctx, h.ISO.UniqueToken("retry-buy"), testGroupName(h.ISO, "retry-buy"), DefaultGroupRules(), "")
+	group, err := governance.CreateGroupWithRules(ctx, h.ISO.UniqueToken("retry-buy"), testGroupName(h.ISO, "retry-buy"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestRetryFailedSwap_sellSuccessCreatesNewConfirmedRow(t *testing.T) {
 	sessions := NewSessionService(h.Store, h.Privy)
 	session := openTestSession(t, h.ISO, sessions, h.Privy, "retry-sell", "Retry Sell")
 	governance := NewGovernanceService(h.Store, h.Privy)
-	group, err := governance.CreateGroupWithRules(ctx, h.ISO.UniqueToken("retry-sell"), testGroupName(h.ISO, "retry-sell"), DefaultGroupRules(), "")
+	group, err := governance.CreateGroupWithRules(ctx, h.ISO.UniqueToken("retry-sell"), testGroupName(h.ISO, "retry-sell"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestRetryFailedSwap_idempotentWhenProposalAlreadyConfirmed(t *testing.T) {
 	session := openTestSession(t, h.ISO, sessions, h.Privy, "retry-idem", "Retry Idem")
 	governance := NewGovernanceService(h.Store, h.Privy)
 	governance.SetBuyService(NewBuyService(h.Jupiter, h.XStocks))
-	group, err := governance.CreateGroupWithRules(ctx, h.ISO.UniqueToken("retry-idem"), testGroupName(h.ISO, "retry-idem"), DefaultGroupRules(), "")
+	group, err := governance.CreateGroupWithRules(ctx, h.ISO.UniqueToken("retry-idem"), testGroupName(h.ISO, "retry-idem"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}

@@ -62,7 +62,7 @@ func TestPOST_proposals_happyPath_createsOpenProposalWithExpiry(t *testing.T) {
 	h := integrationGovernanceApp(t)
 	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "proposer", "Proposer")
 	token := h.ISO.UniqueToken("proposer")
-	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "vote"), DefaultGroupRules(), "")
+	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "vote"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestCreateProposal_exceedsTreasuryUSDC_rejected(t *testing.T) {
 	h := integrationGovernanceApp(t)
 	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "treasury-cap", "Treasury Cap")
 	token := h.ISO.UniqueToken("treasury-cap")
-	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "treasury-cap"), DefaultGroupRules(), "")
+	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "treasury-cap"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestTallyProposal_expiredOpenProposal_failsWithoutSwap(t *testing.T) {
 	token := h.ISO.UniqueToken("expiry")
 	rules := DefaultGroupRules()
 	rules.VoteExpirySeconds = 60
-	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "expiry"), rules, "")
+	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "expiry"), rules)
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestPOST_vote_nonVoterSetMember_returns403(t *testing.T) {
 	creatorToken := h.ISO.UniqueToken("creator")
 	rules := DefaultGroupRules()
 	rules.VoterSet = VoterSet{Mode: VoterSetNamed, MemberIDs: []string{creator.UserID}}
-	created, err := h.Governance.CreateGroupWithRules(context.Background(), creatorToken, testGroupName(h.ISO, "named-voters"), rules, "")
+	created, err := h.Governance.CreateGroupWithRules(context.Background(), creatorToken, testGroupName(h.ISO, "named-voters"), rules)
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestPOST_vote_doubleVoteSameMember_isIdempotentOrRejected(t *testing.T) {
 	h := integrationGovernanceApp(t)
 	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "double", "Double")
 	token := h.ISO.UniqueToken("double")
-	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "double-vote"), DefaultGroupRules(), "")
+	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "double-vote"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestPOST_vote_concurrentDoubleVote_recordsOneBallot(t *testing.T) {
 	h := integrationGovernanceApp(t)
 	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "race", "Race")
 	token := h.ISO.UniqueToken("race")
-	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "race-vote"), DefaultGroupRules(), "")
+	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "race-vote"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
