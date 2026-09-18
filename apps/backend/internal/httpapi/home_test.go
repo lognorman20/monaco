@@ -21,6 +21,17 @@ func integrationHomeApp(t *testing.T) (*HomeHandlers, *AuthHandlers, *GroupHandl
 	return integrationHomeAppWithPyth(t, nil)
 }
 
+func findHomeGroupRow(t *testing.T, groups []homeGroupBoardRowResponse, groupID string) homeGroupBoardRowResponse {
+	t.Helper()
+	for _, row := range groups {
+		if row.GroupID == groupID {
+			return row
+		}
+	}
+	t.Fatalf("group %q not found in home response (%d rows)", groupID, len(groups))
+	return homeGroupBoardRowResponse{}
+}
+
 func integrationHomeAppWithPyth(t *testing.T, pythClient pyth.Client) (*HomeHandlers, *AuthHandlers, *GroupHandlers, privy.Client, *postgres.Store, *postgres.TestIsolation) {
 	t.Helper()
 
@@ -77,8 +88,13 @@ func TestGET_home_authenticated_returnsEmptyBoards(t *testing.T) {
 	if payload.People == nil {
 		t.Fatal("expected people array in response")
 	}
-	if len(payload.Groups) != 0 || len(payload.People) != 0 {
-		t.Fatalf("expected empty boards, got groups=%d people=%d", len(payload.Groups), len(payload.People))
+	for _, row := range payload.Groups {
+		if row.IsJoined {
+			t.Fatalf("expected no joined groups for new user, got joined group %q", row.GroupID)
+		}
+	}
+	if len(payload.People) != 0 {
+		t.Fatalf("expected empty people board, got people=%d", len(payload.People))
 	}
 }
 
@@ -119,23 +135,21 @@ func TestGET_home_authenticated_returnsUnfundedGroupRow(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode json: %v", err)
 	}
-	if len(payload.Groups) != 1 {
-		t.Fatalf("groups len = %d, want 1", len(payload.Groups))
+	row := findHomeGroupRow(t, payload.Groups, created.GroupID)
+	if row.Name != "Logan" {
+		t.Fatalf("group name = %q, want Logan", row.Name)
 	}
-	if payload.Groups[0].Name != "Logan" {
-		t.Fatalf("group name = %q, want Logan", payload.Groups[0].Name)
+	if row.PotValueUsd != "0.00" {
+		t.Fatalf("potValueUsd = %q, want 0.00", row.PotValueUsd)
 	}
-	if payload.Groups[0].GroupID != created.GroupID {
-		t.Fatalf("group id = %q, want %q", payload.Groups[0].GroupID, created.GroupID)
+	if row.PercentReturn != nil {
+		t.Fatalf("percentReturn = %v, want nil for unfunded group", row.PercentReturn)
 	}
-	if payload.Groups[0].PotValueUsd != "0.00" {
-		t.Fatalf("potValueUsd = %q, want 0.00", payload.Groups[0].PotValueUsd)
+	if row.DollarPnL != "+0.00" {
+		t.Fatalf("dollarPnl = %q, want +0.00", row.DollarPnL)
 	}
-	if payload.Groups[0].PercentReturn != nil {
-		t.Fatalf("percentReturn = %v, want nil for unfunded group", payload.Groups[0].PercentReturn)
-	}
-	if payload.Groups[0].DollarPnL != "+0.00" {
-		t.Fatalf("dollarPnl = %q, want +0.00", payload.Groups[0].DollarPnL)
+	if !row.IsJoined {
+		t.Fatal("expected isJoined=true for group creator")
 	}
 	if len(payload.People) != 0 {
 		t.Fatalf("people len = %d, want 0 for unfunded group", len(payload.People))
@@ -191,26 +205,71 @@ func TestGET_home_authenticated_returnsFundedGroupAndPeopleRows(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode json: %v", err)
 	}
-	if len(payload.Groups) != 1 {
-		t.Fatalf("groups len = %d, want 1", len(payload.Groups))
+	row := findHomeGroupRow(t, payload.Groups, created.GroupID)
+	if row.Name != "Weekend investors" {
+		t.Fatalf("group name = %q, want Weekend investors", row.Name)
 	}
-	if payload.Groups[0].Name != "Weekend investors" {
-		t.Fatalf("group name = %q, want Weekend investors", payload.Groups[0].Name)
+	if row.PotValueUsd != "100.00" {
+		t.Fatalf("potValueUsd = %q, want 100.00", row.PotValueUsd)
 	}
-	if payload.Groups[0].GroupID != created.GroupID {
-		t.Fatalf("group id = %q, want %q", payload.Groups[0].GroupID, created.GroupID)
+	if row.DollarPnL != "+0.00" {
+		t.Fatalf("dollarPnl = %q, want +0.00 for flat funded group", row.DollarPnL)
 	}
-	if payload.Groups[0].PotValueUsd != "100.00" {
-		t.Fatalf("potValueUsd = %q, want 100.00", payload.Groups[0].PotValueUsd)
-	}
-	if payload.Groups[0].DollarPnL != "+0.00" {
-		t.Fatalf("dollarPnl = %q, want +0.00 for flat funded group", payload.Groups[0].DollarPnL)
+	if !row.IsJoined {
+		t.Fatal("expected isJoined=true for funded group creator")
 	}
 	if len(payload.People) != 1 {
 		t.Fatalf("people len = %d, want 1", len(payload.People))
 	}
 	if payload.People[0].DisplayName != "Alfred" {
 		t.Fatalf("display name = %q, want Alfred", payload.People[0].DisplayName)
+	}
+}
+
+func TestGET_home_nonMember_seesUnjoinedGroupRow(t *testing.T) {
+	t.Parallel()
+	// Arrange
+	homeHandlers, authHandlers, groupHandlers, privyClient, _, iso := integrationHomeApp(t)
+	_, creatorToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "all-groups-creator", "Creator")
+
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Discovery Club"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	createRec := httptest.NewRecorder()
+	groupHandlers.CreateGroupHandler(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create group status = %d, want 200; body = %s", createRec.Code, createRec.Body.String())
+	}
+
+	var created createGroupResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create group json: %v", err)
+	}
+	trackCreatedGroup(iso, created.GroupID)
+
+	_, viewerToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "all-groups-viewer", "Viewer")
+	req := httptest.NewRequest(http.MethodGet, "/v1/home", nil)
+	req.Header.Set("Authorization", "Bearer "+string(viewerToken))
+	rec := httptest.NewRecorder()
+
+	// Act
+	homeHandlers.HomeHandler(rec, req)
+
+	// Assert
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+
+	var payload homeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	row := findHomeGroupRow(t, payload.Groups, created.GroupID)
+	if row.Name != "Discovery Club" {
+		t.Fatalf("group name = %q, want Discovery Club", row.Name)
+	}
+	if row.IsJoined {
+		t.Fatal("expected isJoined=false for non-member viewer")
 	}
 }
 
@@ -289,10 +348,8 @@ func TestGET_home_pythError_returns200(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode json: %v", err)
 	}
-	if len(payload.Groups) != 1 {
-		t.Fatalf("groups len = %d, want 1", len(payload.Groups))
-	}
-	if payload.Groups[0].PotValueUsd != "2.00" {
-		t.Fatalf("potValueUsd = %q, want 2.00 (cost basis fallback)", payload.Groups[0].PotValueUsd)
+	row := findHomeGroupRow(t, payload.Groups, created.GroupID)
+	if row.PotValueUsd != "2.00" {
+		t.Fatalf("potValueUsd = %q, want 2.00 (cost basis fallback)", row.PotValueUsd)
 	}
 }

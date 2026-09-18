@@ -39,6 +39,7 @@ type HomeGroupRow struct {
 	PotValueUsd   string
 	PercentReturn *string
 	DollarPnL     string
+	IsJoined      bool
 }
 
 // HomePeopleRow is one ranked person on the app-home people board.
@@ -55,7 +56,7 @@ type HomeResult struct {
 	People []HomePeopleRow
 }
 
-// GetHome returns group and people boards for the authenticated viewer's clubs.
+// GetHome returns all groups on the group board plus a people board from the viewer's clubs.
 func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResult, error) {
 	logHomeGetStart()
 
@@ -79,15 +80,24 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 		return HomeResult{}, ErrUserNotFound
 	}
 
-	groupIDs, err := h.store.ListUserGroupIDs(ctx, user.ID)
+	joinedGroupIDs, err := h.store.ListUserGroupIDs(ctx, user.ID)
+	if err != nil {
+		return HomeResult{}, err
+	}
+	joinedGroups := make(map[string]struct{}, len(joinedGroupIDs))
+	for _, groupID := range joinedGroupIDs {
+		joinedGroups[groupID] = struct{}{}
+	}
+
+	allGroupIDs, err := h.store.ListGroupIDs(ctx)
 	if err != nil {
 		return HomeResult{}, err
 	}
 
-	groupInputs := make([]domain.GroupBoardInput, 0, len(groupIDs))
+	groupInputs := make([]domain.GroupBoardInput, 0, len(allGroupIDs))
 	memberPnLByUser := make(map[string][]domain.MemberPnL)
 
-	for _, groupID := range groupIDs {
+	for _, groupID := range allGroupIDs {
 		group, groupFound, err := h.store.GetGroupByID(ctx, groupID)
 		if err != nil {
 			return HomeResult{}, err
@@ -113,6 +123,9 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 			NetUsdcIn: domain.USDCMicros(netUsdcIn),
 		})
 
+		if _, isJoined := joinedGroups[group.ID]; !isJoined {
+			continue
+		}
 		if err := h.collectMemberPnL(ctx, groupID, potNav, totalSharesMicro, memberPnLByUser); err != nil {
 			return HomeResult{}, err
 		}
@@ -137,24 +150,28 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 	}
 	for _, row := range groupBoard {
 		onGroupBoard[row.GroupID] = struct{}{}
+		_, isJoined := joinedGroups[row.GroupID]
 		result.Groups = append(result.Groups, HomeGroupRow{
 			GroupID:       row.GroupID,
 			Name:          row.GroupName,
 			PotValueUsd:   formatMicrosAsUsdDecimal(int64(row.PotNav)),
 			PercentReturn: formatPercentReturnDecimal(row.PercentReturn),
 			DollarPnL:     formatSignedDollarPnL(int64(row.DollarPnL)),
+			IsJoined:      isJoined,
 		})
 	}
 	for _, input := range groupInputs {
 		if _, onBoard := onGroupBoard[input.GroupID]; onBoard {
 			continue
 		}
+		_, isJoined := joinedGroups[input.GroupID]
 		result.Groups = append(result.Groups, HomeGroupRow{
 			GroupID:       input.GroupID,
 			Name:          input.GroupName,
 			PotValueUsd:   formatMicrosAsUsdDecimal(int64(input.PotNav)),
 			PercentReturn: nil,
 			DollarPnL:     formatSignedDollarPnL(int64(input.PotNav - input.NetUsdcIn)),
+			IsJoined:      isJoined,
 		})
 	}
 	for _, row := range peopleBoard {

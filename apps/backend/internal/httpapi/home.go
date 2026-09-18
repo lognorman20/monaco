@@ -20,6 +20,7 @@ type homeGroupBoardRowResponse struct {
 	PotValueUsd   string  `json:"potValueUsd"`
 	PercentReturn *string `json:"percentReturn"`
 	DollarPnL     string  `json:"dollarPnl"`
+	IsJoined      bool    `json:"isJoined"`
 }
 
 type homePeopleBoardRowResponse struct {
@@ -67,6 +68,7 @@ func (h *HomeHandlers) HomeHandler(w http.ResponseWriter, r *http.Request) {
 			PotValueUsd:   row.PotValueUsd,
 			PercentReturn: row.PercentReturn,
 			DollarPnL:     row.DollarPnL,
+			IsJoined:      row.IsJoined,
 		})
 	}
 	people := make([]homePeopleBoardRowResponse, 0, len(result.People))

@@ -6,10 +6,15 @@ struct JoinGroupView: View {
 
     private let apiClient = MonacoAPIClient()
 
-    @State private var groupId = ""
+    @State private var groupId: String
     @State private var didJoin = false
     @State private var errorMessage: String?
     @State private var isJoining = false
+
+    init(auth: PrivyAuthService, groupId: String = "") {
+        self.auth = auth
+        _groupId = State(initialValue: groupId)
+    }
 
     var body: some View {
         Form {

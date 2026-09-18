@@ -16,13 +16,22 @@ public struct HomeGroupBoardRowDTO: Codable, Equatable, Sendable {
     public let potValueUsd: String
     public let percentReturn: String?
     public let dollarPnl: String
+    public let isJoined: Bool
 
-    public init(groupID: String, name: String, potValueUsd: String, percentReturn: String?, dollarPnl: String) {
+    public init(
+        groupID: String,
+        name: String,
+        potValueUsd: String,
+        percentReturn: String?,
+        dollarPnl: String,
+        isJoined: Bool
+    ) {
         self.groupID = groupID
         self.name = name
         self.potValueUsd = potValueUsd
         self.percentReturn = percentReturn
         self.dollarPnl = dollarPnl
+        self.isJoined = isJoined
     }
 
     enum CodingKeys: String, CodingKey {
@@ -31,6 +40,7 @@ public struct HomeGroupBoardRowDTO: Codable, Equatable, Sendable {
         case potValueUsd
         case percentReturn
         case dollarPnl
+        case isJoined
     }
 }
 

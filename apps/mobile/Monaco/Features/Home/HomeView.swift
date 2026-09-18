@@ -69,13 +69,22 @@ struct HomeView: View {
             } else {
                 ForEach(home.groups) { row in
                     NavigationLink {
-                        GroupDetailView(auth: auth, groupId: row.groupId, groupName: row.name)
+                        if row.isJoined {
+                            GroupDetailView(auth: auth, groupId: row.groupId, groupName: row.name)
+                        } else {
+                            JoinGroupView(auth: auth, groupId: row.groupId)
+                        }
                     } label: {
                         HStack {
                             Text(row.name)
                                 .font(.body.bold())
                                 .foregroundStyle(MonacoTheme.primaryText)
                             Spacer()
+                            if !row.isJoined {
+                                Text("Join")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(MonacoTheme.accent)
+                            }
                             groupBoardMetrics(potValueUsd: row.potValueUsd, dollarPnl: row.dollarPnl)
                         }
                     }
@@ -165,7 +174,8 @@ struct HomeView: View {
                         name: "Weekend investors",
                         potValueUsd: "548.20",
                         percentReturn: "+12.4%",
-                        dollarPnl: "+48.20"
+                        dollarPnl: "+48.20",
+                        isJoined: true
                     ),
                 ],
                 people: [

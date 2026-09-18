@@ -16,6 +16,7 @@ final class HomeViewDTOTests: XCTestCase {
         XCTAssertEqual(dto.groups.count, 1)
         XCTAssertEqual(dto.people.count, 1)
         XCTAssertEqual(dto.groups[0].name, "Weekend investors")
+        XCTAssertTrue(dto.groups[0].isJoined)
         XCTAssertEqual(dto.people[0].displayName, "Alfred")
     }
 }
