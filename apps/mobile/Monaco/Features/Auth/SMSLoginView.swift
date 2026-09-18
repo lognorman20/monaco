@@ -78,7 +78,18 @@ struct SMSLoginView: View {
     }
 
     private var normalizedPhone: String {
-        phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("+") {
+            return trimmed
+        }
+        let digits = trimmed.filter(\.isNumber)
+        if digits.count == 10 {
+            return "+1\(digits)"
+        }
+        if digits.count == 11, digits.first == "1" {
+            return "+\(digits)"
+        }
+        return trimmed
     }
 
     private var showsOTPField: Bool {
