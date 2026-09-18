@@ -24,8 +24,8 @@ struct SessionGateView: View {
                 OnboardingFlowView(auth: auth, initialProfile: profile) {
                     await completeOnboarding()
                 }
-            } else if let home {
-                HomeView(auth: auth, home: home, onRefresh: refreshHome)
+            } else if let home, let profile {
+                MainTabView(auth: auth, home: home, profile: profile, onRefresh: refreshHome)
             } else if let errorMessage {
                 VStack(alignment: .leading, spacing: 12) {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
