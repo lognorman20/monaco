@@ -80,6 +80,8 @@ var apiRoutes = []string{
 	"GET /v1/proposals/{id}",
 	"POST /v1/proposals/{id}/votes",
 	"POST /v1/groups/{id}/agents/intents",
+	"GET /v1/proposals/{id}/comments",
+	"POST /v1/proposals/{id}/comments",
 }
 
 // boot loads config, registers the relayer fee payer, applies migrations, and builds the HTTP server.
@@ -259,6 +261,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/proposals/{id}", proposalHandlers.GetProposalDetailHandler)
 	mux.HandleFunc("POST /v1/proposals/{id}/votes", proposalHandlers.CastVoteHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/agents/intents", agentHandlers.SubmitAgentIntentHandler)
+	mux.HandleFunc("GET /v1/proposals/{id}/comments", proposalHandlers.ListProposalCommentsHandler)
+	mux.HandleFunc("POST /v1/proposals/{id}/comments", proposalHandlers.CreateProposalCommentHandler)
 	logRoutesReady(apiRoutes)
 
 	poller := worker.NewSweepPoller(store, privyClient, solanaRPC, deposits, relayer.PrivateKey(), nil)

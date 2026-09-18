@@ -14,17 +14,23 @@ import (
 
 // ProposalListItem is one row in GET /v1/groups/{id}/proposals.
 type ProposalListItem struct {
-	ID           string
-	Symbol       string
-	Kind         domain.ProposalKind
-	UsdcMicros   int64
-	TokenAmount  int64
-	Thesis       string
-	Status       ProposalStatus
-	ProposerID   string
-	ProposerName string
-	CreatedAt    time.Time
-	ExpiresAt    time.Time
+	ID          string
+	Symbol      string
+	Kind        domain.ProposalKind
+	UsdcMicros  int64
+	TokenAmount int64
+	// AgentDisplayName and AllocationUsdcMicros are set on agent governance proposals.
+	AgentDisplayName     string
+	AllocationUsdcMicros int64
+	Thesis               string
+	Status               ProposalStatus
+	ProposerID           string
+	ProposerName         string
+	CreatedAt            time.Time
+	ExpiresAt            time.Time
+	CanVote              bool
+	VoteSummary          ProposalVoteSummary
+	CommentCount         int
 }
 
 // ProposalVoteDetail is one ballot on a proposal detail view.
@@ -74,6 +80,7 @@ type ProposalDetailResult struct {
 	Votes                []ProposalVoteDetail
 	VoteSummary          ProposalVoteSummary
 	Execution            ProposalExecutionDetail
+	CommentCount         int
 }
 
 // ListGroupProposals returns open or closed proposals for a group member.
@@ -86,7 +93,6 @@ func (g *GovernanceService) ListGroupProposals(ctx context.Context, accessToken,
 	if err != nil {
 		return nil, err
 	}
-	_ = userID
 
 	var statuses []domain.ProposalStatus
 	switch strings.ToLower(strings.TrimSpace(tab)) {
@@ -115,24 +121,53 @@ func (g *GovernanceService) ListGroupProposals(ctx context.Context, accessToken,
 		return nil, err
 	}
 
+	proposalIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		proposalIDs = append(proposalIDs, row.ID)
+	}
+	stats, err := g.store.ListProposalFeedStats(ctx, proposalIDs, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	eligibility, err := g.groupVoteEligibility(ctx, groupID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	nowUnix := g.now().UTC().Unix()
 	items := make([]ProposalListItem, 0, len(rows))
 	for _, row := range rows {
 		name := displayNames[row.ProposerID]
 		if name == "" {
 			name = "Member"
 		}
+		rowStats := stats[row.ID]
 		items = append(items, ProposalListItem{
-			ID:           row.ID,
-			Symbol:       row.Symbol,
-			Kind:         row.Kind,
-			UsdcMicros:   row.UsdcMicros,
-			TokenAmount:  row.TokenAmount,
-			Thesis:       row.Thesis,
-			Status:       row.Status,
-			ProposerID:   row.ProposerID,
-			ProposerName: name,
-			CreatedAt:    row.CreatedAt,
-			ExpiresAt:    row.ExpiresAt,
+			ID:                   row.ID,
+			Symbol:               row.Symbol,
+			Kind:                 row.Kind,
+			UsdcMicros:           row.UsdcMicros,
+			TokenAmount:          row.TokenAmount,
+			AgentDisplayName:     row.AgentDisplayName,
+			AllocationUsdcMicros: row.AllocationUsdcMicros,
+			Thesis:               row.Thesis,
+			Status:               row.Status,
+			ProposerID:           row.ProposerID,
+			ProposerName:         name,
+			CreatedAt:            row.CreatedAt,
+			ExpiresAt:            row.ExpiresAt,
+			CanVote: row.Status == ProposalOpen &&
+				nowUnix < row.ExpiresAt.UTC().Unix() &&
+				eligibility.viewerMayVote &&
+				!rowStats.ViewerVoted,
+			VoteSummary: ProposalVoteSummary{
+				YesCount:      rowStats.YesCount,
+				NoCount:       rowStats.NoCount,
+				EligibleCount: eligibility.eligibleCount,
+				Threshold:     eligibility.threshold,
+			},
+			CommentCount: rowStats.CommentCount,
 		})
 	}
 	return items, nil
@@ -160,6 +195,9 @@ func (g *GovernanceService) GetProposalDetail(ctx context.Context, accessToken, 
 		return ProposalDetailResult{}, ErrUserNotFound
 	}
 
+	if !isUUID(proposalID) {
+		return ProposalDetailResult{}, ErrProposalNotFound
+	}
 	row, found, err := g.store.GetProposalByID(ctx, proposalID)
 	if err != nil {
 		return ProposalDetailResult{}, err
@@ -230,37 +268,22 @@ func (g *GovernanceService) GetProposalDetail(ctx context.Context, accessToken, 
 		})
 	}
 
-	canVote := false
-	if proposal.Status == ProposalOpen && g.now().UTC().Unix() < proposal.ExpiresAt {
-		rules, rulesFound, err := g.store.GetGroupRules(ctx, row.GroupID)
-		if err != nil {
-			return ProposalDetailResult{}, err
-		}
-		if rulesFound {
-			voterSet, eligibleIDs, err := g.resolveVoterSet(ctx, row.GroupID, rules)
-			if err != nil {
-				return ProposalDetailResult{}, err
-			}
-			if domain.MemberMayVote(voterSet, user.ID, eligibleIDs) {
-				_, alreadyVoted, err := g.store.GetVoteByProposalAndVoter(ctx, proposalID, user.ID)
-				if err != nil {
-					return ProposalDetailResult{}, err
-				}
-				canVote = !alreadyVoted
-			}
-		}
-	}
-
-	voteSummary := ProposalVoteSummary{Threshold: string(ThresholdMajority)}
-	if rules, rulesFound, err := g.store.GetGroupRules(ctx, row.GroupID); err != nil {
+	eligibility, err := g.groupVoteEligibility(ctx, row.GroupID, user.ID)
+	if err != nil {
 		return ProposalDetailResult{}, err
-	} else if rulesFound {
-		voteSummary.Threshold = string(rules.Threshold)
-		_, eligibleIDs, err := g.resolveVoterSet(ctx, row.GroupID, rules)
-		if err != nil {
-			return ProposalDetailResult{}, err
-		}
-		voteSummary.EligibleCount = len(eligibleIDs)
+	}
+	stats, err := g.store.ListProposalFeedStats(ctx, []string{row.ID}, user.ID)
+	if err != nil {
+		return ProposalDetailResult{}, err
+	}
+	canVote := proposal.Status == ProposalOpen &&
+		g.now().UTC().Unix() < proposal.ExpiresAt &&
+		eligibility.viewerMayVote &&
+		!stats[row.ID].ViewerVoted
+
+	voteSummary := ProposalVoteSummary{
+		Threshold:     eligibility.threshold,
+		EligibleCount: eligibility.eligibleCount,
 	}
 	for _, vote := range votes {
 		switch vote.Choice {
@@ -315,7 +338,34 @@ func (g *GovernanceService) GetProposalDetail(ctx context.Context, accessToken, 
 		Votes:                votes,
 		VoteSummary:          voteSummary,
 		Execution:            execution,
+		CommentCount:         stats[row.ID].CommentCount,
 	}, nil
+}
+
+type groupVoteEligibility struct {
+	threshold     string
+	eligibleCount int
+	viewerMayVote bool
+}
+
+// groupVoteEligibility resolves the group's voter set once per feed page.
+func (g *GovernanceService) groupVoteEligibility(ctx context.Context, groupID, viewerID string) (groupVoteEligibility, error) {
+	out := groupVoteEligibility{threshold: string(ThresholdMajority)}
+	rules, found, err := g.store.GetGroupRules(ctx, groupID)
+	if err != nil {
+		return groupVoteEligibility{}, err
+	}
+	if !found {
+		return out, nil
+	}
+	out.threshold = string(rules.Threshold)
+	voterSet, eligibleIDs, err := g.resolveVoterSet(ctx, groupID, rules)
+	if err != nil {
+		return groupVoteEligibility{}, err
+	}
+	out.eligibleCount = len(eligibleIDs)
+	out.viewerMayVote = domain.MemberMayVote(voterSet, viewerID, eligibleIDs)
+	return out, nil
 }
 
 func buildProposalExecutionDetail(status ProposalStatus, tx postgres.TransactionRow, found bool) ProposalExecutionDetail {

@@ -180,17 +180,22 @@ func (h *ProposalHandlers) CastVoteHandler(w http.ResponseWriter, r *http.Reques
 }
 
 type proposalListItemResponse struct {
-	ID           string `json:"id"`
-	Symbol       string `json:"symbol"`
-	Kind         string `json:"kind"`
-	UsdcMicros   string `json:"usdcMicros,omitempty"`
-	TokenAmount  string `json:"tokenAmount,omitempty"`
-	Thesis       string `json:"thesis,omitempty"`
-	Status       string `json:"status"`
-	ProposerID   string `json:"proposerId"`
-	ProposerName string `json:"proposerName"`
-	CreatedAt    string `json:"createdAt"`
-	ExpiresAt    string `json:"expiresAt,omitempty"`
+	ID                   string                      `json:"id"`
+	Symbol               string                      `json:"symbol"`
+	Kind                 string                      `json:"kind"`
+	UsdcMicros           string                      `json:"usdcMicros,omitempty"`
+	TokenAmount          string                      `json:"tokenAmount,omitempty"`
+	AgentDisplayName     string                      `json:"agentDisplayName,omitempty"`
+	AllocationUsdcMicros string                      `json:"allocationUsdcMicros,omitempty"`
+	Thesis               string                      `json:"thesis,omitempty"`
+	Status               string                      `json:"status"`
+	ProposerID           string                      `json:"proposerId"`
+	ProposerName         string                      `json:"proposerName"`
+	CreatedAt            string                      `json:"createdAt"`
+	ExpiresAt            string                      `json:"expiresAt,omitempty"`
+	CanVote              bool                        `json:"canVote"`
+	VoteSummary          proposalVoteSummaryResponse `json:"voteSummary"`
+	CommentCount         int                         `json:"commentCount"`
 }
 
 type listGroupProposalsResponse struct {
@@ -240,6 +245,7 @@ type proposalDetailResponse struct {
 	Votes                []proposalVoteResponse      `json:"votes"`
 	VoteSummary          proposalVoteSummaryResponse `json:"voteSummary"`
 	Execution            proposalExecutionResponse   `json:"execution"`
+	CommentCount         int                         `json:"commentCount"`
 }
 
 // ListGroupProposalsHandler handles GET /v1/groups/{id}/proposals.
@@ -289,6 +295,14 @@ func (h *ProposalHandlers) ListGroupProposalsHandler(w http.ResponseWriter, r *h
 			ProposerID:   item.ProposerID,
 			ProposerName: item.ProposerName,
 			CreatedAt:    item.CreatedAt.UTC().Format(time.RFC3339),
+			CanVote:      item.CanVote,
+			VoteSummary: proposalVoteSummaryResponse{
+				YesCount:      item.VoteSummary.YesCount,
+				NoCount:       item.VoteSummary.NoCount,
+				EligibleCount: item.VoteSummary.EligibleCount,
+				Threshold:     item.VoteSummary.Threshold,
+			},
+			CommentCount: item.CommentCount,
 		}
 		if item.Kind == "" {
 			row.Kind = string(app.ProposalKindBuy)
@@ -298,6 +312,10 @@ func (h *ProposalHandlers) ListGroupProposalsHandler(w http.ResponseWriter, r *h
 		}
 		if item.TokenAmount > 0 {
 			row.TokenAmount = strconv.FormatInt(item.TokenAmount, 10)
+		}
+		row.AgentDisplayName = item.AgentDisplayName
+		if item.AllocationUsdcMicros > 0 {
+			row.AllocationUsdcMicros = strconv.FormatInt(item.AllocationUsdcMicros, 10)
 		}
 		if item.Status == app.ProposalOpen {
 			row.ExpiresAt = item.ExpiresAt.UTC().Format(time.RFC3339)
@@ -396,7 +414,8 @@ func (h *ProposalHandlers) GetProposalDetailHandler(w http.ResponseWriter, r *ht
 			EligibleCount: detail.VoteSummary.EligibleCount,
 			Threshold:     detail.VoteSummary.Threshold,
 		},
-		Execution: execution,
+		Execution:    execution,
+		CommentCount: detail.CommentCount,
 	}
 	if detail.UsdcMicros > 0 {
 		detailResp.UsdcMicros = strconv.FormatInt(detail.UsdcMicros, 10)
