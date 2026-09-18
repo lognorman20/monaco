@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"sync"
 	"testing"
@@ -95,6 +96,52 @@ func TestPOST_proposals_happyPath_createsOpenProposalWithExpiry(t *testing.T) {
 	}
 	if proposal.Symbol != "AAPLx" || proposal.UsdcMicros != 2_000_000 {
 		t.Fatalf("unexpected proposal payload: %+v", proposal)
+	}
+}
+
+func TestCreateProposal_jupiterTakerOrderFails_priceOnlyQuoteCreates(t *testing.T) {
+	const (
+		usdcMicros  = 2_000_000
+		treasuryUSDC = 5_000_000
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("taker") != "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"requestId":"01a0b261-4278-708b-9c6a-710981e01775","error":"Failed to get quotes"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(jupiter.FixtureJupiterSuccessResponse(jupiter.AAPLxMint))
+	}))
+	t.Cleanup(server.Close)
+
+	h := integrationGovernanceApp(t)
+	h.Governance.SetBuyService(NewBuyService(
+		jupiter.NewHTTPClientWithBaseURL(server.URL, server.Client()),
+		h.XStocks,
+	))
+
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "rfq-propose", "RFQ Proposer")
+	token := h.ISO.UniqueToken("rfq-propose")
+	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "rfq-propose"), DefaultGroupRules())
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	h.ISO.TrackGroup(created.GroupID)
+	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, treasuryUSDC)
+	xstocks.RegisterSolanaMint(h.XStocks, "AAPLx", jupiter.AAPLxMint)
+
+	proposal, err := h.Governance.CreateProposal(context.Background(), CreateProposalInput{
+		GroupID:    created.GroupID,
+		ProposerID: userID.UserID,
+		Symbol:     "AAPLx",
+		UsdcMicros: usdcMicros,
+	})
+	if err != nil {
+		t.Fatalf("CreateProposal: %v", err)
+	}
+	if proposal.UsdcMicros != usdcMicros {
+		t.Fatalf("usdcMicros = %d, want %d", proposal.UsdcMicros, usdcMicros)
 	}
 }
 

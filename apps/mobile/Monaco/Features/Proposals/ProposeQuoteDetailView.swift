@@ -125,8 +125,10 @@ struct ProposeQuoteDetailView: View {
                 usdc: usdcMicros
             )
             toast = MonacoToast(message: proposalSubmittedMessage(id: response.proposalId), isSuccess: true)
-        } catch MonacoAPIError.httpStatus(400) {
+        } catch MonacoAPIError.apiError(_, let message) where message == "amount exceeds treasury total available" {
             toast = MonacoToast(message: "Amount exceeds treasury total available.")
+        } catch MonacoAPIError.apiError(_, let message) where message == "quote not routable" {
+            toast = MonacoToast(message: "No route available right now.")
         } catch MonacoAPIError.httpStatus(let code) {
             toast = MonacoToast(message: "Proposal failed (HTTP \(code)).")
         } catch {

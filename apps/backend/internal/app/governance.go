@@ -608,20 +608,14 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		return Proposal{}, ErrExceedsTreasuryUSDC
 	}
 
-	treasuryTaker := ""
-	if treasury, found, err := g.store.GetTreasuryByGroupID(ctx, in.GroupID); err != nil {
-		logGovernanceBranchError("governance create proposal treasury lookup failed", err, "group_id", in.GroupID, "proposer_id", in.ProposerID)
-		return Proposal{}, err
-	} else if found {
-		treasuryTaker = treasury.SolanaAddress
-	}
-
+	// Price-only routability gate (no taker): matches POST /quotes and Jupiter RFQ.
+	// Treasury total gate above ensures amount <= pot NAV; executable /order with taker
+	// runs at vote-pass execute (OrderBuy).
 	_, err = g.buy.StartBuy(ctx, StartBuyRequest{
 		GroupID:    in.GroupID,
 		UserID:     in.ProposerID,
 		Symbol:     in.Symbol,
 		USDCAmount: in.UsdcMicros,
-		Taker:      treasuryTaker,
 	})
 	if err != nil {
 		if errors.Is(err, ErrQuoteNotRoutable) {

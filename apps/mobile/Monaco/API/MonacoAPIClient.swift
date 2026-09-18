@@ -12,8 +12,13 @@ enum LeaveGroupBlockReason: String, Equatable {
 enum MonacoAPIError: Error {
     case invalidResponse
     case httpStatus(Int)
+    case apiError(status: Int, message: String)
     case missingAccessToken
     case leaveBlocked(LeaveGroupBlockReason)
+}
+
+private struct APIErrorBody: Decodable {
+    let error: String
 }
 
 final class MonacoAPIClient {
@@ -343,9 +348,17 @@ final class MonacoAPIClient {
             throw MonacoAPIError.invalidResponse
         }
         guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
+            throw proposalCreateError(status: http.statusCode, data: data)
         }
         return try JSONDecoder().decode(CreateProposalResponse.self, from: data)
+    }
+
+    private func proposalCreateError(status: Int, data: Data) -> MonacoAPIError {
+        if let body = try? JSONDecoder().decode(APIErrorBody.self, from: data),
+           !body.error.isEmpty {
+            return .apiError(status: status, message: body.error)
+        }
+        return .httpStatus(status)
     }
 
     func getGroupActivity(accessToken: String, groupId: String) async throws -> GroupActivityResponse {
