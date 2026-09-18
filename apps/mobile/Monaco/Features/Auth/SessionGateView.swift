@@ -99,7 +99,25 @@ struct SessionGateView: View {
     private func completeOnboarding() async {
         showOnboarding = false
         isLoading = true
-        await loadHome()
+
+        guard let accessToken = auth.accessToken else {
+            errorMessage = "Missing sign-in token."
+            isLoading = false
+            return
+        }
+
+        do {
+            profile = try await apiClient.me(accessToken: accessToken)
+            await loadHome(accessToken: accessToken)
+        } catch MonacoAPIError.httpStatus(let status) where status == 401 {
+            await auth.logout()
+        } catch MonacoAPIError.httpStatus(let status) {
+            errorMessage = "Could not refresh profile (HTTP \(status))."
+            isLoading = false
+        } catch {
+            errorMessage = "Could not connect to Monaco."
+            isLoading = false
+        }
     }
 
     private func needsOnboarding(profile: MeResponse) -> Bool {
