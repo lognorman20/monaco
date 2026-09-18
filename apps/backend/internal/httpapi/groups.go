@@ -19,8 +19,7 @@ type GroupHandlers struct {
 }
 
 type joinPolicyRequest struct {
-	Mode     string `json:"mode"`
-	Password string `json:"password"`
+	Mode string `json:"mode"`
 }
 
 type voterSetRequest struct {
@@ -47,8 +46,19 @@ type getGroupResponse struct {
 	TreasuryAddress string `json:"treasuryAddress"`
 }
 
-type joinGroupRequest struct {
-	Password string `json:"password"`
+type joinGroupStatusResponse struct {
+	Status string `json:"status"`
+}
+
+type joinRequestResponse struct {
+	ID          string `json:"id"`
+	UserID      string `json:"userId"`
+	DisplayName string `json:"displayName"`
+	RequestedAt string `json:"requestedAt"`
+}
+
+type joinRequestsListResponse struct {
+	Items []joinRequestResponse `json:"items"`
 }
 
 // CreateGroupHandler handles POST /v1/groups.
@@ -72,13 +82,13 @@ func (h *GroupHandlers) CreateGroupHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	rules, joinPassword, err := parseCreateGroupRules(req)
+	rules, err := parseCreateGroupRules(req)
 	if err != nil {
 		logJSONError(ctx, log, "invalid_rules", w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	result, err := h.Governance.CreateGroupWithRules(ctx, token, req.Name, rules, joinPassword)
+	result, err := h.Governance.CreateGroupWithRules(ctx, token, req.Name, rules)
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
@@ -123,15 +133,7 @@ func (h *GroupHandlers) JoinGroupHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var req joinGroupRequest
-	if r.Body != nil && r.ContentLength != 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body", "group_id", groupID)
-			return
-		}
-	}
-
-	err := h.Governance.JoinGroup(ctx, token, groupID, req.Password)
+	outcome, err := h.Governance.JoinGroup(ctx, token, groupID)
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
@@ -141,16 +143,168 @@ func (h *GroupHandlers) JoinGroupHandler(w http.ResponseWriter, r *http.Request)
 			logJSONError(ctx, log, "group_not_found", w, http.StatusNotFound, "group not found", "group_id", groupID)
 			return
 		}
-		if errors.Is(err, app.ErrWrongJoinPassword) {
-			logJSONError(ctx, log, "wrong_join_password", w, http.StatusForbidden, "wrong join password", "group_id", groupID)
-			return
-		}
 		logJSONError(ctx, log, "join_group_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
 		return
 	}
+	switch outcome {
+	case app.JoinOutcomePending:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(joinGroupStatusResponse{Status: string(outcome)})
+		logJSONOK(ctx, log, "join_pending", "group_id", groupID)
+	case app.JoinOutcomeJoined, app.JoinOutcomeAlreadyMember:
+		w.WriteHeader(http.StatusNoContent)
+		logNoContent(ctx, log, "joined", "group_id", groupID)
+	default:
+		logJSONError(ctx, log, "join_group_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID)
+	}
+}
 
+func (h *GroupHandlers) LeaveGroupHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "POST /v1/groups/{id}/leave")
+	token, ok := bearerToken(r)
+	if !ok {
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
+		return
+	}
+	groupID := r.PathValue("id")
+	if strings.TrimSpace(groupID) == "" {
+		logJSONError(ctx, log, "missing_group_id", w, http.StatusNotFound, "group not found")
+		return
+	}
+	err := h.Governance.LeaveGroup(ctx, token, groupID)
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
+			return
+		}
+		if errors.Is(err, app.ErrUserNotFound) || errors.Is(err, app.ErrGroupNotFound) || errors.Is(err, app.ErrNotGroupMemberForLeave) {
+			logJSONError(ctx, log, "group_not_found", w, http.StatusNotFound, "group not found", "group_id", groupID)
+			return
+		}
+		var leaveErr *app.LeaveGroupError
+		if errors.As(err, &leaveErr) {
+			writeLeaveConflict(w, leaveErr.Reason, leaveConflictMessage(leaveErr.Reason))
+			log.done(ctx, "leave_blocked", http.StatusConflict, "group_id", groupID, "reason", string(leaveErr.Reason))
+			return
+		}
+		logJSONError(ctx, log, "leave_group_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
-	logNoContent(ctx, log, "joined", "group_id", groupID)
+	logNoContent(ctx, log, "left", "group_id", groupID)
+}
+
+func writeLeaveConflict(w http.ResponseWriter, reason app.LeaveBlockReason, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message, "reason": string(reason)})
+}
+
+func leaveConflictMessage(reason app.LeaveBlockReason) string {
+	switch reason {
+	case app.LeaveBlockShareUnits:
+		return "redeem your slice before leaving the cabal"
+	case app.LeaveBlockLastMemberTreasury:
+		return "sole member cannot leave while the cabal treasury holds value"
+	case app.LeaveBlockPendingRedeem:
+		return "finish or cancel your pending redeem before leaving"
+	case app.LeaveBlockSoleRemainingVote:
+		return "cast your vote or wait for open proposals to settle before leaving"
+	case app.LeaveBlockCreatorMustTransfer:
+		return "transfer cabal ownership before leaving as creator"
+	default:
+		return "cannot leave cabal"
+	}
+}
+
+// ListJoinRequestsHandler handles GET /v1/groups/{id}/join-requests.
+func (h *GroupHandlers) ListJoinRequestsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "GET /v1/groups/{id}/join-requests")
+	token, ok := bearerToken(r)
+	if !ok {
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
+		return
+	}
+	groupID := r.PathValue("id")
+	if strings.TrimSpace(groupID) == "" {
+		logJSONError(ctx, log, "missing_group_id", w, http.StatusNotFound, "group not found")
+		return
+	}
+	items, err := h.Governance.ListPendingJoinRequests(ctx, token, groupID)
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
+			return
+		}
+		if errors.Is(err, app.ErrUserNotFound) || errors.Is(err, app.ErrGroupNotFound) {
+			logJSONError(ctx, log, "group_not_found", w, http.StatusNotFound, "group not found", "group_id", groupID)
+			return
+		}
+		if errors.Is(err, app.ErrNotGroupAdmin) {
+			logJSONError(ctx, log, "not_group_admin", w, http.StatusForbidden, "not group admin", "group_id", groupID)
+			return
+		}
+		logJSONError(ctx, log, "list_join_requests_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
+		return
+	}
+	respItems := make([]joinRequestResponse, 0, len(items))
+	for _, item := range items {
+		respItems = append(respItems, joinRequestResponse{ID: item.ID, UserID: item.UserID, DisplayName: item.DisplayName, RequestedAt: item.RequestedAt.UTC().Format(time.RFC3339)})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(joinRequestsListResponse{Items: respItems})
+	logJSONOK(ctx, log, "ok", "group_id", groupID, "count", len(respItems))
+}
+
+func (h *GroupHandlers) ApproveJoinRequestHandler(w http.ResponseWriter, r *http.Request) { h.decideJoinRequest(w, r, true) }
+func (h *GroupHandlers) DenyJoinRequestHandler(w http.ResponseWriter, r *http.Request)   { h.decideJoinRequest(w, r, false) }
+
+func (h *GroupHandlers) decideJoinRequest(w http.ResponseWriter, r *http.Request, approve bool) {
+	ctx := r.Context()
+	action := "deny"
+	if approve {
+		action = "approve"
+	}
+	log := newRequestLog(r, "POST /v1/groups/{id}/join-requests/{requestId}/"+action)
+	token, ok := bearerToken(r)
+	if !ok {
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
+		return
+	}
+	groupID := r.PathValue("id")
+	requestID := r.PathValue("requestId")
+	if strings.TrimSpace(groupID) == "" || strings.TrimSpace(requestID) == "" {
+		logJSONError(ctx, log, "missing_ids", w, http.StatusNotFound, "join request not found")
+		return
+	}
+	var err error
+	if approve {
+		err = h.Governance.ApproveJoinRequest(ctx, token, groupID, requestID)
+	} else {
+		err = h.Governance.DenyJoinRequest(ctx, token, groupID, requestID)
+	}
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
+			return
+		}
+		if errors.Is(err, app.ErrUserNotFound) || errors.Is(err, app.ErrGroupNotFound) || errors.Is(err, app.ErrJoinRequestNotFound) {
+			logJSONError(ctx, log, "join_request_not_found", w, http.StatusNotFound, "join request not found", "group_id", groupID)
+			return
+		}
+		if errors.Is(err, app.ErrNotGroupAdmin) {
+			logJSONError(ctx, log, "not_group_admin", w, http.StatusForbidden, "not group admin", "group_id", groupID)
+			return
+		}
+		logJSONError(ctx, log, "decide_join_request_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+	logNoContent(ctx, log, action+"d", "group_id", groupID, "request_id", requestID)
 }
 
 // GetGroupHandler handles GET /v1/groups/{id}.
@@ -367,22 +521,18 @@ func (h *GroupHandlers) ListGroupActivityHandler(w http.ResponseWriter, r *http.
 	logJSONOK(ctx, log, "ok", "group_id", groupID, "count", len(respItems))
 }
 
-func parseCreateGroupRules(req createGroupRequest) (app.GroupRules, string, error) {
+func parseCreateGroupRules(req createGroupRequest) (app.GroupRules, error) {
 	rules := app.DefaultGroupRules()
-	joinPassword := ""
-
 	if req.JoinPolicy != nil {
 		switch req.JoinPolicy.Mode {
 		case "", string(app.JoinModeOpen):
 			rules.JoinPolicy.Mode = app.JoinModeOpen
-		case string(app.JoinModePassword):
-			rules.JoinPolicy.Mode = app.JoinModePassword
-			joinPassword = req.JoinPolicy.Password
+		case string(app.JoinModeRequest):
+			rules.JoinPolicy.Mode = app.JoinModeRequest
 		default:
-			return app.GroupRules{}, "", errors.New("invalid join policy mode")
+			return app.GroupRules{}, errors.New("invalid join policy mode")
 		}
 	}
-
 	if req.VoterSet != nil {
 		switch req.VoterSet.Mode {
 		case "", string(app.VoterSetAllMembers):
@@ -391,10 +541,9 @@ func parseCreateGroupRules(req createGroupRequest) (app.GroupRules, string, erro
 			rules.VoterSet.Mode = app.VoterSetNamed
 			rules.VoterSet.MemberIDs = req.VoterSet.MemberIDs
 		default:
-			return app.GroupRules{}, "", errors.New("invalid voter set mode")
+			return app.GroupRules{}, errors.New("invalid voter set mode")
 		}
 	}
-
 	if req.Threshold != "" {
 		switch req.Threshold {
 		case string(app.ThresholdUnanimous):
@@ -402,13 +551,11 @@ func parseCreateGroupRules(req createGroupRequest) (app.GroupRules, string, erro
 		case string(app.ThresholdMajority):
 			rules.Threshold = app.ThresholdMajority
 		default:
-			return app.GroupRules{}, "", errors.New("invalid threshold")
+			return app.GroupRules{}, errors.New("invalid threshold")
 		}
 	}
-
 	if req.VoteExpirySeconds != nil {
 		rules.VoteExpirySeconds = app.VoteExpirySeconds(*req.VoteExpirySeconds)
 	}
-
-	return rules, joinPassword, nil
+	return rules, nil
 }

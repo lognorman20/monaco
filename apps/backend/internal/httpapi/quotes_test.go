@@ -28,9 +28,15 @@ func integrationQuotesApp(t *testing.T) (*QuoteHandlers, *GroupHandlers, *AuthHa
 		Privy: privyClient,
 		Buy:   buy,
 	}
+	deposits := app.NewDepositService(store, privyClient, nil, app.NewSymbolResolver(xstocks.NewFakeCatalogSearcher()))
+	home := app.NewHomeService(store, privyClient, nil, deposits, app.NewSymbolResolver(xstocks.NewFakeCatalogSearcher()))
+	governance := app.NewGovernanceService(store, privyClient)
+	governance.SetBuyService(buy)
+	governance.SetHomeService(home)
 	groupHandlers := &GroupHandlers{
 		Groups:     app.NewGroupService(store, privyClient),
-		Governance: app.NewGovernanceService(store, privyClient),
+		Governance: governance,
+		Home:       home,
 	}
 	return quoteHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, xstocksResolver, iso
 }

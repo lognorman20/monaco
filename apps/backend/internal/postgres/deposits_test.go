@@ -31,7 +31,7 @@ func TestFailDeposit_marksPendingDepositFailedWithReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
-	group, err := store.InsertGroupWithRulesTx(ctx, tx, "Fail Group "+iso.Suffix(), user.ID, rules, "")
+	group, err := store.InsertGroupWithRulesTx(ctx, tx, "Fail Group "+iso.Suffix(), user.ID, rules)
 	if err != nil {
 		t.Fatalf("InsertGroupWithRulesTx: %v", err)
 	}

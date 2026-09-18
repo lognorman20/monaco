@@ -46,7 +46,7 @@ func TestRetryTransactionHandler_failedBuy_returnsConfirmed(t *testing.T) {
 	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "retry-http", "Retry HTTP")
 
 	governance := app.NewGovernanceService(handlers.Store, handlers.Privy)
-	created, err := governance.CreateGroupWithRules(ctx, string(token), "Retry Club "+iso.Suffix(), app.DefaultGroupRules(), "")
+	created, err := governance.CreateGroupWithRules(ctx, string(token), "Retry Club "+iso.Suffix(), app.DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestGetTransactionHandler_returnsFullDetail(t *testing.T) {
 	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "get-tx", "Get Tx")
 
 	governance := app.NewGovernanceService(handlers.Store, handlers.Privy)
-	created, err := governance.CreateGroupWithRules(ctx, string(token), "Get Tx Club "+iso.Suffix(), app.DefaultGroupRules(), "")
+	created, err := governance.CreateGroupWithRules(ctx, string(token), "Get Tx Club "+iso.Suffix(), app.DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestRetryTransactionHandler_confirmedBuy_returns409(t *testing.T) {
 	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "retry-409", "Retry 409")
 
 	governance := app.NewGovernanceService(handlers.Store, handlers.Privy)
-	created, err := governance.CreateGroupWithRules(ctx, string(token), "Retry 409 Club "+iso.Suffix(), app.DefaultGroupRules(), "")
+	created, err := governance.CreateGroupWithRules(ctx, string(token), "Retry 409 Club "+iso.Suffix(), app.DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}

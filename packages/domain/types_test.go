@@ -3,7 +3,7 @@ package domain
 import "testing"
 
 func TestParseJoinMode_validValues(t *testing.T) {
-	for _, raw := range []string{"open", "password"} {
+	for _, raw := range []string{"open", "request"} {
 		mode, err := ParseJoinMode(raw)
 		if err != nil {
 			t.Fatalf("ParseJoinMode(%q): %v", raw, err)

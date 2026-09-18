@@ -11,6 +11,7 @@ struct HomeGroupBoardRowDTO: Codable, Equatable, Identifiable {
     let potValueUsd: String
     let percentReturn: String?
     let dollarPnl: String
+    let isJoined: Bool
 
     var id: String { groupId }
 }
@@ -22,4 +23,8 @@ struct HomePeopleBoardRowDTO: Codable, Equatable, Identifiable {
     let dollarPnl: String
 
     var id: String { userId }
+}
+
+struct UserSharedGroupsResponse: Codable, Equatable {
+    let groups: [HomeGroupBoardRowDTO]
 }

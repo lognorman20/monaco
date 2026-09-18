@@ -3,10 +3,17 @@ import Foundation
 public struct CatalogAssetDTO: Codable, Equatable, Sendable {
     public let symbol: String
     public let name: String
+    /// When false, Jupiter returned no route for a probe quote; nil means unknown (legacy responses).
+    public let routable: Bool?
 
-    public init(symbol: String, name: String) {
+    public init(symbol: String, name: String, routable: Bool? = nil) {
         self.symbol = symbol
         self.name = name
+        self.routable = routable
+    }
+
+    public var isTradable: Bool {
+        routable ?? true
     }
 }
 

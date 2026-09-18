@@ -236,11 +236,18 @@ func TestGetHome_pythError_stillSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetHome: %v", err)
 	}
-	if len(result.Groups) != 1 {
-		t.Fatalf("groups len = %d, want 1", len(result.Groups))
+	var row *HomeGroupRow
+	for i := range result.Groups {
+		if result.Groups[i].GroupID == group.GroupID {
+			row = &result.Groups[i]
+			break
+		}
 	}
-	if result.Groups[0].PotValueUsd != "2.00" {
-		t.Fatalf("potValueUsd = %q, want 2.00 (cost basis fallback)", result.Groups[0].PotValueUsd)
+	if row == nil {
+		t.Fatalf("group %q not found in home response (%d rows)", group.GroupID, len(result.Groups))
+	}
+	if row.PotValueUsd != "2.00" {
+		t.Fatalf("potValueUsd = %q, want 2.00 (cost basis fallback)", row.PotValueUsd)
 	}
 }
 

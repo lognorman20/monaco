@@ -69,7 +69,7 @@ func TestExecuteOnPass_onlyAfterTallyPassed_callsJupiter(t *testing.T) {
 	sessions := NewSessionService(h.App.Store, h.App.Privy)
 	userID := openTestSession(t, h.App.ISO, sessions, h.App.Privy, "execute-pass", "Execute Pass")
 	token := h.App.ISO.UniqueToken("execute-pass")
-	created, err := h.Governance.CreateGroupWithRules(ctx, token, testGroupName(h.App.ISO, "execute-pass"), DefaultGroupRules(), "")
+	created, err := h.Governance.CreateGroupWithRules(ctx, token, testGroupName(h.App.ISO, "execute-pass"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
@@ -224,7 +224,7 @@ func seedPassedExecuteProposal(t *testing.T, h executeOnPassHarness, label strin
 	sessions := NewSessionService(h.App.Store, h.App.Privy)
 	userID := openTestSession(t, h.App.ISO, sessions, h.App.Privy, label, "Execute Pass")
 	token := h.App.ISO.UniqueToken(label)
-	created, err := h.Governance.CreateGroupWithRules(ctx, token, testGroupName(h.App.ISO, label), DefaultGroupRules(), "")
+	created, err := h.Governance.CreateGroupWithRules(ctx, token, testGroupName(h.App.ISO, label), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}

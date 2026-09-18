@@ -13,8 +13,8 @@ AAPLx | $497.51 [After hours]
 Your slice | $311.50
 Slice % | 42.0%
 P&L | +48.20
-Return | 0.124
+Return | +12.4%
 
 ## Member board
-#1 Alfred | 0.124 | +48.20
-#2 Beatrice | 0.082 | +22.10
+#1 Alfred | +12.4% | +48.20
+#2 Beatrice | +8.2% | +22.10

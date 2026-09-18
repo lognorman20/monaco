@@ -1,3 +1,4 @@
+import MonacoCore
 import SwiftUI
 
 /// App home with group board and people board tabs.
@@ -11,7 +12,7 @@ struct HomeView: View {
     var body: some View {
         VStack(spacing: 0) {
             Picker("Board", selection: $selectedTab) {
-                Text("Groups").tag(0)
+                Text("Cabals").tag(0)
                 Text("People").tag(1)
             }
             .pickerStyle(.segmented)
@@ -40,12 +41,12 @@ struct HomeView: View {
                     NavigationLink {
                         CreateGroupView(auth: auth)
                     } label: {
-                        Label("Create club", systemImage: "plus")
+                        Label("Create cabal", systemImage: "plus")
                     }
                     NavigationLink {
                         JoinGroupView(auth: auth)
                     } label: {
-                        Label("Join club", systemImage: "person.badge.plus")
+                        Label("Join cabal", systemImage: "person.badge.plus")
                     }
                 } label: {
                     Image(systemName: "plus.circle")
@@ -63,20 +64,33 @@ struct HomeView: View {
         List {
             if home.groups.isEmpty {
                 MonacoEmptyStateCard(
-                    message: "No clubs yet. Create or join one to start investing together.",
+                    message: "No cabals yet. Create or join one to start investing together.",
                     systemImage: "person.3"
                 )
             } else {
                 ForEach(home.groups) { row in
                     NavigationLink {
-                        GroupDetailView(auth: auth, groupId: row.groupId, groupName: row.name)
+                        if row.isJoined {
+                            GroupDetailView(auth: auth, groupId: row.groupId, groupName: row.name, onLeft: onRefresh)
+                        } else {
+                            JoinGroupView(auth: auth, groupId: row.groupId)
+                        }
                     } label: {
                         HStack {
                             Text(row.name)
                                 .font(.body.bold())
                                 .foregroundStyle(MonacoTheme.primaryText)
                             Spacer()
-                            groupBoardMetrics(potValueUsd: row.potValueUsd, dollarPnl: row.dollarPnl)
+                            if !row.isJoined {
+                                Text("Join")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(MonacoTheme.accent)
+                            }
+                            groupBoardMetrics(
+                                potValueUsd: row.potValueUsd,
+                                percentReturn: row.percentReturn,
+                                dollarPnl: row.dollarPnl
+                            )
                         }
                     }
                     .accessibilityIdentifier("home-group-row-\(row.groupId)")
@@ -90,13 +104,17 @@ struct HomeView: View {
         List {
             if home.people.isEmpty {
                 MonacoEmptyStateCard(
-                    message: "No leaderboard rows yet.",
+                    message: peopleEmptyMessage,
                     systemImage: "chart.bar"
                 )
             } else {
                 ForEach(home.people) { row in
                     NavigationLink {
-                        UserProfileGroupsView(displayName: row.displayName, groups: home.groups)
+                        UserProfileGroupsView(
+                            auth: auth,
+                            userId: row.userId,
+                            displayName: row.displayName
+                        )
                     } label: {
                         HStack {
                             Text(row.displayName)
@@ -113,12 +131,22 @@ struct HomeView: View {
         .monacoInsetList()
     }
 
+    private var peopleEmptyMessage: String {
+        if home.groups.isEmpty {
+            return "Join a club to see members on the leaderboard."
+        }
+        return "No members in your clubs yet."
+    }
+
     @ViewBuilder
-    private func groupBoardMetrics(potValueUsd: String, dollarPnl: String) -> some View {
+    private func groupBoardMetrics(potValueUsd: String, percentReturn: String?, dollarPnl: String) -> some View {
         VStack(alignment: .trailing, spacing: 2) {
             Text("$\(potValueUsd)")
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(MonacoTheme.primaryText)
+            Text(PercentReturnFormatter.format(percentReturn))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(percentReturn == nil ? MonacoTheme.secondaryText : MonacoTheme.primaryText)
             Text(dollarPnl)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(pnlColor(for: dollarPnl))
@@ -128,15 +156,9 @@ struct HomeView: View {
     @ViewBuilder
     private func boardMetrics(percentReturn: String?, dollarPnl: String) -> some View {
         VStack(alignment: .trailing, spacing: 2) {
-            if let percentReturn {
-                Text(percentReturn)
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(MonacoTheme.primaryText)
-            } else {
-                Text("—")
-                    .font(.subheadline)
-                    .foregroundStyle(MonacoTheme.secondaryText)
-            }
+            Text(PercentReturnFormatter.format(percentReturn))
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(percentReturn == nil ? MonacoTheme.secondaryText : MonacoTheme.primaryText)
             Text(dollarPnl)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(pnlColor(for: dollarPnl))
@@ -164,16 +186,17 @@ struct HomeView: View {
                         groupId: "g1",
                         name: "Weekend investors",
                         potValueUsd: "548.20",
-                        percentReturn: "+12.4%",
-                        dollarPnl: "+48.20"
+                        percentReturn: "0.124",
+                        dollarPnl: "+48.20",
+                        isJoined: true
                     ),
                 ],
                 people: [
                     HomePeopleBoardRowDTO(
                         userId: "u1",
                         displayName: "Alfred",
-                        percentReturn: "+12.4%",
-                        dollarPnl: "+$48.20"
+                        percentReturn: "0.124",
+                        dollarPnl: "+48.20"
                     ),
                 ]
             )

@@ -108,6 +108,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 		slog.Info("pyth client skipped", "reason", "PYTH_API_KEY unset")
 	}
 	catalogSearcher := xstocks.NewHTTPCatalogSearcher()
+	jupiterClient := jupiter.NewHTTPClientWithPayer(relayer.PublicKey())
+	catalogRoutability := xstocks.NewCachedRoutabilityProber(
+		app.NewJupiterCatalogRoutabilityProber(jupiterClient),
+		xstocks.NewRoutabilityCache(xstocks.DefaultRoutabilityCacheTTL),
+	)
+	catalogSearcher.SetRoutabilityProber(catalogRoutability)
 	symbols := app.NewSymbolResolver(catalogSearcher)
 	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
 	sessions := app.NewSessionService(store, privyClient)
@@ -119,13 +125,13 @@ func boot(ctx context.Context) (*bootResult, error) {
 	homeHandlers := &httpapi.HomeHandlers{Home: home}
 	groupHandlers := &httpapi.GroupHandlers{Groups: groups, Governance: governance, Home: home}
 	depositHandlers := &httpapi.DepositHandlers{Deposits: deposits}
-	jupiterClient := jupiter.NewHTTPClientWithPayer(relayer.PublicKey())
 	xstocksResolver := xstocks.NewHTTPResolver()
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	signer := app.NewPrivyTreasurySigner(privyClient)
 	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, relayer.PrivateKey(), symbols)
 	executeOnPass := app.NewExecuteOnPassService(swap, store)
 	governance.SetBuyService(buy)
+	governance.SetHomeService(home)
 	transactionHandlers := &httpapi.TransactionHandlers{
 		Store:    store,
 		Privy:    privyClient,
@@ -159,8 +165,13 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
 	mux.HandleFunc("GET /v1/home", homeHandlers.HomeHandler)
+	mux.HandleFunc("GET /v1/users/{id}/groups", homeHandlers.UserSharedGroupsHandler)
 	mux.HandleFunc("POST /v1/groups", groupHandlers.CreateGroupHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/join", groupHandlers.JoinGroupHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/leave", groupHandlers.LeaveGroupHandler)
+	mux.HandleFunc("GET /v1/groups/{id}/join-requests", groupHandlers.ListJoinRequestsHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/join-requests/{requestId}/approve", groupHandlers.ApproveJoinRequestHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/join-requests/{requestId}/deny", groupHandlers.DenyJoinRequestHandler)
 	mux.HandleFunc("GET /v1/groups/{id}", groupHandlers.GetGroupHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/view", groupHandlers.GetGroupViewHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/activity", groupHandlers.ListGroupActivityHandler)

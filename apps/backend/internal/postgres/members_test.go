@@ -27,7 +27,7 @@ func TestUser_inManyGroups_hasDistinctPositionsPerGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
-	groupA, err := store.InsertGroupWithRulesTx(ctx, txA, "Alpha", creator.ID, rules, "")
+	groupA, err := store.InsertGroupWithRulesTx(ctx, txA, "Alpha", creator.ID, rules)
 	if err != nil {
 		t.Fatalf("insert alpha: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestUser_inManyGroups_hasDistinctPositionsPerGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
-	groupB, err := store.InsertGroupWithRulesTx(ctx, txB, "Beta", creator.ID, rules, "")
+	groupB, err := store.InsertGroupWithRulesTx(ctx, txB, "Beta", creator.ID, rules)
 	if err != nil {
 		t.Fatalf("insert beta: %v", err)
 	}

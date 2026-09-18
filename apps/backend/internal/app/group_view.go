@@ -82,10 +82,8 @@ func (h *HomeService) GetGroupView(ctx context.Context, accessToken, groupID str
 		return GroupViewResult{}, ErrGroupNotFound
 	}
 
-	if h.deposits != nil {
-		if _, err := h.deposits.CreditUncreditedTreasuryUSDC(ctx, groupID); err != nil {
-			return GroupViewResult{}, fmt.Errorf("credit uncredited treasury usdc: %w", err)
-		}
+	if err := h.creditUncreditedForGroups(ctx, []string{groupID}); err != nil {
+		return GroupViewResult{}, err
 	}
 
 	group, groupFound, err := h.store.GetGroupByID(ctx, groupID)

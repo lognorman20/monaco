@@ -2,14 +2,14 @@ import SwiftUI
 
 enum JoinPolicyMode: String, CaseIterable, Identifiable {
     case open
-    case password
+    case request
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
         case .open: "Anyone can join"
-        case .password: "Password required"
+        case .request: "Admin approval required"
         }
     }
 }
@@ -66,7 +66,6 @@ struct CreateGroupView: View {
 
     @State private var groupName = ""
     @State private var joinPolicy: JoinPolicyMode = .open
-    @State private var joinPassword = ""
     @State private var voterSet: VoterSetMode = .allMembers
     @State private var threshold: VoteThresholdMode = .majority
     @State private var voteExpiry: VoteExpiryOption = .oneDay
@@ -79,12 +78,12 @@ struct CreateGroupView: View {
     var body: some View {
         Form {
             Section {
-                TextField("Group name", text: $groupName)
+                TextField("Cabal name", text: $groupName)
                     .textInputAutocapitalization(.words)
                     .disabled(isCreating || createdGroup != nil)
                     .accessibilityIdentifier("create-group-name")
             } header: {
-                Text("Name your club")
+                Text("Name your cabal")
             } footer: {
                 Text("Pick a name your friends will recognize.")
             }
@@ -98,11 +97,6 @@ struct CreateGroupView: View {
                 .pickerStyle(.inline)
                 .disabled(isCreating || createdGroup != nil)
 
-                if joinPolicy == .password {
-                    SecureField("Join password", text: $joinPassword)
-                        .disabled(isCreating || createdGroup != nil)
-                        .accessibilityIdentifier("create-group-join-password")
-                }
             }
 
             Section("Who votes on buys?") {
@@ -157,7 +151,7 @@ struct CreateGroupView: View {
                 }
             }
         }
-        .navigationTitle("Create group")
+        .navigationTitle("Create cabal")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: auth.accessToken) {
             await loadCreatorProfile()
@@ -167,9 +161,6 @@ struct CreateGroupView: View {
     private var canSubmit: Bool {
         let trimmedName = groupName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { return false }
-        if joinPolicy == .password {
-            return !joinPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
         if voterSet == .namedSubset {
             return creatorUserId != nil
         }
@@ -192,18 +183,13 @@ struct CreateGroupView: View {
 
     private func createGroup() async {
         guard let accessToken = auth.accessToken else {
-            errorMessage = "Sign in to create a group."
+            errorMessage = "Sign in to create a cabal."
             return
         }
 
         let trimmedName = groupName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
-            errorMessage = "Group name is required."
-            return
-        }
-
-        if joinPolicy == .password && joinPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            errorMessage = "Enter a join password."
+            errorMessage = "Cabal name is required."
             return
         }
 
@@ -225,7 +211,6 @@ struct CreateGroupView: View {
                 accessToken: accessToken,
                 name: trimmedName,
                 joinPolicyMode: joinPolicy.rawValue,
-                joinPassword: joinPolicy == .password ? joinPassword : nil,
                 voterSetMode: voterSet.rawValue,
                 voterMemberIds: memberIds,
                 threshold: threshold.rawValue,
@@ -233,9 +218,9 @@ struct CreateGroupView: View {
             )
             createdGroup = created
         } catch MonacoAPIError.httpStatus(let status) {
-            errorMessage = "Could not create group (HTTP \(status))."
+            errorMessage = "Could not create cabal (HTTP \(status))."
         } catch {
-            errorMessage = "Could not create group. Try again."
+            errorMessage = "Could not create cabal. Try again."
         }
 
         isCreating = false

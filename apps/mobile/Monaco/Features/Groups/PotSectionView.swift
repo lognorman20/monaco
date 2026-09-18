@@ -74,7 +74,7 @@ struct PotSectionView: View {
     @ViewBuilder
     private func treasuryAddressBlock(_ address: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Club treasury")
+            Text("Cabal treasury")
                 .font(.caption)
                 .foregroundStyle(MonacoTheme.secondaryText)
 

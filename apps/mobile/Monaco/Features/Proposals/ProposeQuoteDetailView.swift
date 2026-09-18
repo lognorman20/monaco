@@ -6,7 +6,7 @@ struct ProposeQuoteDetailView: View {
     let groupId: String
     let symbol: String
     let usdcMicros: Int64
-    let treasuryUsdcMicros: Int64?
+    let treasuryTotalMicros: Int64?
 
     private let apiClient = MonacoAPIClient()
     /// xStock SPL tokens use 8 on-chain decimals (Jupiter outAmount atomics).
@@ -16,7 +16,7 @@ struct ProposeQuoteDetailView: View {
     @State private var errorMessage: String?
     @State private var isLoading = true
     @State private var isProposing = false
-    @State private var createdProposalId: String?
+    @State private var toast: MonacoToast?
 
     var body: some View {
         Form {
@@ -48,7 +48,7 @@ struct ProposeQuoteDetailView: View {
                     }
 
                     if exceedsTreasury {
-                        Label("Amount exceeds treasury USDC available.", systemImage: "exclamationmark.triangle.fill")
+                        Label("Amount exceeds treasury total available.", systemImage: "exclamationmark.triangle.fill")
                             .font(.footnote)
                             .foregroundStyle(.orange)
                     }
@@ -71,14 +71,9 @@ struct ProposeQuoteDetailView: View {
                 }
             }
 
-            if let createdProposalId {
-                Section {
-                    Label("Proposal \(createdProposalId) created", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                }
-            }
         }
         .monacoFormScreen()
+        .monacoToast($toast)
         .navigationTitle("Quote")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: loadTaskID) {
@@ -91,7 +86,7 @@ struct ProposeQuoteDetailView: View {
     }
 
     private var exceedsTreasury: Bool {
-        guard let treasury = treasuryUsdcMicros else { return false }
+        guard let treasury = treasuryTotalMicros else { return false }
         return usdcMicros > treasury
     }
 
@@ -117,11 +112,9 @@ struct ProposeQuoteDetailView: View {
     private func submitProposal() async {
         guard let token = auth.accessToken, let quote, quote.routable else { return }
         if exceedsTreasury {
-            errorMessage = "Amount exceeds treasury USDC available."
             return
         }
         isProposing = true
-        errorMessage = nil
         defer { isProposing = false }
 
         do {
@@ -131,14 +124,21 @@ struct ProposeQuoteDetailView: View {
                 symbol: quote.symbol,
                 usdc: usdcMicros
             )
-            createdProposalId = response.proposalId
-        } catch MonacoAPIError.httpStatus(400) {
-            errorMessage = "Amount exceeds treasury USDC available."
+            toast = MonacoToast(message: proposalSubmittedMessage(id: response.proposalId), isSuccess: true)
+        } catch MonacoAPIError.apiError(_, let message) where message == "amount exceeds treasury total available" {
+            toast = MonacoToast(message: "Amount exceeds treasury total available.")
+        } catch MonacoAPIError.apiError(_, let message) where message == "quote not routable" {
+            toast = MonacoToast(message: "No route available right now.")
         } catch MonacoAPIError.httpStatus(let code) {
-            errorMessage = "Proposal failed (HTTP \(code))."
+            toast = MonacoToast(message: "Proposal failed (HTTP \(code)).")
         } catch {
-            errorMessage = "Could not create proposal."
+            toast = MonacoToast(message: "Could not create proposal.")
         }
+    }
+
+    private func proposalSubmittedMessage(id: String) -> String {
+        let truncated = id.count > 8 ? String(id.prefix(8)) + "…" : id
+        return "Proposal submitted (\(truncated))"
     }
 
     private func formattedPricePerShare(for quote: BuyQuoteDTO) -> String? {

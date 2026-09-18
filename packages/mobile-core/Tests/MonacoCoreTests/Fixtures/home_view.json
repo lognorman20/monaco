@@ -5,15 +5,16 @@
       "name": "Weekend investors",
       "potValueUsd": "548.20",
       "percentReturn": "0.124",
-      "dollarPnl": "+48.20"
+      "dollarPnl": "+48.20",
+      "isJoined": true
     }
   ],
   "people": [
     {
       "userId": "u1",
       "displayName": "Alfred",
-      "percentReturn": "+12.4%",
-      "dollarPnl": "+$48.20"
+      "percentReturn": "0.124",
+      "dollarPnl": "+48.20"
     }
   ]
 }

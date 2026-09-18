@@ -11,13 +11,13 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/packages/domain"
-	"golang.org/x/crypto/bcrypt"
-)
+	)
 
 type GovernanceService struct {
 	store *postgres.Store
 	privy privy.Client
 	buy   *BuyService
+	home  *HomeService
 	now   func() time.Time
 }
 
@@ -30,6 +30,11 @@ func (g *GovernanceService) SetBuyService(buy *BuyService) {
 	g.buy = buy
 }
 
+// SetHomeService wires treasury total + reconcile for proposal create.
+func (g *GovernanceService) SetHomeService(home *HomeService) {
+	g.home = home
+}
+
 // SetClock overrides time.Now for tests.
 func (g *GovernanceService) SetClock(now func() time.Time) {
 	if now == nil {
@@ -40,7 +45,24 @@ func (g *GovernanceService) SetClock(now func() time.Time) {
 }
 
 var ErrInvalidGroupRules = errors.New("invalid group rules")
-var ErrWrongJoinPassword = errors.New("wrong join password")
+
+type LeaveBlockReason string
+
+const (
+	LeaveBlockShareUnits          LeaveBlockReason = "share_units_remaining"
+	LeaveBlockLastMemberTreasury  LeaveBlockReason = "last_member_with_treasury"
+	LeaveBlockPendingRedeem       LeaveBlockReason = "pending_redeem"
+	LeaveBlockSoleRemainingVote   LeaveBlockReason = "sole_remaining_vote"
+	LeaveBlockCreatorMustTransfer LeaveBlockReason = "creator_must_transfer"
+)
+
+type LeaveGroupError struct{ Reason LeaveBlockReason }
+
+func (e *LeaveGroupError) Error() string { return string(e.Reason) }
+
+var ErrNotGroupMemberForLeave = errors.New("not a group member")
+var ErrNotGroupAdmin = errors.New("not group admin")
+var ErrJoinRequestNotFound = errors.New("join request not found")
 var ErrProposalNotFound = errors.New("proposal not found")
 var ErrProposalNotOpen = errors.New("proposal not open")
 var ErrNotEligibleVoter = errors.New("not eligible to vote")
@@ -71,12 +93,12 @@ func DefaultGroupRules() GroupRules {
 	}
 }
 
-func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToken, name string, rules GroupRules, joinPassword string) (CreateGroupResult, error) {
+func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToken, name string, rules GroupRules) (CreateGroupResult, error) {
 	if name == "" {
 		logGovernanceBranchWarn("governance create group rejected", "name required")
 		return CreateGroupResult{}, fmt.Errorf("name is required")
 	}
-	if err := validateCreateRules(rules, joinPassword); err != nil {
+	if err := validateCreateRules(rules); err != nil {
 		logGovernanceBranchWarn("governance create group rejected", "invalid rules")
 		return CreateGroupResult{}, err
 	}
@@ -99,10 +121,6 @@ func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToke
 		return CreateGroupResult{}, ErrUserNotFound
 	}
 	logGovernanceCreateGroupStart(user.ID, name)
-	passwordHash, err := hashJoinPassword(rules.JoinPolicy.Mode, joinPassword)
-	if err != nil {
-		return CreateGroupResult{}, err
-	}
 	tx, err := g.store.BeginTx(ctx)
 	if err != nil {
 		return CreateGroupResult{}, err
@@ -113,7 +131,7 @@ func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToke
 			_ = tx.Rollback()
 		}
 	}()
-	group, err := g.store.InsertGroupWithRulesTx(ctx, tx, name, user.ID, rules, passwordHash)
+	group, err := g.store.InsertGroupWithRulesTx(ctx, tx, name, user.ID, rules)
 	if err != nil {
 		return CreateGroupResult{}, err
 	}
@@ -141,51 +159,117 @@ func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToke
 	return CreateGroupResult{GroupID: group.ID, Name: group.Name, TreasuryAddress: treasuryRef.SolanaAddress}, nil
 }
 
-func (g *GovernanceService) JoinGroup(ctx context.Context, accessToken, groupID, password string) error {
+
+func (g *GovernanceService) JoinGroup(ctx context.Context, accessToken, groupID string) (JoinGroupOutcome, error) {
 	if groupID == "" {
-		logGovernanceBranchWarn("governance join group rejected", "group id required")
-		return fmt.Errorf("group id is required")
+		return "", fmt.Errorf("group id is required")
 	}
 	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
-			logGovernanceBranchWarn("governance join group rejected", "invalid token", "group_id", groupID)
-			return privy.ErrInvalidToken
+			return "", privy.ErrInvalidToken
 		}
-		logGovernanceBranchError("governance join group verify session failed", err, "group_id", groupID)
-		return fmt.Errorf("verify session: %w", err)
+		return "", fmt.Errorf("verify session: %w", err)
 	}
 	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
 	if err != nil {
-		logGovernanceBranchError("governance join group lookup user failed", err, "group_id", groupID)
-		return err
+		return "", err
 	}
 	if !found {
-		logGovernanceBranchWarn("governance join group rejected", "user not found", "group_id", groupID)
-		return ErrUserNotFound
+		return "", ErrUserNotFound
 	}
-	logGovernanceJoinGroupStart(user.ID, groupID)
 	rules, found, err := g.store.GetGroupRules(ctx, groupID)
 	if err != nil {
-		logGovernanceBranchError("governance join group lookup rules failed", err, "group_id", groupID, "user_id", user.ID)
-		return err
+		return "", err
 	}
 	if !found {
-		logGovernanceBranchWarn("governance join group rejected", "group not found", "group_id", groupID, "user_id", user.ID)
-		return ErrGroupNotFound
-	}
-	if err := verifyJoinPassword(rules.JoinPolicy, password); err != nil {
-		logGovernanceBranchWarn("governance join group rejected", "wrong password", "group_id", groupID, "user_id", user.ID)
-		return err
+		return "", ErrGroupNotFound
 	}
 	alreadyMember, err := g.store.IsGroupMember(ctx, groupID, user.ID)
 	if err != nil {
-		logGovernanceBranchError("governance join group membership check failed", err, "group_id", groupID, "user_id", user.ID)
-		return err
+		return "", err
 	}
 	if alreadyMember {
-		logGovernanceJoinGroupAlreadyMember(user.ID, groupID)
-		return nil
+		return JoinOutcomeAlreadyMember, nil
+	}
+	switch rules.JoinPolicy.Mode {
+	case JoinModeOpen:
+		if err := g.insertMember(ctx, groupID, user.ID); err != nil {
+			return "", err
+		}
+		return JoinOutcomeJoined, nil
+	case JoinModeRequest:
+		if _, pending, err := g.store.GetPendingJoinRequest(ctx, groupID, user.ID); err != nil {
+			return "", err
+		} else if pending {
+			return JoinOutcomePending, nil
+		}
+		if _, err := g.store.InsertJoinRequest(ctx, groupID, user.ID); err != nil {
+			if _, pending, pendingErr := g.store.GetPendingJoinRequest(ctx, groupID, user.ID); pendingErr == nil && pending {
+				return JoinOutcomePending, nil
+			}
+			return "", err
+		}
+		return JoinOutcomePending, nil
+	default:
+		return "", fmt.Errorf("invalid join mode")
+	}
+}
+
+func (g *GovernanceService) insertMember(ctx context.Context, groupID, userID string) error {
+	tx, err := g.store.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := g.store.InsertGroupMemberTx(ctx, tx, groupID, userID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit join group: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func (g *GovernanceService) ListPendingJoinRequests(ctx context.Context, accessToken, groupID string) ([]JoinRequest, error) {
+	if _, _, err := g.authenticatedGroupAdmin(ctx, accessToken, groupID); err != nil {
+		return nil, err
+	}
+	rows, err := g.store.ListPendingJoinRequests(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]JoinRequest, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, JoinRequest{ID: row.ID, UserID: row.UserID, DisplayName: row.DisplayName, RequestedAt: row.CreatedAt})
+	}
+	return items, nil
+}
+
+func (g *GovernanceService) ApproveJoinRequest(ctx context.Context, accessToken, groupID, requestID string) error {
+	return g.decideJoinRequest(ctx, accessToken, groupID, requestID, domain.JoinRequestApproved)
+}
+
+func (g *GovernanceService) DenyJoinRequest(ctx context.Context, accessToken, groupID, requestID string) error {
+	return g.decideJoinRequest(ctx, accessToken, groupID, requestID, domain.JoinRequestDenied)
+}
+
+func (g *GovernanceService) decideJoinRequest(ctx context.Context, accessToken, groupID, requestID string, status domain.JoinRequestStatus) error {
+	if _, _, err := g.authenticatedGroupAdmin(ctx, accessToken, groupID); err != nil {
+		return err
+	}
+	row, found, err := g.store.GetJoinRequestByID(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	if !found || row.GroupID != groupID || row.Status != domain.JoinRequestPending {
+		return ErrJoinRequestNotFound
 	}
 	tx, err := g.store.BeginTx(ctx)
 	if err != nil {
@@ -197,24 +281,253 @@ func (g *GovernanceService) JoinGroup(ctx context.Context, accessToken, groupID,
 			_ = tx.Rollback()
 		}
 	}()
-	if err := g.store.InsertGroupMemberTx(ctx, tx, groupID, user.ID); err != nil {
+	if err := g.store.UpdateJoinRequestStatusTx(ctx, tx, requestID, status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrJoinRequestNotFound
+		}
 		return err
 	}
+	if status == domain.JoinRequestApproved {
+		member, err := g.store.IsGroupMember(ctx, groupID, row.UserID)
+		if err != nil {
+			return err
+		}
+		if !member {
+			if err := g.store.InsertGroupMemberTx(ctx, tx, groupID, row.UserID); err != nil {
+			 return err
+			}
+		}
+	}
 	if err := tx.Commit(); err != nil {
-		logGovernanceBranchError("governance join group commit failed", err, "group_id", groupID, "user_id", user.ID)
-		return fmt.Errorf("commit join group: %w", err)
+		return fmt.Errorf("commit join request decision: %w", err)
 	}
 	committed = true
-	logGovernanceJoinGroupSuccess(user.ID, groupID)
 	return nil
 }
 
-func validateCreateRules(rules GroupRules, joinPassword string) error {
+// LeaveGroup removes a member when leave policy preconditions pass.
+// Positions rows are kept for deposit history; non-members are excluded from boards via group_members.
+// Creators with other members must transfer ownership before leaving.
+func (g *GovernanceService) LeaveGroup(ctx context.Context, accessToken, groupID string) error {
+	if groupID == "" {
+		return fmt.Errorf("group id is required")
+	}
+	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			return privy.ErrInvalidToken
+		}
+		return fmt.Errorf("verify session: %w", err)
+	}
+	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrUserNotFound
+	}
+	group, groupFound, err := g.store.GetGroupByID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if !groupFound {
+		return ErrGroupNotFound
+	}
+	member, err := g.store.IsGroupMember(ctx, groupID, user.ID)
+	if err != nil {
+		return err
+	}
+	if !member {
+		return ErrNotGroupMemberForLeave
+	}
+	logGovernanceLeaveGroupStart(user.ID, groupID)
+	tx, err := g.store.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	lockedGroup, lockedFound, err := g.store.GetGroupByIDForUpdateTx(ctx, tx, groupID)
+	if err != nil {
+		return err
+	}
+	if !lockedFound {
+		return ErrGroupNotFound
+	}
+	memberIDs, err := g.store.ListGroupMemberIDsForUpdateTx(ctx, tx, groupID)
+	if err != nil {
+		return err
+	}
+	isMember := false
+	for _, memberID := range memberIDs {
+		if memberID == user.ID {
+			isMember = true
+			break
+		}
+	}
+	if !isMember {
+		return ErrNotGroupMemberForLeave
+	}
+	if err := g.validateLeavePolicyTx(ctx, tx, groupID, user.ID, lockedGroup.CreatorUserID, memberIDs); err != nil {
+		return err
+	}
+	if err := g.store.DeleteGroupMemberTx(ctx, tx, groupID, user.ID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit leave group: %w", err)
+	}
+	committed = true
+	logGovernanceLeaveGroupSuccess(user.ID, groupID, group.CreatorUserID == user.ID)
+	return nil
+}
+
+func (g *GovernanceService) validateLeavePolicyTx(ctx context.Context, tx *sql.Tx, groupID, userID, creatorUserID string, memberIDs []string) error {
+	if userID == creatorUserID && len(memberIDs) > 1 {
+		return &LeaveGroupError{Reason: LeaveBlockCreatorMustTransfer}
+	}
+	position, hasPosition, err := g.store.GetPositionForUpdateTx(ctx, tx, userID, groupID)
+	if err != nil {
+		return err
+	}
+	if hasPosition && position.ShareUnits > 0 {
+		return &LeaveGroupError{Reason: LeaveBlockShareUnits}
+	}
+	activeRedeem, err := g.store.HasActiveRedeemJobForUserTx(ctx, tx, userID, groupID)
+	if err != nil {
+		return err
+	}
+	if activeRedeem {
+		return &LeaveGroupError{Reason: LeaveBlockPendingRedeem}
+	}
+	if len(memberIDs) == 1 {
+		treasuryUSDC, err := g.groupTreasuryUSDCForLeaveTx(ctx, tx, groupID)
+		if err != nil {
+			return err
+		}
+		totalShares, err := g.store.SumShareUnitsByGroupTx(ctx, tx, groupID)
+		if err != nil {
+			return err
+		}
+		if treasuryUSDC > 0 || totalShares > 0 {
+			return &LeaveGroupError{Reason: LeaveBlockLastMemberTreasury}
+		}
+	}
+	rules, found, err := g.store.GetGroupRulesTx(ctx, tx, groupID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrGroupNotFound
+	}
+	soleVote, err := g.hasSoleRemainingVoteTx(ctx, tx, groupID, userID, rules, memberIDs)
+	if err != nil {
+		return err
+	}
+	if soleVote {
+		return &LeaveGroupError{Reason: LeaveBlockSoleRemainingVote}
+	}
+	return nil
+}
+
+func (g *GovernanceService) groupTreasuryUSDCForLeaveTx(ctx context.Context, tx *sql.Tx, groupID string) (int64, error) {
+	netUsdcIn, err := g.store.NetUSDCInByGroupTx(ctx, tx, groupID)
+	if err != nil {
+		return 0, err
+	}
+	treasury, found, err := g.store.GetTreasuryByGroupID(ctx, groupID)
+	if err != nil {
+		return 0, err
+	}
+	if found {
+		balance, err := g.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
+		if err == nil && balance > 0 {
+			return balance, nil
+		}
+	}
+	return netUsdcIn, nil
+}
+
+func (g *GovernanceService) hasSoleRemainingVoteTx(ctx context.Context, tx *sql.Tx, groupID, userID string, rules GroupRules, memberIDs []string) (bool, error) {
+	proposals, err := g.store.ListProposalsByGroupIDTx(ctx, tx, groupID, []domain.ProposalStatus{ProposalOpen})
+	if err != nil {
+		return false, err
+	}
+	if len(proposals) == 0 {
+		return false, nil
+	}
+	voterSet, voterIDs, err := g.resolveVoterSetTx(ctx, tx, groupID, rules, memberIDs)
+	if err != nil {
+		return false, err
+	}
+	if !domain.MemberMayVote(voterSet, userID, voterIDs) {
+		return false, nil
+	}
+	for _, proposal := range proposals {
+		if proposal.Status == ProposalOpen && g.now().UTC().Unix() >= proposal.ExpiresAt.Unix() {
+			continue
+		}
+		votes, err := g.store.ListVotesForProposalTx(ctx, tx, proposal.ID)
+		if err != nil {
+			return false, err
+		}
+		cast := make(map[string]domain.VoteChoice, len(votes))
+		for _, vote := range votes {
+			cast[vote.VoterID] = vote.Choice
+		}
+		uncast := 0
+		userUncast := false
+		for _, voterID := range voterIDs {
+			if _, voted := cast[voterID]; voted {
+				continue
+			}
+			uncast++
+			if voterID == userID {
+				userUncast = true
+			}
+		}
+		if userUncast && uncast == 1 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (g *GovernanceService) authenticatedGroupAdmin(ctx context.Context, accessToken, groupID string) (postgres.User, postgres.Group, error) {
+	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			return postgres.User{}, postgres.Group{}, privy.ErrInvalidToken
+		}
+		return postgres.User{}, postgres.Group{}, fmt.Errorf("verify session: %w", err)
+	}
+	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	if err != nil {
+		return postgres.User{}, postgres.Group{}, err
+	}
+	if !found {
+		return postgres.User{}, postgres.Group{}, ErrUserNotFound
+	}
+	group, groupFound, err := g.store.GetGroupByID(ctx, groupID)
+	if err != nil {
+		return postgres.User{}, postgres.Group{}, err
+	}
+	if !groupFound {
+		return postgres.User{}, postgres.Group{}, ErrGroupNotFound
+	}
+	if group.CreatorUserID != user.ID {
+		return postgres.User{}, postgres.Group{}, ErrNotGroupAdmin
+	}
+	return user, group, nil
+}
+
+func validateCreateRules(rules GroupRules) error {
 	if rules.VoteExpirySeconds <= 0 {
 		return fmt.Errorf("%w: vote expiry must be positive", ErrInvalidGroupRules)
-	}
-	if rules.JoinPolicy.Mode == JoinModePassword && joinPassword == "" {
-		return fmt.Errorf("%w: password required for password join mode", ErrInvalidGroupRules)
 	}
 	if err := domain.ValidateVoterSet(rules.VoterSet); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidGroupRules, err)
@@ -225,7 +538,7 @@ func validateCreateRules(rules GroupRules, joinPassword string) error {
 		return fmt.Errorf("%w: invalid threshold", ErrInvalidGroupRules)
 	}
 	switch rules.JoinPolicy.Mode {
-	case JoinModeOpen, JoinModePassword:
+	case JoinModeOpen, JoinModeRequest:
 	default:
 		return fmt.Errorf("%w: invalid join mode", ErrInvalidGroupRules)
 	}
@@ -235,34 +548,6 @@ func validateCreateRules(rules GroupRules, joinPassword string) error {
 		return fmt.Errorf("%w: invalid voter set mode", ErrInvalidGroupRules)
 	}
 	return nil
-}
-
-func hashJoinPassword(mode JoinMode, joinPassword string) (string, error) {
-	if mode != JoinModePassword {
-		return "", nil
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(joinPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return "", fmt.Errorf("hash join password: %w", err)
-	}
-	return string(hash), nil
-}
-
-func verifyJoinPassword(policy JoinPolicy, password string) error {
-	switch policy.Mode {
-	case JoinModeOpen:
-		return nil
-	case JoinModePassword:
-		if policy.PasswordHash == "" {
-			return fmt.Errorf("group join password not configured")
-		}
-		if err := bcrypt.CompareHashAndPassword([]byte(policy.PasswordHash), []byte(password)); err != nil {
-			return ErrWrongJoinPassword
-		}
-		return nil
-	default:
-		return fmt.Errorf("invalid join mode")
-	}
 }
 
 // CreateProposal inserts an open buy proposal when the quote is routable (M4-T13).
@@ -313,30 +598,24 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		return Proposal{}, ErrNotEligibleProposer
 	}
 
-	treasuryUSDC, err := g.groupTreasuryUSDC(ctx, in.GroupID)
+	treasuryTotal, err := g.proposalTreasuryTotalMicros(ctx, in.GroupID)
 	if err != nil {
 		logGovernanceBranchError("governance create proposal treasury balance failed", err, "group_id", in.GroupID, "proposer_id", in.ProposerID)
 		return Proposal{}, err
 	}
-	if in.UsdcMicros > treasuryUSDC {
-		logGovernanceBranchWarn("governance create proposal rejected", "exceeds treasury usdc", "group_id", in.GroupID, "proposer_id", in.ProposerID, "usdc_micros", in.UsdcMicros, "treasury_usdc_micros", treasuryUSDC)
+	if in.UsdcMicros > treasuryTotal {
+		logGovernanceBranchWarn("governance create proposal rejected", "exceeds treasury total", "group_id", in.GroupID, "proposer_id", in.ProposerID, "usdc_micros", in.UsdcMicros, "treasury_total_micros", treasuryTotal)
 		return Proposal{}, ErrExceedsTreasuryUSDC
 	}
 
-	treasuryTaker := ""
-	if treasury, found, err := g.store.GetTreasuryByGroupID(ctx, in.GroupID); err != nil {
-		logGovernanceBranchError("governance create proposal treasury lookup failed", err, "group_id", in.GroupID, "proposer_id", in.ProposerID)
-		return Proposal{}, err
-	} else if found {
-		treasuryTaker = treasury.SolanaAddress
-	}
-
+	// Price-only routability gate (no taker): matches POST /quotes and Jupiter RFQ.
+	// Treasury total gate above ensures amount <= pot NAV; executable /order with taker
+	// runs at vote-pass execute (OrderBuy).
 	_, err = g.buy.StartBuy(ctx, StartBuyRequest{
 		GroupID:    in.GroupID,
 		UserID:     in.ProposerID,
 		Symbol:     in.Symbol,
 		USDCAmount: in.UsdcMicros,
-		Taker:      treasuryTaker,
 	})
 	if err != nil {
 		if errors.Is(err, ErrQuoteNotRoutable) {
@@ -375,6 +654,13 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 	return proposalFromRow(row), nil
 }
 
+func (g *GovernanceService) proposalTreasuryTotalMicros(ctx context.Context, groupID string) (int64, error) {
+	if g.home != nil {
+		return g.home.GroupTreasuryTotalMicros(ctx, groupID)
+	}
+	return g.groupTreasuryUSDC(ctx, groupID)
+}
+
 func (g *GovernanceService) groupTreasuryUSDC(ctx context.Context, groupID string) (int64, error) {
 	positions, err := g.store.ListPositionsByGroup(ctx, groupID)
 	if err != nil {
@@ -391,9 +677,10 @@ func (g *GovernanceService) groupTreasuryUSDC(ctx context.Context, groupID strin
 	}
 	if found {
 		balance, err := g.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
-		if err == nil && balance > 0 {
-			return balance, nil
+		if err != nil {
+			return 0, fmt.Errorf("treasury usdc balance: %w", err)
 		}
+		return balance, nil
 	}
 	return netUsdcIn, nil
 }
@@ -537,6 +824,23 @@ func (g *GovernanceService) resolveVoterSet(ctx context.Context, groupID string,
 		return vs, ids, nil
 	case VoterSetNamed:
 		ids, err := g.store.ListGroupVoterIDs(ctx, groupID)
+		if err != nil {
+			return VoterSet{}, nil, err
+		}
+		vs.MemberIDs = ids
+		return vs, ids, nil
+	default:
+		return VoterSet{}, nil, fmt.Errorf("invalid voter set mode")
+	}
+}
+
+func (g *GovernanceService) resolveVoterSetTx(ctx context.Context, tx *sql.Tx, groupID string, rules GroupRules, memberIDs []string) (VoterSet, []string, error) {
+	vs := rules.VoterSet
+	switch vs.Mode {
+	case VoterSetAllMembers:
+		return vs, memberIDs, nil
+	case VoterSetNamed:
+		ids, err := g.store.ListGroupVoterIDsTx(ctx, tx, groupID)
 		if err != nil {
 			return VoterSet{}, nil, err
 		}

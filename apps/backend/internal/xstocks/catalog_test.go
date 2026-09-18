@@ -272,6 +272,87 @@ func TestHTTPCatalogSearcher_searchBoostsPinnedAmongMatches(t *testing.T) {
 	}
 }
 
+func TestHTTPCatalogSearcher_ranksRoutableBeforeNonRoutable(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := marshalCatalogListPage(t, []catalogAssetNode{
+			{
+				Symbol: "DEADx",
+				Name:   "Dead xStock",
+				Deployments: []deployment{
+					{Address: "MintDead", Network: solanaNetwork},
+				},
+			},
+			{
+				Symbol: "AAPLx",
+				Name:   "Apple xStock",
+				Deployments: []deployment{
+					{Address: aaplxSolanaMint, Network: solanaNetwork},
+				},
+			},
+		}, 0, false)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	searcher := NewHTTPCatalogSearcherWithClient(server.URL, server.Client())
+	prober := NewFakeRoutabilityProber(false)
+	SetRoutable(prober, aaplxSolanaMint, true)
+	searcher.SetRoutabilityProber(prober)
+
+	page, err := searcher.Search(context.Background(), "x", 10, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(page.Assets) != 2 {
+		t.Fatalf("assets len = %d, want 2", len(page.Assets))
+	}
+	if page.Assets[0].Symbol != "AAPLx" || !page.Assets[0].Routable {
+		t.Fatalf("first = %+v, want routable AAPLx", page.Assets[0])
+	}
+	if page.Assets[1].Symbol != "DEADx" || page.Assets[1].Routable {
+		t.Fatalf("second = %+v, want non-routable DEADx", page.Assets[1])
+	}
+}
+
+func TestFakeCatalogSearcher_paginationStableWithRoutability(t *testing.T) {
+	t.Parallel()
+
+	searcher := NewFakeCatalogSearcher()
+	prober := NewFakeRoutabilityProber(false)
+	SetRoutable(prober, "MintB", true)
+	SetFakeCatalogRoutabilityProber(searcher, prober)
+
+	RegisterCatalogAsset(searcher, CatalogAsset{Symbol: "AAAx", Name: "A", SolanaMint: "MintA"})
+	RegisterCatalogAsset(searcher, CatalogAsset{Symbol: "BBAx", Name: "B", SolanaMint: "MintB"})
+	RegisterCatalogAsset(searcher, CatalogAsset{Symbol: "CCAx", Name: "C", SolanaMint: "MintC"})
+
+	first, err := searcher.Search(context.Background(), "", 1, 0)
+	if err != nil {
+		t.Fatalf("first Search: %v", err)
+	}
+	if len(first.Assets) != 1 || first.Assets[0].Symbol != "BBAx" {
+		t.Fatalf("first page = %+v, want BBAx", first.Assets)
+	}
+	if !first.HasMore {
+		t.Fatal("expected hasMore on first page")
+	}
+
+	second, err := searcher.Search(context.Background(), "", 1, 1)
+	if err != nil {
+		t.Fatalf("second Search: %v", err)
+	}
+	if len(second.Assets) != 1 {
+		t.Fatalf("second page len = %d, want 1", len(second.Assets))
+	}
+	if second.Assets[0].Symbol != "AAAx" && second.Assets[0].Symbol != "CCAx" {
+		t.Fatalf("second page = %+v, want AAAx or CCAx after routable BBAx", second.Assets[0])
+	}
+}
+
 func TestHTTPCatalogSearcher_searchPaginatesResults(t *testing.T) {
 	t.Parallel()
 

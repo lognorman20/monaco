@@ -44,6 +44,28 @@ func (s *Store) IsGroupMember(ctx context.Context, groupID, userID string) (bool
 	return true, nil
 }
 
+// ListGroupMemberIDsForUpdateTx returns member user ids with row locks within tx.
+func (s *Store) ListGroupMemberIDsForUpdateTx(ctx context.Context, tx *sql.Tx, groupID string) ([]string, error) {
+	if groupID == "" {
+		return nil, fmt.Errorf("group_id is required")
+	}
+	const selectSQL = `SELECT user_id FROM group_members WHERE group_id = $1 ORDER BY joined_at FOR UPDATE`
+	rows, err := tx.QueryContext(ctx, selectSQL, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("list group members for update: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan group member: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // ListGroupMemberIDs returns user ids for groupID.
 func (s *Store) ListGroupMemberIDs(ctx context.Context, groupID string) ([]string, error) {
 	if groupID == "" {
@@ -83,6 +105,28 @@ func (s *Store) InsertGroupVotersTx(ctx context.Context, tx *sql.Tx, groupID str
 	return nil
 }
 
+// ListGroupVoterIDsTx returns user ids in group_voters for groupID within tx.
+func (s *Store) ListGroupVoterIDsTx(ctx context.Context, tx *sql.Tx, groupID string) ([]string, error) {
+	if groupID == "" {
+		return nil, fmt.Errorf("group_id is required")
+	}
+	const selectSQL = `SELECT user_id FROM group_voters WHERE group_id = $1 ORDER BY user_id`
+	rows, err := tx.QueryContext(ctx, selectSQL, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("list group voters tx: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan group voter: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // ListGroupVoterIDs returns user ids in group_voters for groupID.
 func (s *Store) ListGroupVoterIDs(ctx context.Context, groupID string) ([]string, error) {
 	if groupID == "" {
@@ -99,6 +143,57 @@ func (s *Store) ListGroupVoterIDs(ctx context.Context, groupID string) ([]string
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			return nil, fmt.Errorf("scan group voter: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// DeleteGroupMemberTx removes membership and named-voter rows within tx.
+func (s *Store) DeleteGroupMemberTx(ctx context.Context, tx *sql.Tx, groupID, userID string) error {
+	if groupID == "" || userID == "" {
+		return fmt.Errorf("group_id and user_id are required")
+	}
+	const deleteVoterSQL = `DELETE FROM group_voters WHERE group_id = $1 AND user_id = $2`
+	if _, err := tx.ExecContext(ctx, deleteVoterSQL, groupID, userID); err != nil {
+		return fmt.Errorf("delete group voter: %w", err)
+	}
+	const deleteMemberSQL = `DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`
+	result, err := tx.ExecContext(ctx, deleteMemberSQL, groupID, userID)
+	if err != nil {
+		return fmt.Errorf("delete group member: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete group member rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("group member not found")
+	}
+	return nil
+}
+
+// ListSharedGroupIDsBetweenUsers returns group ids where both users are members.
+func (s *Store) ListSharedGroupIDsBetweenUsers(ctx context.Context, viewerID, targetUserID string) ([]string, error) {
+	if viewerID == "" || targetUserID == "" {
+		return nil, fmt.Errorf("viewer_id and target_user_id are required")
+	}
+	const selectSQL = `
+		SELECT a.group_id
+		FROM group_members a
+		INNER JOIN group_members b ON a.group_id = b.group_id
+		WHERE a.user_id = $1 AND b.user_id = $2
+		ORDER BY a.joined_at`
+	rows, err := s.db.QueryContext(ctx, selectSQL, viewerID, targetUserID)
+	if err != nil {
+		return nil, fmt.Errorf("list shared groups: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan shared group: %w", err)
 		}
 		ids = append(ids, id)
 	}

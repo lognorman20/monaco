@@ -59,6 +59,35 @@ RETURNING id, name, creator_user_id, created_at`
 	return group, nil
 }
 
+// GetGroupByIDForUpdateTx returns the group row locked for update within tx.
+func (s *Store) GetGroupByIDForUpdateTx(ctx context.Context, tx *sql.Tx, id string) (Group, bool, error) {
+	if id == "" {
+		return Group{}, false, fmt.Errorf("id is required")
+	}
+
+	const selectSQL = `
+SELECT id, name, creator_user_id, created_at
+FROM groups
+WHERE id = $1
+FOR UPDATE`
+
+	var group Group
+	err := tx.QueryRowContext(ctx, selectSQL, id).Scan(
+		&group.ID,
+		&group.Name,
+		&group.CreatorUserID,
+		&group.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Group{}, false, nil
+	}
+	if err != nil {
+		return Group{}, false, fmt.Errorf("get group by id for update: %w", err)
+	}
+
+	return group, true, nil
+}
+
 // GetGroupByID returns the group for id, or false if none exists.
 func (s *Store) GetGroupByID(ctx context.Context, id string) (Group, bool, error) {
 	if id == "" {
@@ -143,53 +172,79 @@ ORDER BY created_at ASC`
 	return ids, nil
 }
 
-func (s *Store) InsertGroupWithRulesTx(ctx context.Context, tx *sql.Tx, name, creatorUserID string, rules domain.GroupRules, passwordHash string) (Group, error) {
+func (s *Store) InsertGroupWithRulesTx(ctx context.Context, tx *sql.Tx, name, creatorUserID string, rules domain.GroupRules) (Group, error) {
 	if name == "" || creatorUserID == "" {
 		return Group{}, fmt.Errorf("name and creator_user_id are required")
 	}
-	const insertSQL = `INSERT INTO groups (name, creator_user_id, join_mode, join_password_hash, voter_set_mode, threshold, vote_expiry_seconds) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, name, creator_user_id, created_at`
-	var hash any
-	if passwordHash != "" {
-		hash = passwordHash
-	}
+	const insertSQL = `INSERT INTO groups (name, creator_user_id, join_mode, voter_set_mode, threshold, vote_expiry_seconds) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, name, creator_user_id, created_at`
 	var group Group
-	err := tx.QueryRowContext(ctx, insertSQL, name, creatorUserID, string(rules.JoinPolicy.Mode), hash, string(rules.VoterSet.Mode), string(rules.Threshold), int64(rules.VoteExpirySeconds)).Scan(&group.ID, &group.Name, &group.CreatorUserID, &group.CreatedAt)
+	err := tx.QueryRowContext(ctx, insertSQL, name, creatorUserID, string(rules.JoinPolicy.Mode), string(rules.VoterSet.Mode), string(rules.Threshold), int64(rules.VoteExpirySeconds)).Scan(&group.ID, &group.Name, &group.CreatorUserID, &group.CreatedAt)
 	if err != nil {
 		return Group{}, fmt.Errorf("insert group with rules: %w", err)
 	}
 	return group, nil
 }
 
+func parseGroupRules(joinMode, voterSetMode, threshold string, voteExpirySeconds int64) (domain.GroupRules, error) {
+	parsedJoinMode, err := domain.ParseJoinMode(joinMode)
+	if err != nil {
+		return domain.GroupRules{}, err
+	}
+	parsedVoterSetMode, err := domain.ParseVoterSetMode(voterSetMode)
+	if err != nil {
+		return domain.GroupRules{}, err
+	}
+	parsedThreshold, err := domain.ParseVoteThreshold(threshold)
+	if err != nil {
+		return domain.GroupRules{}, err
+	}
+	return domain.GroupRules{
+		JoinPolicy:        domain.JoinPolicy{Mode: parsedJoinMode},
+		VoterSet:          domain.VoterSet{Mode: parsedVoterSetMode},
+		Threshold:         parsedThreshold,
+		VoteExpirySeconds: domain.VoteExpirySeconds(voteExpirySeconds),
+	}, nil
+}
+
 func (s *Store) GetGroupRules(ctx context.Context, groupID string) (domain.GroupRules, bool, error) {
 	if groupID == "" {
 		return domain.GroupRules{}, false, fmt.Errorf("group_id is required")
 	}
-	const selectSQL = `SELECT join_mode, join_password_hash, voter_set_mode, threshold, vote_expiry_seconds FROM groups WHERE id = $1`
+	const selectSQL = `SELECT join_mode, voter_set_mode, threshold, vote_expiry_seconds FROM groups WHERE id = $1`
 	var joinMode, voterSetMode, threshold string
-	var passwordHash sql.NullString
 	var voteExpirySeconds int64
-	err := s.db.QueryRowContext(ctx, selectSQL, groupID).Scan(&joinMode, &passwordHash, &voterSetMode, &threshold, &voteExpirySeconds)
+	err := s.db.QueryRowContext(ctx, selectSQL, groupID).Scan(&joinMode, &voterSetMode, &threshold, &voteExpirySeconds)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.GroupRules{}, false, nil
 	}
 	if err != nil {
 		return domain.GroupRules{}, false, fmt.Errorf("get group rules: %w", err)
 	}
-	parsedJoinMode, err := domain.ParseJoinMode(joinMode)
+	rules, err := parseGroupRules(joinMode, voterSetMode, threshold, voteExpirySeconds)
 	if err != nil {
 		return domain.GroupRules{}, false, err
 	}
-	parsedVoterSetMode, err := domain.ParseVoterSetMode(voterSetMode)
+	return rules, true, nil
+}
+
+// GetGroupRulesTx returns group rules within tx.
+func (s *Store) GetGroupRulesTx(ctx context.Context, tx *sql.Tx, groupID string) (domain.GroupRules, bool, error) {
+	if groupID == "" {
+		return domain.GroupRules{}, false, fmt.Errorf("group_id is required")
+	}
+	const selectSQL = `SELECT join_mode, voter_set_mode, threshold, vote_expiry_seconds FROM groups WHERE id = $1`
+	var joinMode, voterSetMode, threshold string
+	var voteExpirySeconds int64
+	err := tx.QueryRowContext(ctx, selectSQL, groupID).Scan(&joinMode, &voterSetMode, &threshold, &voteExpirySeconds)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.GroupRules{}, false, nil
+	}
+	if err != nil {
+		return domain.GroupRules{}, false, fmt.Errorf("get group rules tx: %w", err)
+	}
+	rules, err := parseGroupRules(joinMode, voterSetMode, threshold, voteExpirySeconds)
 	if err != nil {
 		return domain.GroupRules{}, false, err
-	}
-	parsedThreshold, err := domain.ParseVoteThreshold(threshold)
-	if err != nil {
-		return domain.GroupRules{}, false, err
-	}
-	rules := domain.GroupRules{JoinPolicy: domain.JoinPolicy{Mode: parsedJoinMode}, VoterSet: domain.VoterSet{Mode: parsedVoterSetMode}, Threshold: parsedThreshold, VoteExpirySeconds: domain.VoteExpirySeconds(voteExpirySeconds)}
-	if passwordHash.Valid {
-		rules.JoinPolicy.PasswordHash = passwordHash.String
 	}
 	return rules, true, nil
 }

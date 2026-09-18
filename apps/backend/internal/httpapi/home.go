@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
@@ -20,6 +21,7 @@ type homeGroupBoardRowResponse struct {
 	PotValueUsd   string  `json:"potValueUsd"`
 	PercentReturn *string `json:"percentReturn"`
 	DollarPnL     string  `json:"dollarPnl"`
+	IsJoined      bool    `json:"isJoined"`
 }
 
 type homePeopleBoardRowResponse struct {
@@ -67,6 +69,7 @@ func (h *HomeHandlers) HomeHandler(w http.ResponseWriter, r *http.Request) {
 			PotValueUsd:   row.PotValueUsd,
 			PercentReturn: row.PercentReturn,
 			DollarPnL:     row.DollarPnL,
+			IsJoined:      row.IsJoined,
 		})
 	}
 	people := make([]homePeopleBoardRowResponse, 0, len(result.People))
@@ -86,4 +89,53 @@ func (h *HomeHandlers) HomeHandler(w http.ResponseWriter, r *http.Request) {
 		People: people,
 	})
 	logJSONOK(ctx, log, "ok", "group_count", len(groups), "people_count", len(people))
+}
+
+// UserSharedGroupsHandler handles GET /v1/users/{id}/groups.
+func (h *HomeHandlers) UserSharedGroupsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "GET /v1/users/{id}/groups")
+
+	token, ok := bearerToken(r)
+	if !ok {
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
+		return
+	}
+
+	targetUserID := r.PathValue("id")
+	if strings.TrimSpace(targetUserID) == "" {
+		logJSONError(ctx, log, "missing_user_id", w, http.StatusNotFound, "user not found")
+		return
+	}
+
+	result, err := h.Home.GetUserSharedGroups(ctx, token, targetUserID)
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
+			return
+		}
+		if errors.Is(err, app.ErrUserNotFound) {
+			logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found")
+			return
+		}
+		logJSONError(ctx, log, "get_user_shared_groups_failed", w, http.StatusInternalServerError, "internal server error", "err", err.Error())
+		return
+	}
+
+	groups := make([]homeGroupBoardRowResponse, 0, len(result))
+	for _, row := range result {
+		groups = append(groups, homeGroupBoardRowResponse{
+			GroupID:       row.GroupID,
+			Name:          row.Name,
+			PotValueUsd:   row.PotValueUsd,
+			PercentReturn: row.PercentReturn,
+			DollarPnL:     row.DollarPnL,
+			IsJoined:      row.IsJoined,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string][]homeGroupBoardRowResponse{"groups": groups})
+	logJSONOK(ctx, log, "ok", "group_count", len(groups))
 }

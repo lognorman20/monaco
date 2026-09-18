@@ -13,6 +13,7 @@ struct ProposalDetailView: View {
     @State private var isLoading: Bool
     @State private var isVoting = false
     @State private var didVote = false
+    @State private var toast: MonacoToast?
 
     init(auth: PrivyAuthService, proposal: ProposalDTO) {
         self.auth = auth
@@ -52,6 +53,7 @@ struct ProposalDetailView: View {
             }
         }
         .monacoFormScreen()
+        .monacoToast($toast)
         .navigationTitle("Proposal")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: loadTaskID) {
@@ -74,7 +76,7 @@ struct ProposalDetailView: View {
                 Spacer()
                 ProposalStatusChip(status: proposal.status)
             }
-            Text("Club buy proposal for \(formattedUsdc(proposal)) USDC")
+            Text("Cabal buy proposal for \(formattedUsdc(proposal)) USDC")
                 .font(.subheadline)
                 .foregroundStyle(MonacoTheme.secondaryText)
 
@@ -153,20 +155,6 @@ struct ProposalDetailView: View {
             }
         }
 
-        if didVote {
-            Section {
-                Label("Vote recorded", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(MonacoTheme.success)
-            }
-        }
-
-        if let errorMessage {
-            Section {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(MonacoTheme.warning)
-            }
-        }
     }
 
     private func formattedUsdc(_ proposal: ProposalDTO) -> String {
@@ -240,17 +228,17 @@ struct ProposalDetailView: View {
     private func castVote(choice: String, proposal: ProposalDTO) async {
         guard let token = auth.accessToken else { return }
         isVoting = true
-        errorMessage = nil
         defer { isVoting = false }
 
         do {
             try await apiClient.castVote(accessToken: token, proposalId: proposal.id, choice: choice)
             didVote = true
+            toast = MonacoToast(message: "Vote recorded", isSuccess: true)
             await loadProposal()
         } catch MonacoAPIError.httpStatus(let code) {
-            errorMessage = "Vote failed (HTTP \(code))."
+            toast = MonacoToast(message: "Vote failed (HTTP \(code)).")
         } catch {
-            errorMessage = "Could not submit vote."
+            toast = MonacoToast(message: "Could not submit vote.")
         }
     }
 }
