@@ -30,6 +30,7 @@ public struct HomeDashboardDTO: Codable, Equatable, Sendable {
 
 public struct HomeMyGroupRowDTO: Codable, Equatable, Sendable, Identifiable {
     public let groupID: String
+    public var groupId: String { groupID }
     public let name: String
     public let equityUsd: String
     public let slicePercent: String
@@ -71,6 +72,10 @@ public struct HomePnLSeriesPointDTO: Codable, Equatable, Sendable, Identifiable 
 
     public var id: TimeInterval { ts.timeIntervalSince1970 }
 
+    public var chartValue: Double {
+        Double(dollarPnl.replacingOccurrences(of: "+", with: "")) ?? 0
+    }
+
     public init(ts: Date, equityUsd: String, dollarPnl: String) {
         self.ts = ts
         self.equityUsd = equityUsd
@@ -90,8 +95,10 @@ public struct HomeLeaderboardSectionDTO: Codable, Equatable, Sendable {
 
 public struct HomeMissedProposalRowDTO: Codable, Equatable, Sendable, Identifiable {
     public let groupID: String
+    public var groupId: String { groupID }
     public let groupName: String
     public let proposalID: String
+    public var proposalId: String { proposalID }
     public let symbol: String
     public let status: String
     public let createdAt: Date

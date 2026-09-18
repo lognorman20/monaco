@@ -101,7 +101,10 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
     }
 }
 
-public enum AssetChartRange: String, Codable, Sendable, CaseIterable {
+public enum AssetChartRange: String, Codable, Sendable, CaseIterable, Identifiable {
+    public var id: String { rawValue }
+    public var title: String { rawValue }
+
     case oneDay = "1D"
     case oneWeek = "1W"
     case oneMonth = "1M"

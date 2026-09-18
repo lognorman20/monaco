@@ -10,6 +10,7 @@ public struct GroupSearchResponseDTO: Codable, Equatable, Sendable {
 
 public struct GroupDiscoveryRowDTO: Codable, Equatable, Sendable, Identifiable {
     public let groupID: String
+    public var groupId: String { groupID }
     public let name: String
     public let potValueUsd: String
     public let percentReturn: String?
@@ -59,6 +60,7 @@ public struct GroupLeaderboardResponseDTO: Codable, Equatable, Sendable {
 public struct GroupLeaderboardRowDTO: Codable, Equatable, Sendable, Identifiable {
     public let rank: Int
     public let groupID: String
+    public var groupId: String { groupID }
     public let name: String
     public let potValueUsd: String
     public let percentReturn: String?
@@ -98,6 +100,7 @@ public struct GroupLeaderboardRowDTO: Codable, Equatable, Sendable, Identifiable
 
 public struct GroupPnLHistoryDTO: Codable, Equatable, Sendable {
     public let groupID: String
+    public var groupId: String { groupID }
     public let name: String
     public let points: [GroupPnLHistoryPointDTO]
 
