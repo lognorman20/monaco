@@ -10,6 +10,7 @@ struct JoinGroupView: View {
     @State private var didJoin = false
     @State private var errorMessage: String?
     @State private var isJoining = false
+    @State private var toast: MonacoToast?
 
     init(auth: PrivyAuthService, groupId: String = "") {
         self.auth = auth
@@ -39,14 +40,7 @@ struct JoinGroupView: View {
                 .accessibilityIdentifier("join-group-submit")
             }
 
-            if didJoin {
-                Section {
-                    Label("You're in! Head home to see your club on the board.", systemImage: "checkmark.circle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.green)
-                }
-                .accessibilityIdentifier("join-group-success")
-            } else if let errorMessage {
+            if let errorMessage {
                 Section {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
@@ -54,6 +48,7 @@ struct JoinGroupView: View {
                 }
             }
         }
+        .monacoToast($toast)
         .navigationTitle("Join group")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -84,14 +79,18 @@ struct JoinGroupView: View {
                 password: nil
             )
             didJoin = true
+            toast = MonacoToast(
+                message: "You're in! Head home to see your club on the board.",
+                isSuccess: true
+            )
         } catch MonacoAPIError.httpStatus(403) {
-            errorMessage = "You are not allowed to join this club."
+            toast = MonacoToast(message: "You are not allowed to join this club.")
         } catch MonacoAPIError.httpStatus(404) {
-            errorMessage = "Group not found. Check the ID and try again."
+            toast = MonacoToast(message: "Group not found. Check the ID and try again.")
         } catch MonacoAPIError.httpStatus(let status) {
-            errorMessage = "Could not join group (HTTP \(status))."
+            toast = MonacoToast(message: "Could not join group (HTTP \(status)).")
         } catch {
-            errorMessage = "Could not join group. Try again."
+            toast = MonacoToast(message: "Could not join group. Try again.")
         }
 
         isJoining = false
