@@ -106,8 +106,8 @@ func TestGET_homeDashboard_fundedGroup_returnsMyGroupRow(t *testing.T) {
 	if payload.MyGroups[0].EquityUsd != "100.00" {
 		t.Fatalf("equityUsd = %q, want 100.00", payload.MyGroups[0].EquityUsd)
 	}
-	if len(payload.PnlSeries1H) < 2 {
-		t.Fatalf("pnlSeries1H len = %d, want at least 2", len(payload.PnlSeries1H))
+	if len(payload.PnlSeries1H) != 0 {
+		t.Fatalf("pnlSeries1H len = %d, want 0 without in-window nav snapshots", len(payload.PnlSeries1H))
 	}
 	if len(payload.Leaderboard.People) != 1 {
 		t.Fatalf("leaderboard people len = %d, want 1", len(payload.Leaderboard.People))

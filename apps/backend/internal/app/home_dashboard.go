@@ -280,6 +280,9 @@ func (h *HomeService) buildViewerPnLSeries(ctx context.Context, positions []view
 	if err != nil {
 		return nil, err
 	}
+	if len(snapshots) == 0 {
+		return []HomePnLSeriesPoint{}, nil
+	}
 
 	timestamps := make([]time.Time, 0, len(snapshots)+1)
 	seen := make(map[int64]struct{})
@@ -321,9 +324,6 @@ func (h *HomeService) buildViewerPnLSeries(ctx context.Context, positions []view
 		})
 	}
 
-	if len(points) == 1 {
-		points = append(points, points[0])
-	}
 	return points, nil
 }
 
@@ -346,37 +346,14 @@ func (h *HomeService) buildRangedLeaderboard(ctx context.Context, joinedGroupIDs
 		return HomeLeaderboardSection{}, err
 	}
 
-	memberPnLByUser, err := h.collectJoinedGroupMemberPnL(ctx, joinedGroupIDs)
-	if err != nil {
-		return HomeLeaderboardSection{}, err
-	}
-
 	type rangedPerson struct {
-		userID        string
-		startEquity   int64
-		endEquity     int64
-		endNetUsdcIn  int64
-		percentReturn *float64
+		userID       string
+		startEquity  int64
+		endEquity    int64
+		endNetUsdcIn int64
 	}
 
 	ranged := make(map[string]*rangedPerson)
-	for userID, entries := range memberPnLByUser {
-		var endEquity int64
-		var endNet int64
-		for _, entry := range entries {
-			endEquity += int64(entry.Equity)
-			endNet += int64(entry.NetUsdcIn)
-		}
-		if !domain.IncludeOnBoard(domain.USDCMicros(endNet)) {
-			continue
-		}
-		ranged[userID] = &rangedPerson{
-			userID:       userID,
-			endEquity:    endEquity,
-			endNetUsdcIn: endNet,
-		}
-	}
-
 	for _, groupID := range joinedGroupIDs {
 		startSnap, found, err := h.store.GetNavSnapshotAtOrBefore(ctx, groupID, since)
 		if err != nil {
@@ -384,6 +361,15 @@ func (h *HomeService) buildRangedLeaderboard(ctx context.Context, joinedGroupIDs
 		}
 		if !found {
 			continue
+		}
+
+		netUsdcIn, err := h.groupNetUsdcIn(ctx, groupID)
+		if err != nil {
+			return HomeLeaderboardSection{}, err
+		}
+		potNav, totalSharesMicro, err := h.groupPotNavAndShares(ctx, groupID, netUsdcIn)
+		if err != nil {
+			return HomeLeaderboardSection{}, err
 		}
 
 		memberIDs, err := h.store.ListGroupMemberIDs(ctx, groupID)
@@ -400,28 +386,36 @@ func (h *HomeService) buildRangedLeaderboard(ctx context.Context, joinedGroupIDs
 		}
 
 		for _, userID := range memberIDs {
-			person, ok := ranged[userID]
-			if !ok {
+			position := positionByUser[userID]
+			netIn := position.AmountDeposited - position.AmountWithdrawn
+			if !domain.IncludeOnBoard(domain.USDCMicros(netIn)) {
 				continue
 			}
-			position := positionByUser[userID]
+
+			endEquity := int64(0)
+			if totalSharesMicro > 0 && position.ShareUnits > 0 {
+				endEquity = (position.ShareUnits * potNav) / totalSharesMicro
+			}
+
+			person, ok := ranged[userID]
+			if !ok {
+				person = &rangedPerson{userID: userID}
+				ranged[userID] = person
+			}
 			person.startEquity += memberEquityAtSnapshot(position.ShareUnits, startSnap)
+			person.endEquity += endEquity
+			person.endNetUsdcIn += netIn
 		}
 	}
 
 	rows := make([]domain.PersonBoardRow, 0, len(ranged))
 	for userID, person := range ranged {
+		if person.startEquity <= 0 {
+			continue
+		}
 		var pct *float64
-		if person.startEquity > 0 {
-			delta := person.endEquity - person.startEquity
-			if ratio := domain.PercentReturn(domain.USDCMicros(person.endEquity), domain.USDCMicros(person.startEquity)); ratio != nil {
-				pct = ratio
-			} else if person.startEquity > 0 {
-				value := float64(delta) / float64(person.startEquity)
-				pct = &value
-			}
-		} else if person.endNetUsdcIn > 0 {
-			pct = domain.PercentReturn(domain.USDCMicros(person.endEquity), domain.USDCMicros(person.endNetUsdcIn))
+		if ratio := domain.PercentReturn(domain.USDCMicros(person.endEquity), domain.USDCMicros(person.startEquity)); ratio != nil {
+			pct = ratio
 		}
 		rows = append(rows, domain.PersonBoardRow{
 			UserID:         userID,
