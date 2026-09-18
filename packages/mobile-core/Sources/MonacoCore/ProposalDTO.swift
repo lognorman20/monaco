@@ -1,5 +1,7 @@
 import Foundation
 
+/// Proposal row from `GET /v1/groups/{id}/proposals` (feed card) or `GET /v1/proposals/{id}` (detail).
+/// Detail-only fields (`votes`, `execution`, `groupId`) are nil on list items.
 public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
     public let id: String
     public let symbol: String
@@ -9,6 +11,15 @@ public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
     public let status: String
     public let canVote: Bool?
     public let thesis: String?
+    public let proposerId: String?
+    public let proposerName: String?
+    public let createdAt: String?
+    public let expiresAt: String?
+    public let groupId: String?
+    public let votes: [ProposalVoteDTO]?
+    public let voteSummary: ProposalVoteSummaryDTO?
+    public let execution: ProposalExecutionDTO?
+    public let commentCount: Int?
 
     public init(
         id: String,
@@ -18,7 +29,16 @@ public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
         usdcMicros: String? = nil,
         tokenAmount: String? = nil,
         canVote: Bool? = nil,
-        thesis: String? = nil
+        thesis: String? = nil,
+        proposerId: String? = nil,
+        proposerName: String? = nil,
+        createdAt: String? = nil,
+        expiresAt: String? = nil,
+        groupId: String? = nil,
+        votes: [ProposalVoteDTO]? = nil,
+        voteSummary: ProposalVoteSummaryDTO? = nil,
+        execution: ProposalExecutionDTO? = nil,
+        commentCount: Int? = nil
     ) {
         self.id = id
         self.symbol = symbol
@@ -28,11 +48,111 @@ public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
         self.status = status
         self.canVote = canVote
         self.thesis = thesis
+        self.proposerId = proposerId
+        self.proposerName = proposerName
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt
+        self.groupId = groupId
+        self.votes = votes
+        self.voteSummary = voteSummary
+        self.execution = execution
+        self.commentCount = commentCount
     }
 
     public var resolvedKind: String {
         let raw = kind?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         return raw.isEmpty ? "buy" : raw
+    }
+
+    public var isSell: Bool {
+        resolvedKind == "sell"
+    }
+
+    public var isOpen: Bool {
+        status.lowercased() == ProposalStatusDisplay.open.rawValue
+    }
+
+    /// Inline yes/no buttons show only while the server says this viewer may still vote.
+    public var showsVoteActions: Bool {
+        isOpen && canVote == true
+    }
+}
+
+public struct ProposalVoteDTO: Codable, Equatable, Sendable, Identifiable {
+    public let voterId: String
+    public let displayName: String
+    public let choice: String
+    public let castAt: String?
+
+    public var id: String { voterId }
+
+    public init(voterId: String, displayName: String, choice: String, castAt: String? = nil) {
+        self.voterId = voterId
+        self.displayName = displayName
+        self.choice = choice
+        self.castAt = castAt
+    }
+}
+
+public struct ProposalVoteSummaryDTO: Codable, Equatable, Sendable {
+    public let yesCount: Int
+    public let noCount: Int
+    public let eligibleCount: Int
+    public let threshold: String
+
+    public init(yesCount: Int, noCount: Int, eligibleCount: Int, threshold: String) {
+        self.yesCount = yesCount
+        self.noCount = noCount
+        self.eligibleCount = eligibleCount
+        self.threshold = threshold
+    }
+}
+
+public struct ProposalExecutionDTO: Codable, Equatable, Sendable {
+    public let state: String
+    public let txSignature: String?
+    public let transactionId: String?
+    public let executeRequestId: String?
+    public let executedAt: String?
+    public let failureReason: String?
+
+    public init(
+        state: String,
+        txSignature: String? = nil,
+        transactionId: String? = nil,
+        executeRequestId: String? = nil,
+        executedAt: String? = nil,
+        failureReason: String? = nil
+    ) {
+        self.state = state
+        self.txSignature = txSignature
+        self.transactionId = transactionId
+        self.executeRequestId = executeRequestId
+        self.executedAt = executedAt
+        self.failureReason = failureReason
+    }
+}
+
+public struct ProposalListResponseDTO: Codable, Equatable, Sendable {
+    public let proposals: [ProposalDTO]
+
+    public init(proposals: [ProposalDTO]) {
+        self.proposals = proposals
+    }
+}
+
+/// `tab` query value for `GET /v1/groups/{id}/proposals`.
+public enum ProposalFeedTab: String, CaseIterable, Identifiable, Sendable {
+    case open
+    case closed
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .open: "Open"
+        case .closed: "Closed"
+        }
     }
 }
 
