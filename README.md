@@ -121,6 +121,48 @@ sol      0.003044217
 usdc     0.00
 ```
 
+## Demo data (faker seed)
+
+Seeds fake-but-realistic data so Home, Groups, proposals, and activity look alive without a
+full Privy setup. Local Postgres only. It never calls Privy, Solana RPC, or Jupiter.
+
+Two profiles:
+
+- **scale**: three fake clubs (Ridgewood Value Club, Night Shift Traders, Harbor Street Fund).
+  Each has a fake creator, five depositors, deposits spread over the last week, a confirmed
+  AAPLx/TSLAx buy, failed and open proposals, votes, and NAV history for charts. Any signed-in
+  user sees them on Home and the Groups leaderboard/search and can open them read-only. You are
+  never added as a member. Join, deposit, quote, propose, and vote return `403 faker_group_read_only`.
+- **mixed**: adds ghost members Maya Chen, Jordan Hale, and Priya Shah to **your own real club**
+  (you must be its creator). They show up on the member board with P&L, deposits, and ghost-only
+  proposals. They never count toward the pot, surplus credits, or the voter set, and they have no
+  wallets or swaps. You can still deposit and propose for real.
+
+```bash
+just reset db                        # optional: start from an empty DB
+just faker scale                     # three fake clubs
+just faker mixed <your_group_id>     # ghosts on your real club
+just faker all <your_group_id>       # both
+```
+
+Re-running is safe: users are keyed by `faker:user:<name>` and clubs by `groups.faker_key`, so
+a re-run replaces the fake rows and moves the timestamps up to now, with no duplicates.
+`just reset db` wipes the seed data too.
+
+The API can also seed over HTTP when `FAKER_ENABLED=1` (off by default: the route returns 404). It
+only accepts loopback callers with no proxy headers and a local `DATABASE_URL`:
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/v1/dev/faker \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"profile":"all","group_id":"<your_group_id>"}'   # profile: mixed | scale | all
+```
+
+Safety: faker rows are flagged (`users.is_faker`, `groups.is_faker`, migration 000011). The
+sweep poller, surplus reconcile, execute poller, and swap paths skip them whether or not
+`FAKER_ENABLED` is set, so leftover seed rows stay inert. A DB trigger rejects member wallets
+for faker users.
+
 ## Simulator
 
 Slim is **not** required. `just run`, `just run mobile`, and `./scripts/ios-sim` warn and use a stock Xcode simulator when SimSlim is missing or `SIMSLIM_UDID` is unset. Privy xcconfig and `SIMCTL_CHILD_*` still apply.
