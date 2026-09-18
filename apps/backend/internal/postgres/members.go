@@ -105,6 +105,30 @@ func (s *Store) ListGroupVoterIDs(ctx context.Context, groupID string) ([]string
 	return ids, rows.Err()
 }
 
+// DeleteGroupMemberTx removes membership and named-voter rows within tx.
+func (s *Store) DeleteGroupMemberTx(ctx context.Context, tx *sql.Tx, groupID, userID string) error {
+	if groupID == "" || userID == "" {
+		return fmt.Errorf("group_id and user_id are required")
+	}
+	const deleteVoterSQL = `DELETE FROM group_voters WHERE group_id = $1 AND user_id = $2`
+	if _, err := tx.ExecContext(ctx, deleteVoterSQL, groupID, userID); err != nil {
+		return fmt.Errorf("delete group voter: %w", err)
+	}
+	const deleteMemberSQL = `DELETE FROM group_members WHERE group_id = $1 AND user_id = $2`
+	result, err := tx.ExecContext(ctx, deleteMemberSQL, groupID, userID)
+	if err != nil {
+		return fmt.Errorf("delete group member: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete group member rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("group member not found")
+	}
+	return nil
+}
+
 // ListUserGroupIDs returns group ids where userID is a member.
 func (s *Store) ListUserGroupIDs(ctx context.Context, userID string) ([]string, error) {
 	if userID == "" {

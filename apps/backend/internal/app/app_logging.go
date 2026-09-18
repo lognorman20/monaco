@@ -150,6 +150,14 @@ func logGovernanceJoinGroupSuccess(userID, groupID string) {
 	)
 }
 
+func logGovernanceLeaveGroupStart(userID, groupID string) {
+	slog.Info("governance leave group start", "user_id", userID, "group_id", groupID)
+}
+
+func logGovernanceLeaveGroupSuccess(userID, groupID string, wasCreator bool) {
+	slog.Info("governance leave group success", "user_id", userID, "group_id", groupID, "was_creator", wasCreator)
+}
+
 func logGovernanceCreateProposalStart(groupID, proposerID, symbol string, usdcMicros int64) {
 	slog.Info("governance create proposal start",
 		"group_id", groupID,

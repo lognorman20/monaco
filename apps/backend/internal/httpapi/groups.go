@@ -153,6 +153,63 @@ func (h *GroupHandlers) JoinGroupHandler(w http.ResponseWriter, r *http.Request)
 	logNoContent(ctx, log, "joined", "group_id", groupID)
 }
 
+func (h *GroupHandlers) LeaveGroupHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "POST /v1/groups/{id}/leave")
+	token, ok := bearerToken(r)
+	if !ok {
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
+		return
+	}
+	groupID := r.PathValue("id")
+	if strings.TrimSpace(groupID) == "" {
+		logJSONError(ctx, log, "missing_group_id", w, http.StatusNotFound, "group not found")
+		return
+	}
+	err := h.Governance.LeaveGroup(ctx, token, groupID)
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
+			return
+		}
+		if errors.Is(err, app.ErrUserNotFound) || errors.Is(err, app.ErrGroupNotFound) || errors.Is(err, app.ErrNotGroupMemberForLeave) {
+			logJSONError(ctx, log, "group_not_found", w, http.StatusNotFound, "group not found", "group_id", groupID)
+			return
+		}
+		var leaveErr *app.LeaveGroupError
+		if errors.As(err, &leaveErr) {
+			writeLeaveConflict(w, leaveErr.Reason, leaveConflictMessage(leaveErr.Reason))
+			log.done(ctx, "leave_blocked", http.StatusConflict, "group_id", groupID, "reason", string(leaveErr.Reason))
+			return
+		}
+		logJSONError(ctx, log, "leave_group_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+	logNoContent(ctx, log, "left", "group_id", groupID)
+}
+
+func writeLeaveConflict(w http.ResponseWriter, reason app.LeaveBlockReason, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message, "reason": string(reason)})
+}
+
+func leaveConflictMessage(reason app.LeaveBlockReason) string {
+	switch reason {
+	case app.LeaveBlockShareUnits:
+		return "redeem your slice before leaving the group"
+	case app.LeaveBlockLastMemberTreasury:
+		return "sole member cannot leave while the group treasury holds value"
+	case app.LeaveBlockPendingRedeem:
+		return "finish or cancel your pending redeem before leaving"
+	case app.LeaveBlockSoleRemainingVote:
+		return "cast your vote or wait for open proposals to settle before leaving"
+	default:
+		return "cannot leave group"
+	}
+}
+
 // GetGroupHandler handles GET /v1/groups/{id}.
 func (h *GroupHandlers) GetGroupHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
