@@ -105,6 +105,33 @@ func (s *Store) ListGroupVoterIDs(ctx context.Context, groupID string) ([]string
 	return ids, rows.Err()
 }
 
+// ListSharedGroupIDsBetweenUsers returns group ids where both users are members.
+func (s *Store) ListSharedGroupIDsBetweenUsers(ctx context.Context, viewerID, targetUserID string) ([]string, error) {
+	if viewerID == "" || targetUserID == "" {
+		return nil, fmt.Errorf("viewer_id and target_user_id are required")
+	}
+	const selectSQL = `
+		SELECT a.group_id
+		FROM group_members a
+		INNER JOIN group_members b ON a.group_id = b.group_id
+		WHERE a.user_id = $1 AND b.user_id = $2
+		ORDER BY a.joined_at`
+	rows, err := s.db.QueryContext(ctx, selectSQL, viewerID, targetUserID)
+	if err != nil {
+		return nil, fmt.Errorf("list shared groups: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan shared group: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // ListUserGroupIDs returns group ids where userID is a member.
 func (s *Store) ListUserGroupIDs(ctx context.Context, userID string) ([]string, error) {
 	if userID == "" {

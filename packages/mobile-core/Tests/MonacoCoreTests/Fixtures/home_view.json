@@ -13,8 +13,8 @@
     {
       "userId": "u1",
       "displayName": "Alfred",
-      "percentReturn": "+12.4%",
-      "dollarPnl": "+$48.20"
+      "percentReturn": "0.124",
+      "dollarPnl": "+48.20"
     }
   ]
 }

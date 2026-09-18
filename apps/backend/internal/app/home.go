@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
@@ -89,6 +90,10 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 		joinedGroups[groupID] = struct{}{}
 	}
 
+	if err := h.creditUncreditedForGroups(ctx, joinedGroupIDs); err != nil {
+		return HomeResult{}, err
+	}
+
 	allGroupIDs, err := h.store.ListGroupIDs(ctx)
 	if err != nil {
 		return HomeResult{}, err
@@ -113,7 +118,12 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 
 		potNav, totalSharesMicro, err := h.groupPotNavAndShares(ctx, groupID, netUsdcIn)
 		if err != nil {
-			return HomeResult{}, err
+			if _, isJoined := joinedGroups[group.ID]; isJoined {
+				return HomeResult{}, err
+			}
+			slog.Warn("home get group pot failed; using net usdc in for discovery row", "group_id", groupID, "err", err)
+			potNav = netUsdcIn
+			totalSharesMicro = 0
 		}
 
 		groupInputs = append(groupInputs, domain.GroupBoardInput{
@@ -126,7 +136,7 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 		if _, isJoined := joinedGroups[group.ID]; !isJoined {
 			continue
 		}
-		if err := h.collectMemberPnL(ctx, groupID, potNav, totalSharesMicro, memberPnLByUser); err != nil {
+		if err := h.collectGroupMemberPnL(ctx, groupID, potNav, totalSharesMicro, memberPnLByUser); err != nil {
 			return HomeResult{}, err
 		}
 	}
@@ -179,10 +189,14 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 		if displayName == "" {
 			displayName = "Member"
 		}
+		var percentReturn *string
+		if row.PercentReturn != nil {
+			percentReturn = formatPercentReturnDecimal(*row.PercentReturn)
+		}
 		result.People = append(result.People, HomePeopleRow{
 			UserID:        row.UserID,
 			DisplayName:   displayName,
-			PercentReturn: formatPercentReturnDecimal(row.PercentReturn),
+			PercentReturn: percentReturn,
 			DollarPnL:     formatSignedDollarPnL(int64(row.DollarPnL)),
 		})
 	}
@@ -243,19 +257,40 @@ func (h *HomeService) groupTreasuryUSDC(ctx context.Context, groupID string, net
 	return netUsdcIn, nil
 }
 
-func (h *HomeService) collectMemberPnL(
+func (h *HomeService) creditUncreditedForGroups(ctx context.Context, groupIDs []string) error {
+	if h.deposits == nil {
+		return nil
+	}
+	for _, groupID := range groupIDs {
+		if _, err := h.deposits.CreditUncreditedTreasuryUSDC(ctx, groupID); err != nil {
+			return fmt.Errorf("credit uncredited treasury usdc for group %s: %w", groupID, err)
+		}
+	}
+	return nil
+}
+
+func (h *HomeService) collectGroupMemberPnL(
 	ctx context.Context,
 	groupID string,
 	potNav int64,
 	totalSharesMicro int64,
 	memberPnLByUser map[string][]domain.MemberPnL,
 ) error {
+	memberIDs, err := h.store.ListGroupMemberIDs(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if len(memberIDs) == 0 {
+		return nil
+	}
+
 	positions, err := h.store.ListPositionsByGroup(ctx, groupID)
 	if err != nil {
 		return err
 	}
-	if len(positions) == 0 {
-		return nil
+	positionByUser := make(map[string]postgres.PositionRow, len(positions))
+	for _, position := range positions {
+		positionByUser[position.UserID] = position
 	}
 
 	totalShares, err := domain.ShareUnitsMicrosToDomain(totalSharesMicro)
@@ -273,21 +308,22 @@ func (h *HomeService) collectMemberPnL(
 		}
 	}
 
-	members := make([]domain.MemberPosition, 0, len(positions))
-	for _, position := range positions {
+	members := make([]domain.MemberPosition, 0, len(memberIDs))
+	for _, userID := range memberIDs {
+		position := positionByUser[userID]
 		shareUnits, err := domain.ShareUnitsMicrosToDomain(position.ShareUnits)
 		if err != nil {
 			return err
 		}
 		members = append(members, domain.MemberPosition{
-			UserID:          position.UserID,
+			UserID:          userID,
 			ShareUnits:      shareUnits,
 			AmountDeposited: domain.USDCMicros(position.AmountDeposited),
 			AmountWithdrawn: domain.USDCMicros(position.AmountWithdrawn),
 		})
 	}
 
-	board, err := BuildInGroupMemberBoard(members, totalShares, domain.PotNAV{TotalUsdc: domain.USDCMicros(potNav)})
+	board, err := BuildInGroupViewMemberBoard(members, totalShares, domain.PotNAV{TotalUsdc: domain.USDCMicros(potNav)})
 	if err != nil {
 		return err
 	}
@@ -295,6 +331,75 @@ func (h *HomeService) collectMemberPnL(
 		memberPnLByUser[row.UserID] = append(memberPnLByUser[row.UserID], row)
 	}
 	return nil
+}
+
+// GetUserSharedGroups returns clubs shared between the viewer and target user.
+func (h *HomeService) GetUserSharedGroups(ctx context.Context, accessToken, targetUserID string) ([]HomeGroupRow, error) {
+	if strings.TrimSpace(targetUserID) == "" {
+		return nil, fmt.Errorf("user id is required")
+	}
+
+	identity, err := h.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			return nil, privy.ErrInvalidToken
+		}
+		return nil, fmt.Errorf("verify session: %w", err)
+	}
+
+	viewer, found, err := h.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, ErrUserNotFound
+	}
+
+	sharedGroupIDs, err := h.store.ListSharedGroupIDsBetweenUsers(ctx, viewer.ID, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	if len(sharedGroupIDs) == 0 {
+		return []HomeGroupRow{}, nil
+	}
+
+	rows := make([]HomeGroupRow, 0, len(sharedGroupIDs))
+	for _, groupID := range sharedGroupIDs {
+		group, groupFound, err := h.store.GetGroupByID(ctx, groupID)
+		if err != nil {
+			return nil, err
+		}
+		if !groupFound {
+			continue
+		}
+
+		netUsdcIn, err := h.groupNetUsdcIn(ctx, groupID)
+		if err != nil {
+			return nil, err
+		}
+
+		potNav, _, err := h.groupPotNavAndShares(ctx, groupID, netUsdcIn)
+		if err != nil {
+			return nil, err
+		}
+
+		var percentReturn *string
+		if netUsdcIn > 0 {
+			if pct := domain.PercentReturn(domain.USDCMicros(potNav), domain.USDCMicros(netUsdcIn)); pct != nil {
+				percentReturn = formatPercentReturnDecimal(*pct)
+			}
+		}
+
+		rows = append(rows, HomeGroupRow{
+			GroupID:       group.ID,
+			Name:          group.Name,
+			PotValueUsd:   formatMicrosAsUsdDecimal(potNav),
+			PercentReturn: percentReturn,
+			DollarPnL:     formatSignedDollarPnL(potNav - netUsdcIn),
+			IsJoined:      true,
+		})
+	}
+	return rows, nil
 }
 
 func (h *HomeService) displayNamesForUsers(ctx context.Context, people []domain.PersonBoardRow) (map[string]string, error) {

@@ -1,3 +1,4 @@
+import MonacoCore
 import SwiftUI
 
 struct MemberBoardSection: View {
@@ -6,7 +7,7 @@ struct MemberBoardSection: View {
     var body: some View {
         Section("Member board") {
             if members.isEmpty {
-                Text("No members ranked yet.")
+                Text("No members yet.")
                     .font(.footnote)
                     .foregroundStyle(MonacoTheme.secondaryText)
             } else {
@@ -21,14 +22,9 @@ struct MemberBoardSection: View {
                             .foregroundStyle(MonacoTheme.primaryText)
                         Spacer()
                         VStack(alignment: .trailing, spacing: 2) {
-                            if let percentReturn = row.percentReturn {
-                                Text(percentReturn)
-                                    .font(.subheadline.monospacedDigit())
-                                    .foregroundStyle(MonacoTheme.primaryText)
-                            } else {
-                                Text("—")
-                                    .foregroundStyle(MonacoTheme.secondaryText)
-                            }
+                            Text(PercentReturnFormatter.format(row.percentReturn))
+                                .font(.subheadline.monospacedDigit())
+                                .foregroundStyle(row.percentReturn == nil ? MonacoTheme.secondaryText : MonacoTheme.primaryText)
                             Text(row.dollarPnl)
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(MonacoTheme.secondaryText)

@@ -52,7 +52,7 @@ type PersonBoardRow struct {
 	UserID         string
 	TotalEquity    USDCMicros
 	TotalNetUsdcIn USDCMicros
-	PercentReturn  float64
+	PercentReturn  *float64
 	DollarPnL      USDCMicros
 }
 
@@ -241,29 +241,41 @@ func AggregatePersonPnL(entries []MemberPnL) PersonBoardInput {
 }
 
 // BuildPeopleBoard assembles the app-wide people board from cross-group aggregates.
+// Every person with group membership is included; funded members rank first by percent
+// return, unfunded members appear at the bottom with nil percent return.
 func BuildPeopleBoard(people []PersonBoardInput) []PersonBoardRow {
 	rows := make([]PersonBoardRow, 0, len(people))
 	for _, person := range people {
-		if !IncludeOnBoard(person.TotalNetUsdcIn) {
-			continue
-		}
-		pct := PercentReturn(person.TotalEquity, person.TotalNetUsdcIn)
-		if pct == nil {
+		if person.UserID == "" {
 			continue
 		}
 		rows = append(rows, PersonBoardRow{
 			UserID:         person.UserID,
 			TotalEquity:    person.TotalEquity,
 			TotalNetUsdcIn: person.TotalNetUsdcIn,
-			PercentReturn:  *pct,
+			PercentReturn:  PercentReturn(person.TotalEquity, person.TotalNetUsdcIn),
 			DollarPnL:      person.TotalEquity - person.TotalNetUsdcIn,
 		})
 	}
+	RankPeopleBoard(rows)
+	return rows
+}
+
+// RankPeopleBoard sorts funded members by percent return descending, then unfunded by user id.
+func RankPeopleBoard(rows []PersonBoardRow) {
 	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].PercentReturn != rows[j].PercentReturn {
-			return rows[i].PercentReturn > rows[j].PercentReturn
+		iFunded := rows[i].PercentReturn != nil
+		jFunded := rows[j].PercentReturn != nil
+		if iFunded != jFunded {
+			return iFunded
+		}
+		if iFunded {
+			pi := *rows[i].PercentReturn
+			pj := *rows[j].PercentReturn
+			if pi != pj {
+				return pi > pj
+			}
 		}
 		return rows[i].UserID < rows[j].UserID
 	})
-	return rows
 }

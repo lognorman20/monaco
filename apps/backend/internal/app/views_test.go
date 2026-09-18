@@ -118,7 +118,41 @@ func TestPeopleBoard_aggregatesCrossGroupNetInAndEquity(t *testing.T) {
 	if board[0].UserID != "alex" {
 		t.Fatalf("board[0].UserID = %q, want alex", board[0].UserID)
 	}
-	if board[0].PercentReturn < 0.099 || board[0].PercentReturn > 0.101 {
-		t.Fatalf("alex percent return = %v, want ~0.10", board[0].PercentReturn)
+	if board[0].PercentReturn == nil {
+		t.Fatal("alex percent return: expected non-nil")
+	}
+	if *board[0].PercentReturn < 0.099 || *board[0].PercentReturn > 0.101 {
+		t.Fatalf("alex percent return = %v, want ~0.10", *board[0].PercentReturn)
+	}
+}
+
+func TestPeopleBoard_includesUnfundedAtBottom(t *testing.T) {
+	// Arrange
+	funded := domain.PersonBoardInput{
+		UserID:         "alice",
+		TotalEquity:    110_000_000,
+		TotalNetUsdcIn: 100_000_000,
+	}
+	unfunded := domain.PersonBoardInput{
+		UserID:         "bob",
+		TotalEquity:    0,
+		TotalNetUsdcIn: 0,
+	}
+
+	// Act
+	board := BuildAppPeopleBoard([]domain.PersonBoardInput{funded, unfunded})
+
+	// Assert
+	if len(board) != 2 {
+		t.Fatalf("board len = %d, want 2", len(board))
+	}
+	if board[0].UserID != "alice" {
+		t.Fatalf("board[0].UserID = %q, want alice", board[0].UserID)
+	}
+	if board[1].UserID != "bob" {
+		t.Fatalf("board[1].UserID = %q, want bob", board[1].UserID)
+	}
+	if board[1].PercentReturn != nil {
+		t.Fatalf("bob percent return = %v, want nil", board[1].PercentReturn)
 	}
 }
