@@ -8,9 +8,6 @@ OUT="$ROOT/apps/mobile/Config/Privy.local.xcconfig"
 ENV_FILE="$ROOT/.env.local"
 
 load_privy_env() {
-  if [[ -n "${PRIVY_APP_ID:-}" && -n "${PRIVY_APP_CLIENT_ID:-${PRIVY_AUTH_ID:-}}" ]]; then
-    return 0
-  fi
   if [[ ! -f "$ENV_FILE" ]]; then
     echo "error: $ENV_FILE missing — set PRIVY_APP_ID and PRIVY_APP_CLIENT_ID with dotenvx." >&2
     exit 1
@@ -19,6 +16,11 @@ load_privy_env() {
     echo "error: dotenvx not on PATH. Install: https://dotenvx.com/docs/install" >&2
     exit 1
   fi
+  # Always read from .env.local. dotenvx get/run both honor existing shell exports,
+  # so clear stale Privy keys before fetching decrypted values.
+  unset PRIVY_APP_ID PRIVY_APP_CLIENT_ID PRIVY_AUTH_ID \
+    PRIVY_SMS_LOGIN_ENABLED PRIVY_EMAIL_LOGIN_ENABLED PRIVY_AUTHORIZATION_KEY_ID
+
   PRIVY_APP_ID="$(cd "$ROOT" && dotenvx get PRIVY_APP_ID -f .env.local 2>/dev/null || true)"
   PRIVY_APP_CLIENT_ID="$(cd "$ROOT" && dotenvx get PRIVY_APP_CLIENT_ID -f .env.local 2>/dev/null || true)"
   PRIVY_AUTH_ID="$(cd "$ROOT" && dotenvx get PRIVY_AUTH_ID -f .env.local 2>/dev/null || true)"
@@ -29,13 +31,22 @@ load_privy_env() {
   PRIVY_EMAIL_LOGIN_ENABLED="${PRIVY_EMAIL_LOGIN_ENABLED:-true}"
 }
 
-generate_xcconfig() {
-  load_privy_env
-  local client_id="${PRIVY_APP_CLIENT_ID:-${PRIVY_AUTH_ID:-}}"
-  if [[ -z "${PRIVY_APP_ID:-}" || -z "$client_id" ]]; then
-    echo "error: PRIVY_APP_ID and PRIVY_APP_CLIENT_ID must be set in .env.local" >&2
+resolve_ios_client_id() {
+  local client_id="${PRIVY_APP_CLIENT_ID:-}"
+  if [[ -z "$client_id" && -n "${PRIVY_AUTH_ID:-}" && "${PRIVY_AUTH_ID}" == client-* ]]; then
+    client_id="$PRIVY_AUTH_ID"
+  fi
+  if [[ -z "${PRIVY_APP_ID:-}" || -z "$client_id" || "$client_id" != client-* ]]; then
+    echo "error: PRIVY_APP_ID and PRIVY_APP_CLIENT_ID (client-…) must be set in .env.local" >&2
     exit 1
   fi
+  printf '%s' "$client_id"
+}
+
+generate_xcconfig() {
+  load_privy_env
+  local client_id
+  client_id="$(resolve_ios_client_id)"
 
   mkdir -p "$(dirname "$OUT")"
   cat >"$OUT" <<EOF
@@ -55,7 +66,8 @@ EOF
 
 export_launch_env() {
   load_privy_env
-  local client_id="${PRIVY_APP_CLIENT_ID:-${PRIVY_AUTH_ID:-}}"
+  local client_id
+  client_id="$(resolve_ios_client_id)"
   export PRIVY_APP_ID
   export PRIVY_APP_CLIENT_ID="$client_id"
   export PRIVY_SMS_LOGIN_ENABLED="${PRIVY_SMS_LOGIN_ENABLED:-true}"

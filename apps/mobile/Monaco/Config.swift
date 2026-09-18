@@ -41,10 +41,18 @@ struct PrivyAuthSettings: Equatable {
 
     private static func resolvedClientID(from environment: [String: String]) -> String {
         let clientID = value(for: "PRIVY_APP_CLIENT_ID", environment: environment)
-        if !clientID.isEmpty {
+        if isValidPrivyIOSClientID(clientID) {
             return clientID
         }
-        return value(for: "PRIVY_AUTH_ID", environment: environment)
+        let authID = value(for: "PRIVY_AUTH_ID", environment: environment)
+        if isValidPrivyIOSClientID(authID) {
+            return authID
+        }
+        return ""
+    }
+
+    private static func isValidPrivyIOSClientID(_ value: String) -> Bool {
+        !value.isEmpty && value.hasPrefix("client-")
     }
 
     /// Process env (simctl / Xcode scheme) wins; Info.plist from xcconfig is fallback.

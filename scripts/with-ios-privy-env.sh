@@ -12,11 +12,10 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
-# Decrypt once if Privy vars not already in the environment (e.g. parent `just run`).
-if [[ -z "${PRIVY_APP_ID:-}" || -z "${PRIVY_APP_CLIENT_ID:-${PRIVY_AUTH_ID:-}}" ]]; then
-  if [[ "${MONACO_PRIVY_ENV:-}" != "1" ]]; then
-    exec ./scripts/with-dotenv-local.sh env MONACO_PRIVY_ENV=1 "$0" "$@"
-  fi
+# Always enter through dotenvx once so other .env.local keys are available to the
+# launch command. Privy iOS creds themselves come from dotenvx get in ensure-ios-privy-config.
+if [[ "${MONACO_PRIVY_ENV:-}" != "1" ]]; then
+  exec ./scripts/with-dotenv-local.sh env MONACO_PRIVY_ENV=1 "$0" "$@"
 fi
 
 # shellcheck disable=SC1091

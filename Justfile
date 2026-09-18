@@ -203,6 +203,9 @@ run *app:
         fi
         ;;
       mobile)
+        if [[ "${MONACO_DOTENVX:-}" != "1" ]]; then
+          exec {{_dotenvx}} env MONACO_DOTENVX=1 just run mobile
+        fi
         if [[ ! -d apps/mobile ]]; then
           echo "error: apps/mobile is not scaffolded yet (M0-T4)."
           exit 1

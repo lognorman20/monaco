@@ -41,10 +41,18 @@ public struct PrivyAuthConfig: Equatable, Sendable {
 
     private static func resolvedClientID(from environment: [String: String]) -> String {
         let clientID = environment["PRIVY_APP_CLIENT_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !clientID.isEmpty {
+        if isValidPrivyIOSClientID(clientID) {
             return clientID
         }
-        return environment["PRIVY_AUTH_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let authID = environment["PRIVY_AUTH_ID"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if isValidPrivyIOSClientID(authID) {
+            return authID
+        }
+        return ""
+    }
+
+    private static func isValidPrivyIOSClientID(_ value: String) -> Bool {
+        !value.isEmpty && value.hasPrefix("client-")
     }
 
     private static func parseBool(_ value: String?, defaultValue: Bool) -> Bool {

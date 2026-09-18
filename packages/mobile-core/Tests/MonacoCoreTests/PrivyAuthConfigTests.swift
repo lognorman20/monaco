@@ -50,6 +50,36 @@ final class PrivyAuthConfigTests: XCTestCase {
         XCTAssertTrue(config.isConfigured)
     }
 
+    func testFromEnvironment_legacyAuthID_withoutClientPrefix_isIgnored() {
+        // Arrange
+        let environment: [String: String] = [
+            "PRIVY_APP_ID": "app-123",
+            "PRIVY_AUTH_ID": "sl4rn26yjqnwgggjh8pje1vs",
+        ]
+
+        // Act
+        let config = PrivyAuthConfig.fromEnvironment(environment)
+
+        // Assert
+        XCTAssertEqual(config.appClientID, "")
+        XCTAssertFalse(config.isConfigured)
+    }
+
+    func testFromEnvironment_staleNonClientAppClientID_isIgnored() {
+        // Arrange
+        let environment: [String: String] = [
+            "PRIVY_APP_ID": "app-123",
+            "PRIVY_APP_CLIENT_ID": "sl4rn26yjqnwgggjh8pje1vs",
+        ]
+
+        // Act
+        let config = PrivyAuthConfig.fromEnvironment(environment)
+
+        // Assert
+        XCTAssertEqual(config.appClientID, "")
+        XCTAssertFalse(config.isConfigured)
+    }
+
     func testFromEnvironment_canDisableLoginMethods() {
         // Arrange
         let environment: [String: String] = [
