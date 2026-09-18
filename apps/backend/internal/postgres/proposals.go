@@ -437,6 +437,7 @@ LIMIT 100`
 }
 
 // ListPassedProposalsPendingExecute returns passed proposals without a confirmed buy row.
+// Faker proposers and faker groups (#153) are excluded so seeded proposals never reach Jupiter.
 func (s *Store) ListPassedProposalsPendingExecute(ctx context.Context, limit int) ([]ProposalRow, error) {
 	if limit <= 0 {
 		limit = 20
@@ -446,6 +447,8 @@ func (s *Store) ListPassedProposalsPendingExecute(ctx context.Context, limit int
 SELECT ` + proposalSelectColumns + `
 FROM proposals p
 WHERE p.status = 'passed'
+  AND NOT EXISTS (SELECT 1 FROM users fu WHERE fu.id = p.proposer_id AND fu.is_faker)
+  AND NOT EXISTS (SELECT 1 FROM groups fg WHERE fg.id = p.group_id AND fg.is_faker)
   AND (
     (
       p.kind = 'buy'
@@ -488,6 +491,8 @@ SELECT ` + proposalSelectColumns + `
 FROM proposals p
 WHERE p.group_id = $1
   AND p.status = 'passed'
+  AND NOT EXISTS (SELECT 1 FROM users fu WHERE fu.id = p.proposer_id AND fu.is_faker)
+  AND NOT EXISTS (SELECT 1 FROM groups fg WHERE fg.id = p.group_id AND fg.is_faker)
   AND NOT EXISTS (
     SELECT 1
     FROM transactions t
@@ -531,9 +536,12 @@ func (s *Store) ListMissedOpenProposalsForUser(ctx context.Context, userID strin
 SELECT p.id, p.group_id, g.name, p.symbol, p.status, p.created_at, p.expires_at
 FROM proposals p
 JOIN groups g ON g.id = p.group_id
+JOIN users pu ON pu.id = p.proposer_id
 WHERE p.group_id = ANY($1::uuid[])
   AND p.status = 'open'
   AND p.expires_at > NOW()
+  AND NOT pu.is_faker
+  AND NOT g.is_faker
   AND NOT EXISTS (
     SELECT 1 FROM votes v WHERE v.proposal_id = p.id AND v.voter_id = $2
   )

@@ -119,7 +119,8 @@ func (p *SweepPoller) Tick(ctx context.Context) error {
 }
 
 func (p *SweepPoller) reconcileAllTreasurySurplus(ctx context.Context) error {
-	groupIDs, err := p.store.ListGroupIDs(ctx)
+	// Faker scale clubs (#153) have dummy treasuries: never read their balance via Privy.
+	groupIDs, err := p.store.ListRealGroupIDs(ctx)
 	if err != nil {
 		return err
 	}

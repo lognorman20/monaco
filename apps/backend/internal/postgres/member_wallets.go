@@ -46,12 +46,15 @@ WHERE user_id = $1`
 	return wallet, true, nil
 }
 
-// ListMemberWallets returns all member wallet rows.
+// ListMemberWallets returns member wallet rows for real users. Faker users (#153) are
+// excluded (and a DB trigger rejects faker wallets) so the sweep scan never queries them.
 func (s *Store) ListMemberWallets(ctx context.Context) ([]MemberWallet, error) {
 	const selectSQL = `
-SELECT id, user_id, privy_wallet_id, solana_address, created_at
-FROM member_wallets
-ORDER BY created_at ASC`
+SELECT w.id, w.user_id, w.privy_wallet_id, w.solana_address, w.created_at
+FROM member_wallets w
+JOIN users u ON u.id = w.user_id
+WHERE NOT u.is_faker
+ORDER BY w.created_at ASC`
 
 	rows, err := s.db.QueryContext(ctx, selectSQL)
 	if err != nil {

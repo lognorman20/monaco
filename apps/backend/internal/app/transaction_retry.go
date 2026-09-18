@@ -43,6 +43,9 @@ func (s *SwapService) RetryFailedSwap(ctx context.Context, req RetryFailedSwapRe
 	if !found {
 		return RetryFailedSwapResult{}, ErrTransactionNotFound
 	}
+	if err := rejectFakerGroup(ctx, s.store, tx.GroupID); err != nil {
+		return RetryFailedSwapResult{}, err
+	}
 	if tx.Status != postgres.TransactionStatusFailed {
 		return RetryFailedSwapResult{}, ErrTransactionNotRetryable
 	}

@@ -180,6 +180,12 @@ func (s *ExecuteOnPassService) executeBuyOnPass(ctx context.Context, proposal Pr
 		logExecuteOnPassBranchWarn("execute on pass rejected", "usdc not positive", "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, fmt.Errorf("usdc must be positive")
 	}
+	// Faker groups and faker proposers (#153) never execute: seeded passed proposals must not
+	// trigger live Jupiter swaps from a real (mixed club) treasury.
+	if err := s.rejectFakerProposal(ctx, proposal); err != nil {
+		logExecuteOnPassBranchWarn("execute on pass rejected", "faker proposal", "proposal_id", proposal.ID, "group_id", proposal.GroupID)
+		return ExecuteOnPassResult{}, err
+	}
 
 	if existing, ok, err := s.existingBuyForProposal(ctx, proposal.ID); err != nil {
 		logExecuteOnPassBranchError("execute on pass lookup existing failed", err, "proposal_id", proposal.ID)
@@ -256,6 +262,23 @@ func (s *ExecuteOnPassService) executeSellOnPass(ctx context.Context, proposal P
 	}
 	logExecuteOnPassSuccess(proposal.ID, result.Transaction.ID, result.Created)
 	return ExecuteOnPassResult{Transaction: result.Transaction, Created: result.Created}, nil
+}
+
+func (s *ExecuteOnPassService) rejectFakerProposal(ctx context.Context, proposal Proposal) error {
+	if err := rejectFakerGroup(ctx, s.store, proposal.GroupID); err != nil {
+		return err
+	}
+	if proposal.ProposerID == "" {
+		return nil
+	}
+	isFaker, err := s.store.IsFakerUser(ctx, proposal.ProposerID)
+	if err != nil {
+		return err
+	}
+	if isFaker {
+		return ErrFakerGroupReadOnly
+	}
+	return nil
 }
 
 func (s *ExecuteOnPassService) existingBuyForProposal(ctx context.Context, proposalID string) (postgres.TransactionRow, bool, error) {
