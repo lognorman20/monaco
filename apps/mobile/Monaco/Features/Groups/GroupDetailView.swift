@@ -177,6 +177,13 @@ struct GroupDetailView: View {
 
             Section("Actions") {
                 NavigationLink {
+                    GroupChatView(auth: auth, groupId: groupId, groupName: view.name)
+                } label: {
+                    Label("Cabal chat", systemImage: "bubble.left.and.bubble.right")
+                }
+                .accessibilityIdentifier("group-action-chat")
+
+                NavigationLink {
                     FundCabalView(
                         auth: auth,
                         joinedCabals: [HomeGroupBoardRowDTO(

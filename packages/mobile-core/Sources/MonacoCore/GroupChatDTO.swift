@@ -67,6 +67,14 @@ enum GroupChatDates {
     }
 }
 
+/// Chat transport used by the chat screen. `MonacoAPIClient` is the live implementation.
+public protocol GroupChatService: Sendable {
+    func listGroupMessages(groupId: String, before: String?, limit: Int) async throws -> GroupMessagesPageDTO
+    func postGroupMessage(groupId: String, body: String) async throws -> GroupMessageDTO
+}
+
+extension MonacoAPIClient: GroupChatService {}
+
 /// Client-side draft rules mirroring the API (trimmed, 1...2000 characters).
 public enum GroupChatDraft {
     public static let maxCharacters = 2000
