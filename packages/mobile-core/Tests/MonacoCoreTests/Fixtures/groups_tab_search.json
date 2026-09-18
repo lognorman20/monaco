@@ -1,0 +1,13 @@
+{
+  "groups": [
+    {
+      "groupId": "550e8400-e29b-41d4-a716-446655440001",
+      "name": "Weekend investors",
+      "potValueUsd": "548.20",
+      "percentReturn": "0.124",
+      "dollarPnl": "+48.20",
+      "isJoined": true,
+      "joinMode": "open"
+    }
+  ]
+}
