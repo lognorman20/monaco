@@ -168,6 +168,37 @@ func TestComputeMemberPnL_depositOnlyPot_zeroReturn(t *testing.T) {
 	}
 }
 
+func TestPeopleBoard_includesUnfundedAtBottom(t *testing.T) {
+	// Arrange
+	funded := PersonBoardInput{
+		UserID:         "alice",
+		TotalEquity:    110_000_000,
+		TotalNetUsdcIn: 100_000_000,
+	}
+	unfunded := PersonBoardInput{
+		UserID:         "bob",
+		TotalEquity:    0,
+		TotalNetUsdcIn: 0,
+	}
+
+	// Act
+	board := BuildPeopleBoard([]PersonBoardInput{funded, unfunded})
+
+	// Assert
+	if len(board) != 2 {
+		t.Fatalf("board len = %d, want 2", len(board))
+	}
+	if board[0].UserID != "alice" {
+		t.Fatalf("board[0].UserID = %q, want alice", board[0].UserID)
+	}
+	if board[1].UserID != "bob" {
+		t.Fatalf("board[1].UserID = %q, want bob", board[1].UserID)
+	}
+	if board[1].PercentReturn != nil {
+		t.Fatalf("bob percent return = %v, want nil", board[1].PercentReturn)
+	}
+}
+
 func TestInGroupBoard_fullExit_dropsMemberFromBoard(t *testing.T) {
 	// Arrange
 	members := []MemberPosition{

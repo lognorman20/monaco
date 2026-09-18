@@ -25,19 +25,15 @@ public enum ScreenSnapshotRenderer {
         lines.append("Your slice | $\(view.you.equityUsd)")
         lines.append("Slice % | \(formatSlicePercent(view.you.slicePercent))")
         lines.append("P&L | \(view.you.dollarPnl)")
-        if let percentReturn = view.you.percentReturn {
-            lines.append("Return | \(percentReturn)")
-        } else {
-            lines.append("Return | —")
-        }
+        lines.append("Return | \(PercentReturnFormatter.format(view.you.percentReturn))")
 
         lines.append("")
         lines.append("## Member board")
         if view.members.isEmpty {
-            lines.append("No members ranked yet.")
+            lines.append("No members yet.")
         } else {
             for row in view.members {
-                let pct = row.percentReturn ?? "—"
+                let pct = PercentReturnFormatter.format(row.percentReturn)
                 lines.append("#\(row.rank) \(row.displayName) | \(pct) | \(row.dollarPnl)")
             }
         }
@@ -51,17 +47,18 @@ public enum ScreenSnapshotRenderer {
             lines.append("No cabals yet. Create or join one to start investing together.")
         } else {
             for row in view.groups {
-                lines.append("\(row.name) | $\(row.potValueUsd) | \(row.dollarPnl)")
+                let pct = PercentReturnFormatter.format(row.percentReturn)
+                lines.append("\(row.name) | $\(row.potValueUsd) | \(pct) | \(row.dollarPnl)")
             }
         }
 
         lines.append("")
         lines.append("## People")
         if view.people.isEmpty {
-            lines.append("No leaderboard rows yet.")
+            lines.append("No members in your clubs yet.")
         } else {
             for row in view.people {
-                let pct = row.percentReturn ?? "—"
+                let pct = PercentReturnFormatter.format(row.percentReturn)
                 lines.append("\(row.displayName) | \(pct) | \(row.dollarPnl)")
             }
         }

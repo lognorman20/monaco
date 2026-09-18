@@ -86,6 +86,23 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(HomeViewDTO.self, from: data)
     }
 
+    func getUserSharedGroups(accessToken: String, userId: String) async throws -> [HomeGroupBoardRowDTO] {
+        let url = baseURL.appending(path: "v1/users/\(userId)/groups")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        let payload = try JSONDecoder().decode(UserSharedGroupsResponse.self, from: data)
+        return payload.groups
+    }
+
     func createGroup(accessToken: String, name: String) async throws -> CreateGroupResponse {
         try await createGroup(
             accessToken: accessToken,
