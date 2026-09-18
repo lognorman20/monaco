@@ -124,6 +124,12 @@ func (s *SwapService) TreasuryBalancesFor(treasuryAddress string) TreasuryBalanc
 func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyRequest) (DevExecuteBuyResult, error) {
 	logSwapBuyStart(req.GroupID, req.UserID, req.Symbol, req.USDCAmount)
 
+	// Faker scale clubs (#153) have a dummy treasury: never reach Privy or Jupiter for them.
+	if err := rejectFakerGroup(ctx, s.store, req.GroupID); err != nil {
+		logSwapBranchError("swap buy rejected", err, "group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol, "stage", "faker_guard")
+		return DevExecuteBuyResult{}, err
+	}
+
 	treasury, err := s.privy.EnsureTreasury(ctx, privy.GroupID(req.GroupID))
 	if err != nil {
 		logSwapBranchError("swap buy ensure treasury failed", err,
@@ -254,6 +260,11 @@ func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyReques
 // Confirmed sells are idempotent on tx_signature via postgres.ConfirmSellTransaction.
 func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (SellToUSDCResult, error) {
 	logSwapSellStart(req.GroupID, req.UserID, req.Symbol, req.Amount)
+
+	if err := rejectFakerGroup(ctx, s.store, req.GroupID); err != nil {
+		logSwapBranchError("swap sell rejected", err, "group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol, "stage", "faker_guard")
+		return SellToUSDCResult{}, err
+	}
 
 	treasury, err := s.privy.EnsureTreasury(ctx, privy.GroupID(req.GroupID))
 	if err != nil {

@@ -306,7 +306,12 @@ func (s *Store) computeNavSnapshotValues(ctx context.Context, q navSnapshotQueri
 }
 
 func sumShareUnitsByGroupQuery(ctx context.Context, q navSnapshotQuerier, groupID string) (int64, error) {
-	const selectSQL = `SELECT COALESCE(SUM(share_units), 0) FROM positions WHERE group_id = $1`
+	const selectSQL = `
+SELECT COALESCE(SUM(p.share_units), 0)
+FROM positions p
+JOIN users u ON u.id = p.user_id
+JOIN groups g ON g.id = p.group_id
+WHERE p.group_id = $1 AND ` + potPositionPredicate
 	var total int64
 	if err := q.QueryRowContext(ctx, selectSQL, groupID).Scan(&total); err != nil {
 		return 0, fmt.Errorf("sum share units: %w", err)
