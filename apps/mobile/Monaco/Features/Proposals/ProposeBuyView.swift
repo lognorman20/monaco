@@ -21,7 +21,7 @@ struct ProposeBuyView: View {
     @State private var catalogLoadFailed = false
     @State private var isLoadingTreasury = false
     @State private var treasuryLoadFailed = false
-    @State private var treasuryUsdcMicros: Int64?
+    @State private var treasuryTotalMicros: Int64?
     @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
@@ -52,8 +52,8 @@ struct ProposeBuyView: View {
                     Button("Retry treasury") {
                         Task { await loadTreasury() }
                     }
-                } else if let treasuryUsdcMicros {
-                    Text("Treasury available: \(formatUsd(microsToDecimal(String(treasuryUsdcMicros)) ?? 0))")
+                } else if let treasuryTotalMicros {
+                    Text("Treasury total: \(formatUsd(microsToDecimal(String(treasuryTotalMicros)) ?? 0))")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -76,7 +76,7 @@ struct ProposeBuyView: View {
                         .accessibilityIdentifier("proposal-amount-field")
 
                     if exceedsTreasury {
-                        Label("Amount exceeds treasury USDC available.", systemImage: "exclamationmark.triangle.fill")
+                        Label("Amount exceeds treasury total available.", systemImage: "exclamationmark.triangle.fill")
                             .font(.footnote)
                             .foregroundStyle(.orange)
                     }
@@ -88,7 +88,7 @@ struct ProposeBuyView: View {
                                 groupId: groupId,
                                 symbol: selectedSymbol,
                                 usdcMicros: usdcMicros,
-                                treasuryUsdcMicros: treasuryUsdcMicros
+                                treasuryTotalMicros: treasuryTotalMicros
                             )
                         } label: {
                             Text("Get quote")
@@ -190,7 +190,7 @@ struct ProposeBuyView: View {
     }
 
     private var exceedsTreasury: Bool {
-        guard let amount = parsedUsdcMicro, let treasury = treasuryUsdcMicros else {
+        guard let amount = parsedUsdcMicro, let treasury = treasuryTotalMicros else {
             return false
         }
         return amount > treasury
@@ -222,10 +222,10 @@ struct ProposeBuyView: View {
 
         do {
             let view = try await apiClient.getGroupView(accessToken: token, groupId: groupId)
-            treasuryUsdcMicros = usdcMicrosFromPot(view.pot)
+            treasuryTotalMicros = usdcMicrosFromUsdDecimal(view.resolvedPotTotalUsd)
         } catch {
             treasuryLoadFailed = true
-            treasuryUsdcMicros = nil
+            treasuryTotalMicros = nil
         }
     }
 
@@ -275,15 +275,15 @@ struct ProposeBuyView: View {
         }
     }
 
-    private func usdcMicrosFromPot(_ pot: [PotRowDTO]) -> Int64? {
-        guard let usdcRow = pot.first(where: { $0.symbol.uppercased() == "USDC" }),
-              let decimal = Decimal(string: usdcRow.units, locale: Locale(identifier: "en_US_POSIX")) else {
+    private func usdcMicrosFromUsdDecimal(_ raw: String) -> Int64? {
+        guard let decimal = Decimal(string: raw, locale: Locale(identifier: "en_US_POSIX")) else {
             return nil
         }
         var scaled = decimal * Decimal(1_000_000)
         var rounded = Decimal()
         NSDecimalRound(&rounded, &scaled, 0, .plain)
-        return (rounded as NSDecimalNumber).int64Value
+        let micros = (rounded as NSDecimalNumber).int64Value
+        return micros >= 0 ? micros : nil
     }
 
     private func microsToDecimal(_ raw: String) -> Decimal? {

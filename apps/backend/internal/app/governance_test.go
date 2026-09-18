@@ -31,8 +31,10 @@ func integrationGovernanceApp(t *testing.T) governanceHarness {
 
 	h := integrationApp(t)
 	buy := NewBuyService(h.Jupiter, h.XStocks)
+	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
 	governance := NewGovernanceService(h.Store, h.Privy)
 	governance.SetBuyService(buy)
+	governance.SetHomeService(home)
 	return governanceHarness{
 		Governance: governance,
 		Store:      h.Store,
@@ -93,6 +95,40 @@ func TestPOST_proposals_happyPath_createsOpenProposalWithExpiry(t *testing.T) {
 	}
 	if proposal.Symbol != "AAPLx" || proposal.UsdcMicros != 2_000_000 {
 		t.Fatalf("unexpected proposal payload: %+v", proposal)
+	}
+}
+
+func TestCreateProposal_treasurySurplusOnChain_allowsAfterReconcile(t *testing.T) {
+	h := integrationGovernanceApp(t)
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "surplus-propose", "Surplus Proposer")
+	token := h.ISO.UniqueToken("surplus-propose")
+	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "surplus-propose"), DefaultGroupRules())
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	h.ISO.TrackGroup(created.GroupID)
+	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 5_000_000)
+	registerRoutableQuote(t, h.Jupiter, h.XStocks, "AAPLx", 2_000_000)
+
+	proposal, err := h.Governance.CreateProposal(context.Background(), CreateProposalInput{
+		GroupID:    created.GroupID,
+		ProposerID: userID.UserID,
+		Symbol:     "AAPLx",
+		UsdcMicros: 2_000_000,
+	})
+	if err != nil {
+		t.Fatalf("CreateProposal: %v", err)
+	}
+	if proposal.UsdcMicros != 2_000_000 {
+		t.Fatalf("usdcMicros = %d, want 2000000", proposal.UsdcMicros)
+	}
+
+	totalShares, err := h.Store.SumShareUnitsByGroup(context.Background(), created.GroupID)
+	if err != nil {
+		t.Fatalf("SumShareUnitsByGroup: %v", err)
+	}
+	if totalShares != 5_000_000 {
+		t.Fatalf("share units = %d, want 5000000 after reconcile", totalShares)
 	}
 }
 

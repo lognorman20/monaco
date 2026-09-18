@@ -131,6 +131,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, relayer.PrivateKey(), symbols)
 	executeOnPass := app.NewExecuteOnPassService(swap, store)
 	governance.SetBuyService(buy)
+	governance.SetHomeService(home)
 	transactionHandlers := &httpapi.TransactionHandlers{
 		Store:    store,
 		Privy:    privyClient,

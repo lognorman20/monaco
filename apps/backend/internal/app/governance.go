@@ -17,6 +17,7 @@ type GovernanceService struct {
 	store *postgres.Store
 	privy privy.Client
 	buy   *BuyService
+	home  *HomeService
 	now   func() time.Time
 }
 
@@ -27,6 +28,11 @@ func NewGovernanceService(store *postgres.Store, privyClient privy.Client) *Gove
 // SetBuyService wires quote gating for proposal create (M4-T13).
 func (g *GovernanceService) SetBuyService(buy *BuyService) {
 	g.buy = buy
+}
+
+// SetHomeService wires treasury total + reconcile for proposal create.
+func (g *GovernanceService) SetHomeService(home *HomeService) {
+	g.home = home
 }
 
 // SetClock overrides time.Now for tests.
@@ -592,13 +598,13 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		return Proposal{}, ErrNotEligibleProposer
 	}
 
-	treasuryUSDC, err := g.groupTreasuryUSDC(ctx, in.GroupID)
+	treasuryTotal, err := g.proposalTreasuryTotalMicros(ctx, in.GroupID)
 	if err != nil {
 		logGovernanceBranchError("governance create proposal treasury balance failed", err, "group_id", in.GroupID, "proposer_id", in.ProposerID)
 		return Proposal{}, err
 	}
-	if in.UsdcMicros > treasuryUSDC {
-		logGovernanceBranchWarn("governance create proposal rejected", "exceeds treasury usdc", "group_id", in.GroupID, "proposer_id", in.ProposerID, "usdc_micros", in.UsdcMicros, "treasury_usdc_micros", treasuryUSDC)
+	if in.UsdcMicros > treasuryTotal {
+		logGovernanceBranchWarn("governance create proposal rejected", "exceeds treasury total", "group_id", in.GroupID, "proposer_id", in.ProposerID, "usdc_micros", in.UsdcMicros, "treasury_total_micros", treasuryTotal)
 		return Proposal{}, ErrExceedsTreasuryUSDC
 	}
 
@@ -654,6 +660,13 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 	return proposalFromRow(row), nil
 }
 
+func (g *GovernanceService) proposalTreasuryTotalMicros(ctx context.Context, groupID string) (int64, error) {
+	if g.home != nil {
+		return g.home.GroupTreasuryTotalMicros(ctx, groupID)
+	}
+	return g.groupTreasuryUSDC(ctx, groupID)
+}
+
 func (g *GovernanceService) groupTreasuryUSDC(ctx context.Context, groupID string) (int64, error) {
 	positions, err := g.store.ListPositionsByGroup(ctx, groupID)
 	if err != nil {
@@ -670,9 +683,10 @@ func (g *GovernanceService) groupTreasuryUSDC(ctx context.Context, groupID strin
 	}
 	if found {
 		balance, err := g.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
-		if err == nil && balance > 0 {
-			return balance, nil
+		if err != nil {
+			return 0, fmt.Errorf("treasury usdc balance: %w", err)
 		}
+		return balance, nil
 	}
 	return netUsdcIn, nil
 }

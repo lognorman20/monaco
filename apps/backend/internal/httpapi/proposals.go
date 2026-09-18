@@ -383,7 +383,7 @@ func writeProposalCreateError(ctx context.Context, log *requestLog, w http.Respo
 	case errors.Is(err, app.ErrQuoteNotRoutable):
 		logJSONError(ctx, log, "quote_not_routable", w, http.StatusBadRequest, "quote not routable", attrs...)
 	case errors.Is(err, app.ErrExceedsTreasuryUSDC):
-		logJSONError(ctx, log, "exceeds_treasury_usdc", w, http.StatusBadRequest, "amount exceeds treasury USDC available", attrs...)
+		logJSONError(ctx, log, "exceeds_treasury_usdc", w, http.StatusBadRequest, "amount exceeds treasury total available", attrs...)
 	default:
 		all := append(attrs, "err", err.Error())
 		logJSONError(ctx, log, "create_proposal_failed", w, http.StatusInternalServerError, "internal server error", all...)

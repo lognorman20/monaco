@@ -216,6 +216,23 @@ func (h *HomeService) groupNetUsdcIn(ctx context.Context, groupID string) (int64
 	return net, nil
 }
 
+// GroupTreasuryTotalMicros returns marked pot NAV for a group after reconciling
+// uncredited on-chain USDC, matching GET /v1/groups/{id}/view pot total.
+func (h *HomeService) GroupTreasuryTotalMicros(ctx context.Context, groupID string) (int64, error) {
+	if err := h.creditUncreditedForGroups(ctx, []string{groupID}); err != nil {
+		return 0, err
+	}
+	netUsdcIn, err := h.groupNetUsdcIn(ctx, groupID)
+	if err != nil {
+		return 0, err
+	}
+	potNav, _, err := h.groupPotNavAndShares(ctx, groupID, netUsdcIn)
+	if err != nil {
+		return 0, err
+	}
+	return potNav, nil
+}
+
 func (h *HomeService) groupPotNavAndShares(ctx context.Context, groupID string, netUsdcIn int64) (int64, int64, error) {
 	treasuryUSDC, err := h.groupTreasuryUSDC(ctx, groupID, netUsdcIn)
 	if err != nil {
@@ -250,9 +267,10 @@ func (h *HomeService) groupTreasuryUSDC(ctx context.Context, groupID string, net
 	}
 	if found {
 		balance, err := h.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
-		if err == nil && balance > 0 {
-			return balance, nil
+		if err != nil {
+			return 0, fmt.Errorf("treasury usdc balance: %w", err)
 		}
+		return balance, nil
 	}
 	return netUsdcIn, nil
 }

@@ -6,7 +6,7 @@ struct ProposeQuoteDetailView: View {
     let groupId: String
     let symbol: String
     let usdcMicros: Int64
-    let treasuryUsdcMicros: Int64?
+    let treasuryTotalMicros: Int64?
 
     private let apiClient = MonacoAPIClient()
     /// xStock SPL tokens use 8 on-chain decimals (Jupiter outAmount atomics).
@@ -48,7 +48,7 @@ struct ProposeQuoteDetailView: View {
                     }
 
                     if exceedsTreasury {
-                        Label("Amount exceeds treasury USDC available.", systemImage: "exclamationmark.triangle.fill")
+                        Label("Amount exceeds treasury total available.", systemImage: "exclamationmark.triangle.fill")
                             .font(.footnote)
                             .foregroundStyle(.orange)
                     }
@@ -86,7 +86,7 @@ struct ProposeQuoteDetailView: View {
     }
 
     private var exceedsTreasury: Bool {
-        guard let treasury = treasuryUsdcMicros else { return false }
+        guard let treasury = treasuryTotalMicros else { return false }
         return usdcMicros > treasury
     }
 
@@ -126,7 +126,7 @@ struct ProposeQuoteDetailView: View {
             )
             toast = MonacoToast(message: proposalSubmittedMessage(id: response.proposalId), isSuccess: true)
         } catch MonacoAPIError.httpStatus(400) {
-            toast = MonacoToast(message: "Amount exceeds treasury USDC available.")
+            toast = MonacoToast(message: "Amount exceeds treasury total available.")
         } catch MonacoAPIError.httpStatus(let code) {
             toast = MonacoToast(message: "Proposal failed (HTTP \(code)).")
         } catch {
