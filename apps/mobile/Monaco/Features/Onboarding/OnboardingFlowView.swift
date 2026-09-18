@@ -41,7 +41,9 @@ struct OnboardingFlowView: View {
             VStack(alignment: .leading, spacing: 24) {
                 stepContent
             }
-            .padding(.vertical, 24)
+            .frame(maxWidth: 560, alignment: .leading)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 32)
         }
         .authScreenBackground()
         .tint(MonacoTheme.accent)
@@ -55,29 +57,29 @@ struct OnboardingFlowView: View {
             usernameStep
         case .whatIsMonaco:
             tourStep(
-                title: "Welcome to Monaco",
-                body: "Monaco helps groups invest together in tokenized stocks. Pool money with friends, vote on trades, and track performance on leaderboards.",
+                title: "Invest with your people",
+                body: "Pool money in a cabal, vote on stock buys, and see how your returns compare with other cabals.",
                 stepIdentifier: "onboarding-step-2",
                 isFinal: false
             )
         case .clubs:
             tourStep(
-                title: "Cabals and groups",
-                body: "Create or join a cabal to share a treasury. Each group has its own pot, member board, and rules for who can vote on proposals.",
+                title: "Find your cabal",
+                body: "Create a cabal with friends or join one from the Cabals tab. Each cabal has a shared pot and its own voting rules.",
                 stepIdentifier: "onboarding-step-3",
                 isFinal: false
             )
         case .deposits:
             tourStep(
                 title: "Add money",
-                body: "Send USDC to your personal deposit address in the app. The backend sweeps funds into the group vault so everyone’s balance stays in sync.",
+                body: "Open Add money in your cabal and send USDC to your deposit address. Once the deposit reaches the pot, your slice appears in the cabal.",
                 stepIdentifier: "onboarding-step-4",
                 isFinal: false
             )
         case .proposals:
             tourStep(
-                title: "Proposals and votes",
-                body: "Members propose stock buys with treasury USDC. The group votes; approved trades execute on-chain and show up in transaction history.",
+                title: "Make the call together",
+                body: "Propose a stock buy and follow the vote. When a proposal passes, Monaco places the trade. Track the result in your cabal’s holdings and activity.",
                 stepIdentifier: "onboarding-step-5",
                 isFinal: true
             )
@@ -85,16 +87,20 @@ struct OnboardingFlowView: View {
     }
 
     private var usernameStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 24) {
+            onboardingProgress
+
             Text("Choose a username")
-                .font(.title2.bold())
+                .font(.largeTitle.bold())
+                .accessibilityAddTraits(.isHeader)
                 .foregroundStyle(MonacoTheme.primaryText)
 
             Text("This name appears on leaderboards and in your cabals.")
-                .authSecondaryCaption()
+                .font(.body)
+                .foregroundStyle(MonacoTheme.secondaryText)
 
             TextField(
-                "",
+                "Username",
                 text: $username,
                 prompt: Text("Username").foregroundStyle(MonacoTheme.disabled)
             )
@@ -109,47 +115,78 @@ struct OnboardingFlowView: View {
                     .foregroundStyle(MonacoTheme.destructive)
             }
 
-            Button("Continue") {
+            Button {
                 Task { await saveUsername() }
+            } label: {
+                Text("Continue")
+                    .frame(maxWidth: .infinity, minHeight: 28)
             }
             .buttonStyle(.monacoPrimary)
             .disabled(isContinueDisabled)
             .accessibilityIdentifier("onboarding-username-continue-button")
         }
-        .padding(.horizontal)
+        .padding(.horizontal, 24)
     }
 
     private func tourStep(title: String, body: String, stepIdentifier: String, isFinal: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 24) {
+            onboardingProgress
+
             Text(title)
-                .font(.title2.bold())
+                .font(.largeTitle.bold())
+                .accessibilityAddTraits(.isHeader)
                 .foregroundStyle(MonacoTheme.primaryText)
 
             Text(body)
-                .authSecondaryCaption()
+                .font(.body)
+                .foregroundStyle(MonacoTheme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
 
             if isFinal {
-                Button("Get started") {
+                Button {
                     Task { await finishOnboarding() }
+                } label: {
+                    Text("Open Monaco")
+                        .frame(maxWidth: .infinity, minHeight: 28)
                 }
                 .buttonStyle(.monacoPrimary)
                 .accessibilityIdentifier("onboarding-get-started-button")
             } else {
-                Button("Continue") {
+                Button {
                     advanceTour()
+                } label: {
+                    Text("Continue")
+                        .frame(maxWidth: .infinity, minHeight: 28)
                 }
                 .buttonStyle(.monacoPrimary)
             }
 
-            Button("Skip") {
+            Button {
                 Task { await finishOnboarding() }
+            } label: {
+                Text("Skip tour")
+                    .frame(maxWidth: .infinity, minHeight: 28)
             }
             .buttonStyle(.monacoSecondary)
             .accessibilityIdentifier("onboarding-skip-button")
         }
-        .padding(.horizontal)
+        .padding(.horizontal, 24)
         .accessibilityIdentifier(stepIdentifier)
+    }
+
+    private var onboardingProgress: some View {
+        HStack {
+            Text("MONACO")
+                .font(.caption.weight(.bold))
+                .tracking(2)
+                .foregroundStyle(MonacoTheme.accent)
+            Spacer()
+            Text("\(step.rawValue) of 5")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(MonacoTheme.secondaryText)
+                .accessibilityLabel("Step \(step.rawValue) of 5")
+        }
+        .padding(.bottom, 16)
     }
 
     private var trimmedUsername: String {

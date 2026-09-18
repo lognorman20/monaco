@@ -12,7 +12,7 @@ struct PotSectionView: View {
     var body: some View {
         Section {
             if pot.isEmpty {
-                Text("No holdings yet. Add money to get started.")
+                Text("Your pot is empty. Add money to fund your cabal’s first trade.")
                     .font(.footnote)
                     .foregroundStyle(MonacoTheme.secondaryText)
             } else {
@@ -74,7 +74,7 @@ struct PotSectionView: View {
     @ViewBuilder
     private func treasuryAddressBlock(_ address: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Cabal treasury")
+            Text("Cabal wallet address")
                 .font(.caption)
                 .foregroundStyle(MonacoTheme.secondaryText)
 

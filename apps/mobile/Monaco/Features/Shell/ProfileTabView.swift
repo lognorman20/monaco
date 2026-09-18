@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Signed-in user profile — full profile screen deferred to a dedicated lane.
+/// Account identity, cabals, and personal deposit address.
 struct ProfileTabView: View {
     @ObservedObject var auth: PrivyAuthService
     let profile: MeResponse
@@ -13,19 +13,14 @@ struct ProfileTabView: View {
     var body: some View {
         List {
             Section {
-                if !profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(profile.displayName)
-                        .font(.title3.bold())
-                        .foregroundStyle(MonacoTheme.primaryText)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Deposit address")
-                        .font(.caption)
-                        .foregroundStyle(MonacoTheme.secondaryText)
-                    MonacoWalletAddressText(address: profile.memberWalletAddress)
-                }
+                Text(displayName)
+                    .font(.largeTitle.bold())
+                    .foregroundStyle(MonacoTheme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.vertical, 12)
             }
+            .listRowBackground(Color.clear)
 
             Section {
                 NavigationLink {
@@ -37,14 +32,23 @@ struct ProfileTabView: View {
                 } label: {
                     Label("Your cabals", systemImage: "person.3")
                         .foregroundStyle(MonacoTheme.primaryText)
+                        .frame(minHeight: 44)
                 }
                 .accessibilityIdentifier("profile-your-cabals-link")
+            }
+            Section {
+                MonacoWalletAddressText(address: profile.memberWalletAddress)
+                    .padding(.vertical, 8)
+            } header: {
+                Text("Deposit address")
+            } footer: {
+                Text("To add money to a cabal, open that cabal and choose Add money.")
             }
         }
         .monacoInsetList()
         .background(MonacoTheme.background)
         .navigationTitle("Profile")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
