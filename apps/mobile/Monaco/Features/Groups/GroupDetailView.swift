@@ -161,7 +161,29 @@ struct GroupDetailView: View {
                 } label: {
                     Label("Add money", systemImage: "plus.circle")
                 }
-                .accessibilityIdentifier("group-action-deposit")
+                .accessibilityIdentifier("deposit-usdc-link")
+
+                NavigationLink {
+                    FundCabalView(
+                        auth: auth,
+                        joinedCabals: [HomeGroupBoardRowDTO(
+                            groupId: groupId,
+                            name: view.name,
+                            potValueUsd: view.resolvedPotTotalUsd,
+                            percentReturn: nil,
+                            dollarPnl: view.you.dollarPnl,
+                            isJoined: true
+                        )],
+                        preselectedGroupId: groupId,
+                        onFunded: {
+                            await loadGroup()
+                            await loadActivity()
+                        }
+                    )
+                } label: {
+                    Label("Fund this cabal", systemImage: "arrow.right.circle")
+                }
+                .accessibilityIdentifier("group-action-fund")
 
                 NavigationLink {
                     ProposeBuyView(auth: auth, groupId: groupId)

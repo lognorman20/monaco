@@ -1,10 +1,11 @@
 import SwiftUI
 import UIKit
 
-/// Add money — show member deposit address; backend sweep credits club share.
+/// Add money — inbound USDC lands in account balance; fund a cabal separately.
 struct DepositView: View {
     @ObservedObject var auth: PrivyAuthService
     let groupId: String
+    var joinedCabals: [HomeGroupBoardRowDTO] = []
 
     private let apiClient = MonacoAPIClient()
 
@@ -16,7 +17,7 @@ struct DepositView: View {
     var body: some View {
         Form {
             Section {
-                Text("Send USDC on Solana to your deposit address. We sweep it into your club's vault and credit your share when it lands.")
+                Text("Send USDC on Solana to your deposit address. It stays in your account balance until you choose a cabal to fund.")
                     .monacoSecondaryCaption()
             }
 
@@ -51,8 +52,21 @@ struct DepositView: View {
 
             Section("How it works") {
                 stepRow(number: 1, text: "Send USDC on Solana to the address above.")
-                stepRow(number: 2, text: "Monaco sweeps your deposit into the club vault.")
-                stepRow(number: 3, text: "Your share in the pot updates once the sweep completes.")
+                stepRow(number: 2, text: "Your account balance updates when USDC arrives.")
+                stepRow(number: 3, text: "Fund a cabal to move USDC into its treasury and credit your share.")
+            }
+
+            Section("Fund a cabal") {
+                NavigationLink {
+                    FundCabalView(
+                        auth: auth,
+                        joinedCabals: joinedCabals,
+                        preselectedGroupId: groupId
+                    )
+                } label: {
+                    Label("Choose cabal and amount", systemImage: "arrow.right.circle")
+                }
+                .accessibilityIdentifier("deposit-fund-cabal-link")
             }
         }
         .monacoFormScreen()

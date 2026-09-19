@@ -75,6 +75,40 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(MeResponse.self, from: data)
     }
 
+    func getPlatformBalance(accessToken: String) async throws -> PlatformBalanceDTO {
+        let url = baseURL.appending(path: "v1/me/balance")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(PlatformBalanceDTO.self, from: data)
+    }
+
+    func fundGroup(accessToken: String, groupId: String, amount: Int64) async throws -> FundGroupResponse {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/fund")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        request.httpBody = try JSONEncoder().encode(FundGroupRequest(amount: amount))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(FundGroupResponse.self, from: data)
+    }
+
     func getHome(accessToken: String) async throws -> HomeViewDTO {
         let url = baseURL.appending(path: "v1/home")
         var request = URLRequest(url: url)

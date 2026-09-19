@@ -32,6 +32,40 @@ public final class MonacoAPIClient: @unchecked Sendable {
         self.accessTokenProvider = accessTokenProvider
     }
 
+    public func platformBalance() async throws -> PlatformBalanceDTO {
+        let url = baseURL.appending(path: "v1/me/balance")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(PlatformBalanceDTO.self, from: data)
+    }
+
+    public func fundGroup(groupId: String, amount: Int64) async throws -> FundGroupResponseDTO {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/fund")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try await applyAuthorizationHeader(to: &request)
+        request.httpBody = try JSONEncoder().encode(FundGroupRequestDTO(amount: amount))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(FundGroupResponseDTO.self, from: data)
+    }
+
     public func me() async throws -> MeDTO {
         let url = baseURL.appending(path: "v1/me")
         var request = URLRequest(url: url)
