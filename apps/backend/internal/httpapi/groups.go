@@ -54,10 +54,11 @@ type joinGroupStatusResponse struct {
 }
 
 type joinRequestResponse struct {
-	ID          string `json:"id"`
-	UserID      string `json:"userId"`
-	DisplayName string `json:"displayName"`
-	RequestedAt string `json:"requestedAt"`
+	ID              string  `json:"id"`
+	UserID          string  `json:"userId"`
+	DisplayName     string  `json:"displayName"`
+	ProfilePhotoURL *string `json:"profilePhotoUrl"`
+	RequestedAt     string  `json:"requestedAt"`
 }
 
 type joinRequestsListResponse struct {
@@ -289,7 +290,7 @@ func (h *GroupHandlers) ListJoinRequestsHandler(w http.ResponseWriter, r *http.R
 	}
 	respItems := make([]joinRequestResponse, 0, len(items))
 	for _, item := range items {
-		respItems = append(respItems, joinRequestResponse{ID: item.ID, UserID: item.UserID, DisplayName: item.DisplayName, RequestedAt: item.RequestedAt.UTC().Format(time.RFC3339)})
+		respItems = append(respItems, joinRequestResponse{ID: item.ID, UserID: item.UserID, DisplayName: item.DisplayName, ProfilePhotoURL: optionalString(item.ProfilePhotoURL), RequestedAt: item.RequestedAt.UTC().Format(time.RFC3339)})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

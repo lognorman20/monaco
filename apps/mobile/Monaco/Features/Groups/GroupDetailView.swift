@@ -139,7 +139,10 @@ struct GroupDetailView: View {
                     if joinRequestsLoading && joinRequests.isEmpty { ProgressView("Loading requests…") }
                     ForEach(joinRequests) { request in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(request.displayName.isEmpty ? "Member" : request.displayName).font(.headline)
+                            HStack(spacing: 8) {
+                                MonacoAvatar(photoURL: request.profilePhotoUrl, displayName: request.displayName, size: 28)
+                                Text(request.displayName.isEmpty ? "Member" : request.displayName).font(.headline)
+                            }
                             HStack {
                                 Button("Approve") { Task { await decideJoinRequest(request, approve: true) } }
                                     .disabled(decidingRequestIDs.contains(request.id))

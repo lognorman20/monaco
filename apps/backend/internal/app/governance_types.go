@@ -24,10 +24,11 @@ const (
 )
 
 type JoinRequest struct {
-	ID          string
-	UserID      string
-	DisplayName string
-	RequestedAt time.Time
+	ID              string
+	UserID          string
+	DisplayName     string
+	ProfilePhotoURL string
+	RequestedAt     time.Time
 }
 
 type VoterSet = domain.VoterSet

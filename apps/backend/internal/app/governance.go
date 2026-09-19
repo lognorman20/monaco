@@ -265,7 +265,7 @@ func (g *GovernanceService) ListPendingJoinRequests(ctx context.Context, accessT
 	}
 	items := make([]JoinRequest, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, JoinRequest{ID: row.ID, UserID: row.UserID, DisplayName: row.DisplayName, RequestedAt: row.CreatedAt})
+		items = append(items, JoinRequest{ID: row.ID, UserID: row.UserID, DisplayName: row.DisplayName, ProfilePhotoURL: row.ProfilePhotoURL, RequestedAt: row.CreatedAt})
 	}
 	return items, nil
 }
