@@ -223,7 +223,7 @@ RETURNING id`, club.Name, ids[club.Creator.Slug], fakerKey, createdAt).Scan(&gro
 	if err != nil {
 		return ScaleClub{}, err
 	}
-	if err := insertSwaps(ctx, tx, groupID, s.prefix+club.Key, club, pids, mark, now); err != nil {
+	if err := insertSwaps(ctx, tx, groupID, s.prefix+club.Key, club, ids, pids, mark, now); err != nil {
 		return ScaleClub{}, err
 	}
 	if err := insertNavSnapshots(ctx, tx, groupID, club, now); err != nil {
@@ -366,33 +366,40 @@ func insertProposals(ctx context.Context, tx *sql.Tx, groupID string, ids map[st
 		expires := created.Add(time.Duration(p.ExpiresHours * float64(time.Hour)))
 		var id string
 		if err := tx.QueryRowContext(ctx, `
-INSERT INTO proposals (group_id, proposer_id, symbol, usdc_micros, status, expires_at, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+INSERT INTO proposals (group_id, proposer_id, symbol, kind, usdc_micros, status, expires_at, created_at)
+VALUES ($1, $2, $3, 'buy', $4, $5, $6, $7) RETURNING id`,
 			groupID, ids[p.Proposer], p.Symbol, p.USDC*usdc, p.Status, expires, created).Scan(&id); err != nil {
 			return nil, fmt.Errorf("insert faker proposal: %w", err)
 		}
 		out[p.Key] = id
-		for i, v := range p.Votes {
-			castAt := created.Add(time.Duration(i+1) * 37 * time.Minute)
-			if _, err := tx.ExecContext(ctx, `INSERT INTO votes (proposal_id, voter_id, choice, cast_at) VALUES ($1, $2, $3, $4)`,
-				id, ids[v.Who], v.Choice, castAt); err != nil {
-				return nil, fmt.Errorf("insert faker vote: %w", err)
-			}
+		if err := insertVotes(ctx, tx, id, ids, p.Votes, created); err != nil {
+			return nil, err
 		}
 	}
 	return out, nil
 }
 
-// tokenAtomics converts USDC spent at a whole-share price into holding atomics on the scale the
-// read path uses (app/marked_pot.go tokenAtomicScale = 1e6 per displayed unit).
+func insertVotes(ctx context.Context, tx *sql.Tx, proposalID string, ids map[string]string, votes []voteSpec, created time.Time) error {
+	for i, v := range votes {
+		castAt := created.Add(time.Duration(i+1) * 37 * time.Minute)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO votes (proposal_id, voter_id, choice, cast_at) VALUES ($1, $2, $3, $4)`,
+			proposalID, ids[v.Who], v.Choice, castAt); err != nil {
+			return fmt.Errorf("insert faker vote: %w", err)
+		}
+	}
+	return nil
+}
+
+// tokenAtomics converts USDC spent at a whole-share price into xStock SPL atomics
+// (8 decimals, jupiter.XStockAtomicScale per whole share), matching real Jupiter fills.
 func tokenAtomics(usdcMicros, pxMicros int64) int64 {
 	if pxMicros <= 0 {
 		return 0
 	}
-	return usdcMicros * 1_000_000 / pxMicros
+	return usdcMicros * jupiter.XStockAtomicScale / pxMicros
 }
 
-func insertSwaps(ctx context.Context, tx *sql.Tx, groupID, sigKey string, club clubSpec, pids map[string]string, mark int64, now time.Time) error {
+func insertSwaps(ctx context.Context, tx *sql.Tx, groupID, sigKey string, club clubSpec, ids map[string]string, pids map[string]string, mark int64, now time.Time) error {
 	var buy *proposalSpec
 	for i := range club.Proposals {
 		if club.Proposals[i].Buy {
@@ -418,13 +425,31 @@ VALUES ($1, $2, $3, 'buy', $4, $5, 'confirmed', $6, $7, $3, $8, $9, $9)`,
 		return nil
 	}
 	sold := int64(float64(tokens) * club.SellFrac)
-	proceeds := int64(math.Round(float64(sold) * float64(costPx) * club.SellPx / 1_000_000))
+	proceeds := int64(math.Round(float64(sold) * float64(costPx) * club.SellPx / float64(jupiter.XStockAtomicScale)))
 	soldAt := hoursAgo(now, club.SellHours)
+
+	// Governed sell (main's proposal kind model): passed sell proposal carrying token_amount,
+	// linked to the confirmed sell transaction.
+	sellCreated := hoursAgo(now, club.SellHours+3)
+	var sellProposalID string
+	if err := tx.QueryRowContext(ctx, `
+INSERT INTO proposals (group_id, proposer_id, symbol, kind, token_amount, status, expires_at, created_at)
+VALUES ($1, $2, $3, 'sell', $4, 'passed', $5, $6) RETURNING id`,
+		groupID, ids[club.Creator.Slug], club.BuySymbol, sold, sellCreated.Add(12*time.Hour), sellCreated).Scan(&sellProposalID); err != nil {
+		return fmt.Errorf("insert faker sell proposal: %w", err)
+	}
+	var sellVotes []voteSpec
+	for _, v := range buy.Votes {
+		sellVotes = append(sellVotes, voteSpec{Who: v.Who, Choice: "yes"})
+	}
+	if err := insertVotes(ctx, tx, sellProposalID, ids, sellVotes, sellCreated); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO transactions (group_id, amount, action, input_mint, output_mint, status,
+INSERT INTO transactions (group_id, proposal_id, amount, action, input_mint, output_mint, status,
                           tx_signature, execute_request_id, cost_basis_amount, created_at, confirmed_at)
-VALUES ($1, $2, 'sell', $3, $4, 'confirmed', $5, $6, $7, $8, $8)`,
-		groupID, sold, club.BuyMint, jupiter.USDCMint,
+VALUES ($1, $2, $3, 'sell', $4, $5, 'confirmed', $6, $7, $8, $9, $9)`,
+		groupID, sellProposalID, sold, club.BuyMint, jupiter.USDCMint,
 		"faker-"+sigKey+"-sell", "faker-"+sigKey+"-sell-req", proceeds, soldAt); err != nil {
 		return fmt.Errorf("insert faker sell: %w", err)
 	}

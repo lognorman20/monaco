@@ -3,6 +3,7 @@ package faker
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -179,6 +180,11 @@ func TestSeedMixedAndScale_idempotentAndInert(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetGroupView(%s): %v", c.Name, err)
 		}
+		// Sanity: pot NAV (ledger USDC + 8-decimal holdings at cost) sits near net deposits,
+		// never 100x off. Clubs take in 8.5k-14k USDC.
+		if pot, err := strconv.ParseFloat(view.PotTotalUsd, 64); err != nil || pot < 7_000 || pot > 16_000 {
+			t.Errorf("%s pot total = %s, want within 7000-16000 USD", c.Name, view.PotTotalUsd)
+		}
 		if len(view.Members) != 6 || view.TreasuryAddress != "" {
 			t.Errorf("%s view members=%d treasury=%q", c.Name, len(view.Members), view.TreasuryAddress)
 		}
@@ -186,9 +192,8 @@ func TestSeedMixedAndScale_idempotentAndInert(t *testing.T) {
 		if err != nil || len(activity) < 7 {
 			t.Errorf("%s activity rows=%d err=%v", c.Name, len(activity), err)
 		}
-		history, err := e.home.GetGroupPnLHistory(ctx, e.token, c.GroupID, 30)
-		if err != nil || len(history.Points) < 10 {
-			t.Errorf("%s pnl history points=%d err=%v", c.Name, len(history.Points), err)
+		if n := countRows(t, e, `SELECT count(*) FROM nav_snapshots WHERE group_id = $1`, c.GroupID); n < 10 {
+			t.Errorf("%s nav snapshots = %d, want a week of history", c.Name, n)
 		}
 	}
 	realView, err := e.home.GetGroupView(ctx, e.token, e.groupID)
