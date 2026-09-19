@@ -1,3 +1,4 @@
+import MonacoCore
 import SwiftUI
 
 /// Home dashboard. Order: hero → balance row → "Needs your vote" (if any) →
@@ -49,12 +50,36 @@ struct HomeView: View {
         .monacoCanvas()
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                profileButton
+            }
+        }
         .refreshable {
             await session.refresh(auth: auth, leaderboardRange: leaderboardRange)
         }
         .onChange(of: leaderboardRange) { _, range in
             Task { await session.refreshDashboard(auth: auth, leaderboardRange: range) }
         }
+    }
+
+    /// The viewer's photo (or initials) in the corner; tapping it switches to the Profile tab.
+    private var profileButton: some View {
+        Button {
+            Haptics.selection()
+            selectedTab = .profile
+        } label: {
+            MonacoAvatar(
+                photoURL: session.me?.profilePhotoUrl,
+                displayName: session.me?.displayName ?? "",
+                size: 32
+            )
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Profile")
+        .accessibilityIdentifier("home-profile-avatar")
     }
 
     private func dashboardScroll(_ dashboard: HomeDashboardDTO) -> some View {

@@ -48,6 +48,13 @@ struct HomeSampleHarness: View {
             return session
         }
 
+        session.me = MeResponse(
+            userId: "sample-user",
+            displayName: "Logan Norman",
+            memberWalletAddress: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+            profilePhotoUrl: scenario == .empty ? nil : ProfileSampleHarness.samplePhotoURL()?.absoluteString
+        )
+
         session.platformBalance = PlatformBalanceDTO(
             availableUsdcMicros: 248_500_000,
             memberWalletAddress: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
