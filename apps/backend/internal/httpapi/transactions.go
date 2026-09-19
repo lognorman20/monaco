@@ -347,7 +347,14 @@ func (h *TransactionHandlers) authorizeGroupMember(ctx context.Context, accessTo
 	if err != nil {
 		return "", err
 	}
-	if !found || group.CreatorUserID != user.ID {
+	if !found {
+		return "", app.ErrGroupNotFound
+	}
+	member, err := h.Store.IsGroupMember(ctx, group.ID, user.ID)
+	if err != nil {
+		return "", err
+	}
+	if !member {
 		return "", app.ErrGroupNotFound
 	}
 

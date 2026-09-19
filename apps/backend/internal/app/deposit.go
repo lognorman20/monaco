@@ -287,7 +287,12 @@ func (d *DepositService) CreateDeposit(ctx context.Context, accessToken string, 
 		logDepositBranchWarn("deposit create rejected", "group not found", "group_id", groupID, "user_id", user.ID)
 		return CreateDepositResult{}, ErrGroupNotFound
 	}
-	if group.CreatorUserID != user.ID {
+	member, err := d.store.IsGroupMember(ctx, group.ID, user.ID)
+	if err != nil {
+		logDepositBranchError("deposit create membership check failed", err, "group_id", groupID, "user_id", user.ID)
+		return CreateDepositResult{}, err
+	}
+	if !member {
 		logDepositBranchWarn("deposit create rejected", "not group member", "group_id", groupID, "user_id", user.ID)
 		return CreateDepositResult{}, ErrNotGroupMember
 	}
@@ -593,7 +598,14 @@ func (d *DepositService) GetTreasuryUSDCBalance(ctx context.Context, accessToken
 	if err != nil {
 		return 0, "", err
 	}
-	if !found || group.CreatorUserID != user.ID {
+	if !found {
+		return 0, "", ErrGroupNotFound
+	}
+	member, err := d.store.IsGroupMember(ctx, group.ID, user.ID)
+	if err != nil {
+		return 0, "", err
+	}
+	if !member {
 		return 0, "", ErrGroupNotFound
 	}
 
