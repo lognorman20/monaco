@@ -12,7 +12,7 @@ struct PotSectionView: View {
     var body: some View {
         Section {
             if pot.isEmpty {
-                Text("No holdings yet. Add money to get started.")
+                Text("No holdings yet. Fund this cabal to get started.")
                     .font(.footnote)
                     .foregroundStyle(MonacoTheme.secondaryText)
             } else {

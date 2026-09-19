@@ -1,23 +1,23 @@
 import SwiftUI
 import UIKit
 
-/// Add money — inbound USDC lands in account balance; fund a cabal separately.
+/// Deposit — inbound USDC lands in account balance; fund a cabal separately.
 struct DepositView: View {
     @ObservedObject var auth: PrivyAuthService
-    let groupId: String
     var joinedCabals: [HomeGroupBoardRowDTO] = []
+    var preselectedGroupId: String?
 
     private let apiClient = MonacoAPIClient()
 
     @State private var depositAddress: String?
     @State private var errorMessage: String?
     @State private var isLoading = true
-    @State private var didCopy = false
+    @State private var toast: MonacoToast?
 
     var body: some View {
         Form {
             Section {
-                Text("Send USDC on Solana to your deposit address. It stays in your account balance until you choose a cabal to fund.")
+                Text("Send USDC on Solana to your deposit address. It stays in your account balance until you fund a cabal.")
                     .monacoSecondaryCaption()
             }
 
@@ -56,22 +56,25 @@ struct DepositView: View {
                 stepRow(number: 3, text: "Fund a cabal to move USDC into its treasury and credit your share.")
             }
 
-            Section("Fund a cabal") {
-                NavigationLink {
-                    FundCabalView(
-                        auth: auth,
-                        joinedCabals: joinedCabals,
-                        preselectedGroupId: groupId
-                    )
-                } label: {
-                    Label("Choose cabal and amount", systemImage: "arrow.right.circle")
+            if !joinedCabals.isEmpty {
+                Section("Fund a cabal") {
+                    NavigationLink {
+                        FundCabalView(
+                            auth: auth,
+                            joinedCabals: joinedCabals,
+                            preselectedGroupId: preselectedGroupId
+                        )
+                    } label: {
+                        Label("Choose cabal and amount", systemImage: "arrow.right.circle")
+                    }
+                    .accessibilityIdentifier("deposit-fund-cabal-link")
                 }
-                .accessibilityIdentifier("deposit-fund-cabal-link")
             }
         }
         .monacoFormScreen()
-        .navigationTitle("Add money")
+        .navigationTitle("Deposit")
         .navigationBarTitleDisplayMode(.inline)
+        .monacoToast($toast)
         .task(id: auth.accessToken) {
             await loadDepositAddress()
         }
@@ -86,22 +89,13 @@ struct DepositView: View {
                     copyAddress(address)
                 }
 
-            HStack {
-                Button {
-                    copyAddress(address)
-                } label: {
-                    Label(didCopy ? "Copied" : "Copy address", systemImage: didCopy ? "checkmark" : "doc.on.doc")
-                }
-                .buttonStyle(.monacoSecondary)
-                .accessibilityIdentifier("deposit-address-copy-button")
-
-                if didCopy {
-                    Text("Copied")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(MonacoTheme.success)
-                        .accessibilityIdentifier("deposit-address-copied-feedback")
-                }
+            Button {
+                copyAddress(address)
+            } label: {
+                Label("Copy address", systemImage: "doc.on.doc")
             }
+            .buttonStyle(.monacoSecondary)
+            .accessibilityIdentifier("deposit-address-copy-button")
         }
     }
 
@@ -119,11 +113,7 @@ struct DepositView: View {
 
     private func copyAddress(_ address: String) {
         UIPasteboard.general.string = address
-        didCopy = true
-        Task {
-            try? await Task.sleep(for: .seconds(2))
-            didCopy = false
-        }
+        toast = MonacoToast(message: "Address copied.", isSuccess: true)
     }
 
     private func loadDepositAddress() async {
@@ -160,6 +150,6 @@ struct DepositView: View {
 
 #Preview {
     NavigationStack {
-        DepositView(auth: PrivyAuthService(), groupId: "00000000-0000-0000-0000-000000000001")
+        DepositView(auth: PrivyAuthService())
     }
 }

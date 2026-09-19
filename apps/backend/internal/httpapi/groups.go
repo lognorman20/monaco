@@ -613,6 +613,10 @@ func (h *GroupHandlers) WithdrawToBalanceHandler(w http.ResponseWriter, r *http.
 			logJSONError(ctx, log, "redeem_in_progress", w, http.StatusConflict, "withdraw already in progress", "group_id", groupID)
 			return
 		}
+		if errors.Is(err, app.ErrQuoteNotRoutable) {
+			logJSONError(ctx, log, "quote_not_routable", w, http.StatusBadRequest, err.Error(), "group_id", groupID)
+			return
+		}
 		logJSONError(ctx, log, "withdraw_to_balance_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
 		return
 	}

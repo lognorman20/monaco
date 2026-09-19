@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -263,6 +264,10 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 		Taker:     treasury.SolanaAddress,
 	})
 	if err != nil {
+		if errors.Is(err, jupiter.ErrNoRoute) || errors.Is(err, jupiter.ErrBelowMinimumSize) {
+			logSwapRefusal(req.GroupID, req.UserID, req.Symbol, err.Error())
+			return SellToUSDCResult{}, ErrQuoteNotRoutable
+		}
 		logSwapBranchError("swap sell quote failed", err,
 			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
 			"stage", "quote_sell", "taker", treasury.SolanaAddress, "input_mint", req.InputMint, "amount", req.Amount)

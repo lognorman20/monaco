@@ -176,6 +176,56 @@ RETURNING user_id, group_id, share_units, amount_deposited, amount_withdrawn`
 	return row, nil
 }
 
+// CreditPositionShareUnitsTx row-locks a position and credits share_units without touching amount_deposited.
+func (s *Store) CreditPositionShareUnitsTx(ctx context.Context, tx *sql.Tx, userID, groupID string, shareUnits int64) (PositionRow, error) {
+	if userID == "" || groupID == "" {
+		return PositionRow{}, fmt.Errorf("user_id and group_id are required")
+	}
+	if shareUnits <= 0 {
+		return PositionRow{}, fmt.Errorf("share units must be positive")
+	}
+
+	const lockSQL = `
+SELECT user_id, group_id, share_units, amount_deposited, amount_withdrawn
+FROM positions
+WHERE user_id = $1 AND group_id = $2
+FOR UPDATE`
+
+	var locked PositionRow
+	err := tx.QueryRowContext(ctx, lockSQL, userID, groupID).Scan(
+		&locked.UserID,
+		&locked.GroupID,
+		&locked.ShareUnits,
+		&locked.AmountDeposited,
+		&locked.AmountWithdrawn,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PositionRow{}, fmt.Errorf("position not found")
+	}
+	if err != nil {
+		return PositionRow{}, fmt.Errorf("lock position: %w", err)
+	}
+
+	const updateSQL = `
+UPDATE positions
+SET share_units = share_units + $3
+WHERE user_id = $1 AND group_id = $2
+RETURNING user_id, group_id, share_units, amount_deposited, amount_withdrawn`
+
+	var row PositionRow
+	err = tx.QueryRowContext(ctx, updateSQL, userID, groupID, shareUnits).Scan(
+		&row.UserID,
+		&row.GroupID,
+		&row.ShareUnits,
+		&row.AmountDeposited,
+		&row.AmountWithdrawn,
+	)
+	if err != nil {
+		return PositionRow{}, fmt.Errorf("credit position share units: %w", err)
+	}
+	return row, nil
+}
+
 // DebitPositionShareUnitsTx row-locks a position and debits share_units without touching amount_withdrawn.
 func (s *Store) DebitPositionShareUnitsTx(ctx context.Context, tx *sql.Tx, userID, groupID string, shareUnits int64) (PositionRow, error) {
 	if userID == "" || groupID == "" {

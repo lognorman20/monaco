@@ -139,6 +139,10 @@ func (r *RedeemService) WithdrawToBalance(ctx context.Context, req WithdrawToBal
 	}
 	defer release()
 
+	if resumed, handled, err := r.reconcileActiveRedeemBeforeWithdraw(ctx, user.ID, req.GroupID, memberWallet); handled {
+		return resumed, err
+	}
+
 	treasury, found, err := r.store.GetTreasuryByGroupID(ctx, req.GroupID)
 	if err != nil {
 		return RedeemJobView{}, err
@@ -365,6 +369,9 @@ func (r *RedeemService) continueRedeemJob(ctx context.Context, view RedeemJobVie
 	if view.Status == domain.RedeemJobDebited {
 		if err := r.sellRedeemSliceIfNeeded(ctx, &view); err != nil {
 			logRedeemBranchError("redeem sell slice failed", err, "job_id", view.ID)
+			if abortErr := r.abortRedeemJob(ctx, view); abortErr != nil {
+				logRedeemBranchError("redeem abort after sell failed", abortErr, "job_id", view.ID)
+			}
 			return view, err
 		}
 	}
@@ -392,6 +399,27 @@ func (r *RedeemService) continueRedeemJob(ctx context.Context, view RedeemJobVie
 }
 
 func (r *RedeemService) sellRedeemSliceIfNeeded(ctx context.Context, view *RedeemJobView) error {
+	treasury, err := r.privy.EnsureTreasury(ctx, privy.GroupID(view.GroupID))
+	if err != nil {
+		return err
+	}
+
+	treasuryUsdc, err := r.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
+	if err != nil {
+		return fmt.Errorf("treasury usdc balance: %w", err)
+	}
+	if treasuryUsdc >= view.SliceUsdc {
+		slog.Info("redeem sell slice skipped", "job_id", view.ID, "reason", "treasury usdc covers slice",
+			"treasury_usdc", treasuryUsdc, "slice_usdc", view.SliceUsdc)
+		prev := view.Status
+		if err := r.store.UpdateRedeemJobStatus(ctx, view.ID, string(domain.RedeemJobPaying)); err != nil {
+			return err
+		}
+		view.Status = domain.RedeemJobPaying
+		logRedeemStatusTransition(view.ID, string(prev), string(view.Status))
+		return nil
+	}
+
 	holdings, err := r.store.ListNetTokenHoldingsByGroup(ctx, view.GroupID)
 	if err != nil {
 		return err
@@ -413,11 +441,6 @@ func (r *RedeemService) sellRedeemSliceIfNeeded(ctx context.Context, view *Redee
 	}
 	totalSharesMicro += view.ShareUnits
 
-	treasury, err := r.privy.EnsureTreasury(ctx, privy.GroupID(view.GroupID))
-	if err != nil {
-		return err
-	}
-
 	for _, holding := range holdings {
 		sellAmount := jupiter.RedeemSliceSellAmount(holding.Amount, view.ShareUnits, totalSharesMicro)
 		if sellAmount <= 0 {
@@ -431,9 +454,11 @@ func (r *RedeemService) sellRedeemSliceIfNeeded(ctx context.Context, view *Redee
 			InputMint: holding.Mint,
 			Amount:    sellAmount,
 		}); err != nil {
+			if errors.Is(err, ErrQuoteNotRoutable) {
+				return fmt.Errorf("%w: stock sell below swap minimum; try a larger amount or wait for more USDC in the pot", ErrQuoteNotRoutable)
+			}
 			return fmt.Errorf("sell redeem slice: %w", err)
 		}
-		_ = treasury
 	}
 
 	prev := view.Status
@@ -626,6 +651,80 @@ func (r *RedeemService) resolveRedeemShares(ctx context.Context, req RedeemReque
 		return 0, 0, 0, fmt.Errorf("%w: share amount out of range", ErrInvalidRedeemRequest)
 	}
 	return shareUnits, potNav, totalShares, nil
+}
+
+// reconcileActiveRedeemBeforeWithdraw clears stuck debited jobs or resumes in-flight payout work.
+func (r *RedeemService) reconcileActiveRedeemBeforeWithdraw(ctx context.Context, userID, groupID, payoutAddress string) (RedeemJobView, bool, error) {
+	job, found, err := r.store.GetActiveRedeemJobForUser(ctx, userID, groupID)
+	if err != nil {
+		return RedeemJobView{}, false, err
+	}
+	if !found {
+		return RedeemJobView{}, false, nil
+	}
+
+	status, err := domain.ParseRedeemJobStatus(job.Status)
+	if err != nil {
+		return RedeemJobView{}, false, err
+	}
+
+	position, hasPosition, err := r.store.GetPosition(ctx, userID, groupID)
+	if err != nil {
+		return RedeemJobView{}, false, err
+	}
+	if !hasPosition {
+		position = postgres.PositionRow{UserID: userID, GroupID: groupID}
+	}
+	view := redeemJobFromRow(job, positionFromRowPostgres(position))
+
+	switch status {
+	case domain.RedeemJobDebited:
+		slog.Warn("redeem abort stuck debited job before new withdraw", "job_id", job.ID, "user_id", userID, "group_id", groupID)
+		if err := r.abortRedeemJob(ctx, view); err != nil {
+			return RedeemJobView{}, false, err
+		}
+		return RedeemJobView{}, false, nil
+	case domain.RedeemJobSelling, domain.RedeemJobPaying:
+		proof := privy.PayoutProof{PayoutAddress: payoutAddress}
+		if proof.PayoutAddress == "" {
+			proof.PayoutAddress = job.PayoutAddress
+		}
+		result, err := r.continueRedeemJob(ctx, view, proof)
+		return result, true, err
+	default:
+		return RedeemJobView{}, false, fmt.Errorf("unsupported active redeem job status %q", job.Status)
+	}
+}
+
+func (r *RedeemService) abortRedeemJob(ctx context.Context, view RedeemJobView) error {
+	if view.Status != domain.RedeemJobDebited {
+		return fmt.Errorf("cannot abort redeem job in status %q", view.Status)
+	}
+
+	tx, err := r.store.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err := r.store.CreditPositionShareUnitsTx(ctx, tx, view.UserID, view.GroupID, view.ShareUnits); err != nil {
+		return err
+	}
+	if err := r.store.DeleteRedeemJobTx(ctx, tx, view.ID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit abort redeem job: %w", err)
+	}
+	committed = true
+
+	slog.Info("redeem job aborted", "job_id", view.ID, "user_id", view.UserID, "group_id", view.GroupID, "share_units", view.ShareUnits)
+	return nil
 }
 
 func redeemJobFromRow(row postgres.RedeemJobRow, position Position) RedeemJobView {

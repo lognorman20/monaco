@@ -46,4 +46,45 @@ final class DisplayFormatterTests: XCTestCase {
         // Assert
         XCTAssertEqual(formatted, "42.5%")
     }
+
+    func testUsdAmountFormatter_formatsDecimalStringAsCurrency() {
+        XCTAssertEqual(UsdAmountFormatter.format(decimalString: "2100.05"), "$2,100.05")
+    }
+
+    func testUsdAmountFormatter_formatsMicrosAsCurrency() {
+        XCTAssertEqual(UsdAmountFormatter.format(micros: 2_100_050_000), "$2,100.05")
+    }
+
+    func testStakeWithdrawConverter_shareMicros_scalesWithUsdTarget() {
+        let shares = StakeWithdrawConverter.shareMicros(
+            forUsdMicros: 1_050_025_000,
+            totalEquityUsdMicros: 2_100_050_000,
+            maxShareMicros: 2_100_050
+        )
+        XCTAssertEqual(shares, 1_050_025)
+    }
+
+    func testStakeWithdrawConverter_fullWithdraw_returnsMaxShares() {
+        XCTAssertTrue(
+            StakeWithdrawConverter.isFullWithdraw(
+                selectedUsdMicros: 2_100_050_000,
+                totalEquityUsdMicros: 2_100_050_000
+            )
+        )
+        XCTAssertEqual(
+            StakeWithdrawConverter.shareMicros(
+                forUsdMicros: 2_100_050_000,
+                totalEquityUsdMicros: 2_100_050_000,
+                maxShareMicros: 2_100_050
+            ),
+            2_100_050
+        )
+    }
+
+    func testStakeWithdrawConverter_usdMicrosForFraction_atMax_returnsFullEquity() {
+        XCTAssertEqual(
+            StakeWithdrawConverter.usdMicros(forFraction: 1, maxUsdMicros: 2_100_050_000),
+            2_100_050_000
+        )
+    }
 }

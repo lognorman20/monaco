@@ -322,15 +322,177 @@ func TestLeaveGroup_withWithdrawStake_zeroSharesThenLeaves(t *testing.T) {
 	}
 }
 
-func TestWithdrawToBalance_rejectsConcurrentJob(t *testing.T) {
+func TestWithdrawToBalance_abortsStuckDebitedJob_allowsRetry(t *testing.T) {
 	t.Parallel()
 
 	h := integrationApp(t)
 	ctx := context.Background()
+	governance := NewGovernanceService(h.Store, h.Privy)
+	governance.SetRedeemService(h.Redeem)
+
+	token := privy.AccessToken(h.ISO.UniqueToken("withdraw-stuck"))
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-stuck", "Stuck User")
+	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-stuck"), DefaultGroupRules())
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	h.ISO.TrackGroup(group.GroupID)
+
+	const userShares = int64(1_000_000)
+	tx, err := h.Store.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if _, err := h.Store.IncrementPositionTx(ctx, tx, session.UserID, group.GroupID, userShares, userShares); err != nil {
+		t.Fatalf("IncrementPositionTx: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit position: %v", err)
+	}
+
+	if _, _, err := h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
+		GroupID:          group.GroupID,
+		Amount:           500_000,
+		InputMint:        jupiter.USDCMint,
+		OutputMint:       jupiter.AAPLxMint,
+		TxSignature:      testTxSignature(h.ISO, "withdraw-stuck-buy"),
+		ExecuteRequestID: testRequestID(h.ISO, "withdraw-stuck-buy"),
+		CostBasisPrice:   500_000,
+		CostBasisAmount:  500_000,
+	}); err != nil {
+		t.Fatalf("confirm buy: %v", err)
+	}
+	seedTestTreasuryUSDC(t, h.Privy, group.TreasuryAddress, 100_000)
+
+	partial := int64(200_000)
+	_, err = h.Redeem.WithdrawToBalance(ctx, WithdrawToBalanceRequest{
+		AccessToken:       string(token),
+		GroupID:           group.GroupID,
+		ShareAmountMicros: &partial,
+	})
+	if !errors.Is(err, ErrQuoteNotRoutable) {
+		t.Fatalf("WithdrawToBalance err = %v, want ErrQuoteNotRoutable", err)
+	}
+
+	positionAfterFail, _, err := h.Store.GetPosition(ctx, session.UserID, group.GroupID)
+	if err != nil {
+		t.Fatalf("GetPosition after fail: %v", err)
+	}
+	if positionAfterFail.ShareUnits != userShares {
+		t.Fatalf("share_units after fail = %d, want %d (shares restored after abort)", positionAfterFail.ShareUnits, userShares)
+	}
+
+	active, err := h.Store.HasActiveRedeemJobForUser(ctx, session.UserID, group.GroupID)
+	if err != nil {
+		t.Fatalf("HasActiveRedeemJobForUser: %v", err)
+	}
+	if active {
+		t.Fatal("expected stuck redeem job cleared after abort-on-failure")
+	}
+
+	seedTestTreasuryUSDC(t, h.Privy, group.TreasuryAddress, 500_000)
+
+	job, err := h.Redeem.WithdrawToBalance(ctx, WithdrawToBalanceRequest{
+		AccessToken:       string(token),
+		GroupID:           group.GroupID,
+		ShareAmountMicros: &partial,
+	})
+	if err != nil {
+		t.Fatalf("WithdrawToBalance retry: %v", err)
+	}
+	if job.Status != domain.RedeemJobSettled {
+		t.Fatalf("retry status = %q, want settled", job.Status)
+	}
+}
+
+func TestWithdrawToBalance_partialUsdcOnly_skipsStockSell(t *testing.T) {
+	t.Parallel()
+
+	h := integrationApp(t)
+	ctx := context.Background()
+	governance := NewGovernanceService(h.Store, h.Privy)
+	governance.SetRedeemService(h.Redeem)
+
+	token := privy.AccessToken(h.ISO.UniqueToken("withdraw-usdc-only"))
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-usdc-only", "USDC Only User")
+	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-usdc-only"), DefaultGroupRules())
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	h.ISO.TrackGroup(group.GroupID)
+
+	const userShares = int64(500_000)
+	tx, err := h.Store.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if _, err := h.Store.IncrementPositionTx(ctx, tx, session.UserID, group.GroupID, userShares, userShares); err != nil {
+		t.Fatalf("IncrementPositionTx user: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit user position: %v", err)
+	}
+
+	otherUser, err := h.Store.UpsertUser(ctx, h.ISO.UniquePrivyID("withdraw-usdc-only-other"), "Other")
+	if err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	h.ISO.TrackUser(otherUser.ID)
+	tx2, err := h.Store.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx other: %v", err)
+	}
+	if err := h.Store.InsertGroupMemberTx(ctx, tx2, group.GroupID, otherUser.ID); err != nil {
+		t.Fatalf("InsertGroupMemberTx: %v", err)
+	}
+	if _, err := h.Store.IncrementPositionTx(ctx, tx2, otherUser.ID, group.GroupID, userShares, userShares); err != nil {
+		t.Fatalf("IncrementPositionTx other: %v", err)
+	}
+	if err := tx2.Commit(); err != nil {
+		t.Fatalf("commit other position: %v", err)
+	}
+
+	if _, _, err := h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
+		GroupID:          group.GroupID,
+		Amount:           500_000,
+		InputMint:        jupiter.USDCMint,
+		OutputMint:       jupiter.AAPLxMint,
+		TxSignature:      testTxSignature(h.ISO, "withdraw-usdc-only-buy"),
+		ExecuteRequestID: testRequestID(h.ISO, "withdraw-usdc-only-buy"),
+		CostBasisPrice:   500_000,
+		CostBasisAmount:  500_000,
+	}); err != nil {
+		t.Fatalf("confirm buy: %v", err)
+	}
+	seedTestTreasuryUSDC(t, h.Privy, group.TreasuryAddress, 1_000_000)
+
+	partial := int64(100_000)
+	job, err := h.Redeem.WithdrawToBalance(ctx, WithdrawToBalanceRequest{
+		AccessToken:       string(token),
+		GroupID:           group.GroupID,
+		ShareAmountMicros: &partial,
+	})
+	if err != nil {
+		t.Fatalf("WithdrawToBalance: %v", err)
+	}
+	if job.Status != domain.RedeemJobSettled {
+		t.Fatalf("status = %q, want settled", job.Status)
+	}
+	if job.SliceUsdc < 100_000 {
+		t.Fatalf("slice_usdc = %d, want at least dust minimum", job.SliceUsdc)
+	}
+}
+
+func TestWithdrawToBalance_clearsDebitedJobBeforeNewWithdraw(t *testing.T) {
+	t.Parallel()
+
+	h := integrationApp(t)
+	ctx := context.Background()
+	governance := NewGovernanceService(h.Store, h.Privy)
+	governance.SetRedeemService(h.Redeem)
 
 	token := privy.AccessToken(h.ISO.UniqueToken("withdraw-lock"))
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-lock", "Lock User")
-	governance := NewGovernanceService(h.Store, h.Privy)
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-lock"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -363,11 +525,16 @@ func TestWithdrawToBalance_rejectsConcurrentJob(t *testing.T) {
 		t.Fatalf("commit lock job: %v", err)
 	}
 
-	_, err = h.Redeem.WithdrawToBalance(ctx, WithdrawToBalanceRequest{
+	seedTestTreasuryUSDC(t, h.Privy, group.TreasuryAddress, 1_000_000)
+
+	job, err := h.Redeem.WithdrawToBalance(ctx, WithdrawToBalanceRequest{
 		AccessToken: string(token),
 		GroupID:     group.GroupID,
 	})
-	if !errors.Is(err, ErrRedeemAlreadyInProgress) {
-		t.Fatalf("WithdrawToBalance err = %v, want ErrRedeemAlreadyInProgress", err)
+	if err != nil {
+		t.Fatalf("WithdrawToBalance err = %v, want success after clearing debited job", err)
+	}
+	if job.Status != domain.RedeemJobSettled {
+		t.Fatalf("status = %q, want settled", job.Status)
 	}
 }

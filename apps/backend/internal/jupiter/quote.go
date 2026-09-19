@@ -258,6 +258,10 @@ func (c *HTTPClient) fetchBuyOrder(ctx context.Context, req buyOrderRequest, gro
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
+		if routedErr := orderResponseBuildError(body); routedErr != nil {
+			logOrderHTTPFailure(groupID, userID, symbol, req, c.payer, resp.StatusCode, body, routedErr)
+			return nil, routedErr
+		}
 		apiErr := fmt.Errorf("jupiter: order status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 		logOrderHTTPFailure(groupID, userID, symbol, req, c.payer, resp.StatusCode, body, apiErr)
 		return nil, apiErr
