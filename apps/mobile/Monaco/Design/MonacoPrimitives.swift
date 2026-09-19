@@ -1,23 +1,10 @@
 import SwiftUI
 
-/// Light gray sheet with a grayscale wash at the top.
+/// Flat paper canvas behind every screen. No gradient.
 struct MonacoCanvasBackground: View {
     var body: some View {
-        ZStack(alignment: .top) {
-            MonacoTheme.canvas
-            LinearGradient(
-                stops: [
-                    .init(color: MonacoTheme.canvasWash, location: 0),
-                    .init(color: MonacoTheme.canvasWash.opacity(0.28), location: 0.55),
-                    .init(color: MonacoTheme.canvas.opacity(0), location: 1),
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 128)
-            .allowsHitTesting(false)
-        }
-        .ignoresSafeArea()
+        MonacoTheme.canvas
+            .ignoresSafeArea()
     }
 }
 
@@ -61,6 +48,7 @@ struct MonacoSearchField: View {
 }
 
 /// Large-radius surface. Hairline only — no decorative shadow.
+@available(*, deprecated, message: "Use MonacoGroupedList, or a surface-filled VStack.")
 struct MonacoCard<Content: View>: View {
     @ViewBuilder var content: Content
 
@@ -80,6 +68,7 @@ struct MonacoCard<Content: View>: View {
 }
 
 /// Filter / range pill.
+@available(*, deprecated, message: "Use MonacoSegmented, or a 44pt chip built on surfaceSunken.")
 struct MonacoChip: View {
     let title: String
     var isSelected: Bool = false
@@ -120,6 +109,7 @@ struct MonacoHeroHeader: View {
 }
 
 /// Image-or-mark + title + trailing metric.
+@available(*, deprecated, message: "Use MonacoRow inside MonacoGroupedList.")
 struct MonacoRowCard<Leading: View>: View {
     let title: String
     let subtitle: String?
@@ -197,6 +187,7 @@ struct MonacoRowCard<Leading: View>: View {
 }
 
 /// SF Symbol tile used as the default `MonacoRowCard` leading mark.
+@available(*, deprecated, message: "Use CabalMark or StockMark.")
 struct MonacoRowIcon: View {
     let systemImage: String
 
@@ -210,6 +201,7 @@ struct MonacoRowIcon: View {
     }
 }
 
+@available(*, deprecated, message: "Use MonacoRow inside MonacoGroupedList.")
 extension MonacoRowCard where Leading == MonacoRowIcon {
     init(
         systemImage: String,

@@ -261,9 +261,9 @@ final class GroupsTabDTOTests: XCTestCase {
 
     func testSignedUsdFormatter_formatsGainsLossesAndZero() {
         XCTAssertEqual(SignedUsdFormatter.format("+48.20"), "+$48.20")
-        XCTAssertEqual(SignedUsdFormatter.format("-3.10"), "-$3.10")
+        XCTAssertEqual(SignedUsdFormatter.format("-3.10"), "\u{2212}$3.10")
         XCTAssertEqual(SignedUsdFormatter.format("+1234.5"), "+$1,234.50")
-        XCTAssertEqual(SignedUsdFormatter.format("-0.00"), "+$0.00")
+        XCTAssertEqual(SignedUsdFormatter.format("-0.00"), "$0.00")
     }
 
     func testSignedUsdFormatter_isLossOnlyBelowZero() {
