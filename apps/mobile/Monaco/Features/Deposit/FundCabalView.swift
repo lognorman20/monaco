@@ -60,6 +60,10 @@ struct FundCabalView: View {
                     cabalPicker
                 }
 
+                if let balance {
+                    PlatformBalanceCard(balance: balance)
+                }
+
                 if isLoadingBalance {
                     ProgressView()
                         .tint(MonacoTheme.accent)
