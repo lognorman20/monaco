@@ -151,6 +151,13 @@ final class ProposeFlowSampleUITests: XCTestCase {
         }
     }
 
+    /// With the keyboard up, the reason field sits fully above the pinned Review button.
+    private func assertAboveReview(_ field: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+        let review = app.buttons["Review"]
+        XCTAssertTrue(field.isHittable, "reason field is covered", file: file, line: line)
+        XCTAssertLessThanOrEqual(field.frame.maxY, review.frame.minY, "reason field runs under Review", file: file, line: line)
+    }
+
     func testBuy_threeSteps_sendsToCabal() throws {
         let propose = element("group-action-propose")
         XCTAssertTrue(propose.waitForExistence(timeout: 10))
@@ -170,6 +177,8 @@ final class ProposeFlowSampleUITests: XCTestCase {
 
         let preset = app.buttons["$50"]
         XCTAssertTrue(preset.waitForExistence(timeout: 5))
+        sleep(1)
+        capture("12a-amount-empty")
         preset.tap()
         sleep(1)
         capture("12-amount")
@@ -185,6 +194,9 @@ final class ProposeFlowSampleUITests: XCTestCase {
         let thesis = element("proposal-thesis-field")
         XCTAssertTrue(thesis.waitForExistence(timeout: 3))
         thesis.typeText("Earnings Thursday.")
+        sleep(1)
+        assertAboveReview(thesis)
+        capture("13b-amount-reason")
 
         app.buttons["Review"].tap()
         let send = app.buttons["Send to cabal"]
@@ -220,6 +232,7 @@ final class ProposeFlowSampleUITests: XCTestCase {
         thesis.tap()
         thesis.typeText("Take some profit before earnings.")
         sleep(1)
+        assertAboveReview(thesis)
         capture("21-sell-amount")
 
         app.buttons["Review"].tap()

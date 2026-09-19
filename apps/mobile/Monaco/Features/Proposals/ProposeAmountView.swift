@@ -51,32 +51,10 @@ struct ProposeAmountView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: MonacoTheme.Space.l) {
-                header
-                AmountEntry(
-                    amountText: $amountText,
-                    max: potUsd,
-                    presets: [.dollars(25), .dollars(50), .dollars(100), .fraction(1, label: "Max")],
-                    helper: potHelper,
-                    overLimitHelper: ProposeFlowCopy.overPot
-                )
-                .onChange(of: amountText) { _, _ in quoteError = nil }
-                reasonField
-                if let quoteError {
-                    Text(quoteError)
-                        .font(MonacoTheme.Typo.callout)
-                        .foregroundStyle(MonacoTheme.loss)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityIdentifier("proposal-quote-error")
-                }
-            }
-            .padding(.horizontal, MonacoTheme.Space.gutter)
-            .padding(.top, MonacoTheme.Space.m)
-            .padding(.bottom, MonacoTheme.Space.l)
+        ScrollViewReader { proxy in
+            form
+                .revealsWhileActive(ProposeReasonField.scrollID, isActive: reasonFocused, tracking: reason, proxy: proxy)
         }
-        .scrollDismissesKeyboard(.interactively)
         .background(MonacoTheme.canvas.ignoresSafeArea())
         .navigationTitle(ProposeFlowCopy.amountTitle)
         .navigationBarTitleDisplayMode(.inline)
@@ -105,6 +83,35 @@ struct ProposeAmountView: View {
             await loadPrice()
         }
         .accessibilityIdentifier("propose-amount")
+    }
+
+    private var form: some View {
+        ScrollView {
+            VStack(spacing: MonacoTheme.Space.l) {
+                header
+                AmountEntry(
+                    amountText: $amountText,
+                    max: potUsd,
+                    presets: [.dollars(25), .dollars(50), .dollars(100), .fraction(1, label: "Max")],
+                    helper: potHelper,
+                    overLimitHelper: ProposeFlowCopy.overPot
+                )
+                .onChange(of: amountText) { _, _ in quoteError = nil }
+                reasonField
+                if let quoteError {
+                    Text(quoteError)
+                        .font(MonacoTheme.Typo.callout)
+                        .foregroundStyle(MonacoTheme.loss)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("proposal-quote-error")
+                }
+            }
+            .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.top, MonacoTheme.Space.m)
+            .padding(.bottom, MonacoTheme.Space.l)
+        }
+        .scrollDismissesKeyboard(.interactively)
     }
 
     private var potHelper: String? {
@@ -139,26 +146,13 @@ struct ProposeAmountView: View {
     @ViewBuilder
     private var reasonField: some View {
         if showsReason || !reason.isEmpty {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-                TextField(ProposeFlowCopy.reasonPlaceholderBuy, text: $reason, axis: .vertical)
-                    .font(MonacoTheme.Typo.body)
-                    .foregroundStyle(MonacoTheme.ink)
-                    .lineLimit(3...8)
-                    .focused($reasonFocused)
-                    .padding(MonacoTheme.Space.m)
-                    .background(MonacoTheme.surfaceSunken, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous)
-                            .strokeBorder(reasonFocused ? MonacoTheme.ink : .clear, lineWidth: 1)
-                    }
-                    .accessibilityIdentifier("proposal-thesis-field")
-                if ProposeFlowCopy.reasonLength(reason) >= ProposeFlowCopy.reasonCounterFrom {
-                    Text(ProposeFlowCopy.reasonCounter(ProposeFlowCopy.reasonLength(reason)))
-                        .font(MonacoTheme.Typo.caption.monospacedDigit())
-                        .foregroundStyle(reasonTooLong ? MonacoTheme.loss : MonacoTheme.muted)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-            }
+            ProposeReasonField(
+                placeholder: ProposeFlowCopy.reasonPlaceholderBuy,
+                text: $reason,
+                focused: $reasonFocused,
+                lineLimit: 3...8,
+                identifier: "proposal-thesis-field"
+            )
         } else {
             Button {
                 withAnimation(.snappy) { showsReason = true }
@@ -218,6 +212,45 @@ struct ProposeAmountView: View {
             quoteError = ProposeErrorCopy.quote(error)
             Haptics.warning()
         }
+    }
+}
+
+/// The optional reason on a buy or sell amount step: a growing field on `surfaceSunken` with an ink
+/// stroke while focused, and a counter once the reason nears the limit. Tagged `scrollID` so the step
+/// can keep it above the keyboard and the pinned Review button.
+struct ProposeReasonField: View {
+    static let scrollID = "propose-reason"
+
+    let placeholder: String
+    @Binding var text: String
+    var focused: FocusState<Bool>.Binding
+    let lineLimit: ClosedRange<Int>
+    let identifier: String
+
+    private var length: Int { ProposeFlowCopy.reasonLength(text) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            TextField(placeholder, text: $text, axis: .vertical)
+                .font(MonacoTheme.Typo.body)
+                .foregroundStyle(MonacoTheme.ink)
+                .lineLimit(lineLimit)
+                .focused(focused)
+                .padding(MonacoTheme.Space.m)
+                .background(MonacoTheme.surfaceSunken, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous)
+                        .strokeBorder(focused.wrappedValue ? MonacoTheme.ink : .clear, lineWidth: 1)
+                }
+                .accessibilityIdentifier(identifier)
+            if length >= ProposeFlowCopy.reasonCounterFrom {
+                Text(ProposeFlowCopy.reasonCounter(length))
+                    .font(MonacoTheme.Typo.caption.monospacedDigit())
+                    .foregroundStyle(length > ProposeFlowCopy.reasonMax ? MonacoTheme.loss : MonacoTheme.muted)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+        .id(Self.scrollID)
     }
 }
 

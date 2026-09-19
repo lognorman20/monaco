@@ -121,6 +121,7 @@ struct ProposeSellAmountView: View {
     @State private var isQuoting = false
     @State private var errorMessage: String?
     @State private var review: ProposeSellReview?
+    @FocusState private var reasonFocused: Bool
 
     init(service: ProposeService, groupId: String, holding: PotRowDTO, pot: ProposePot?, onProposed: @escaping (_ proposalId: String) -> Void) {
         self.service = service
@@ -166,6 +167,38 @@ struct ProposeSellAmountView: View {
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
+            form
+                .revealsWhileActive(ProposeReasonField.scrollID, isActive: reasonFocused, tracking: reason, proxy: proxy)
+        }
+        .background(MonacoTheme.canvas.ignoresSafeArea())
+        .navigationTitle(ProposeFlowCopy.amountTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: amountText) { _, _ in errorMessage = nil }
+        .safeAreaInset(edge: .bottom) {
+            BottomCTA {
+                Button {
+                    Task { await fetchQuote() }
+                } label: {
+                    ZStack {
+                        Text(ProposeFlowCopy.review).opacity(isQuoting ? 0 : 1)
+                        if isQuoting { ProgressView().tint(MonacoTheme.primaryButtonLabel) }
+                    }
+                }
+                .buttonStyle(.monacoPrimary)
+                .disabled(tokenAmount == nil || isQuoting || reasonTooLong)
+                .accessibilityIdentifier("proposal-sell-quote")
+            }
+        }
+        .navigationDestination(item: $review) { review in
+            ProposeSellReviewView(service: service, groupId: groupId, review: review, onProposed: onProposed)
+        }
+        .task {
+            if pot == nil { pot = try? await service.pot(groupId: groupId) }
+        }
+    }
+
+    private var form: some View {
         ScrollView {
             VStack(spacing: MonacoTheme.Space.xl) {
                 HStack(spacing: MonacoTheme.Space.sm) {
@@ -201,19 +234,13 @@ struct ProposeSellAmountView: View {
                     }
                 }
 
-                TextField(ProposeFlowCopy.reasonPlaceholderSell, text: $reason, axis: .vertical)
-                    .font(MonacoTheme.Typo.body)
-                    .lineLimit(2...6)
-                    .padding(MonacoTheme.Space.m)
-                    .background(MonacoTheme.surfaceSunken, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous))
-                    .accessibilityIdentifier("proposal-sell-thesis-field")
-
-                if ProposeFlowCopy.reasonLength(reason) >= ProposeFlowCopy.reasonCounterFrom {
-                    Text(ProposeFlowCopy.reasonCounter(ProposeFlowCopy.reasonLength(reason)))
-                        .font(MonacoTheme.Typo.caption.monospacedDigit())
-                        .foregroundStyle(reasonTooLong ? MonacoTheme.loss : MonacoTheme.muted)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
+                ProposeReasonField(
+                    placeholder: ProposeFlowCopy.reasonPlaceholderSell,
+                    text: $reason,
+                    focused: $reasonFocused,
+                    lineLimit: 2...6,
+                    identifier: "proposal-sell-thesis-field"
+                )
 
                 if let errorMessage {
                     Text(errorMessage)
@@ -228,31 +255,6 @@ struct ProposeSellAmountView: View {
             .padding(.bottom, MonacoTheme.Space.l)
         }
         .scrollDismissesKeyboard(.interactively)
-        .background(MonacoTheme.canvas.ignoresSafeArea())
-        .navigationTitle(ProposeFlowCopy.amountTitle)
-        .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: amountText) { _, _ in errorMessage = nil }
-        .safeAreaInset(edge: .bottom) {
-            BottomCTA {
-                Button {
-                    Task { await fetchQuote() }
-                } label: {
-                    ZStack {
-                        Text(ProposeFlowCopy.review).opacity(isQuoting ? 0 : 1)
-                        if isQuoting { ProgressView().tint(MonacoTheme.primaryButtonLabel) }
-                    }
-                }
-                .buttonStyle(.monacoPrimary)
-                .disabled(tokenAmount == nil || isQuoting || reasonTooLong)
-                .accessibilityIdentifier("proposal-sell-quote")
-            }
-        }
-        .navigationDestination(item: $review) { review in
-            ProposeSellReviewView(service: service, groupId: groupId, review: review, onProposed: onProposed)
-        }
-        .task {
-            if pot == nil { pot = try? await service.pot(groupId: groupId) }
-        }
     }
 
     private func fetchQuote() async {
