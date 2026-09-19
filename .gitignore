@@ -13,7 +13,7 @@ xcuserdata/
 DerivedData/
 build/
 .build/
-.cursor/hooks/*
+.cursor/hooks/
 .tmp*
 .worktrees/
 .logs/
