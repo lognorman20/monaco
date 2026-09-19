@@ -77,7 +77,7 @@ struct MonacoRootAppearanceModifier: ViewModifier {
 }
 
 extension View {
-    /// Paper white + top peach wash. Apply once at a screen root.
+    /// Gray sheet + top grayscale wash. Apply once at a screen root.
     func monacoCanvas() -> some View {
         background { MonacoCanvasBackground() }
     }

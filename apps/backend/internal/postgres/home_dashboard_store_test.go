@@ -61,15 +61,36 @@ func TestListMissedOpenProposalsForUser_excludesVotedAndExpired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
-	openProposal, err := store.InsertProposalTx(ctx, tx, groupID, user.ID, "AAPL", 1_000_000, time.Now().Add(24*time.Hour))
+	openProposal, err := store.InsertProposalTx(ctx, tx, InsertProposalParams{
+		GroupID:    groupID,
+		ProposerID: user.ID,
+		Symbol:     "AAPL",
+		Kind:       domain.ProposalKindBuy,
+		UsdcMicros: 1_000_000,
+		ExpiresAt:  time.Now().Add(24 * time.Hour),
+	})
 	if err != nil {
 		t.Fatalf("InsertProposalTx open: %v", err)
 	}
-	votedProposal, err := store.InsertProposalTx(ctx, tx, groupID, user.ID, "TSLA", 1_000_000, time.Now().Add(24*time.Hour))
+	votedProposal, err := store.InsertProposalTx(ctx, tx, InsertProposalParams{
+		GroupID:    groupID,
+		ProposerID: user.ID,
+		Symbol:     "TSLA",
+		Kind:       domain.ProposalKindBuy,
+		UsdcMicros: 1_000_000,
+		ExpiresAt:  time.Now().Add(24 * time.Hour),
+	})
 	if err != nil {
 		t.Fatalf("InsertProposalTx voted: %v", err)
 	}
-	_, err = store.InsertProposalTx(ctx, tx, groupID, user.ID, "MSFT", 1_000_000, time.Now().Add(-time.Hour))
+	_, err = store.InsertProposalTx(ctx, tx, InsertProposalParams{
+		GroupID:    groupID,
+		ProposerID: user.ID,
+		Symbol:     "MSFT",
+		Kind:       domain.ProposalKindBuy,
+		UsdcMicros: 1_000_000,
+		ExpiresAt:  time.Now().Add(-time.Hour),
+	})
 	if err != nil {
 		t.Fatalf("InsertProposalTx expired: %v", err)
 	}

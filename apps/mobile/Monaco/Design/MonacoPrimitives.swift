@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Paper-white sheet with a kiln peach wash at the top (Orbix / Sujon grammar).
+/// Light gray sheet with a grayscale wash at the top.
 struct MonacoCanvasBackground: View {
     var body: some View {
         ZStack(alignment: .top) {
@@ -125,6 +125,8 @@ struct MonacoRowCard: View {
     let title: String
     let subtitle: String?
     let trailing: String?
+    var subtitleColor: Color = MonacoTheme.muted
+    var trailingColor: Color = MonacoTheme.ink
 
     var body: some View {
         HStack(spacing: MonacoTheme.Space.m) {
@@ -141,14 +143,14 @@ struct MonacoRowCard: View {
                 if let subtitle, !subtitle.isEmpty {
                     Text(subtitle)
                         .font(MonacoTheme.TypeRole.caption)
-                        .foregroundStyle(MonacoTheme.muted)
+                        .foregroundStyle(subtitleColor)
                 }
             }
             Spacer(minLength: 8)
             if let trailing, !trailing.isEmpty {
                 Text(trailing)
                     .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(MonacoTheme.ink)
+                    .foregroundStyle(trailingColor)
             }
         }
         .padding(MonacoTheme.Space.m)

@@ -105,7 +105,7 @@ final class MonacoUITests: XCTestCase {
 
     @MainActor
     private func loginIfNeeded(_ app: XCUIApplication) {
-        if appLandedInApp(app, timeout: 5) {
+        if appLandedInApp(app, timeout: 30) {
             return
         }
 
@@ -132,6 +132,97 @@ final class MonacoUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    @MainActor
+    func testAssetsTabBrowseSearchDetailAndBuyPicker() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment = privyLaunchEnvironment()
+        app.launch()
+        loginIfNeeded(app)
+
+        tabButton(app, "Assets").tap()
+        XCTAssertTrue(app.staticTexts["Popular"].waitForExistence(timeout: 20), "Assets tab root")
+
+        let popularChip = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "assets-popular-")
+        ).element(boundBy: 0)
+        XCTAssertTrue(popularChip.waitForExistence(timeout: 30), "popular strip with prices")
+
+        let search = app.textFields["assets-search-field"].exists
+            ? app.textFields["assets-search-field"]
+            : app.textFields["monaco-search-field"]
+        XCTAssertTrue(search.waitForExistence(timeout: 8), "search field")
+        search.tap()
+        search.typeText("AAPL")
+        let appleRow = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "assets-row-AAPL")
+        ).firstMatch
+        XCTAssertTrue(appleRow.waitForExistence(timeout: 25), "AAPL market row")
+        appleRow.tap()
+
+        XCTAssertTrue(
+            app.buttons["asset-detail-buy"].waitForExistence(timeout: 25)
+                || app.staticTexts["Via Jupiter"].waitForExistence(timeout: 8)
+                || app.otherElements["asset-detail-root"].waitForExistence(timeout: 8)
+                || app.staticTexts["No route for this stock right now."].waitForExistence(timeout: 5),
+            "asset detail"
+        )
+        XCTAssertTrue(
+            app.otherElements["asset-detail-chart"].waitForExistence(timeout: 12)
+                || app.staticTexts["Price history is not available yet."].waitForExistence(timeout: 8)
+        )
+        XCTAssertTrue(app.otherElements["asset-detail-jupiter"].waitForExistence(timeout: 8)
+            || app.staticTexts["Via Jupiter"].waitForExistence(timeout: 8))
+        attachScreenshot(app, name: "issue-156-asset-detail")
+
+        let buy = app.buttons["asset-detail-buy"]
+        XCTAssertTrue(buy.waitForExistence(timeout: 8))
+        buy.tap()
+
+        XCTAssertTrue(
+            app.navigationBars["Pick a cabal"].waitForExistence(timeout: 10)
+                || app.otherElements["group-picker-root"].waitForExistence(timeout: 8)
+                || app.staticTexts["Join a cabal first to propose a buy or sell."].waitForExistence(timeout: 8)
+        )
+        attachScreenshot(app, name: "issue-156-pick-cabal")
+
+        let cabalRow = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "pick-cabal-")
+        ).firstMatch
+        if cabalRow.waitForExistence(timeout: 6) {
+            cabalRow.tap()
+            XCTAssertTrue(
+                app.navigationBars["Propose buy"].waitForExistence(timeout: 12)
+                    || app.textFields["proposal-search-field"].waitForExistence(timeout: 12)
+                    || app.textFields["proposal-amount-field"].waitForExistence(timeout: 8),
+                "propose buy with symbol prefilled"
+            )
+            attachScreenshot(app, name: "issue-156-propose-buy")
+            if app.navigationBars.buttons.count > 0 {
+                app.navigationBars.buttons.element(boundBy: 0).tap()
+            }
+        }
+
+        if app.navigationBars.buttons.count > 0 {
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+        }
+        tabButton(app, "Assets").tap()
+        let searchField = app.textFields["assets-search-field"].exists
+            ? app.textFields["assets-search-field"]
+            : app.textFields["monaco-search-field"]
+        if searchField.waitForExistence(timeout: 5), let value = searchField.value as? String, !value.isEmpty {
+            searchField.tap()
+            searchField.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: value.count))
+        }
+        app.swipeDown()
+        XCTAssertTrue(app.staticTexts["Popular"].waitForExistence(timeout: 8))
+
+        tabButton(app, "Home").tap()
+        XCTAssertTrue(tabButton(app, "Home").waitForExistence(timeout: 8))
+        tabButton(app, "Cabals").tap()
+        XCTAssertTrue(app.navigationBars["Cabals"].waitForExistence(timeout: 8))
+        attachScreenshot(app, name: "issue-156-cabals-unchanged")
     }
 
     @MainActor

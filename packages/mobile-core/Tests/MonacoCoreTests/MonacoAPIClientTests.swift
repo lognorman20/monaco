@@ -150,6 +150,114 @@ final class MonacoAPIClientTests: XCTestCase {
         XCTAssertEqual(series.points, [])
     }
 
+    func testAPIClient_listMarketAssets_callsV1Assets() async throws {
+        var capturedPath: String?
+        var capturedQuery: String?
+        let fixtureURL = try XCTUnwrap(
+            Bundle.module.url(forResource: "market_assets", withExtension: "json")
+        )
+        let fixtureData = try Data(contentsOf: fixtureURL)
+        MockURLProtocol.requestHandler = { request in
+            capturedPath = request.url?.path
+            capturedQuery = request.url?.query
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, fixtureData)
+        }
+        let client = MonacoAPIClient(
+            baseURL: URL(string: "https://api.test")!,
+            session: makeMockURLSession(),
+            accessTokenProvider: { TestFixtures.fixtureSessionToken }
+        )
+        let page = try await client.listMarketAssets(query: "AAPL", limit: 25, offset: 0)
+        XCTAssertEqual(capturedPath, "/v1/assets")
+        XCTAssertTrue(capturedQuery?.contains("query=AAPL") == true)
+        XCTAssertEqual(page.assets.count, 1)
+        XCTAssertTrue(page.hasMore)
+    }
+
+    func testAPIClient_getPopularAssets_callsV1AssetsPopular() async throws {
+        var capturedPath: String?
+        MockURLProtocol.requestHandler = { request in
+            capturedPath = request.url?.path
+            let body = #"{"assets":[]}"#
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, Data(body.utf8))
+        }
+        let client = MonacoAPIClient(
+            baseURL: URL(string: "https://api.test")!,
+            session: makeMockURLSession(),
+            accessTokenProvider: { TestFixtures.fixtureSessionToken }
+        )
+        let popular = try await client.getPopularAssets(limit: 10)
+        XCTAssertEqual(capturedPath, "/v1/assets/popular")
+        XCTAssertEqual(popular.assets, [])
+    }
+
+    func testAPIClient_getMarketAsset_callsV1AssetsSymbol() async throws {
+        var capturedPath: String?
+        let fixtureURL = try XCTUnwrap(
+            Bundle.module.url(forResource: "market_asset_detail", withExtension: "json")
+        )
+        let fixtureData = try Data(contentsOf: fixtureURL)
+        MockURLProtocol.requestHandler = { request in
+            capturedPath = request.url?.path
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, fixtureData)
+        }
+        let client = MonacoAPIClient(
+            baseURL: URL(string: "https://api.test")!,
+            session: makeMockURLSession(),
+            accessTokenProvider: { TestFixtures.fixtureSessionToken }
+        )
+        let detail = try await client.getMarketAsset(symbol: "AAPLx")
+        XCTAssertEqual(capturedPath, "/v1/assets/AAPLx")
+        XCTAssertEqual(detail.liquidity.label, "Via Jupiter")
+    }
+
+    func testAPIClient_getMarketAssetChart_callsV1AssetsChart() async throws {
+        var capturedPath: String?
+        var capturedQuery: String?
+        let fixtureURL = try XCTUnwrap(
+            Bundle.module.url(forResource: "market_asset_chart", withExtension: "json")
+        )
+        let fixtureData = try Data(contentsOf: fixtureURL)
+        MockURLProtocol.requestHandler = { request in
+            capturedPath = request.url?.path
+            capturedQuery = request.url?.query
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, fixtureData)
+        }
+        let client = MonacoAPIClient(
+            baseURL: URL(string: "https://api.test")!,
+            session: makeMockURLSession(),
+            accessTokenProvider: { TestFixtures.fixtureSessionToken }
+        )
+        let chart = try await client.getMarketAssetChart(symbol: "AAPLx", range: .oneWeek)
+        XCTAssertEqual(capturedPath, "/v1/assets/AAPLx/chart")
+        XCTAssertEqual(capturedQuery, "range=1W")
+        XCTAssertEqual(chart.points.count, 2)
+    }
+
     func testAPIClient_leaveGroup_callsV1Leave() async throws {
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 204, httpVersion: nil, headerFields: nil)!

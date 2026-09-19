@@ -20,10 +20,10 @@ struct HomeNetWorthSection<DepositLink: View>: View {
                 HStack(spacing: MonacoTheme.Space.m) {
                     Text(dashboard.netWorthDollarPnl)
                         .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(HomePnLTint.color(dashboard.netWorthDollarPnl))
+                        .foregroundStyle(MonacoTheme.signed(dashboard.netWorthDollarPnl))
                     Text(PercentReturnFormatter.format(dashboard.netWorthPercentReturn))
                         .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(MonacoTheme.muted)
+                        .foregroundStyle(MonacoTheme.signed(dashboard.netWorthPercentReturn))
                 }
             }
 
@@ -57,12 +57,6 @@ struct HomeNetWorthSection<DepositLink: View>: View {
 
 enum HomePnLTint {
     static func color(_ raw: String) -> Color {
-        if raw.hasPrefix("-") {
-            return MonacoTheme.destructive
-        }
-        if raw.hasPrefix("+"), raw != "+0.00" {
-            return MonacoTheme.success
-        }
-        return MonacoTheme.muted
+        MonacoTheme.signed(raw)
     }
 }

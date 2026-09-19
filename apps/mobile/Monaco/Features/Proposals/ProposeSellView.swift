@@ -4,6 +4,7 @@ struct ProposeSellView: View {
     @ObservedObject var auth: PrivyAuthService
     let groupId: String
     let holdings: [PotRowDTO]
+    var initialSymbol: String? = nil
 
     private let apiClient = MonacoAPIClient()
     @Environment(\.dismiss) private var dismiss
@@ -70,6 +71,13 @@ struct ProposeSellView: View {
         }
         .navigationTitle("Propose sell")
         .monacoToast($toast)
+        .task {
+            if selected == nil, let initialSymbol {
+                selected = holdings.first {
+                    $0.symbol.caseInsensitiveCompare(initialSymbol) == .orderedSame
+                }
+            }
+        }
     }
 
     private var tokenAmount: Int64? {

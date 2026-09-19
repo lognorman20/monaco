@@ -4,6 +4,11 @@ import SwiftUI
 struct HomePnLChartSection: View {
     let points: [HomePnLSeriesPointDTO]
 
+    private var chartTint: Color {
+        guard let last = points.last else { return MonacoTheme.ink }
+        return last.chartValue >= 0 ? MonacoTheme.profit : MonacoTheme.loss
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             Text("P&L · last hour")
@@ -21,12 +26,12 @@ struct HomePnLChartSection: View {
                         x: .value("Time", point.ts),
                         y: .value("P&L", point.chartValue)
                     )
-                    .foregroundStyle(MonacoTheme.accent.opacity(0.18))
+                    .foregroundStyle(chartTint.opacity(0.18))
                     LineMark(
                         x: .value("Time", point.ts),
                         y: .value("P&L", point.chartValue)
                     )
-                    .foregroundStyle(MonacoTheme.accent)
+                    .foregroundStyle(chartTint)
                     .lineStyle(StrokeStyle(lineWidth: 2))
                 }
                 .chartXAxis(.hidden)

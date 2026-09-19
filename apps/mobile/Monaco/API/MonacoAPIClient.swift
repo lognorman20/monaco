@@ -506,6 +506,117 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(SearchAssetsResponse.self, from: data)
     }
 
+    func listMarketAssets(
+        accessToken: String,
+        query: String = "",
+        limit: Int = 25,
+        offset: Int = 0
+    ) async throws -> ListMarketAssetsResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/assets"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "offset", value: String(offset)),
+        ]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(ListMarketAssetsResponse.self, from: data)
+    }
+
+    func getPopularAssets(
+        accessToken: String,
+        limit: Int = 10
+    ) async throws -> PopularAssetsResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/assets/popular"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(PopularAssetsResponse.self, from: data)
+    }
+
+    func getMarketAsset(
+        accessToken: String,
+        symbol: String
+    ) async throws -> AssetDetailDTO {
+        let url = baseURL.appending(path: "v1/assets/\(symbol)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(AssetDetailDTO.self, from: data)
+    }
+
+    func getMarketAssetChart(
+        accessToken: String,
+        symbol: String,
+        range: AssetChartRange = .oneDay
+    ) async throws -> AssetChartDTO {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/assets/\(symbol)/chart"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "range", value: range.rawValue),
+        ]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(AssetChartDTO.self, from: data)
+    }
+
     func postQuote(
         accessToken: String,
         groupId: String,

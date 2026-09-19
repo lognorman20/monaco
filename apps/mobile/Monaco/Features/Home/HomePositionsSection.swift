@@ -31,7 +31,8 @@ struct HomePositionsSection: View {
                             systemImage: "person.3.fill",
                             title: row.name,
                             subtitle: "\(UsdAmountFormatter.format(decimalString: row.equityUsd)) · \(SlicePercentFormatter.format(row.slicePercent)) of pot",
-                            trailing: "\(PercentReturnFormatter.format(row.percentReturn))  \(row.dollarPnl)"
+                            trailing: "\(PercentReturnFormatter.format(row.percentReturn))  \(row.dollarPnl)",
+                            trailingColor: MonacoTheme.signed(row.dollarPnl)
                         )
                     }
                     .buttonStyle(.plain)

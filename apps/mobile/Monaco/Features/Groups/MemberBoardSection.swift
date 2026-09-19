@@ -24,10 +24,10 @@ struct MemberBoardSection: View {
                         VStack(alignment: .trailing, spacing: 2) {
                             Text(PercentReturnFormatter.format(row.percentReturn))
                                 .font(.subheadline.monospacedDigit())
-                                .foregroundStyle(row.percentReturn == nil ? MonacoTheme.secondaryText : MonacoTheme.primaryText)
+                                .foregroundStyle(MonacoTheme.signed(row.percentReturn))
                             Text(row.dollarPnl)
                                 .font(.caption.monospacedDigit())
-                                .foregroundStyle(MonacoTheme.secondaryText)
+                                .foregroundStyle(MonacoTheme.signed(row.dollarPnl))
                         }
                     }
                     .accessibilityIdentifier("member-board-row-\(row.rank)")

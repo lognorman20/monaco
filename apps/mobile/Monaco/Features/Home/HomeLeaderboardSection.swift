@@ -44,7 +44,9 @@ struct HomeLeaderboardSection: View {
                             systemImage: "person.fill",
                             title: row.displayName,
                             subtitle: PercentReturnFormatter.format(row.percentReturn),
-                            trailing: row.dollarPnl
+                            trailing: row.dollarPnl,
+                            subtitleColor: MonacoTheme.signed(row.percentReturn),
+                            trailingColor: MonacoTheme.signed(row.dollarPnl)
                         )
                     }
                     .buttonStyle(.plain)

@@ -36,7 +36,7 @@ struct UserProfileGroupsView: View {
                                 .foregroundStyle(MonacoTheme.primaryText)
                             Text(row.dollarPnl)
                                 .font(.caption.monospacedDigit())
-                                .foregroundStyle(MonacoTheme.secondaryText)
+                                .foregroundStyle(MonacoTheme.signed(row.dollarPnl))
                         }
                     }
                 }
