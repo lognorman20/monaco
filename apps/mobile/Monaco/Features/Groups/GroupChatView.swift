@@ -26,19 +26,15 @@ struct GroupChatView: View {
             composer
         }
         .background(MonacoTheme.background)
-        .navigationTitle(GroupChatCopy.title)
+        .navigationTitle(GroupChatCopy.title(groupName: groupName))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if let groupName, !groupName.isEmpty {
-                ToolbarItem(placement: .principal) {
-                    VStack(spacing: 0) {
-                        Text(GroupChatCopy.title).font(.headline)
-                        Text(groupName)
-                            .font(.caption)
-                            .foregroundStyle(MonacoTheme.secondaryText)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
+            ToolbarItem(placement: .principal) {
+                Text(GroupChatCopy.title(groupName: groupName))
+                    .font(.headline)
+                    .foregroundStyle(MonacoTheme.ink)
+                    .lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
             }
         }
         .task {
@@ -73,10 +69,6 @@ struct GroupChatView: View {
             }
         } else if timeline.messages.isEmpty {
             statusMessage {
-                Image(systemName: "bubble.left.and.bubble.right")
-                    .font(.title2)
-                    .foregroundStyle(MonacoTheme.secondaryText)
-                    .accessibilityHidden(true)
                 Text(GroupChatCopy.emptyState)
                     .font(.subheadline)
                     .foregroundStyle(MonacoTheme.secondaryText)
@@ -93,7 +85,7 @@ struct GroupChatView: View {
     private var thread: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
+                LazyVStack(alignment: .leading, spacing: 3) {
                     if timeline.hasOlder {
                         Button {
                             Task { await loadOlder() }
@@ -115,18 +107,33 @@ struct GroupChatView: View {
 
                     ForEach(Array(timeline.messages.enumerated()), id: \.element.id) { index, message in
                         let previous = index > 0 ? timeline.messages[index - 1] : nil
+                        let next = index + 1 < timeline.messages.count ? timeline.messages[index + 1] : nil
+                        let separator = separatorLabel(for: message, previous: previous)
+                        let startsRun = separator != nil || previous?.authorId != message.authorId
+                        let endsRun = next?.authorId != message.authorId
+                            || next.map { separatorLabel(for: $0, previous: message) != nil } == true
+                        if let separator {
+                            Text(separator)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(MonacoTheme.muted)
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, index == 0 ? 8 : 16)
+                                .padding(.bottom, 4)
+                                .accessibilityIdentifier("group-chat-separator-\(message.id)")
+                        }
                         GroupChatBubble(
                             message: message,
-                            showsAuthor: !message.mine && previous?.authorId != message.authorId
+                            showsAuthor: !message.mine && startsRun,
+                            endsRun: endsRun
                         )
-                        .padding(.top, previous?.authorId == message.authorId ? 0 : 8)
+                        .padding(.top, startsRun && separator == nil ? 10 : 0)
                         .id(message.id)
                     }
 
                     Color.clear.frame(height: 1).id(Self.bottomAnchor)
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
             }
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
@@ -138,6 +145,12 @@ struct GroupChatView: View {
             }
             .accessibilityIdentifier("group-chat-thread")
         }
+    }
+
+    private func separatorLabel(for message: GroupMessageDTO, previous: GroupMessageDTO?) -> String? {
+        guard let date = message.createdAtDate else { return nil }
+        guard GroupChatCopy.showsTimeSeparator(previous: previous?.createdAtDate, current: date) else { return nil }
+        return GroupChatCopy.timeSeparatorLabel(date)
     }
 
     private func statusMessage<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -160,27 +173,28 @@ struct GroupChatView: View {
                 TextField(GroupChatCopy.composerPlaceholder, text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .focused($composerFocused)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(MonacoTheme.border, lineWidth: 1)
-                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 11)
+                    .frame(minHeight: 44)
+                    .background(MonacoTheme.border.opacity(0.45), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .accessibilityIdentifier("group-chat-composer")
 
                 Button {
                     Task { await send() }
                 } label: {
-                    if isSending {
-                        ProgressView()
-                            .tint(MonacoTheme.accent)
-                            .frame(width: 34, height: 34)
-                    } else {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 34))
-                            .foregroundStyle(canSend ? MonacoTheme.primaryButtonFill : MonacoTheme.disabled)
+                    ZStack {
+                        Circle()
+                            .fill(canSend || isSending ? MonacoTheme.primaryButtonFill : MonacoTheme.disabled)
+                        if isSending {
+                            ProgressView()
+                                .tint(MonacoTheme.primaryButtonLabel)
+                        } else {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(MonacoTheme.primaryButtonLabel)
+                        }
                     }
+                    .frame(width: 44, height: 44)
                 }
                 .disabled(!canSend)
                 .accessibilityLabel("Send message")
@@ -194,7 +208,7 @@ struct GroupChatView: View {
                     .accessibilityIdentifier("group-chat-char-count")
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(MonacoTheme.background)
         .overlay(alignment: .top) {
@@ -297,57 +311,48 @@ extension GroupChatView {
 private struct GroupChatBubble: View {
     let message: GroupMessageDTO
     let showsAuthor: Bool
+    let endsRun: Bool
 
     var body: some View {
         HStack {
-            if message.mine { Spacer(minLength: 48) }
-            VStack(alignment: message.mine ? .trailing : .leading, spacing: 3) {
+            if message.mine { Spacer(minLength: 56) }
+            VStack(alignment: message.mine ? .trailing : .leading, spacing: 4) {
                 if showsAuthor {
                     Text(message.authorName)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(MonacoTheme.secondaryText)
-                        .padding(.horizontal, 4)
+                        .foregroundStyle(MonacoTheme.muted)
+                        .padding(.horizontal, 14)
                 }
                 Text(message.body)
                     .font(.body)
-                    .foregroundStyle(message.mine ? MonacoTheme.primaryButtonLabel : MonacoTheme.primaryText)
+                    .foregroundStyle(message.mine ? MonacoTheme.primaryButtonLabel : MonacoTheme.ink)
                     .textSelection(.enabled)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
                     .background(bubbleShape.fill(message.mine ? MonacoTheme.primaryButtonFill : MonacoTheme.surface))
-                    .overlay {
-                        if !message.mine {
-                            bubbleShape.strokeBorder(MonacoTheme.border, lineWidth: 1)
-                        }
-                    }
-                if let date = message.createdAtDate {
-                    Text(Self.timestamp(date))
-                        .font(.caption2)
-                        .foregroundStyle(MonacoTheme.secondaryText)
-                        .padding(.horizontal, 4)
-                }
             }
-            if !message.mine { Spacer(minLength: 48) }
+            if !message.mine { Spacer(minLength: 56) }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
         .accessibilityIdentifier("group-chat-message-\(message.id)")
     }
 
-    private var bubbleShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
+    /// Rounded 20 all round, with a tighter corner on the sender's side at the end of a run.
+    private var bubbleShape: UnevenRoundedRectangle {
+        let tail: CGFloat = endsRun ? 6 : 20
+        return UnevenRoundedRectangle(
+            topLeadingRadius: 20,
+            bottomLeadingRadius: message.mine ? 20 : tail,
+            bottomTrailingRadius: message.mine ? tail : 20,
+            topTrailingRadius: 20,
+            style: .continuous
+        )
     }
 
     private var accessibilityText: String {
         let who = message.mine ? "You" : message.authorName
-        return "\(who): \(message.body)"
-    }
-
-    /// Local time on display; the API stores UTC.
-    private static func timestamp(_ date: Date) -> String {
-        if Calendar.current.isDateInToday(date) {
-            return date.formatted(date: .omitted, time: .shortened)
-        }
-        return date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+        guard let date = message.createdAtDate else { return "\(who): \(message.body)" }
+        return "\(who), \(date.formatted(date: .omitted, time: .shortened)): \(message.body)"
     }
 }

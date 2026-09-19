@@ -160,7 +160,8 @@ public struct GroupChatTimeline: Equatable, Sendable {
 
 /// User-facing chat copy shared by the app and copy audits.
 public enum GroupChatCopy {
-    public static let title = "Chat"
+    /// Fallback navigation title when the cabal's name isn't known yet.
+    public static let title = "Cabal chat"
     public static let emptyState = "No messages yet. Say hi to your cabal or float a stock idea before someone proposes a buy."
     public static let composerPlaceholder = "Message your cabal"
     public static let loadEarlier = "Load earlier messages"
@@ -186,6 +187,48 @@ public enum GroupChatCopy {
             }
             return "Message not sent. Check your connection and try again."
         }
+    }
+
+    /// The chat screen is titled with the cabal's own name; "Cabal chat" only when it's missing.
+    public static func title(groupName: String?) -> String {
+        let trimmed = groupName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? title : trimmed
+    }
+
+    /// Gap after which the thread shows a centred time separator instead of stamping every bubble.
+    public static let timeSeparatorGap: TimeInterval = 10 * 60
+
+    /// True for the first message and whenever more than ten minutes passed since the previous one.
+    public static func showsTimeSeparator(previous: Date?, current: Date) -> Bool {
+        guard let previous else { return true }
+        return current.timeIntervalSince(previous) > timeSeparatorGap
+    }
+
+    /// "Today 12:40", "Yesterday 9:02 AM", "Sep 14, 9:02 AM" in the viewer's local time (the API stores UTC).
+    public static func timeSeparatorLabel(
+        _ date: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        locale: Locale = .current
+    ) -> String {
+        let time = DateFormatter()
+        time.locale = locale
+        time.timeZone = calendar.timeZone
+        time.setLocalizedDateFormatFromTemplate("jmm")
+        let clock = time.string(from: date)
+        if calendar.isDate(date, inSameDayAs: now) {
+            return "Today \(clock)"
+        }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+           calendar.isDate(date, inSameDayAs: yesterday) {
+            return "Yesterday \(clock)"
+        }
+        let day = DateFormatter()
+        day.locale = locale
+        day.timeZone = calendar.timeZone
+        let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
+        day.setLocalizedDateFormatFromTemplate(sameYear ? "MMMd" : "yMMMd")
+        return "\(day.string(from: date)), \(clock)"
     }
 
     public static func loadFailure(_ error: Error) -> String {

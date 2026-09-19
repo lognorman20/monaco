@@ -19,7 +19,7 @@ enum ChatSampleQA {
             failSends: arguments.contains("-MonacoChatSampleOffline")
         )
         return NavigationStack {
-            GroupChatView(groupId: SampleGroupChatService.groupId, groupName: "Sample data · Tech Bros") { service }
+            GroupChatView(groupId: SampleGroupChatService.groupId, groupName: "Weekend investors") { service }
         }
     }
 }
@@ -38,11 +38,18 @@ private actor SampleGroupChatService: GroupChatService {
         }
         let now = Date()
         func at(_ minutesAgo: Double) -> String { Self.stamp(now.addingTimeInterval(-minutesAgo * 60)) }
+        func msg(_ id: String, _ who: String, _ name: String, _ body: String, _ minutesAgo: Double) -> GroupMessageDTO {
+            .init(id: id, groupId: Self.groupId, authorId: who, authorName: name, body: body, createdAt: at(minutesAgo), mine: who == "u-me")
+        }
         messages = [
-            .init(id: "s1", groupId: Self.groupId, authorId: "u-ana", authorName: "Ana", body: "Apple reports Thursday. Anyone want in before?", createdAt: at(42), mine: false),
-            .init(id: "s2", groupId: Self.groupId, authorId: "u-ana", authorName: "Ana", body: "Thinking $50 from the pot.", createdAt: at(41), mine: false),
-            .init(id: "s3", groupId: Self.groupId, authorId: "u-me", authorName: "You", body: "I'm in. Propose it and I'll vote yes.", createdAt: at(30), mine: true),
-            .init(id: "s4", groupId: Self.groupId, authorId: "u-leo", authorName: "Leo", body: "Tesla instead? Or split it.", createdAt: at(12), mine: false),
+            msg("s1", "u-ana", "Ana", "Apple reports Thursday. Anyone want in before?", 1_210),
+            msg("s2", "u-ana", "Ana", "Thinking $50 from the pot.", 1_209),
+            msg("s3", "u-leo", "Leo", "Tesla instead? Or split it.", 1_195),
+            msg("s4", "u-me", "You", "I'd rather do Apple first. Smaller swings for our first buy.", 1_190),
+            msg("s5", "u-mia", "Mia", "Agree. Nvidia can be next.", 95),
+            msg("s6", "u-ana", "Ana", "Proposing Apple now. $50.", 12),
+            msg("s7", "u-me", "You", "Voted yes.", 9),
+            msg("s8", "u-me", "You", "Leo, you're the last vote.", 9),
         ]
     }
 

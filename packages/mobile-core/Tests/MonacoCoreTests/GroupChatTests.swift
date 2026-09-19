@@ -211,9 +211,54 @@ final class GroupChatCopyTests: XCTestCase {
         XCTAssertEqual(GroupChatCopy.sendFailure(GroupChatDraft.Problem.tooLong(count: 2001)), "Messages can be up to 2000 characters.")
     }
 
+    func testTitle_usesCabalNameWithFallback() {
+        XCTAssertEqual(GroupChatCopy.title(groupName: "Weekend investors"), "Weekend investors")
+        XCTAssertEqual(GroupChatCopy.title(groupName: "  "), "Cabal chat")
+        XCTAssertEqual(GroupChatCopy.title(groupName: nil), "Cabal chat")
+    }
+
+    func testShowsTimeSeparator_onlyForFirstMessageAndGapsOverTenMinutes() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertTrue(GroupChatCopy.showsTimeSeparator(previous: nil, current: start))
+        XCTAssertFalse(GroupChatCopy.showsTimeSeparator(previous: start, current: start.addingTimeInterval(600)))
+        XCTAssertTrue(GroupChatCopy.showsTimeSeparator(previous: start, current: start.addingTimeInterval(601)))
+    }
+
+    func testTimeSeparatorLabel_todayYesterdayAndOlder() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let locale = Locale(identifier: "en_US_POSIX")
+        let now = ISO8601DateFormatter().date(from: "2026-09-18T15:00:00Z")!
+        let today = ISO8601DateFormatter().date(from: "2026-09-18T12:40:00Z")!
+        let yesterday = ISO8601DateFormatter().date(from: "2026-09-17T09:02:00Z")!
+        let older = ISO8601DateFormatter().date(from: "2026-09-14T09:02:00Z")!
+        let lastYear = ISO8601DateFormatter().date(from: "2025-12-30T21:15:00Z")!
+
+        XCTAssertEqual(plain(GroupChatCopy.timeSeparatorLabel(today, now: now, calendar: calendar, locale: locale)), "Today 12:40 PM")
+        XCTAssertEqual(plain(GroupChatCopy.timeSeparatorLabel(yesterday, now: now, calendar: calendar, locale: locale)), "Yesterday 9:02 AM")
+        XCTAssertEqual(plain(GroupChatCopy.timeSeparatorLabel(older, now: now, calendar: calendar, locale: locale)), "Sep 14, 9:02 AM")
+        XCTAssertEqual(plain(GroupChatCopy.timeSeparatorLabel(lastYear, now: now, calendar: calendar, locale: locale)), "Dec 30, 2025, 9:15 PM")
+    }
+
+    func testTimeSeparatorLabel_usesViewerTimeZone() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        let locale = Locale(identifier: "en_US_POSIX")
+        let now = ISO8601DateFormatter().date(from: "2026-09-18T20:00:00Z")!
+        let stamp = ISO8601DateFormatter().date(from: "2026-09-18T16:30:00Z")!
+
+        XCTAssertEqual(plain(GroupChatCopy.timeSeparatorLabel(stamp, now: now, calendar: calendar, locale: locale)), "Today 9:30 AM")
+    }
+
+    /// DateFormatter puts a narrow no-break space before AM/PM; compare with plain spaces.
+    private func plain(_ label: String) -> String {
+        label.replacingOccurrences(of: "\u{202F}", with: " ")
+    }
+
     func testChatCopy_passesMainFlowAudit() {
         XCTAssertTrue(MainFlowCopyAudit.stringsAreClean([
             GroupChatCopy.title,
+            GroupChatCopy.title(groupName: "Weekend investors"),
             GroupChatCopy.emptyState,
             GroupChatCopy.composerPlaceholder,
             GroupChatCopy.loadEarlier,
