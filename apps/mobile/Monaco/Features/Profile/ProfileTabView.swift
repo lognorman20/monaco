@@ -84,6 +84,8 @@ struct ProfileTabView: View {
                     onLeft: { await session.refresh(auth: auth) }
                 )
 
+                accountActions
+
                 if let errorMessage = session.errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .font(MonacoTheme.TypeRole.caption)
@@ -154,6 +156,39 @@ struct ProfileTabView: View {
                             .foregroundStyle(MonacoTheme.muted)
                     }
                 }
+            }
+        }
+    }
+
+    private var accountActions: some View {
+        MonacoCard {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+                NavigationLink {
+                    WithdrawView(auth: auth)
+                } label: {
+                    Label("Withdraw", systemImage: "arrow.up.right")
+                        .foregroundStyle(MonacoTheme.primaryText)
+                }
+                .accessibilityIdentifier("profile-withdraw-link")
+
+                Divider().overlay(MonacoTheme.hairline)
+
+                NavigationLink {
+                    AdvancedSettingsView()
+                } label: {
+                    Label("Advanced", systemImage: "link")
+                        .foregroundStyle(MonacoTheme.primaryText)
+                }
+                .accessibilityIdentifier("profile-advanced-link")
+
+                Divider().overlay(MonacoTheme.hairline)
+
+                Button("Sign out") {
+                    Task { await auth.logout() }
+                }
+                .buttonStyle(.monacoDestructive)
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("profile-sign-out")
             }
         }
     }

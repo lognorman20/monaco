@@ -37,14 +37,6 @@ struct MainTabView: View {
                 Label("Assets", systemImage: "chart.pie")
                     .accessibilityIdentifier("tab-assets")
             }
-
-            NavigationStack {
-                SettingsView(auth: auth)
-            }
-            .tabItem {
-                Label("Settings", systemImage: "gearshape")
-                    .accessibilityIdentifier("tab-settings")
-            }
         }
         .tint(MonacoTheme.ink)
     }
