@@ -271,7 +271,7 @@ extension ProposalCardView where Destination == EmptyView {
     }
 }
 
-/// Dots (up to 12 voters) and "2 of 5 voted · 3 yes to pass". Ink = yes, loss outline = no,
+/// Dots (up to 12 voters) and "2 of 5 voted · 3 yes to pass". Brand = yes, loss outline = no,
 /// hairline = still to vote. Green stays reserved for profit.
 struct ProposalVoteTally: View {
     let progress: ProposalVoteProgress
@@ -311,7 +311,7 @@ private struct VoteDot: View {
 
     var body: some View {
         Circle()
-            .fill(dot == .yes ? MonacoTheme.ink : Color.clear)
+            .fill(dot == .yes ? MonacoTheme.brand : Color.clear)
             .overlay {
                 Circle().strokeBorder(stroke, lineWidth: dot == .no ? 1.5 : 1)
             }
@@ -321,7 +321,7 @@ private struct VoteDot: View {
 
     private var stroke: Color {
         switch dot {
-        case .yes: MonacoTheme.ink
+        case .yes: MonacoTheme.brand
         case .no: MonacoTheme.loss
         case .pending: MonacoTheme.tertiaryText.opacity(0.7)
         }

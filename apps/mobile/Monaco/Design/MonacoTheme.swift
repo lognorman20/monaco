@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Shared visual tokens: warm paper, ink, and colour only for money and cabal identity.
+/// Shared visual tokens: cool paper, deep ink, one electric-blue brand accent, and vivid money colour.
 ///
 /// - `background` / `canvas` — warm paper sheet, flat
 /// - `surface` — cards, grouped lists, sheets, tab bar
@@ -14,56 +14,109 @@ import UIKit
 /// - `warning` — amber, pending and after-hours states
 /// - `CabalTint` — pastel identity fills, only inside marks and the cabal hero
 enum MonacoTheme {
-    static let background = Color.adaptive(light: 0xF4F3EF, dark: 0x121211)
+    // MARK: Surfaces
+
+    /// Cool very-light gray sheet in light; true rich dark in dark.
+    static let background = Color.adaptive(light: 0xF5F7FA, dark: 0x0A0D14)
 
     static let canvas = background
 
     /// Kept for source compatibility. The gradient wash is gone; this is the flat canvas.
     static let canvasWash = canvas
 
-    static let surface = Color.adaptive(light: 0xFCFBF8, dark: 0x1C1C1A)
+    /// Crisp white cards on the cool canvas; raised ink panels in dark.
+    static let surface = Color.adaptive(light: 0xFFFFFF, dark: 0x121826)
 
     /// Field fill, segmented track, skeleton base, idle chip fill.
-    static let surfaceSunken = Color.adaptive(light: 0xECEAE4, dark: 0x262623)
+    static let surfaceSunken = Color.adaptive(light: 0xEDF1F7, dark: 0x1B2334)
 
-    static let primaryText = Color.adaptive(light: 0x161613, dark: 0xF2F1EC)
+    static let primaryText = Color.adaptive(light: 0x0B1220, dark: 0xF3F6FB)
 
     static let ink = primaryText
 
-    static let secondaryText = Color.adaptive(light: 0x6B6A64, dark: 0x9F9D96)
+    static let secondaryText = Color.adaptive(light: 0x5B6880, dark: 0x94A2BC)
 
     static let muted = secondaryText
 
     /// Timestamps and placeholders.
-    static let tertiaryText = Color.adaptive(light: 0x9C9A93, dark: 0x6E6C66)
+    static let tertiaryText = Color.adaptive(light: 0x8C99AE, dark: 0x64718A)
 
-    static let border = Color.adaptive(light: 0xE3E1DA, dark: 0x2E2D2A)
+    static let border = Color.adaptive(light: 0xE3E8F0, dark: 0x232C40)
 
     static let hairline = border
 
-    static let primaryButtonFill = ink
+    // MARK: Brand
 
-    static let primaryButtonLabel = Color.adaptive(light: 0xFCFBF8, dark: 0x161613)
+    /// The one brand accent: electric blue. Primary buttons, selected tab, links, focus rings,
+    /// selected segments, the "Yes" vote, my chat bubbles, progress and vote dots.
+    /// Brand blue never means gain — that is `profit`.
+    static let brand = Color.adaptive(light: 0x1652F0, dark: 0x3B7BFF)
+
+    /// Button/chip fill. Deeper than `brand` in dark so white labels clear AA (4.64:1).
+    static let brandFill = Color.adaptive(light: 0x1652F0, dark: 0x2C6BF5)
+
+    /// Label on `brandFill`. White both modes: 6.00:1 light, 4.64:1 dark.
+    static let onBrand = Color.white
+
+    /// Tinted chip / selected-row wash under brand text.
+    static let brandWash = Color.adaptive(light: 0x1652F0, lightAlpha: 0.10, dark: 0x3B7BFF, darkAlpha: 0.18)
+
+    // MARK: Dark "money" hero cards (premium even in light mode)
+
+    /// Deep ink card base for the Home net-worth hero and the cabal hero.
+    static let heroInk = Color.adaptive(light: 0x0B1220, dark: 0x151D30)
+
+    /// Very subtle top-left radial highlight on the hero card. No purple, no glass.
+    static let heroInkHighlight = Color.adaptive(light: 0x2A3A5C, lightAlpha: 0.55, dark: 0x31415F, darkAlpha: 0.55)
+
+    /// Primary text on a hero card.
+    static let onHero = Color.white
+
+    /// Captions on a hero card.
+    static let onHeroMuted = Color.white.opacity(0.62)
+
+    /// Divider inside a hero card.
+    static let onHeroHairline = Color.white.opacity(0.14)
+
+    // MARK: Money
+
+    /// Signed P&L text. Deep enough to clear AA on white (4.59:1) and vivid in dark (8.96:1).
+    static let profit = Color.adaptive(light: 0x00874D, dark: 0x1FD286)
+
+    static let loss = Color.adaptive(light: 0xDC2F33, dark: 0xFF5A5F)
+
+    /// Saturated P&L for chart strokes/fills and figures sitting on a dark hero card,
+    /// where the background carries the contrast (6.8:1 on `heroInk`).
+    static let profitVivid = Color.adaptive(light: 0x00B368, dark: 0x1FD286)
+
+    static let lossVivid = Color.adaptive(light: 0xE5383B, dark: 0xFF5A5F)
+
+    /// `PnLBadge` background on gains.
+    static let profitWash = Color.adaptive(light: 0x00874D, lightAlpha: 0.14, dark: 0x1FD286, darkAlpha: 0.20)
+
+    /// `PnLBadge` background on losses.
+    static let lossWash = Color.adaptive(light: 0xDC2F33, lightAlpha: 0.12, dark: 0xFF5A5F, darkAlpha: 0.20)
+
+    /// `PnLBadge` on a dark hero card: the wash must read on ink, not on paper.
+    static let profitWashOnHero = Color.adaptive(light: 0x1FD286, lightAlpha: 0.20, dark: 0x1FD286, darkAlpha: 0.20)
+
+    static let lossWashOnHero = Color.adaptive(light: 0xFF5A5F, lightAlpha: 0.22, dark: 0xFF5A5F, darkAlpha: 0.22)
+
+    // MARK: Roles
+
+    static let primaryButtonFill = brandFill
+
+    static let primaryButtonLabel = onBrand
 
     static let secondaryButtonFill = surface
 
     static let secondaryButtonLabel = primaryText
 
-    static let profit = Color.adaptive(light: 0x0E7C4A, dark: 0x3CCB7F)
-
-    static let loss = Color.adaptive(light: 0xC0392B, dark: 0xFF6B5E)
-
-    /// `PnLBadge` background on gains.
-    static let profitWash = Color.adaptive(light: 0x0E7C4A, lightAlpha: 0.12, dark: 0x3CCB7F, darkAlpha: 0.18)
-
-    /// `PnLBadge` background on losses.
-    static let lossWash = Color.adaptive(light: 0xC0392B, lightAlpha: 0.10, dark: 0xFF6B5E, darkAlpha: 0.18)
-
     static let destructive = loss
 
-    static let accent = ink
+    static let accent = brand
 
-    static let disabled = Color.adaptive(light: 0xB9B7B0, dark: 0x4A4945)
+    static let disabled = Color.adaptive(light: 0xC2CAD8, dark: 0x3A4459)
 
     static let success = profit
 
@@ -96,29 +149,48 @@ enum MonacoTheme {
         return muted
     }
 
-    /// Pastel identity tints. Picked from the group id, never from the name, so a rename keeps the colour.
+    /// Saturated identity tints. Picked from the group id, never from the name, so a rename keeps the colour.
+    /// Every `fill` carries white initials at AA; `soft` is the low-alpha wash for tinted areas that
+    /// still hold ink text. No purple, and nothing close to brand blue or profit green.
     enum CabalTint: CaseIterable {
         case sage, peach, butter, clay, sky
 
-        /// Tile, hero and strip background.
+        /// Mark tile, accent stripe, chart key.
         var fill: Color {
             switch self {
-            case .sage: return Color.adaptive(light: 0xDCE8D6, dark: 0x2A3A2C)
-            case .peach: return Color.adaptive(light: 0xF6DDCB, dark: 0x43301F)
-            case .butter: return Color.adaptive(light: 0xF1E7C2, dark: 0x3E3820)
-            case .clay: return Color.adaptive(light: 0xEAD6CF, dark: 0x3E2A25)
-            case .sky: return Color.adaptive(light: 0xD5E3EA, dark: 0x223540)
+            case .sage: return Color.adaptive(light: 0x0D7D74, dark: 0x10938A)
+            case .peach: return Color.adaptive(light: 0xC2570C, dark: 0xD9681A)
+            case .butter: return Color.adaptive(light: 0xA16207, dark: 0xBC7A10)
+            case .clay: return Color.adaptive(light: 0xBE3455, dark: 0xD44467)
+            case .sky: return Color.adaptive(light: 0x17627D, dark: 0x1E7A99)
             }
         }
 
-        /// Chart line colour for this cabal. Deeper than `fill` so a 2pt line reads on paper.
+        /// Initials and glyphs drawn on `fill`.
+        var onFill: Color { .white }
+
+        /// Low-alpha wash of `fill` for tinted surfaces that still carry ink text.
+        var soft: Color { fill.opacity(0.12) }
+
+        /// Brighter than `fill` so the tint still reads as a mark or stripe on a deep ink hero card.
+        var onInk: Color {
+            switch self {
+            case .sage: return Color(hex: 0x2CC3B4)
+            case .peach: return Color(hex: 0xFF9248)
+            case .butter: return Color(hex: 0xEBB13C)
+            case .clay: return Color(hex: 0xFF6C8B)
+            case .sky: return Color(hex: 0x46B3DB)
+            }
+        }
+
+        /// Chart line colour for this cabal.
         var stroke: Color {
             switch self {
-            case .sage: return Color.adaptive(light: 0x5E7F55, dark: 0x9CC392)
-            case .peach: return Color.adaptive(light: 0xB9724A, dark: 0xF0B08A)
-            case .butter: return Color.adaptive(light: 0x9A8230, dark: 0xE3CD7A)
-            case .clay: return Color.adaptive(light: 0x94604F, dark: 0xD9A596)
-            case .sky: return Color.adaptive(light: 0x4E7A91, dark: 0x93BED3)
+            case .sage: return Color.adaptive(light: 0x0D7D74, dark: 0x2CC3B4)
+            case .peach: return Color.adaptive(light: 0xC2570C, dark: 0xFF9248)
+            case .butter: return Color.adaptive(light: 0xA16207, dark: 0xEBB13C)
+            case .clay: return Color.adaptive(light: 0xBE3455, dark: 0xFF6C8B)
+            case .sky: return Color.adaptive(light: 0x17627D, dark: 0x46B3DB)
             }
         }
 
@@ -136,6 +208,11 @@ enum MonacoTheme {
         /// Background fill for a cabal: `CabalTint.forGroupId(groupId).fill`.
         static func fill(forGroupId groupId: String) -> Color {
             forGroupId(groupId).fill
+        }
+
+        /// Low-alpha wash for a cabal: `CabalTint.forGroupId(groupId).soft`.
+        static func soft(forGroupId groupId: String) -> Color {
+            forGroupId(groupId).soft
         }
 
         /// Chart line colour for a cabal: `CabalTint.forGroupId(groupId).stroke`.
@@ -208,6 +285,11 @@ enum MonacoTheme {
 }
 
 extension Color {
+    /// A single fixed colour from an 0xRRGGBB literal — same in both schemes.
+    init(hex: UInt32, alpha: Double = 1) {
+        self.init(uiColor: UIColor(hex: hex, alpha: alpha))
+    }
+
     /// Light/dark pair from 0xRRGGBB literals.
     static func adaptive(light: UInt32, lightAlpha: Double = 1, dark: UInt32, darkAlpha: Double = 1) -> Color {
         Color(

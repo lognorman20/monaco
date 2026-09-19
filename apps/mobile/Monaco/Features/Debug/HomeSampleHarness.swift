@@ -73,7 +73,7 @@ struct HomeSampleHarness: View {
                 HomeMyGroupRowDTO(groupId: "g2", name: "Semis or bust", equityUsd: "400.05", slicePercent: "0.173", dollarPnl: "-15.00", percentReturn: "-0.036"),
                 HomeMyGroupRowDTO(groupId: "g3", name: "Index huggers", equityUsd: "120.00", slicePercent: "1.0", dollarPnl: "+0.00", percentReturn: nil),
             ] : [],
-            pnlSeries1H: [],
+            pnlSeries1H: joined ? HomeSampleHarness.samplePnLSeries1H() : [],
             leaderboard: HomeLeaderboardSectionDTO(
                 range: "ALL",
                 people: joined ? [
@@ -94,6 +94,34 @@ struct HomeSampleHarness: View {
             ] : []
         )
         return session
+    }
+
+    /// Sample 1H net-worth P&L curve for the Home hero chart. Deterministic, five-minute
+    /// steps back from launch, and it lands exactly on the dashboard's "+48.20" so the
+    /// curve and the badge agree. Harness-only: the app never synthesises a series.
+    static func samplePnLSeries1H(now: Date = Date()) -> [HomePnLSeriesPointDTO] {
+        let steps: [(Int, String, String)] = [
+            (12, "1212.70", "+12.40"),
+            (11, "1210.10", "+9.80"),
+            (10, "1218.50", "+18.20"),
+            (9, "1215.90", "+15.60"),
+            (8, "1224.40", "+24.10"),
+            (7, "1221.60", "+21.30"),
+            (6, "1230.20", "+29.90"),
+            (5, "1234.50", "+34.20"),
+            (4, "1231.10", "+30.80"),
+            (3, "1238.90", "+38.60"),
+            (2, "1243.40", "+43.10"),
+            (1, "1241.50", "+41.20"),
+            (0, "1248.50", "+48.20"),
+        ]
+        return steps.map { minutesAgo, equity, pnl in
+            HomePnLSeriesPointDTO(
+                ts: now.addingTimeInterval(TimeInterval(-minutesAgo * 300)),
+                equityUsd: equity,
+                dollarPnl: pnl
+            )
+        }
     }
 }
 #endif

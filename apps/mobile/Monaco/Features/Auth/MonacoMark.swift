@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The Monaco mark, drawn live: three equal circles rising left to right, overlaps knocked out,
-/// the top-right one in profit green. Same geometry as the app icon and `LaunchMark`
+/// the top-right one in brand blue. Same geometry as the app icon and `LaunchMark`
 /// (scripts/design/render-app-icon.swift). Ink on paper in light mode, paper on ink in dark.
 struct MonacoMark: View {
     var size: CGFloat = 88
@@ -22,8 +22,8 @@ struct MonacoMark: View {
             let origin = CGPoint(x: canvasSize.width / 2 - unit / 2, y: canvasSize.height / 2 - unit / 2)
             let d = Self.diameter * unit
             let g = Self.gap * unit
-            let circle = colorScheme == .dark ? Color(red: 0xF4 / 255, green: 0xF3 / 255, blue: 0xEF / 255) : Color(red: 0x16 / 255, green: 0x16 / 255, blue: 0x13 / 255)
-            let green = Color(red: 0x3C / 255, green: 0xCB / 255, blue: 0x7F / 255)
+            let circle = colorScheme == .dark ? Color(hex: 0xF3F6FB) : Color(hex: 0x0B1220)
+            let accent = colorScheme == .dark ? Color(hex: 0x3B7BFF) : Color(hex: 0x1652F0)
             context.drawLayer { layer in
                 for (index, c) in Self.centres.enumerated() {
                     let centre = CGPoint(x: origin.x + c.x * unit, y: origin.y + c.y * unit)
@@ -33,7 +33,7 @@ struct MonacoMark: View {
                         knock.fill(Path(ellipseIn: CGRect(x: centre.x - d / 2 - g, y: centre.y - d / 2 - g, width: d + 2 * g, height: d + 2 * g)), with: .color(.black))
                     }
                     layer.fill(Path(ellipseIn: CGRect(x: centre.x - d / 2, y: centre.y - d / 2, width: d, height: d)),
-                               with: .color(index == 2 ? green : circle))
+                               with: .color(index == 2 ? accent : circle))
                 }
             }
         }

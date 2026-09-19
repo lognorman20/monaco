@@ -92,18 +92,39 @@ struct AssetDetailView: View {
             }
 
             if let chart, chart.points.count >= 2 {
+                // Gain/loss over the drawn window, so the curve agrees with the figure above it.
+                let rises = (chart.points.last?.chartValue ?? 0) >= (chart.points.first?.chartValue ?? 0)
+                let tint = rises ? MonacoTheme.profitVivid : MonacoTheme.lossVivid
+                // Prices live far from zero, so the area is clipped to the series' own range.
+                let low = chart.points.map(\.chartValue).min() ?? 0
+                let high = chart.points.map(\.chartValue).max() ?? 0
+                let pad = max((high - low) * 0.12, 0.01)
+
                 Chart(chart.points) { point in
+                    AreaMark(
+                        x: .value("Time", point.date),
+                        yStart: .value("Floor", low - pad),
+                        yEnd: .value("Price", point.chartValue)
+                    )
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [tint.opacity(0.26), tint.opacity(0)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .interpolationMethod(.catmullRom)
                     LineMark(
                         x: .value("Time", point.date),
                         y: .value("Price", point.chartValue)
                     )
-                    .foregroundStyle(MonacoTheme.accent)
-                    .lineStyle(StrokeStyle(lineWidth: 2))
+                    .foregroundStyle(tint)
+                    .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                    .interpolationMethod(.catmullRom)
                 }
                 .chartXAxis(.hidden)
-                .chartYAxis {
-                    AxisMarks(position: .leading, values: .automatic(desiredCount: 3))
-                }
+                .chartYAxis(.hidden)
+                .chartYScale(domain: (low - pad)...(high + pad))
                 .frame(height: 180)
                 .accessibilityIdentifier("asset-detail-chart")
             } else {
