@@ -110,11 +110,14 @@ struct PnLBadge: View {
     private let dollarPnl: String
     private let percentReturn: String?
     private let style: MoneyStyle
+    private let onInk: Bool
 
-    init(dollarPnl: String, percentReturn: String?, style: MoneyStyle = .caption) {
+    /// `onInk` switches to the vivid pair and a wash that reads on a deep ink hero card.
+    init(dollarPnl: String, percentReturn: String?, style: MoneyStyle = .caption, onInk: Bool = false) {
         self.dollarPnl = dollarPnl
         self.percentReturn = percentReturn
         self.style = style
+        self.onInk = onInk
     }
 
     private var tone: PnLTone { PnLTone(dollarPnl: dollarPnl) }
@@ -137,13 +140,13 @@ struct PnLBadge: View {
 
     var body: some View {
         Text(label)
-            .font(style.font)
-            .foregroundStyle(tone.color)
+            .font(style.font.weight(.semibold))
+            .foregroundStyle(onInk ? tone.inkCardColor : tone.color)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
-            .padding(.horizontal, style == .caption ? 8 : 12)
-            .padding(.vertical, style == .caption ? 4 : 6)
-            .background(Capsule().fill(tone.wash))
+            .padding(.horizontal, style == .caption ? 9 : 12)
+            .padding(.vertical, style == .caption ? 5 : 6)
+            .background(Capsule().fill(onInk ? tone.inkCardWash : tone.wash))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Profit and loss")
             .accessibilityValue(PnLSpeech.badge(dollarPnl: dollarPnl, percentReturn: percentReturn))
@@ -210,6 +213,23 @@ enum PnLTone {
         case .profit: return MonacoTheme.profitWash
         case .loss: return MonacoTheme.lossWash
         case .flat: return MonacoTheme.surfaceSunken
+        }
+    }
+
+    /// Saturated pair for figures drawn on a deep ink hero card.
+    var inkCardColor: Color {
+        switch self {
+        case .profit: return MonacoTheme.profitVivid
+        case .loss: return MonacoTheme.lossVivid
+        case .flat: return MonacoTheme.onHeroMuted
+        }
+    }
+
+    var inkCardWash: Color {
+        switch self {
+        case .profit: return MonacoTheme.profitWashOnHero
+        case .loss: return MonacoTheme.lossWashOnHero
+        case .flat: return Color.white.opacity(0.12)
         }
     }
 }
