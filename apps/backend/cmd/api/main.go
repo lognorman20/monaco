@@ -45,6 +45,8 @@ var apiRoutes = []string{
 	"GET /v1/home",
 	"POST /v1/groups",
 	"POST /v1/groups/{id}/join",
+	"POST /v1/groups/{id}/leave",
+	"POST /v1/groups/{id}/withdraw-to-balance",
 	"GET /v1/groups/{id}",
 	"GET /v1/groups/{id}/view",
 	"GET /v1/groups/{id}/activity",
@@ -125,16 +127,18 @@ func boot(ctx context.Context) (*bootResult, error) {
 	home := app.NewHomeService(store, privyClient, pythClient, deposits, symbols)
 	groups := app.NewGroupService(store, privyClient)
 	governance := app.NewGovernanceService(store, privyClient)
-	auth := &httpapi.AuthHandlers{Sessions: sessions}
-	me := &httpapi.MeHandlers{Sessions: sessions}
-	homeHandlers := &httpapi.HomeHandlers{Home: home}
-	groupHandlers := &httpapi.GroupHandlers{Groups: groups, Governance: governance, Home: home}
 	depositHandlers := &httpapi.DepositHandlers{Deposits: deposits}
 	platformWithdrawHandlers := &httpapi.PlatformWithdrawHandlers{Withdrawals: platformWithdrawals}
 	xstocksResolver := xstocks.NewHTTPResolver()
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	signer := app.NewPrivyTreasurySigner(privyClient)
 	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, relayer.PrivateKey(), symbols)
+	redeem := app.NewRedeemService(store, privyClient, pythClient, jupiterClient, swap, signer)
+	governance.SetRedeemService(redeem)
+	auth := &httpapi.AuthHandlers{Sessions: sessions}
+	me := &httpapi.MeHandlers{Sessions: sessions}
+	homeHandlers := &httpapi.HomeHandlers{Home: home}
+	groupHandlers := &httpapi.GroupHandlers{Groups: groups, Governance: governance, Home: home, Redeem: redeem}
 	executeOnPass := app.NewExecuteOnPassService(swap, store)
 	governance.SetBuyService(buy)
 	governance.SetHomeService(home)
@@ -178,6 +182,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("POST /v1/groups", groupHandlers.CreateGroupHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/join", groupHandlers.JoinGroupHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/leave", groupHandlers.LeaveGroupHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/withdraw-to-balance", groupHandlers.WithdrawToBalanceHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/join-requests", groupHandlers.ListJoinRequestsHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/join-requests/{requestId}/approve", groupHandlers.ApproveJoinRequestHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/join-requests/{requestId}/deny", groupHandlers.DenyJoinRequestHandler)

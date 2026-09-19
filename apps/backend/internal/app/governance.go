@@ -14,11 +14,12 @@ import (
 	)
 
 type GovernanceService struct {
-	store *postgres.Store
-	privy privy.Client
-	buy   *BuyService
-	home  *HomeService
-	now   func() time.Time
+	store  *postgres.Store
+	privy  privy.Client
+	buy    *BuyService
+	home   *HomeService
+	redeem *RedeemService
+	now    func() time.Time
 }
 
 func NewGovernanceService(store *postgres.Store, privyClient privy.Client) *GovernanceService {
@@ -33,6 +34,11 @@ func (g *GovernanceService) SetBuyService(buy *BuyService) {
 // SetHomeService wires treasury total + reconcile for proposal create.
 func (g *GovernanceService) SetHomeService(home *HomeService) {
 	g.home = home
+}
+
+// SetRedeemService wires withdraw-to-balance for leave-with-stake.
+func (g *GovernanceService) SetRedeemService(redeem *RedeemService) {
+	g.redeem = redeem
 }
 
 // SetClock overrides time.Now for tests.
@@ -305,13 +311,23 @@ func (g *GovernanceService) decideJoinRequest(ctx context.Context, accessToken, 
 	return nil
 }
 
+// LeaveGroupRequest is input for POST /v1/groups/{id}/leave.
+type LeaveGroupRequest struct {
+	AccessToken   string
+	GroupID       string
+	WithdrawStake bool
+}
+
 // LeaveGroup removes a member when leave policy preconditions pass.
 // Positions rows are kept for deposit history; non-members are excluded from boards via group_members.
 // Creators with other members must transfer ownership before leaving.
-func (g *GovernanceService) LeaveGroup(ctx context.Context, accessToken, groupID string) error {
-	if groupID == "" {
+// When WithdrawStake is true, full stake is withdrawn to platform balance before membership removal.
+func (g *GovernanceService) LeaveGroup(ctx context.Context, req LeaveGroupRequest) error {
+	if req.GroupID == "" {
 		return fmt.Errorf("group id is required")
 	}
+	accessToken := req.AccessToken
+	groupID := req.GroupID
 	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
@@ -339,6 +355,23 @@ func (g *GovernanceService) LeaveGroup(ctx context.Context, accessToken, groupID
 	}
 	if !member {
 		return ErrNotGroupMemberForLeave
+	}
+	if req.WithdrawStake {
+		position, hasPosition, err := g.store.GetPosition(ctx, user.ID, groupID)
+		if err != nil {
+			return err
+		}
+		if hasPosition && position.ShareUnits > 0 {
+			if g.redeem == nil {
+				return fmt.Errorf("redeem service is required for withdraw stake")
+			}
+			if _, err := g.redeem.WithdrawToBalance(ctx, WithdrawToBalanceRequest{
+				AccessToken: accessToken,
+				GroupID:     groupID,
+			}); err != nil {
+				return err
+			}
+		}
 	}
 	logGovernanceLeaveGroupStart(user.ID, groupID)
 	tx, err := g.store.BeginTx(ctx)

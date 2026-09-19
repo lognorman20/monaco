@@ -197,6 +197,7 @@ func (f *fakePrivyClient) PayUSDC(ctx context.Context, req PayUSDCRequest) (PayU
 		return PayUSDCResult{}, fmt.Errorf("%w: insufficient treasury usdc", ErrAPI)
 	}
 	f.treasuryBalances[req.TreasuryAddress] = balance - req.Amount
+	f.memberBalances[req.ToAddress] += req.Amount
 	sig := deterministicTxSignature(req.TreasuryAddress, req.ToAddress, req.Amount, f.payoutCount)
 	return PayUSDCResult{TxSignature: sig}, nil
 }

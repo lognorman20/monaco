@@ -43,12 +43,16 @@ func (h *HomeService) ListGroupActivity(ctx context.Context, accessToken, groupI
 	if err != nil {
 		return nil, err
 	}
+	withdrawals, err := h.store.ListWithdrawalsByGroupID(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
 	awaitingExecute, err := h.store.ListPassedProposalsAwaitingExecuteByGroupID(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
 
-	items := make([]GroupActivityItem, 0, len(deposits)+len(transactions)+len(awaitingExecute))
+	items := make([]GroupActivityItem, 0, len(deposits)+len(transactions)+len(withdrawals)+len(awaitingExecute))
 	for _, deposit := range deposits {
 		item := GroupActivityItem{
 			ID:           deposit.ID,
@@ -65,6 +69,20 @@ func (h *HomeService) ListGroupActivity(ctx context.Context, accessToken, groupI
 	}
 	for _, tx := range transactions {
 		items = append(items, h.activityItemFromTransaction(ctx, tx))
+	}
+	for _, withdrawal := range withdrawals {
+		item := GroupActivityItem{
+			ID:           withdrawal.ID,
+			Kind:         "withdrawal",
+			Status:       withdrawal.Status,
+			Symbol:       "USDC",
+			AmountMicros: withdrawal.Amount,
+			CreatedAt:    withdrawal.CreatedAt,
+		}
+		if withdrawal.TxSignature.Valid {
+			item.TxSignature = withdrawal.TxSignature.String
+		}
+		items = append(items, item)
 	}
 	for _, proposal := range awaitingExecute {
 		items = append(items, GroupActivityItem{
