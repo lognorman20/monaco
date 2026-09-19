@@ -60,5 +60,9 @@ public enum MainFlowCopyManifest {
         "Needs your vote",
         "No shared cabals yet.",
         "Loading cabals…",
+        GroupChatCopy.title,
+        GroupChatCopy.emptyState,
+        GroupChatCopy.composerPlaceholder,
+        GroupChatCopy.loadEarlier,
     ]
 }
