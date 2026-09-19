@@ -265,12 +265,16 @@ struct GroupChatView: View {
             return
         }
 
+        let submitted = draft
         isSending = true
         defer { isSending = false }
         do {
             let sent = try await service.postGroupMessage(groupId: groupId, body: body)
             timeline.appendSent(sent)
-            draft = ""
+            // Keep anything typed while the request was in flight.
+            if draft.hasPrefix(submitted) {
+                draft = String(draft.dropFirst(submitted.count)).trimmingCharacters(in: .whitespaces)
+            }
         } catch is CancellationError {
             return
         } catch {
