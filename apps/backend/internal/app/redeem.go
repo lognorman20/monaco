@@ -13,6 +13,14 @@ import (
 	"github.com/monaco/monaco/packages/domain"
 )
 
+// WithdrawToBalanceRequest withdraws deployed stake to the member Privy wallet (platform balance).
+type WithdrawToBalanceRequest struct {
+	AccessToken       string
+	GroupID           string
+	ShareAmountMicros *int64
+	ResumeJobID       string
+}
+
 // RedeemRequest starts or resumes a debit-first redeem job.
 type RedeemRequest struct {
 	AccessToken        string
@@ -72,6 +80,124 @@ func NewRedeemService(
 		swap:    swap,
 		signer:  signer,
 	}
+}
+
+// WithdrawToBalance debits share units, sells slice if needed, and pays USDC to the member wallet.
+func (r *RedeemService) WithdrawToBalance(ctx context.Context, req WithdrawToBalanceRequest) (RedeemJobView, error) {
+	if req.ResumeJobID != "" {
+		return r.resumeRedeemJob(ctx, req.ResumeJobID, privy.PayoutProof{})
+	}
+
+	if req.GroupID == "" {
+		logRedeemBranchWarn("withdraw to balance rejected", "group id required")
+		return RedeemJobView{}, fmt.Errorf("group id is required")
+	}
+
+	identity, err := r.privy.VerifySession(ctx, privy.AccessToken(req.AccessToken))
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			logRedeemBranchWarn("withdraw to balance rejected", "invalid token", "group_id", req.GroupID)
+			return RedeemJobView{}, privy.ErrInvalidToken
+		}
+		logRedeemBranchError("withdraw to balance verify session failed", err, "group_id", req.GroupID)
+		return RedeemJobView{}, fmt.Errorf("verify session: %w", err)
+	}
+
+	user, found, err := r.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	if err != nil {
+		logRedeemBranchError("withdraw to balance lookup user failed", err, "group_id", req.GroupID)
+		return RedeemJobView{}, err
+	}
+	if !found {
+		logRedeemBranchWarn("withdraw to balance rejected", "user not found", "group_id", req.GroupID)
+		return RedeemJobView{}, ErrUserNotFound
+	}
+
+	member, err := r.store.IsGroupMember(ctx, req.GroupID, user.ID)
+	if err != nil {
+		return RedeemJobView{}, err
+	}
+	if !member {
+		return RedeemJobView{}, ErrNotGroupMember
+	}
+
+	memberWallet, err := r.ensureMemberWalletAddress(ctx, identity.PrivyUserID, user.ID)
+	if err != nil {
+		return RedeemJobView{}, err
+	}
+
+	logRedeemStart(req.GroupID, user.ID, "")
+
+	release, acquired, err := r.store.TryAcquireMemberRedeemLock(ctx, user.ID, req.GroupID)
+	if err != nil {
+		logRedeemBranchError("withdraw to balance acquire lock failed", err, "group_id", req.GroupID, "user_id", user.ID)
+		return RedeemJobView{}, err
+	}
+	if !acquired {
+		logRedeemLockContended(user.ID, req.GroupID)
+		return RedeemJobView{}, ErrRedeemAlreadyInProgress
+	}
+	defer release()
+
+	treasury, found, err := r.store.GetTreasuryByGroupID(ctx, req.GroupID)
+	if err != nil {
+		return RedeemJobView{}, err
+	}
+	if !found {
+		return RedeemJobView{}, ErrGroupNotFound
+	}
+
+	shareUnitsToDebit, potNav, totalSharesMicro, err := r.resolveWithdrawShares(ctx, req, user.ID, treasury.SolanaAddress)
+	if err != nil {
+		return RedeemJobView{}, err
+	}
+
+	slice, err := domain.ComputeRedeemSlice(domain.RedeemSliceInput{
+		SharesRedeemedMicros: shareUnitsToDebit,
+		TotalSharesMicros:    totalSharesMicro,
+		PotNav:               domain.USDCMicros(potNav),
+	})
+	if err != nil {
+		return RedeemJobView{}, err
+	}
+	if slice.UsdcOwed < domain.RedeemDustMinimumMicros {
+		logRedeemBranchWarn("withdraw to balance rejected", "below dust minimum", "group_id", req.GroupID, "user_id", user.ID, "slice_usdc", int64(slice.UsdcOwed))
+		return RedeemJobView{}, fmt.Errorf("%w: below dust minimum", ErrInvalidRedeemRequest)
+	}
+
+	tx, err := r.store.BeginTx(ctx)
+	if err != nil {
+		return RedeemJobView{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	position, err := r.store.DebitPositionShareUnitsTx(ctx, tx, user.ID, req.GroupID, shareUnitsToDebit)
+	if err != nil {
+		return RedeemJobView{}, err
+	}
+
+	job, err := r.store.InsertRedeemJobTx(ctx, tx, user.ID, req.GroupID, shareUnitsToDebit, int64(slice.UsdcOwed), memberWallet)
+	if err != nil {
+		if errors.Is(err, postgres.ErrActiveRedeemJobExists) {
+			return RedeemJobView{}, ErrRedeemAlreadyInProgress
+		}
+		return RedeemJobView{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		logRedeemBranchError("withdraw to balance commit debit failed", err, "group_id", req.GroupID, "user_id", user.ID)
+		return RedeemJobView{}, fmt.Errorf("commit withdraw debit: %w", err)
+	}
+	committed = true
+
+	logRedeemDebited(job.ID, user.ID, req.GroupID, shareUnitsToDebit, int64(slice.UsdcOwed))
+	view := redeemJobFromRow(job, positionFromRowPostgres(position))
+	return r.continueRedeemJob(ctx, view, privy.PayoutProof{PayoutAddress: memberWallet})
 }
 
 // Redeem verifies payout proof, debits share units first, sells slice if needed, and pays USDC.
@@ -254,7 +380,11 @@ func (r *RedeemService) continueRedeemJob(ctx context.Context, view RedeemJobVie
 	}
 
 	if view.Status == domain.RedeemJobPaying {
-		return r.payRedeemSlice(ctx, view, proof)
+		platformPayout, err := r.isPlatformPayoutAddress(ctx, view.UserID, view.PayoutAddress)
+		if err != nil {
+			return view, err
+		}
+		return r.payRedeemSlice(ctx, view, proof, platformPayout)
 	}
 
 	logRedeemBranchWarn("redeem rejected", "unsupported status", "job_id", view.ID, "status", string(view.Status))
@@ -315,7 +445,7 @@ func (r *RedeemService) sellRedeemSliceIfNeeded(ctx context.Context, view *Redee
 	return nil
 }
 
-func (r *RedeemService) payRedeemSlice(ctx context.Context, view RedeemJobView, proof privy.PayoutProof) (RedeemJobView, error) {
+func (r *RedeemService) payRedeemSlice(ctx context.Context, view RedeemJobView, proof privy.PayoutProof, platformPayout bool) (RedeemJobView, error) {
 	treasury, err := r.privy.EnsureTreasury(ctx, privy.GroupID(view.GroupID))
 	if err != nil {
 		return view, err
@@ -354,8 +484,10 @@ func (r *RedeemService) payRedeemSlice(ctx context.Context, view RedeemJobView, 
 		return view, err
 	}
 
-	if err := r.store.InsertPayoutProofTx(ctx, tx, view.UserID, view.GroupID, proof.PayoutAddress, proof.Message, proof.Signature, withdrawal.ID); err != nil {
-		return view, err
+	if !platformPayout {
+		if err := r.store.InsertPayoutProofTx(ctx, tx, view.UserID, view.GroupID, proof.PayoutAddress, proof.Message, proof.Signature, withdrawal.ID); err != nil {
+			return view, err
+		}
 	}
 
 	confirmed, newlyPaid, err := r.store.ConfirmWithdrawalPayoutTx(ctx, tx, withdrawal.ID, payout.TxSignature, treasuryUsdc)
@@ -386,6 +518,76 @@ func (r *RedeemService) payRedeemSlice(ctx context.Context, view RedeemJobView, 
 	view.Position = positionFromRowPostgres(position)
 	logRedeemSettled(view.ID, view.UserID, view.GroupID, withdrawal.ID, view.SliceUsdc)
 	return view, nil
+}
+
+func (r *RedeemService) ensureMemberWalletAddress(ctx context.Context, privyUserID, userID string) (string, error) {
+	existing, found, err := r.store.GetMemberWalletByUserID(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	if found {
+		return existing.SolanaAddress, nil
+	}
+	ref, err := r.privy.EnsureMemberWallet(ctx, privyUserID, privy.UserID(userID))
+	if err != nil {
+		return "", fmt.Errorf("privy ensure member wallet: %w", err)
+	}
+	if _, err := r.store.InsertMemberWallet(ctx, userID, ref.PrivyWalletID, ref.SolanaAddress); err != nil {
+		return "", err
+	}
+	return ref.SolanaAddress, nil
+}
+
+func (r *RedeemService) isPlatformPayoutAddress(ctx context.Context, userID, payoutAddress string) (bool, error) {
+	wallet, found, err := r.store.GetMemberWalletByUserID(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, nil
+	}
+	return wallet.SolanaAddress == payoutAddress, nil
+}
+
+func (r *RedeemService) resolveWithdrawShares(ctx context.Context, req WithdrawToBalanceRequest, userID, treasuryAddress string) (shareUnits int64, potNav int64, totalShares int64, err error) {
+	position, hasPosition, err := r.store.GetPosition(ctx, userID, req.GroupID)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if !hasPosition || position.ShareUnits <= 0 {
+		return 0, 0, 0, fmt.Errorf("%w: no share units to withdraw", ErrInvalidRedeemRequest)
+	}
+
+	totalShares, err = r.store.SumShareUnitsByGroup(ctx, req.GroupID)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if totalShares <= 0 {
+		return 0, 0, 0, fmt.Errorf("%w: no shares outstanding", ErrInvalidRedeemRequest)
+	}
+
+	treasuryUsdc, err := r.privy.TreasuryUSDCBalance(ctx, treasuryAddress)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("treasury usdc balance: %w", err)
+	}
+
+	navVals, err := r.store.ComputeNavSnapshotValues(ctx, req.GroupID, treasuryUsdc)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	potNav = navVals.PotNavMicros
+
+	switch {
+	case req.ShareAmountMicros != nil:
+		shareUnits = *req.ShareAmountMicros
+	default:
+		shareUnits = position.ShareUnits
+	}
+
+	if shareUnits <= 0 || shareUnits > position.ShareUnits {
+		return 0, 0, 0, fmt.Errorf("%w: share amount out of range", ErrInvalidRedeemRequest)
+	}
+	return shareUnits, potNav, totalShares, nil
 }
 
 func (r *RedeemService) resolveRedeemShares(ctx context.Context, req RedeemRequest, treasuryAddress string) (shareUnits int64, potNav int64, totalShares int64, err error) {

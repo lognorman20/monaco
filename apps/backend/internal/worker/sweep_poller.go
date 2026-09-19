@@ -90,12 +90,9 @@ func Run(ctx context.Context, poller *SweepPoller, interval time.Duration) {
 	}
 }
 
-// Tick evaluates pending deposits once.
+// Tick evaluates user-initiated pending deposits once.
 func (p *SweepPoller) Tick(ctx context.Context) error {
 	_ = p.clock.Now()
-	if err := p.scanMemberWalletDeposits(ctx); err != nil {
-		return err
-	}
 
 	pending, err := p.store.ListPendingDeposits(ctx)
 	if err != nil {
@@ -169,7 +166,7 @@ func (p *SweepPoller) processPendingDeposit(ctx context.Context, deposit postgre
 			logSweepDepositFailed(deposit.ID, deposit.GroupID, "balance_check", err)
 			return err
 		}
-		if balance <= 0 {
+		if balance < deposit.Amount {
 			logSweepDepositSkipped(deposit.ID, deposit.GroupID, "insufficient_balance",
 				"balance", balance,
 				"required", deposit.Amount,
@@ -177,21 +174,7 @@ func (p *SweepPoller) processPendingDeposit(ctx context.Context, deposit postgre
 			return nil
 		}
 
-		sweepAmount := balance
-		if sweepAmount != deposit.Amount {
-			if err := p.store.UpdatePendingDepositAmount(ctx, deposit.ID, sweepAmount); err != nil {
-				logSweepDepositFailed(deposit.ID, deposit.GroupID, "update_deposit_amount", err)
-				return err
-			}
-			slog.Info("sweep deposit amount adjusted",
-				"deposit_id", deposit.ID,
-				"group_id", deposit.GroupID,
-				"previous_amount", deposit.Amount,
-				"sweep_amount", sweepAmount,
-			)
-			deposit.Amount = sweepAmount
-		}
-
+		sweepAmount := deposit.Amount
 		logSweepAttempt(deposit.GroupID, deposit.UserID, deposit.ID, sweepAmount, deposit.FromAddress, treasury.SolanaAddress)
 
 		req, err := privy.BuildSweepRequest(deposit.FromAddress, treasury.SolanaAddress, sweepAmount, p.relayer)
@@ -242,81 +225,6 @@ func depositBroadcastSignature(deposit postgres.DepositRow) string {
 		return deposit.TxSignature.String
 	}
 	return ""
-}
-
-// scanMemberWalletDeposits creates pending deposit rows when USDC lands without a prior intent.
-func (p *SweepPoller) scanMemberWalletDeposits(ctx context.Context) error {
-	wallets, err := p.store.ListMemberWallets(ctx)
-	if err != nil {
-		return err
-	}
-
-	for _, wallet := range wallets {
-		hasPending, err := p.store.HasPendingDepositForFromAddress(ctx, wallet.SolanaAddress)
-		if err != nil {
-			return err
-		}
-		if hasPending {
-			continue
-		}
-
-		balance, err := p.privy.MemberUSDCBalance(ctx, wallet.SolanaAddress)
-		if err != nil {
-			slog.Warn("deposit scan balance check failed",
-				"from_address", wallet.SolanaAddress,
-				"user_id", wallet.UserID,
-				"err", err,
-			)
-			continue
-		}
-		if balance <= 0 {
-			continue
-		}
-
-		groupID, ok, err := p.resolveDepositGroupID(ctx, wallet.UserID)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			slog.Info("deposit scan skipped ambiguous group membership",
-				"from_address", wallet.SolanaAddress,
-				"user_id", wallet.UserID,
-				"balance", balance,
-			)
-			continue
-		}
-
-		row, err := p.store.InsertDeposit(ctx, wallet.UserID, groupID, balance, wallet.SolanaAddress)
-		if err != nil {
-			return err
-		}
-		slog.Info("deposit scan created pending deposit",
-			"deposit_id", row.ID,
-			"group_id", row.GroupID,
-			"user_id", row.UserID,
-			"from_address", row.FromAddress,
-			"amount", row.Amount,
-		)
-	}
-
-	return nil
-}
-
-func (p *SweepPoller) resolveDepositGroupID(ctx context.Context, userID string) (string, bool, error) {
-	groupIDs, err := p.store.ListUserGroupIDs(ctx, userID)
-	if err != nil {
-		return "", false, err
-	}
-	if len(groupIDs) == 0 {
-		groupIDs, err = p.store.ListGroupsCreatedByUserID(ctx, userID)
-		if err != nil {
-			return "", false, err
-		}
-	}
-	if len(groupIDs) != 1 {
-		return "", false, nil
-	}
-	return groupIDs[0], true, nil
 }
 
 func (p *SweepPoller) confirmAndObserveSweep(ctx context.Context, deposit postgres.DepositRow, treasuryAddress, txSignature string) error {

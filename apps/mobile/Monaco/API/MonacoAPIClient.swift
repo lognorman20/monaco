@@ -75,6 +75,74 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(MeResponse.self, from: data)
     }
 
+    func getPlatformBalance(accessToken: String) async throws -> PlatformBalanceDTO {
+        let url = baseURL.appending(path: "v1/me/balance")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(PlatformBalanceDTO.self, from: data)
+    }
+
+    func createPlatformWithdrawal(accessToken: String, amount: Int64, toAddress: String) async throws -> PlatformWithdrawalDTO {
+        let url = baseURL.appending(path: "v1/me/withdrawals")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        request.httpBody = try JSONEncoder().encode(CreatePlatformWithdrawalRequest(amount: amount, toAddress: toAddress))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(PlatformWithdrawalDTO.self, from: data)
+    }
+
+    func getPlatformWithdrawal(accessToken: String, withdrawalId: String) async throws -> PlatformWithdrawalDTO {
+        let url = baseURL.appending(path: "v1/me/withdrawals/\(withdrawalId)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(PlatformWithdrawalDTO.self, from: data)
+    }
+
+    func fundGroup(accessToken: String, groupId: String, amount: Int64) async throws -> FundGroupResponse {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/fund")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        request.httpBody = try JSONEncoder().encode(FundGroupRequest(amount: amount))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(FundGroupResponse.self, from: data)
+    }
+
     func getHome(accessToken: String) async throws -> HomeViewDTO {
         let url = baseURL.appending(path: "v1/home")
         var request = URLRequest(url: url)
@@ -154,11 +222,13 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(CreateGroupResponse.self, from: data)
     }
 
-    func leaveGroup(accessToken: String, groupId: String) async throws {
+    func leaveGroup(accessToken: String, groupId: String, withdrawStake: Bool = false) async throws {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/leave")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        request.httpBody = try JSONEncoder().encode(LeaveGroupRequestDTO(withdrawStake: withdrawStake))
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
         switch http.statusCode {
@@ -166,6 +236,19 @@ final class MonacoAPIClient {
         case 409: throw MonacoAPIError.leaveBlocked(parseLeaveConflict(from: data))
         default: throw MonacoAPIError.httpStatus(http.statusCode)
         }
+    }
+
+    func withdrawToBalance(accessToken: String, groupId: String, shareAmountMicros: Int64? = nil) async throws -> WithdrawToBalanceJobDTO {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/withdraw-to-balance")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        request.httpBody = try JSONEncoder().encode(WithdrawToBalanceRequestDTO(shareAmountMicros: shareAmountMicros))
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
+        guard http.statusCode == 200 else { throw MonacoAPIError.httpStatus(http.statusCode) }
+        return try JSONDecoder().decode(WithdrawToBalanceJobDTO.self, from: data)
     }
 
     func joinGroup(accessToken: String, groupId: String) async throws -> JoinGroupOutcome {

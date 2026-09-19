@@ -10,7 +10,8 @@ import (
 
 // Store is the Postgres persistence layer for M1 tables.
 type Store struct {
-	db *sql.DB
+	db                          *sql.DB
+	platformWithdrawalTestHooks platformWithdrawalTestHooks
 }
 
 // NewStore returns a Store backed by db.

@@ -38,6 +38,10 @@ func (c *failingEnsureTreasuryClient) SubmitSweep(ctx context.Context, req privy
 	return c.inner.SubmitSweep(ctx, req)
 }
 
+func (c *failingEnsureTreasuryClient) SubmitMemberUSDCTransfer(ctx context.Context, req privy.TransferRequest) (privy.TransferResult, error) {
+	return c.inner.SubmitMemberUSDCTransfer(ctx, req)
+}
+
 func (c *failingEnsureTreasuryClient) VerifyPayoutProof(ctx context.Context, userID string, proof privy.PayoutProof) error {
 	return c.inner.VerifyPayoutProof(ctx, userID, proof)
 }

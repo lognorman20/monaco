@@ -10,6 +10,14 @@ struct SettingsView: View {
         Form {
             Section {
                 NavigationLink {
+                    WithdrawView(auth: auth)
+                } label: {
+                    Label("Withdraw", systemImage: "arrow.up.right")
+                        .foregroundStyle(MonacoTheme.primaryText)
+                }
+                .accessibilityIdentifier("settings-withdraw-link")
+
+                NavigationLink {
                     AdvancedSettingsView(
                         memberWalletAddress: memberWalletAddress,
                         treasuryAddress: treasuryAddress

@@ -153,6 +153,47 @@ WHERE id = $1`
 	return row, true, nil
 }
 
+// ListWithdrawalsByGroupID returns confirmed and pending withdrawals for a group.
+func (s *Store) ListWithdrawalsByGroupID(ctx context.Context, groupID string) ([]WithdrawalRow, error) {
+	if groupID == "" {
+		return nil, fmt.Errorf("group_id is required")
+	}
+
+	const selectSQL = `
+SELECT id, user_id, group_id, amount, to_address, status, tx_signature, created_at
+FROM withdrawals
+WHERE group_id = $1
+ORDER BY created_at DESC`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("list withdrawals by group: %w", err)
+	}
+	defer rows.Close()
+
+	var out []WithdrawalRow
+	for rows.Next() {
+		var row WithdrawalRow
+		if err := rows.Scan(
+			&row.ID,
+			&row.UserID,
+			&row.GroupID,
+			&row.Amount,
+			&row.ToAddress,
+			&row.Status,
+			&row.TxSignature,
+			&row.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan withdrawal: %w", err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate withdrawals: %w", err)
+	}
+	return out, nil
+}
+
 // InsertPayoutProofTx records a verified payout proof linked to a withdrawal.
 func (s *Store) InsertPayoutProofTx(ctx context.Context, tx *sql.Tx, userID, groupID, payoutAddress, message, signature, withdrawalID string) error {
 	if userID == "" || groupID == "" || payoutAddress == "" || message == "" || signature == "" {

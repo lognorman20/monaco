@@ -28,6 +28,16 @@ fi
 
 open -a Simulator >/dev/null 2>&1 || true
 
+_ios_clipboard_bridge() {
+  local cmd="$1"
+  if command -v ios-sim-clipboard-bridge >/dev/null 2>&1; then
+    ios-sim-clipboard-bridge "$cmd" >/dev/null 2>&1 || true
+  elif [[ -x "${HOME}/.local/bin/ios-sim-clipboard-bridge" ]]; then
+    "${HOME}/.local/bin/ios-sim-clipboard-bridge" "$cmd" >/dev/null 2>&1 || true
+  fi
+}
+_ios_clipboard_bridge start
+
 xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
   -destination "platform=iOS Simulator,id=${udid}" \
   -configuration Debug \

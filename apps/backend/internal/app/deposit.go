@@ -58,6 +58,13 @@ type CreateDepositResult struct {
 	Deposit Deposit
 }
 
+// PlatformBalanceResult is the authenticated user's spendable USDC in their member wallet.
+type PlatformBalanceResult struct {
+	AvailableUsdcMicros     int64
+	MemberWalletAddress     string
+	PendingAllocationMicros int64
+}
+
 // ObserveSweepResult is the outcome after applying a confirmed treasury credit.
 type ObserveSweepResult struct {
 	Deposit  Deposit
@@ -70,6 +77,9 @@ var ErrDepositNotFound = errors.New("deposit not found")
 
 // ErrNotGroupMember means the user cannot deposit into the group.
 var ErrNotGroupMember = errors.New("not a group member")
+
+// ErrInsufficientPlatformBalance means the fund amount exceeds available member-wallet USDC.
+var ErrInsufficientPlatformBalance = errors.New("insufficient platform balance")
 
 // ErrInvalidSweepTarget means the sweep did not arrive at group treasury.
 var ErrInvalidSweepTarget = errors.New("invalid sweep target")
@@ -90,6 +100,149 @@ func NewDepositService(store *postgres.Store, privyClient privy.Client, pythClie
 		pyth:    pythClient,
 		symbols: symbols,
 	}
+}
+
+// GetPlatformBalance returns chain member-wallet USDC minus in-flight fund reservations.
+func (d *DepositService) GetPlatformBalance(ctx context.Context, accessToken string) (PlatformBalanceResult, error) {
+	identity, err := d.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			return PlatformBalanceResult{}, privy.ErrInvalidToken
+		}
+		return PlatformBalanceResult{}, fmt.Errorf("verify session: %w", err)
+	}
+
+	user, found, err := d.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	if err != nil {
+		return PlatformBalanceResult{}, err
+	}
+	if !found {
+		return PlatformBalanceResult{}, ErrUserNotFound
+	}
+
+	wallet, found, err := d.store.GetMemberWalletByUserID(ctx, user.ID)
+	if err != nil {
+		return PlatformBalanceResult{}, err
+	}
+	if !found {
+		return PlatformBalanceResult{}, ErrUserNotFound
+	}
+
+	balance, pending, err := d.platformBalanceForWallet(ctx, user.ID, wallet.SolanaAddress)
+	if err != nil {
+		return PlatformBalanceResult{}, err
+	}
+
+	return PlatformBalanceResult{
+		AvailableUsdcMicros:     balance,
+		MemberWalletAddress:     wallet.SolanaAddress,
+		PendingAllocationMicros: pending,
+	}, nil
+}
+
+// FundGroup records a user-initiated cabal fund intent and enqueues an exact-amount sweep.
+func (d *DepositService) FundGroup(ctx context.Context, accessToken string, groupID string, amount int64) (CreateDepositResult, error) {
+	logDepositCreateStart(groupID, amount)
+
+	if groupID == "" {
+		logDepositBranchWarn("fund group rejected", "group id required")
+		return CreateDepositResult{}, fmt.Errorf("group id is required")
+	}
+	if amount <= 0 {
+		logDepositBranchWarn("fund group rejected", "amount not positive", "group_id", groupID)
+		return CreateDepositResult{}, fmt.Errorf("amount must be positive")
+	}
+
+	identity, err := d.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			logDepositBranchWarn("fund group rejected", "invalid token", "group_id", groupID)
+			return CreateDepositResult{}, privy.ErrInvalidToken
+		}
+		logDepositBranchError("fund group verify session failed", err, "group_id", groupID)
+		return CreateDepositResult{}, fmt.Errorf("verify session: %w", err)
+	}
+
+	user, found, err := d.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	if err != nil {
+		logDepositBranchError("fund group lookup user failed", err, "group_id", groupID)
+		return CreateDepositResult{}, err
+	}
+	if !found {
+		logDepositBranchWarn("fund group rejected", "user not found", "group_id", groupID)
+		return CreateDepositResult{}, ErrUserNotFound
+	}
+
+	member, err := d.store.IsGroupMember(ctx, groupID, user.ID)
+	if err != nil {
+		logDepositBranchError("fund group membership check failed", err, "group_id", groupID, "user_id", user.ID)
+		return CreateDepositResult{}, err
+	}
+	if !member {
+		logDepositBranchWarn("fund group rejected", "not group member", "group_id", groupID, "user_id", user.ID)
+		return CreateDepositResult{}, ErrNotGroupMember
+	}
+
+	_, found, err = d.store.GetTreasuryByGroupID(ctx, groupID)
+	if err != nil {
+		logDepositBranchError("fund group lookup treasury failed", err, "group_id", groupID, "user_id", user.ID)
+		return CreateDepositResult{}, err
+	}
+	if !found {
+		logDepositBranchWarn("fund group rejected", "group not found", "group_id", groupID, "user_id", user.ID)
+		return CreateDepositResult{}, ErrGroupNotFound
+	}
+
+	wallet, found, err := d.store.GetMemberWalletByUserID(ctx, user.ID)
+	if err != nil {
+		logDepositBranchError("fund group lookup wallet failed", err, "group_id", groupID, "user_id", user.ID)
+		return CreateDepositResult{}, err
+	}
+	if !found {
+		logDepositBranchWarn("fund group rejected", "wallet not found", "group_id", groupID, "user_id", user.ID)
+		return CreateDepositResult{}, ErrUserNotFound
+	}
+
+	available, _, err := d.platformBalanceForWallet(ctx, user.ID, wallet.SolanaAddress)
+	if err != nil {
+		logDepositBranchError("fund group balance check failed", err, "group_id", groupID, "user_id", user.ID)
+		return CreateDepositResult{}, err
+	}
+	if amount > available {
+		logDepositBranchWarn("fund group rejected", "insufficient platform balance",
+			"group_id", groupID, "user_id", user.ID, "amount", amount, "available", available)
+		return CreateDepositResult{}, ErrInsufficientPlatformBalance
+	}
+
+	row, err := d.store.InsertDeposit(ctx, user.ID, groupID, amount, wallet.SolanaAddress)
+	if err != nil {
+		logDepositBranchError("fund group insert failed", err, "group_id", groupID, "user_id", user.ID)
+		return CreateDepositResult{}, err
+	}
+
+	logDepositCreateSuccess(user.ID, groupID, row.ID, amount)
+	return CreateDepositResult{Deposit: depositFromRow(row)}, nil
+}
+
+func (d *DepositService) platformBalanceForWallet(ctx context.Context, userID, memberAddress string) (available int64, pending int64, err error) {
+	chainBalance, err := d.privy.MemberUSDCBalance(ctx, memberAddress)
+	if err != nil {
+		return 0, 0, fmt.Errorf("member usdc balance: %w", err)
+	}
+	pendingDeposits, err := d.store.SumPendingDepositAmountByUserID(ctx, userID)
+	if err != nil {
+		return 0, 0, err
+	}
+	pendingWithdrawals, err := d.store.SumPendingPlatformWithdrawalAmountByUserID(ctx, userID)
+	if err != nil {
+		return 0, 0, err
+	}
+	pending = pendingDeposits + pendingWithdrawals
+	available = chainBalance - pending
+	if available < 0 {
+		available = 0
+	}
+	return available, pending, nil
 }
 
 // CreateDeposit records a pending deposit intent for an authenticated group member.
