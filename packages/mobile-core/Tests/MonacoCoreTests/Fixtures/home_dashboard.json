@@ -1,0 +1,49 @@
+{
+  "netWorthUsd": "145.00",
+  "netWorthDollarPnl": "+15.00",
+  "netWorthPercentReturn": "0.115",
+  "myGroups": [
+    {
+      "groupId": "g1",
+      "name": "Weekend investors",
+      "equityUsd": "100.00",
+      "slicePercent": "0.5",
+      "dollarPnl": "+10.00",
+      "percentReturn": "0.111"
+    }
+  ],
+  "pnlSeries1H": [
+    {
+      "ts": "2026-09-17T22:00:00Z",
+      "equityUsd": "130.00",
+      "dollarPnl": "+0.00"
+    },
+    {
+      "ts": "2026-09-17T23:00:00Z",
+      "equityUsd": "145.00",
+      "dollarPnl": "+15.00"
+    }
+  ],
+  "leaderboard": {
+    "range": "ALL",
+    "people": [
+      {
+        "userId": "u1",
+        "displayName": "Alfred",
+        "percentReturn": "0.115",
+        "dollarPnl": "+15.00"
+      }
+    ]
+  },
+  "missedProposals": [
+    {
+      "groupId": "g1",
+      "groupName": "Weekend investors",
+      "proposalId": "p1",
+      "symbol": "AAPL",
+      "status": "open",
+      "createdAt": "2026-09-17T20:00:00Z",
+      "expiresAt": "2026-09-18T20:00:00Z"
+    }
+  ]
+}

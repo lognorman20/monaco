@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/monaco/monaco/packages/domain"
@@ -114,6 +115,49 @@ WHERE id = $1`
 	}
 
 	return group, true, nil
+}
+
+// SearchGroupsByName returns groups whose name matches query (case-insensitive), paginated.
+func (s *Store) SearchGroupsByName(ctx context.Context, query string, limit, offset int) ([]Group, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return []Group{}, nil
+	}
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	const selectSQL = `
+SELECT id, name, creator_user_id, created_at
+FROM groups
+WHERE name ILIKE '%' || $1 || '%'
+ORDER BY name ASC, created_at ASC
+LIMIT $2 OFFSET $3`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, query, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("search groups by name: %w", err)
+	}
+	defer rows.Close()
+
+	var groups []Group
+	for rows.Next() {
+		var group Group
+		if err := rows.Scan(&group.ID, &group.Name, &group.CreatorUserID, &group.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan searched group: %w", err)
+		}
+		groups = append(groups, group)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate searched groups: %w", err)
+	}
+	return groups, nil
 }
 
 // ListGroupIDs returns every group id.

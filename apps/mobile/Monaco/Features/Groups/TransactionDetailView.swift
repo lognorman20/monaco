@@ -69,7 +69,7 @@ struct TransactionDetailView: View {
                 LabeledContent("Status", value: statusLabel(deposit.status))
                 LabeledContent("Created", value: formatTimestamp(deposit.createdAt))
                 if deposit.status.lowercased() == "failed" {
-                    LabeledContent("Failure reason", value: "Sweep failed")
+                    LabeledContent("Failure reason", value: "Transfer to the pot failed")
                 }
                 if let fromAddress = deposit.fromAddress, !fromAddress.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
@@ -133,7 +133,7 @@ struct TransactionDetailView: View {
             }
         }
 
-        Section("On chain") {
+        Section("Transaction record") {
             signatureRow(transaction.txSignature)
             copyableRow(label: "Execute request", value: transaction.executeRequestId)
         }
@@ -142,8 +142,6 @@ struct TransactionDetailView: View {
             LabeledContent("Transaction ID", value: transaction.transactionId)
             LabeledContent("Cabal ID", value: transaction.groupId)
             copyableRow(label: "Proposal ID", value: transaction.proposalId)
-            copyableRow(label: "Input mint", value: transaction.inputMint)
-            copyableRow(label: "Output mint", value: transaction.outputMint)
         }
 
         if canRetry {

@@ -1,3 +1,4 @@
+import MonacoCore
 import SwiftUI
 
 /// Profile list of clubs shared with a people-board row member.

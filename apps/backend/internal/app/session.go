@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
@@ -11,6 +13,9 @@ import (
 
 // ErrUserNotFound means the Privy token is valid but no Monaco user row exists.
 var ErrUserNotFound = errors.New("user not found")
+
+// ErrInvalidDisplayName means displayName failed validation.
+var ErrInvalidDisplayName = errors.New("invalid display name")
 
 // SessionService orchestrates auth session flows.
 type SessionService struct {
@@ -130,6 +135,54 @@ func (s *SessionService) GetMe(ctx context.Context, accessToken string) (MeResul
 	return MeResult{
 		UserID:              user.ID,
 		DisplayName:         displayName,
+		MemberWalletAddress: wallet.SolanaAddress,
+	}, nil
+}
+
+// SetDisplayName validates and persists a user-chosen display name.
+func (s *SessionService) SetDisplayName(ctx context.Context, accessToken string, displayName string) (MeResult, error) {
+	trimmed := strings.TrimSpace(displayName)
+	if trimmed == "" || utf8.RuneCountInString(trimmed) > 32 {
+		return MeResult{}, ErrInvalidDisplayName
+	}
+
+	identity, err := s.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			return MeResult{}, privy.ErrInvalidToken
+		}
+		return MeResult{}, fmt.Errorf("verify session: %w", err)
+	}
+
+	user, found, err := s.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	if err != nil {
+		return MeResult{}, err
+	}
+	if !found {
+		return MeResult{}, ErrUserNotFound
+	}
+
+	updated, err := s.store.UpdateUserDisplayName(ctx, user.ID, trimmed)
+	if err != nil {
+		return MeResult{}, err
+	}
+
+	wallet, found, err := s.store.GetMemberWalletByUserID(ctx, user.ID)
+	if err != nil {
+		return MeResult{}, err
+	}
+	if !found {
+		return MeResult{}, ErrUserNotFound
+	}
+
+	displayNameOut := ""
+	if updated.DisplayName.Valid {
+		displayNameOut = updated.DisplayName.String
+	}
+
+	return MeResult{
+		UserID:              updated.ID,
+		DisplayName:         displayNameOut,
 		MemberWalletAddress: wallet.SolanaAddress,
 	}, nil
 }

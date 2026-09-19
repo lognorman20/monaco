@@ -8,9 +8,7 @@ struct AuthGateView: View {
             if Config.privy.isConfigured {
                 if hasLoginMethod {
                     if isAuthenticated {
-                        NavigationStack {
-                            SessionGateView(auth: auth)
-                        }
+                        SessionGateView(auth: auth)
                     } else {
                         LoginView(auth: auth)
                     }

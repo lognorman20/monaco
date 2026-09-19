@@ -4,6 +4,7 @@ import SwiftUI
 struct ProposeBuyView: View {
     @ObservedObject var auth: PrivyAuthService
     let groupId: String
+    var initialSymbol: String?
 
     private let apiClient = MonacoAPIClient()
     private let pageSize = 25
@@ -117,6 +118,13 @@ struct ProposeBuyView: View {
             scheduleCatalogSearch(reset: true)
         }
         .task {
+            if let initialSymbol, selectedSymbol == nil {
+                let trimmed = initialSymbol.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    searchQuery = trimmed
+                    selectedSymbol = trimmed
+                }
+            }
             await loadTreasury()
             await loadCatalog(reset: true)
         }

@@ -354,6 +354,124 @@ func NavSnapshotValuesFromPotNAV(nav domain.PotNAV, totalSharesMicro int64) NavS
 	}
 }
 
+// ListNavSnapshotsByGroupSince returns snapshots oldest first within the window.
+func (s *Store) ListNavSnapshotsByGroupSince(ctx context.Context, groupID string, since time.Time) ([]NavSnapshotRow, error) {
+	if groupID == "" {
+		return nil, fmt.Errorf("group_id is required")
+	}
+
+	const selectSQL = `
+SELECT id, group_id, pot_nav_micros, nav_per_share_micros, total_shares, reason, created_at
+FROM nav_snapshots
+WHERE group_id = $1 AND created_at >= $2
+ORDER BY created_at ASC, id ASC`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, groupID, since)
+	if err != nil {
+		return nil, fmt.Errorf("list nav snapshots since: %w", err)
+	}
+	defer rows.Close()
+
+	var out []NavSnapshotRow
+	for rows.Next() {
+		var row NavSnapshotRow
+		var reason string
+		if err := rows.Scan(
+			&row.ID,
+			&row.GroupID,
+			&row.PotNavMicros,
+			&row.NavPerShareMicros,
+			&row.TotalShares,
+			&reason,
+			&row.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan nav snapshot: %w", err)
+		}
+		row.Reason = NavSnapshotReason(reason)
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate nav snapshots since: %w", err)
+	}
+	return out, nil
+}
+
+// ListNavSnapshotsForGroupsSince returns snapshots for groupIDs at or after since, oldest first.
+func (s *Store) ListNavSnapshotsForGroupsSince(ctx context.Context, groupIDs []string, since time.Time) ([]NavSnapshotRow, error) {
+	if len(groupIDs) == 0 {
+		return []NavSnapshotRow{}, nil
+	}
+
+	const selectSQL = `
+SELECT id, group_id, pot_nav_micros, nav_per_share_micros, total_shares, reason, created_at
+FROM nav_snapshots
+WHERE group_id = ANY($1::uuid[]) AND created_at >= $2
+ORDER BY created_at ASC, id ASC`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, groupIDs, since.UTC())
+	if err != nil {
+		return nil, fmt.Errorf("list nav snapshots for groups since: %w", err)
+	}
+	defer rows.Close()
+
+	var out []NavSnapshotRow
+	for rows.Next() {
+		var row NavSnapshotRow
+		var reason string
+		if err := rows.Scan(
+			&row.ID,
+			&row.GroupID,
+			&row.PotNavMicros,
+			&row.NavPerShareMicros,
+			&row.TotalShares,
+			&reason,
+			&row.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan nav snapshot: %w", err)
+		}
+		row.Reason = NavSnapshotReason(reason)
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate nav snapshots for groups since: %w", err)
+	}
+	return out, nil
+}
+
+// GetNavSnapshotAtOrBefore returns the latest snapshot at or before at for groupID.
+func (s *Store) GetNavSnapshotAtOrBefore(ctx context.Context, groupID string, at time.Time) (NavSnapshotRow, bool, error) {
+	if groupID == "" {
+		return NavSnapshotRow{}, false, fmt.Errorf("group_id is required")
+	}
+
+	const selectSQL = `
+SELECT id, group_id, pot_nav_micros, nav_per_share_micros, total_shares, reason, created_at
+FROM nav_snapshots
+WHERE group_id = $1 AND created_at <= $2
+ORDER BY created_at DESC, id DESC
+LIMIT 1`
+
+	var row NavSnapshotRow
+	var reason string
+	err := s.db.QueryRowContext(ctx, selectSQL, groupID, at.UTC()).Scan(
+		&row.ID,
+		&row.GroupID,
+		&row.PotNavMicros,
+		&row.NavPerShareMicros,
+		&row.TotalShares,
+		&reason,
+		&row.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return NavSnapshotRow{}, false, nil
+	}
+	if err != nil {
+		return NavSnapshotRow{}, false, fmt.Errorf("get nav snapshot at or before: %w", err)
+	}
+	row.Reason = NavSnapshotReason(reason)
+	return row, true, nil
+}
+
 // ListNavSnapshotsByGroup returns snapshots newest first.
 func (s *Store) ListNavSnapshotsByGroup(ctx context.Context, groupID string) ([]NavSnapshotRow, error) {
 	if groupID == "" {

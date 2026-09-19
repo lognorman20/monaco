@@ -1,3 +1,4 @@
+import MonacoCore
 import Foundation
 
 enum LeaveGroupBlockReason: String, Equatable {
@@ -75,6 +76,26 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(MeResponse.self, from: data)
     }
 
+    func updateProfile(accessToken: String, displayName: String) async throws -> MeResponse {
+        let url = baseURL.appending(path: "v1/me")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        request.httpBody = try JSONEncoder().encode(UpdateProfileRequest(displayName: displayName))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        let profile = try JSONDecoder().decode(MeResponse.self, from: data)
+        NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
+        return profile
+    }
+
     func getHome(accessToken: String) async throws -> HomeViewDTO {
         let url = baseURL.appending(path: "v1/home")
         var request = URLRequest(url: url)
@@ -89,6 +110,106 @@ final class MonacoAPIClient {
             throw MonacoAPIError.httpStatus(http.statusCode)
         }
         return try JSONDecoder().decode(HomeViewDTO.self, from: data)
+    }
+
+    func getHomeDashboard(accessToken: String, leaderboardRange: HomeLeaderboardRange = .all) async throws -> HomeDashboardDTO {
+        var components = URLComponents(url: baseURL.appending(path: "v1/home/dashboard"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "leaderboardRange", value: leaderboardRange.rawValue),
+        ]
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(HomeDashboardDTO.self, from: data)
+    }
+
+    func searchGroups(accessToken: String, query: String, limit: Int = 25, offset: Int = 0) async throws -> GroupSearchResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/groups/search"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "offset", value: String(offset)),
+        ]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(GroupSearchResponse.self, from: data)
+    }
+
+    func getGroupLeaderboard(accessToken: String, limit: Int = 25, offset: Int = 0) async throws -> GroupLeaderboardResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/groups/leaderboard"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "offset", value: String(offset)),
+        ]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(GroupLeaderboardResponse.self, from: data)
+    }
+
+    func getGroupPnLHistory(accessToken: String, groupId: String, days: Int = 90) async throws -> GroupPnLHistoryResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/groups/\(groupId)/pnl-history"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "days", value: String(days))]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(GroupPnLHistoryResponse.self, from: data)
     }
 
     func getUserSharedGroups(accessToken: String, userId: String) async throws -> [HomeGroupBoardRowDTO] {
@@ -151,7 +272,9 @@ final class MonacoAPIClient {
         guard http.statusCode == 200 else {
             throw MonacoAPIError.httpStatus(http.statusCode)
         }
-        return try JSONDecoder().decode(CreateGroupResponse.self, from: data)
+        let result = try JSONDecoder().decode(CreateGroupResponse.self, from: data)
+        NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
+        return result
     }
 
     func leaveGroup(accessToken: String, groupId: String) async throws {
@@ -162,7 +285,9 @@ final class MonacoAPIClient {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
         switch http.statusCode {
-        case 204: return
+        case 204:
+            NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
+            return
         case 409: throw MonacoAPIError.leaveBlocked(parseLeaveConflict(from: data))
         default: throw MonacoAPIError.httpStatus(http.statusCode)
         }
@@ -178,8 +303,13 @@ final class MonacoAPIClient {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
         switch http.statusCode {
-        case 204: return .joined
-        case 202: return try JSONDecoder().decode(JoinGroupStatusResponse.self, from: data).status
+        case 204:
+            NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
+            return .joined
+        case 202:
+            let status = try JSONDecoder().decode(JoinGroupStatusResponse.self, from: data).status
+            NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
+            return status
         case 403: throw MonacoAPIError.httpStatus(403)
         case 404: throw MonacoAPIError.httpStatus(404)
         default: throw MonacoAPIError.httpStatus(http.statusCode)
@@ -214,6 +344,7 @@ final class MonacoAPIClient {
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
         guard http.statusCode == 204 else { throw MonacoAPIError.httpStatus(http.statusCode) }
+        NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
     }
 
 
@@ -283,6 +414,107 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(GetDepositResponse.self, from: data)
     }
 
+    func listMarketAssets(
+        accessToken: String,
+        query: String,
+        limit: Int = 25,
+        offset: Int = 0
+    ) async throws -> ListMarketAssetsResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/assets"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "offset", value: String(offset)),
+        ]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(ListMarketAssetsResponse.self, from: data)
+    }
+
+    func getPopularMarketAssets(accessToken: String, limit: Int = 10) async throws -> PopularMarketAssetsResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/assets/popular"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(PopularMarketAssetsResponse.self, from: data)
+    }
+
+    func getMarketAsset(accessToken: String, symbol: String) async throws -> AssetDetailDTO {
+        let url = baseURL.appending(path: "v1/assets/\(symbol)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(AssetDetailDTO.self, from: data)
+    }
+
+    func getMarketAssetChart(
+        accessToken: String,
+        symbol: String,
+        range: AssetChartRange
+    ) async throws -> AssetChartResponse {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/assets/\(symbol)/chart"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "range", value: range.rawValue)]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(AssetChartResponse.self, from: data)
+    }
+
     func searchAssets(
         accessToken: String,
         groupId: String,
@@ -350,7 +582,9 @@ final class MonacoAPIClient {
         guard http.statusCode == 200 else {
             throw proposalCreateError(status: http.statusCode, data: data)
         }
-        return try JSONDecoder().decode(CreateProposalResponse.self, from: data)
+        let result = try JSONDecoder().decode(CreateProposalResponse.self, from: data)
+        NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
+        return result
     }
 
     private func proposalCreateError(status: Int, data: Data) -> MonacoAPIError {
@@ -464,6 +698,7 @@ final class MonacoAPIClient {
         guard http.statusCode == 200 || http.statusCode == 204 else {
             throw MonacoAPIError.httpStatus(http.statusCode)
         }
+        NotificationCenter.default.post(name: .monacoSessionChanged, object: nil)
     }
 
     func postRedeem(
@@ -531,6 +766,10 @@ final class MonacoAPIClient {
 
 private struct SessionRequest: Encodable {
     let accessToken: String
+}
+
+private struct UpdateProfileRequest: Encodable {
+    let displayName: String
 }
 
 private struct CreateGroupJoinPolicyRequest: Encodable {

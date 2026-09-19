@@ -10,8 +10,10 @@ public struct HomeViewDTO: Codable, Equatable, Sendable {
     }
 }
 
-public struct HomeGroupBoardRowDTO: Codable, Equatable, Sendable {
+public struct HomeGroupBoardRowDTO: Codable, Equatable, Sendable, Identifiable {
+    public var id: String { groupID }
     public let groupID: String
+    public var groupId: String { groupID }
     public let name: String
     public let potValueUsd: String
     public let percentReturn: String?
@@ -34,6 +36,10 @@ public struct HomeGroupBoardRowDTO: Codable, Equatable, Sendable {
         self.isJoined = isJoined
     }
 
+    public init(groupId: String, name: String, potValueUsd: String, percentReturn: String?, dollarPnl: String, isJoined: Bool) {
+        self.init(groupID: groupId, name: name, potValueUsd: potValueUsd, percentReturn: percentReturn, dollarPnl: dollarPnl, isJoined: isJoined)
+    }
+
     enum CodingKeys: String, CodingKey {
         case groupID = "groupId"
         case name
@@ -44,8 +50,10 @@ public struct HomeGroupBoardRowDTO: Codable, Equatable, Sendable {
     }
 }
 
-public struct HomePeopleBoardRowDTO: Codable, Equatable, Sendable {
+public struct HomePeopleBoardRowDTO: Codable, Equatable, Sendable, Identifiable {
+    public var id: String { userID }
     public let userID: String
+    public var userId: String { userID }
     public let displayName: String
     public let percentReturn: String?
     public let dollarPnl: String
