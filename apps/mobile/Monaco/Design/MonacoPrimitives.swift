@@ -126,12 +126,15 @@ struct MonacoRowCard<Leading: View>: View {
     let trailing: String?
     var subtitleColor: Color = MonacoTheme.muted
     var trailingColor: Color = MonacoTheme.ink
+    /// Muted second line under `trailing` (e.g. percent under dollar P&L).
+    let trailingCaption: String?
     let leading: Leading
 
     init(
         title: String,
         subtitle: String?,
         trailing: String?,
+        trailingCaption: String? = nil,
         subtitleColor: Color = MonacoTheme.muted,
         trailingColor: Color = MonacoTheme.ink,
         @ViewBuilder leading: () -> Leading
@@ -139,6 +142,7 @@ struct MonacoRowCard<Leading: View>: View {
         self.title = title
         self.subtitle = subtitle
         self.trailing = trailing
+        self.trailingCaption = trailingCaption
         self.subtitleColor = subtitleColor
         self.trailingColor = trailingColor
         self.leading = leading()
@@ -160,9 +164,17 @@ struct MonacoRowCard<Leading: View>: View {
             }
             Spacer(minLength: 8)
             if let trailing, !trailing.isEmpty {
-                Text(trailing)
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(trailingColor)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(trailing)
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(trailingColor)
+                    if let trailingCaption, !trailingCaption.isEmpty {
+                        Text(trailingCaption)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(MonacoTheme.muted)
+                    }
+                }
+                .fixedSize()
             }
         }
         .padding(MonacoTheme.Space.m)
@@ -197,6 +209,7 @@ extension MonacoRowCard where Leading == MonacoRowIcon {
         title: String,
         subtitle: String?,
         trailing: String?,
+        trailingCaption: String? = nil,
         subtitleColor: Color = MonacoTheme.muted,
         trailingColor: Color = MonacoTheme.ink
     ) {
@@ -204,6 +217,7 @@ extension MonacoRowCard where Leading == MonacoRowIcon {
             title: title,
             subtitle: subtitle,
             trailing: trailing,
+            trailingCaption: trailingCaption,
             subtitleColor: subtitleColor,
             trailingColor: trailingColor
         ) {

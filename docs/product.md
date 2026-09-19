@@ -164,6 +164,15 @@ Postgres stores NAV snapshots on deposit, fill, and redeem so charts and both bo
 
 Settings → Advanced may expose explorer links. The main flow never needs them.
 
+## Profile
+
+The Profile tab is the signed-in user's own page: photo, display name, member-since date, account balance, deposit address with copy, and every joined cabal with its pot, the viewer's position, and P&L. It reads the same `/v1/home`, `/v1/home/dashboard`, `/v1/me`, and `/v1/me/balance` payloads Home already loads, so it adds no fetches.
+
+- **Display name** (`PATCH /v1/me` with `{"displayName": "..."}`) is a label, not a handle. Names are not unique; boards key on user id. 1–32 characters after trimming. Letters, numbers, spaces, punctuation, and emoji; no control, zero-width, bidi-override, or blank filler characters, and at least one letter or digit. The app checks the same rules inline. A save shows immediately and rolls back with a toast if the server rejects it.
+- **Photo** (`POST /v1/me/profile-photo`) is picked on Profile or Settings through one shared picker. Storage details: [ops-profile-photos.md](ops-profile-photos.md).
+- Both writes are limited per user (name: 5 quick edits, then one per 12 s; photo: 3, then one per 20 s) and return 429 with `Retry-After` past that.
+- After either write the app refetches Home, so the people board, dashboard leaderboard, and cabal member boards show the new name and photo. Those rows carry `profilePhotoUrl`.
+
 ## Withdraw
 
 **Platform withdraw** (Settings → Withdraw) sends idle USDC from the user's Privy **member wallet** to any Solana address they paste. It uses `GET /v1/me/balance` (chain USDC minus in-flight fund jobs and pending platform withdrawals) and `POST /v1/me/withdrawals`. It does not sell cabal holdings, debit share units, or pull from group treasuries. Deployed stake must return to the member wallet first (see leave / withdraw-to-balance flows).

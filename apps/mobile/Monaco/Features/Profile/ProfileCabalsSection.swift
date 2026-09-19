@@ -39,9 +39,14 @@ struct ProfileCabalRow: Identifiable, Equatable {
         return "\(pot) · You \(UsdAmountFormatter.format(decimalString: equityUsd))"
     }
 
+    /// Dollar P&L on the viewer's position; nil when the viewer holds no stake.
     var trailing: String? {
-        guard let dollarPnl else { return nil }
-        return "\(PercentReturnFormatter.format(percentReturn))  \(dollarPnl)"
+        dollarPnl
+    }
+
+    var trailingCaption: String? {
+        guard dollarPnl != nil else { return nil }
+        return PercentReturnFormatter.format(percentReturn)
     }
 }
 
@@ -76,7 +81,8 @@ struct ProfileCabalsSection: View {
                             systemImage: "person.3.fill",
                             title: row.name,
                             subtitle: row.subtitle,
-                            trailing: row.trailing
+                            trailing: row.trailing,
+                            trailingCaption: row.trailingCaption
                         )
                     }
                     .buttonStyle(.plain)

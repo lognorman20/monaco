@@ -5,11 +5,13 @@ import UIKit
 
 /// Debug-only: renders Profile from canned `AppSessionStore` data so QA can screenshot
 /// each state without Privy or a backend. Launch with
-/// `-MonacoProfileSample <placeholder|photo|validation|empty|loading|error>`.
+/// `-MonacoProfileSample <placeholder|photo|validation|cabals|empty|loading|error>`.
+/// `cabals` and `empty` open scrolled to the bottom so the cabal list is on screen.
 enum ProfileSampleScenario: String, CaseIterable {
     case placeholder
     case photo
     case validation
+    case cabals
     case empty
     case loading
     case error
@@ -41,6 +43,7 @@ struct ProfileSampleHarness: View {
                 initialNameDraft: scenario == .validation ? "Logan Norman of the Weekend Investors" : nil
             )
         }
+        .defaultScrollAnchor(scenario == .cabals || scenario == .empty ? .bottom : .top)
         .environment(session)
     }
 
@@ -62,7 +65,7 @@ struct ProfileSampleHarness: View {
             userId: "sample-user",
             displayName: "Logan Norman",
             memberWalletAddress: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-            profilePhotoUrl: scenario == .photo ? samplePhotoURL()?.absoluteString : nil,
+            profilePhotoUrl: scenario == .photo || scenario == .cabals ? samplePhotoURL()?.absoluteString : nil,
             createdAt: ISO8601DateFormatter().date(from: "2026-09-01T14:30:00Z")
         )
         session.platformBalance = PlatformBalanceDTO(
@@ -95,20 +98,24 @@ struct ProfileSampleHarness: View {
         return session
     }
 
-    /// Writes a generated image to tmp so AsyncImage loads it from a file URL.
+    /// Writes a generated landscape to tmp so AsyncImage loads it from a file URL.
     private static func samplePhotoURL() -> URL? {
         let size = CGSize(width: 256, height: 256)
         let image = UIGraphicsImageRenderer(size: size).image { context in
-            let colors = [
-                UIColor(red: 0.93, green: 0.55, blue: 0.36, alpha: 1).cgColor,
-                UIColor(red: 0.36, green: 0.22, blue: 0.18, alpha: 1).cgColor,
+            let cg = context.cgContext
+            let sky = [
+                UIColor(red: 0.98, green: 0.72, blue: 0.45, alpha: 1).cgColor,
+                UIColor(red: 0.85, green: 0.42, blue: 0.38, alpha: 1).cgColor,
             ] as CFArray
-            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
-                context.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: sky, locations: [0, 1]) {
+                cg.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0, y: 170), options: [.drawsAfterEndLocation])
             }
-            UIColor(white: 1, alpha: 0.85).setFill()
-            context.cgContext.fillEllipse(in: CGRect(x: 88, y: 52, width: 80, height: 80))
-            context.cgContext.fillEllipse(in: CGRect(x: 48, y: 150, width: 160, height: 150))
+            UIColor(red: 1.0, green: 0.93, blue: 0.7, alpha: 1).setFill()
+            cg.fillEllipse(in: CGRect(x: 150, y: 70, width: 64, height: 64))
+            UIColor(red: 0.29, green: 0.36, blue: 0.33, alpha: 1).setFill()
+            cg.fillEllipse(in: CGRect(x: -60, y: 150, width: 260, height: 200))
+            UIColor(red: 0.18, green: 0.25, blue: 0.23, alpha: 1).setFill()
+            cg.fillEllipse(in: CGRect(x: 90, y: 175, width: 240, height: 180))
         }
         guard let data = image.pngData() else { return nil }
         let url = FileManager.default.temporaryDirectory.appending(path: "monaco-sample-avatar.png")

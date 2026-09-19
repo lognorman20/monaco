@@ -65,7 +65,7 @@ struct ProfileNameEditor: View {
                         .onSubmit { Task { await save() } }
                         .padding(.horizontal, MonacoTheme.Space.m)
                         .padding(.vertical, 12)
-                        .background(MonacoTheme.canvas, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
                                 .strokeBorder(
