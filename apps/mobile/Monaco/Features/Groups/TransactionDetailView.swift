@@ -1,7 +1,7 @@
-import SwiftUI
 import MonacoCore
+import SwiftUI
 
-/// Full detail for one activity row — deposit, buy, or sell.
+/// Receipt for one activity row: deposit, buy, or sell. Loads the detail, then renders `TransactionReceiptView`.
 struct TransactionDetailView: View {
     @ObservedObject var auth: PrivyAuthService
     let activityItem: GroupActivityItemDTO
@@ -16,26 +16,45 @@ struct TransactionDetailView: View {
     @State private var isLoading = true
 
     var body: some View {
-        Form {
-            if isDeposit {
-                depositContent
-            } else if let transaction {
-                swapContent(transaction)
+        Group {
+            if let receipt {
+                TransactionReceiptView(
+                    receipt: receipt,
+                    isRetrying: isRetrying,
+                    onRetry: canRetry ? { onRetry?(activityItem) } : nil
+                )
             } else if let errorMessage {
-                errorSection(errorMessage)
-            } else if isLoading {
-                Section {
-                    ProgressView("Loading transaction…")
-                        .tint(MonacoTheme.accent)
+                VStack(spacing: 16) {
+                    Text(errorMessage)
+                        .font(.body)
+                        .foregroundStyle(MonacoTheme.muted)
+                        .multilineTextAlignment(.center)
+                    Button("Try again") {
+                        Task { await loadDetail() }
+                    }
+                    .buttonStyle(.monacoSecondary)
                 }
+                .padding(24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("transaction-detail-error")
+            } else {
+                ProgressView()
+                    .tint(MonacoTheme.ink)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .monacoFormScreen()
-        .navigationTitle(screenTitle)
+        .monacoCanvas()
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: loadTaskID) {
             await loadDetail()
         }
+    }
+
+    private var receipt: TransactionReceipt? {
+        if let deposit { return TransactionReceipt(deposit: deposit) }
+        if let transaction { return TransactionReceipt(transaction: transaction) }
+        return nil
     }
 
     private var loadTaskID: String {
@@ -46,251 +65,14 @@ struct TransactionDetailView: View {
         activityItem.kind.lowercased() == "deposit"
     }
 
-    private var screenTitle: String {
-        switch activityItem.kind.lowercased() {
-        case "deposit": "Deposit"
-        case "buy": "Buy"
-        case "sell": "Sell"
-        default: activityItem.kind.capitalized
-        }
-    }
-
-    @ViewBuilder
-    private var depositContent: some View {
-        if let deposit {
-            summarySection(
-                kindLabel: "Deposit",
-                status: deposit.status,
-                amountLabel: formatUsdc(deposit.amount)
-            )
-
-            Section("Details") {
-                LabeledContent("Amount", value: formatUsdc(deposit.amount))
-                LabeledContent("Status", value: statusLabel(deposit.status))
-                LabeledContent("Created", value: formatTimestamp(deposit.createdAt))
-                if deposit.status.lowercased() == "failed" {
-                    LabeledContent("Failure reason", value: "Sweep failed")
-                }
-                if let fromAddress = deposit.fromAddress, !fromAddress.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("From address")
-                            .font(.subheadline)
-                            .foregroundStyle(MonacoTheme.secondaryText)
-                        MonacoWalletAddressText(address: fromAddress, textStyle: .footnote)
-                    }
-                }
-                signatureRow(deposit.txSignature)
-                if deposit.shareUnits > 0 {
-                    LabeledContent("Your share units", value: "\(deposit.shareUnits)")
-                }
-            }
-
-            Section("Identifiers") {
-                LabeledContent("Deposit ID", value: deposit.depositId)
-                LabeledContent("Cabal ID", value: deposit.groupId)
-            }
-        } else if let errorMessage {
-            errorSection(errorMessage)
-        } else if isLoading {
-            Section {
-                ProgressView("Loading deposit…")
-                    .tint(MonacoTheme.accent)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func swapContent(_ transaction: TransactionDetailDTO) -> some View {
-        summarySection(
-            kindLabel: screenTitle,
-            status: transaction.status,
-            amountLabel: formatSwapAmount(transaction)
-        )
-
-        Section("Details") {
-            LabeledContent("Kind", value: transaction.action.capitalized)
-            LabeledContent("Status", value: statusLabel(transaction.status))
-            LabeledContent("Created", value: formatTimestamp(transaction.createdAt))
-            if let confirmedAt = transaction.confirmedAt {
-                LabeledContent("Executed", value: formatTimestamp(confirmedAt))
-            } else {
-                LabeledContent("Executed", value: "N/A")
-            }
-            if let inputSymbol = transaction.inputSymbol, !inputSymbol.isEmpty {
-                LabeledContent("Input", value: AssetSymbolFormatter.format(inputSymbol))
-            }
-            if let outputSymbol = transaction.outputSymbol, !outputSymbol.isEmpty {
-                LabeledContent("Output", value: AssetSymbolFormatter.format(outputSymbol))
-            }
-            if let price = transaction.costBasisPrice, price > 0 {
-                LabeledContent("Cost basis (USDC)", value: formatUsdc(price))
-            }
-            if let amount = transaction.costBasisAmount, amount > 0 {
-                LabeledContent("Fill amount", value: formatFillAmount(transaction, amount))
-            }
-            if let reason = transaction.failureReason, !reason.isEmpty {
-                LabeledContent("Failure reason", value: reason)
-            }
-        }
-
-        Section("On chain") {
-            signatureRow(transaction.txSignature)
-            copyableRow(label: "Execute request", value: transaction.executeRequestId)
-        }
-
-        Section("Identifiers") {
-            LabeledContent("Transaction ID", value: transaction.transactionId)
-            LabeledContent("Cabal ID", value: transaction.groupId)
-            copyableRow(label: "Proposal ID", value: transaction.proposalId)
-            copyableRow(label: "Input mint", value: transaction.inputMint)
-            copyableRow(label: "Output mint", value: transaction.outputMint)
-        }
-
-        if canRetry {
-            Section {
-                if isRetrying {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                            .tint(MonacoTheme.accent)
-                        Spacer()
-                    }
-                    .accessibilityIdentifier("transaction-detail-retry-loading")
-                } else {
-                    Button("Retry swap") {
-                        onRetry?(activityItem)
-                    }
-                    .monacoFormSecondaryAction()
-                    .accessibilityIdentifier("transaction-detail-retry")
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func summarySection(kindLabel: String, status: String, amountLabel: String) -> some View {
-        Section {
-            HStack {
-                Text(kindLabel)
-                    .font(.title2.bold())
-                Spacer()
-                TransactionStatusChip(status: status)
-            }
-            Text(amountLabel)
-                .font(.subheadline)
-                .foregroundStyle(MonacoTheme.secondaryText)
-        }
-    }
-
-    @ViewBuilder
-    private func signatureRow(_ signature: String?) -> some View {
-        if let signature, !signature.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Tx signature")
-                    .font(.subheadline)
-                    .foregroundStyle(MonacoTheme.secondaryText)
-                MonacoWalletAddressText(address: signature, textStyle: .footnote)
-            }
-        } else {
-            LabeledContent("Tx signature", value: "N/A")
-        }
-    }
-
-    @ViewBuilder
-    private func copyableRow(label: String, value: String?) -> some View {
-        if let value, !value.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(label)
-                    .font(.subheadline)
-                    .foregroundStyle(MonacoTheme.secondaryText)
-                MonacoWalletAddressText(address: value, textStyle: .footnote)
-            }
-        } else {
-            LabeledContent(label, value: "N/A")
-        }
-    }
-
-    @ViewBuilder
-    private func errorSection(_ message: String) -> some View {
-        Section {
-            Label(message, systemImage: "exclamationmark.triangle.fill")
-                .font(.footnote)
-                .foregroundStyle(MonacoTheme.warning)
-            Button("Try again") {
-                Task { await loadDetail() }
-            }
-            .monacoFormSecondaryAction()
-        }
-    }
-
     private var canRetry: Bool {
-        guard activityItem.status.lowercased() == "failed" else { return false }
-        switch activityItem.kind.lowercased() {
-        case "buy", "sell":
-            return onRetry != nil
-        default:
-            return false
-        }
-    }
-
-    private func formatSwapAmount(_ transaction: TransactionDetailDTO) -> String {
-        switch transaction.action.lowercased() {
-        case "buy":
-            return "\(formatUsdc(transaction.amountMicros)) USDC → \(AssetSymbolFormatter.format(transaction.outputSymbol ?? "token"))"
-        case "sell":
-            if transaction.status.lowercased() == "confirmed",
-               transaction.outputSymbol?.uppercased() == "USDC" || transaction.inputSymbol?.uppercased() != "USDC" {
-                if let proceeds = transaction.costBasisAmount, proceeds > 0 {
-                    return "\(AssetSymbolFormatter.format(transaction.inputSymbol ?? "token")) → \(formatUsdc(proceeds))"
-                }
-            }
-            return "\(AssetSymbolFormatter.format(transaction.inputSymbol ?? "token")) → USDC"
-        default:
-            return formatUsdc(transaction.amountMicros)
-        }
-    }
-
-    private func formatFillAmount(_ transaction: TransactionDetailDTO, _ micros: Int64) -> String {
-        switch transaction.action.lowercased() {
-        case "buy":
-            if let symbol = transaction.outputSymbol {
-                return "\(AssetSymbolFormatter.format(symbol)) \(formatTokenAmount(Double(micros) / 100_000_000.0))"
-            }
-            return formatTokenAmount(Double(micros) / 100_000_000.0)
-        case "sell":
-            let proceeds = transaction.proceedsUsdcMicros ?? transaction.costBasisAmount ?? micros
-            return formatUsdc(proceeds)
-        default:
-            return formatUsdc(micros)
-        }
-    }
-
-    private func formatTokenAmount(_ amount: Double) -> String {
-        String(format: "%.8f", amount).replacingOccurrences(of: "0+$", with: "", options: .regularExpression)
-    }
-
-    private func formatUsdc(_ micros: Int64) -> String {
-        String(format: "$%.2f", Double(micros) / 1_000_000.0)
-    }
-
-    private func statusLabel(_ status: String) -> String {
-        switch status.lowercased() {
-        case "confirmed": "Confirmed"
-        case "pending": "Pending"
-        case "failed": "Failed"
-        default: status.capitalized
-        }
-    }
-
-    private func formatTimestamp(_ raw: String) -> String {
-        guard let date = ISO8601DateFormatter().date(from: raw) else { return raw }
-        return date.formatted(date: .abbreviated, time: .shortened)
+        onRetry != nil && GroupActivityRules.canRetry(activityItem)
     }
 
     private func loadDetail() async {
         guard let token = auth.accessToken else {
             isLoading = false
-            errorMessage = "Missing sign-in token."
+            errorMessage = "Sign in again to see this."
             return
         }
 
@@ -306,44 +88,260 @@ struct TransactionDetailView: View {
             }
         } catch is CancellationError {
             return
-        } catch MonacoAPIError.httpStatus(let code) {
-            errorMessage = "Could not load details (HTTP \(code))."
         } catch {
-            errorMessage = "Could not load details."
+            errorMessage = "Couldn't load this. Try again"
         }
     }
 }
 
-private struct TransactionStatusChip: View {
-    let status: String
+/// Everything a receipt shows, derived from the deposit or swap DTO. No ids, no mints.
+struct TransactionReceipt: Equatable {
+    struct Row: Equatable, Identifiable {
+        let label: String
+        let value: String
+        var id: String { label }
+    }
+
+    enum Status: Equatable { case confirmed, pending, failed, other(String) }
+
+    let glyph: String
+    let headline: String
+    /// Hero figure in USDC micros; nil when there's no dollar amount yet (pending sell).
+    let amountMicros: Int64?
+    /// Shown in place of the hero figure when there's no dollar amount.
+    let fallbackHero: String?
+    let status: Status
+    let rows: [Row]
+    let failureMessage: String?
+    let signature: String?
+
+    private static let atomicsPerShare = 100_000_000.0
+
+    init(deposit: GetDepositResponse) {
+        glyph = "plus"
+        headline = "Money added"
+        amountMicros = deposit.amount
+        fallbackHero = nil
+        status = Self.status(deposit.status)
+        rows = [Row(label: "Date", value: Self.date(deposit.createdAt))]
+        failureMessage = status == .failed ? "The transfer didn't go through" : nil
+        signature = deposit.txSignature
+    }
+
+    init(transaction: TransactionDetailDTO) {
+        let action = transaction.action.lowercased()
+        status = Self.status(transaction.status)
+        signature = transaction.txSignature
+        let dateRow = Row(label: "Date", value: Self.date(transaction.confirmedAt ?? transaction.createdAt))
+
+        switch action {
+        case "buy":
+            let name = Self.stockName(transaction.outputSymbol)
+            glyph = "arrow.down"
+            headline = switch status {
+            case .confirmed: "Bought \(name)"
+            case .failed: "Couldn't buy \(name)"
+            default: "Buying \(name)"
+            }
+            amountMicros = transaction.amountMicros
+            fallbackHero = nil
+            var rows: [Row] = []
+            if let atomics = transaction.costBasisAmount, atomics > 0 {
+                let shares = Double(atomics) / Self.atomicsPerShare
+                rows.append(Row(label: "Shares", value: GroupActivityRules.sharesLabel(shares)))
+                if let spent = transaction.costBasisPrice, spent > 0 {
+                    let perShare = Int64((Double(spent) / shares).rounded())
+                    rows.append(Row(label: "Price", value: "\(UsdAmountFormatter.format(micros: perShare)) a share"))
+                }
+            }
+            rows.append(dateRow)
+            self.rows = rows
+        case "sell":
+            let name = Self.stockName(transaction.inputSymbol)
+            glyph = "arrow.up"
+            headline = switch status {
+            case .confirmed: "Sold \(name)"
+            case .failed: "Couldn't sell \(name)"
+            default: "Selling \(name)"
+            }
+            let proceeds = transaction.proceedsUsdcMicros ?? transaction.costBasisAmount
+            let shares = Double(transaction.amountMicros) / Self.atomicsPerShare
+            if let proceeds, proceeds > 0 {
+                amountMicros = proceeds
+                fallbackHero = nil
+            } else {
+                amountMicros = nil
+                fallbackHero = GroupActivityRules.sharesLabel(shares)
+            }
+            var rows: [Row] = []
+            if shares > 0 {
+                rows.append(Row(label: "Shares", value: GroupActivityRules.sharesLabel(shares)))
+                if let proceeds, proceeds > 0 {
+                    let perShare = Int64((Double(proceeds) / shares).rounded())
+                    rows.append(Row(label: "Price", value: "\(UsdAmountFormatter.format(micros: perShare)) a share"))
+                }
+            }
+            rows.append(dateRow)
+            self.rows = rows
+        default:
+            glyph = "circle"
+            headline = transaction.action.capitalized
+            amountMicros = transaction.amountMicros
+            fallbackHero = nil
+            rows = [dateRow]
+        }
+        failureMessage = status == .failed ? "It didn't go through. Nothing left the pot." : nil
+    }
+
+    /// Solscan only for real signatures (base58); seeded rows carry placeholders.
+    var solscanURL: URL? {
+        guard let signature, !signature.isEmpty,
+              signature.allSatisfy({ $0.isLetter || $0.isNumber }) else { return nil }
+        return URL(string: "https://solscan.io/tx/\(signature)")
+    }
+
+    var statusLabel: String {
+        switch status {
+        case .confirmed: "Confirmed"
+        case .pending: "Pending"
+        case .failed: "Failed"
+        case .other(let raw): raw.capitalized
+        }
+    }
+
+    private static func status(_ raw: String) -> Status {
+        switch raw.lowercased() {
+        case "confirmed": .confirmed
+        case "pending": .pending
+        case "failed": .failed
+        default: .other(raw)
+        }
+    }
+
+    private static func stockName(_ symbol: String?) -> String {
+        guard let symbol, !symbol.isEmpty else { return "stock" }
+        return AssetSymbolFormatter.format(symbol)
+    }
+
+    /// Local time on display; the API stores UTC.
+    private static func date(_ raw: String) -> String {
+        guard let date = GroupActivityRules.parseDate(raw) else { return raw }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+/// Receipt layout: glyph, what happened, the amount, status, a few facts, Solscan.
+struct TransactionReceiptView: View {
+    let receipt: TransactionReceipt
+    var isRetrying = false
+    var onRetry: (() -> Void)?
 
     var body: some View {
-        Text(label)
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .foregroundStyle(foreground)
-            .background(background, in: Capsule())
-    }
+        ScrollView {
+            VStack(spacing: 28) {
+                VStack(spacing: 12) {
+                    Image(systemName: receipt.glyph)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(MonacoTheme.ink)
+                        .frame(width: 56, height: 56)
+                        .background(Circle().fill(MonacoTheme.surface))
+                        .accessibilityHidden(true)
+                    Text(receipt.headline)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(MonacoTheme.ink)
+                        .multilineTextAlignment(.center)
+                    Group {
+                        if let micros = receipt.amountMicros {
+                            Text(UsdAmountFormatter.format(micros: micros))
+                        } else {
+                            Text(receipt.fallbackHero ?? "—")
+                        }
+                    }
+                    .font(.system(size: 44, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(MonacoTheme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    Text(receipt.statusLabel)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(statusColor)
+                        .accessibilityIdentifier("transaction-detail-status")
+                }
+                .frame(maxWidth: .infinity)
+                .accessibilityElement(children: .combine)
 
-    private var label: String {
-        switch status.lowercased() {
-        case "confirmed": "Confirmed"
-        case "pending": "Pending"
-        case "failed": "Failed"
-        default: status.capitalized
+                if let failure = receipt.failureMessage {
+                    Text(failure)
+                        .font(.subheadline)
+                        .foregroundStyle(MonacoTheme.muted)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                }
+
+                VStack(spacing: 0) {
+                    ForEach(receipt.rows) { row in
+                        HStack {
+                            Text(row.label)
+                                .foregroundStyle(MonacoTheme.muted)
+                            Spacer(minLength: 12)
+                            Text(row.value)
+                                .fontWeight(.semibold)
+                                .monospacedDigit()
+                                .foregroundStyle(MonacoTheme.ink)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        .font(.body)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 52)
+                        .accessibilityElement(children: .combine)
+                    }
+                    if let url = receipt.solscanURL {
+                        Link(destination: url) {
+                            HStack {
+                                Text("View on Solscan")
+                                Spacer()
+                                Image(systemName: "arrow.up.right")
+                                    .imageScale(.small)
+                            }
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(MonacoTheme.ink)
+                            .padding(.horizontal, 16)
+                            .frame(minHeight: 52)
+                            .contentShape(Rectangle())
+                        }
+                        .accessibilityIdentifier("transaction-detail-solscan")
+                    }
+                }
+                .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
+
+                if let onRetry {
+                    Group {
+                        if isRetrying {
+                            ProgressView()
+                                .tint(MonacoTheme.ink)
+                                .frame(minHeight: 50)
+                                .accessibilityIdentifier("transaction-detail-retry-loading")
+                        } else {
+                            Button("Try again", action: onRetry)
+                                .buttonStyle(.monacoPrimary)
+                                .accessibilityIdentifier("transaction-detail-retry")
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 32)
         }
+        .accessibilityIdentifier("transaction-receipt")
     }
 
-    private var foreground: Color {
-        switch status.lowercased() {
-        case "confirmed": MonacoTheme.success
-        case "pending", "failed": MonacoTheme.warning
-        default: MonacoTheme.secondaryText
+    private var statusColor: Color {
+        switch receipt.status {
+        case .confirmed: MonacoTheme.muted
+        case .pending: MonacoTheme.warning
+        case .failed: MonacoTheme.loss
+        case .other: MonacoTheme.muted
         }
-    }
-
-    private var background: Color {
-        foreground.opacity(0.15)
     }
 }
