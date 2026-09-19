@@ -11,12 +11,31 @@ struct ProposeChooserView: View {
 
     private let service: ProposeService
 
-    init(auth: PrivyAuthService, groupId: String, groupView: GroupViewDTO, onProposed: ((_ proposalId: String) -> Void)? = nil) {
-        self.init(service: LiveProposeService(auth: auth), groupId: groupId, groupView: groupView, onProposed: onProposed)
+    /// The presenting sheet's detent. When given, the chooser raises the sheet to `.large` while a
+    /// flow is pushed (the steps need the height for the keypad and the bottom button) and lowers it
+    /// back to `.medium` on return. Presenters pass the same binding to
+    /// `.presentationDetents([.medium, .large], selection:)`.
+    private let detent: Binding<PresentationDetent>?
+
+    init(
+        auth: PrivyAuthService,
+        groupId: String,
+        groupView: GroupViewDTO,
+        onProposed: ((_ proposalId: String) -> Void)? = nil,
+        detent: Binding<PresentationDetent>? = nil
+    ) {
+        self.init(service: LiveProposeService(auth: auth), groupId: groupId, groupView: groupView, onProposed: onProposed, detent: detent)
     }
 
-    init(service: ProposeService, groupId: String, groupView: GroupViewDTO, onProposed: ((_ proposalId: String) -> Void)? = nil) {
+    init(
+        service: ProposeService,
+        groupId: String,
+        groupView: GroupViewDTO,
+        onProposed: ((_ proposalId: String) -> Void)? = nil,
+        detent: Binding<PresentationDetent>? = nil
+    ) {
         self.service = service
+        self.detent = detent
         self.groupId = groupId
         self.groupView = groupView
         self.onProposed = onProposed
@@ -64,7 +83,14 @@ struct ProposeChooserView: View {
         .background(MonacoTheme.canvas.ignoresSafeArea())
         .navigationTitle(ProposeFlowCopy.chooserTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { setDetent(.medium) }
+        .onDisappear { setDetent(.large) }
         .accessibilityIdentifier("propose-chooser")
+    }
+
+    private func setDetent(_ value: PresentationDetent) {
+        guard let detent, detent.wrappedValue != value else { return }
+        withAnimation(.snappy) { detent.wrappedValue = value }
     }
 
     private var sellDetail: String {
@@ -163,9 +189,3 @@ private struct ChooserRow: View {
     }
 }
 
-extension View {
-    /// Flows pushed from the Propose sheet need the full height for the keypad and the bottom button.
-    func proposeFlowFullHeight() -> some View {
-        presentationDetents([.large])
-    }
-}

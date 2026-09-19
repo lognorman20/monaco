@@ -95,7 +95,6 @@ struct ProposeBuyView: View {
             }
             await search(reset: true)
         }
-        .proposeFlowFullHeight()
         .accessibilityIdentifier("propose-buy")
     }
 

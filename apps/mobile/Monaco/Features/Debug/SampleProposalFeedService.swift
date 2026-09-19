@@ -184,6 +184,7 @@ struct SampleProposalFeedRoot: View {
 private struct SampleProposeRoot: View {
     @State private var service = SampleProposeService()
     @State private var showsPropose = false
+    @State private var proposeDetent: PresentationDetent = .medium
     @State private var toast: MonacoToast?
 
     var body: some View {
@@ -210,10 +211,11 @@ private struct SampleProposeRoot: View {
                             showsPropose = false
                             Haptics.success()
                             toast = MonacoToast(message: ProposeFlowCopy.proposalSent(SampleProposeService.groupView.name), isSuccess: true)
-                        }
+                        },
+                        detent: $proposeDetent
                     )
                 }
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.medium, .large], selection: $proposeDetent)
             }
             .monacoToast($toast)
         }

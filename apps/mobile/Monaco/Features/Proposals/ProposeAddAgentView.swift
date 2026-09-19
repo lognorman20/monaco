@@ -72,7 +72,6 @@ struct ProposeAddAgentView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(MonacoTheme.canvas.ignoresSafeArea())
-        .proposeFlowFullHeight()
         .navigationTitle(ProposeFlowCopy.addBotTitle)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
@@ -166,7 +165,6 @@ struct ProposeAgentLifecycleView: View {
         .padding(.horizontal, MonacoTheme.Space.gutter)
         .padding(.top, MonacoTheme.Space.l)
         .background(MonacoTheme.canvas.ignoresSafeArea())
-        .proposeFlowFullHeight()
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
