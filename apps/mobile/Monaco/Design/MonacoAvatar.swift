@@ -1,7 +1,7 @@
 import MonacoCore
 import SwiftUI
 
-/// Circular profile photo with an initials placeholder. Used on Profile, Settings,
+/// Circular profile photo with an initials placeholder. Used on Profile
 /// and board rows.
 struct MonacoAvatar: View {
     let photoURL: String?
