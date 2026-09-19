@@ -18,124 +18,76 @@ struct SellCabalView: View {
     @State private var amountText = ""
     @State private var isSubmitting = false
     @State private var toast: MonacoToast?
-    @FocusState private var amountFocused: Bool
 
     private static let posix = Locale(identifier: "en_US_POSIX")
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
+            VStack(spacing: MonacoTheme.Space.l) {
                 if hasStake {
-                    amountEntry
+                    AmountEntry(
+                        amountText: $amountText,
+                        max: maxEquityUsd,
+                        presets: [
+                            .fraction(0.25, label: "25%"),
+                            .fraction(0.5, label: "50%"),
+                            .fraction(1, label: "All"),
+                        ],
+                        helper: "Your slice is worth \(UsdAmountFormatter.format(micros: maxEquityUsdMicros))",
+                        overLimitHelper: "More than your slice"
+                    )
+                    .padding(.top, MonacoTheme.Space.xl)
+                    .accessibilityIdentifier("sell-cabal-amount-display")
                     Text("We sell this much of your slice and move the cash to your account balance. You stay in the cabal.")
-                        .font(.footnote)
+                        .font(MonacoTheme.Typo.caption)
                         .foregroundStyle(MonacoTheme.muted)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, MonacoTheme.Space.sm)
                         .accessibilityIdentifier("sell-cabal-explainer")
                 } else {
-                    VStack(spacing: 8) {
-                        Text("Nothing to cash out yet")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(MonacoTheme.ink)
-                        Text("Add money to this cabal first. Your slice shows up here.")
-                            .font(.subheadline)
-                            .foregroundStyle(MonacoTheme.muted)
-                            .multilineTextAlignment(.center)
-                    }
+                    EmptyState(
+                        title: "Nothing to cash out yet",
+                        message: "Add money to this cabal first. Your slice shows up here."
+                    )
                     .padding(.top, 48)
                     .accessibilityIdentifier("sell-cabal-empty")
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 24)
+            .padding(.horizontal, MonacoTheme.Space.gutter)
         }
         .scrollDismissesKeyboard(.never)
         .monacoCanvas()
         .safeAreaInset(edge: .bottom) {
             if hasStake {
-                VStack(spacing: 0) {
-                    Rectangle().fill(MonacoTheme.hairline).frame(height: 0.5)
+                BottomCTA {
                     Button {
                         Task { await submitSell() }
                     } label: {
-                        Text(ctaTitle)
-                            .frame(maxWidth: .infinity)
+                        if isSubmitting {
+                            ProgressView().tint(MonacoTheme.primaryButtonLabel)
+                        } else {
+                            Text(ctaTitle)
+                        }
                     }
                     .buttonStyle(.monacoPrimary)
                     .disabled(isSubmitting || !canSubmit)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
                     .accessibilityIdentifier("sell-cabal-submit-button")
                 }
-                .background(MonacoTheme.canvas)
             }
         }
         .navigationTitle("Cash out")
         .navigationBarTitleDisplayMode(.inline)
-        .monacoToast($toast)
-        .onAppear {
-            if amountText.isEmpty, hasStake {
-                applyFraction(0.5)
-            }
-            amountFocused = hasStake
-        }
-    }
-
-    // MARK: - Amount entry
-
-    private var amountEntry: some View {
-        VStack(spacing: 16) {
-            ZStack {
-                TextField("", text: $amountText)
-                    .keyboardType(.decimalPad)
-                    .focused($amountFocused)
-                    .opacity(0.02)
-                    .frame(width: 1, height: 1)
-                    .accessibilityIdentifier("sell-cabal-amount-field")
-                Text(UsdAmountFormatter.format(micros: selectedUsdMicros))
-                    .font(.system(size: 44, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(amountText.isEmpty ? MonacoTheme.muted : MonacoTheme.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
-                    .onTapGesture { amountFocused = true }
-                    .accessibilityIdentifier("sell-cabal-amount-display")
-            }
-
-            HStack(spacing: 8) {
-                presetChip("25%", fraction: 0.25, id: 25)
-                presetChip("50%", fraction: 0.5, id: 50)
-                presetChip("All", fraction: 1, id: 100)
-            }
-
-            Text(helperText)
-                .font(.footnote)
-                .foregroundStyle(isOverLimit ? MonacoTheme.loss : MonacoTheme.muted)
-                .accessibilityIdentifier("sell-cabal-helper")
-        }
-    }
-
-    private func presetChip(_ title: String, fraction: Double, id: Int) -> some View {
-        let selected = selectedUsdMicros == StakeWithdrawConverter.usdMicros(forFraction: fraction, maxUsdMicros: maxEquityUsdMicros)
-        return Button {
-            applyFraction(fraction)
-        } label: {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(selected ? MonacoTheme.primaryButtonLabel : MonacoTheme.ink)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .background(Capsule().fill(selected ? MonacoTheme.primaryButtonFill : MonacoTheme.surface))
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("sell-cabal-preset-\(id)")
+        .monacoToast($toast, bottomInset: 72)
     }
 
     // MARK: - Derived values
 
     private var hasStake: Bool {
         maxShareUnits > 0 && maxEquityUsdMicros > 0
+    }
+
+    private var maxEquityUsd: Decimal {
+        Decimal(maxEquityUsdMicros) / Decimal(1_000_000)
     }
 
     private var maxEquityUsdMicros: Int64 {
@@ -170,26 +122,10 @@ struct SellCabalView: View {
             && selectedShareUnits <= maxShareUnits
     }
 
-    private var helperText: String {
-        isOverLimit
-            ? "More than your slice"
-            : "Your slice is worth \(UsdAmountFormatter.format(micros: maxEquityUsdMicros))"
-    }
-
     private var ctaTitle: String {
         if isSubmitting { return "Cashing out…" }
         guard selectedUsdMicros > 0 else { return "Cash out" }
         return "Cash out \(UsdAmountFormatter.format(micros: selectedUsdMicros))"
-    }
-
-    private func applyFraction(_ fraction: Double) {
-        let micros = StakeWithdrawConverter.usdMicros(forFraction: fraction, maxUsdMicros: maxEquityUsdMicros)
-        amountText = editableAmountText(for: micros)
-    }
-
-    private func editableAmountText(for micros: Int64) -> String {
-        let value = Decimal(micros) / Decimal(1_000_000)
-        return NSDecimalNumber(decimal: value).description(withLocale: Self.posix)
     }
 
     // MARK: - Submit
@@ -215,6 +151,7 @@ struct SellCabalView: View {
                 message: "Cashing out \(UsdAmountFormatter.format(micros: soldMicros)). It lands in your balance in about a minute",
                 isSuccess: true
             )
+            Haptics.success()
             await onSold()
             if let onToast {
                 onToast(success)
