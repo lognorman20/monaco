@@ -32,16 +32,17 @@ final class ProposalFeedSampleUITests: XCTestCase {
         // Feed renders cards with vote summary and inline voting.
         let yes = element("proposal-card-vote-yes-sample-0")
         XCTAssertTrue(yes.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["1 comment"].exists || app.staticTexts["2 comments"].exists)
+        XCTAssertTrue(element("proposal-card-comment-count-sample-0").exists)
         capture("01-feed")
 
         // Vote yes from the card: buttons disappear and the tally updates.
         yes.tap()
-        XCTAssertTrue(app.staticTexts["Vote recorded"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Vote in"].waitForExistence(timeout: 5))
         let tally = element("proposal-card-votes-sample-0")
-        let updated = NSPredicate(format: "label CONTAINS %@", "1 yes · 0 no · 4 still to vote")
+        let updated = NSPredicate(format: "label CONTAINS %@", "1 of 5 voted · 3 yes to pass")
         wait(for: [expectation(for: updated, evaluatedWith: tally)], timeout: 5)
         XCTAssertFalse(element("proposal-card-vote-yes-sample-0").exists)
+        XCTAssertTrue(element("proposal-card-voted-sample-0").exists)
         capture("02-after-card-vote")
 
         // Scroll performance smoke: the feed holds 20 open cards; reach the last one.
@@ -102,5 +103,86 @@ final class ProposalFeedSampleUITests: XCTestCase {
 
         XCTAssertFalse(element("comment-composer-send").isEnabled)
         XCTAssertTrue(element("comment-thread-empty").exists)
+    }
+
+    func testReadOnlyProposal_showsTallyWithoutButtons() throws {
+        let card = element("proposal-card-sample-3")
+        var swipes = 0
+        while !card.exists && swipes < 6 {
+            app.swipeUp()
+            swipes += 1
+        }
+        XCTAssertTrue(card.waitForExistence(timeout: 5))
+        XCTAssertTrue(element("proposal-card-votes-sample-3").exists)
+        XCTAssertFalse(element("proposal-card-vote-yes-sample-3").exists)
+        XCTAssertFalse(element("proposal-card-vote-no-sample-3").exists)
+    }
+}
+
+/// Drives the propose sheet on sample data (`-MonacoProposalFeedSample -MonacoProposeSample`):
+/// chooser → pick a stock → amount preset → review → send, then the toast on the cabal screen.
+final class ProposeFlowSampleUITests: XCTestCase {
+    private var app: XCUIApplication!
+
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+        app = XCUIApplication()
+        app.launchArguments = ["-MonacoProposalFeedSample", "-MonacoProposeSample"]
+        app.launch()
+    }
+
+    private func element(_ id: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+
+    private func capture(_ name: String) {
+        let shot = XCUIScreen.main.screenshot()
+        let attachment = XCTAttachment(screenshot: shot)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        if let dir = ProcessInfo.processInfo.environment["MONACO_QA_SCREENSHOT_DIR"], !dir.isEmpty {
+            try? shot.pngRepresentation.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(name).png"))
+        }
+    }
+
+    func testBuy_threeSteps_sendsToCabal() throws {
+        let propose = element("group-action-propose")
+        XCTAssertTrue(propose.waitForExistence(timeout: 10))
+        propose.tap()
+
+        let buy = element("propose-kind-buy")
+        XCTAssertTrue(buy.waitForExistence(timeout: 5))
+        sleep(1)
+        capture("10-chooser")
+        buy.tap()
+
+        let apple = element("proposal-asset-AAPLx")
+        XCTAssertTrue(apple.waitForExistence(timeout: 5))
+        sleep(1)
+        capture("11-pick-stock")
+        apple.tap()
+
+        let preset = app.buttons["$50"]
+        XCTAssertTrue(preset.waitForExistence(timeout: 5))
+        preset.tap()
+        sleep(1)
+        capture("12-amount")
+
+        element("amount-entry-field").typeText("00")
+        XCTAssertTrue(app.staticTexts["More than the pot has"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["Review"].isEnabled)
+        capture("13-amount-over")
+        preset.tap()
+
+        app.buttons["Review"].tap()
+        let send = app.buttons["Send to cabal"]
+        XCTAssertTrue(send.waitForExistence(timeout: 5))
+        sleep(1)
+        capture("14-review")
+        send.tap()
+
+        XCTAssertTrue(app.staticTexts["Proposal sent to Weekend investors"].waitForExistence(timeout: 5))
+        capture("15-sent")
     }
 }

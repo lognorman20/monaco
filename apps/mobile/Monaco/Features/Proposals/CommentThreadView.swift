@@ -51,7 +51,7 @@ struct CommentThreadView: View {
                     .foregroundStyle(MonacoTheme.muted)
                     .accessibilityIdentifier("comment-thread-empty")
             } else {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(rows) { row in
                         CommentRow(row: row, onReply: { onReply(row.comment) })
                     }

@@ -183,7 +183,7 @@ public enum ProposalFeedCopy {
 public enum ProposeFlowCopy {
     public static let chooserTitle = "Propose"
     public static let buyRow = "Buy a stock"
-    public static let buyRowDetail = "The cabal votes on it before anything is bought"
+    public static let buyRowDetail = "Your cabal votes on it first"
     public static let sellRow = "Sell something the cabal owns"
     public static let sellRowEmpty = "Nothing to sell yet"
     public static let addBotRow = "Add a trading bot"

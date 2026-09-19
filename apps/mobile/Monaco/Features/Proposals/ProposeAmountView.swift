@@ -52,7 +52,7 @@ struct ProposeAmountView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: MonacoTheme.Space.xl) {
+            VStack(spacing: MonacoTheme.Space.l) {
                 header
                 AmountEntry(
                     amountText: $amountText,

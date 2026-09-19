@@ -165,7 +165,8 @@ struct ProposalCardView<Destination: View>: View {
     private var reason: some View {
         let name = proposal.proposerName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let thesis = proposal.thesis?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !thesis.isEmpty {
+        // The detail screen quotes the full reason below the header, so the header only names the proposer.
+        if !thesis.isEmpty, showsChrome {
             // Two-line excerpt; the full reason lives on the detail screen.
             (nameLead(name) + Text(thesis).foregroundStyle(MonacoTheme.muted))
                 .font(MonacoTheme.Typo.callout)

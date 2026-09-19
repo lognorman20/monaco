@@ -80,6 +80,7 @@ struct ProposeSellView: View {
             }
             if pot == nil { pot = try? await service.pot(groupId: groupId) }
         }
+        .proposeFlowFullHeight()
         .accessibilityIdentifier("propose-sell")
     }
 
