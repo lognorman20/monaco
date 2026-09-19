@@ -95,4 +95,60 @@ final class DisplayFormatterTests: XCTestCase {
             2_100_050_000
         )
     }
+
+    // MARK: - Demo polish formatters
+
+    func testPercentReturnFormatter_usesTypographicMinusAndUnsignedZero() {
+        XCTAssertEqual(PercentReturnFormatter.format("-0.036"), "\u{2212}3.6%")
+        XCTAssertEqual(PercentReturnFormatter.format("0.096"), "+9.6%")
+        XCTAssertEqual(PercentReturnFormatter.format("-0.0001"), "0.0%")
+        XCTAssertEqual(PercentReturnFormatter.format("-0"), "0.0%")
+        XCTAssertEqual(PercentReturnFormatter.format("-3.6%"), "\u{2212}3.6%")
+        XCTAssertEqual(PercentReturnFormatter.format("\u{2212}0.036"), "\u{2212}3.6%")
+        XCTAssertEqual(PercentReturnFormatter.format(""), "—")
+        XCTAssertEqual(PercentReturnFormatter.format(nil), "—")
+        XCTAssertEqual(PercentReturnFormatter.format("—"), "—")
+    }
+
+    func testUsdAmountFormatter_compact() {
+        XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "12431.8"), "$12,431.80")
+        XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "99999.99"), "$99,999.99")
+        XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "100000"), "$100K")
+        XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "124500"), "$124.5K")
+        XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "12431180"), "$12.4M")
+        XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "2000000000"), "$2B")
+        XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "0"), "$0.00")
+    }
+
+    func testProposalShareFormatter_sharesLabel() {
+        XCTAssertEqual(ProposalShareFormatter.sharesLabel(fromAtomics: "120340000"), "1.2034 shares")
+        XCTAssertEqual(ProposalShareFormatter.sharesLabel(fromAtomics: "120345678"), "1.2035 shares")
+        XCTAssertEqual(ProposalShareFormatter.sharesLabel(fromAtomics: "50000000"), "0.5 shares")
+        XCTAssertEqual(ProposalShareFormatter.sharesLabel(fromAtomics: "100000000"), "1 share")
+        XCTAssertEqual(ProposalShareFormatter.sharesLabel(fromAtomics: "300000000"), "3 shares")
+        XCTAssertEqual(ProposalShareFormatter.sharesLabel(fromAtomics: "0"), "0 shares")
+        XCTAssertEqual(ProposalShareFormatter.sharesLabel(fromAtomics: "1000"), "< 0.0001 shares")
+        XCTAssertEqual(ProposalShareFormatter.sharesLabel(fromAtomics: "garbage"), "garbage")
+    }
+
+    func testRelativeTimeFormatter_label() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let now = ISO8601DateFormatter().date(from: "2026-09-19T12:00:00Z")!
+        XCTAssertEqual(RelativeTimeFormatter.label(iso: "2026-09-19T11:59:30Z", now: now, calendar: calendar), "now")
+        XCTAssertEqual(RelativeTimeFormatter.label(iso: "2026-09-19T11:45:00Z", now: now, calendar: calendar), "15m")
+        XCTAssertEqual(RelativeTimeFormatter.label(iso: "2026-09-19T08:59:00.500Z", now: now, calendar: calendar), "3h")
+        XCTAssertEqual(RelativeTimeFormatter.label(iso: "2026-09-14T09:00:00Z", now: now, calendar: calendar), "Sep 14")
+        XCTAssertEqual(RelativeTimeFormatter.label(iso: "2025-12-31T09:00:00Z", now: now, calendar: calendar), "Dec 31, 2025")
+        XCTAssertEqual(RelativeTimeFormatter.label(iso: "2026-09-19T12:05:00Z", now: now, calendar: calendar), "now")
+        XCTAssertEqual(RelativeTimeFormatter.label(iso: "not a date", now: now, calendar: calendar), "")
+    }
+
+    func testRelativeTimeFormatter_datesUseLocalCalendarDay() {
+        var tokyo = Calendar(identifier: .gregorian)
+        tokyo.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        let now = ISO8601DateFormatter().date(from: "2026-09-19T12:00:00Z")!
+        // 20:00 UTC on Sep 14 is already Sep 15 in Tokyo.
+        XCTAssertEqual(RelativeTimeFormatter.label(iso: "2026-09-14T20:00:00Z", now: now, calendar: tokyo), "Sep 15")
+    }
 }

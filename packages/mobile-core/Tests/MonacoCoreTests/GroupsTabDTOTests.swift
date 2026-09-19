@@ -272,4 +272,54 @@ final class GroupsTabDTOTests: XCTestCase {
         XCTAssertFalse(SignedUsdFormatter.isLoss("-0.00"))
         XCTAssertFalse(SignedUsdFormatter.isLoss("garbage"))
     }
+
+    // MARK: - Negative zero, dust and the typographic minus (plan §8)
+
+    func testSignedUsdFormatter_zeroAndDustRenderUnsignedZero() {
+        XCTAssertEqual(SignedUsdFormatter.format("+0.00"), "$0.00")
+        XCTAssertEqual(SignedUsdFormatter.format("-0.00"), "$0.00")
+        XCTAssertEqual(SignedUsdFormatter.format("-0.001"), "$0.00")
+        XCTAssertEqual(SignedUsdFormatter.format("0.004"), "$0.00")
+        XCTAssertEqual(SignedUsdFormatter.format("0"), "$0.00")
+    }
+
+    func testSignedUsdFormatter_signsUseTypographicMinusAndPadCents() {
+        XCTAssertEqual(SignedUsdFormatter.format("-7.6"), "\u{2212}$7.60")
+        XCTAssertEqual(SignedUsdFormatter.format("+48.2"), "+$48.20")
+        XCTAssertEqual(SignedUsdFormatter.format("48.2"), "+$48.20")
+        XCTAssertEqual(SignedUsdFormatter.format("-0.005"), "\u{2212}$0.01")
+        XCTAssertEqual(SignedUsdFormatter.format("\u{2212}7.60"), "\u{2212}$7.60")
+        XCTAssertEqual(SignedUsdFormatter.format(" -1234567.891 "), "\u{2212}$1,234,567.89")
+        XCTAssertFalse(SignedUsdFormatter.format("-7.6").contains("-"), "ASCII hyphen must never reach the screen")
+    }
+
+    func testSignedUsdFormatter_garbageRendersDash() {
+        XCTAssertEqual(SignedUsdFormatter.format("garbage"), "—")
+        XCTAssertEqual(SignedUsdFormatter.format(""), "—")
+        XCTAssertEqual(SignedUsdFormatter.format("-"), "—")
+        XCTAssertEqual(SignedUsdFormatter.format("1e5"), "—")
+    }
+
+    func testSignedUsdFormatter_isLossIgnoresDustAndAcceptsBothMinusSigns() {
+        XCTAssertFalse(SignedUsdFormatter.isLoss("-0.001"))
+        XCTAssertTrue(SignedUsdFormatter.isLoss("-0.006"))
+        XCTAssertTrue(SignedUsdFormatter.isLoss("\u{2212}7.60"))
+        XCTAssertFalse(SignedUsdFormatter.isLoss("+48.2"))
+    }
+
+    func testSignedUsdFormatter_isZero() {
+        XCTAssertTrue(SignedUsdFormatter.isZero("+0.00"))
+        XCTAssertTrue(SignedUsdFormatter.isZero("-0.00"))
+        XCTAssertTrue(SignedUsdFormatter.isZero("-0.001"))
+        XCTAssertFalse(SignedUsdFormatter.isZero("-7.6"))
+        XCTAssertFalse(SignedUsdFormatter.isZero("+48.2"))
+        XCTAssertFalse(SignedUsdFormatter.isZero("garbage"))
+    }
+
+    func testSignedUsdFormatter_parse() {
+        XCTAssertEqual(SignedUsdFormatter.parse("-7.6"), Decimal(string: "-7.6"))
+        XCTAssertEqual(SignedUsdFormatter.parse("\u{2212}7.6"), Decimal(string: "-7.6"))
+        XCTAssertEqual(SignedUsdFormatter.parse("+$1,234.50"), Decimal(string: "1234.5"))
+        XCTAssertNil(SignedUsdFormatter.parse("garbage"))
+    }
 }
