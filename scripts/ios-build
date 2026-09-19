@@ -8,7 +8,13 @@ cd "$repo_root"
 ./scripts/ensure-ios-privy-config.sh generate
 udid="$(./scripts/resolve-ios-sim.sh)"
 
+# Ad-hoc sign the sim build (see docs/how-to/local-simulator.md#signing): an unsigned
+# build (CODE_SIGNING_ALLOWED=NO) can't hold a keychain-access-group entitlement, so the
+# Privy session is silently dropped on every relaunch or reinstall. Automatic signing needs
+# the team's own certificate, which not every contributor's machine has; "-" self-signs
+# locally without one.
 xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
   -destination "platform=iOS Simulator,id=${udid}" \
   -configuration Debug \
+  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
   build

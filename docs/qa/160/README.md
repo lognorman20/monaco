@@ -5,7 +5,8 @@ Screenshots come from the Debug-only sample harness, which renders the real `Pro
 ```bash
 dotenvx run -q -f .env.local -- bash scripts/ensure-ios-privy-config.sh
 xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco -configuration Debug \
-  -destination 'platform=iOS Simulator,id=<sim udid>' -derivedDataPath <dd> CODE_SIGNING_ALLOWED=NO build
+  -destination 'platform=iOS Simulator,id=<sim udid>' -derivedDataPath <dd> \
+  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES build
 xcrun simctl install <sim udid> <dd>/Build/Products/Debug-iphonesimulator/Monaco.app
 xcrun simctl launch <sim udid> com.monaco.app -MonacoProfileSample <scenario>
 ```
