@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
@@ -104,14 +106,28 @@ func (h *HomeService) GetHomeDashboard(ctx context.Context, accessToken string, 
 		}
 	}
 
-	leaderboard, err := h.buildRangedLeaderboard(ctx, joinedGroupIDs, leaderboardRange)
-	if err != nil {
-		return HomeDashboardResult{}, err
+	var (
+		leaderboard HomeLeaderboardSection
+		missed      []HomeMissedProposalRow
+		lbErr       error
+		missedErr   error
+		tail        sync.WaitGroup
+	)
+	tail.Add(2)
+	go func() {
+		defer tail.Done()
+		leaderboard, lbErr = h.buildRangedLeaderboard(ctx, joinedGroupIDs, leaderboardRange)
+	}()
+	go func() {
+		defer tail.Done()
+		missed, missedErr = h.listMissedProposals(ctx, user.ID, joinedGroupIDs)
+	}()
+	tail.Wait()
+	if lbErr != nil {
+		return HomeDashboardResult{}, lbErr
 	}
-
-	missed, err := h.listMissedProposals(ctx, user.ID, joinedGroupIDs)
-	if err != nil {
-		return HomeDashboardResult{}, err
+	if missedErr != nil {
+		return HomeDashboardResult{}, missedErr
 	}
 
 	return HomeDashboardResult{
@@ -180,53 +196,94 @@ func (h *HomeService) authenticateHomeUser(ctx context.Context, accessToken stri
 }
 
 func (h *HomeService) viewerGroupPositions(ctx context.Context, userID string, joinedGroupIDs []string) ([]viewerGroupPosition, error) {
+	if len(joinedGroupIDs) == 0 {
+		return nil, nil
+	}
+
+	type slot struct {
+		row viewerGroupPosition
+		ok  bool
+	}
+	slots := make([]slot, len(joinedGroupIDs))
+	errCh := make(chan error, len(joinedGroupIDs))
+	var wg sync.WaitGroup
+	for i, groupID := range joinedGroupIDs {
+		wg.Add(1)
+		go func(i int, groupID string) {
+			defer wg.Done()
+			row, ok, err := h.viewerGroupPosition(ctx, userID, groupID)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if ok {
+				slots[i] = slot{row: row, ok: true}
+			}
+		}(i, groupID)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	rows := make([]viewerGroupPosition, 0, len(joinedGroupIDs))
-	for _, groupID := range joinedGroupIDs {
-		group, groupFound, err := h.store.GetGroupByID(ctx, groupID)
-		if err != nil {
-			return nil, err
+	for _, slot := range slots {
+		if slot.ok {
+			rows = append(rows, slot.row)
 		}
-		if !groupFound {
-			continue
-		}
-
-		netUsdcIn, err := h.groupNetUsdcIn(ctx, groupID)
-		if err != nil {
-			return nil, err
-		}
-		potNav, totalSharesMicro, err := h.groupPotNavAndShares(ctx, groupID, netUsdcIn)
-		if err != nil {
-			return nil, err
-		}
-
-		positionRow, hasPosition, err := h.store.GetPosition(ctx, userID, groupID)
-		if err != nil {
-			return nil, err
-		}
-		shareUnitsMicro := int64(0)
-		deposited := int64(0)
-		withdrawn := int64(0)
-		if hasPosition {
-			shareUnitsMicro = positionRow.ShareUnits
-			deposited = positionRow.AmountDeposited
-			withdrawn = positionRow.AmountWithdrawn
-		}
-
-		equityMicro, err := shareOfPotMicros(shareUnitsMicro, potNav, totalSharesMicro)
-		if err != nil {
-			return nil, err
-		}
-
-		rows = append(rows, viewerGroupPosition{
-			GroupID:          groupID,
-			Name:             group.Name,
-			ShareUnitsMicro:  shareUnitsMicro,
-			NetUsdcInMicro:   deposited - withdrawn,
-			EquityMicro:      equityMicro,
-			TotalSharesMicro: totalSharesMicro,
-		})
 	}
 	return rows, nil
+}
+
+func (h *HomeService) viewerGroupPosition(ctx context.Context, userID, groupID string) (viewerGroupPosition, bool, error) {
+	group, groupFound, err := h.store.GetGroupByID(ctx, groupID)
+	if err != nil {
+		return viewerGroupPosition{}, false, err
+	}
+	if !groupFound {
+		return viewerGroupPosition{}, false, nil
+	}
+
+	netUsdcIn, err := h.groupNetUsdcIn(ctx, groupID)
+	if err != nil {
+		return viewerGroupPosition{}, false, err
+	}
+	potNav, totalSharesMicro, err := h.groupPotNavAndShares(ctx, groupID, netUsdcIn)
+	if err != nil {
+		slog.Warn("home dashboard pot nav failed; using net usdc in", "group_id", groupID, "err", err)
+		potNav = netUsdcIn
+		totalSharesMicro = 0
+	}
+
+	positionRow, hasPosition, err := h.store.GetPosition(ctx, userID, groupID)
+	if err != nil {
+		return viewerGroupPosition{}, false, err
+	}
+	shareUnitsMicro := int64(0)
+	deposited := int64(0)
+	withdrawn := int64(0)
+	if hasPosition {
+		shareUnitsMicro = positionRow.ShareUnits
+		deposited = positionRow.AmountDeposited
+		withdrawn = positionRow.AmountWithdrawn
+	}
+
+	equityMicro, err := shareOfPotMicros(shareUnitsMicro, potNav, totalSharesMicro)
+	if err != nil {
+		return viewerGroupPosition{}, false, err
+	}
+
+	return viewerGroupPosition{
+		GroupID:          groupID,
+		Name:             group.Name,
+		ShareUnitsMicro:  shareUnitsMicro,
+		NetUsdcInMicro:   deposited - withdrawn,
+		EquityMicro:      equityMicro,
+		TotalSharesMicro: totalSharesMicro,
+	}, true, nil
 }
 
 func formatMyGroups(positions []viewerGroupPosition) ([]HomeMyGroupRow, int64, int64) {
@@ -397,7 +454,9 @@ func (h *HomeService) buildRangedLeaderboard(ctx context.Context, joinedGroupIDs
 		}
 		potNav, totalSharesMicro, err := h.groupPotNavAndShares(ctx, groupID, netUsdcIn)
 		if err != nil {
-			return HomeLeaderboardSection{}, err
+			slog.Warn("home leaderboard pot nav failed; using net usdc in", "group_id", groupID, "err", err)
+			potNav = netUsdcIn
+			totalSharesMicro = 0
 		}
 
 		memberIDs, err := h.store.ListGroupMemberIDs(ctx, groupID)
@@ -539,7 +598,9 @@ func (h *HomeService) collectJoinedGroupMemberPnL(ctx context.Context, joinedGro
 		}
 		potNav, totalSharesMicro, err := h.groupPotNavAndShares(ctx, groupID, netUsdcIn)
 		if err != nil {
-			return nil, err
+			slog.Warn("home people board pot nav failed; using net usdc in", "group_id", groupID, "err", err)
+			potNav = netUsdcIn
+			totalSharesMicro = 0
 		}
 		if err := h.collectGroupMemberPnL(ctx, groupID, potNav, totalSharesMicro, memberPnLByUser); err != nil {
 			return nil, err

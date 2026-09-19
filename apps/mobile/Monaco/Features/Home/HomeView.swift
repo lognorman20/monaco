@@ -13,7 +13,7 @@ struct HomeView: View {
 
     var body: some View {
         Group {
-            if session.isLoading, session.dashboard == nil {
+            if session.dashboard == nil, session.errorMessage == nil {
                 ProgressView("Loading home…")
                     .tint(MonacoTheme.accent)
                     .foregroundStyle(MonacoTheme.muted)

@@ -10,15 +10,17 @@ struct SessionGateView: View {
 
     var body: some View {
         Group {
-            if session.isLoading {
-                ProgressView("Loading your boards…")
+            if session.me != nil {
+                if needsOnboarding {
+                    Color.clear.accessibilityIdentifier("onboarding-hook")
+                } else {
+                    MainTabView(auth: auth)
+                }
+            } else if session.isLoading {
+                ProgressView("Opening session…")
                     .foregroundStyle(MonacoTheme.secondaryText)
                     .tint(MonacoTheme.accent)
                     .frame(maxWidth: .infinity, minHeight: 200)
-            } else if needsOnboarding {
-                Color.clear.accessibilityIdentifier("onboarding-hook")
-            } else if session.dashboard != nil {
-                MainTabView(auth: auth)
             } else if let errorMessage = session.errorMessage {
                 VStack(alignment: .leading, spacing: 12) {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")

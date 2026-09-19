@@ -14,8 +14,9 @@ type homePotNavCacheEntry struct {
 }
 
 type homePotNavCache struct {
-	mu      sync.Mutex
-	entries map[string]homePotNavCacheEntry
+	mu       sync.Mutex
+	entries  map[string]homePotNavCacheEntry
+	inflight map[string]*sync.WaitGroup
 	computes int
 }
 
@@ -25,7 +26,8 @@ func HomeContextWithPotNavCache(ctx context.Context) context.Context {
 		return ctx
 	}
 	return context.WithValue(ctx, homePotNavCacheKey{}, &homePotNavCache{
-		entries: make(map[string]homePotNavCacheEntry),
+		entries:  make(map[string]homePotNavCacheEntry),
+		inflight: make(map[string]*sync.WaitGroup),
 	})
 }
 

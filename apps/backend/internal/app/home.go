@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
@@ -233,27 +234,44 @@ func (h *HomeService) GroupTreasuryTotalMicros(ctx context.Context, groupID stri
 }
 
 func (h *HomeService) groupPotNavAndShares(ctx context.Context, groupID string, netUsdcIn int64) (int64, int64, error) {
-	if cache := homePotNavCacheFrom(ctx); cache != nil {
-		cache.mu.Lock()
-		if entry, ok := cache.entries[groupID]; ok {
-			cache.mu.Unlock()
-			return entry.potNav, entry.totalShares, entry.err
-		}
-		cache.mu.Unlock()
+	cache := homePotNavCacheFrom(ctx)
+	if cache == nil {
+		return h.computeGroupPotNavAndShares(ctx, groupID, netUsdcIn)
 	}
+
+	cache.mu.Lock()
+	if entry, ok := cache.entries[groupID]; ok {
+		cache.mu.Unlock()
+		return entry.potNav, entry.totalShares, entry.err
+	}
+	if wg, ok := cache.inflight[groupID]; ok {
+		cache.mu.Unlock()
+		wg.Wait()
+		cache.mu.Lock()
+		entry := cache.entries[groupID]
+		cache.mu.Unlock()
+		return entry.potNav, entry.totalShares, entry.err
+	}
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	if cache.inflight == nil {
+		cache.inflight = make(map[string]*sync.WaitGroup)
+	}
+	cache.inflight[groupID] = wg
+	cache.mu.Unlock()
 
 	potNav, totalShares, err := h.computeGroupPotNavAndShares(ctx, groupID, netUsdcIn)
 
-	if cache := homePotNavCacheFrom(ctx); cache != nil {
-		cache.mu.Lock()
-		cache.entries[groupID] = homePotNavCacheEntry{
-			potNav:      potNav,
-			totalShares: totalShares,
-			err:         err,
-		}
-		cache.computes++
-		cache.mu.Unlock()
+	cache.mu.Lock()
+	cache.entries[groupID] = homePotNavCacheEntry{
+		potNav:      potNav,
+		totalShares: totalShares,
+		err:         err,
 	}
+	cache.computes++
+	delete(cache.inflight, groupID)
+	cache.mu.Unlock()
+	wg.Done()
 	return potNav, totalShares, err
 }
 

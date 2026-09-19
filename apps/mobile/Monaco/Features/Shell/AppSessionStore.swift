@@ -18,6 +18,7 @@ final class AppSessionStore {
     var isLoading = true
 
     private let apiClient = MonacoAPIClient()
+    private var refreshGeneration = 0
 
     var joinedCabals: [HomeGroupBoardRowDTO] {
         (home?.groups ?? []).filter(\.isJoined)
@@ -32,7 +33,7 @@ final class AppSessionStore {
             return
         }
 
-        if dashboard == nil {
+        if me == nil {
             isLoading = true
         }
         errorMessage = nil
@@ -45,6 +46,7 @@ final class AppSessionStore {
             }
             auth.recordBackendSession(userId: session.userId)
             me = session
+            isLoading = false
             await refresh(auth: auth, accessToken: token)
         } catch MonacoAPIError.httpStatus(let status) where status == 401 {
             await auth.logout()
@@ -52,6 +54,7 @@ final class AppSessionStore {
             errorMessage = "Could not open session (HTTP \(status))."
             isLoading = false
         } catch {
+            if error.isRequestCancellation { return }
             errorMessage = "Could not connect to Monaco."
             isLoading = false
         }
@@ -69,12 +72,17 @@ final class AppSessionStore {
             return
         }
 
+        refreshGeneration += 1
+        let generation = refreshGeneration
+
         do {
             isBalanceLoading = platformBalance == nil
             async let dashboardLoad = apiClient.getHomeDashboard(accessToken: token, leaderboardRange: leaderboardRange)
             async let meLoad = apiClient.me(accessToken: token)
             async let balanceLoad = apiClient.getPlatformBalance(accessToken: token)
-            dashboard = try await dashboardLoad
+            let loadedDashboard = try await dashboardLoad
+            guard generation == refreshGeneration else { return }
+            dashboard = loadedDashboard
             if let profile = try? await meLoad {
                 me = profile
             }
@@ -82,7 +90,6 @@ final class AppSessionStore {
                 platformBalance = balance
             }
             errorMessage = nil
-            isLoading = false
             isBalanceLoading = false
 
             Task {
@@ -93,20 +100,17 @@ final class AppSessionStore {
         } catch MonacoAPIError.httpStatus(let status) where status == 401 {
             await auth.logout()
         } catch MonacoAPIError.httpStatus(let status) {
+            guard generation == refreshGeneration else { return }
             errorMessage = "Could not load home (HTTP \(status))."
-            dashboard = nil
         } catch {
-            if error.isRequestCancellation {
-                isLoading = false
-                isBalanceLoading = false
-                return
-            }
+            if error.isRequestCancellation { return }
+            guard generation == refreshGeneration else { return }
             errorMessage = "Could not load your boards."
-            dashboard = nil
         }
 
-        isLoading = false
-        isBalanceLoading = false
+        if generation == refreshGeneration {
+            isBalanceLoading = false
+        }
     }
 
     /// Legacy home boards + popular strip. Does not block Home first paint.
