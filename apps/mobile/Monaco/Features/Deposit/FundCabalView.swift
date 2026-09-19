@@ -110,6 +110,7 @@ struct FundCabalView: View {
         }
         .navigationTitle(screenTitle)
         .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("fund-cabal-view")
         .monacoToast($toast, bottomInset: 72)
         .task(id: auth.accessToken) {
             await loadBalance()

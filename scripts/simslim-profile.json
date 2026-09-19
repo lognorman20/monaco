@@ -1,0 +1,6 @@
+{
+  "name": "monaco-auth-and-trading",
+  "description": "Monaco simulator profile; keep auth, keychain, links, messaging, push and photos services.",
+  "except": ["icloud", "web", "messaging", "store", "telemetry", "photos"],
+  "keep": []
+}

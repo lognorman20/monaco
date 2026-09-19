@@ -16,6 +16,11 @@ final class PrivyAuthService: ObservableObject {
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var accessToken: String?
+    /// Set when the session gate signs the user out because the backend rejected
+    /// their token (e.g. a Privy app-id / verification-key mismatch), so LoginView
+    /// can explain why they're back here instead of leaving them guessing. Cleared
+    /// on the next sign-in attempt.
+    @Published private(set) var lastSignOutReason: String?
 
     private var sessionStore = MonacoSessionStore()
 
@@ -51,6 +56,7 @@ final class PrivyAuthService: ObservableObject {
     }
 
     func sendSMSCode(to phoneNumberE164: String) async {
+        lastSignOutReason = nil
         phase = .sendingCode
 
         do {
@@ -74,6 +80,7 @@ final class PrivyAuthService: ObservableObject {
     }
 
     func sendEmailCode(to email: String) async {
+        lastSignOutReason = nil
         phase = .sendingCode
 
         do {
@@ -104,6 +111,17 @@ final class PrivyAuthService: ObservableObject {
     }
 
     func logout() async {
+        await performLogout()
+    }
+
+    /// Same as `logout()`, but records why so LoginView can explain it instead of
+    /// silently bouncing the user back with no context.
+    func signOut(reason: String) async {
+        lastSignOutReason = reason
+        await performLogout()
+    }
+
+    private func performLogout() async {
         if let user = await privy.getUser() {
             await user.logout()
         }
@@ -122,6 +140,7 @@ final class PrivyAuthService: ObservableObject {
         do {
             let token = try await user.getAccessToken()
             accessToken = token
+            lastSignOutReason = nil
             phase = .authenticated(userID: user.id)
             if markExplicitLogin {
                 sessionStore.markExplicitLogin()

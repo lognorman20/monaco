@@ -25,7 +25,7 @@ struct MonacoSectionHeader: View {
                     Button(action: action) {
                         Text(trailing)
                             .font(MonacoTheme.Typo.callout.weight(.semibold))
-                            .foregroundStyle(MonacoTheme.muted)
+                            .foregroundStyle(MonacoTheme.brand)
                             .lineLimit(1)
                             .frame(minHeight: 44)
                             .contentShape(Rectangle())

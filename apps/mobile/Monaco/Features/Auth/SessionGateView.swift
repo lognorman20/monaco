@@ -19,16 +19,29 @@ struct SessionGateView: View {
                 }
             } else if session.isLoading {
                 SessionGateSkeleton()
-            } else if session.errorMessage != nil {
+            } else if let errorMessage = session.errorMessage {
                 VStack(spacing: MonacoTheme.Space.m) {
                     EmptyState(
-                        title: "Couldn't reach Monaco",
-                        message: "Check your connection and try again."
+                        title: "Couldn't open Monaco",
+                        message: errorMessage
                     )
+                    #if DEBUG
+                    if let detail = session.errorDebugDetail {
+                        Text(detail)
+                            .font(.system(.footnote, design: .monospaced))
+                            .foregroundStyle(MonacoTheme.tertiaryText)
+                            .multilineTextAlignment(.center)
+                            .accessibilityIdentifier("sessionErrorDebugDetail")
+                    }
+                    #endif
                     Button("Try again") {
                         Task { await session.bootstrap(auth: auth) }
                     }
                     .buttonStyle(.monacoPrimary)
+                    Button("Sign out") {
+                        Task { await auth.logout() }
+                    }
+                    .buttonStyle(.monacoSecondary)
                 }
                 .padding(.horizontal, MonacoTheme.Space.gutter)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

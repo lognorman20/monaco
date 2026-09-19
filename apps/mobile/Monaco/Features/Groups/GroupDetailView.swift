@@ -20,7 +20,7 @@ struct GroupDetailView: View {
     var onLeft: () async -> Void = {}
 
     private let apiClient = MonacoAPIClient()
-    @Environment(\.dismiss) private var dismiss
+    // NB: no `@Environment(\.dismiss)` here on purpose — see `DismissWhenActive`.
     @Environment(AppSessionStore.self) private var session: AppSessionStore?
 
     @State private var groupView: GroupViewDTO?
@@ -45,6 +45,8 @@ struct GroupDetailView: View {
     @State private var showDetailsSheet = false
     @State private var leaveRequestedFromDetails = false
     @State private var heroScrolledAway = false
+    /// Set once leaving succeeded; `DismissWhenActive` pops the screen.
+    @State private var hasLeft = false
 
     private let activityPollInterval: Duration = .seconds(15)
     private let activityPollIntervalWhilePending: Duration = DepositPolling.sweepStatusInterval
@@ -92,6 +94,7 @@ struct GroupDetailView: View {
             .navigationDestination(item: $route) { route in
                 destination(for: route)
             }
+            .background(DismissWhenActive(isActive: hasLeft))
             .task(id: loadTaskID) {
                 if let initialView, groupView == nil {
                     groupView = initialView
@@ -368,7 +371,7 @@ struct GroupDetailView: View {
                 toast = MonacoToast(message: "Cash moved to your account balance", isSuccess: true)
             }
             await onLeft()
-            dismiss()
+            hasLeft = true
         } catch MonacoAPIError.leaveBlocked(let reason) {
             toast = MonacoToast(message: leaveBlockedMessage(for: reason))
         } catch MonacoAPIError.httpStatus {
@@ -452,6 +455,33 @@ struct GroupDetailView: View {
         } catch {
             toast = MonacoToast(message: "Couldn't update the request. Try again")
         }
+    }
+}
+
+/// Invisible helper that pops its screen once `isActive` turns true.
+///
+/// It exists so that `GroupDetailView` does not read `@Environment(\.dismiss)` itself.
+/// `GroupDetailView` also declares `.navigationDestination(item:)` for the screens its
+/// action row pushes, and SwiftUI recomputes a pushed view's `DismissAction` whenever the
+/// stack's contents change. Reading both in one body makes pushing a screen invalidate the
+/// very body that declares the push, which invalidates the dismiss action again: the group
+/// screen spins the main thread instead of navigating, and Add money / Cash out / Chat do
+/// nothing. Keeping the dismiss dependency in a leaf that renders nothing confines that
+/// churn to a view with no navigation of its own.
+///
+/// `GroupNavSampleUITests` covers every entry path the product uses; it hangs without this.
+private struct DismissWhenActive: View {
+    let isActive: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+            .onChange(of: isActive) { _, nowActive in
+                if nowActive { dismiss() }
+            }
     }
 }
 

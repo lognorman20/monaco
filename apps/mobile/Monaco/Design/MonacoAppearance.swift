@@ -57,17 +57,18 @@ enum MonacoAppearance {
         tabBar.configureWithOpaqueBackground()
         tabBar.backgroundColor = surface
         tabBar.shadowColor = hairline
+        let brand = UIColor(MonacoTheme.brand)
         let tabItem = UITabBarItemAppearance()
         tabItem.normal.iconColor = muted
         tabItem.normal.titleTextAttributes = [.foregroundColor: muted]
-        tabItem.selected.iconColor = primaryText
-        tabItem.selected.titleTextAttributes = [.foregroundColor: primaryText]
+        tabItem.selected.iconColor = brand
+        tabItem.selected.titleTextAttributes = [.foregroundColor: brand]
         tabBar.stackedLayoutAppearance = tabItem
         tabBar.inlineLayoutAppearance = tabItem
         tabBar.compactInlineLayoutAppearance = tabItem
         UITabBar.appearance().standardAppearance = tabBar
         UITabBar.appearance().scrollEdgeAppearance = tabBar
-        UITabBar.appearance().tintColor = primaryText
+        UITabBar.appearance().tintColor = brand
         UITabBar.appearance().unselectedItemTintColor = muted
 
         // Legacy Form / List screens until they migrate to MonacoGroupedList.
@@ -111,6 +112,15 @@ extension View {
                 RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
                     .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
             }
+    }
+
+    /// The premium "money" card: deep ink in both schemes, with a very subtle top-left
+    /// radial highlight. Everything inside draws in `onHero` / `onHeroMuted`.
+    func monacoHeroCard(padding: CGFloat = 24) -> some View {
+        self
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(MonacoHeroCardBackground())
     }
 
     /// Inset grouped list on the app canvas — hides default scroll chrome.
@@ -208,5 +218,30 @@ struct MonacoEmptyStateCard: View {
         .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
+    }
+}
+
+/// Deep ink money card. One flat ink base plus a soft off-centre highlight — no glass, no glow.
+struct MonacoHeroCardBackground: View {
+    var radius: CGFloat = MonacoTheme.Radius.hero
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .fill(MonacoTheme.heroInk)
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(
+                        RadialGradient(
+                            colors: [MonacoTheme.heroInkHighlight, .clear],
+                            center: UnitPoint(x: 0.08, y: -0.05),
+                            startRadius: 0,
+                            endRadius: 340
+                        )
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+            }
     }
 }

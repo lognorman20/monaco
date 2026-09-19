@@ -85,7 +85,13 @@ struct HomeView: View {
     private func dashboardScroll(_ dashboard: HomeDashboardDTO) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
-                HomeNetWorthSection(dashboard: dashboard)
+                // The 1H series loads after first paint (#217); the hero reserves its height.
+                let pnlPoints = session.homePnLSeries ?? dashboard.pnlSeries1H
+                HomeNetWorthSection(
+                    dashboard: dashboard,
+                    pnlPoints: pnlPoints,
+                    isChartLoading: session.isHomePnLSeriesLoading && session.homePnLSeries == nil
+                )
 
                 HomeBalanceRowSection(
                     auth: auth,
@@ -107,18 +113,6 @@ struct HomeView: View {
                     onLeft: { await session.refresh(auth: auth, leaderboardRange: leaderboardRange) },
                     onBrowseCabals: { selectedTab = .cabals }
                 )
-
-                // The 1H series loads after first paint (#217); a flat line under three points reads as broken.
-                let pnlPoints = session.homePnLSeries ?? dashboard.pnlSeries1H
-                if session.isHomePnLSeriesLoading, session.homePnLSeries == nil {
-                    RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
-                        .fill(MonacoTheme.surface)
-                        .frame(height: 160)
-                        .accessibilityLabel("Loading chart")
-                        .accessibilityIdentifier("home-pnl-chart-loading")
-                } else if pnlPoints.count >= 3 {
-                    HomePnLChartSection(points: pnlPoints)
-                }
 
                 HomeLeaderboardSection(
                     auth: auth,

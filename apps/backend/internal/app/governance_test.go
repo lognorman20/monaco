@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -21,10 +22,13 @@ import (
 type governanceHarness struct {
 	Governance *GovernanceService
 	Store      *postgres.Store
+	DB         *sql.DB
 	Sessions   *SessionService
 	Privy      privy.Client
 	Jupiter    jupiter.Client
 	XStocks    xstocks.Resolver
+	Swap       *SwapService
+	Symbols    *SymbolResolver
 	ISO        *postgres.TestIsolation
 }
 
@@ -41,10 +45,13 @@ func integrationGovernanceApp(t *testing.T) governanceHarness {
 	return governanceHarness{
 		Governance: governance,
 		Store:      h.Store,
+		DB:         h.DB,
 		Sessions:   NewSessionService(h.Store, h.Privy),
 		Privy:      h.Privy,
 		Jupiter:    h.Jupiter,
 		XStocks:    h.XStocks,
+		Swap:       h.Swap,
+		Symbols:    h.Symbols,
 		ISO:        h.ISO,
 	}
 }

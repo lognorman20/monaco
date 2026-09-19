@@ -66,9 +66,12 @@ func (c *HTTPClient) MemberUSDCBalance(ctx context.Context, memberAddress string
 	return c.walletUSDCBalance(ctx, memberAddress)
 }
 
-// TreasuryUSDCBalance returns treasury wallet USDC balance via Privy + RPC.
+// TreasuryUSDCBalance returns treasury wallet USDC balance read straight from Solana RPC.
+// It deliberately skips Privy's indexed balance endpoint: that index lags chain state, and a
+// stale treasury balance both inflates pot NAV and lets redeem broadcast a payout the treasury
+// cannot cover (SPL transfer fails with Custom:1, insufficient funds).
 func (c *HTTPClient) TreasuryUSDCBalance(ctx context.Context, treasuryAddress string) (int64, error) {
-	return c.walletUSDCBalance(ctx, treasuryAddress)
+	return c.walletUSDCBalanceOnChain(ctx, treasuryAddress)
 }
 
 func (c *HTTPClient) walletUSDCBalance(ctx context.Context, address string) (int64, error) {

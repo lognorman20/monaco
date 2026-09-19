@@ -159,8 +159,12 @@ struct SellCabalView: View {
             } else {
                 toast = success
             }
+        } catch MonacoAPIError.apiError(409, _) {
+            toast = MonacoToast(message: "Your last cash out is still finishing. Try again in a minute")
+        } catch MonacoAPIError.apiError(400, let message) {
+            toast = MonacoToast(message: message)
         } catch MonacoAPIError.httpStatus(400) {
-            toast = MonacoToast(message: "Cash out at least $1.")
+            toast = MonacoToast(message: "Cash out at least $0.10.")
         } catch MonacoAPIError.httpStatus(409) {
             toast = MonacoToast(message: "Your last cash out is still finishing. Try again in a minute")
         } catch MonacoAPIError.httpStatus {

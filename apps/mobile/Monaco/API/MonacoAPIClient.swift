@@ -328,8 +328,18 @@ final class MonacoAPIClient {
         request.httpBody = try JSONEncoder().encode(WithdrawToBalanceRequestDTO(shareAmountMicros: shareAmountMicros))
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
-        guard http.statusCode == 200 else { throw MonacoAPIError.httpStatus(http.statusCode) }
+        // 4xx cash out refusals carry a message the member can act on (amount too small to
+        // route, pot short on USDC); surface it instead of a generic failure.
+        guard http.statusCode == 200 else { throw withdrawToBalanceError(status: http.statusCode, data: data) }
         return try JSONDecoder().decode(WithdrawToBalanceJobDTO.self, from: data)
+    }
+
+    private func withdrawToBalanceError(status: Int, data: Data) -> MonacoAPIError {
+        if let body = try? JSONDecoder().decode(APIErrorBody.self, from: data),
+           !body.error.isEmpty {
+            return .apiError(status: status, message: body.error)
+        }
+        return .httpStatus(status)
     }
 
     func joinGroup(accessToken: String, groupId: String) async throws -> JoinGroupOutcome {

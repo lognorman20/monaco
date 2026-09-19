@@ -1,5 +1,6 @@
 import MonacoCore
 import Observation
+import os
 import SwiftUI
 
 /// Shared post-auth home + profile payload. Tabs read this instead of a one-shot DTO.
@@ -15,6 +16,11 @@ final class AppSessionStore {
     var isHomePnLSeriesLoading = false
     var isBalanceLoading = false
     var errorMessage: String?
+    #if DEBUG
+    /// Status code / URLError code + API base URL, shown under `errorMessage` in
+    /// DEBUG builds only so devs can debug straight from the gate screen.
+    var errorDebugDetail: String?
+    #endif
     var isLoading = true
 
     private let apiClient = MonacoAPIClient()
@@ -37,6 +43,9 @@ final class AppSessionStore {
             isLoading = true
         }
         errorMessage = nil
+        #if DEBUG
+        errorDebugDetail = nil
+        #endif
 
         do {
             let session = try await apiClient.openSession(accessToken: token)
@@ -48,16 +57,31 @@ final class AppSessionStore {
             me = session
             isLoading = false
             await refresh(auth: auth, accessToken: token)
-        } catch MonacoAPIError.httpStatus(let status) where status == 401 {
-            await auth.logout()
-        } catch MonacoAPIError.httpStatus {
-            errorMessage = "Couldn't load this. Pull down to try again."
-            isLoading = false
         } catch {
             if error.isRequestCancellation { return }
-            errorMessage = "No connection. Check your internet and try again."
-            isLoading = false
+            await handleSessionOpenFailure(error, auth: auth)
         }
+    }
+
+    /// A 401 here means the token Privy handed us didn't verify against this backend
+    /// — most often a Privy app-id / verification-key mismatch between the app build
+    /// and the backend env, which otherwise looks exactly like "can't log in" with no
+    /// explanation. We still sign out (the token is bad), but we surface *why* on the
+    /// login screen instead of bouncing the user back silently.
+    private func handleSessionOpenFailure(_ error: Error, auth: PrivyAuthService) async {
+        isLoading = false
+        let mapped = SessionErrorMapping.describe(error, apiBaseURL: Config.apiBaseURL)
+        AppLogger.session.error("POST /v1/auth/session failed: \(mapped.debugDetail, privacy: .public)")
+
+        if case MonacoAPIError.httpStatus(401) = error {
+            await auth.signOut(reason: mapped.message)
+            return
+        }
+
+        errorMessage = mapped.message
+        #if DEBUG
+        errorDebugDetail = mapped.debugDetail
+        #endif
     }
 
     func refresh(

@@ -144,7 +144,8 @@ struct BottomCTA<Content: View>: View {
     }
 }
 
-/// 56pt ink circle with a symbol and a 13pt label below (Group detail action row).
+/// 56pt brand-tinted disc with a symbol and a 13pt label below (Group detail action row).
+/// A wash rather than a solid fill: four solid brand discs in a row would spend the accent.
 struct CircleAction: View {
     private let title: String
     private let systemImage: String
@@ -166,9 +167,9 @@ struct CircleAction: View {
             VStack(spacing: MonacoTheme.Space.s) {
                 Image(systemName: systemImage)
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(isEnabled ? MonacoTheme.primaryButtonLabel : MonacoTheme.tertiaryText)
+                    .foregroundStyle(isEnabled ? MonacoTheme.brand : MonacoTheme.tertiaryText)
                     .frame(width: 56, height: 56)
-                    .background(Circle().fill(isEnabled ? MonacoTheme.primaryButtonFill : MonacoTheme.surfaceSunken))
+                    .background(Circle().fill(isEnabled ? MonacoTheme.brandWash : MonacoTheme.surfaceSunken))
                 Text(title)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(isEnabled ? MonacoTheme.ink : MonacoTheme.tertiaryText)

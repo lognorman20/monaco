@@ -1,28 +1,32 @@
 import MonacoCore
 import SwiftUI
 
-/// A cabal's identity: pastel tile (tint from the group id) with 1–2 initials in ink.
+/// A cabal's identity: saturated tile (tint from the group id) with 1–2 initials in white.
 struct CabalMark: View {
     private let tint: MonacoTheme.CabalTint
     private let initials: String
     private let name: String
     private let size: CGFloat
+    private let onInk: Bool
 
-    init(groupId: String, name: String, size: CGFloat = 44) {
+    /// `onInk` brightens the tile and drops the initials to deep ink, so the mark still
+    /// carries the cabal's identity on a deep ink hero card.
+    init(groupId: String, name: String, size: CGFloat = 44, onInk: Bool = false) {
         tint = .forGroupId(groupId)
         initials = CabalMark.initials(for: name)
         self.name = name
         self.size = size
+        self.onInk = onInk
     }
 
     var body: some View {
         RoundedRectangle(cornerRadius: MarkGeometry.radius(for: size), style: .continuous)
-            .fill(tint.fill)
+            .fill(onInk ? tint.onInk : tint.fill)
             .frame(width: size, height: size)
             .overlay {
                 Text(initials)
                     .font(.custom("AvenirNext-DemiBold", fixedSize: size * (initials.count > 1 ? 0.36 : 0.42)))
-                    .foregroundStyle(MonacoTheme.ink)
+                    .foregroundStyle(onInk ? MonacoTheme.heroInk : tint.onFill)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
                     .padding(size * 0.08)
@@ -54,7 +58,7 @@ struct CabalMark: View {
     }
 }
 
-/// A stock's tile: sunken fill with the ticker's first letter. "USDC" (cash) shows a dollar sign.
+/// A stock's tile: sunken fill with a hairline and the ticker's first letter. "USDC" (cash) shows a dollar sign.
 struct StockMark: View {
     private enum Content {
         case letter(String)
@@ -84,6 +88,10 @@ struct StockMark: View {
         RoundedRectangle(cornerRadius: MarkGeometry.radius(for: size), style: .continuous)
             .fill(MonacoTheme.surfaceSunken)
             .frame(width: size, height: size)
+            .overlay {
+                RoundedRectangle(cornerRadius: MarkGeometry.radius(for: size), style: .continuous)
+                    .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+            }
             .overlay {
                 switch content {
                 case .letter(let letter):

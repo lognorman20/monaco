@@ -2,7 +2,7 @@
 
 iOS app: friends pool USDC and buy tokenized US stocks on Solana. Product rules: [`docs/product.md`](docs/product.md). Milestone backlog: [`docs/index.md`](docs/index.md).
 
-This file is how to clone, run, and operate the repo.
+Monaco lets you create a hedge fund with friends by pooling money to buy stocks together. Members propose and vote on trades, and approved trades execute for the group; as the pool profits, each member’s stake increases in value through NAV. You can even add an agent to your cabal to trade on your behalf. Built as a social trading app, Monaco turns investing into an easy group game anyone can join simply by depositing money.
 
 ## Prereqs
 

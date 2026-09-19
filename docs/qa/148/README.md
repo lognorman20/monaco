@@ -8,7 +8,8 @@ The Debug-only launch argument `-MonacoCabalsTabSample` opens the Cabals tab on 
 
 ```bash
 xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco -configuration Debug \
-  -destination 'platform=iOS Simulator,id=<sim udid>' CODE_SIGNING_ALLOWED=NO \
+  -destination 'platform=iOS Simulator,id=<sim udid>' \
+  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
   test -only-testing:MonacoTests -only-testing:MonacoUITests/CabalsTabSampleUITests
 ```
 

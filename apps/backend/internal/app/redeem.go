@@ -53,6 +53,9 @@ var ErrInvalidPayoutProof = errors.New("invalid payout proof")
 // ErrRedeemAlreadyInProgress means another redeem job is active for this member.
 var ErrRedeemAlreadyInProgress = errors.New("redeem already in progress")
 
+// ErrRedeemPotIlliquid means the pot could not raise enough USDC to cover the payout.
+var ErrRedeemPotIlliquid = errors.New("redeem pot illiquid")
+
 // RedeemService orchestrates debit-first redeem with resume support.
 type RedeemService struct {
 	store   *postgres.Store
@@ -375,84 +378,147 @@ func (r *RedeemService) continueRedeemJob(ctx context.Context, view RedeemJobVie
 		slog.Info("redeem already settled", "job_id", view.ID)
 		return view, nil
 	}
-
-	if view.Status == domain.RedeemJobDebited {
-		if err := r.sellRedeemSliceIfNeeded(ctx, &view); err != nil {
-			logRedeemBranchError("redeem sell slice failed", err, "job_id", view.ID)
-			if abortErr := r.abortRedeemJob(ctx, view); abortErr != nil {
-				logRedeemBranchError("redeem abort after sell failed", abortErr, "job_id", view.ID)
-			}
-			return view, err
-		}
+	switch view.Status {
+	case domain.RedeemJobDebited, domain.RedeemJobSelling, domain.RedeemJobPaying:
+	default:
+		logRedeemBranchWarn("redeem rejected", "unsupported status", "job_id", view.ID, "status", string(view.Status))
+		return view, fmt.Errorf("unsupported redeem job status %q", view.Status)
 	}
 
-	if view.Status == domain.RedeemJobDebited || view.Status == domain.RedeemJobSelling {
+	treasury, err := r.privy.EnsureTreasury(ctx, privy.GroupID(view.GroupID))
+	if err != nil {
+		return view, err
+	}
+
+	// Re-price against the pot as it really is now. A job debited against a stale treasury
+	// balance (or one wedged from an earlier failure) can carry a slice larger than the
+	// member's actual claim, and paying it would overdraw the treasury.
+	cash, owed, err := r.repriceRedeemJob(ctx, view, treasury.SolanaAddress)
+	if err != nil {
+		return r.failRedeemJob(ctx, view, err)
+	}
+	if owed != view.SliceUsdc {
+		slog.Warn("redeem slice re-priced", "job_id", view.ID,
+			"stored_slice_usdc", view.SliceUsdc, "repriced_slice_usdc", owed, "treasury_usdc", cash)
+		if err := r.store.UpdateRedeemJobSliceUsdc(ctx, view.ID, owed); err != nil {
+			return r.failRedeemJob(ctx, view, err)
+		}
+		view.SliceUsdc = owed
+	}
+
+	// A job already in `selling` has a confirmed sell behind it; anything else still needs the
+	// cash raised. Sizing the sell by the shortfall keeps that decision safe either way.
+	if cash < owed && view.Status != domain.RedeemJobSelling {
+		if err := r.sellRedeemShortfall(ctx, &view, cash, owed); err != nil {
+			logRedeemBranchError("redeem sell slice failed", err, "job_id", view.ID)
+			return r.failRedeemJob(ctx, view, err)
+		}
+		cash, err = r.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
+		if err != nil {
+			return r.failRedeemJob(ctx, view, fmt.Errorf("treasury usdc balance: %w", err))
+		}
+	} else if cash >= owed {
+		slog.Info("redeem sell slice skipped", "job_id", view.ID, "reason", "treasury usdc covers slice",
+			"treasury_usdc", cash, "slice_usdc", owed)
+	}
+
+	// The transfer may never exceed the treasury's real USDC: an SPL transfer for more than the
+	// token account holds fails simulation with Custom:1 and 500s the whole cash out.
+	payAmount := owed
+	if cash < payAmount {
+		slog.Warn("redeem payout clamped to treasury usdc", "job_id", view.ID,
+			"owed_usdc", owed, "treasury_usdc", cash)
+		payAmount = cash
+	}
+	if payAmount < int64(domain.RedeemDustMinimumMicros) {
+		return r.failRedeemJob(ctx, view, fmt.Errorf(
+			"%w: the pot only has %d USDC micros available against a %d payout", ErrRedeemPotIlliquid, cash, owed))
+	}
+	if payAmount != view.SliceUsdc {
+		if err := r.store.UpdateRedeemJobSliceUsdc(ctx, view.ID, payAmount); err != nil {
+			return r.failRedeemJob(ctx, view, err)
+		}
+		view.SliceUsdc = payAmount
+	}
+
+	if view.Status != domain.RedeemJobPaying {
 		prev := view.Status
 		if err := r.store.UpdateRedeemJobStatus(ctx, view.ID, string(domain.RedeemJobPaying)); err != nil {
 			logRedeemBranchError("redeem update status failed", err, "job_id", view.ID)
-			return view, err
+			return r.failRedeemJob(ctx, view, err)
 		}
 		view.Status = domain.RedeemJobPaying
 		logRedeemStatusTransition(view.ID, string(prev), string(view.Status))
 	}
 
-	if view.Status == domain.RedeemJobPaying {
-		platformPayout, err := r.isPlatformPayoutAddress(ctx, view.UserID, view.PayoutAddress)
-		if err != nil {
-			return view, err
-		}
-		return r.payRedeemSlice(ctx, view, proof, platformPayout)
+	platformPayout, err := r.isPlatformPayoutAddress(ctx, view.UserID, view.PayoutAddress)
+	if err != nil {
+		return r.failRedeemJob(ctx, view, err)
 	}
-
-	logRedeemBranchWarn("redeem rejected", "unsupported status", "job_id", view.ID, "status", string(view.Status))
-	return view, fmt.Errorf("unsupported redeem job status %q", view.Status)
+	return r.payRedeemSlice(ctx, view, proof, platformPayout, treasury)
 }
 
-func (r *RedeemService) sellRedeemSliceIfNeeded(ctx context.Context, view *RedeemJobView) error {
-	treasury, err := r.privy.EnsureTreasury(ctx, privy.GroupID(view.GroupID))
+// repriceRedeemJob values the pot from the authoritative on-chain treasury balance and returns
+// that balance plus what the member is owed, never more than the slice quoted at debit time.
+func (r *RedeemService) repriceRedeemJob(ctx context.Context, view RedeemJobView, treasuryAddress string) (cash int64, owed int64, err error) {
+	cash, err = r.privy.TreasuryUSDCBalance(ctx, treasuryAddress)
 	if err != nil {
-		return err
+		return 0, 0, fmt.Errorf("treasury usdc balance: %w", err)
 	}
 
-	treasuryUsdc, err := r.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
+	// The job's shares are already debited, so add them back: the pot still owes them.
+	navVals, err := r.store.ComputeNavSnapshotValuesWithShareBase(ctx, view.GroupID, cash, view.ShareUnits)
 	if err != nil {
-		return fmt.Errorf("treasury usdc balance: %w", err)
+		return 0, 0, err
 	}
-	if treasuryUsdc >= view.SliceUsdc {
-		slog.Info("redeem sell slice skipped", "job_id", view.ID, "reason", "treasury usdc covers slice",
-			"treasury_usdc", treasuryUsdc, "slice_usdc", view.SliceUsdc)
-		prev := view.Status
-		if err := r.store.UpdateRedeemJobStatus(ctx, view.ID, string(domain.RedeemJobPaying)); err != nil {
-			return err
-		}
-		view.Status = domain.RedeemJobPaying
-		logRedeemStatusTransition(view.ID, string(prev), string(view.Status))
-		return nil
+	totalSharesMicro, err := r.store.SumShareUnitsByGroup(ctx, view.GroupID)
+	if err != nil {
+		return 0, 0, err
+	}
+	totalSharesMicro += view.ShareUnits
+
+	slice, err := domain.ComputeRedeemSlice(domain.RedeemSliceInput{
+		SharesRedeemedMicros: view.ShareUnits,
+		TotalSharesMicros:    totalSharesMicro,
+		PotNav:               domain.USDCMicros(navVals.PotNavMicros),
+	})
+	if err != nil {
+		return 0, 0, err
 	}
 
+	owed = int64(slice.UsdcOwed)
+	if owed > view.SliceUsdc {
+		owed = view.SliceUsdc
+	}
+	return cash, owed, nil
+}
+
+// sellRedeemShortfall sells pot holdings to USDC until the payout can be funded, waiting for
+// each sell to confirm before returning.
+func (r *RedeemService) sellRedeemShortfall(ctx context.Context, view *RedeemJobView, cash, owed int64) error {
 	holdings, err := r.store.ListNetTokenHoldingsByGroup(ctx, view.GroupID)
 	if err != nil {
 		return err
 	}
 	if len(holdings) == 0 {
 		slog.Info("redeem sell slice skipped", "job_id", view.ID, "reason", "no token holdings")
-		if err := r.store.UpdateRedeemJobStatus(ctx, view.ID, string(domain.RedeemJobPaying)); err != nil {
-			return err
-		}
-		prev := view.Status
-		view.Status = domain.RedeemJobPaying
-		logRedeemStatusTransition(view.ID, string(prev), string(view.Status))
 		return nil
 	}
 
-	totalSharesMicro, err := r.store.SumShareUnitsByGroup(ctx, view.GroupID)
+	// Marked value of everything the pot holds that is not already cash.
+	navVals, err := r.store.ComputeNavSnapshotValuesWithShareBase(ctx, view.GroupID, cash, view.ShareUnits)
 	if err != nil {
 		return err
 	}
-	totalSharesMicro += view.ShareUnits
+	stockValue := navVals.PotNavMicros - cash
+	if stockValue <= 0 {
+		slog.Info("redeem sell slice skipped", "job_id", view.ID, "reason", "no marked stock value")
+		return nil
+	}
+	shortfall := owed - cash
 
 	for _, holding := range holdings {
-		sellAmount := jupiter.RedeemSliceSellAmount(holding.Amount, view.ShareUnits, totalSharesMicro)
+		sellAmount := jupiter.RedeemShortfallSellAmount(holding.Amount, shortfall, stockValue)
 		if sellAmount <= 0 {
 			continue
 		}
@@ -480,12 +546,20 @@ func (r *RedeemService) sellRedeemSliceIfNeeded(ctx context.Context, view *Redee
 	return nil
 }
 
-func (r *RedeemService) payRedeemSlice(ctx context.Context, view RedeemJobView, proof privy.PayoutProof, platformPayout bool) (RedeemJobView, error) {
-	treasury, err := r.privy.EnsureTreasury(ctx, privy.GroupID(view.GroupID))
-	if err != nil {
-		return view, err
+// failRedeemJob rolls an unpaid job back so the member keeps their shares and can retry, then
+// returns the original cause. A job that already has a withdrawal attached is never rolled back.
+func (r *RedeemService) failRedeemJob(ctx context.Context, view RedeemJobView, cause error) (RedeemJobView, error) {
+	if view.WithdrawalID != "" {
+		logRedeemBranchError("redeem failed after payout; leaving job for manual review", cause, "job_id", view.ID)
+		return view, cause
 	}
+	if abortErr := r.abortRedeemJob(ctx, view); abortErr != nil {
+		logRedeemBranchError("redeem abort after failure failed", abortErr, "job_id", view.ID)
+	}
+	return view, cause
+}
 
+func (r *RedeemService) payRedeemSlice(ctx context.Context, view RedeemJobView, proof privy.PayoutProof, platformPayout bool, treasury privy.TreasuryRef) (RedeemJobView, error) {
 	payout, err := r.privy.PayUSDC(ctx, privy.PayUSDCRequest{
 		TreasuryPrivyWalletID: treasury.PrivyWalletID,
 		TreasuryAddress:       treasury.SolanaAddress,
@@ -706,9 +780,17 @@ func (r *RedeemService) reconcileActiveRedeemBeforeWithdraw(ctx context.Context,
 	}
 }
 
+// abortRedeemJob returns the debited share units and clears the job. It is safe for any status
+// that has not produced a payout: nothing has left the treasury, and a sell that already
+// happened only left the pot holding more USDC than before.
 func (r *RedeemService) abortRedeemJob(ctx context.Context, view RedeemJobView) error {
-	if view.Status != domain.RedeemJobDebited {
+	switch view.Status {
+	case domain.RedeemJobDebited, domain.RedeemJobSelling, domain.RedeemJobPaying:
+	default:
 		return fmt.Errorf("cannot abort redeem job in status %q", view.Status)
+	}
+	if view.WithdrawalID != "" {
+		return fmt.Errorf("cannot abort redeem job %s: payout already recorded", view.ID)
 	}
 
 	tx, err := r.store.BeginTx(ctx)

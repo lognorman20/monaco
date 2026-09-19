@@ -41,7 +41,7 @@ struct MonacoToastBanner: View {
 
 private enum MonacoToastPalette {
     /// Profit green that stays legible on the ink capsule in both modes.
-    static let successGlyph = Color.adaptive(light: 0x3CCB7F, dark: 0x0E7C4A)
+    static let successGlyph = MonacoTheme.profit
 }
 
 private struct MonacoToastModifier: ViewModifier {

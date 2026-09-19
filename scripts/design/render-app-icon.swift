@@ -4,7 +4,9 @@
 //   LaunchMark{,-Dark}@{1,2,3}x.png                             (96pt mark, LaunchMark.imageset)
 //
 // The mark: three equal circles on a shallow rising diagonal, overlaps knocked out with a gap,
-// the top-right circle in profit green. Three friends, rising, one of them winning.
+// the top-right circle in brand blue. Three friends, rising, one of them winning.
+// Palette matches MonacoMark.swift / MonacoTheme.swift (v2, docs/qa/polish-v2/README.md):
+// ink #0B1220 / paper #F3F6FB, brand accent #1652F0 light / #3B7BFF dark.
 //
 // Usage: swift scripts/design/render-app-icon.swift [assets-dir]
 //        (default: apps/mobile/Monaco/Assets.xcassets)
@@ -18,10 +20,11 @@ func hex(_ v: UInt32) -> RGB {
     RGB(r: CGFloat((v >> 16) & 0xFF) / 255, g: CGFloat((v >> 8) & 0xFF) / 255, b: CGFloat(v & 0xFF) / 255)
 }
 
-let ink = hex(0x161613)
-let inkDark = hex(0x0D0D0C)
-let paper = hex(0xF4F3EF)
-let green = hex(0x3CCB7F)
+let ink = hex(0x0B1220)
+let inkDark = hex(0x060A14)
+let paper = hex(0xF3F6FB)
+let accentLight = hex(0x1652F0)
+let accentDark = hex(0x3B7BFF)
 let white = hex(0xFFFFFF)
 let seventyWhite = RGB(r: 0.7, g: 0.7, b: 0.7)
 let black = hex(0x000000)
@@ -90,7 +93,7 @@ func icon(background: RGB, colors: [RGB], to url: URL) {
 }
 
 /// The mark alone on transparent, cropped to its bounds and centred in a square of `points` × scale.
-func launchMark(points: Int, scale: Int, circle: RGB, to url: URL) {
+func launchMark(points: Int, scale: Int, circle: RGB, accent: RGB, to url: URL) {
     let side = points * scale
     let ctx = context(side, side)
     // Mark bounds within the unit square: x 0.195…0.805, y 0.265…0.735 → width 0.61.
@@ -98,7 +101,7 @@ func launchMark(points: Int, scale: Int, circle: RGB, to url: URL) {
     let unit = CGFloat(side) / (markWidth * 1.04) // 2% breathing room each side
     let midX: CGFloat = 0.5, midY: CGFloat = 0.5
     let frame = CGRect(x: CGFloat(side) / 2 - midX * unit, y: CGFloat(side) / 2 - midY * unit, width: unit, height: unit)
-    drawMark(ctx, frame: frame, colors: [circle, circle, green], gapColor: nil)
+    drawMark(ctx, frame: frame, colors: [circle, circle, accent], gapColor: nil)
     write(ctx, url)
 }
 
@@ -108,11 +111,11 @@ let iconDir = assets.appendingPathComponent("AppIcon.appiconset")
 let launchDir = assets.appendingPathComponent("LaunchMark.imageset")
 try FileManager.default.createDirectory(at: launchDir, withIntermediateDirectories: true)
 
-icon(background: ink, colors: [paper, paper, green], to: iconDir.appendingPathComponent("AppIcon-Light.png"))
-icon(background: inkDark, colors: [paper, paper, green], to: iconDir.appendingPathComponent("AppIcon-Dark.png"))
+icon(background: ink, colors: [paper, paper, accentLight], to: iconDir.appendingPathComponent("AppIcon-Light.png"))
+icon(background: inkDark, colors: [paper, paper, accentDark], to: iconDir.appendingPathComponent("AppIcon-Dark.png"))
 icon(background: black, colors: [seventyWhite, seventyWhite, white], to: iconDir.appendingPathComponent("AppIcon-Tinted.png"))
 for scale in 1...3 {
     let suffix = scale == 1 ? "" : "@\(scale)x"
-    launchMark(points: 96, scale: scale, circle: ink, to: launchDir.appendingPathComponent("LaunchMark\(suffix).png"))
-    launchMark(points: 96, scale: scale, circle: paper, to: launchDir.appendingPathComponent("LaunchMark-Dark\(suffix).png"))
+    launchMark(points: 96, scale: scale, circle: ink, accent: accentLight, to: launchDir.appendingPathComponent("LaunchMark\(suffix).png"))
+    launchMark(points: 96, scale: scale, circle: paper, accent: accentDark, to: launchDir.appendingPathComponent("LaunchMark-Dark\(suffix).png"))
 }

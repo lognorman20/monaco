@@ -214,6 +214,13 @@ func (s *Store) ComputeNavSnapshotValues(ctx context.Context, groupID string, tr
 	return s.computeNavSnapshotValues(ctx, s.db, groupID, treasuryUSDC)
 }
 
+// ComputeNavSnapshotValuesWithShareBase derives pot NAV as if extraShareUnitsMicros additional
+// share units were still outstanding. Redeem uses it to re-price an in-flight job: those shares
+// are already debited, but the pot they are a claim on has not been paid out yet.
+func (s *Store) ComputeNavSnapshotValuesWithShareBase(ctx context.Context, groupID string, treasuryUSDC, extraShareUnitsMicros int64) (NavSnapshotValues, error) {
+	return s.computeNavSnapshotValuesWithShareBase(ctx, s.db, groupID, treasuryUSDC, extraShareUnitsMicros)
+}
+
 // SumShareUnitsByGroupTx returns total share_units within tx.
 func (s *Store) SumShareUnitsByGroupTx(ctx context.Context, tx *sql.Tx, groupID string) (int64, error) {
 	return sumShareUnitsByGroupQuery(ctx, tx, groupID)
@@ -230,17 +237,25 @@ func (s *Store) GetFillDerivedCostBasisByOutputMintTx(ctx context.Context, tx *s
 }
 
 func (s *Store) computeNavSnapshotValues(ctx context.Context, q navSnapshotQuerier, groupID string, treasuryUSDC int64) (NavSnapshotValues, error) {
+	return s.computeNavSnapshotValuesWithShareBase(ctx, q, groupID, treasuryUSDC, 0)
+}
+
+func (s *Store) computeNavSnapshotValuesWithShareBase(ctx context.Context, q navSnapshotQuerier, groupID string, treasuryUSDC, extraShareUnitsMicros int64) (NavSnapshotValues, error) {
 	if groupID == "" {
 		return NavSnapshotValues{}, fmt.Errorf("group_id is required")
 	}
 	if treasuryUSDC < 0 {
 		return NavSnapshotValues{}, fmt.Errorf("treasury usdc must be non-negative")
 	}
+	if extraShareUnitsMicros < 0 {
+		return NavSnapshotValues{}, fmt.Errorf("extra share units must be non-negative")
+	}
 
 	totalSharesMicro, err := sumShareUnitsByGroupQuery(ctx, q, groupID)
 	if err != nil {
 		return NavSnapshotValues{}, err
 	}
+	totalSharesMicro += extraShareUnitsMicros
 
 	holdings, err := listNetTokenHoldingsByGroupQuery(ctx, q, groupID)
 	if err != nil {
