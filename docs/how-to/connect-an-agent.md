@@ -41,6 +41,10 @@ Run `scripts/demo/agent-intent.sh --help` for all flags.
   re-displayed, never emailed.
 - **The budget is enforced server-side.** The bot can't spend past its allocation; a request
   that would exceed it comes back rejected, not silently capped.
+- **Guessing the key is throttled.** After 10 wrong keys for a cabal (or from one address)
+  the API answers `429` with `Retry-After` and allows one more try per minute. Calls with
+  the right key are never throttled, and a key sent to the wrong cabal gets the same `401`
+  as an unknown key.
 - **The cabal keeps control after install.** Pause, resume, and revoke are each their own
   vote — pausing keeps the key valid but blocks trades, revoking kills the key outright.
 - **Same execution path as a member's vote.** Agent trades settle through the identical

@@ -83,6 +83,24 @@ func (l *Limiter) Allow(key string) (bool, time.Duration) {
 	return false, wait
 }
 
+// Blocked reports whether key is over its limit without spending a request, and how
+// long until one request is available. Use it with Allow when only some outcomes
+// should count against the limit (for example failed key guesses, not valid calls).
+func (l *Limiter) Blocked(key string) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	b, ok := l.buckets[key]
+	if !ok {
+		return false, 0
+	}
+	tokens := l.refilled(b, l.now())
+	if tokens >= 1 {
+		return false, 0
+	}
+	return true, time.Duration(math.Ceil((1 - tokens) * float64(l.interval)))
+}
+
 func (l *Limiter) refilled(b *bucket, now time.Time) float64 {
 	elapsed := now.Sub(b.last)
 	if elapsed <= 0 {
