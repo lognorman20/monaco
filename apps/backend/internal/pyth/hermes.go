@@ -22,6 +22,7 @@ type HermesClient struct {
 	baseURL    string
 	httpClient *http.Client
 	apiKey     string
+	chartCache *ChartSeriesCache
 }
 
 // NewHermesClient returns a production Hermes client authenticated with a Pyth API key.
@@ -31,7 +32,8 @@ func NewHermesClient(apiKey string) *HermesClient {
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 		},
-		apiKey: strings.TrimSpace(apiKey),
+		apiKey:     strings.TrimSpace(apiKey),
+		chartCache: NewChartSeriesCache(DefaultChartSeriesCacheTTL),
 	}
 }
 
@@ -44,6 +46,7 @@ func NewHermesClientWithHTTP(baseURL string, httpClient *http.Client, apiKey str
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		httpClient: httpClient,
 		apiKey:     strings.TrimSpace(apiKey),
+		chartCache: NewChartSeriesCache(DefaultChartSeriesCacheTTL),
 	}
 }
 
