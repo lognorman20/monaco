@@ -30,7 +30,7 @@
 - **Persistence:** Logan tables only — deposits, positions, withdrawals, transactions. Signature/idempotency on row unique keys (`tx_signature`, `execute_request_id`). Do NOT create `sweep_tx_log`, `share_ledger`, `jupiter_orders`, `fills`, or `cost_basis` tables.
 - Sells already exist for redeem: `SwapService.SellToUSDC` + `jupiter.QuoteSell`/`SellToUSDC` + `postgres.ConfirmSellTransaction` with `transactions.action='sell'`. Reuse that path for passed sell proposals. Do not duplicate Jupiter execute.
 - Buys remain `CreateProposal` → vote → `ProposalExecutePoller` → `ExecuteOnPass` → `SwapService` buy. Sells mirror this and dispatch by proposal kind. `StartBuy` stays the buy gate; do not delete M4 vote-is-the-only-execute-path.
-- Local DB is Docker Compose Postgres (`monaco`, port `54322`). New schema is `supabase/migrations/000008_proposal_sells.sql`. Never use hosted Supabase for tests.
+- Local DB is Docker Compose Postgres (`monaco`, port `54322`). New schema is `supabase/migrations/000009_proposal_sells.sql`. Never use hosted Supabase for tests.
 - `just test backend` uses stubs/fakes only and never live Jupiter. Focused Go tests use the owning module: `go test -C packages/domain …` and `(cd apps/backend && go test ./internal/…)`. Never `go test ./packages/domain` from the repo root (`packages/domain` is its own module). `just test mobile` is host `swift test` in `packages/mobile-core` with no simulator. `just build mobile` is the iOS compile gate. Gold-sim tap-through is mandatory in Done when.
 - **DB-backed commands need the dotenvx wrapper.** `scripts/apply-migrations.sh` delegates to `go run ./cmd/migrate`, which `log.Fatal`s when `DATABASE_URL` is unset, and `postgres.OpenTestDB` tests **skip** (not fail) without `DATABASE_URL`, so an unwrapped focused run can report a false PASS. Prefix every focused Postgres/app test and every migration apply in this plan with `./scripts/with-dotenv-local.sh` (or run inside `just test backend`), e.g. `./scripts/with-dotenv-local.sh scripts/apply-migrations.sh` and `./scripts/with-dotenv-local.sh bash -c 'cd apps/backend && go test ./internal/postgres -run …'`. `docker compose up -d --wait` must already have run.
 - Product copy uses human stock names/symbols, never raw mints or “xStock” branding; never hyphenates wallet addresses; uses toasts over banners; and follows `MainFlowCopyManifest`. Existing cabal/group copy must not regress.
@@ -47,7 +47,7 @@
 
 ### Create
 
-- `supabase/migrations/000008_proposal_sells.sql` — add proposal kind/token amount and cross-kind integrity checks.
+- `supabase/migrations/000009_proposal_sells.sql` — add proposal kind/token amount and cross-kind integrity checks.
 - `apps/backend/internal/postgres/proposals_test.go` — persistence and migration-shape coverage for buy/sell proposal rows.
 - `apps/backend/internal/app/proposal_sell.go` — focused sell quote/holding validation methods on existing `GovernanceService`; no new service.
 - `apps/mobile/Monaco/Features/Proposals/ProposeChooserView.swift` — one Buy/Sell chooser reached from Group Detail.
@@ -119,7 +119,7 @@ The Xcode project uses a file-system-synchronized `Monaco` group, so creating th
 ### Task 1: Lock Domain and SQL Proposal Contract
 
 **Files:**
-- Create: `supabase/migrations/000008_proposal_sells.sql`
+- Create: `supabase/migrations/000009_proposal_sells.sql`
 - Modify: `packages/domain/votes.go`
 - Modify: `packages/domain/types_test.go`
 - Modify: `packages/domain/factories_test.go`
@@ -222,7 +222,7 @@ Expected: `kind` defaults to `buy`, `token_amount` and `usdc_micros` are nullabl
 
 - [ ] **Step 6: Document migration rollback behavior in the implementation commit**
 
-Application rollback is safe without dropping columns because old code reads existing buy columns and every old/new buy row defaults to `kind='buy'`. Before the migration is shared, local schema rollback is: revert `000008_proposal_sells.sql`, then run `just reset db` to recreate local `monaco` and `monaco_test`; never edit an already-shared migration or target hosted Supabase.
+Application rollback is safe without dropping columns because old code reads existing buy columns and every old/new buy row defaults to `kind='buy'`. Before the migration is shared, local schema rollback is: revert `000009_proposal_sells.sql`, then run `just reset db` to recreate local `monaco` and `monaco_test`; never edit an already-shared migration or target hosted Supabase.
 
 Note: `scripts/ensure-test-database.sh` (run by `just test backend`) must also see `000008`, so run the full `just test backend` gate at least once before relying on focused `internal/postgres` runs.
 
@@ -235,7 +235,7 @@ Expected: PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add supabase/migrations/000008_proposal_sells.sql packages/domain/votes.go packages/domain/types_test.go packages/domain/factories_test.go
+git add supabase/migrations/000009_proposal_sells.sql packages/domain/votes.go packages/domain/types_test.go packages/domain/factories_test.go
 git commit -m "feat: add buy and sell proposal contract"
 ```
 
@@ -1141,7 +1141,7 @@ Run: `./scripts/with-dotenv-local.sh scripts/apply-migrations.sh`
 
 Run it a second time.
 
-Expected: first run applies `000008_proposal_sells.sql` if needed; second run reports it already applied/skipped. Confirm local compose project `monaco`, container `monaco-postgres`, host port `54322`.
+Expected: first run applies `000009_proposal_sells.sql` if needed; second run reports it already applied/skipped. Confirm local compose project `monaco`, container `monaco-postgres`, host port `54322`.
 
 - [ ] **Step 5: Perform mandatory gold-sim setup**
 

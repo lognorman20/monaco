@@ -21,7 +21,7 @@ Prize target is the general Stocklana pool. Judges ask whether this could be a r
 
 1. Sign in with SMS or email OTP via Privy.
 2. Create a group or join one of many. One user belongs to many groups. App home ranks groups and people across the whole app.
-3. Deposit USDC into the member wallet. The backend sweeps it into the group treasury and credits share units at the current share price.
+3. Deposit USDC into the member wallet. It appears as **account balance** (chain USDC in the Privy member wallet). The user picks a cabal and amount to fund; the backend sweeps that exact amount into the group treasury and credits share units at the current share price.
 4. Propose a buy from the xStocks catalog. The group's voter set must pass it under the creator's threshold and expiry. Then the backend swaps treasury USDC for the token on Jupiter.
 5. Live on the group screen: pot composition, your slice, dollar P&L, percent return, and the in-group member leaderboard.
 6. Redeem some or all share units whenever you want. The backend sells that slice to USDC and pays a verified payout address.
@@ -94,12 +94,12 @@ Users never manage keys or approve individual Solana transactions in the happy p
 
 Do not put `PHANTOM_APP_ID` in Monaco `.env.local`. Agent wallet setup: [README Agent QA](../README.md#agent-qa-phantom-mcp).
 
-### Deposit and sweep
+### Deposit and fund
 
-1. The user funds **their** Privy wallet with USDC (onramp or external transfer). Personal Phantom send to the member inbox also works; see [README Deposits](../README.md#deposits).
-2. The backend **sweeps** USDC from the member wallet into the group treasury (server-signed, no second approval sheet).
+1. The user funds **their** Privy member wallet with USDC (onramp or external transfer). Personal Phantom send to the member inbox also works; see [README Deposits](../README.md#deposits). Inbound USDC stays in the member wallet and shows as **account balance** (`GET /v1/me/balance` reads chain USDC minus in-flight fund jobs).
+2. To deploy into a cabal, the user calls **`POST /v1/groups/{id}/fund`** with an amount ≤ account balance. The backend creates a pending deposit and sweeps that exact amount member → treasury (server-signed, no second approval sheet).
 3. On **confirmed sweep into treasury**, credit share units at the current share price. Idempotent on transaction signature.
-4. Do **not** credit shares when USDC only arrives in the member wallet. Sweep promptly.
+4. Do **not** credit shares when USDC only arrives in the member wallet. Do **not** auto-sweep inbound USDC without an explicit fund action.
 
 See **NAV and share units** for the formula.
 
@@ -165,6 +165,10 @@ Postgres stores NAV snapshots on deposit, fill, and redeem so charts and both bo
 Settings → Advanced may expose explorer links. The main flow never needs them.
 
 ## Withdraw
+
+**Platform withdraw** (Settings → Withdraw) sends idle USDC from the user's Privy **member wallet** to any Solana address they paste. It uses `GET /v1/me/balance` (chain USDC minus in-flight fund jobs and pending platform withdrawals) and `POST /v1/me/withdrawals`. It does not sell cabal holdings, debit share units, or pull from group treasuries. Deployed stake must return to the member wallet first (see leave / withdraw-to-balance flows).
+
+**Cabal cash out** (group screen redeem) is different: it debits share units, may sell pot holdings on Jupiter, and pays USDC from the **group treasury** to a proven payout address.
 
 Partial redeem is a first-class action on the group screen, same weight as buy. Payout is **USDC only**. Never send tokenized stock in kind.
 

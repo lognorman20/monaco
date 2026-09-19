@@ -27,7 +27,7 @@ enum DepositFailureToastTracker {
         let amount = String(format: "$%.2f", dollars)
         let status = item.status.trimmingCharacters(in: .whitespacesAndNewlines)
         if status.lowercased() == "failed" || status.isEmpty {
-            return "Deposit failed — \(amount) wasn't swept into the club vault."
+            return "Fund failed — \(amount) didn't reach the cabal treasury."
         }
         return "Deposit failed — \(amount). (\(status))"
     }

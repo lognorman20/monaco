@@ -18,6 +18,7 @@ type Client interface {
 	MemberUSDCBalance(ctx context.Context, memberAddress string) (int64, error)
 	TreasuryUSDCBalance(ctx context.Context, treasuryAddress string) (int64, error)
 	SubmitSweep(ctx context.Context, req SweepRequest) (SweepResult, error)
+	SubmitMemberUSDCTransfer(ctx context.Context, req TransferRequest) (TransferResult, error)
 	VerifyPayoutProof(ctx context.Context, userID string, proof PayoutProof) error
 	PayUSDC(ctx context.Context, req PayUSDCRequest) (PayUSDCResult, error)
 }
@@ -28,6 +29,7 @@ type HTTPClient struct {
 	appSecret                    string
 	privyAuthorizationPrivateKey string
 	privyAuthorizationKeyID      string
+	relayerPrivateKey            string
 	baseURL                      string
 	solanaCluster                string
 	solanaRPCURL                 string // test override; empty uses cluster default
@@ -41,6 +43,7 @@ func NewHTTPClient(cfg *config.Config) *HTTPClient {
 		appSecret:                    cfg.PrivyAppSecret,
 		privyAuthorizationPrivateKey: cfg.PrivyAuthorizationPrivateKey,
 		privyAuthorizationKeyID:      cfg.PrivyAuthorizationKeyID,
+		relayerPrivateKey:            cfg.RelayerPrivateKey,
 		baseURL:                      defaultBaseURL,
 		solanaCluster:                cfg.SolanaCluster,
 		solanaRPCURL:                 cfg.SolanaRPCURL,

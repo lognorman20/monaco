@@ -24,7 +24,9 @@ func integrationGroupApp(t *testing.T) (*GroupHandlers, *AuthHandlers, privy.Cli
 	symbols := app.NewSymbolResolver(nil)
 	deposits := app.NewDepositService(store, privyClient, nil, symbols)
 	home := app.NewHomeService(store, privyClient, nil, deposits, symbols)
-	return &GroupHandlers{Groups: groups, Governance: governance, Home: home}, authHandlers, privyClient, db, iso
+	redeem := app.NewRedeemService(store, privyClient, nil, nil, nil, app.NewFakePrivyTreasurySigner())
+	governance.SetRedeemService(redeem)
+	return &GroupHandlers{Groups: groups, Governance: governance, Home: home, Redeem: redeem}, authHandlers, privyClient, db, iso
 }
 
 func TestPOST_groups_missingAuth_returns401(t *testing.T) {

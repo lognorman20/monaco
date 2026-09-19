@@ -57,7 +57,7 @@ final class PrivyAuthService: ObservableObject {
             try await privy.sms.sendCode(to: phoneNumberE164)
             phase = .awaitingCode
         } catch {
-            phase = .failed(message: "Could not send SMS code.")
+            phase = .failed(message: privySendCodeErrorMessage("Could not send SMS code.", error: error))
         }
     }
 
@@ -80,7 +80,7 @@ final class PrivyAuthService: ObservableObject {
             try await privy.email.sendCode(to: email)
             phase = .awaitingCode
         } catch {
-            phase = .failed(message: "Could not send email code.")
+            phase = .failed(message: privySendCodeErrorMessage("Could not send email code.", error: error))
         }
     }
 
@@ -110,6 +110,12 @@ final class PrivyAuthService: ObservableObject {
         accessToken = nil
         phase = .idle
         sessionStore.clear()
+    }
+
+    private func privySendCodeErrorMessage(_ fallback: String, error: Error) -> String {
+        let detail = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !detail.isEmpty else { return fallback }
+        return "\(fallback) \(detail)"
     }
 
     private func storeAuthenticatedUser(_ user: PrivyUser, markExplicitLogin: Bool) async {

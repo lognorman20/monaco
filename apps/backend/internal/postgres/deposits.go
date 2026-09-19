@@ -204,6 +204,24 @@ WHERE id = $1 AND status = 'pending'`
 	return nil
 }
 
+// SumPendingDepositAmountByUserID returns the sum of pending deposit amounts for userID.
+func (s *Store) SumPendingDepositAmountByUserID(ctx context.Context, userID string) (int64, error) {
+	if userID == "" {
+		return 0, fmt.Errorf("user_id is required")
+	}
+
+	const selectSQL = `
+SELECT COALESCE(SUM(amount), 0)
+FROM deposits
+WHERE user_id = $1 AND status = 'pending'`
+
+	var total int64
+	if err := s.db.QueryRowContext(ctx, selectSQL, userID).Scan(&total); err != nil {
+		return 0, fmt.Errorf("sum pending deposit amount: %w", err)
+	}
+	return total, nil
+}
+
 // ListPendingDeposits returns all pending deposit rows.
 func (s *Store) ListPendingDeposits(ctx context.Context) ([]DepositRow, error) {
 	const selectSQL = `

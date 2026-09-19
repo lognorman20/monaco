@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ type GroupHandlers struct {
 	Groups     *app.GroupService
 	Governance *app.GovernanceService
 	Home       *app.HomeService
+	Redeem     *app.RedeemService
 }
 
 type joinPolicyRequest struct {
@@ -161,6 +163,22 @@ func (h *GroupHandlers) JoinGroupHandler(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+type leaveGroupRequest struct {
+	WithdrawStake bool `json:"withdrawStake"`
+}
+
+type withdrawToBalanceRequest struct {
+	ShareAmountMicros *int64 `json:"shareAmountMicros"`
+}
+
+type redeemJobResponse struct {
+	ID            string `json:"id"`
+	Status        string `json:"status"`
+	ShareUnits    int64  `json:"shareUnits"`
+	SliceUsdc     int64  `json:"sliceUsdc"`
+	PayoutAddress string `json:"payoutAddress,omitempty"`
+}
+
 func (h *GroupHandlers) LeaveGroupHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	log := newRequestLog(r, "POST /v1/groups/{id}/leave")
@@ -174,7 +192,25 @@ func (h *GroupHandlers) LeaveGroupHandler(w http.ResponseWriter, r *http.Request
 		logJSONError(ctx, log, "missing_group_id", w, http.StatusNotFound, "group not found")
 		return
 	}
-	err := h.Governance.LeaveGroup(ctx, token, groupID)
+	var leaveReq leaveGroupRequest
+	if r.Body != nil {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, &leaveReq); err != nil {
+				logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+		}
+	}
+	err := h.Governance.LeaveGroup(ctx, app.LeaveGroupRequest{
+		AccessToken:   token,
+		GroupID:       groupID,
+		WithdrawStake: leaveReq.WithdrawStake,
+	})
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
@@ -531,6 +567,82 @@ func (h *GroupHandlers) ListGroupActivityHandler(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(groupActivityResponse{Items: respItems})
 	logJSONOK(ctx, log, "ok", "group_id", groupID, "count", len(respItems))
+}
+
+// WithdrawToBalanceHandler handles POST /v1/groups/{id}/withdraw-to-balance.
+func (h *GroupHandlers) WithdrawToBalanceHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "POST /v1/groups/{id}/withdraw-to-balance")
+	token, ok := bearerToken(r)
+	if !ok {
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
+		return
+	}
+	groupID := r.PathValue("id")
+	if strings.TrimSpace(groupID) == "" {
+		logJSONError(ctx, log, "missing_group_id", w, http.StatusNotFound, "group not found")
+		return
+	}
+	if h.Redeem == nil {
+		logJSONError(ctx, log, "redeem_unavailable", w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	var req withdrawToBalanceRequest
+	if r.Body != nil {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if len(body) > 0 {
+			if err := json.Unmarshal(body, &req); err != nil {
+				logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+		}
+	}
+
+	job, err := h.Redeem.WithdrawToBalance(ctx, app.WithdrawToBalanceRequest{
+		AccessToken:       token,
+		GroupID:           groupID,
+		ShareAmountMicros: req.ShareAmountMicros,
+	})
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
+			return
+		}
+		if errors.Is(err, app.ErrUserNotFound) || errors.Is(err, app.ErrGroupNotFound) || errors.Is(err, app.ErrNotGroupMember) {
+			logJSONError(ctx, log, "group_not_found", w, http.StatusNotFound, "group not found", "group_id", groupID)
+			return
+		}
+		if errors.Is(err, app.ErrInvalidRedeemRequest) {
+			logJSONError(ctx, log, "invalid_redeem", w, http.StatusBadRequest, "invalid withdraw request", "group_id", groupID)
+			return
+		}
+		if errors.Is(err, app.ErrRedeemAlreadyInProgress) {
+			logJSONError(ctx, log, "redeem_in_progress", w, http.StatusConflict, "withdraw already in progress", "group_id", groupID)
+			return
+		}
+		if errors.Is(err, app.ErrQuoteNotRoutable) {
+			logJSONError(ctx, log, "quote_not_routable", w, http.StatusBadRequest, err.Error(), "group_id", groupID)
+			return
+		}
+		logJSONError(ctx, log, "withdraw_to_balance_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(redeemJobResponse{
+		ID:            job.ID,
+		Status:        string(job.Status),
+		ShareUnits:    job.ShareUnits,
+		SliceUsdc:     job.SliceUsdc,
+		PayoutAddress: job.PayoutAddress,
+	})
+	logJSONOK(ctx, log, "withdraw_to_balance_ok", "group_id", groupID, "job_id", job.ID, "status", string(job.Status))
 }
 
 func parseCreateGroupRules(req createGroupRequest) (app.GroupRules, error) {

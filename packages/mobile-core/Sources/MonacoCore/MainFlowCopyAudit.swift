@@ -25,7 +25,7 @@ public enum MainFlowCopyAudit {
 
 public enum MainFlowCopyManifest {
     public static let mainFlowStrings: [String] = [
-        "Add money to grow your cabal's pot.",
+        "Fund this cabal to grow your cabal's pot.",
         "Create cabal",
         "Join cabal",
         "Propose",

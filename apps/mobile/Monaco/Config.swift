@@ -20,7 +20,7 @@ struct PrivyAuthSettings: Equatable {
     static var current: PrivyAuthSettings {
         let environment = ProcessInfo.processInfo.environment
         return PrivyAuthSettings(
-            appID: value(for: "PRIVY_APP_ID", environment: environment),
+            appID: resolvedAppID(from: environment),
             appClientID: resolvedClientID(from: environment),
             smsLoginEnabled: parseBool(
                 firstNonEmpty(
@@ -39,12 +39,32 @@ struct PrivyAuthSettings: Equatable {
         )
     }
 
-    private static func resolvedClientID(from environment: [String: String]) -> String {
-        let clientID = value(for: "PRIVY_APP_CLIENT_ID", environment: environment)
-        if !clientID.isEmpty {
-            return clientID
+    private static func resolvedAppID(from environment: [String: String]) -> String {
+        let envAppID = trimmed(environment["PRIVY_APP_ID"])
+        if !envAppID.isEmpty {
+            return envAppID
         }
-        return value(for: "PRIVY_AUTH_ID", environment: environment)
+        return plistString("PRIVY_APP_ID")
+    }
+
+    private static func resolvedClientID(from environment: [String: String]) -> String {
+        let envClientID = trimmed(environment["PRIVY_APP_CLIENT_ID"])
+        if isValidPrivyIOSClientID(envClientID) {
+            return envClientID
+        }
+        let envAuthID = trimmed(environment["PRIVY_AUTH_ID"])
+        if isValidPrivyIOSClientID(envAuthID) {
+            return envAuthID
+        }
+        let plistClientID = plistString("PRIVY_APP_CLIENT_ID")
+        if isValidPrivyIOSClientID(plistClientID) {
+            return plistClientID
+        }
+        return ""
+    }
+
+    private static func isValidPrivyIOSClientID(_ value: String) -> Bool {
+        !value.isEmpty && value.hasPrefix("client-")
     }
 
     /// Process env (simctl / Xcode scheme) wins; Info.plist from xcconfig is fallback.

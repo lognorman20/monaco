@@ -54,6 +54,8 @@ Default: sequential if unsure.
 
 ## Subagent defaults
 
+Implementer `working_directory` MUST be the worktree path — never the integration checkout. Task inherits parent cwd; pass absolute worktree paths for Shell and file edits.
+
 | Role | `subagent_type` | `model` | `run_in_background` |
 |------|-----------------|---------|---------------------|
 | Implementer | `best-of-n-runner` | `composer-2.5` | `true` |
@@ -172,6 +174,8 @@ Touched packages’ done gate. After shared/contracts merges: workspace check / 
 - Multi-model interrogate panel
 - Reviewing instead of dispatching the next implementer
 - Implementing on main checkout during orchestration
+- Subagent Shell/file paths on primary checkout when a worktree exists
+- `git checkout` feat/integration branch in user's Cursor folder instead of worktree add
 - Full-stack smoke as done gate
 - Nesting `lfg`
 

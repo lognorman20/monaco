@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 # Decrypt repo-root .env.local via dotenvx and materialize iOS Privy config.
-# Writes gitignored apps/mobile/Config/Privy.local.xcconfig (xcconfig → Info.plist at build).
+# Writes gitignored Privy.local.xcconfig + Privy.local.Info.plist (merged into app at build).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/apps/mobile/Config/Privy.local.xcconfig"
+PLIST_OUT="$ROOT/apps/mobile/Config/Privy.local.Info.plist"
 ENV_FILE="$ROOT/.env.local"
 
 load_privy_env() {
-  if [[ -n "${PRIVY_APP_ID:-}" && -n "${PRIVY_APP_CLIENT_ID:-${PRIVY_AUTH_ID:-}}" ]]; then
-    return 0
-  fi
   if [[ ! -f "$ENV_FILE" ]]; then
     echo "error: $ENV_FILE missing — set PRIVY_APP_ID and PRIVY_APP_CLIENT_ID with dotenvx." >&2
     exit 1
@@ -19,6 +17,11 @@ load_privy_env() {
     echo "error: dotenvx not on PATH. Install: https://dotenvx.com/docs/install" >&2
     exit 1
   fi
+  # Always read from .env.local. dotenvx get/run both honor existing shell exports,
+  # so clear stale Privy keys before fetching decrypted values.
+  unset PRIVY_APP_ID PRIVY_APP_CLIENT_ID PRIVY_AUTH_ID \
+    PRIVY_SMS_LOGIN_ENABLED PRIVY_EMAIL_LOGIN_ENABLED PRIVY_AUTHORIZATION_KEY_ID
+
   PRIVY_APP_ID="$(cd "$ROOT" && dotenvx get PRIVY_APP_ID -f .env.local 2>/dev/null || true)"
   PRIVY_APP_CLIENT_ID="$(cd "$ROOT" && dotenvx get PRIVY_APP_CLIENT_ID -f .env.local 2>/dev/null || true)"
   PRIVY_AUTH_ID="$(cd "$ROOT" && dotenvx get PRIVY_AUTH_ID -f .env.local 2>/dev/null || true)"
@@ -29,13 +32,45 @@ load_privy_env() {
   PRIVY_EMAIL_LOGIN_ENABLED="${PRIVY_EMAIL_LOGIN_ENABLED:-true}"
 }
 
-generate_xcconfig() {
-  load_privy_env
-  local client_id="${PRIVY_APP_CLIENT_ID:-${PRIVY_AUTH_ID:-}}"
-  if [[ -z "${PRIVY_APP_ID:-}" || -z "$client_id" ]]; then
-    echo "error: PRIVY_APP_ID and PRIVY_APP_CLIENT_ID must be set in .env.local" >&2
+resolve_ios_client_id() {
+  local client_id="${PRIVY_APP_CLIENT_ID:-}"
+  if [[ -z "$client_id" && -n "${PRIVY_AUTH_ID:-}" && "${PRIVY_AUTH_ID}" == client-* ]]; then
+    client_id="$PRIVY_AUTH_ID"
+  fi
+  if [[ -z "${PRIVY_APP_ID:-}" || -z "$client_id" || "$client_id" != client-* ]]; then
+    echo "error: PRIVY_APP_ID and PRIVY_APP_CLIENT_ID (client-…) must be set in .env.local" >&2
     exit 1
   fi
+  printf '%s' "$client_id"
+}
+
+generate_info_plist() {
+  local client_id="$1"
+  mkdir -p "$(dirname "$PLIST_OUT")"
+  cat >"$PLIST_OUT" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PRIVY_APP_ID</key>
+	<string>${PRIVY_APP_ID}</string>
+	<key>PRIVY_APP_CLIENT_ID</key>
+	<string>${client_id}</string>
+	<key>PRIVY_SMS_LOGIN_ENABLED</key>
+	<string>${PRIVY_SMS_LOGIN_ENABLED:-true}</string>
+	<key>PRIVY_EMAIL_LOGIN_ENABLED</key>
+	<string>${PRIVY_EMAIL_LOGIN_ENABLED:-true}</string>
+	<key>PRIVY_AUTHORIZATION_KEY_ID</key>
+	<string>${PRIVY_AUTHORIZATION_KEY_ID:-}</string>
+</dict>
+</plist>
+EOF
+}
+
+generate_xcconfig() {
+  load_privy_env
+  local client_id
+  client_id="$(resolve_ios_client_id)"
 
   mkdir -p "$(dirname "$OUT")"
   cat >"$OUT" <<EOF
@@ -45,17 +80,14 @@ PRIVY_APP_CLIENT_ID = ${client_id}
 PRIVY_SMS_LOGIN_ENABLED = ${PRIVY_SMS_LOGIN_ENABLED:-true}
 PRIVY_EMAIL_LOGIN_ENABLED = ${PRIVY_EMAIL_LOGIN_ENABLED:-true}
 PRIVY_AUTHORIZATION_KEY_ID = ${PRIVY_AUTHORIZATION_KEY_ID:-}
-INFOPLIST_KEY_PRIVY_APP_ID = \$(PRIVY_APP_ID)
-INFOPLIST_KEY_PRIVY_APP_CLIENT_ID = \$(PRIVY_APP_CLIENT_ID)
-INFOPLIST_KEY_PRIVY_SMS_LOGIN_ENABLED = \$(PRIVY_SMS_LOGIN_ENABLED)
-INFOPLIST_KEY_PRIVY_EMAIL_LOGIN_ENABLED = \$(PRIVY_EMAIL_LOGIN_ENABLED)
-INFOPLIST_KEY_PRIVY_AUTHORIZATION_KEY_ID = \$(PRIVY_AUTHORIZATION_KEY_ID)
 EOF
+  generate_info_plist "$client_id"
 }
 
 export_launch_env() {
   load_privy_env
-  local client_id="${PRIVY_APP_CLIENT_ID:-${PRIVY_AUTH_ID:-}}"
+  local client_id
+  client_id="$(resolve_ios_client_id)"
   export PRIVY_APP_ID
   export PRIVY_APP_CLIENT_ID="$client_id"
   export PRIVY_SMS_LOGIN_ENABLED="${PRIVY_SMS_LOGIN_ENABLED:-true}"

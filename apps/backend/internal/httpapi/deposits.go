@@ -50,10 +50,51 @@ type treasuryUsdcBalanceResponse struct {
 	UsdcBalance     int64  `json:"usdcBalance"`
 }
 
-// CreateDepositHandler handles POST /v1/groups/{id}/deposits.
-func (h *DepositHandlers) CreateDepositHandler(w http.ResponseWriter, r *http.Request) {
+type platformBalanceResponse struct {
+	AvailableUsdcMicros     int64  `json:"availableUsdcMicros"`
+	MemberWalletAddress     string `json:"memberWalletAddress"`
+	PendingAllocationMicros int64  `json:"pendingAllocationMicros"`
+}
+
+// GetPlatformBalanceHandler handles GET /v1/me/balance.
+func (h *DepositHandlers) GetPlatformBalanceHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	log := newRequestLog(r, "POST /v1/groups/{id}/deposits")
+	log := newRequestLog(r, "GET /v1/me/balance")
+
+	token, ok := bearerToken(r)
+	if !ok {
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
+		return
+	}
+
+	result, err := h.Deposits.GetPlatformBalance(ctx, token)
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
+			return
+		}
+		if errors.Is(err, app.ErrUserNotFound) {
+			logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found")
+			return
+		}
+		logJSONError(ctx, log, "get_balance_failed", w, http.StatusInternalServerError, "internal server error", "err", err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(platformBalanceResponse{
+		AvailableUsdcMicros:     result.AvailableUsdcMicros,
+		MemberWalletAddress:     result.MemberWalletAddress,
+		PendingAllocationMicros: result.PendingAllocationMicros,
+	})
+	logJSONOK(ctx, log, "ok", "available_usdc_micros", result.AvailableUsdcMicros)
+}
+
+// FundGroupHandler handles POST /v1/groups/{id}/fund.
+func (h *DepositHandlers) FundGroupHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "POST /v1/groups/{id}/fund")
 
 	token, ok := bearerToken(r)
 	if !ok {
@@ -77,7 +118,7 @@ func (h *DepositHandlers) CreateDepositHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	result, err := h.Deposits.CreateDeposit(ctx, token, groupID, req.Amount)
+	result, err := h.Deposits.FundGroup(ctx, token, groupID, req.Amount)
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
@@ -95,7 +136,11 @@ func (h *DepositHandlers) CreateDepositHandler(w http.ResponseWriter, r *http.Re
 			logJSONError(ctx, log, "not_group_member", w, http.StatusForbidden, "not a group member", "group_id", groupID)
 			return
 		}
-		logJSONError(ctx, log, "create_deposit_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
+		if errors.Is(err, app.ErrInsufficientPlatformBalance) {
+			logJSONError(ctx, log, "insufficient_balance", w, http.StatusBadRequest, "amount exceeds available platform balance", "group_id", groupID)
+			return
+		}
+		logJSONError(ctx, log, "fund_group_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
 		return
 	}
 
@@ -108,11 +153,19 @@ func (h *DepositHandlers) CreateDepositHandler(w http.ResponseWriter, r *http.Re
 		Status:      string(result.Deposit.Status),
 		FromAddress: result.Deposit.FromAddress,
 	})
-	logJSONOK(ctx, log, "deposit_created",
+	logJSONOK(ctx, log, "fund_created",
 		"deposit_id", result.Deposit.ID,
 		"group_id", result.Deposit.GroupID,
 		"amount", result.Deposit.Amount,
 	)
+}
+
+// CreateDepositHandler handles deprecated POST /v1/groups/{id}/deposits.
+func (h *DepositHandlers) CreateDepositHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "POST /v1/groups/{id}/deposits")
+	logJSONError(ctx, log, "deprecated", w, http.StatusGone,
+		"Use GET /v1/me/balance and POST /v1/groups/{id}/fund to move USDC from your account balance into a cabal treasury.")
 }
 
 // GetDepositHandler handles GET /v1/deposits/{id}.

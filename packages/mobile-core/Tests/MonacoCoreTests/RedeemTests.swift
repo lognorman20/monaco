@@ -9,9 +9,9 @@ final class RedeemTests: XCTestCase {
 
     func testRedeemSlider_dustMinimum_disablesSubmitBelowThreshold() {
         // Arrange
-        let gate = RedeemSliderGate(dustMinimumMicros: 1_000_000)
-        let below = Int64(500_000)
-        let atMinimum = Int64(1_000_000)
+        let gate = RedeemSliderGate()
+        let below = Int64(50_000)
+        let atMinimum = RedeemDustMinimum.usdcMicros
 
         // Act
         let belowOk = gate.maySubmit(selectedMicros: below)

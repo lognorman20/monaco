@@ -95,6 +95,60 @@ func (s *Store) HasActiveRedeemJobForUserTx(ctx context.Context, tx *sql.Tx, use
 	return true, nil
 }
 
+// GetActiveRedeemJobForUser returns the member's in-flight redeem job in groupID, if any.
+func (s *Store) GetActiveRedeemJobForUser(ctx context.Context, userID, groupID string) (RedeemJobRow, bool, error) {
+	if userID == "" || groupID == "" {
+		return RedeemJobRow{}, false, fmt.Errorf("user_id and group_id are required")
+	}
+	const selectSQL = `
+SELECT id, group_id, user_id, share_units, slice_usdc, payout_address, status, withdrawal_id, created_at, updated_at
+FROM redeem_jobs
+WHERE user_id = $1 AND group_id = $2 AND status <> 'settled'
+ORDER BY created_at DESC
+LIMIT 1`
+
+	var row RedeemJobRow
+	err := s.db.QueryRowContext(ctx, selectSQL, userID, groupID).Scan(
+		&row.ID,
+		&row.GroupID,
+		&row.UserID,
+		&row.ShareUnits,
+		&row.SliceUsdc,
+		&row.PayoutAddress,
+		&row.Status,
+		&row.WithdrawalID,
+		&row.CreatedAt,
+		&row.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RedeemJobRow{}, false, nil
+	}
+	if err != nil {
+		return RedeemJobRow{}, false, fmt.Errorf("get active redeem job: %w", err)
+	}
+	return row, true, nil
+}
+
+// DeleteRedeemJobTx removes a redeem job within a transaction.
+func (s *Store) DeleteRedeemJobTx(ctx context.Context, tx *sql.Tx, jobID string) error {
+	if jobID == "" {
+		return fmt.Errorf("job id is required")
+	}
+	const deleteSQL = `DELETE FROM redeem_jobs WHERE id = $1`
+	result, err := tx.ExecContext(ctx, deleteSQL, jobID)
+	if err != nil {
+		return fmt.Errorf("delete redeem job: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete redeem job rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("redeem job not found")
+	}
+	return nil
+}
+
 // HasActiveRedeemJobForUser reports whether userID has an unsettled redeem job in groupID.
 func (s *Store) HasActiveRedeemJobForUser(ctx context.Context, userID, groupID string) (bool, error) {
 	if userID == "" || groupID == "" {

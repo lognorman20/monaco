@@ -21,6 +21,11 @@ type fakePrivyClient struct {
 	treasuryBalances map[string]int64
 	lastSweep       SweepRequest
 	sweepCount      int
+	lastTransfer    TransferRequest
+	transferCount   int
+	rejectSubmitTransfer bool
+	rejectSubmitTransferErr error
+	forcedTransferSignature string
 	validProofs     map[string]struct{}
 	lastPayout      PayUSDCRequest
 	payoutCount     int
@@ -193,8 +198,44 @@ func (f *fakePrivyClient) PayUSDC(ctx context.Context, req PayUSDCRequest) (PayU
 		return PayUSDCResult{}, fmt.Errorf("%w: insufficient treasury usdc", ErrAPI)
 	}
 	f.treasuryBalances[req.TreasuryAddress] = balance - req.Amount
+	f.memberBalances[req.ToAddress] += req.Amount
 	sig := deterministicTxSignature(req.TreasuryAddress, req.ToAddress, req.Amount, f.payoutCount)
 	return PayUSDCResult{TxSignature: sig}, nil
+}
+
+func (f *fakePrivyClient) SubmitMemberUSDCTransfer(ctx context.Context, req TransferRequest) (TransferResult, error) {
+	_ = ctx
+	if req.MemberAddress == "" || req.ToAddress == "" {
+		return TransferResult{}, fmt.Errorf("%w: missing addresses", ErrAPI)
+	}
+	if req.Amount <= 0 {
+		return TransferResult{}, fmt.Errorf("%w: invalid amount", ErrAPI)
+	}
+	if req.RelayerKey == "" {
+		return TransferResult{}, fmt.Errorf("%w: relayer key required", ErrAPI)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.rejectSubmitTransfer {
+		err := f.rejectSubmitTransferErr
+		if err == nil {
+			err = fmt.Errorf("%w: submit transfer rejected", ErrAPI)
+		}
+		return TransferResult{}, err
+	}
+	logFake("submit_member_usdc_transfer", "amount", req.Amount, "member", req.MemberAddress, "to", req.ToAddress)
+	f.lastTransfer = req
+	f.transferCount++
+	f.memberBalances[req.MemberAddress] -= req.Amount
+	if f.memberBalances[req.MemberAddress] < 0 {
+		f.memberBalances[req.MemberAddress] = 0
+	}
+	sig := f.forcedTransferSignature
+	if sig == "" {
+		sig = deterministicTxSignature(req.MemberAddress, req.ToAddress, req.Amount, f.transferCount)
+	}
+	return TransferResult{TxSignature: sig}, nil
 }
 
 func (f *fakePrivyClient) SubmitSweep(ctx context.Context, req SweepRequest) (SweepResult, error) {
@@ -309,6 +350,43 @@ func BuildValidPayoutProof(userID, payoutAddress string) PayoutProof {
 		Message:       message,
 		Signature:     deterministicPayoutSignature(userID, payoutAddress),
 	}
+}
+
+// SetForcedTransferSignature forces SubmitMemberUSDCTransfer to return a fixed signature for tests.
+func SetForcedTransferSignature(client Client, signature string) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		panic("privy: SetForcedTransferSignature requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.forcedTransferSignature = signature
+	fake.mu.Unlock()
+}
+
+// SetRejectSubmitTransfer forces SubmitMemberUSDCTransfer to fail for tests.
+func SetRejectSubmitTransfer(client Client, reject bool, err error) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		panic("privy: SetRejectSubmitTransfer requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.rejectSubmitTransfer = reject
+	fake.rejectSubmitTransferErr = err
+	fake.mu.Unlock()
+}
+
+// LastTransferRequest returns the most recent member USDC transfer submitted to the fake client.
+func LastTransferRequest(client Client) (TransferRequest, bool) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		return TransferRequest{}, false
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.transferCount == 0 {
+		return TransferRequest{}, false
+	}
+	return fake.lastTransfer, true
 }
 
 func LastSweepRequest(client Client) (SweepRequest, bool) {

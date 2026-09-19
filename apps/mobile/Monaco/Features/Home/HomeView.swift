@@ -7,10 +7,32 @@ struct HomeView: View {
     let home: HomeViewDTO
     var onRefresh: () async -> Void = {}
 
+    private let apiClient = MonacoAPIClient()
+
     @State private var selectedTab = 0
+    @State private var platformBalance: PlatformBalanceDTO?
+
+    private var joinedCabals: [HomeGroupBoardRowDTO] {
+        home.groups.filter(\.isJoined)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
+            PlatformBalanceCard(balance: platformBalance)
+                .padding([.horizontal, .top])
+
+            NavigationLink {
+                DepositView(auth: auth, joinedCabals: joinedCabals)
+            } label: {
+                Label("Deposit", systemImage: "plus.circle")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.monacoSecondary)
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+            .accessibilityIdentifier("home-deposit-link")
+
             Picker("Board", selection: $selectedTab) {
                 Text("Cabals").tag(0)
                 Text("People").tag(1)
@@ -29,7 +51,7 @@ struct HomeView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
-                    SettingsView(auth: auth, memberWalletAddress: nil, treasuryAddress: nil)
+                    SettingsView(auth: auth)
                 } label: {
                     Image(systemName: "gearshape")
                         .monacoToolbarIcon()
@@ -57,7 +79,19 @@ struct HomeView: View {
         }
         .refreshable {
             await onRefresh()
+            await refreshBalance()
         }
+        .task(id: auth.accessToken) {
+            await refreshBalance()
+        }
+    }
+
+    private func refreshBalance() async {
+        guard let token = auth.accessToken else {
+            platformBalance = nil
+            return
+        }
+        platformBalance = try? await apiClient.getPlatformBalance(accessToken: token)
     }
 
     private var groupBoardSection: some View {
