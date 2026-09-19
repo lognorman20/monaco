@@ -183,6 +183,10 @@ func TestFakerSpectator_nonMemberReadsScaleClubWithoutPrivy(t *testing.T) {
 	if err != nil || len(open) != 1 {
 		t.Fatalf("ListGroupProposals(open) = %d rows, err %v", len(open), err)
 	}
+	// Feed cards follow the same display-only rule as detail (#149 x #153).
+	if open[0].CanVote {
+		t.Error("feed card CanVote = true on faker proposal")
+	}
 	detail, err := fx.governance.GetProposalDetail(ctx, fx.operatorToken, fx.fakerOpenID)
 	if err != nil {
 		t.Fatalf("GetProposalDetail(faker): %v", err)
@@ -190,7 +194,6 @@ func TestFakerSpectator_nonMemberReadsScaleClubWithoutPrivy(t *testing.T) {
 	if detail.CanVote {
 		t.Error("spectator CanVote = true on faker proposal")
 	}
-
 
 	member, err := fx.h.Store.IsGroupMember(ctx, fx.fakerGroupID, fx.operatorID)
 	if err != nil || member {
@@ -321,6 +324,22 @@ func TestFakerSpectator_ghostsShowPnLWithoutDilutingOperator(t *testing.T) {
 	}
 	if detail.CanVote || detail.VoteSummary.EligibleCount != 2 {
 		t.Errorf("ghost proposal detail canVote=%v eligible=%d, want false/2", detail.CanVote, detail.VoteSummary.EligibleCount)
+	}
+	realOpen, err := fx.governance.ListGroupProposals(ctx, fx.operatorToken, fx.realGroupID, "open")
+	if err != nil {
+		t.Fatalf("ListGroupProposals(real, open): %v", err)
+	}
+	var ghostCard *ProposalListItem
+	for i := range realOpen {
+		if realOpen[i].ID == fx.ghostProposalID {
+			ghostCard = &realOpen[i]
+		}
+	}
+	if ghostCard == nil {
+		t.Fatal("ghost proposal missing from real group feed")
+	}
+	if ghostCard.CanVote || ghostCard.VoteSummary.EligibleCount != 2 {
+		t.Errorf("ghost feed card canVote=%v eligible=%d, want false/2", ghostCard.CanVote, ghostCard.VoteSummary.EligibleCount)
 	}
 
 	// Live voter set for real proposals is the operator alone.
