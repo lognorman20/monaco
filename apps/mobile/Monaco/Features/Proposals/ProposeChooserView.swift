@@ -1,9 +1,60 @@
 import MonacoCore
 import SwiftUI
 
-/// Sheet content for Group detail's "Propose" action. The presenter wraps it in a
-/// `NavigationStack` with `.presentationDetents([.medium, .large])`; each flow pushes onto that stack
-/// and calls `onProposed` with the new proposal id when the cabal has it.
+/// How tall the propose sheet may be. On the chooser the member can pull it between `.medium` and
+/// `.large`; once a flow is pushed (search, amount with the keyboard, review) the sheet is pinned at
+/// `.large`, so dragging content cannot collapse it mid-flow and hide "Add a reason" or Review.
+struct ProposeSheetDetents: Equatable {
+    var selection: PresentationDetent = .medium
+    private(set) var isFlowActive = false
+
+    var allowed: Set<PresentationDetent> {
+        isFlowActive ? [.large] : [.medium, .large]
+    }
+
+    mutating func flowStarted() {
+        isFlowActive = true
+        selection = .large
+    }
+
+    mutating func returnedToChooser() {
+        isFlowActive = false
+        selection = .medium
+    }
+}
+
+/// The whole propose sheet: its navigation stack, the chooser, and the sheet height. Present it from
+/// `.sheet { ProposeSheet(…) }`; it owns its detents, so every presentation starts at `.medium` on the
+/// chooser and each flow runs at `.large`.
+struct ProposeSheet: View {
+    private let service: ProposeService
+    private let groupId: String
+    private let groupView: GroupViewDTO
+    private let onProposed: ((_ proposalId: String) -> Void)?
+
+    @State private var detents = ProposeSheetDetents()
+
+    init(auth: PrivyAuthService, groupId: String, groupView: GroupViewDTO, onProposed: ((_ proposalId: String) -> Void)? = nil) {
+        self.init(service: LiveProposeService(auth: auth), groupId: groupId, groupView: groupView, onProposed: onProposed)
+    }
+
+    init(service: ProposeService, groupId: String, groupView: GroupViewDTO, onProposed: ((_ proposalId: String) -> Void)? = nil) {
+        self.service = service
+        self.groupId = groupId
+        self.groupView = groupView
+        self.onProposed = onProposed
+    }
+
+    var body: some View {
+        NavigationStack {
+            ProposeChooserView(service: service, groupId: groupId, groupView: groupView, onProposed: onProposed, detents: $detents)
+        }
+        .presentationDetents(detents.allowed, selection: $detents.selection)
+    }
+}
+
+/// The propose sheet's first screen. Present it through `ProposeSheet`; each flow pushes onto the
+/// sheet's stack and calls `onProposed` with the new proposal id when the cabal has it.
 struct ProposeChooserView: View {
     let groupId: String
     let groupView: GroupViewDTO
@@ -11,20 +62,17 @@ struct ProposeChooserView: View {
 
     private let service: ProposeService
 
-    /// The presenting sheet's detent. When given, the chooser raises the sheet to `.large` while a
-    /// flow is pushed (the steps need the height for the keypad and the bottom button) and lowers it
-    /// back to `.medium` on return. Presenters pass the same binding to
-    /// `.presentationDetents([.medium, .large], selection:)`.
-    private let detent: Binding<PresentationDetent>?
+    /// The presenting sheet's detents: pinned to `.large` while a flow is pushed, released on return.
+    private let detents: Binding<ProposeSheetDetents>?
 
     init(
         auth: PrivyAuthService,
         groupId: String,
         groupView: GroupViewDTO,
         onProposed: ((_ proposalId: String) -> Void)? = nil,
-        detent: Binding<PresentationDetent>? = nil
+        detents: Binding<ProposeSheetDetents>? = nil
     ) {
-        self.init(service: LiveProposeService(auth: auth), groupId: groupId, groupView: groupView, onProposed: onProposed, detent: detent)
+        self.init(service: LiveProposeService(auth: auth), groupId: groupId, groupView: groupView, onProposed: onProposed, detents: detents)
     }
 
     init(
@@ -32,10 +80,10 @@ struct ProposeChooserView: View {
         groupId: String,
         groupView: GroupViewDTO,
         onProposed: ((_ proposalId: String) -> Void)? = nil,
-        detent: Binding<PresentationDetent>? = nil
+        detents: Binding<ProposeSheetDetents>? = nil
     ) {
         self.service = service
-        self.detent = detent
+        self.detents = detents
         self.groupId = groupId
         self.groupView = groupView
         self.onProposed = onProposed
@@ -83,14 +131,19 @@ struct ProposeChooserView: View {
         .background(MonacoTheme.canvas.ignoresSafeArea())
         .navigationTitle(ProposeFlowCopy.chooserTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { setDetent(.medium) }
-        .onDisappear { setDetent(.large) }
+        // The chooser disappears only when a flow is pushed over it (or the sheet closes, which
+        // discards the sheet's state), and appears again when the member comes back to it.
+        .onAppear { updateDetents { $0.returnedToChooser() } }
+        .onDisappear { updateDetents { $0.flowStarted() } }
         .accessibilityIdentifier("propose-chooser")
     }
 
-    private func setDetent(_ value: PresentationDetent) {
-        guard let detent, detent.wrappedValue != value else { return }
-        withAnimation(.snappy) { detent.wrappedValue = value }
+    private func updateDetents(_ change: (inout ProposeSheetDetents) -> Void) {
+        guard let detents else { return }
+        var next = detents.wrappedValue
+        change(&next)
+        guard next != detents.wrappedValue else { return }
+        withAnimation(.snappy) { detents.wrappedValue = next }
     }
 
     private var sellDetail: String {

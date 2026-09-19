@@ -45,7 +45,6 @@ struct GroupDetailSampleHarness: View {
     @State private var proposalService = SampleProposalFeedService()
     @State private var showDetails = false
     @State private var showPropose = false
-    @State private var proposeDetent: PresentationDetent = .medium
     @State private var route: GroupDetailRoute?
     @State private var toast: MonacoToast?
     @State private var heroScrolledAway = false
@@ -132,10 +131,7 @@ struct GroupDetailSampleHarness: View {
             }
         }
         .sheet(isPresented: $showPropose) {
-            NavigationStack {
-                ProposeChooserView(auth: auth, groupId: view.id, groupView: view, detent: $proposeDetent)
-            }
-            .presentationDetents([.medium, .large], selection: $proposeDetent)
+            ProposeSheet(auth: auth, groupId: view.id, groupView: view)
         }
         .sheet(isPresented: $showDetails) {
             GroupDetailsSheet(groupId: view.id, treasuryAddress: view.treasuryAddress, isLeaving: false, onLeave: {})

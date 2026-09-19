@@ -42,7 +42,6 @@ struct GroupDetailView: View {
     @State private var route: GroupDetailRoute?
     @State private var showProposeSheet = false
     /// The propose sheet's height; the chooser raises it to `.large` while a flow is pushed.
-    @State private var proposeDetent: PresentationDetent = .medium
     @State private var showDetailsSheet = false
     @State private var leaveRequestedFromDetails = false
     @State private var heroScrolledAway = false
@@ -113,16 +112,7 @@ struct GroupDetailView: View {
                 proposalRefreshCount += 1
             }) {
                 if let groupView {
-                    NavigationStack {
-                        ProposeChooserView(
-                            auth: auth,
-                            groupId: groupId,
-                            groupView: groupView,
-                            onProposed: proposalSent,
-                            detent: $proposeDetent
-                        )
-                    }
-                    .presentationDetents([.medium, .large], selection: $proposeDetent)
+                    ProposeSheet(auth: auth, groupId: groupId, groupView: groupView, onProposed: proposalSent)
                 }
             }
             .sheet(isPresented: $showDetailsSheet, onDismiss: presentLeaveConfirmationIfRequested) {

@@ -213,6 +213,34 @@ final class ProposeFlowSampleUITests: XCTestCase {
         capture("15-sent")
     }
 
+    /// Once a flow is pushed the sheet stays full height: dragging it down does not drop it to
+    /// half height, where "Add a reason" and Review would sit below the fold.
+    func testFlow_keepsSheetFullHeightWhenDragged() throws {
+        let propose = element("group-action-propose")
+        XCTAssertTrue(propose.waitForExistence(timeout: 10))
+        propose.tap()
+        let buy = element("propose-kind-buy")
+        XCTAssertTrue(buy.waitForExistence(timeout: 5))
+        buy.tap()
+        let apple = element("proposal-asset-AAPLx")
+        XCTAssertTrue(apple.waitForExistence(timeout: 5))
+        apple.tap()
+        let addReason = element("proposal-add-reason")
+        XCTAssertTrue(addReason.waitForExistence(timeout: 5))
+        sleep(1)
+
+        let title = app.navigationBars["Amount"]
+        let before = title.frame.minY
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
+        sleep(1)
+        capture("16-flow-after-drag")
+        XCTAssertTrue(title.exists, "the sheet closed")
+        XCTAssertEqual(title.frame.minY, before, accuracy: 2, "the sheet dropped from full height")
+        XCTAssertTrue(addReason.isHittable)
+        XCTAssertTrue(app.buttons["Review"].isHittable)
+    }
+
     func testSell_dollarsToShares_reviewShowsEstimate() throws {
         let propose = element("group-action-propose")
         XCTAssertTrue(propose.waitForExistence(timeout: 10))
