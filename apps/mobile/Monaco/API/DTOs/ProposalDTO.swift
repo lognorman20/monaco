@@ -19,6 +19,7 @@ struct ProposalDTO: Codable, Equatable, Identifiable {
     let agentDisplayName: String?
     let allocationUsdcMicros: String?
     let mintedAgentKey: String?
+    let thesis: String?
 
     var resolvedKind: String {
         let raw = kind?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""

@@ -99,6 +99,13 @@ struct ProposalHistorySection: View {
                     .font(.caption)
                     .foregroundStyle(MonacoTheme.secondaryText)
             }
+            if let thesis = proposal.thesis, !thesis.isEmpty {
+                Text(thesis)
+                    .font(.caption)
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("group-proposal-thesis-\(proposal.id)")
+            }
             if selectedTab == .open, let expiresAt = proposal.expiresAt {
                 Text(timeRemaining(until: expiresAt))
                     .font(.caption.weight(.medium))

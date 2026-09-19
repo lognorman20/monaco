@@ -15,6 +15,7 @@ struct ProposeSellView: View {
     @State private var isQuoting = false
     @State private var isSubmitting = false
     @State private var toast: MonacoToast?
+    @State private var thesisText = ""
 
     var body: some View {
         Form {
@@ -49,6 +50,15 @@ struct ProposeSellView: View {
                     }
                     .disabled(isQuoting || tokenAmount == nil)
                     .accessibilityIdentifier("proposal-sell-quote")
+                }
+
+                Section("Thesis (optional)") {
+                    Text("Why are you closing this position? Voters will see this.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: $thesisText)
+                        .frame(minHeight: 80)
+                        .accessibilityIdentifier("proposal-sell-thesis-field")
                 }
             }
 
@@ -116,16 +126,21 @@ struct ProposeSellView: View {
         isSubmitting = true
         errorMessage = nil
         defer { isSubmitting = false }
+        let trimmedThesis = thesisText.trimmingCharacters(in: .whitespacesAndNewlines)
+
         do {
             _ = try await apiClient.createProposal(
                 accessToken: token,
                 groupId: groupId,
                 kind: "sell",
                 symbol: selected.symbol,
-                tokenAmount: amount
+                tokenAmount: amount,
+                thesis: trimmedThesis.isEmpty ? nil : trimmedThesis
             )
             toast = MonacoToast(message: "Proposal submitted", isSuccess: true)
             dismiss()
+        } catch MonacoAPIError.apiError(_, let message) where message == "thesis exceeds maximum length" {
+            errorMessage = "Thesis is too long. Keep it under 500 characters."
         } catch MonacoAPIError.httpStatus(400) {
             errorMessage = "That amount is no longer available to sell."
         } catch {
