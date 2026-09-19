@@ -64,7 +64,12 @@ func (h *MeHandlers) UploadProfilePhotoHandler(w http.ResponseWriter, r *http.Re
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 
 	if err := r.ParseMultipartForm(maxBodyBytes); err != nil {
-		logJSONError(ctx, log, "invalid_multipart", w, http.StatusBadRequest, "invalid multipart form")
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			logJSONError(ctx, log, "photo_too_large", w, http.StatusBadRequest, "photo must be at most 2MB")
+			return
+		}
+		logJSONError(ctx, log, "invalid_multipart", w, http.StatusBadRequest, "invalid multipart form", "err", err.Error())
 		return
 	}
 

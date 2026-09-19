@@ -205,8 +205,15 @@ struct SettingsView: View {
                 toast = MonacoToast(message: "Could not read that photo.", isSuccess: false)
                 return
             }
-            let mimeType = photoMimeType(for: item)
-            let profile = try await apiClient.uploadProfilePhoto(accessToken: token, imageData: data, mimeType: mimeType)
+            guard let (preparedData, mimeType) = ProfilePhotoUploadPreparer.prepare(from: data) else {
+                toast = MonacoToast(message: "Photo must be jpeg, png, or webp under 2MB.", isSuccess: false)
+                return
+            }
+            let profile = try await apiClient.uploadProfilePhoto(
+                accessToken: token,
+                imageData: preparedData,
+                mimeType: mimeType
+            )
             profilePhotoURL = profile.profilePhotoUrl
             toast = MonacoToast(message: "Profile photo updated.", isSuccess: true)
         } catch MonacoAPIError.httpStatus(let status) {
@@ -214,17 +221,6 @@ struct SettingsView: View {
         } catch {
             toast = MonacoToast(message: "Could not upload profile photo.", isSuccess: false)
         }
-    }
-
-    private func photoMimeType(for item: PhotosPickerItem) -> String {
-        let supportedTypes = item.supportedContentTypes
-        if supportedTypes.contains(where: { $0.conforms(to: .png) }) {
-            return "image/png"
-        }
-        if supportedTypes.contains(where: { $0.conforms(to: .webP) }) {
-            return "image/webp"
-        }
-        return "image/jpeg"
     }
 }
 
