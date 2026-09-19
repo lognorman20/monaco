@@ -1,40 +1,70 @@
+import MonacoCore
 import SwiftUI
 
+/// Join a cabal by pasted ID, or from a search/board row that already knows
+/// the cabal's name and join policy.
 struct JoinGroupView: View {
     @ObservedObject var auth: PrivyAuthService
+    /// Present inside the signed-in shell; refreshed after a join so every tab updates.
+    @Environment(AppSessionStore.self) private var session: AppSessionStore?
     private let apiClient = MonacoAPIClient()
+    private let groupName: String?
+    private let joinMode: GroupJoinMode?
     @State private var groupId: String
     @State private var didJoin = false
     @State private var requestPending = false
     @State private var isJoining = false
     @State private var toast: MonacoToast?
 
-    init(auth: PrivyAuthService, groupId: String = "") {
+    init(auth: PrivyAuthService, groupId: String = "", groupName: String? = nil, joinMode: GroupJoinMode? = nil) {
         self.auth = auth
+        self.groupName = groupName
+        self.joinMode = joinMode
         _groupId = State(initialValue: groupId)
+    }
+
+    private var actionTitle: String {
+        if isJoining { return joinMode == .request ? "Sending…" : "Joining…" }
+        if requestPending { return "Request sent" }
+        if didJoin { return "You're in" }
+        return joinMode == .request ? "Ask to join" : "Join cabal"
     }
 
     var body: some View {
         Form {
-            Section {
-                TextField("Cabal ID", text: $groupId)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-                    .disabled(isJoining || didJoin || requestPending)
-            } footer: {
-                Text("Paste the cabal ID your friend shared.")
+            if let groupName {
+                Section {
+                    Text(groupName)
+                        .font(MonacoTheme.TypeRole.title)
+                        .accessibilityIdentifier("join-group-name")
+                } footer: {
+                    Text(joinMode == .request
+                        ? "The cabal admin approves new members. You'll show up once they say yes."
+                        : "Anyone can join this cabal. You can add money after you're in.")
+                }
+            } else {
+                Section {
+                    TextField("Cabal ID", text: $groupId)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.body.monospaced())
+                        .disabled(isJoining || didJoin || requestPending)
+                        .accessibilityIdentifier("join-group-id")
+                } footer: {
+                    Text("Paste the cabal ID your friend shared.")
+                }
             }
             Section {
-                Button(isJoining ? "Joining…" : "Join cabal") {
+                Button(actionTitle) {
                     Task { await joinGroup() }
                 }
                 .disabled(isJoining || didJoin || requestPending || groupId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("join-group-submit")
             }
         }
         .monacoFormScreen()
         .monacoToast($toast)
-        .navigationTitle("Join cabal")
+        .navigationTitle(joinMode == .request ? "Ask to join" : "Join cabal")
     }
 
     private func joinGroup() async {
@@ -51,9 +81,10 @@ struct JoinGroupView: View {
             case .joined, .alreadyMember:
                 didJoin = true
                 toast = MonacoToast(
-                    message: "You're in! Head home to see your cabal on the board.",
+                    message: "You're in! Your cabal is on the Cabals tab now.",
                     isSuccess: true
                 )
+                await session?.refresh(auth: auth)
             case .pending:
                 requestPending = true
                 toast = MonacoToast(
@@ -71,6 +102,6 @@ struct JoinGroupView: View {
 
 #Preview {
     NavigationStack {
-        JoinGroupView(auth: PrivyAuthService())
+        JoinGroupView(auth: PrivyAuthService(), groupId: "g1", groupName: "Weekend investors", joinMode: .request)
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import MonacoCore
 
 enum LeaveGroupBlockReason: String, Equatable {
     case shareUnitsRemaining = "share_units_remaining"
@@ -410,6 +411,41 @@ final class MonacoAPIClient {
             throw MonacoAPIError.httpStatus(http.statusCode)
         }
         return try JSONDecoder().decode(GroupViewDTO.self, from: data)
+    }
+
+    // MARK: Groups tab (#148). Requests and DTOs live in MonacoCore; these wrappers
+    // add the session token and map MonacoCore errors onto this client's errors.
+
+    func searchGroups(accessToken: String, query: String, limit: Int = 20, cursor: String? = nil) async throws -> GroupSearchResponseDTO {
+        try await withCoreClient(accessToken) { try await $0.searchGroups(query: query, limit: limit, cursor: cursor) }
+    }
+
+    func groupLeaderboard(accessToken: String, limit: Int = 20) async throws -> GroupLeaderboardResponseDTO {
+        try await withCoreClient(accessToken) { try await $0.groupLeaderboard(limit: limit) }
+    }
+
+    func myGroupsPnLHistory(accessToken: String, range: GroupPnLRange = .oneMonth) async throws -> MyGroupsPnLHistoryDTO {
+        try await withCoreClient(accessToken) { try await $0.myGroupsPnLHistory(range: range) }
+    }
+
+    private func withCoreClient<T>(
+        _ accessToken: String,
+        _ call: (MonacoCore.MonacoAPIClient) async throws -> T
+    ) async throws -> T {
+        let token = accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else { throw MonacoAPIError.missingAccessToken }
+        let core = MonacoCore.MonacoAPIClient(baseURL: baseURL, session: session, accessTokenProvider: { token })
+        do {
+            return try await call(core)
+        } catch let error as MonacoCore.MonacoAPIError {
+            switch error {
+            case .httpStatus(let status): throw MonacoAPIError.httpStatus(status)
+            case .invalidResponse: throw MonacoAPIError.invalidResponse
+            case .leaveBlocked: throw MonacoAPIError.invalidResponse
+            case .rejected(let status, let message): throw MonacoAPIError.apiError(status: status, message: message)
+            case .rateLimited: throw MonacoAPIError.httpStatus(429)
+            }
+        }
     }
 
     func createDeposit(accessToken: String, groupId: String, amount: Int64) async throws -> CreateDepositResponse {

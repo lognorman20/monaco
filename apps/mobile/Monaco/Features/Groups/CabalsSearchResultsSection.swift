@@ -1,0 +1,95 @@
+import MonacoCore
+import SwiftUI
+
+/// Search results replace the tab content while a query is typed.
+struct CabalsSearchResultsSection: View {
+    @ObservedObject var auth: PrivyAuthService
+    let model: CabalsTabModel
+    var onChanged: () async -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            switch model.searchState {
+            case .idle:
+                EmptyView()
+            case .tooShort:
+                hint("Type at least \(GroupSearchQuery.minimumLength) letters.", id: "cabals-search-too-short")
+            case .loading:
+                ProgressView()
+                    .tint(MonacoTheme.accent)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+                    .accessibilityIdentifier("cabals-search-loading")
+            case .empty:
+                MonacoEmptyStateCard(
+                    message: "No cabal named \u{201C}\(model.query.trimmingCharacters(in: .whitespacesAndNewlines))\u{201D}. Check the spelling or create it from the + menu.",
+                    systemImage: "magnifyingglass"
+                )
+                .accessibilityIdentifier("cabals-search-empty")
+            case .failed:
+                VStack(spacing: MonacoTheme.Space.s) {
+                    Text("Search didn't go through.")
+                        .font(MonacoTheme.TypeRole.body)
+                        .foregroundStyle(MonacoTheme.muted)
+                    Button("Try again") { model.retrySearch() }
+                        .buttonStyle(.monacoSecondary)
+                        .accessibilityIdentifier("cabals-search-retry")
+                }
+                .frame(maxWidth: .infinity)
+                .monacoSurfaceCard()
+                .accessibilityIdentifier("cabals-search-error")
+            case .results:
+                results
+            }
+        }
+    }
+
+    private var results: some View {
+        LazyVStack(spacing: MonacoTheme.Space.s) {
+            ForEach(model.results) { row in
+                NavigationLink {
+                    CabalDiscoveryDestinationView(
+                        auth: auth,
+                        groupId: row.groupID,
+                        name: row.name,
+                        destination: GroupDiscoveryDestination(isJoined: row.isJoined, joinMode: row.joinMode),
+                        onChanged: onChanged
+                    )
+                } label: {
+                    CabalBoardRow(
+                        leading: nil,
+                        name: row.name,
+                        detail: cabalRowDetail(memberCount: row.memberCount, isJoined: row.isJoined, joinMode: row.joinMode),
+                        potValueUsd: row.potValueUsd,
+                        dollarPnl: row.dollarPnl,
+                        percentReturn: row.percentReturn
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("cabals-search-result-\(row.groupID)")
+            }
+
+            if model.nextCursor != nil {
+                Button {
+                    Task { await model.loadMoreResults() }
+                } label: {
+                    if model.isLoadingMore {
+                        ProgressView().tint(MonacoTheme.accent)
+                    } else {
+                        Text("Show more cabals")
+                    }
+                }
+                .buttonStyle(.monacoSecondary)
+                .disabled(model.isLoadingMore)
+                .accessibilityIdentifier("cabals-search-more")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("cabals-search-results")
+    }
+
+    private func hint(_ text: String, id: String) -> some View {
+        Text(text)
+            .monacoSecondaryCaption()
+            .accessibilityIdentifier(id)
+    }
+}
