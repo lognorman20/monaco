@@ -32,6 +32,7 @@ type CatalogSearchPage struct {
 type CatalogSearcher interface {
 	MintCatalog
 	Search(ctx context.Context, query string, limit, offset int) (CatalogSearchPage, error)
+	Browse(ctx context.Context, limit, offset int) (CatalogSearchPage, error)
 }
 
 // HTTPCatalogSearcher lists assets from the xStocks public API and filters locally.
@@ -101,9 +102,11 @@ func (s *HTTPCatalogSearcher) Search(ctx context.Context, query string, limit, o
 		offset = 0
 	}
 
-	if offset == 0 && looksLikeTickerQuery(query) {
+	if offset == 0 && query != "" && looksLikeTickerQuery(query) {
 		if asset, err := s.searchBySymbol(ctx, query); err != nil {
-			logCatalogSearch(query, 0, err)
+			if !isContextCanceled(err) {
+				logCatalogSearch(query, 0, err)
+			}
 			return CatalogSearchPage{}, err
 		} else if asset != nil {
 			matches := []CatalogAsset{*asset}
@@ -113,12 +116,33 @@ func (s *HTTPCatalogSearcher) Search(ctx context.Context, query string, limit, o
 		}
 	}
 
-	page, err := s.searchPaginatedList(ctx, query, limit, offset)
+	page, err := s.searchFromIndex(ctx, query, limit, offset, false)
 	if err != nil {
-		logCatalogSearch(query, 0, err)
+		if !isContextCanceled(err) {
+			logCatalogSearch(query, 0, err)
+		}
 		return CatalogSearchPage{}, err
 	}
 	logCatalogSearch(query, len(page.Assets), nil)
+	return page, nil
+}
+
+// Browse returns a paginated market catalog for the Assets tab, omitting the popular strip.
+func (s *HTTPCatalogSearcher) Browse(ctx context.Context, limit, offset int) (CatalogSearchPage, error) {
+	if limit <= 0 {
+		limit = 25
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	page, err := s.searchFromIndex(ctx, "", limit, offset, true)
+	if err != nil {
+		if !isContextCanceled(err) {
+			logCatalogSearch("", 0, err)
+		}
+		return CatalogSearchPage{}, err
+	}
+	logCatalogSearch("", len(page.Assets), nil)
 	return page, nil
 }
 
@@ -148,38 +172,31 @@ func (s *HTTPCatalogSearcher) searchBySymbol(ctx context.Context, query string) 
 	return nil, nil
 }
 
-func (s *HTTPCatalogSearcher) searchPaginatedList(ctx context.Context, query string, limit, offset int) (CatalogSearchPage, error) {
+func (s *HTTPCatalogSearcher) searchFromIndex(ctx context.Context, query string, limit, offset int, excludePopularStrip bool) (CatalogSearchPage, error) {
+	if err := s.ensureMintIndex(ctx); err != nil {
+		return CatalogSearchPage{}, err
+	}
+
 	needle := strings.ToLower(strings.TrimSpace(query))
-	matches := make([]CatalogAsset, 0)
-	hasNextPage := true
+	s.mintIndex.mu.RLock()
+	all := append([]CatalogAsset(nil), s.mintIndex.allAssets...)
+	s.mintIndex.mu.RUnlock()
 
-	for page := 0; hasNextPage; page++ {
-		body, err := s.fetchCatalogListPage(ctx, page)
-		if err != nil {
-			return CatalogSearchPage{}, err
-		}
-
-		var list catalogListResponse
-		if err := json.Unmarshal(body, &list); err != nil {
-			return CatalogSearchPage{}, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
-		}
-
-		for _, node := range list.Nodes {
-			if !catalogNodeMatches(node, needle) {
-				continue
+	popularSet := popularStripSymbolSet()
+	matches := make([]CatalogAsset, 0, len(all))
+	for _, asset := range all {
+		if needle == "" {
+			if excludePopularStrip {
+				if _, pinned := popularSet[strings.ToUpper(strings.TrimSpace(asset.Symbol))]; pinned {
+					continue
+				}
 			}
-			mint, err := solanaMintFromDeployments(node.Deployments)
-			if err != nil {
-				continue
-			}
-			matches = append(matches, CatalogAsset{
-				Symbol:     strings.TrimSpace(node.Symbol),
-				Name:       strings.TrimSpace(node.Name),
-				SolanaMint: mint,
-			})
+			matches = append(matches, asset)
+			continue
 		}
-
-		hasNextPage = list.Page.HasNextPage
+		if catalogAssetMatches(asset, needle) {
+			matches = append(matches, asset)
+		}
 	}
 
 	rankCatalogAssets(ctx, s.routability, matches)
@@ -196,6 +213,10 @@ func (s *HTTPCatalogSearcher) searchPaginatedList(ctx context.Context, query str
 		Assets:  matches[offset:end],
 		HasMore: hasMore,
 	}, nil
+}
+
+func (f *fakeCatalogSearcher) Browse(ctx context.Context, limit, offset int) (CatalogSearchPage, error) {
+	return f.Search(ctx, "", limit, offset)
 }
 
 func (s *HTTPCatalogSearcher) fetchCatalogListPage(ctx context.Context, page int) ([]byte, error) {
@@ -276,10 +297,39 @@ func looksLikeTickerQuery(query string) bool {
 			return false
 		}
 	}
-	if strings.HasSuffix(strings.ToLower(q), "x") {
+	return true
+}
+
+func catalogAssetMatches(asset CatalogAsset, needle string) bool {
+	if needle == "" {
 		return true
 	}
-	return q == strings.ToUpper(q) && unicode.IsLetter(rune(q[0]))
+	symbol := strings.ToLower(strings.TrimSpace(asset.Symbol))
+	name := strings.ToLower(catalogDisplayName(asset.Name))
+	return strings.Contains(symbol, needle) || strings.Contains(name, needle)
+}
+
+// CatalogDisplayName strips xStocks branding from catalog asset names.
+func CatalogDisplayName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return name
+	}
+	for _, suffix := range []string{" xStock", " xStocks", " xstock", " xstocks"} {
+		if strings.HasSuffix(strings.ToLower(name), suffix) {
+			name = strings.TrimSpace(name[:len(name)-len(suffix)])
+			break
+		}
+	}
+	return name
+}
+
+func catalogDisplayName(name string) string {
+	return CatalogDisplayName(name)
+}
+
+func isContextCanceled(err error) bool {
+	return errors.Is(err, context.Canceled)
 }
 
 func xStockSymbolCandidates(query string) []string {
@@ -322,7 +372,7 @@ func catalogAssetsFromListResponse(body []byte, query string) ([]CatalogAsset, e
 
 func catalogNodeMatches(node catalogAssetNode, needle string) bool {
 	symbol := strings.ToLower(strings.TrimSpace(node.Symbol))
-	name := strings.ToLower(strings.TrimSpace(node.Name))
+	name := strings.ToLower(catalogDisplayName(node.Name))
 	return strings.Contains(symbol, needle) || strings.Contains(name, needle)
 }
 
@@ -396,9 +446,7 @@ func (f *fakeCatalogSearcher) Search(ctx context.Context, query string, limit, o
 	needle := strings.ToLower(query)
 	matches := make([]CatalogAsset, 0, len(assets))
 	for _, asset := range assets {
-		symbol := strings.ToLower(strings.TrimSpace(asset.Symbol))
-		name := strings.ToLower(strings.TrimSpace(asset.Name))
-		if needle == "" || strings.Contains(symbol, needle) || strings.Contains(name, needle) {
+		if needle == "" || catalogAssetMatches(asset, needle) {
 			matches = append(matches, asset)
 		}
 	}

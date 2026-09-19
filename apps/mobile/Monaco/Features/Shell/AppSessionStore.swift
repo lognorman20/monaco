@@ -73,7 +73,7 @@ final class AppSessionStore {
             async let dashboardLoad = apiClient.getHomeDashboard(accessToken: token, leaderboardRange: leaderboardRange)
             async let meLoad = apiClient.me(accessToken: token)
             async let balanceLoad = apiClient.getPlatformBalance(accessToken: token)
-            async let popularLoad = apiClient.getPopularAssets(accessToken: token, limit: 10)
+            async let popularLoad = apiClient.getPopularAssets(accessToken: token, limit: 5)
             home = try await homeLoad
             dashboard = try await dashboardLoad
             if let profile = try? await meLoad {
@@ -108,7 +108,7 @@ final class AppSessionStore {
     func refreshPopular(auth: PrivyAuthService) async {
         guard let token = auth.accessToken else { return }
         do {
-            let popular = try await apiClient.getPopularAssets(accessToken: token, limit: 10)
+            let popular = try await apiClient.getPopularAssets(accessToken: token, limit: 5)
             popularAssets = popular.assets
         } catch {
             if error.isRequestCancellation { return }

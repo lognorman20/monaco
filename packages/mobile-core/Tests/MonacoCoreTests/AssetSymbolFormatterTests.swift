@@ -2,8 +2,9 @@ import XCTest
 @testable import MonacoCore
 
 final class AssetSymbolFormatterTests: XCTestCase {
-    func testFormat_knownTicker_unchanged() {
-        XCTAssertEqual(AssetSymbolFormatter.format("TSLAx"), "TSLAx")
+    func testFormat_stripsTrailingXStockSuffix() {
+        XCTAssertEqual(AssetSymbolFormatter.format("TSLAx"), "TSLA")
+        XCTAssertEqual(AssetSymbolFormatter.format("Goog"), "GOOG")
         XCTAssertEqual(AssetSymbolFormatter.format("USDC"), "USDC")
     }
 

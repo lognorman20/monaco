@@ -14,9 +14,10 @@ type MintCatalog interface {
 }
 
 type mintIndex struct {
-	mu    sync.RWMutex
-	byMint map[string]CatalogAsset
-	loaded bool
+	mu         sync.RWMutex
+	byMint     map[string]CatalogAsset
+	allAssets  []CatalogAsset
+	loaded     bool
 }
 
 func (s *HTTPCatalogSearcher) LookupByMint(ctx context.Context, mint string) (CatalogAsset, bool, error) {
@@ -48,6 +49,7 @@ func (s *HTTPCatalogSearcher) ensureMintIndex(ctx context.Context) error {
 	}
 
 	byMint := make(map[string]CatalogAsset)
+	allAssets := make([]CatalogAsset, 0)
 	hasNextPage := true
 	for page := 0; hasNextPage; page++ {
 		body, err := s.fetchCatalogListPage(ctx, page)
@@ -63,16 +65,19 @@ func (s *HTTPCatalogSearcher) ensureMintIndex(ctx context.Context) error {
 			if err != nil {
 				continue
 			}
-			byMint[mint] = CatalogAsset{
+			asset := CatalogAsset{
 				Symbol:     strings.TrimSpace(node.Symbol),
 				Name:       strings.TrimSpace(node.Name),
 				SolanaMint: mint,
 			}
+			byMint[mint] = asset
+			allAssets = append(allAssets, asset)
 		}
 		hasNextPage = list.Page.HasNextPage
 	}
 
 	s.mintIndex.byMint = byMint
+	s.mintIndex.allAssets = allAssets
 	s.mintIndex.loaded = true
 	return nil
 }

@@ -32,14 +32,20 @@ public enum SlicePercentFormatter {
 }
 
 public enum AssetSymbolFormatter {
-    /// User-facing ticker; never show raw Solana mint as primary label.
+    /// User-facing ticker; never show raw Solana mint or trailing xStock suffix.
     public static func format(_ symbol: String) -> String {
         let trimmed = symbol.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return trimmed }
         if looksLikeSolanaMint(trimmed) {
             return "Unknown stock"
         }
-        return trimmed
+        if trimmed.lowercased().hasSuffix("x"), trimmed.count > 1 {
+            let base = String(trimmed.dropLast())
+            if base.allSatisfy({ $0.isLetter || $0.isNumber }) {
+                return base.uppercased()
+            }
+        }
+        return trimmed.uppercased()
     }
 
     private static func looksLikeSolanaMint(_ value: String) -> Bool {

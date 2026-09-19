@@ -7,6 +7,7 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
     public let routable: Bool
     public let priceUsdcMicros: Int64?
     public let change24h: String?
+    public let logoUrl: String?
 
     public var id: String { symbol }
 
@@ -16,7 +17,8 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         solanaMint: String,
         routable: Bool,
         priceUsdcMicros: Int64? = nil,
-        change24h: String? = nil
+        change24h: String? = nil,
+        logoUrl: String? = nil
     ) {
         self.symbol = symbol
         self.name = name
@@ -24,6 +26,7 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         self.routable = routable
         self.priceUsdcMicros = priceUsdcMicros
         self.change24h = change24h
+        self.logoUrl = logoUrl
     }
 }
 

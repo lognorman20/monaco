@@ -7,6 +7,7 @@ struct MarketAssetDTO: Codable, Equatable, Identifiable {
     let routable: Bool
     let priceUsdcMicros: Int64?
     let change24h: String?
+    let logoUrl: String?
 
     var id: String { symbol }
 }
