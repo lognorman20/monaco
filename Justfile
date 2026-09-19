@@ -284,6 +284,21 @@ reset *target:
         ;;
     esac
 
+# Seed #153 demo data into local Postgres: `just faker scale`, `just faker mixed <group_id>`, `just faker all <group_id>`.
+# Local DATABASE_URL only; never calls Privy/RPC/Jupiter. Refresh path: `just reset db` then `just faker ...`.
+faker profile *group_id:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "${MONACO_DOTENVX:-}" != "1" ]]; then
+      exec {{_dotenvx}} env MONACO_DOTENVX=1 just faker {{profile}} {{group_id}}
+    fi
+    source ./scripts/assert-local-database-url.sh
+    args=(-profile "{{profile}}")
+    if [[ -n "{{group_id}}" ]]; then
+      args+=(-group-id "{{group_id}}")
+    fi
+    go run -C apps/backend ./cmd/faker-seed "${args[@]}"
+
 relayer target:
     #!/usr/bin/env bash
     set -euo pipefail

@@ -139,6 +139,9 @@ func (h *GroupHandlers) JoinGroupHandler(w http.ResponseWriter, r *http.Request)
 
 	outcome, err := h.Governance.JoinGroup(ctx, token, groupID)
 	if err != nil {
+		if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
+			return
+		}
 		if errors.Is(err, privy.ErrInvalidToken) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
@@ -213,6 +216,9 @@ func (h *GroupHandlers) LeaveGroupHandler(w http.ResponseWriter, r *http.Request
 		WithdrawStake: leaveReq.WithdrawStake,
 	})
 	if err != nil {
+		if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
+			return
+		}
 		if errors.Is(err, privy.ErrInvalidToken) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
@@ -326,6 +332,9 @@ func (h *GroupHandlers) decideJoinRequest(w http.ResponseWriter, r *http.Request
 		err = h.Governance.DenyJoinRequest(ctx, token, groupID, requestID)
 	}
 	if err != nil {
+		if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
+			return
+		}
 		if errors.Is(err, privy.ErrInvalidToken) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
@@ -637,6 +646,9 @@ func (h *GroupHandlers) WithdrawToBalanceHandler(w http.ResponseWriter, r *http.
 		ShareAmountMicros: req.ShareAmountMicros,
 	})
 	if err != nil {
+		if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
+			return
+		}
 		if errors.Is(err, privy.ErrInvalidToken) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return

@@ -210,6 +210,10 @@ func (g *GovernanceService) JoinGroup(ctx context.Context, accessToken, groupID 
 	if !found {
 		return "", ErrGroupNotFound
 	}
+	// Faker scale clubs (#153) are spectator-only: joining would unlock mutations.
+	if err := rejectFakerGroup(ctx, g.store, groupID); err != nil {
+		return "", err
+	}
 	alreadyMember, err := g.store.IsGroupMember(ctx, groupID, user.ID)
 	if err != nil {
 		return "", err
@@ -286,8 +290,12 @@ func (g *GovernanceService) DenyJoinRequest(ctx context.Context, accessToken, gr
 }
 
 func (g *GovernanceService) decideJoinRequest(ctx context.Context, accessToken, groupID, requestID string, status domain.JoinRequestStatus) error {
-	if _, _, err := g.authenticatedGroupAdmin(ctx, accessToken, groupID); err != nil {
+	_, group, err := g.authenticatedGroupAdmin(ctx, accessToken, groupID)
+	if err != nil {
 		return err
+	}
+	if group.IsFaker {
+		return ErrFakerGroupReadOnly
 	}
 	row, found, err := g.store.GetJoinRequestByID(ctx, requestID)
 	if err != nil {
@@ -367,6 +375,9 @@ func (g *GovernanceService) LeaveGroup(ctx context.Context, req LeaveGroupReques
 	}
 	if !groupFound {
 		return ErrGroupNotFound
+	}
+	if group.IsFaker {
+		return ErrFakerGroupReadOnly
 	}
 	member, err := g.store.IsGroupMember(ctx, groupID, user.ID)
 	if err != nil {
@@ -623,6 +634,10 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		logGovernanceBranchWarn("governance create proposal rejected", "thesis too long", "group_id", in.GroupID)
 		return Proposal{}, ErrThesisTooLong
 	}
+	if err := rejectFakerGroup(ctx, g.store, in.GroupID); err != nil {
+		logGovernanceBranchWarn("governance create proposal rejected", "faker group", "group_id", in.GroupID, "proposer_id", in.ProposerID)
+		return Proposal{}, err
+	}
 
 	member, err := g.store.IsGroupMember(ctx, in.GroupID, in.ProposerID)
 	if err != nil {
@@ -758,14 +773,18 @@ func (g *GovernanceService) proposalTreasuryTotalMicros(ctx context.Context, gro
 }
 
 func (g *GovernanceService) groupTreasuryUSDC(ctx context.Context, groupID string) (int64, error) {
+	isFaker, err := g.store.IsFakerGroup(ctx, groupID)
+	if err != nil {
+		return 0, err
+	}
+	if isFaker {
+		return g.store.FakerLedgerUSDC(ctx, groupID)
+	}
 	positions, err := g.store.ListPositionsByGroup(ctx, groupID)
 	if err != nil {
 		return 0, err
 	}
-	var netUsdcIn int64
-	for _, position := range positions {
-		netUsdcIn += position.AmountDeposited - position.AmountWithdrawn
-	}
+	netUsdcIn := potNetUsdcIn(positions)
 
 	treasury, found, err := g.store.GetTreasuryByGroupID(ctx, groupID)
 	if err != nil {
@@ -806,6 +825,15 @@ func (g *GovernanceService) CastVote(ctx context.Context, in CastVoteInput) (Pro
 		return Proposal{}, ErrProposalNotFound
 	}
 	proposal := proposalFromRow(row)
+
+	// Faker scale club proposals and ghost (faker-proposed) proposals in real groups are
+	// display-only (#153). Real votes would pass them without any swap ever executing.
+	if fakerReadOnly, err := g.isFakerReadOnlyProposal(ctx, row); err != nil {
+		return Proposal{}, err
+	} else if fakerReadOnly {
+		logGovernanceBranchWarn("governance cast vote rejected", "faker proposal", "proposal_id", in.ProposalID, "voter_id", in.VoterID)
+		return Proposal{}, ErrFakerGroupReadOnly
+	}
 
 	_, foundVote, err := g.store.GetVoteByProposalAndVoter(ctx, in.ProposalID, in.VoterID)
 	if err != nil {
@@ -913,7 +941,8 @@ func (g *GovernanceService) resolveVoterSet(ctx context.Context, groupID string,
 	vs := rules.VoterSet
 	switch vs.Mode {
 	case VoterSetAllMembers:
-		ids, err := g.store.ListGroupMemberIDs(ctx, groupID)
+		// Live voter set: ghost (faker) members never count toward a real group's majority (#153).
+		ids, err := g.store.ListLiveGroupMemberIDs(ctx, groupID)
 		if err != nil {
 			return VoterSet{}, nil, err
 		}

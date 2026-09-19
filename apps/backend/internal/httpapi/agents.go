@@ -97,6 +97,9 @@ func (h *AgentHandlers) SubmitAgentIntentHandler(w http.ResponseWriter, r *http.
 }
 
 func writeAgentIntentError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, groupID string) {
+	if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
+		return
+	}
 	switch {
 	case errors.Is(err, app.ErrInvalidAgentAPIKey):
 		logJSONError(ctx, log, "invalid_agent_key", w, http.StatusUnauthorized, "invalid agent api key", "group_id", groupID)

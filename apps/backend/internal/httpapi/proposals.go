@@ -468,6 +468,9 @@ func writeProposalError(ctx context.Context, log *requestLog, w http.ResponseWri
 }
 
 func writeProposalCreateError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, attrs ...any) {
+	if writeFakerReadOnly(ctx, log, w, err, attrs...) {
+		return
+	}
 	switch {
 	case errors.Is(err, privy.ErrInvalidToken):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)
@@ -496,6 +499,9 @@ func writeProposalCreateError(ctx context.Context, log *requestLog, w http.Respo
 }
 
 func writeProposalVoteError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, attrs ...any) {
+	if writeFakerReadOnly(ctx, log, w, err, attrs...) {
+		return
+	}
 	switch {
 	case errors.Is(err, privy.ErrInvalidToken):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)

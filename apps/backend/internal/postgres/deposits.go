@@ -136,10 +136,12 @@ func (s *Store) HasPendingDepositsForGroup(ctx context.Context, groupID string) 
 		return false, fmt.Errorf("group_id is required")
 	}
 
+	// Faker (#153) pending deposits never sweep, so they must not freeze real surplus credit.
 	const selectSQL = `
 SELECT 1
-FROM deposits
-WHERE group_id = $1 AND status = 'pending'
+FROM deposits d
+JOIN users u ON u.id = d.user_id
+WHERE d.group_id = $1 AND d.status = 'pending' AND NOT u.is_faker
 LIMIT 1`
 
 	var exists int
@@ -222,13 +224,16 @@ WHERE user_id = $1 AND status = 'pending'`
 	return total, nil
 }
 
-// ListPendingDeposits returns all pending deposit rows.
+// ListPendingDeposits returns pending deposit rows the sweep poller may act on.
+// Faker users and faker groups (#153) are excluded: their rows must never reach Privy/RPC.
 func (s *Store) ListPendingDeposits(ctx context.Context) ([]DepositRow, error) {
 	const selectSQL = `
-SELECT id, user_id, group_id, amount, from_address, status, tx_signature, created_at
-FROM deposits
-WHERE status = 'pending'
-ORDER BY created_at ASC`
+SELECT d.id, d.user_id, d.group_id, d.amount, d.from_address, d.status, d.tx_signature, d.created_at
+FROM deposits d
+JOIN users u ON u.id = d.user_id
+JOIN groups g ON g.id = d.group_id
+WHERE d.status = 'pending' AND NOT u.is_faker AND NOT g.is_faker
+ORDER BY d.created_at ASC`
 
 	rows, err := s.db.QueryContext(ctx, selectSQL)
 	if err != nil {
