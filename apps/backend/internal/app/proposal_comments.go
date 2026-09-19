@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -26,12 +25,6 @@ const (
 	// maxCommentsPerThread caps GET /v1/proposals/{id}/comments.
 	maxCommentsPerThread = 500
 )
-
-var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-
-func isUUID(raw string) bool {
-	return uuidPattern.MatchString(raw)
-}
 
 // ProposalComment is one comment in a proposal thread. ParentID is empty for top-level comments.
 type ProposalComment struct {
