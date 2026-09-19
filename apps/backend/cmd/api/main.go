@@ -185,12 +185,19 @@ func boot(ctx context.Context) (*bootResult, error) {
 	if hermes, ok := pythClient.(*pyth.HermesClient); ok {
 		assetPrices = hermes
 	}
+	jupiterPriceClient := jupiter.NewHTTPPriceClient(cfg.JupiterAPIKey)
+	if cfg.JupiterAPIKey != "" {
+		slog.Info("jupiter price client ready")
+	} else {
+		slog.Info("jupiter price client ready", "reason", "JUPITER_API_KEY unset, using unauthenticated rate limit")
+	}
 	assetsHandlers := &httpapi.AssetsHandlers{
 		Store:   store,
 		Privy:   privyClient,
 		Catalog: catalogSearcher,
 		Pyth:    assetPrices,
 		Jupiter: jupiterClient,
+		Price:   jupiterPriceClient,
 	}
 	quoteHandlers := &httpapi.QuoteHandlers{
 		Store:      store,

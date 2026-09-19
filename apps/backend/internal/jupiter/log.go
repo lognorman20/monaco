@@ -188,3 +188,16 @@ func logPollTerminalFailure(groupID, userID, symbol, requestID, status string, c
 	}
 	slog.Warn("jupiter execute poll terminal failure", args...)
 }
+
+func logPriceFetch(requestedCount, httpStatus int, err error) {
+	args := []any{"requested_count", requestedCount}
+	if httpStatus > 0 {
+		args = append(args, "status", httpStatus)
+	}
+	if err != nil {
+		args = append(args, "err", err)
+		slog.Warn("jupiter price fetch failed", args...)
+		return
+	}
+	slog.Info("jupiter price fetch", args...)
+}

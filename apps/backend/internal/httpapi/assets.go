@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
@@ -23,8 +22,11 @@ type AssetsHandlers struct {
 	Store   *postgres.Store
 	Privy   privy.Client
 	Catalog xstocks.CatalogSearcher
+	// Pyth backs historical chart series only — display prices come from Price.
 	Pyth    pyth.AssetPriceClient
 	Jupiter jupiter.Client
+	// Price batches current display prices via Jupiter's Price API (not Swap API v2).
+	Price jupiter.PriceClient
 }
 
 type marketAssetResponse struct {
@@ -128,7 +130,7 @@ func (h *AssetsHandlers) PopularAssetsHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	resp := popularAssetsResponse{Assets: h.enrichPopularAssets(ctx, assets)}
+	resp := popularAssetsResponse{Assets: h.enrichAssets(ctx, assets)}
 	writeMarketJSON(ctx, log, w, http.StatusOK, resp, "ok", "limit", limit, "result_count", len(resp.Assets))
 }
 
@@ -253,55 +255,48 @@ func (h *AssetsHandlers) lookupAsset(ctx context.Context, symbol string) (xstock
 	return xstocks.CatalogAsset{}, false, nil
 }
 
+// enrichAssets marks every asset with one batched Jupiter Price API call instead
+// of a per-asset round trip (Pyth or Jupiter QuoteBuy). Shared by the list and
+// popular routes — both just display current price, so both get the same source.
 func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []xstocks.CatalogAsset) []marketAssetResponse {
+	prices := h.fetchPrices(ctx, assets)
 	out := make([]marketAssetResponse, 0, len(assets))
 	for _, asset := range assets {
-		out = append(out, h.enrichAsset(ctx, asset))
+		out = append(out, marketAssetResponseFor(asset, prices))
 	}
 	return out
 }
 
-// enrichPopularAssets marks each asset concurrently — each mark is an independent
-// Pyth round trip, so a sequential loop pays their combined latency instead of the
-// slowest single one.
-func (h *AssetsHandlers) enrichPopularAssets(ctx context.Context, assets []xstocks.CatalogAsset) []marketAssetResponse {
-	out := make([]marketAssetResponse, len(assets))
-	var wg sync.WaitGroup
-	for i, asset := range assets {
-		wg.Add(1)
-		go func(i int, asset xstocks.CatalogAsset) {
-			defer wg.Done()
-			out[i] = h.enrichPopularAsset(ctx, asset)
-		}(i, asset)
+// fetchPrices batches current USD marks for assets in one Jupiter Price API call.
+// A nil Price client or a failed fetch degrades to "no price" rather than erroring
+// the whole catalog response.
+func (h *AssetsHandlers) fetchPrices(ctx context.Context, assets []xstocks.CatalogAsset) map[string]jupiter.TokenPrice {
+	if h.Price == nil {
+		return nil
 	}
-	wg.Wait()
-	return out
+	mints := make([]string, 0, len(assets))
+	for _, asset := range assets {
+		if mint := strings.TrimSpace(asset.SolanaMint); mint != "" {
+			mints = append(mints, mint)
+		}
+	}
+	prices, err := h.Price.Prices(ctx, mints)
+	if err != nil {
+		return nil
+	}
+	return prices
 }
 
-func (h *AssetsHandlers) enrichPopularAsset(ctx context.Context, asset xstocks.CatalogAsset) marketAssetResponse {
+func marketAssetResponseFor(asset xstocks.CatalogAsset, prices map[string]jupiter.TokenPrice) marketAssetResponse {
 	resp := marketAssetResponse{
 		Symbol:     asset.Symbol,
 		Name:       asset.Name,
 		SolanaMint: asset.SolanaMint,
 		Routable:   asset.Routable,
 	}
-	if price, change, ok := h.assetMarkPrice(ctx, asset); ok {
-		resp.PriceUsdcMicros = &price
-		resp.Change24h = change
-	}
-	return resp
-}
-
-func (h *AssetsHandlers) enrichAsset(ctx context.Context, asset xstocks.CatalogAsset) marketAssetResponse {
-	resp := marketAssetResponse{
-		Symbol:     asset.Symbol,
-		Name:       asset.Name,
-		SolanaMint: asset.SolanaMint,
-		Routable:   asset.Routable,
-	}
-	if price, change, ok := h.assetPrice(ctx, asset); ok {
-		resp.PriceUsdcMicros = &price
-		resp.Change24h = change
+	if price, ok := prices[asset.SolanaMint]; ok && price.PriceUsdcMicros > 0 {
+		resp.PriceUsdcMicros = &price.PriceUsdcMicros
+		resp.Change24h = price.Change24h
 	}
 	return resp
 }
@@ -314,51 +309,15 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset xstocks.Cat
 		Routable:   asset.Routable,
 		Liquidity:  h.liquiditySnippet(ctx, asset, nil),
 	}
-	if price, change, ok := h.assetPrice(ctx, asset); ok {
-		detail.PriceUsdcMicros = &price
-		detail.Change24h = change
-		detail.Liquidity = h.liquiditySnippet(ctx, asset, &price)
+	prices := h.fetchPrices(ctx, []xstocks.CatalogAsset{asset})
+	if price, ok := prices[asset.SolanaMint]; ok && price.PriceUsdcMicros > 0 {
+		detail.PriceUsdcMicros = &price.PriceUsdcMicros
+		detail.Change24h = price.Change24h
+		detail.Liquidity = h.liquiditySnippet(ctx, asset, &price.PriceUsdcMicros)
 	}
 	// Live Jupiter probe wins over a stale catalog rank (429s cache as not routable).
 	detail.Routable = detail.Liquidity.Routable
 	return detail
-}
-
-func (h *AssetsHandlers) assetMarkPrice(ctx context.Context, asset xstocks.CatalogAsset) (int64, *string, bool) {
-	if h.Pyth == nil {
-		return 0, nil, false
-	}
-	mark, err := h.Pyth.AssetMark(ctx, asset.Symbol)
-	if err == nil && mark.PriceUsdcMicros > 0 {
-		return mark.PriceUsdcMicros, mark.Change24h, true
-	}
-	return 0, nil, false
-}
-
-func (h *AssetsHandlers) assetPrice(ctx context.Context, asset xstocks.CatalogAsset) (int64, *string, bool) {
-	if price, change, ok := h.assetMarkPrice(ctx, asset); ok {
-		return price, change, true
-	}
-	if h.Jupiter == nil || strings.TrimSpace(asset.SolanaMint) == "" {
-		return 0, nil, false
-	}
-	quote, err := h.Jupiter.QuoteBuy(ctx, jupiter.QuoteBuyParams{
-		Symbol:     asset.Symbol,
-		OutputMint: asset.SolanaMint,
-		USDCAmount: app.CatalogRoutabilityProbeMicros,
-	})
-	if err != nil || !quote.Routable {
-		return 0, nil, false
-	}
-	outRaw, err := strconv.ParseInt(strings.TrimSpace(quote.OutAmount), 10, 64)
-	if err != nil || outRaw <= 0 {
-		return 0, nil, false
-	}
-	priceMicros := (app.CatalogRoutabilityProbeMicros * jupiter.XStockAtomicScale) / outRaw
-	if priceMicros <= 0 {
-		return 0, nil, false
-	}
-	return priceMicros, nil, true
 }
 
 func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset xstocks.CatalogAsset, markMicros *int64) assetLiquidityResponse {
