@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -44,8 +43,6 @@ type RateLimitedError struct {
 func (e *RateLimitedError) Error() string {
 	return fmt.Sprintf("rate limited; retry after %s", e.RetryAfter)
 }
-
-var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // GroupMessage is one chat message as seen by the viewer.
 type GroupMessage struct {
@@ -166,7 +163,7 @@ func (s *GroupChatService) authorizeMember(ctx context.Context, accessToken, gro
 		return "", ErrUserNotFound
 	}
 
-	if !uuidPattern.MatchString(groupID) {
+	if !isUUID(groupID) {
 		return "", ErrGroupNotFound
 	}
 	_, found, err = s.store.GetGroupByID(ctx, groupID)
@@ -214,7 +211,7 @@ func decodeGroupMessageCursor(cursor string) (postgres.GroupMessageCursor, error
 		return postgres.GroupMessageCursor{}, ErrInvalidMessageCursor
 	}
 	ts, id, ok := strings.Cut(string(raw), "|")
-	if !ok || !uuidPattern.MatchString(id) {
+	if !ok || !isUUID(id) {
 		return postgres.GroupMessageCursor{}, ErrInvalidMessageCursor
 	}
 	createdAt, err := time.Parse(time.RFC3339Nano, ts)
