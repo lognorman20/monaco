@@ -65,8 +65,8 @@ extension AppSessionStore {
 
     private func failure(for error: Error, auth: PrivyAuthService, fallback: String) async -> ProfileSaveOutcome {
         if case MonacoCore.MonacoAPIError.httpStatus(401) = error {
-            await auth.logout()
-            return .failed("Your session expired. Sign in again.")
+            await auth.signOutAfterRejectedSession()
+            return .failed(LoginFailureCopy.sessionExpired)
         }
         return .failed(Self.profileErrorMessage(for: error, fallback: fallback))
     }

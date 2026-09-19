@@ -29,6 +29,7 @@ struct EmailLoginView: View {
                 .autocorrectionDisabled()
                 .focused($focusedField, equals: .email)
                 .authTextFieldStyle()
+                .disabled(showsOTPField)
                 .accessibilityIdentifier("emailAddressField")
 
             if showsOTPField {
@@ -74,6 +75,39 @@ struct EmailLoginView: View {
                     .accessibilityIdentifier("emailSendCodeButton")
                 }
             }
+
+            if showsOTPField {
+                HStack {
+                    Button("Send a new code") {
+                        otpCode = ""
+                        Task {
+                            await auth.sendEmailCode(to: normalizedEmail)
+                            if case .awaitingCode = auth.phase {
+                                focusedField = .code
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .foregroundStyle(MonacoTheme.accent)
+                    .disabled(auth.phase == .verifyingCode)
+                    .accessibilityIdentifier("emailResendCodeButton")
+
+                    Spacer()
+
+                    Button("Change email") {
+                        otpCode = ""
+                        auth.resetLoginFlow()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .disabled(auth.phase == .verifyingCode)
+                    .accessibilityIdentifier("emailChangeAddressButton")
+                }
+            }
         }
     }
 
@@ -83,9 +117,9 @@ struct EmailLoginView: View {
 
     private var showsOTPField: Bool {
         switch auth.phase {
-        case .awaitingCode, .verifyingCode, .authenticated:
+        case .awaitingCode, .verifyingCode, .codeRejected, .authenticated:
             true
-        case .idle, .sendingCode, .failed:
+        case .idle, .sendingCode, .failed, .restoring, .restoreFailed:
             false
         }
     }
@@ -100,7 +134,7 @@ struct EmailLoginView: View {
 
     private var statusMessage: String? {
         switch auth.phase {
-        case .idle:
+        case .idle, .restoring, .restoreFailed:
             return nil
         case .sendingCode:
             return "Sending code…"
@@ -110,14 +144,14 @@ struct EmailLoginView: View {
             return "Signing you in…"
         case .authenticated:
             return nil
-        case .failed(let message):
+        case .failed(let message), .codeRejected(let message):
             return message
         }
     }
 
     private var statusColor: Color {
         switch auth.phase {
-        case .failed:
+        case .failed, .codeRejected:
             return MonacoTheme.destructive
         case .authenticated:
             return MonacoTheme.success

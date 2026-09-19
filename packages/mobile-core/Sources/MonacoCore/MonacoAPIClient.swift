@@ -23,16 +23,30 @@ public typealias AccessTokenProvider = @Sendable () async throws -> String?
 
 public final class MonacoAPIClient: @unchecked Sendable {
     private let baseURL: URL
-    private let session: URLSession
+    /// Every request goes through the transport so an expired access token is
+    /// refreshed and the request retried once instead of surfacing a 401.
+    private let session: MonacoHTTPTransport
     private let accessTokenProvider: AccessTokenProvider?
 
-    public init(
+    public convenience init(
         baseURL: URL = MonacoConfig.defaultAPIBaseURL,
         session: URLSession = .shared,
         accessTokenProvider: AccessTokenProvider? = nil
     ) {
+        self.init(
+            baseURL: baseURL,
+            transport: MonacoHTTPTransport(session: session),
+            accessTokenProvider: accessTokenProvider
+        )
+    }
+
+    public init(
+        baseURL: URL = MonacoConfig.defaultAPIBaseURL,
+        transport: MonacoHTTPTransport,
+        accessTokenProvider: AccessTokenProvider? = nil
+    ) {
         self.baseURL = baseURL
-        self.session = session
+        self.session = transport
         self.accessTokenProvider = accessTokenProvider
     }
 

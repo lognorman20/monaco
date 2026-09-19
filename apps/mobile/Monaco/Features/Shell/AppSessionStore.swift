@@ -50,7 +50,7 @@ final class AppSessionStore {
         do {
             let session = try await apiClient.openSession(accessToken: token)
             if auth.shouldInvalidateBackendSession(serverUserId: session.userId) {
-                await auth.logout()
+                await auth.signOutAfterRejectedSession()
                 return
             }
             auth.recordBackendSession(userId: session.userId)
@@ -59,21 +59,34 @@ final class AppSessionStore {
             await refresh(auth: auth, accessToken: token)
         } catch {
             if error.isRequestCancellation { return }
-            await handleSessionOpenFailure(error, auth: auth)
+            await handleSessionOpenFailure(error, rejectedToken: token, auth: auth)
         }
     }
 
-    /// A 401 here means the token Privy handed us didn't verify against this backend
-    /// — most often a Privy app-id / verification-key mismatch between the app build
-    /// and the backend env, which otherwise looks exactly like "can't log in" with no
-    /// explanation. We still sign out (the token is bad), but we surface *why* on the
-    /// login screen instead of bouncing the user back silently.
-    private func handleSessionOpenFailure(_ error: Error, auth: PrivyAuthService) async {
+    /// A 401 here means the backend would not accept the access token. Tokens last about
+    /// an hour, so first ask Privy for a fresh one: if that yields a different token the
+    /// gate re-runs `bootstrap` with it. Only when Privy has nothing newer is the token
+    /// really bad — most often a Privy app-id / verification-key mismatch between the app
+    /// build and the backend env — and we sign out, saying *why* on the login screen.
+    private func handleSessionOpenFailure(_ error: Error, rejectedToken: String, auth: PrivyAuthService) async {
+        var failure = error
+        if case MonacoAPIError.httpStatus(401) = error {
+            do {
+                if let fresh = try await auth.refreshedAccessToken(replacing: rejectedToken), fresh != rejectedToken {
+                    // `auth.accessToken` changed; SessionGateView's task re-runs bootstrap.
+                    return
+                }
+            } catch {
+                // Couldn't reach Privy to refresh. That's a connection problem, not a bad session.
+                failure = error
+            }
+        }
+
         isLoading = false
-        let mapped = SessionErrorMapping.describe(error, apiBaseURL: Config.apiBaseURL)
+        let mapped = SessionErrorMapping.describe(failure, apiBaseURL: Config.apiBaseURL)
         AppLogger.session.error("POST /v1/auth/session failed: \(mapped.debugDetail, privacy: .public)")
 
-        if case MonacoAPIError.httpStatus(401) = error {
+        if case MonacoAPIError.httpStatus(401) = failure {
             await auth.signOut(reason: mapped.message)
             return
         }
@@ -122,7 +135,7 @@ final class AppSessionStore {
                 _ = await (deferred, pnlSeries)
             }
         } catch MonacoAPIError.httpStatus(let status) where status == 401 {
-            await auth.logout()
+            await auth.signOutAfterRejectedSession()
         } catch MonacoAPIError.httpStatus {
             guard generation == refreshGeneration else { return }
             errorMessage = "Couldn't load this. Pull down to try again."
@@ -168,7 +181,7 @@ final class AppSessionStore {
         } catch {
             if error.isRequestCancellation { return }
             if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
-                await auth.logout()
+                await auth.signOutAfterRejectedSession()
             }
         }
     }
@@ -211,7 +224,7 @@ final class AppSessionStore {
         } catch {
             if error.isRequestCancellation { return }
             if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
-                await auth.logout()
+                await auth.signOutAfterRejectedSession()
             }
         }
     }
@@ -224,7 +237,7 @@ final class AppSessionStore {
         } catch {
             if error.isRequestCancellation { return }
             if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
-                await auth.logout()
+                await auth.signOutAfterRejectedSession()
             }
         }
     }
@@ -238,7 +251,7 @@ final class AppSessionStore {
                 return
             }
             if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
-                await auth.logout()
+                await auth.signOutAfterRejectedSession()
             }
         }
     }
