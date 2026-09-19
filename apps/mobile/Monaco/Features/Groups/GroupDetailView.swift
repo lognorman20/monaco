@@ -335,7 +335,11 @@ struct GroupDetailView: View {
         while !Task.isCancelled {
             try? await Task.sleep(for: activityHasPendingDeposits ? activityPollIntervalWhilePending : activityPollInterval)
             guard !Task.isCancelled else { return }
+            let wasPending = activityHasPendingDeposits
             await loadActivity(showLoadingIndicator: false)
+            if wasPending || activityHasPendingDeposits {
+                await loadGroup()
+            }
         }
     }
 
