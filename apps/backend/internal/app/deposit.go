@@ -173,6 +173,12 @@ func (d *DepositService) FundGroup(ctx context.Context, accessToken string, grou
 		return CreateDepositResult{}, ErrUserNotFound
 	}
 
+	// Faker scale clubs (#153) are read-only: never create a fund intent against a dummy treasury.
+	if err := rejectFakerGroup(ctx, d.store, groupID); err != nil {
+		logDepositBranchWarn("fund group rejected", "faker group", "group_id", groupID, "user_id", user.ID)
+		return CreateDepositResult{}, err
+	}
+
 	member, err := d.store.IsGroupMember(ctx, groupID, user.ID)
 	if err != nil {
 		logDepositBranchError("fund group membership check failed", err, "group_id", groupID, "user_id", user.ID)

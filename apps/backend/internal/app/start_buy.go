@@ -165,6 +165,13 @@ func (s *ExecuteOnPassService) ExecuteOnPass(ctx context.Context, proposal Propo
 		return ExecuteOnPassResult{}, fmt.Errorf("symbol is required")
 	}
 
+	// Faker groups and faker proposers (#153) never execute (buy or sell): seeded passed proposals must
+	// not trigger live Jupiter swaps from a real (mixed club) treasury.
+	if err := s.rejectFakerProposal(ctx, proposal); err != nil {
+		logExecuteOnPassBranchWarn("execute on pass rejected", "faker proposal", "proposal_id", proposal.ID, "group_id", proposal.GroupID)
+		return ExecuteOnPassResult{}, err
+	}
+
 	switch kind {
 	case ProposalKindBuy:
 		return s.executeBuyOnPass(ctx, proposal)
@@ -179,12 +186,6 @@ func (s *ExecuteOnPassService) executeBuyOnPass(ctx context.Context, proposal Pr
 	if proposal.UsdcMicros <= 0 {
 		logExecuteOnPassBranchWarn("execute on pass rejected", "usdc not positive", "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, fmt.Errorf("usdc must be positive")
-	}
-	// Faker groups and faker proposers (#153) never execute: seeded passed proposals must not
-	// trigger live Jupiter swaps from a real (mixed club) treasury.
-	if err := s.rejectFakerProposal(ctx, proposal); err != nil {
-		logExecuteOnPassBranchWarn("execute on pass rejected", "faker proposal", "proposal_id", proposal.ID, "group_id", proposal.GroupID)
-		return ExecuteOnPassResult{}, err
 	}
 
 	if existing, ok, err := s.existingBuyForProposal(ctx, proposal.ID); err != nil {

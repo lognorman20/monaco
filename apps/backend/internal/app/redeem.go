@@ -92,6 +92,11 @@ func (r *RedeemService) WithdrawToBalance(ctx context.Context, req WithdrawToBal
 		logRedeemBranchWarn("withdraw to balance rejected", "group id required")
 		return RedeemJobView{}, fmt.Errorf("group id is required")
 	}
+	// Faker scale clubs (#153) have a dummy treasury: no sells, payouts, or Privy reads.
+	if err := rejectFakerGroup(ctx, r.store, req.GroupID); err != nil {
+		return RedeemJobView{}, err
+	}
+
 
 	identity, err := r.privy.VerifySession(ctx, privy.AccessToken(req.AccessToken))
 	if err != nil {
@@ -214,6 +219,11 @@ func (r *RedeemService) Redeem(ctx context.Context, req RedeemRequest) (RedeemJo
 		logRedeemBranchWarn("redeem rejected", "group id required")
 		return RedeemJobView{}, fmt.Errorf("group id is required")
 	}
+	// Faker scale clubs (#153) have a dummy treasury: no sells, payouts, or Privy reads.
+	if err := rejectFakerGroup(ctx, r.store, req.GroupID); err != nil {
+		return RedeemJobView{}, err
+	}
+
 
 	identity, err := r.privy.VerifySession(ctx, privy.AccessToken(req.AccessToken))
 	if err != nil {
