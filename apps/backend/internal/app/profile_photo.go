@@ -10,14 +10,15 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/ratelimit"
 	"github.com/monaco/monaco/apps/backend/internal/storage"
 )
 
 const maxProfilePhotoBytes = 2 << 20
 
 var (
-	ErrProfilePhotoTooLarge   = errors.New("profile photo exceeds size limit")
-	ErrProfilePhotoInvalid    = errors.New("profile photo must be jpeg, png, or webp")
+	ErrProfilePhotoTooLarge      = errors.New("profile photo exceeds size limit")
+	ErrProfilePhotoInvalid       = errors.New("profile photo must be jpeg, png, or webp")
 	ErrProfilePhotoNotConfigured = errors.New("profile photo upload is not configured")
 )
 
@@ -31,6 +32,7 @@ type ProfilePhotoService struct {
 	store   *postgres.Store
 	privy   privy.Client
 	storage storage.Client
+	limiter *ratelimit.Limiter
 }
 
 // NewProfilePhotoService wires profile photo dependencies.
@@ -40,6 +42,12 @@ func NewProfilePhotoService(store *postgres.Store, privyClient privy.Client, sto
 		privy:   privyClient,
 		storage: storageClient,
 	}
+}
+
+// WithUploadLimiter rate-limits UploadProfilePhoto per user. Nil disables limiting.
+func (s *ProfilePhotoService) WithUploadLimiter(limiter *ratelimit.Limiter) *ProfilePhotoService {
+	s.limiter = limiter
+	return s
 }
 
 // UploadProfilePhoto validates the image, stores it, and returns the updated profile.
@@ -70,6 +78,10 @@ func (s *ProfilePhotoService) UploadProfilePhoto(ctx context.Context, accessToke
 	}
 	if !found {
 		return MeResult{}, ErrUserNotFound
+	}
+
+	if err := allowWrite(s.limiter, user.ID); err != nil {
+		return MeResult{}, err
 	}
 
 	wallet, found, err := s.store.GetMemberWalletByUserID(ctx, user.ID)
@@ -111,6 +123,7 @@ func meResultFromUser(user postgres.User, memberWalletAddress string) MeResult {
 		DisplayName:         displayName,
 		MemberWalletAddress: memberWalletAddress,
 		ProfilePhotoURL:     profilePhotoURL,
+		CreatedAt:           user.CreatedAt.UTC(),
 	}
 }
 

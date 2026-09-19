@@ -26,10 +26,11 @@ type homeGroupBoardRowResponse struct {
 }
 
 type homePeopleBoardRowResponse struct {
-	UserID        string  `json:"userId"`
-	DisplayName   string  `json:"displayName"`
-	PercentReturn *string `json:"percentReturn"`
-	DollarPnL     string  `json:"dollarPnl"`
+	UserID          string  `json:"userId"`
+	DisplayName     string  `json:"displayName"`
+	ProfilePhotoURL *string `json:"profilePhotoUrl"`
+	PercentReturn   *string `json:"percentReturn"`
+	DollarPnL       string  `json:"dollarPnl"`
 }
 
 type homeResponse struct {
@@ -76,10 +77,11 @@ func (h *HomeHandlers) HomeHandler(w http.ResponseWriter, r *http.Request) {
 	people := make([]homePeopleBoardRowResponse, 0, len(result.People))
 	for _, row := range result.People {
 		people = append(people, homePeopleBoardRowResponse{
-			UserID:        row.UserID,
-			DisplayName:   row.DisplayName,
-			PercentReturn: row.PercentReturn,
-			DollarPnL:     row.DollarPnL,
+			UserID:          row.UserID,
+			DisplayName:     row.DisplayName,
+			ProfilePhotoURL: optionalString(row.ProfilePhotoURL),
+			PercentReturn:   row.PercentReturn,
+			DollarPnL:       row.DollarPnL,
 		})
 	}
 
@@ -312,10 +314,11 @@ func mapHomeDashboardResponse(result app.HomeDashboardResult) homeDashboardRespo
 	people := make([]homePeopleBoardRowResponse, 0, len(result.Leaderboard.People))
 	for _, row := range result.Leaderboard.People {
 		people = append(people, homePeopleBoardRowResponse{
-			UserID:        row.UserID,
-			DisplayName:   row.DisplayName,
-			PercentReturn: row.PercentReturn,
-			DollarPnL:     row.DollarPnL,
+			UserID:          row.UserID,
+			DisplayName:     row.DisplayName,
+			ProfilePhotoURL: optionalString(row.ProfilePhotoURL),
+			PercentReturn:   row.PercentReturn,
+			DollarPnL:       row.DollarPnL,
 		})
 	}
 	return homeDashboardResponse{

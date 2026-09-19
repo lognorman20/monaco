@@ -40,6 +40,7 @@ var apiRoutes = []string{
 	"GET /health",
 	"POST /v1/auth/session",
 	"GET /v1/me",
+	"PATCH /v1/me",
 	"POST /v1/me/profile-photo",
 	"GET /v1/me/balance",
 	"POST /v1/me/withdrawals",
@@ -133,7 +134,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 	symbols := app.NewSymbolResolver(catalogSearcher)
 	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
 	platformWithdrawals := app.NewPlatformWithdrawService(store, privyClient, deposits, solanaRPC, relayer.PrivateKey())
-	sessions := app.NewSessionService(store, privyClient)
+	sessions := app.NewSessionService(store, privyClient).
+		WithDisplayNameLimiter(app.NewDisplayNameUpdateLimiter())
 	var storageClient storage.Client
 	if cfg.SupabaseURL != "" && cfg.SupabaseServiceRoleKey != "" {
 		storageClient = storage.NewSupabaseClient(cfg.SupabaseURL, cfg.SupabaseServiceRoleKey)
@@ -141,7 +143,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 	} else {
 		slog.Info("supabase storage skipped", "reason", "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY unset")
 	}
-	profilePhotos := app.NewProfilePhotoService(store, privyClient, storageClient)
+	profilePhotos := app.NewProfilePhotoService(store, privyClient, storageClient).
+		WithUploadLimiter(app.NewProfilePhotoUploadLimiter())
 	home := app.NewHomeService(store, privyClient, pythClient, deposits, symbols)
 	groups := app.NewGroupService(store, privyClient)
 	governance := app.NewGovernanceService(store, privyClient)
@@ -207,6 +210,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /health", httpapi.HealthHandler)
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
+	mux.HandleFunc("PATCH /v1/me", me.PatchMeHandler)
 	mux.HandleFunc("POST /v1/me/profile-photo", me.UploadProfilePhotoHandler)
 	mux.HandleFunc("GET /v1/me/balance", depositHandlers.GetPlatformBalanceHandler)
 	mux.HandleFunc("POST /v1/me/withdrawals", platformWithdrawHandlers.CreatePlatformWithdrawalHandler)

@@ -154,3 +154,78 @@ RETURNING id, privy_user_id, display_name, profile_photo_url, created_at`
 	}
 	return user, nil
 }
+
+// UpdateUserDisplayName sets display_name for userID and returns the updated row.
+// found is false when no user has that id. displayName must already be validated.
+func (s *Store) UpdateUserDisplayName(ctx context.Context, userID, displayName string) (User, bool, error) {
+	if userID == "" {
+		return User{}, false, fmt.Errorf("user_id is required")
+	}
+	if displayName == "" {
+		return User{}, false, fmt.Errorf("display_name is required")
+	}
+
+	const updateSQL = `
+UPDATE users
+SET display_name = $2
+WHERE id = $1
+RETURNING id, privy_user_id, display_name, profile_photo_url, created_at`
+
+	var user User
+	err := s.db.QueryRowContext(ctx, updateSQL, userID, displayName).Scan(
+		&user.ID,
+		&user.PrivyUserID,
+		&user.DisplayName,
+		&user.ProfilePhotoURL,
+		&user.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, false, nil
+	}
+	if err != nil {
+		return User{}, false, fmt.Errorf("update user display name: %w", err)
+	}
+	return user, true, nil
+}
+
+// UserProfileSummary is the public identity shown next to a user on boards.
+type UserProfileSummary struct {
+	DisplayName     string
+	ProfilePhotoURL string
+}
+
+// ListUserProfilesByIDs returns display name and avatar URL keyed by user id in one
+// query. Users without a row are absent; unset columns are empty strings.
+func (s *Store) ListUserProfilesByIDs(ctx context.Context, userIDs []string) (map[string]UserProfileSummary, error) {
+	if len(userIDs) == 0 {
+		return map[string]UserProfileSummary{}, nil
+	}
+
+	const selectSQL = `
+SELECT id, display_name, profile_photo_url
+FROM users
+WHERE id = ANY($1::uuid[])`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, userIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list user profiles: %w", err)
+	}
+	defer rows.Close()
+
+	profiles := make(map[string]UserProfileSummary, len(userIDs))
+	for rows.Next() {
+		var id string
+		var displayName, profilePhotoURL sql.NullString
+		if err := rows.Scan(&id, &displayName, &profilePhotoURL); err != nil {
+			return nil, fmt.Errorf("scan user profile: %w", err)
+		}
+		profiles[id] = UserProfileSummary{
+			DisplayName:     strings.TrimSpace(displayName.String),
+			ProfilePhotoURL: strings.TrimSpace(profilePhotoURL.String),
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate user profiles: %w", err)
+	}
+	return profiles, nil
+}

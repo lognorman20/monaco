@@ -403,11 +403,12 @@ type groupViewMemberSliceResponse struct {
 }
 
 type groupViewMemberRowResponse struct {
-	Rank          int     `json:"rank"`
-	UserID        string  `json:"userId"`
-	DisplayName   string  `json:"displayName"`
-	PercentReturn *string `json:"percentReturn"`
-	DollarPnL     string  `json:"dollarPnl"`
+	Rank            int     `json:"rank"`
+	UserID          string  `json:"userId"`
+	DisplayName     string  `json:"displayName"`
+	ProfilePhotoURL *string `json:"profilePhotoUrl"`
+	PercentReturn   *string `json:"percentReturn"`
+	DollarPnL       string  `json:"dollarPnl"`
 }
 
 type groupViewAgentResponse struct {
@@ -475,11 +476,12 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 	members := make([]groupViewMemberRowResponse, 0, len(result.Members))
 	for _, row := range result.Members {
 		members = append(members, groupViewMemberRowResponse{
-			Rank:          row.Rank,
-			UserID:        row.UserID,
-			DisplayName:   row.DisplayName,
-			PercentReturn: row.PercentReturn,
-			DollarPnL:     row.DollarPnL,
+			Rank:            row.Rank,
+			UserID:          row.UserID,
+			DisplayName:     row.DisplayName,
+			ProfilePhotoURL: optionalString(row.ProfilePhotoURL),
+			PercentReturn:   row.PercentReturn,
+			DollarPnL:       row.DollarPnL,
 		})
 	}
 

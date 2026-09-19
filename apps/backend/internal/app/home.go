@@ -45,10 +45,11 @@ type HomeGroupRow struct {
 
 // HomePeopleRow is one ranked person on the app-home people board.
 type HomePeopleRow struct {
-	UserID        string
-	DisplayName   string
-	PercentReturn *string
-	DollarPnL     string
+	UserID          string
+	DisplayName     string
+	ProfilePhotoURL string
+	PercentReturn   *string
+	DollarPnL       string
 }
 
 // HomeResult is the authenticated app-home projection for GET /v1/home.
@@ -148,7 +149,7 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 	}
 	peopleBoard := BuildAppPeopleBoard(peopleInputs)
 
-	displayNames, err := h.displayNamesForUsers(ctx, peopleBoard)
+	profiles, err := h.profilesForUsers(ctx, peopleBoard)
 	if err != nil {
 		return HomeResult{}, err
 	}
@@ -185,19 +186,17 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 		})
 	}
 	for _, row := range peopleBoard {
-		displayName := displayNames[row.UserID]
-		if displayName == "" {
-			displayName = "Member"
-		}
+		displayName, profilePhotoURL := boardIdentity(profiles, row.UserID)
 		var percentReturn *string
 		if row.PercentReturn != nil {
 			percentReturn = formatPercentReturnDecimal(*row.PercentReturn)
 		}
 		result.People = append(result.People, HomePeopleRow{
-			UserID:        row.UserID,
-			DisplayName:   displayName,
-			PercentReturn: percentReturn,
-			DollarPnL:     formatSignedDollarPnL(int64(row.DollarPnL)),
+			UserID:          row.UserID,
+			DisplayName:     displayName,
+			ProfilePhotoURL: profilePhotoURL,
+			PercentReturn:   percentReturn,
+			DollarPnL:       formatSignedDollarPnL(int64(row.DollarPnL)),
 		})
 	}
 	logHomeGetSuccess(user.ID, len(result.Groups), len(result.People))
@@ -420,13 +419,24 @@ func (h *HomeService) GetUserSharedGroups(ctx context.Context, accessToken, targ
 	return rows, nil
 }
 
-func (h *HomeService) displayNamesForUsers(ctx context.Context, people []domain.PersonBoardRow) (map[string]string, error) {
+func (h *HomeService) profilesForUsers(ctx context.Context, people []domain.PersonBoardRow) (map[string]postgres.UserProfileSummary, error) {
 	if len(people) == 0 {
-		return map[string]string{}, nil
+		return map[string]postgres.UserProfileSummary{}, nil
 	}
 	userIDs := make([]string, 0, len(people))
 	for _, row := range people {
 		userIDs = append(userIDs, row.UserID)
 	}
-	return h.store.ListUserDisplayNamesByIDs(ctx, userIDs)
+	return h.store.ListUserProfilesByIDs(ctx, userIDs)
+}
+
+// boardIdentity returns the name and avatar URL shown for userID on a board.
+// Users who never set a name show as "Member".
+func boardIdentity(profiles map[string]postgres.UserProfileSummary, userID string) (displayName, profilePhotoURL string) {
+	profile := profiles[userID]
+	displayName = profile.DisplayName
+	if displayName == "" {
+		displayName = "Member"
+	}
+	return displayName, profile.ProfilePhotoURL
 }

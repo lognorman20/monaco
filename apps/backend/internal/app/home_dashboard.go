@@ -468,26 +468,24 @@ func (h *HomeService) buildRangedLeaderboard(ctx context.Context, joinedGroupIDs
 		return rows[i].UserID < rows[j].UserID
 	})
 
-	displayNames, err := h.displayNamesForUsers(ctx, rows)
+	profiles, err := h.profilesForUsers(ctx, rows)
 	if err != nil {
 		return HomeLeaderboardSection{}, err
 	}
 
 	people := make([]HomePeopleRow, 0, len(rows))
 	for _, row := range rows {
-		displayName := displayNames[row.UserID]
-		if displayName == "" {
-			displayName = "Member"
-		}
+		displayName, profilePhotoURL := boardIdentity(profiles, row.UserID)
 		var percentReturn *string
 		if row.PercentReturn != nil {
 			percentReturn = formatPercentReturnDecimal(*row.PercentReturn)
 		}
 		people = append(people, HomePeopleRow{
-			UserID:        row.UserID,
-			DisplayName:   displayName,
-			PercentReturn: percentReturn,
-			DollarPnL:     formatSignedDollarPnL(int64(row.DollarPnL)),
+			UserID:          row.UserID,
+			DisplayName:     displayName,
+			ProfilePhotoURL: profilePhotoURL,
+			PercentReturn:   percentReturn,
+			DollarPnL:       formatSignedDollarPnL(int64(row.DollarPnL)),
 		})
 	}
 
@@ -504,26 +502,24 @@ func (h *HomeService) buildLifetimePeopleBoard(ctx context.Context, joinedGroupI
 		peopleInputs = append(peopleInputs, AggregateCrossGroupPerson(entries))
 	}
 	peopleBoard := BuildAppPeopleBoard(peopleInputs)
-	displayNames, err := h.displayNamesForUsers(ctx, peopleBoard)
+	profiles, err := h.profilesForUsers(ctx, peopleBoard)
 	if err != nil {
 		return nil, err
 	}
 
 	people := make([]HomePeopleRow, 0, len(peopleBoard))
 	for _, row := range peopleBoard {
-		displayName := displayNames[row.UserID]
-		if displayName == "" {
-			displayName = "Member"
-		}
+		displayName, profilePhotoURL := boardIdentity(profiles, row.UserID)
 		var percentReturn *string
 		if row.PercentReturn != nil {
 			percentReturn = formatPercentReturnDecimal(*row.PercentReturn)
 		}
 		people = append(people, HomePeopleRow{
-			UserID:        row.UserID,
-			DisplayName:   displayName,
-			PercentReturn: percentReturn,
-			DollarPnL:     formatSignedDollarPnL(int64(row.DollarPnL)),
+			UserID:          row.UserID,
+			DisplayName:     displayName,
+			ProfilePhotoURL: profilePhotoURL,
+			PercentReturn:   percentReturn,
+			DollarPnL:       formatSignedDollarPnL(int64(row.DollarPnL)),
 		})
 	}
 	return people, nil

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/ratelimit"
 )
 
 // ErrUserNotFound means the Privy token is valid but no Monaco user row exists.
@@ -14,8 +16,9 @@ var ErrUserNotFound = errors.New("user not found")
 
 // SessionService orchestrates auth session flows.
 type SessionService struct {
-	store *postgres.Store
-	privy privy.Client
+	store              *postgres.Store
+	privy              privy.Client
+	displayNameLimiter *ratelimit.Limiter
 }
 
 // NewSessionService wires session dependencies.
@@ -26,19 +29,22 @@ func NewSessionService(store *postgres.Store, privyClient privy.Client) *Session
 	}
 }
 
-// SessionResult is the authenticated user and member wallet for POST /v1/auth/session.
-type SessionResult struct {
-	UserID              string
-	DisplayName         string
-	MemberWalletAddress string
+// WithDisplayNameLimiter rate-limits SetDisplayName per user. Nil disables limiting.
+func (s *SessionService) WithDisplayNameLimiter(limiter *ratelimit.Limiter) *SessionService {
+	s.displayNameLimiter = limiter
+	return s
 }
 
-// MeResult is the authenticated profile for GET /v1/me.
+// SessionResult is the authenticated profile for POST /v1/auth/session. Same shape as MeResult.
+type SessionResult = MeResult
+
+// MeResult is the authenticated profile for GET/PATCH /v1/me and profile photo upload.
 type MeResult struct {
 	UserID              string
 	DisplayName         string
 	MemberWalletAddress string
 	ProfilePhotoURL     string
+	CreatedAt           time.Time
 }
 
 // MemberWallet is the persisted member Solana wallet for a user.
@@ -75,17 +81,8 @@ func (s *SessionService) OpenSession(ctx context.Context, accessToken string) (S
 		return SessionResult{}, err
 	}
 
-	displayName := ""
-	if user.DisplayName.Valid {
-		displayName = user.DisplayName.String
-	}
-
 	logSessionOpenSuccess(user.ID)
-	return SessionResult{
-		UserID:              user.ID,
-		DisplayName:         displayName,
-		MemberWalletAddress: wallet.SolanaAddress,
-	}, nil
+	return meResultFromUser(user, wallet.SolanaAddress), nil
 }
 
 // GetMe returns the authenticated user's profile and member wallet address.
@@ -124,6 +121,56 @@ func (s *SessionService) GetMe(ctx context.Context, accessToken string) (MeResul
 
 	logSessionGetMeSuccess(user.ID)
 	return meResultFromUser(user, wallet.SolanaAddress), nil
+}
+
+// SetDisplayName validates and persists a user-chosen display name for PATCH /v1/me.
+//
+// The session is verified before the name is validated so unauthenticated callers
+// always get ErrInvalidToken. Every authenticated attempt, valid or not, spends one
+// request from the per-user limiter.
+func (s *SessionService) SetDisplayName(ctx context.Context, accessToken string, displayName string) (MeResult, error) {
+	identity, err := s.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			return MeResult{}, privy.ErrInvalidToken
+		}
+		return MeResult{}, fmt.Errorf("verify session: %w", err)
+	}
+
+	user, found, err := s.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	if err != nil {
+		return MeResult{}, err
+	}
+	if !found {
+		return MeResult{}, ErrUserNotFound
+	}
+
+	if err := allowWrite(s.displayNameLimiter, user.ID); err != nil {
+		return MeResult{}, err
+	}
+
+	normalized, err := NormalizeDisplayName(displayName)
+	if err != nil {
+		return MeResult{}, err
+	}
+
+	wallet, found, err := s.store.GetMemberWalletByUserID(ctx, user.ID)
+	if err != nil {
+		return MeResult{}, err
+	}
+	if !found {
+		return MeResult{}, ErrUserNotFound
+	}
+
+	updated, found, err := s.store.UpdateUserDisplayName(ctx, user.ID, normalized)
+	if err != nil {
+		return MeResult{}, err
+	}
+	if !found {
+		return MeResult{}, ErrUserNotFound
+	}
+
+	return meResultFromUser(updated, wallet.SolanaAddress), nil
 }
 
 // EnsureMemberWallet provisions a member wallet once per user and returns the persisted row.
