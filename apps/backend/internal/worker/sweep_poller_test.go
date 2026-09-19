@@ -180,53 +180,35 @@ func TestSweepPoller_memberBalanceBelowIntent_doesNotSweep(t *testing.T) {
 	}
 }
 
-func TestSweepPoller_memberBalanceBelowIntent_sweepsAvailableBalance(t *testing.T) {
+func TestSweepPoller_memberBalanceBelowIntent_doesNotSweepPartialAmount(t *testing.T) {
 	// Arrange
-	poller, testApp, rpc := setupPoller(t)
+	poller, testApp, _ := setupPoller(t)
 	ctx := context.Background()
 	deposit, memberAddress, _ := seedPendingDeposit(t, testApp)
 	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 500_000)
 
 	// Act
 	if err := poller.Tick(ctx); err != nil {
-		t.Fatalf("first Tick: %v", err)
+		t.Fatalf("Tick: %v", err)
 	}
 
 	// Assert
-	last, ok := privy.LastSweepRequest(testApp.Privy)
-	if !ok {
-		t.Fatal("expected SubmitSweep call")
+	if _, ok := privy.LastSweepRequest(testApp.Privy); ok {
+		t.Fatal("expected no SubmitSweep call for partial balance")
 	}
-	if last.Amount != 500_000 {
-		t.Fatalf("amount = %d, want 500000", last.Amount)
-	}
-
 	updated, found, err := testApp.Store.GetDepositByID(ctx, deposit.ID)
 	if err != nil || !found {
 		t.Fatalf("GetDepositByID: found=%v err=%v", found, err)
 	}
-	if updated.Amount != 500_000 {
-		t.Fatalf("deposit amount = %d, want 500000", updated.Amount)
+	if updated.Amount != 2_000_000 {
+		t.Fatalf("deposit amount = %d, want unchanged 2000000", updated.Amount)
 	}
-
-	sig := updated.TxSignature.String
-	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 0)
-	rpc.Confirm(sig)
-
-	if err := poller.Tick(ctx); err != nil {
-		t.Fatalf("second Tick: %v", err)
-	}
-
-	confirmed, found, err := testApp.Store.GetDepositByID(ctx, deposit.ID)
-	if err != nil || !found {
-		t.Fatalf("GetDepositByID after confirm: found=%v err=%v", found, err)
-	}
-	if confirmed.Status != "confirmed" {
-		t.Fatalf("status = %q, want confirmed", confirmed.Status)
+	if updated.Status != "pending" {
+		t.Fatalf("status = %q, want pending", updated.Status)
 	}
 }
 
-func TestSweepPoller_scanCreatesPendingDepositWhenUSDCArrivesWithoutIntent(t *testing.T) {
+func TestSweepPoller_scanDoesNotCreateDepositWithoutUserIntent(t *testing.T) {
 	// Arrange
 	poller, testApp, _ := setupPoller(t)
 	ctx := context.Background()
@@ -262,14 +244,10 @@ func TestSweepPoller_scanCreatesPendingDepositWhenUSDCArrivesWithoutIntent(t *te
 	if err != nil {
 		t.Fatalf("HasPendingDepositForFromAddress: %v", err)
 	}
-	if !hasPending {
-		t.Fatal("expected pending deposit created by scan")
+	if hasPending {
+		t.Fatal("expected no pending deposit from wallet scan")
 	}
-	last, ok := privy.LastSweepRequest(testApp.Privy)
-	if !ok {
-		t.Fatal("expected SubmitSweep call")
-	}
-	if last.Amount != 750_000 {
-		t.Fatalf("amount = %d, want 750000", last.Amount)
+	if _, ok := privy.LastSweepRequest(testApp.Privy); ok {
+		t.Fatal("expected no SubmitSweep call from wallet scan")
 	}
 }

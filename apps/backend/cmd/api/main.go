@@ -39,6 +39,7 @@ var apiRoutes = []string{
 	"GET /health",
 	"POST /v1/auth/session",
 	"GET /v1/me",
+	"GET /v1/me/balance",
 	"GET /v1/home",
 	"POST /v1/groups",
 	"POST /v1/groups/{id}/join",
@@ -47,6 +48,7 @@ var apiRoutes = []string{
 	"GET /v1/groups/{id}/activity",
 	"GET /v1/groups/{id}/proposals",
 	"POST /v1/groups/{id}/deposits",
+	"POST /v1/groups/{id}/fund",
 	"GET /v1/groups/{id}/share-units",
 	"GET /v1/groups/{id}/treasury/usdc",
 	"GET /v1/deposits/{id}",
@@ -164,6 +166,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /health", httpapi.HealthHandler)
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
+	mux.HandleFunc("GET /v1/me/balance", depositHandlers.GetPlatformBalanceHandler)
 	mux.HandleFunc("GET /v1/home", homeHandlers.HomeHandler)
 	mux.HandleFunc("GET /v1/users/{id}/groups", homeHandlers.UserSharedGroupsHandler)
 	mux.HandleFunc("POST /v1/groups", groupHandlers.CreateGroupHandler)
@@ -176,6 +179,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/groups/{id}/view", groupHandlers.GetGroupViewHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/activity", groupHandlers.ListGroupActivityHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/deposits", depositHandlers.CreateDepositHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/fund", depositHandlers.FundGroupHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/share-units", depositHandlers.GetMemberShareUnitsHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/treasury/usdc", depositHandlers.GetTreasuryUsdcBalanceHandler)
 	mux.HandleFunc("GET /v1/deposits/{id}", depositHandlers.GetDepositHandler)
