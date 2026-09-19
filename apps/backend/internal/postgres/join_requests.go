@@ -11,13 +11,14 @@ import (
 )
 
 type JoinRequest struct {
-	ID          string
-	GroupID     string
-	UserID      string
-	DisplayName string
-	Status      domain.JoinRequestStatus
-	CreatedAt   time.Time
-	DecidedAt   sql.NullTime
+	ID              string
+	GroupID         string
+	UserID          string
+	DisplayName     string
+	ProfilePhotoURL string
+	Status          domain.JoinRequestStatus
+	CreatedAt       time.Time
+	DecidedAt       sql.NullTime
 }
 
 func (s *Store) InsertJoinRequest(ctx context.Context, groupID, userID string) (JoinRequest, error) {
@@ -44,7 +45,7 @@ func (s *Store) GetPendingJoinRequest(ctx context.Context, groupID, userID strin
 }
 
 func (s *Store) ListPendingJoinRequests(ctx context.Context, groupID string) ([]JoinRequest, error) {
-	const selectSQL = `SELECT r.id, r.group_id, r.user_id, COALESCE(u.display_name,''), r.status, r.created_at, r.decided_at FROM group_join_requests r JOIN users u ON u.id=r.user_id WHERE r.group_id=$1 AND r.status='pending' ORDER BY r.created_at ASC`
+	const selectSQL = `SELECT r.id, r.group_id, r.user_id, COALESCE(u.display_name,''), COALESCE(u.profile_photo_url,''), r.status, r.created_at, r.decided_at FROM group_join_requests r JOIN users u ON u.id=r.user_id WHERE r.group_id=$1 AND r.status='pending' ORDER BY r.created_at ASC`
 	rows, err := s.db.QueryContext(ctx, selectSQL, groupID)
 	if err != nil {
 		return nil, err
@@ -53,7 +54,7 @@ func (s *Store) ListPendingJoinRequests(ctx context.Context, groupID string) ([]
 	var items []JoinRequest
 	for rows.Next() {
 		var row JoinRequest
-		if err := rows.Scan(&row.ID, &row.GroupID, &row.UserID, &row.DisplayName, &row.Status, &row.CreatedAt, &row.DecidedAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.GroupID, &row.UserID, &row.DisplayName, &row.ProfilePhotoURL, &row.Status, &row.CreatedAt, &row.DecidedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, row)

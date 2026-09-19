@@ -37,7 +37,8 @@ struct HomeLeaderboardSection: View {
                         UserProfileGroupsView(
                             auth: auth,
                             userId: row.userId,
-                            displayName: row.displayName
+                            displayName: row.displayName,
+                            profilePhotoUrl: row.profilePhotoUrl
                         )
                     } label: {
                         MonacoRowCard(
