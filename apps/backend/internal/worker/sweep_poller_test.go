@@ -9,6 +9,23 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 )
 
+func TestPollerWake_notifyCoalesces(t *testing.T) {
+	wake := NewPollerWake()
+	wake.Notify()
+	wake.Notify()
+
+	select {
+	case <-wake.wakeChan():
+	default:
+		t.Fatal("expected one wake signal")
+	}
+	select {
+	case <-wake.wakeChan():
+		t.Fatal("expected coalesced wake")
+	default:
+	}
+}
+
 func setupPoller(t *testing.T) (*SweepPoller, *workerTestApp, *fakeSolanaRPC) {
 	t.Helper()
 	testApp := integrationWorkerApp(t)

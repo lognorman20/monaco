@@ -1,5 +1,11 @@
 import Foundation
 
+/// Shared poll cadence for inbound USDC balance and fund-to-cabal sweep status.
+public enum DepositPolling {
+    public static let balanceInterval: Duration = .seconds(3)
+    public static let sweepStatusInterval: Duration = .seconds(3)
+}
+
 public enum DepositSweepPhase: Equatable {
     case idle
     case awaitingSweep

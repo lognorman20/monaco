@@ -157,7 +157,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 	home := app.NewHomeService(store, privyClient, pythClient, deposits, symbols)
 	groups := app.NewGroupService(store, privyClient)
 	governance := app.NewGovernanceService(store, privyClient)
-	depositHandlers := &httpapi.DepositHandlers{Deposits: deposits}
+	sweepWake := worker.NewPollerWake()
+	depositHandlers := &httpapi.DepositHandlers{
+		Deposits:        deposits,
+		NotifySweepPoll: sweepWake.Notify,
+	}
 	platformWithdrawHandlers := &httpapi.PlatformWithdrawHandlers{Withdrawals: platformWithdrawals}
 	xstocksResolver := xstocks.NewHTTPResolver()
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
@@ -297,7 +301,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 
 	poller := worker.NewSweepPoller(store, privyClient, solanaRPC, deposits, relayer.PrivateKey(), nil)
 	pollerCtx, stopPoller := context.WithCancel(context.Background())
-	go worker.Run(pollerCtx, poller, worker.DefaultPollInterval)
+	go worker.Run(pollerCtx, poller, worker.DefaultPollInterval, sweepWake)
 	slog.Info("sweep poller started")
 
 	executePoller := worker.NewProposalExecutePoller(store, executeOnPass, nil)

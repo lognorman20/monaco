@@ -13,7 +13,8 @@ import (
 
 // DepositHandlers serves deposit HTTP routes.
 type DepositHandlers struct {
-	Deposits *app.DepositService
+	Deposits        *app.DepositService
+	NotifySweepPoll func() // optional immediate sweep poller tick after fund intent
 }
 
 type createDepositRequest struct {
@@ -145,6 +146,10 @@ func (h *DepositHandlers) FundGroupHandler(w http.ResponseWriter, r *http.Reques
 		}
 		logJSONError(ctx, log, "fund_group_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
 		return
+	}
+
+	if h.NotifySweepPoll != nil {
+		h.NotifySweepPoll()
 	}
 
 	w.Header().Set("Content-Type", "application/json")

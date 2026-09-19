@@ -112,6 +112,7 @@ struct FundCabalView: View {
             if selectedGroupId == nil {
                 selectedGroupId = preselectedGroupId ?? joinedCabals.first?.groupId
             }
+            await pollBalanceWhileVisible()
         }
     }
 
@@ -209,12 +210,14 @@ struct FundCabalView: View {
         defer { isSubmitting = false }
 
         do {
-            _ = try await apiClient.fundGroup(accessToken: token, groupId: groupId, amount: micros)
+            let fund = try await apiClient.fundGroup(accessToken: token, groupId: groupId, amount: micros)
             Haptics.success()
             let name = selectedCabalName ?? "your cabal"
-            toast = MonacoToast(message: "Added \(AmountEntryText.display(amountText)) to \(name).", isSuccess: true)
+            toast = MonacoToast(message: "Adding \(AmountEntryText.display(amountText)) to \(name)…", isSuccess: true)
             amountText = ""
             await loadBalance()
+            await pollFundSweep(depositId: fund.depositId)
+            toast = MonacoToast(message: "Added money to \(name).", isSuccess: true)
             await onFunded()
         } catch MonacoAPIError.httpStatus(400) {
             toast = MonacoToast(message: "More than you have. Try a smaller amount.", isSuccess: false)
@@ -224,6 +227,43 @@ struct FundCabalView: View {
             toast = MonacoToast(message: "Couldn't add that money. Try again.", isSuccess: false)
         } catch {
             toast = MonacoToast(message: "No connection. Check your internet and try again.", isSuccess: false)
+        }
+    }
+
+    private func pollBalanceWhileVisible() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: DepositPolling.balanceInterval)
+            guard !Task.isCancelled else { return }
+            await refreshBalanceIfChanged()
+        }
+    }
+
+    private func refreshBalanceIfChanged() async {
+        guard let token = auth.accessToken else { return }
+        guard let fresh = try? await apiClient.getPlatformBalance(accessToken: token) else { return }
+        let previous = balance?.availableUsdcMicros ?? 0
+        balance = fresh
+        if previous == 0, fresh.availableUsdcMicros > 0 {
+            toast = MonacoToast(message: "USDC arrived. You can fund your cabal now.", isSuccess: true)
+        }
+    }
+
+    private func pollFundSweep(depositId: String) async {
+        guard let token = auth.accessToken else { return }
+        var machine = DepositPollStateMachine()
+        while !Task.isCancelled {
+            guard let deposit = try? await apiClient.getDeposit(accessToken: token, depositId: depositId) else {
+                try? await Task.sleep(for: DepositPolling.sweepStatusInterval)
+                continue
+            }
+            machine.apply(status: deposit.status)
+            if machine.isTerminal {
+                if case .failed = machine.phase {
+                    toast = MonacoToast(message: "Couldn't add money to the cabal. Try again.", isSuccess: false)
+                }
+                return
+            }
+            try? await Task.sleep(for: DepositPolling.sweepStatusInterval)
         }
     }
 }
