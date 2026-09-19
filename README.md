@@ -130,9 +130,10 @@ Two profiles:
 
 - **scale**: three fake clubs (Ridgewood Value Club, Night Shift Traders, Harbor Street Fund).
   Each has a fake creator, five depositors, deposits spread over the last week, a confirmed
-  AAPLx/TSLAx buy, failed and open proposals, votes, and NAV history for charts. Any signed-in
-  user sees them on Home and the Groups leaderboard/search and can open them read-only. You are
-  never added as a member. Join, deposit, quote, propose, and vote return `403 faker_group_read_only`.
+  AAPLx/TSLAx buy, a governed sell (Ridgewood and Night Shift), failed and open proposals, votes,
+  and NAV history for charts. Any signed-in user sees them on Home (group board and people
+  leaderboard) and can open them read-only. You are never added as a member. Join, fund/deposit,
+  quote, propose (buy or sell), vote, and leave/withdraw return `403 faker_group_read_only`.
 - **mixed**: adds ghost members Maya Chen, Jordan Hale, and Priya Shah to **your own real club**
   (you must be its creator). They show up on the member board with P&L, deposits, and ghost-only
   proposals. They never count toward the pot, surplus credits, or the voter set, and they have no
@@ -158,8 +159,9 @@ curl -s -X POST http://127.0.0.1:8080/v1/dev/faker \
   -d '{"profile":"all","group_id":"<your_group_id>"}'   # profile: mixed | scale | all
 ```
 
-Safety: faker rows are flagged (`users.is_faker`, `groups.is_faker`, migration 000011). The
-sweep poller, surplus reconcile, execute poller, and swap paths skip them whether or not
+Safety: faker rows are flagged (`users.is_faker`, `groups.is_faker`, migration 000016). The
+sweep poller, surplus reconcile, execute poller (buys and sells), swap, redeem/withdraw, and
+`sweep-wallets` treasury sources skip them whether or not
 `FAKER_ENABLED` is set, so leftover seed rows stay inert. A DB trigger rejects member wallets
 for faker users.
 
