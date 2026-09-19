@@ -19,6 +19,7 @@ type ProposalListItem struct {
 	Kind         domain.ProposalKind
 	UsdcMicros   int64
 	TokenAmount  int64
+	Thesis       string
 	Status       ProposalStatus
 	ProposerID   string
 	ProposerName string
@@ -63,6 +64,7 @@ type ProposalDetailResult struct {
 	AgentDisplayName     string
 	AllocationUsdcMicros int64
 	MintedAgentKey       string
+	Thesis               string
 	Status               ProposalStatus
 	CreatedAt            time.Time
 	ExpiresAt            time.Time
@@ -125,6 +127,7 @@ func (g *GovernanceService) ListGroupProposals(ctx context.Context, accessToken,
 			Kind:         row.Kind,
 			UsdcMicros:   row.UsdcMicros,
 			TokenAmount:  row.TokenAmount,
+			Thesis:       row.Thesis,
 			Status:       row.Status,
 			ProposerID:   row.ProposerID,
 			ProposerName: name,
@@ -302,6 +305,7 @@ func (g *GovernanceService) GetProposalDetail(ctx context.Context, accessToken, 
 		AgentDisplayName:     row.AgentDisplayName,
 		AllocationUsdcMicros: row.AllocationUsdcMicros,
 		MintedAgentKey:       mintedKey,
+		Thesis:               row.Thesis,
 		Status:               row.Status,
 		CreatedAt:            row.CreatedAt,
 		ExpiresAt:            row.ExpiresAt,

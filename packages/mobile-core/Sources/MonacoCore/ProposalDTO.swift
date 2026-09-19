@@ -8,6 +8,7 @@ public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
     public let tokenAmount: String?
     public let status: String
     public let canVote: Bool?
+    public let thesis: String?
 
     public init(
         id: String,
@@ -16,7 +17,8 @@ public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
         kind: String? = nil,
         usdcMicros: String? = nil,
         tokenAmount: String? = nil,
-        canVote: Bool? = nil
+        canVote: Bool? = nil,
+        thesis: String? = nil
     ) {
         self.id = id
         self.symbol = symbol
@@ -25,6 +27,7 @@ public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
         self.tokenAmount = tokenAmount
         self.status = status
         self.canVote = canVote
+        self.thesis = thesis
     }
 
     public var resolvedKind: String {

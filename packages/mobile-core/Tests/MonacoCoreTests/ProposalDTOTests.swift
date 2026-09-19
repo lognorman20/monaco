@@ -44,4 +44,30 @@ final class ProposalDTOTests: XCTestCase {
         XCTAssertEqual(dto.tokenAmount, "50000000")
         XCTAssertNil(dto.usdcMicros)
     }
+
+    func testProposalDTO_decodesThesisWhenPresentAndNilWhenAbsent() throws {
+        let withThesis = """
+        {
+          "id": "prop-thesis",
+          "symbol": "AAPLx",
+          "usdcMicros": "2500000",
+          "status": "open",
+          "thesis": "Strong earnings beat, raising guidance."
+        }
+        """
+        let withoutThesis = """
+        {
+          "id": "prop-no-thesis",
+          "symbol": "AAPLx",
+          "usdcMicros": "2500000",
+          "status": "open"
+        }
+        """
+
+        let dtoWithThesis = try JSONDecoder().decode(ProposalDTO.self, from: Data(withThesis.utf8))
+        let dtoWithoutThesis = try JSONDecoder().decode(ProposalDTO.self, from: Data(withoutThesis.utf8))
+
+        XCTAssertEqual(dtoWithThesis.thesis, "Strong earnings beat, raising guidance.")
+        XCTAssertNil(dtoWithoutThesis.thesis)
+    }
 }

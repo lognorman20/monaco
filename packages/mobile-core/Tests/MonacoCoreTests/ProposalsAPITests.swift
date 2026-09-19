@@ -126,6 +126,45 @@ final class ProposalsAPITests: XCTestCase {
         XCTAssertTrue(quote.routable)
     }
 
+    func testAPIClient_createProposal_sendsThesis() async throws {
+        // Arrange
+        let token = TestFixtures.fixtureSessionToken
+        var capturedBody: Data?
+
+        MockURLProtocol.requestHandler = { request in
+            capturedBody = Self.httpBody(from: request)
+            let body = """
+            {"proposalId":"prop-1"}
+            """
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, Data(body.utf8))
+        }
+
+        let client = MonacoAPIClient(
+            baseURL: URL(string: "https://api.test")!,
+            session: makeMockURLSession(),
+            accessTokenProvider: { token }
+        )
+
+        // Act
+        let result = try await client.createProposal(
+            groupId: "grp-1",
+            symbol: "AAPLx",
+            usdc: 5_000_000,
+            thesis: "Strong earnings beat, raising guidance."
+        )
+
+        // Assert
+        XCTAssertEqual(result.proposalId, "prop-1")
+        let json = try XCTUnwrap(capturedBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        XCTAssertEqual(json["thesis"] as? String, "Strong earnings beat, raising guidance.")
+    }
+
     func testAPIClient_postProposal_doesNotCallWhenRoutableFalse() {
         // Arrange
         let gate = ProposalSubmitGate()

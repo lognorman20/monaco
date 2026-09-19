@@ -17,12 +17,22 @@ struct ProposeQuoteDetailView: View {
     @State private var isLoading = true
     @State private var isProposing = false
     @State private var toast: MonacoToast?
+    @State private var thesisText = ""
 
     var body: some View {
         Form {
             Section {
                 LabeledContent("Symbol", value: symbol)
                 LabeledContent("Amount", value: formatUsd(microsToDecimal(String(usdcMicros)) ?? 0))
+            }
+
+            Section("Thesis (optional)") {
+                Text("Why are you opening this position? Voters will see this.")
+                    .font(.footnote)
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                TextEditor(text: $thesisText)
+                    .frame(minHeight: 80)
+                    .accessibilityIdentifier("proposal-thesis-field")
             }
 
             if isLoading {
@@ -118,19 +128,24 @@ struct ProposeQuoteDetailView: View {
         isProposing = true
         defer { isProposing = false }
 
+        let trimmedThesis = thesisText.trimmingCharacters(in: .whitespacesAndNewlines)
+
         do {
             let response = try await apiClient.createProposal(
                 accessToken: token,
                 groupId: groupId,
                 kind: "buy",
                 symbol: quote.symbol,
-                usdcMicros: usdcMicros
+                usdcMicros: usdcMicros,
+                thesis: trimmedThesis.isEmpty ? nil : trimmedThesis
             )
             toast = MonacoToast(message: proposalSubmittedMessage(id: response.proposalId), isSuccess: true)
         } catch MonacoAPIError.apiError(_, let message) where message == "amount exceeds treasury total available" {
             toast = MonacoToast(message: "Amount exceeds treasury total available.")
         } catch MonacoAPIError.apiError(_, let message) where message == "quote not routable" {
             toast = MonacoToast(message: "No route available right now.")
+        } catch MonacoAPIError.apiError(_, let message) where message == "thesis exceeds maximum length" {
+            toast = MonacoToast(message: "Thesis is too long. Keep it under 500 characters.")
         } catch MonacoAPIError.httpStatus(let code) {
             toast = MonacoToast(message: "Proposal failed (HTTP \(code)).")
         } catch {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
@@ -94,7 +95,13 @@ type CreateProposalInput struct {
 	TokenAmount          int64
 	AgentDisplayName     string
 	AllocationUsdcMicros int64
+	Thesis               string
 }
+
+// MaxProposalThesisLength is the maximum accepted length of a proposal thesis.
+const MaxProposalThesisLength = 500
+
+var ErrThesisTooLong = errors.New("thesis exceeds maximum length")
 
 // CastVoteInput is input for yes/no vote cast (M4-T14).
 type CastVoteInput struct {
@@ -611,6 +618,11 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		logGovernanceBranchWarn("governance create proposal rejected", "symbol required", "group_id", in.GroupID)
 		return Proposal{}, fmt.Errorf("symbol is required")
 	}
+	thesis := strings.TrimSpace(in.Thesis)
+	if len(thesis) > MaxProposalThesisLength {
+		logGovernanceBranchWarn("governance create proposal rejected", "thesis too long", "group_id", in.GroupID)
+		return Proposal{}, ErrThesisTooLong
+	}
 
 	member, err := g.store.IsGroupMember(ctx, in.GroupID, in.ProposerID)
 	if err != nil {
@@ -722,6 +734,7 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		TokenAmount:          in.TokenAmount,
 		AgentDisplayName:     in.AgentDisplayName,
 		AllocationUsdcMicros: in.AllocationUsdcMicros,
+		Thesis:               thesis,
 		ExpiresAt:            expiresAt,
 	})
 	if err != nil {
