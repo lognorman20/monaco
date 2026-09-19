@@ -31,7 +31,7 @@ struct MainTabView: View {
             }
 
             NavigationStack {
-                AssetsTabView()
+                AssetsTabView(auth: auth)
             }
             .tabItem {
                 Label("Assets", systemImage: "chart.pie")

@@ -1,0 +1,17 @@
+{
+  "symbol": "AAPLx",
+  "name": "Apple",
+  "solanaMint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+  "routable": true,
+  "priceUsdcMicros": 185000000,
+  "change24h": "0.027027",
+  "liquidity": {
+    "label": "Via Jupiter",
+    "routable": true,
+    "buyProbeUsdcMicros": 1000000,
+    "buyProbeOutAmount": "100000000",
+    "sellProbeInAmount": "100000000",
+    "sellProbeOutAmount": "1800000",
+    "spreadBps": 12
+  }
+}

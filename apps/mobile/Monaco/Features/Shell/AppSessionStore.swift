@@ -9,6 +9,7 @@ final class AppSessionStore {
     var dashboard: HomeDashboardDTO?
     var me: MeResponse?
     var platformBalance: PlatformBalanceDTO?
+    var popularAssets: [MarketAssetDTO] = []
     var isBalanceLoading = false
     var errorMessage: String?
     var isLoading = true
@@ -71,6 +72,7 @@ final class AppSessionStore {
             async let dashboardLoad = apiClient.getHomeDashboard(accessToken: token, leaderboardRange: leaderboardRange)
             async let meLoad = apiClient.me(accessToken: token)
             async let balanceLoad = apiClient.getPlatformBalance(accessToken: token)
+            async let popularLoad = apiClient.getPopularAssets(accessToken: token, limit: 10)
             home = try await homeLoad
             dashboard = try await dashboardLoad
             if let profile = try? await meLoad {
@@ -78,6 +80,9 @@ final class AppSessionStore {
             }
             if let balance = try? await balanceLoad {
                 platformBalance = balance
+            }
+            if let popular = try? await popularLoad {
+                popularAssets = popular.assets
             }
             errorMessage = nil
         } catch MonacoAPIError.httpStatus(let status) where status == 401 {
@@ -97,6 +102,19 @@ final class AppSessionStore {
 
         isLoading = false
         isBalanceLoading = false
+    }
+
+    func refreshPopular(auth: PrivyAuthService) async {
+        guard let token = auth.accessToken else { return }
+        do {
+            let popular = try await apiClient.getPopularAssets(accessToken: token, limit: 10)
+            popularAssets = popular.assets
+        } catch {
+            if error.isRequestCancellation { return }
+            if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
+                await auth.logout()
+            }
+        }
     }
 
     func refreshDashboard(auth: PrivyAuthService, leaderboardRange: HomeLeaderboardRange) async {

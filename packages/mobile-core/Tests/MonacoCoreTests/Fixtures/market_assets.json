@@ -1,0 +1,13 @@
+{
+  "assets": [
+    {
+      "symbol": "AAPLx",
+      "name": "Apple",
+      "solanaMint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+      "routable": true,
+      "priceUsdcMicros": 185000000,
+      "change24h": "0.027027"
+    }
+  ],
+  "hasMore": true
+}

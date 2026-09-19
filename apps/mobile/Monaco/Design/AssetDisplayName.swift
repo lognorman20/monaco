@@ -1,4 +1,5 @@
 import Foundation
+import MonacoCore
 
 /// Strips xStocks catalog branding from user-facing asset names.
 enum AssetDisplayName {
@@ -21,5 +22,25 @@ enum AssetDisplayName {
 extension CatalogAssetDTO {
     var displayName: String {
         AssetDisplayName.format(catalogName: name)
+    }
+}
+
+extension MarketAssetDTO {
+    var displayName: String {
+        AssetDisplayName.format(catalogName: name)
+    }
+
+    var displayTicker: String {
+        AssetSymbolFormatter.format(symbol)
+    }
+}
+
+extension AssetDetailDTO {
+    var displayName: String {
+        AssetDisplayName.format(catalogName: name)
+    }
+
+    var displayTicker: String {
+        AssetSymbolFormatter.format(symbol)
     }
 }

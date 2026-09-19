@@ -118,12 +118,6 @@ struct PotSectionView: View {
     }
 
     private func pnlColor(for dollarPnl: String) -> Color {
-        if dollarPnl.hasPrefix("-") {
-            return MonacoTheme.warning
-        }
-        if dollarPnl.hasPrefix("+") && dollarPnl != "+0.00" {
-            return MonacoTheme.success
-        }
-        return MonacoTheme.secondaryText
+        MonacoTheme.signed(dollarPnl)
     }
 }
