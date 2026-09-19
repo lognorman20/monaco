@@ -20,7 +20,7 @@ struct MonacoScreen<Content: View>: View {
     }
 }
 
-/// Rounded search field matching Orbix browse chrome.
+/// Capsule search field on `surfaceSunken`, 44pt tall, with a clear button while there is text.
 struct MonacoSearchField: View {
     var placeholder: String
     @Binding var text: String
@@ -29,21 +29,36 @@ struct MonacoSearchField: View {
     var body: some View {
         HStack(spacing: MonacoTheme.Space.s) {
             Image(systemName: "magnifyingglass")
+                .font(.body.weight(.medium))
                 .foregroundStyle(MonacoTheme.muted)
-                .symbolRenderingMode(.hierarchical)
-            TextField(placeholder, text: $text)
-                .font(MonacoTheme.TypeRole.body)
+                .accessibilityHidden(true)
+            TextField("", text: $text, prompt: Text(placeholder).foregroundStyle(MonacoTheme.tertiaryText))
+                .font(MonacoTheme.Typo.body)
                 .foregroundStyle(MonacoTheme.ink)
+                .tint(MonacoTheme.ink)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
                 .disabled(!isEnabled)
+                .accessibilityLabel(placeholder)
                 .accessibilityIdentifier("monaco-search-field")
+            if !text.isEmpty, isEnabled {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(MonacoTheme.tertiaryText)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
         }
-        .padding(.horizontal, MonacoTheme.Space.m)
-        .padding(.vertical, 12)
-        .background(MonacoTheme.surface, in: Capsule())
-        .overlay {
-            Capsule().strokeBorder(MonacoTheme.hairline, lineWidth: 1)
-        }
-        .opacity(isEnabled ? 1 : 0.7)
+        .padding(.leading, MonacoTheme.Space.m)
+        .padding(.trailing, text.isEmpty ? MonacoTheme.Space.m : 0)
+        .frame(minHeight: 44)
+        .background(MonacoTheme.surfaceSunken, in: Capsule())
+        .opacity(isEnabled ? 1 : 0.6)
     }
 }
 

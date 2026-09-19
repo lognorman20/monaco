@@ -39,7 +39,7 @@ struct MonacoSectionHeader: View {
                 }
             }
         }
-        .frame(minHeight: 44)
+        .frame(minHeight: action == nil ? nil : 44)
     }
 }
 
