@@ -17,10 +17,12 @@ import "github.com/monaco/monaco/apps/backend/internal/jupiter"
 
 const usdc = int64(1_000_000)
 
-// person is a seeded faker user.
+// person is a seeded faker user. Photo marks the ghosts whose portraits the operator uploads
+// under FAKER_PHOTO_BASE_URL (see docs/ops-profile-photos.md); everyone else gets initials.
 type person struct {
-	Slug string
-	Name string
+	Slug  string
+	Name  string
+	Photo bool
 }
 
 // deposit is one confirmed (or pending/failed) deposit into a club.
@@ -46,6 +48,8 @@ type proposalSpec struct {
 	HoursAgo     float64
 	ExpiresHours float64 // relative to created_at
 	Votes        []voteSpec
+	// Thesis is the proposer's reason, shown as "Why buy" on the proposal detail.
+	Thesis string
 	// Buy marks the passed proposal that carries the confirmed fake swap (scale clubs only).
 	Buy bool
 }
@@ -67,9 +71,9 @@ type clubSpec struct {
 }
 
 var mixedPeople = []person{
-	{Slug: "maya", Name: "Maya Chen"},
-	{Slug: "jordan", Name: "Jordan Hale"},
-	{Slug: "priya", Name: "Priya Shah"},
+	{Slug: "maya", Name: "Maya Chen", Photo: true},
+	{Slug: "jordan", Name: "Jordan Hale", Photo: true},
+	{Slug: "priya", Name: "Priya Shah", Photo: true},
 }
 
 // mixedDeposits are ghost deposits on the operator's club. SharePx < 1 means the ghost's
@@ -85,9 +89,11 @@ var mixedDeposits = []depositSpec{
 
 var mixedProposals = []proposalSpec{
 	{Key: "open", Proposer: "jordan", Symbol: "TSLAx", USDC: 400, Status: "open", HoursAgo: 5, ExpiresHours: 24,
-		Votes: []voteSpec{{"jordan", "yes"}, {"maya", "yes"}}},
+		Votes:  []voteSpec{{"jordan", "yes"}, {"maya", "yes"}},
+		Thesis: "Deliveries beat last quarter and the chart is basing. Small position before the call."},
 	{Key: "passed", Proposer: "maya", Symbol: "AAPLx", USDC: 500, Status: "passed", HoursAgo: 48, ExpiresHours: 24,
-		Votes: []voteSpec{{"maya", "yes"}, {"jordan", "yes"}, {"priya", "yes"}}},
+		Votes:  []voteSpec{{"maya", "yes"}, {"jordan", "yes"}, {"priya", "yes"}},
+		Thesis: "Buybacks keep shrinking the share count. A boring first holding for the pot."},
 	{Key: "failed", Proposer: "priya", Symbol: "AAPLx", USDC: 600, Status: "failed", HoursAgo: 96, ExpiresHours: 24,
 		Votes: []voteSpec{{"priya", "yes"}, {"maya", "no"}, {"jordan", "no"}}},
 	{Key: "expired", Proposer: "jordan", Symbol: "AAPLx", USDC: 300, Status: "expired", HoursAgo: 120, ExpiresHours: 24,
@@ -97,8 +103,8 @@ var mixedProposals = []proposalSpec{
 var scaleClubs = []clubSpec{
 	{
 		Key: "ridgewood", Name: "Ridgewood Value Club",
-		Creator: person{"rowan", "Rowan Ellis"},
-		Members: []person{{"tess", "Tess Morgan"}, {"diego", "Diego Alvarez"}, {"hana", "Hana Kim"}, {"marcus", "Marcus Webb"}, {"lena", "Lena Fischer"}},
+		Creator: person{Slug: "rowan", Name: "Rowan Ellis"},
+		Members: []person{{Slug: "tess", Name: "Tess Morgan"}, {Slug: "diego", Name: "Diego Alvarez"}, {Slug: "hana", Name: "Hana Kim"}, {Slug: "marcus", Name: "Marcus Webb"}, {Slug: "lena", Name: "Lena Fischer"}},
 		Deposits: []depositSpec{
 			{Who: "rowan", USDC: 4000, HoursAgo: 7*24 + 2, SharePx: 1},
 			{Who: "tess", USDC: 2500, HoursAgo: 6*24 + 20, SharePx: 1},
@@ -109,19 +115,21 @@ var scaleClubs = []clubSpec{
 		},
 		Proposals: []proposalSpec{
 			{Key: "buy", Proposer: "rowan", Symbol: "AAPLx", USDC: 6000, Status: "passed", HoursAgo: 4*24 + 3, ExpiresHours: 24, Buy: true,
-				Votes: []voteSpec{{"rowan", "yes"}, {"tess", "yes"}, {"hana", "yes"}, {"diego", "no"}}},
+				Votes:  []voteSpec{{"rowan", "yes"}, {"tess", "yes"}, {"hana", "yes"}, {"diego", "no"}},
+				Thesis: "Cash pile, steady services growth, cheap versus its own history. Our core holding."},
 			{Key: "failed", Proposer: "diego", Symbol: "TSLAx", USDC: 2000, Status: "failed", HoursAgo: 3*24 + 5, ExpiresHours: 24,
 				Votes: []voteSpec{{"diego", "yes"}, {"rowan", "no"}, {"tess", "no"}, {"hana", "no"}}},
 			{Key: "open", Proposer: "tess", Symbol: "TSLAx", USDC: 1500, Status: "open", HoursAgo: 6, ExpiresHours: 24,
-				Votes: []voteSpec{{"tess", "yes"}, {"marcus", "yes"}}},
+				Votes:  []voteSpec{{"tess", "yes"}, {"marcus", "yes"}},
+				Thesis: "Energy storage is the part nobody prices in. Small bet, we can add later."},
 		},
 		BuySymbol: "AAPLx", BuyMint: jupiter.AAPLxMint, BuyCostPx: 0.9,
 		SellFrac: 0.25, SellPx: 1.14, SellHours: 26, ChartDrift: 0.09,
 	},
 	{
 		Key: "night-shift", Name: "Night Shift Traders",
-		Creator: person{"kai", "Kai Brooks"},
-		Members: []person{{"sofia", "Sofia Reyes"}, {"omar", "Omar Haddad"}, {"jules", "Jules Martin"}, {"nina", "Nina Patel"}, {"theo", "Theo Grant"}},
+		Creator: person{Slug: "kai", Name: "Kai Brooks"},
+		Members: []person{{Slug: "sofia", Name: "Sofia Reyes"}, {Slug: "omar", Name: "Omar Haddad"}, {Slug: "jules", Name: "Jules Martin"}, {Slug: "nina", Name: "Nina Patel"}, {Slug: "theo", Name: "Theo Grant"}},
 		Deposits: []depositSpec{
 			{Who: "kai", USDC: 2000, HoursAgo: 7*24 + 1, SharePx: 1},
 			{Who: "sofia", USDC: 1500, HoursAgo: 6*24 + 12, SharePx: 1},
@@ -132,19 +140,21 @@ var scaleClubs = []clubSpec{
 		},
 		Proposals: []proposalSpec{
 			{Key: "buy", Proposer: "kai", Symbol: "TSLAx", USDC: 5000, Status: "passed", HoursAgo: 4 * 24, ExpiresHours: 12, Buy: true,
-				Votes: []voteSpec{{"kai", "yes"}, {"omar", "yes"}, {"sofia", "yes"}}},
+				Votes:  []voteSpec{{"kai", "yes"}, {"omar", "yes"}, {"sofia", "yes"}},
+				Thesis: "Volatile, which is the point for this club. Sized so a bad week doesn't hurt."},
 			{Key: "failed", Proposer: "jules", Symbol: "AAPLx", USDC: 1000, Status: "failed", HoursAgo: 2*24 + 10, ExpiresHours: 12,
 				Votes: []voteSpec{{"jules", "yes"}, {"kai", "no"}, {"omar", "no"}, {"sofia", "no"}}},
 			{Key: "open", Proposer: "omar", Symbol: "AAPLx", USDC: 800, Status: "open", HoursAgo: 3, ExpiresHours: 20,
-				Votes: []voteSpec{{"omar", "yes"}}},
+				Votes:  []voteSpec{{"omar", "yes"}},
+				Thesis: "Something calmer next to the Tesla position. Earnings are next week."},
 		},
 		BuySymbol: "TSLAx", BuyMint: jupiter.TSLAxMint, BuyCostPx: 1.07,
 		SellFrac: 0.3, SellPx: 0.9, SellHours: 30, ChartDrift: -0.06,
 	},
 	{
 		Key: "harbor", Name: "Harbor Street Fund",
-		Creator: person{"ava", "Ava Lindqvist"},
-		Members: []person{{"ben", "Ben Carter"}, {"ivy", "Ivy Nakamura"}, {"leo", "Leo Santos"}, {"zoe", "Zoe Adler"}, {"sam", "Sam Okafor"}},
+		Creator: person{Slug: "ava", Name: "Ava Lindqvist"},
+		Members: []person{{Slug: "ben", Name: "Ben Carter"}, {Slug: "ivy", Name: "Ivy Nakamura"}, {Slug: "leo", Name: "Leo Santos"}, {Slug: "zoe", Name: "Zoe Adler"}, {Slug: "sam", Name: "Sam Okafor"}},
 		Deposits: []depositSpec{
 			{Who: "ava", USDC: 5000, HoursAgo: 7*24 + 3, SharePx: 1},
 			{Who: "ben", USDC: 1000, HoursAgo: 6*24 + 2, SharePx: 1},
@@ -155,16 +165,56 @@ var scaleClubs = []clubSpec{
 		},
 		Proposals: []proposalSpec{
 			{Key: "buy", Proposer: "ava", Symbol: "AAPLx", USDC: 4500, Status: "passed", HoursAgo: 4*24 + 8, ExpiresHours: 24, Buy: true,
-				Votes: []voteSpec{{"ava", "yes"}, {"ivy", "yes"}, {"leo", "yes"}, {"ben", "yes"}}},
+				Votes:  []voteSpec{{"ava", "yes"}, {"ivy", "yes"}, {"leo", "yes"}, {"ben", "yes"}},
+				Thesis: "Everyone here already uses the products. Hold it and stop checking the price."},
 			{Key: "failed", Proposer: "ben", Symbol: "TSLAx", USDC: 1200, Status: "failed", HoursAgo: 3 * 24, ExpiresHours: 24,
 				Votes: []voteSpec{{"ben", "yes"}, {"ava", "no"}, {"ivy", "no"}, {"leo", "no"}}},
 			{Key: "expired", Proposer: "leo", Symbol: "TSLAx", USDC: 500, Status: "expired", HoursAgo: 2*24 + 6, ExpiresHours: 24,
 				Votes: []voteSpec{{"leo", "yes"}}},
 			{Key: "open", Proposer: "ivy", Symbol: "TSLAx", USDC: 1000, Status: "open", HoursAgo: 8, ExpiresHours: 24,
-				Votes: []voteSpec{{"ivy", "yes"}, {"zoe", "no"}}},
+				Votes:  []voteSpec{{"ivy", "yes"}, {"zoe", "no"}},
+				Thesis: "Down a lot from the high. If the robotaxi news lands, we want to own some."},
 		},
 		BuySymbol: "AAPLx", BuyMint: jupiter.AAPLxMint, BuyCostPx: 1.03, ChartDrift: 0.02,
 	},
+}
+
+// messageSpec is one ghost chat message in the demo cabal.
+type messageSpec struct {
+	Who        string
+	MinutesAgo float64
+	Body       string
+}
+
+// demoMessages read as a friend group talking about the next buy. Spread over the last 90 minutes.
+var demoMessages = []messageSpec{
+	{Who: "maya", MinutesAgo: 88, Body: "Apple reports Thursday. Anyone want in before?"},
+	{Who: "jordan", MinutesAgo: 74, Body: "Thinking $50 from the pot."},
+	{Who: "priya", MinutesAgo: 61, Body: "Tesla instead? Or split it."},
+	{Who: "maya", MinutesAgo: 43, Body: "Services revenue keeps compounding. I'm a yes."},
+	{Who: "priya", MinutesAgo: 30, Body: "Rent is due Friday so I'm sitting this one out."},
+	{Who: "jordan", MinutesAgo: 12, Body: "If it passes we're 40% cash. Fine by me."},
+}
+
+// commentSpec is one ghost comment. Parent names another comment's Key in the same thread.
+type commentSpec struct {
+	Key        string
+	Who        string
+	MinutesAgo float64
+	Body       string
+	Parent     string
+}
+
+// realProposalComments go on the operator's real (votable) proposal when -proposal-id is set.
+var realProposalComments = []commentSpec{
+	{Key: "why-not-split", Who: "maya", MinutesAgo: 25, Body: "Why not split with NVDA?"},
+	{Key: "smaller-drawdown", Who: "jordan", MinutesAgo: 18, Parent: "why-not-split",
+		Body: "Smaller drawdown for our first buy. Nvidia can be next."},
+}
+
+// ghostOpenProposalComments go on the ghost open proposal in the demo profile.
+var ghostOpenProposalComments = []commentSpec{
+	{Key: "under-400", Who: "priya", MinutesAgo: 140, Body: "I'm in if we keep it at $400 and not a dollar more."},
 }
 
 // fallbackMarkMicros are reference whole-share prices used when no live Pyth mark is available.

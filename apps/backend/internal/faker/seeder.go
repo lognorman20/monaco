@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
@@ -19,6 +21,21 @@ var ErrGroupNotFound = errors.New("faker: group not found")
 // ErrGroupIsFaker means the mixed profile was pointed at a faker scale club.
 var ErrGroupIsFaker = errors.New("faker: mixed profile requires a real group")
 
+// ErrProposalNotInGroup means -proposal-id does not name a proposal in the target group.
+var ErrProposalNotInGroup = errors.New("faker: proposal not found in this group")
+
+// ErrProposalNotReal means -proposal-id names a ghost proposal; comments go on a real one.
+var ErrProposalNotReal = errors.New("faker: proposal must be proposed by a real member")
+
+// MixedOptions tunes the mixed profile.
+type MixedOptions struct {
+	// ProposalID is a real member's proposal in the group; two ghost comments are added to it.
+	ProposalID string
+	// Demo seeds the recording variant: chat messages, comments and thesis, only confirmed
+	// deposits, and only the open and passed ghost proposals (no "Failed" rows on screen).
+	Demo bool
+}
+
 // MarkSource returns a live whole-share mark in USDC micros for symbol, or ok=false.
 // The server wires Pyth Hermes; nil or failures fall back to fixed reference marks.
 type MarkSource func(ctx context.Context, symbol, mint string) (int64, bool)
@@ -30,11 +47,25 @@ type Seeder struct {
 	now   func() time.Time
 	// prefix namespaces faker keys and privy ids (tests use a per-lane prefix; production uses "").
 	prefix string
+	// photoBaseURL is FAKER_PHOTO_BASE_URL: ghost portraits live at <base>/<slug>.jpg. Empty = initials.
+	photoBaseURL string
 }
 
-// NewSeeder builds a seeder. marks may be nil.
+// NewSeeder builds a seeder. marks may be nil. Reads FAKER_PHOTO_BASE_URL (optional).
 func NewSeeder(store *postgres.Store, marks MarkSource) *Seeder {
-	return &Seeder{store: store, marks: marks, now: time.Now}
+	return &Seeder{
+		store:        store,
+		marks:        marks,
+		now:          time.Now,
+		photoBaseURL: strings.TrimRight(strings.TrimSpace(os.Getenv("FAKER_PHOTO_BASE_URL")), "/"),
+	}
+}
+
+// WithPhotoBaseURL overrides FAKER_PHOTO_BASE_URL (tests only).
+func (s *Seeder) WithPhotoBaseURL(base string) *Seeder {
+	c := *s
+	c.photoBaseURL = strings.TrimRight(strings.TrimSpace(base), "/")
+	return &c
 }
 
 // WithPrefix returns a copy whose faker keys and privy ids are namespaced (tests only).
@@ -56,6 +87,9 @@ type MixedResult struct {
 	GroupID     string   `json:"groupId"`
 	UserIDs     []string `json:"fakerUserIds"`
 	ProposalIDs []string `json:"proposalIds"`
+	Demo        bool     `json:"demo,omitempty"`
+	Messages    int      `json:"messages,omitempty"`
+	CommentIDs  []string `json:"commentIds,omitempty"`
 }
 
 // ScaleClub is one seeded scale club.
@@ -89,9 +123,15 @@ func (s *Seeder) inTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 
 // SeedMixed adds ghost members to a real group. Caller authorization (creator check) is the
 // endpoint's job; the seeder refuses faker groups and missing groups.
-func (s *Seeder) SeedMixed(ctx context.Context, groupID string) (MixedResult, error) {
+// opts is optional; pass MixedOptions{Demo: true} for the recording variant.
+func (s *Seeder) SeedMixed(ctx context.Context, groupID string, opts ...MixedOptions) (MixedResult, error) {
+	var o MixedOptions
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	o.ProposalID = strings.TrimSpace(o.ProposalID)
 	now := s.now().UTC()
-	result := MixedResult{GroupID: groupID}
+	result := MixedResult{GroupID: groupID, Demo: o.Demo}
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		var isFaker bool
 		err := tx.QueryRowContext(ctx, `SELECT is_faker FROM groups WHERE id = $1 FOR UPDATE`, groupID).Scan(&isFaker)
@@ -103,6 +143,11 @@ func (s *Seeder) SeedMixed(ctx context.Context, groupID string) (MixedResult, er
 		}
 		if isFaker {
 			return ErrGroupIsFaker
+		}
+		if o.ProposalID != "" {
+			if err := checkRealProposal(ctx, tx, groupID, o.ProposalID); err != nil {
+				return err
+			}
 		}
 
 		ids, err := s.upsertPeople(ctx, tx, mixedPeople, now.Add(-7*24*time.Hour))
@@ -116,8 +161,13 @@ func (s *Seeder) SeedMixed(ctx context.Context, groupID string) (MixedResult, er
 			return err
 		}
 
+		deposits, proposals := mixedDeposits, mixedProposals
+		if o.Demo {
+			deposits, proposals = demoDeposits(), demoProposals()
+		}
+
 		joined := map[string]time.Time{}
-		for _, d := range mixedDeposits {
+		for _, d := range deposits {
 			at := hoursAgo(now, d.HoursAgo)
 			if t, ok := joined[d.Who]; !ok || at.Before(t) {
 				joined[d.Who] = at.Add(-time.Hour)
@@ -128,19 +178,115 @@ func (s *Seeder) SeedMixed(ctx context.Context, groupID string) (MixedResult, er
 				return fmt.Errorf("insert ghost member: %w", err)
 			}
 		}
-		if err := insertDepositsAndPositions(ctx, tx, groupID, "mixed-"+groupID, ids, mixedDeposits, now); err != nil {
+		if err := insertDepositsAndPositions(ctx, tx, groupID, "mixed-"+groupID, ids, deposits, now); err != nil {
 			return err
 		}
-		pids, err := insertProposals(ctx, tx, groupID, ids, mixedProposals, now)
+		pids, err := insertProposals(ctx, tx, groupID, ids, proposals, now)
 		if err != nil {
 			return err
 		}
-		for _, p := range mixedProposals {
+		for _, p := range proposals {
 			result.ProposalIDs = append(result.ProposalIDs, pids[p.Key])
+		}
+		if !o.Demo {
+			return nil
+		}
+
+		if err := insertMessages(ctx, tx, groupID, ids, demoMessages, now); err != nil {
+			return err
+		}
+		result.Messages = len(demoMessages)
+		commentIDs, err := insertComments(ctx, tx, pids["open"], ids, ghostOpenProposalComments, now)
+		if err != nil {
+			return err
+		}
+		result.CommentIDs = append(result.CommentIDs, commentIDs...)
+		if o.ProposalID != "" {
+			commentIDs, err := insertComments(ctx, tx, o.ProposalID, ids, realProposalComments, now)
+			if err != nil {
+				return err
+			}
+			result.CommentIDs = append(result.CommentIDs, commentIDs...)
 		}
 		return nil
 	})
 	return result, err
+}
+
+// demoDeposits keeps only confirmed ghost deposits, so the demo screen shows no pending or failed rows.
+func demoDeposits() []depositSpec {
+	var out []depositSpec
+	for _, d := range mixedDeposits {
+		if d.Status == "" {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// demoProposals keeps the open and passed ghost proposals.
+func demoProposals() []proposalSpec {
+	var out []proposalSpec
+	for _, p := range mixedProposals {
+		if p.Status == "open" || p.Status == "passed" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// checkRealProposal requires proposalID to be in groupID and proposed by a real (non-faker) user.
+func checkRealProposal(ctx context.Context, tx *sql.Tx, groupID, proposalID string) error {
+	var proposerIsFaker bool
+	err := tx.QueryRowContext(ctx, `
+SELECT u.is_faker FROM proposals p JOIN users u ON u.id = p.proposer_id
+WHERE p.id::text = $1 AND p.group_id = $2`, proposalID, groupID).Scan(&proposerIsFaker)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrProposalNotInGroup
+	}
+	if err != nil {
+		return fmt.Errorf("check proposal: %w", err)
+	}
+	if proposerIsFaker {
+		return ErrProposalNotReal
+	}
+	return nil
+}
+
+func insertMessages(ctx context.Context, tx *sql.Tx, groupID string, ids map[string]string, messages []messageSpec, now time.Time) error {
+	for _, m := range messages {
+		at := now.Add(-time.Duration(m.MinutesAgo * float64(time.Minute))).UTC()
+		if _, err := tx.ExecContext(ctx, `INSERT INTO group_messages (group_id, author_id, body, created_at) VALUES ($1, $2, $3, $4)`,
+			groupID, ids[m.Who], m.Body, at); err != nil {
+			return fmt.Errorf("insert ghost message: %w", err)
+		}
+	}
+	return nil
+}
+
+func insertComments(ctx context.Context, tx *sql.Tx, proposalID string, ids map[string]string, comments []commentSpec, now time.Time) ([]string, error) {
+	byKey := map[string]string{}
+	var out []string
+	for _, c := range comments {
+		at := now.Add(-time.Duration(c.MinutesAgo * float64(time.Minute))).UTC()
+		var parent any
+		if c.Parent != "" {
+			parentID, ok := byKey[c.Parent]
+			if !ok {
+				return nil, fmt.Errorf("faker: comment %s replies to unknown %s", c.Key, c.Parent)
+			}
+			parent = parentID
+		}
+		var id string
+		if err := tx.QueryRowContext(ctx, `
+INSERT INTO proposal_comments (proposal_id, author_id, parent_comment_id, body, created_at)
+VALUES ($1, $2, $3, $4, $5) RETURNING id`, proposalID, ids[c.Who], parent, c.Body, at).Scan(&id); err != nil {
+			return nil, fmt.Errorf("insert ghost comment: %w", err)
+		}
+		byKey[c.Key] = id
+		out = append(out, id)
+	}
+	return out, nil
 }
 
 // SeedScale upserts the three wholly fake scale clubs.
@@ -237,13 +383,18 @@ RETURNING id`, club.Name, ids[club.Creator.Slug], fakerKey, createdAt).Scan(&gro
 func (s *Seeder) upsertPeople(ctx context.Context, tx *sql.Tx, people []person, createdAt time.Time) (map[string]string, error) {
 	ids := make(map[string]string, len(people))
 	for _, p := range people {
+		var photo any
+		if p.Photo && s.photoBaseURL != "" {
+			photo = s.photoBaseURL + "/" + p.Slug + ".jpg"
+		}
 		var id string
 		err := tx.QueryRowContext(ctx, `
-INSERT INTO users (privy_user_id, display_name, is_faker, created_at)
-VALUES ($1, $2, true, $3)
-ON CONFLICT (privy_user_id) DO UPDATE SET display_name = EXCLUDED.display_name
+INSERT INTO users (privy_user_id, display_name, is_faker, created_at, profile_photo_url)
+VALUES ($1, $2, true, $3, $4)
+ON CONFLICT (privy_user_id) DO UPDATE
+  SET display_name = EXCLUDED.display_name, profile_photo_url = EXCLUDED.profile_photo_url
   WHERE users.is_faker
-RETURNING id`, s.privyID(p.Slug), p.Name, createdAt).Scan(&id)
+RETURNING id`, s.privyID(p.Slug), p.Name, createdAt, photo).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("faker: privy id %s belongs to a real user", s.privyID(p.Slug))
 		}
@@ -258,6 +409,19 @@ RETURNING id`, s.privyID(p.Slug), p.Name, createdAt).Scan(&id)
 // deleteFakerRowsInRealGroup removes only faker-owned rows from a real group (mixed re-run).
 func deleteFakerRowsInRealGroup(ctx context.Context, tx *sql.Tx, groupID string) error {
 	steps := []string{
+		// Comments and chat first: proposal_comments references proposals (and its parent comment).
+		// A real member's reply to a ghost comment is kept and detached from its ghost parent.
+		`UPDATE proposal_comments c SET parent_comment_id = NULL
+		   FROM proposal_comments parent, proposals p, users u
+		   WHERE c.parent_comment_id = parent.id AND parent.proposal_id = p.id AND p.group_id = $1
+		     AND u.id = parent.author_id AND u.is_faker`,
+		// Everything on a ghost proposal goes with it (such proposals are display-only).
+		`DELETE FROM proposal_comments c USING proposals p, users u
+		   WHERE c.proposal_id = p.id AND p.group_id = $1 AND u.id = p.proposer_id AND u.is_faker
+		     AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.proposal_id = p.id)`,
+		`DELETE FROM proposal_comments c USING proposals p, users u
+		   WHERE c.proposal_id = p.id AND p.group_id = $1 AND u.id = c.author_id AND u.is_faker`,
+		`DELETE FROM group_messages m USING users u WHERE m.group_id = $1 AND u.id = m.author_id AND u.is_faker`,
 		`DELETE FROM votes v USING proposals p, users u
 		   WHERE v.proposal_id = p.id AND p.group_id = $1 AND u.id = v.voter_id AND u.is_faker`,
 		`DELETE FROM votes v USING proposals p, users u
@@ -288,6 +452,8 @@ func deleteFakerGroupChildren(ctx context.Context, tx *sql.Tx, groupID string) e
 	}
 	steps := []string{
 		`DELETE FROM agent_intents WHERE group_id = $1`,
+		`DELETE FROM proposal_comments WHERE proposal_id IN (SELECT id FROM proposals WHERE group_id = $1)`,
+		`DELETE FROM group_messages WHERE group_id = $1`,
 		`DELETE FROM votes WHERE proposal_id IN (SELECT id FROM proposals WHERE group_id = $1)`,
 		`DELETE FROM transactions WHERE group_id = $1`,
 		`DELETE FROM group_agents WHERE group_id = $1`,
@@ -368,9 +534,9 @@ func insertProposals(ctx context.Context, tx *sql.Tx, groupID string, ids map[st
 		expires := created.Add(time.Duration(p.ExpiresHours * float64(time.Hour)))
 		var id string
 		if err := tx.QueryRowContext(ctx, `
-INSERT INTO proposals (group_id, proposer_id, symbol, kind, usdc_micros, status, expires_at, created_at)
-VALUES ($1, $2, $3, 'buy', $4, $5, $6, $7) RETURNING id`,
-			groupID, ids[p.Proposer], p.Symbol, p.USDC*usdc, p.Status, expires, created).Scan(&id); err != nil {
+INSERT INTO proposals (group_id, proposer_id, symbol, kind, usdc_micros, status, expires_at, created_at, thesis)
+VALUES ($1, $2, $3, 'buy', $4, $5, $6, $7, NULLIF($8, '')) RETURNING id`,
+			groupID, ids[p.Proposer], p.Symbol, p.USDC*usdc, p.Status, expires, created, p.Thesis).Scan(&id); err != nil {
 			return nil, fmt.Errorf("insert faker proposal: %w", err)
 		}
 		out[p.Key] = id

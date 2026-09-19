@@ -133,6 +133,13 @@ func TestSeedMixedAndScale_idempotentAndInert(t *testing.T) {
 			t.Fatalf("club %d id changed on rerun", i)
 		}
 	}
+	// Like the API, a proposal without a thesis stores NULL, never an empty string.
+	if n := countRows(t, e, `SELECT count(*) FROM proposals WHERE thesis = '' AND group_id = $1`, e.groupID); n != 0 {
+		t.Errorf("faker proposals with empty-string thesis = %d, want 0 (NULL)", n)
+	}
+	if n := countRows(t, e, `SELECT count(*) FROM proposals WHERE thesis IS NULL AND group_id = $1`, e.groupID); n != 2 {
+		t.Errorf("faker proposals without thesis = %d, want the failed and expired ones", n)
+	}
 	if first[5] != 4 {
 		t.Errorf("real club members = %d, want operator + 3 ghosts", first[5])
 	}
@@ -221,5 +228,160 @@ func TestSeedMixed_rejectsFakerAndMissingGroups(t *testing.T) {
 	}
 	if _, err := e.seeder.SeedMixed(ctx, "00000000-0000-0000-0000-000000000000"); !errors.Is(err, ErrGroupNotFound) {
 		t.Errorf("SeedMixed(missing) err = %v, want ErrGroupNotFound", err)
+	}
+}
+
+func TestSeedDemo_seedsConversationAndStaysIdempotent(t *testing.T) {
+	e := newSeedEnv(t)
+	ctx := context.Background()
+	seeder := e.seeder.WithPhotoBaseURL("https://cdn.example.test/avatars/faker/")
+
+	// A real, votable proposal by the operator (the demo's account B stands in here).
+	var realProposal string
+	tx, err := e.store.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	err = tx.QueryRowContext(ctx, `
+INSERT INTO proposals (group_id, proposer_id, symbol, kind, usdc_micros, status, expires_at, thesis)
+VALUES ($1, $2, 'AAPLx', 'buy', 50000000, 'open', now() + interval '22 hours', 'Earnings Thursday.') RETURNING id`,
+		e.groupID, e.operator).Scan(&realProposal)
+	if err == nil {
+		err = tx.Commit()
+	} else {
+		_ = tx.Rollback()
+	}
+	if err != nil {
+		t.Fatalf("insert real proposal: %v", err)
+	}
+
+	opts := MixedOptions{Demo: true, ProposalID: realProposal}
+	demo, err := seeder.SeedMixed(ctx, e.groupID, opts)
+	e.track(demo, ScaleResult{})
+	if err != nil {
+		t.Fatalf("SeedMixed(demo): %v", err)
+	}
+
+	counts := func() [6]int {
+		return [6]int{
+			countRows(t, e, `SELECT count(*) FROM group_messages WHERE group_id = $1`, e.groupID),
+			countRows(t, e, `SELECT count(*) FROM proposal_comments c JOIN proposals p ON p.id = c.proposal_id WHERE p.group_id = $1`, e.groupID),
+			countRows(t, e, `SELECT count(*) FROM proposal_comments WHERE proposal_id = $1`, realProposal),
+			countRows(t, e, `SELECT count(*) FROM deposits WHERE group_id = $1 AND status <> 'confirmed'`, e.groupID),
+			countRows(t, e, `SELECT count(*) FROM proposals WHERE group_id = $1 AND status IN ('failed', 'expired')`, e.groupID),
+			countRows(t, e, `SELECT count(*) FROM proposals WHERE group_id = $1`, e.groupID),
+		}
+	}
+	first := counts()
+	if first[0] != 6 {
+		t.Errorf("messages = %d, want 6", first[0])
+	}
+	if first[1] != 3 || first[2] != 2 {
+		t.Errorf("comments = %d (real proposal %d), want 3 (2 on the real proposal, 1 on the ghost)", first[1], first[2])
+	}
+	if first[3] != 0 {
+		t.Errorf("pending/failed ghost deposits = %d, want 0 in demo", first[3])
+	}
+	if first[4] != 0 {
+		t.Errorf("failed/expired proposals = %d, want 0 in demo", first[4])
+	}
+	if first[5] != 3 {
+		t.Errorf("proposals = %d, want real + ghost open + ghost passed", first[5])
+	}
+	if len(demo.CommentIDs) != 3 || demo.Messages != 6 || !demo.Demo {
+		t.Errorf("result = %+v, want 3 comment ids, 6 messages, demo", demo)
+	}
+
+	// Thesis on the ghost open proposal; the reply threads under Maya's question.
+	if n := countRows(t, e, `SELECT count(*) FROM proposals p JOIN users u ON u.id = p.proposer_id
+		WHERE p.group_id = $1 AND u.is_faker AND p.status = 'open' AND p.thesis <> ''`, e.groupID); n != 1 {
+		t.Errorf("ghost open proposals with thesis = %d, want 1", n)
+	}
+	if n := countRows(t, e, `SELECT count(*) FROM proposal_comments c JOIN proposal_comments parent ON parent.id = c.parent_comment_id
+		WHERE c.proposal_id = $1`, realProposal); n != 1 {
+		t.Errorf("threaded replies on the real proposal = %d, want 1", n)
+	}
+	// Timestamps are recent and never in the future.
+	if n := countRows(t, e, `SELECT count(*) FROM group_messages WHERE group_id = $1
+		AND created_at BETWEEN $2::timestamptz - interval '90 minutes' AND $2::timestamptz`, e.groupID, time.Date(2026, 9, 18, 15, 0, 0, 0, time.UTC)); n != 6 {
+		t.Errorf("messages within the last 90 minutes of seed time = %d, want 6", n)
+	}
+	// Photos only when a base URL is configured.
+	if n := countRows(t, e, `SELECT count(*) FROM users WHERE id = ANY($1::uuid[]) AND profile_photo_url LIKE 'https://cdn.example.test/avatars/faker/%.jpg'`, demo.UserIDs); n != 3 {
+		t.Errorf("ghost photos = %d, want 3", n)
+	}
+
+	// A real member replies to a ghost comment; the re-run must keep it.
+	tx, err = e.store.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO proposal_comments (proposal_id, author_id, parent_comment_id, body) VALUES ($1, $2, $3, 'Agreed.')`,
+		realProposal, e.operator, demo.CommentIDs[1])
+	if err == nil {
+		err = tx.Commit()
+	} else {
+		_ = tx.Rollback()
+	}
+	if err != nil {
+		t.Fatalf("insert real reply: %v", err)
+	}
+
+	again, err := seeder.SeedMixed(ctx, e.groupID, opts)
+	e.track(again, ScaleResult{})
+	if err != nil {
+		t.Fatalf("SeedMixed(demo) rerun: %v", err)
+	}
+	second := counts()
+	want := first
+	want[1]++ // the operator's reply survives
+	want[2]++
+	if second != want {
+		t.Fatalf("rerun counts = %v, want %v", second, want)
+	}
+
+	// Plain mixed afterwards drops the chat and comments again and restores its own rows.
+	mixed, err := e.seeder.SeedMixed(ctx, e.groupID)
+	e.track(mixed, ScaleResult{})
+	if err != nil {
+		t.Fatalf("SeedMixed after demo: %v", err)
+	}
+	if n := countRows(t, e, `SELECT count(*) FROM group_messages WHERE group_id = $1`, e.groupID); n != 0 {
+		t.Errorf("messages after mixed = %d, want 0", n)
+	}
+	if n := countRows(t, e, `SELECT count(*) FROM users WHERE id = ANY($1::uuid[]) AND profile_photo_url IS NOT NULL`, mixed.UserIDs); n != 0 {
+		t.Errorf("ghost photos without a base URL = %d, want 0", n)
+	}
+}
+
+func TestSeedDemo_rejectsGhostOrForeignProposal(t *testing.T) {
+	e := newSeedEnv(t)
+	ctx := context.Background()
+	mixed, err := e.seeder.SeedMixed(ctx, e.groupID)
+	e.track(mixed, ScaleResult{})
+	if err != nil {
+		t.Fatalf("SeedMixed: %v", err)
+	}
+	if _, err := e.seeder.SeedMixed(ctx, e.groupID, MixedOptions{Demo: true, ProposalID: mixed.ProposalIDs[0]}); !errors.Is(err, ErrProposalNotReal) {
+		t.Errorf("ghost proposal err = %v, want ErrProposalNotReal", err)
+	}
+	if _, err := e.seeder.SeedMixed(ctx, e.groupID, MixedOptions{Demo: true, ProposalID: "00000000-0000-0000-0000-000000000000"}); !errors.Is(err, ErrProposalNotInGroup) {
+		t.Errorf("unknown proposal err = %v, want ErrProposalNotInGroup", err)
+	}
+}
+
+// Every seeded thesis must pass the same limit the API and the proposals_thesis_length_check
+// constraint enforce.
+func TestProfiles_thesesFitTheProposalLimit(t *testing.T) {
+	check := func(where string, specs []proposalSpec) {
+		for _, p := range specs {
+			if len(p.Thesis) > app.MaxProposalThesisLength {
+				t.Errorf("%s proposal %q thesis is %d bytes, over %d", where, p.Key, len(p.Thesis), app.MaxProposalThesisLength)
+			}
+		}
+	}
+	check("mixed", mixedProposals)
+	for _, club := range scaleClubs {
+		check(club.Key, club.Proposals)
 	}
 }

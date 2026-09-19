@@ -3,6 +3,11 @@
 //	go run ./cmd/faker-seed -profile scale
 //	go run ./cmd/faker-seed -profile mixed -group-id <uuid>
 //	go run ./cmd/faker-seed -profile all -group-id <uuid>
+//	go run ./cmd/faker-seed -profile demo -group-id <uuid> [-proposal-id <uuid>]
+//
+// demo is the recording variant of mixed: ghosts plus chat messages, thesis and comments, with no
+// pending/failed rows. -proposal-id adds two ghost comments to a real member's open proposal.
+// FAKER_PHOTO_BASE_URL (optional) gives the three ghosts profile photos at <base>/<slug>.jpg.
 //
 // It refuses non-local DATABASE_URLs, applies migrations, and never calls Privy, Solana RPC, or
 // Jupiter. PYTH_API_KEY (optional) anchors seeded cost bases near live marks.
@@ -36,19 +41,23 @@ func main() {
 }
 
 func run() error {
-	profile := flag.String("profile", "", `profile to seed: "mixed", "scale", or "all"`)
-	groupID := flag.String("group-id", "", "real club id for mixed/all (your own club)")
+	profile := flag.String("profile", "", `profile to seed: "mixed", "scale", "all", or "demo"`)
+	groupID := flag.String("group-id", "", "real club id for mixed/all/demo (your own club)")
+	proposalID := flag.String("proposal-id", "", "demo only: a real member's proposal in that club to comment on")
 	flag.Parse()
 
 	p := strings.ToLower(strings.TrimSpace(*profile))
 	switch p {
 	case "scale":
-	case "mixed", "all":
+	case "mixed", "all", "demo":
 		if strings.TrimSpace(*groupID) == "" {
 			return fmt.Errorf("-group-id is required for profile %s", p)
 		}
 	default:
-		return fmt.Errorf(`-profile must be "mixed", "scale", or "all"`)
+		return fmt.Errorf(`-profile must be "mixed", "scale", "all", or "demo"`)
+	}
+	if strings.TrimSpace(*proposalID) != "" && p != "demo" {
+		return fmt.Errorf("-proposal-id is only supported with -profile demo")
 	}
 
 	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
@@ -74,8 +83,9 @@ func run() error {
 	seeder := faker.NewSeeder(postgres.NewStore(db), marks)
 
 	out := map[string]any{"profile": p}
-	if p == "mixed" || p == "all" {
-		mixed, err := seeder.SeedMixed(ctx, strings.TrimSpace(*groupID))
+	if p == "mixed" || p == "all" || p == "demo" {
+		opts := faker.MixedOptions{Demo: p == "demo", ProposalID: strings.TrimSpace(*proposalID)}
+		mixed, err := seeder.SeedMixed(ctx, strings.TrimSpace(*groupID), opts)
 		if err != nil {
 			return err
 		}

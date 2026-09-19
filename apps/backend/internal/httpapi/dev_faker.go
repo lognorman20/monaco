@@ -22,7 +22,8 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 // DevFakerHandlers serves POST /v1/dev/faker (#153): local-only demo/test seeding.
 //
 // Guards, in order: FAKER_ENABLED (else 404), loopback caller without proxy headers (403),
-// local DATABASE_URL (403), bearer auth (401). mixed requires a group_id the caller created.
+// local DATABASE_URL (403), bearer auth (401). mixed/all/demo require a group_id the caller created;
+// demo optionally takes a proposal_id (a real member's proposal in that group) to comment on.
 type DevFakerHandlers struct {
 	Enabled     bool
 	DatabaseURL string
@@ -32,8 +33,9 @@ type DevFakerHandlers struct {
 }
 
 type devFakerRequest struct {
-	Profile string `json:"profile"`
-	GroupID string `json:"group_id"`
+	Profile    string `json:"profile"`
+	GroupID    string `json:"group_id"`
+	ProposalID string `json:"proposal_id"`
 }
 
 type devFakerResponse struct {
@@ -87,8 +89,19 @@ func (h *DevFakerHandlers) FakerHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	profile := strings.ToLower(strings.TrimSpace(req.Profile))
 	groupID := strings.TrimSpace(req.GroupID)
+	proposalID := strings.TrimSpace(req.ProposalID)
+	if proposalID != "" {
+		if profile != "demo" {
+			logJSONError(ctx, log, "proposal_id_not_supported", w, http.StatusBadRequest, `proposal_id is only supported with profile "demo"`)
+			return
+		}
+		if !uuidPattern.MatchString(proposalID) {
+			logJSONError(ctx, log, "invalid_proposal_id", w, http.StatusBadRequest, "proposal_id must be a uuid")
+			return
+		}
+	}
 	switch profile {
-	case "mixed", "all":
+	case "mixed", "all", "demo":
 		if groupID == "" {
 			logJSONError(ctx, log, "missing_group_id", w, http.StatusBadRequest, "group_id is required for profile "+profile)
 			return
@@ -100,13 +113,21 @@ func (h *DevFakerHandlers) FakerHandler(w http.ResponseWriter, r *http.Request) 
 	case "scale":
 		groupID = ""
 	default:
-		logJSONError(ctx, log, "invalid_profile", w, http.StatusBadRequest, `profile must be "mixed", "scale", or "all"`)
+		logJSONError(ctx, log, "invalid_profile", w, http.StatusBadRequest, `profile must be "mixed", "scale", "all", or "demo"`)
 		return
 	}
 
 	resp := devFakerResponse{Profile: profile}
-	if profile == "mixed" || profile == "all" {
-		mixed, err := h.Seeder.SeedMixed(ctx, groupID)
+	if profile == "mixed" || profile == "all" || profile == "demo" {
+		mixed, err := h.Seeder.SeedMixed(ctx, groupID, faker.MixedOptions{Demo: profile == "demo", ProposalID: proposalID})
+		if errors.Is(err, faker.ErrProposalNotInGroup) {
+			logJSONError(ctx, log, "proposal_not_found", w, http.StatusNotFound, "proposal not found in this group", "group_id", groupID, "proposal_id", proposalID)
+			return
+		}
+		if errors.Is(err, faker.ErrProposalNotReal) {
+			logJSONError(ctx, log, "faker_proposal", w, http.StatusBadRequest, "proposal_id must be a real member's proposal", "proposal_id", proposalID)
+			return
+		}
 		if err != nil {
 			logJSONError(ctx, log, "faker_mixed_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
 			return
