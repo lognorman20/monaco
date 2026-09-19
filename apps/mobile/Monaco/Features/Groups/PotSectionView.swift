@@ -7,7 +7,12 @@ struct PotSectionView: View {
     let pot: [PotRowDTO]
     var onAddMoney: () -> Void = {}
 
-    private var stocks: [PotRowDTO] { pot.filter { !Self.isCash($0) } }
+    /// Largest position first (#214).
+    private var stocks: [PotRowDTO] {
+        pot.filter { !Self.isCash($0) }.sorted {
+            (GroupHeroMath.decimal(from: $0.valueUsd) ?? 0) > (GroupHeroMath.decimal(from: $1.valueUsd) ?? 0)
+        }
+    }
     private var cash: PotRowDTO? { pot.first(where: Self.isCash) }
 
     private var hasCash: Bool {

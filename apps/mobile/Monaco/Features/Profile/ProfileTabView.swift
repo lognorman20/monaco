@@ -234,36 +234,34 @@ struct ProfileTabView: View {
         .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
     }
 
+    /// #210 moved Settings into Profile: block explorers and sign out sit under the cabals.
+    /// Withdraw is the balance card's "Cash out".
     private var accountActions: some View {
-        MonacoCard {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
-                NavigationLink {
-                    WithdrawView(auth: auth)
-                } label: {
-                    Label("Withdraw", systemImage: "arrow.up.right")
-                        .foregroundStyle(MonacoTheme.primaryText)
-                }
-                .accessibilityIdentifier("profile-withdraw-link")
-
-                Divider().overlay(MonacoTheme.hairline)
-
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            MonacoSectionHeader("Account")
+            MonacoGroupedList {
                 NavigationLink {
                     AdvancedSettingsView()
                 } label: {
-                    Label("Advanced", systemImage: "link")
-                        .foregroundStyle(MonacoTheme.primaryText)
+                    MonacoRow(
+                        title: "Advanced",
+                        subtitle: "Block explorers",
+                        chevron: true,
+                        isLast: true,
+                        leading: { StockMark(systemImage: "link", size: 40) }
+                    )
                 }
+                .buttonStyle(.monacoRow)
                 .accessibilityIdentifier("profile-advanced-link")
-
-                Divider().overlay(MonacoTheme.hairline)
-
-                Button("Sign out") {
-                    Task { await auth.logout() }
-                }
-                .buttonStyle(.monacoDestructive)
-                .frame(maxWidth: .infinity)
-                .accessibilityIdentifier("profile-sign-out")
             }
+
+            Button("Sign out") {
+                Task { await auth.logout() }
+            }
+            .buttonStyle(.monacoDestructive)
+            .frame(maxWidth: .infinity)
+            .padding(.top, MonacoTheme.Space.s)
+            .accessibilityIdentifier("profile-sign-out")
         }
     }
 }
