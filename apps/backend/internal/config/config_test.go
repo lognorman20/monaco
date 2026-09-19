@@ -16,6 +16,7 @@ func clearConfigEnv(t *testing.T) {
 	t.Setenv("RELAYER_PRIVATE_KEY", "")
 	t.Setenv("PYTH_API_KEY", "")
 	t.Setenv("PYTH_HERMES_BASE_URL", "")
+	t.Setenv("JUPITER_API_KEY", "")
 }
 
 func setValidConfigEnv(t *testing.T) {
@@ -155,6 +156,24 @@ func TestLoad_optionalPythAPIKey_isLoadedWhenSet(t *testing.T) {
 	}
 	if cfg.PythAPIKey != "test-pyth-key" {
 		t.Fatalf("PythAPIKey = %q", cfg.PythAPIKey)
+	}
+}
+
+func TestLoad_optionalJupiterAPIKey_isLoadedWhenSet(t *testing.T) {
+	// Arrange
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+	t.Setenv("JUPITER_API_KEY", "  test-jupiter-key  ")
+
+	// Act
+	cfg, err := Load()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.JupiterAPIKey != "test-jupiter-key" {
+		t.Fatalf("JupiterAPIKey = %q", cfg.JupiterAPIKey)
 	}
 }
 

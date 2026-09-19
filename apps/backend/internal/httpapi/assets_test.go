@@ -21,12 +21,14 @@ func integrationAssetsApp(t *testing.T) (*AssetsHandlers, *AuthHandlers, privy.C
 	jupiterClient := jupiter.NewFakeClient()
 	catalog := xstocks.NewFakeCatalogSearcher()
 	pythClient := pyth.NewFakeAssetPriceClient()
+	priceClient := jupiter.NewFakePriceClient()
 	handlers := &AssetsHandlers{
 		Store:   store,
 		Privy:   privyClient,
 		Catalog: catalog,
 		Pyth:    pythClient,
 		Jupiter: jupiterClient,
+		Price:   priceClient,
 	}
 	return handlers, authHandlers, privyClient, jupiterClient, iso
 }
@@ -59,7 +61,7 @@ func TestGET_assets_listsCatalogWithPrices(t *testing.T) {
 		SolanaMint: jupiter.AAPLxMint,
 		Routable:   true,
 	})
-	pyth.RegisterAssetMark(handlers.Pyth, "AAPLx", pyth.AssetMark{
+	jupiter.RegisterPrice(handlers.Price, jupiter.AAPLxMint, jupiter.TokenPrice{
 		PriceUsdcMicros: 185_000_000,
 	})
 	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, 1_000_000, jupiter.BuyQuote{
@@ -122,7 +124,7 @@ func TestGET_assets_popular_returnsPinnedAssets(t *testing.T) {
 	}
 }
 
-func TestGET_assets_popular_marksConcurrently_preservesOrder(t *testing.T) {
+func TestGET_assets_popular_batchedPrices_preservesOrder(t *testing.T) {
 	t.Parallel()
 
 	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
@@ -139,11 +141,10 @@ func TestGET_assets_popular_marksConcurrently_preservesOrder(t *testing.T) {
 		SolanaMint: "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
 		Routable:   true,
 	})
-	// MSFTx's mark is registered before AAPLx's so a sequential-only enrichment
-	// loop would still pass by luck; only a race in the concurrent path could
-	// scramble the response order relative to catalog order.
-	pyth.RegisterAssetMark(handlers.Pyth, "MSFTx", pyth.AssetMark{PriceUsdcMicros: 400_000_000})
-	pyth.RegisterAssetMark(handlers.Pyth, "AAPLx", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
+	// MSFTx's mark is registered before AAPLx's so a lucky map-iteration order
+	// wouldn't mask a real ordering bug in the response assembly.
+	jupiter.RegisterPrice(handlers.Price, "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX", jupiter.TokenPrice{PriceUsdcMicros: 400_000_000})
+	jupiter.RegisterPrice(handlers.Price, jupiter.AAPLxMint, jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/assets/popular?limit=3", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -171,7 +172,7 @@ func TestGET_assets_popular_marksConcurrently_preservesOrder(t *testing.T) {
 	}
 }
 
-func TestGET_assets_popular_pythOnly_skipsJupiterQuoteBuy(t *testing.T) {
+func TestGET_assets_popular_usesPriceAPI_skipsQuoteBuy(t *testing.T) {
 	t.Parallel()
 
 	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
@@ -182,7 +183,7 @@ func TestGET_assets_popular_pythOnly_skipsJupiterQuoteBuy(t *testing.T) {
 		SolanaMint: jupiter.AAPLxMint,
 		Routable:   true,
 	})
-	pyth.RegisterAssetMark(handlers.Pyth, "AAPLx", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
+	jupiter.RegisterPrice(handlers.Price, jupiter.AAPLxMint, jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
 	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, 1_000_000, jupiter.BuyQuote{
 		Routable:   true,
 		InputMint:  jupiter.USDCMint,
@@ -199,12 +200,22 @@ func TestGET_assets_popular_pythOnly_skipsJupiterQuoteBuy(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	}
+	var payload popularAssetsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if payload.Assets[0].PriceUsdcMicros == nil || *payload.Assets[0].PriceUsdcMicros != 185_000_000 {
+		t.Fatalf("priceUsdcMicros = %v, want 185000000", payload.Assets[0].PriceUsdcMicros)
+	}
+	if got := jupiter.PriceCallCount(handlers.Price); got != 1 {
+		t.Fatalf("Price.Prices calls = %d, want 1 batched call for the whole popular strip", got)
+	}
 	if got := jupiter.QuoteBuyCallCount(jupiterClient); got != 0 {
 		t.Fatalf("QuoteBuy calls = %d, want 0 on popular enrichment", got)
 	}
 }
 
-func TestGET_assets_popular_missingPythMark_omitsPriceWithoutJupiter(t *testing.T) {
+func TestGET_assets_popular_missingPrice_omitsPriceField(t *testing.T) {
 	t.Parallel()
 
 	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
@@ -232,10 +243,10 @@ func TestGET_assets_popular_missingPythMark_omitsPriceWithoutJupiter(t *testing.
 		t.Fatalf("assets len = %d, want 1", len(payload.Assets))
 	}
 	if payload.Assets[0].PriceUsdcMicros != nil {
-		t.Fatalf("priceUsdcMicros = %v, want nil without Pyth mark", payload.Assets[0].PriceUsdcMicros)
+		t.Fatalf("priceUsdcMicros = %v, want nil without a registered price", payload.Assets[0].PriceUsdcMicros)
 	}
 	if got := jupiter.QuoteBuyCallCount(jupiterClient); got != 0 {
-		t.Fatalf("QuoteBuy calls = %d, want 0 when Pyth mark missing", got)
+		t.Fatalf("QuoteBuy calls = %d, want 0 when price is missing", got)
 	}
 }
 
@@ -250,7 +261,7 @@ func TestGET_assets_symbol_returnsDetailAndLiquidity(t *testing.T) {
 		SolanaMint: jupiter.AAPLxMint,
 		Routable:   true,
 	})
-	pyth.RegisterAssetMark(handlers.Pyth, "AAPLx", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
+	jupiter.RegisterPrice(handlers.Price, jupiter.AAPLxMint, jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
 	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, 1_000_000, jupiter.BuyQuote{
 		Routable:   true,
 		InputMint:  jupiter.USDCMint,
@@ -304,7 +315,7 @@ func TestGET_assets_symbol_catalogNotRoutable_liveQuoteSetsRoutable(t *testing.T
 		SolanaMint: jupiter.AAPLxMint,
 		Routable:   false,
 	})
-	pyth.RegisterAssetMark(handlers.Pyth, "AAPLx", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
+	jupiter.RegisterPrice(handlers.Price, jupiter.AAPLxMint, jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
 	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, 1_000_000, jupiter.BuyQuote{
 		Routable:   true,
 		InputMint:  jupiter.USDCMint,
@@ -342,7 +353,7 @@ func TestGET_assets_symbol_quoteFail_marksNotRoutable(t *testing.T) {
 		SolanaMint: jupiter.AAPLxMint,
 		Routable:   true,
 	})
-	pyth.RegisterAssetMark(handlers.Pyth, "AAPLx", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
+	jupiter.RegisterPrice(handlers.Price, jupiter.AAPLxMint, jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLx", nil)
 	req.SetPathValue("symbol", "AAPLx")
