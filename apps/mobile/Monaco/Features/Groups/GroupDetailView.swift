@@ -112,7 +112,7 @@ struct GroupDetailView: View {
             }) {
                 if let groupView {
                     NavigationStack {
-                        ProposeChooserView(auth: auth, groupId: groupId, groupView: groupView)
+                        ProposeChooserView(auth: auth, groupId: groupId, groupView: groupView, onProposed: proposalSent)
                     }
                     .presentationDetents([.medium, .large])
                 }
@@ -257,9 +257,8 @@ struct GroupDetailView: View {
         "\(groupId)-\(auth.accessToken ?? "")"
     }
 
-    /// Called by the propose sheet once the cabal has the proposal (WP4's `onProposed`): close the
-    /// sheet, reload the open votes, and confirm. Wire as `ProposeChooserView(…, onProposed: proposalSent)`
-    /// when WP4's chooser lands on this branch.
+    /// Called by the propose sheet once the cabal has the proposal: close the sheet and confirm.
+    /// Closing the sheet reloads the open votes.
     private func proposalSent(_ proposalId: String) {
         showProposeSheet = false
         Haptics.success()
