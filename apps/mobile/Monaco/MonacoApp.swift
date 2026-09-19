@@ -24,7 +24,9 @@ struct MonacoApp: App {
     @ViewBuilder
     private var root: some View {
         #if DEBUG
-        if ChatSampleQA.isEnabled {
+        if MonacoDesignGallery.isEnabled {
+            MonacoDesignGallery.rootView()
+        } else if ChatSampleQA.isEnabled {
             ChatSampleQA.rootView()
         } else {
             ContentView()
