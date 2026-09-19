@@ -121,6 +121,83 @@ struct GroupDetailView: View {
     }
 
     @ViewBuilder
+    private func cabalActionSection(for view: GroupViewDTO) -> some View {
+        Section {
+            VStack(spacing: MonacoTheme.Space.s) {
+                NavigationLink {
+                    FundCabalView(
+                        auth: auth,
+                        joinedCabals: [HomeGroupBoardRowDTO(
+                            groupId: groupId,
+                            name: view.name,
+                            potValueUsd: view.resolvedPotTotalUsd,
+                            percentReturn: nil,
+                            dollarPnl: view.you.dollarPnl,
+                            isJoined: true
+                        )],
+                        preselectedGroupId: groupId,
+                        onFunded: {
+                            await loadGroup()
+                            await loadActivity()
+                        }
+                    )
+                } label: {
+                    Text("Fund this cabal")
+                        .frame(maxWidth: .infinity)
+                }
+                .monacoFormPrimaryAction()
+                .accessibilityIdentifier("group-action-fund")
+
+                HStack(spacing: MonacoTheme.Space.s) {
+                    NavigationLink {
+                        ProposeChooserView(auth: auth, groupId: groupId, groupView: view)
+                    } label: {
+                        Text("Propose")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .monacoFormSecondaryAction()
+                    .accessibilityIdentifier("group-action-propose")
+
+                    NavigationLink {
+                        SellCabalView(
+                            auth: auth,
+                            groupId: groupId,
+                            maxShareUnits: Int64(view.you.shareUnits) ?? 0,
+                            equityUsd: view.you.equityUsd,
+                            onSold: {
+                                await loadGroup()
+                                await loadActivity()
+                            }
+                        )
+                    } label: {
+                        Text("Sell")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .monacoFormSecondaryAction()
+                    .accessibilityIdentifier("group-action-sell")
+                }
+
+                Button {
+                    if hasDeployedStake(in: view) {
+                        showWithdrawLeaveConfirmation = true
+                    } else {
+                        showLeaveConfirmation = true
+                    }
+                } label: {
+                    Text(isLeaving ? "Leaving…" : "Leave cabal")
+                        .frame(maxWidth: .infinity)
+                }
+                .monacoFormDestructiveAction()
+                .disabled(isLeaving)
+                .accessibilityIdentifier("group-action-leave")
+            }
+            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+    }
+
+    @ViewBuilder
     private func groupContent(_ view: GroupViewDTO) -> some View {
         List {
             PotSectionView(
@@ -128,6 +205,9 @@ struct GroupDetailView: View {
                 pot: view.pot,
                 treasuryAddress: view.treasuryAddress
             )
+
+            cabalActionSection(for: view)
+
             YouSectionView(slice: view.you)
             if let agent = view.agent {
                 AgentSectionView(agent: agent)
@@ -166,65 +246,6 @@ struct GroupDetailView: View {
             )
 
             ProposalHistorySection(auth: auth, groupId: groupId)
-
-            Section("Actions") {
-                NavigationLink {
-                    FundCabalView(
-                        auth: auth,
-                        joinedCabals: [HomeGroupBoardRowDTO(
-                            groupId: groupId,
-                            name: view.name,
-                            potValueUsd: view.resolvedPotTotalUsd,
-                            percentReturn: nil,
-                            dollarPnl: view.you.dollarPnl,
-                            isJoined: true
-                        )],
-                        preselectedGroupId: groupId,
-                        onFunded: {
-                            await loadGroup()
-                            await loadActivity()
-                        }
-                    )
-                } label: {
-                    Label("Fund this cabal", systemImage: "arrow.right.circle")
-                }
-                .accessibilityIdentifier("group-action-fund")
-
-                NavigationLink {
-                    ProposeChooserView(auth: auth, groupId: groupId, groupView: view)
-                } label: {
-                    Label("Propose", systemImage: "chart.line.uptrend.xyaxis")
-                }
-                .accessibilityIdentifier("group-action-propose")
-
-                NavigationLink {
-                    SellCabalView(
-                        auth: auth,
-                        groupId: groupId,
-                        maxShareUnits: Int64(view.you.shareUnits) ?? 0,
-                        equityUsd: view.you.equityUsd,
-                        onSold: {
-                            await loadGroup()
-                            await loadActivity()
-                        }
-                    )
-                } label: {
-                    Label("Sell", systemImage: "chart.line.downtrend.xyaxis")
-                }
-                .accessibilityIdentifier("group-action-sell")
-
-                Button(role: .destructive) {
-                    if hasDeployedStake(in: view) {
-                        showWithdrawLeaveConfirmation = true
-                    } else {
-                        showLeaveConfirmation = true
-                    }
-                } label: {
-                    Label(isLeaving ? "Leaving…" : "Leave cabal", systemImage: "rectangle.portrait.and.arrow.right")
-                }
-                .disabled(isLeaving)
-                .accessibilityIdentifier("group-action-leave")
-            }
         }
         .monacoInsetList()
         .background(Color.clear)
