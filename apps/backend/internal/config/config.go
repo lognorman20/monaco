@@ -21,6 +21,7 @@ const (
 	envRelayerPrivateKey             = "RELAYER_PRIVATE_KEY"
 	envSolanaRPCURL                  = "SOLANA_RPC_URL"
 	envPythAPIKey                    = "PYTH_API_KEY"
+	envPythHermesBaseURL             = "PYTH_HERMES_BASE_URL"
 	envSupabaseURL                   = "SUPABASE_URL"
 	envSupabaseServiceRoleKey        = "SUPABASE_SERVICE_ROLE_KEY"
 )
@@ -43,6 +44,9 @@ const (
 //     created without this signer must be updated in Privy (owner-signed PATCH); new wallets
 //     get the signer at create time when this is set.
 //   - PYTH_API_KEY: Pyth Hermes API key (Bearer token) for marked equity price fetches (M4).
+//     Equity feeds (e.g. AAPLx) require feed grants on the key in Pyth Terminal; crypto-only
+//     keys authenticate but return 403 "Not entitled" for equity price updates.
+//   - PYTH_HERMES_BASE_URL: Optional Hermes base URL override (default https://pyth.dourolabs.app/hermes).
 type Config struct {
 	DatabaseURL                   string
 	PrivyAppID                    string
@@ -52,6 +56,7 @@ type Config struct {
 	RelayerPrivateKey             string
 	SolanaRPCURL                  string
 	PythAPIKey                    string
+	PythHermesBaseURL             string
 	SupabaseURL                   string
 	SupabaseServiceRoleKey        string
 	SolanaCluster                 string
@@ -69,6 +74,7 @@ func Load() (*Config, error) {
 		RelayerPrivateKey:            strings.TrimSpace(os.Getenv(envRelayerPrivateKey)),
 		SolanaRPCURL:                 strings.TrimSpace(os.Getenv(envSolanaRPCURL)),
 		PythAPIKey:                   strings.TrimSpace(os.Getenv(envPythAPIKey)),
+		PythHermesBaseURL:            strings.TrimRight(strings.TrimSpace(os.Getenv(envPythHermesBaseURL)), "/"),
 		SupabaseURL:                  strings.TrimSpace(os.Getenv(envSupabaseURL)),
 		SupabaseServiceRoleKey:       strings.TrimSpace(os.Getenv(envSupabaseServiceRoleKey)),
 		SolanaCluster:                SolanaCluster,
