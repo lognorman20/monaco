@@ -16,6 +16,8 @@ Product path stays: member inbox → treasury (poller) → **in-app redeem**. Us
 From repo root. Loads `.env.local` via dotenvx.
 
 ```bash
+./scripts/sweep-wallets.sh --destination <solana_address> --source <wallet> --dry-run
+./scripts/sweep-wallets.sh --destination <solana_address> --source <wallet_a> --source <wallet_b>
 ./scripts/sweep-wallets.sh --destination <solana_address> --all --dry-run
 ./scripts/sweep-wallets.sh --destination <solana_address> --all
 ./scripts/sweep-wallets.sh --destination <solana_address>
@@ -41,10 +43,15 @@ Then paste `--destination` again. No `--yes`. Wrong phrase aborts.
 | Flag | Required | Meaning |
 | --- | --- | --- |
 | `--destination` | yes | Base58 Solana address that receives USDC. |
+| `--source` | no | Drain only this wallet. Repeatable; one value may be comma-separated. |
 | `--all` | no | Privy is source of truth: paginated `GET /v1/wallets?chain_type=solana` (no `user_id`). |
 | `--dry-run` | no | Log planned Jupiter sells + USDC sweeps. Skip sign/send. Skip confirm. |
 
-Without `--all`, sources are Postgres `member_wallets` and `treasuries` for `DATABASE_URL`.
+Do not combine `--all` with `--source`.
+
+Without `--source` or `--all`, sources are Postgres `member_wallets` and `treasuries` for `DATABASE_URL`.
+
+With `--source`, only the listed wallets run through the per-wallet pipeline. Unknown Privy addresses fail that wallet and the run continues on the rest.
 
 Per wallet:
 

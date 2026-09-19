@@ -265,20 +265,26 @@ Product path is poller member-inbox → treasury, then **in-app redeem**. Use th
 **Danger.** Mainnet USDC. Wrong `DATABASE_URL` or `--all` against the prod Privy app can empty live pots and break share credits. Relayer still pays SOL fees.
 
 ```bash
-# Always dry-run first. --all = every Solana wallet Privy returns for this app (not just local DB rows).
+# One wallet (or list). Always dry-run first.
+./scripts/sweep-wallets.sh --destination <solana_address> --source <wallet> --dry-run
+./scripts/sweep-wallets.sh --destination <solana_address> --source <wallet_a> --source <wallet_b> --dry-run
+
+# --all = every Solana wallet Privy returns for this app (not just local DB rows).
 ./scripts/sweep-wallets.sh --destination <solana_address> --all --dry-run
 
 # Live: same flags without --dry-run. Type exactly:
 #   I UNDERSTAND THIS MAY MESS WITH PROD
 # then paste the destination address again.
+./scripts/sweep-wallets.sh --destination <solana_address> --source <wallet>
 ./scripts/sweep-wallets.sh --destination <solana_address> --all
 ```
 
 | Flag               | Meaning                                                                                  |
 | ------------------ | ---------------------------------------------------------------------------------------- |
 | `--destination`    | Required. Receives all swept USDC.                                                       |
+| `--source`         | Drain only listed wallet(s). Repeatable; comma-separate in one value. Do not mix with `--all`. |
 | `--all`            | Source of truth = Privy `GET /v1/wallets?chain_type=solana` (paginated). Skips Postgres. |
-| *(omit* `--all`*)* | Source = local `member_wallets` + `treasuries` for the `DATABASE_URL` in `.env.local`.   |
+| *(omit both)*      | Source = local `member_wallets` + `treasuries` for the `DATABASE_URL` in `.env.local`.   |
 | `--dry-run`        | Print balances and `would sweep` lines. No txs. No confirm prompt.                       |
 
 Needs `.env.local` (`PRIVY_*`, `RELAYER_PRIVATE_KEY`, `DATABASE_URL`). Wrapper is `scripts/with-dotenv-local.sh`. Amounts are micro-USDC (`1000000` = $1). Zero-balance wallets skip. Destination equal to a source skips.
