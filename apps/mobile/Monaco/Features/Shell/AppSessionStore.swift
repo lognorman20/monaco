@@ -149,6 +149,49 @@ final class AppSessionStore {
         }
     }
 
+    /// After POST /v1/groups: patch joined cabals locally, then refresh home/dashboard
+    /// in the background. Skips popular assets so create does not stampede Jupiter.
+    func refreshAfterCreate(auth: PrivyAuthService, created: CreateGroupResponse) {
+        insertJoinedCabal(from: created)
+        Task { await deferredRefreshAfterCreate(auth: auth) }
+    }
+
+    private func insertJoinedCabal(from created: CreateGroupResponse) {
+        let row = HomeGroupBoardRowDTO(
+            groupId: created.groupId,
+            name: created.name,
+            potValueUsd: "0.00",
+            percentReturn: nil,
+            dollarPnl: "+0.00",
+            isJoined: true
+        )
+        if let current = home {
+            guard !current.groups.contains(where: { $0.groupId == created.groupId }) else { return }
+            home = HomeViewDTO(groups: [row] + current.groups, people: current.people)
+        } else {
+            home = HomeViewDTO(groups: [row], people: [])
+        }
+    }
+
+    private func deferredRefreshAfterCreate(auth: PrivyAuthService) async {
+        guard let token = auth.accessToken else { return }
+        do {
+            async let homeLoad = apiClient.getHome(accessToken: token)
+            async let dashboardLoad = apiClient.getHomeDashboard(accessToken: token)
+            async let balanceLoad = apiClient.getPlatformBalance(accessToken: token)
+            home = try await homeLoad
+            dashboard = try await dashboardLoad
+            if let balance = try? await balanceLoad {
+                platformBalance = balance
+            }
+        } catch {
+            if error.isRequestCancellation { return }
+            if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
+                await auth.logout()
+            }
+        }
+    }
+
     func refreshPopular(auth: PrivyAuthService) async {
         guard let token = auth.accessToken else { return }
         do {
