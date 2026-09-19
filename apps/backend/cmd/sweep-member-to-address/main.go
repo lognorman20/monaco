@@ -1,6 +1,6 @@
 // Ops helper: sweep USDC from Monaco-controlled wallets to --destination.
 // Non-USDC SPL holdings are sold to USDC on Jupiter first.
-// Usage: ./scripts/sweep-wallets.sh --destination <addr> [--all] [--dry-run]
+// Usage: ./scripts/sweep-wallets.sh --destination <addr> [--source <addr>] [--all] [--dry-run]
 package main
 
 import (
@@ -47,7 +47,14 @@ func main() {
 	ctx := context.Background()
 	client := privy.NewHTTPClient(cfg)
 
-	sources, sourceNote, err := loadSweepSources(ctx, flags, cfg, client)
+	db, err := sql.Open("pgx", cfg.DatabaseURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "database: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+	store := postgres.NewStore(db)
+	sources, sourceNote, err := loadSweepSources(ctx, flags, store, client)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "list wallets: %v\n", err)
 		os.Exit(1)
@@ -90,43 +97,7 @@ func main() {
 	}
 }
 
-func loadSweepSources(ctx context.Context, flags sweepFlags, cfg *config.Config, client *privy.HTTPClient) ([]sweepSource, string, error) {
-	db, err := sql.Open("pgx", cfg.DatabaseURL)
-	if err != nil {
-		return nil, "", err
-	}
-	defer db.Close()
-	store := postgres.NewStore(db)
-
-	memberSet, treasurySet, err := walletKindSets(ctx, store)
-	if err != nil {
-		return nil, "", err
-	}
-
-	if flags.all {
-		wallets, err := client.ListAppSolanaWallets(ctx)
-		if err != nil {
-			return nil, "", err
-		}
-		var sources []sweepSource
-		for _, wallet := range wallets {
-			sources = append(sources, sweepSource{
-				kind:     classifyWalletKind(wallet.SolanaAddress, memberSet, treasurySet, "privy"),
-				address:  wallet.SolanaAddress,
-				walletID: wallet.PrivyWalletID,
-			})
-		}
-		return sources, "privy app wallets (--all)", nil
-	}
-
-	sources, err := listDBSweepSources(ctx, store)
-	if err != nil {
-		return nil, "", err
-	}
-	return sources, "postgres member_wallets + treasuries", nil
-}
-
-func walletKindSets(ctx context.Context, store *postgres.Store) (members, treasuries map[string]struct{}, err error) {
+func walletKindSets(ctx context.Context, store walletKindReader) (members, treasuries map[string]struct{}, err error) {
 	members = map[string]struct{}{}
 	treasuries = map[string]struct{}{}
 
@@ -162,7 +133,7 @@ func classifyWalletKind(address string, members, treasuries map[string]struct{},
 	return fallback
 }
 
-func listDBSweepSources(ctx context.Context, store *postgres.Store) ([]sweepSource, error) {
+func listDBSweepSources(ctx context.Context, store walletKindReader) ([]sweepSource, error) {
 	members, err := store.ListMemberWallets(ctx)
 	if err != nil {
 		return nil, err

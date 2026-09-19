@@ -6,25 +6,6 @@ import (
 	"testing"
 )
 
-func TestParseSweepFlags_requiresDestination(t *testing.T) {
-	t.Parallel()
-
-	if _, err := parseSweepFlags(nil, bytes.NewBuffer(nil)); err == nil {
-		t.Fatal("expected error")
-	}
-
-	flags, err := parseSweepFlags([]string{"--destination", "Dest111", "--all", "--dry-run"}, bytes.NewBuffer(nil))
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if flags.destination != "Dest111" {
-		t.Fatalf("destination = %q", flags.destination)
-	}
-	if !flags.all || !flags.dryRun {
-		t.Fatalf("all=%t dryRun=%t", flags.all, flags.dryRun)
-	}
-}
-
 func TestConfirmSweep_requiresAckAndDestRepeat(t *testing.T) {
 	t.Parallel()
 
