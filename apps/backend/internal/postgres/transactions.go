@@ -518,6 +518,64 @@ WHERE execute_request_id = $1 AND status = 'confirmed'`
 	return row, true, nil
 }
 
+// TransactionActivityRow is a transaction row enriched for group activity feeds.
+type TransactionActivityRow struct {
+	TransactionRow
+	InitiatedBy      string
+	AgentDisplayName string
+}
+
+// ListTransactionActivityByGroupID returns transactions for activity with agent attribution.
+func (s *Store) ListTransactionActivityByGroupID(ctx context.Context, groupID string) ([]TransactionActivityRow, error) {
+	if groupID == "" {
+		return nil, fmt.Errorf("group_id is required")
+	}
+
+	const selectSQL = `
+SELECT t.id, t.group_id, t.proposal_id, t.amount, t.action, t.input_mint, t.output_mint, t.status,
+       t.tx_signature, t.execute_request_id, t.cost_basis_price, t.cost_basis_amount, t.created_at, t.confirmed_at,
+       COALESCE(t.initiated_by, ''), COALESCE(ga.agent_display_name, '')
+FROM transactions t
+LEFT JOIN agent_intents ai ON ai.id = t.agent_intent_id
+LEFT JOIN group_agents ga ON ga.id = ai.group_agent_id
+WHERE t.group_id = $1
+ORDER BY t.created_at DESC
+LIMIT 100`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("list transaction activity by group: %w", err)
+	}
+	defer rows.Close()
+
+	var out []TransactionActivityRow
+	for rows.Next() {
+		var row TransactionActivityRow
+		if err := rows.Scan(
+			&row.ID,
+			&row.GroupID,
+			&row.ProposalID,
+			&row.Amount,
+			&row.Action,
+			&row.InputMint,
+			&row.OutputMint,
+			&row.Status,
+			&row.TxSignature,
+			&row.ExecuteRequestID,
+			&row.CostBasisPrice,
+			&row.CostBasisAmount,
+			&row.CreatedAt,
+			&row.ConfirmedAt,
+			&row.InitiatedBy,
+			&row.AgentDisplayName,
+		); err != nil {
+			return nil, fmt.Errorf("scan transaction activity: %w", err)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 // ListTransactionsByGroupID returns transactions for a group newest first.
 func (s *Store) ListTransactionsByGroupID(ctx context.Context, groupID string) ([]TransactionRow, error) {
 	if groupID == "" {

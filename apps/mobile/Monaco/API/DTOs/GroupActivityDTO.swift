@@ -10,6 +10,8 @@ struct GroupActivityItemDTO: Codable, Equatable, Identifiable {
     let txSignature: String?
     let tokenAmount: String?
     let proceedsUsdcMicros: String?
+    let initiatedBy: String?
+    let agentDisplayName: String?
 }
 
 struct GroupActivityResponse: Codable, Equatable {

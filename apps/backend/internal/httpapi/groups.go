@@ -527,6 +527,8 @@ type groupActivityItemResponse struct {
 	ProceedsUsdcMicros string `json:"proceedsUsdcMicros,omitempty"`
 	CreatedAt          string `json:"createdAt"`
 	TxSignature        string `json:"txSignature,omitempty"`
+	InitiatedBy        string `json:"initiatedBy,omitempty"`
+	AgentDisplayName   string `json:"agentDisplayName,omitempty"`
 }
 
 type groupActivityResponse struct {
@@ -567,13 +569,15 @@ func (h *GroupHandlers) ListGroupActivityHandler(w http.ResponseWriter, r *http.
 	respItems := make([]groupActivityItemResponse, 0, len(items))
 	for _, item := range items {
 		resp := groupActivityItemResponse{
-			ID:           item.ID,
-			Kind:         item.Kind,
-			Status:       item.Status,
-			Symbol:       item.Symbol,
-			AmountMicros: item.AmountMicros,
-			CreatedAt:    item.CreatedAt.UTC().Format(time.RFC3339),
-			TxSignature:  item.TxSignature,
+			ID:               item.ID,
+			Kind:             item.Kind,
+			Status:           item.Status,
+			Symbol:           item.Symbol,
+			AmountMicros:     item.AmountMicros,
+			CreatedAt:        item.CreatedAt.UTC().Format(time.RFC3339),
+			TxSignature:      item.TxSignature,
+			InitiatedBy:        item.InitiatedBy,
+			AgentDisplayName: item.AgentDisplayName,
 		}
 		if item.TokenAmount > 0 {
 			resp.TokenAmount = strconv.FormatInt(item.TokenAmount, 10)

@@ -48,8 +48,15 @@ struct ActivityDetailDestination: View {
     }
 
     private var shouldResolveProposalFallback: Bool {
-        ["buy", "sell"].contains(activityItem.kind.lowercased())
+        if isAgentGovernanceKind(activityItem.kind) {
+            return true
+        }
+        return ["buy", "sell"].contains(activityItem.kind.lowercased())
             && activityItem.status.lowercased() == "pending"
             && (activityItem.txSignature ?? "").isEmpty
+    }
+
+    private func isAgentGovernanceKind(_ kind: String) -> Bool {
+        ["add_agent", "pause_agent", "resume_agent", "revoke_agent"].contains(kind.lowercased())
     }
 }
