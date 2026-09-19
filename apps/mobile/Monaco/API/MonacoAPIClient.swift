@@ -222,11 +222,13 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(CreateGroupResponse.self, from: data)
     }
 
-    func leaveGroup(accessToken: String, groupId: String) async throws {
+    func leaveGroup(accessToken: String, groupId: String, withdrawStake: Bool = false) async throws {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/leave")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        request.httpBody = try JSONEncoder().encode(LeaveGroupRequestDTO(withdrawStake: withdrawStake))
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
         switch http.statusCode {
@@ -234,6 +236,19 @@ final class MonacoAPIClient {
         case 409: throw MonacoAPIError.leaveBlocked(parseLeaveConflict(from: data))
         default: throw MonacoAPIError.httpStatus(http.statusCode)
         }
+    }
+
+    func withdrawToBalance(accessToken: String, groupId: String, shareAmountMicros: Int64? = nil) async throws -> WithdrawToBalanceJobDTO {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/withdraw-to-balance")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+        request.httpBody = try JSONEncoder().encode(WithdrawToBalanceRequestDTO(shareAmountMicros: shareAmountMicros))
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
+        guard http.statusCode == 200 else { throw MonacoAPIError.httpStatus(http.statusCode) }
+        return try JSONDecoder().decode(WithdrawToBalanceJobDTO.self, from: data)
     }
 
     func joinGroup(accessToken: String, groupId: String) async throws -> JoinGroupOutcome {

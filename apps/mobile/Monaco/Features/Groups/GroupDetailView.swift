@@ -13,6 +13,7 @@ struct GroupDetailView: View {
 
     @State private var groupView: GroupViewDTO?
     @State private var showLeaveConfirmation = false
+    @State private var showWithdrawLeaveConfirmation = false
     @State private var isLeaving = false
     @State private var activityItems: [GroupActivityItemDTO] = []
     @State private var activityLoading = true
@@ -66,9 +67,14 @@ struct GroupDetailView: View {
             }
             .monacoToast($toast)
             .confirmationDialog("Leave this cabal?", isPresented: $showLeaveConfirmation, titleVisibility: .visible) {
-                Button("Leave cabal", role: .destructive) { Task { await leaveGroup() } }
+                Button("Leave cabal", role: .destructive) { Task { await leaveGroup(withdrawStake: false) } }
             } message: {
                 Text("You will lose access to this cabal's board. Your deposit history stays on record.")
+            }
+            .confirmationDialog("Withdraw stake and leave?", isPresented: $showWithdrawLeaveConfirmation, titleVisibility: .visible) {
+                Button("Withdraw and leave", role: .destructive) { Task { await leaveGroup(withdrawStake: true) } }
+            } message: {
+                Text("Your deployed stake will be sold to USDC at market prices and credited to your account balance. Deposit history stays on record.")
             }
     }
 
@@ -191,7 +197,13 @@ struct GroupDetailView: View {
                     Label("Propose buy", systemImage: "chart.line.uptrend.xyaxis")
                 }
                 .accessibilityIdentifier("group-action-propose")
-                Button(role: .destructive) { showLeaveConfirmation = true } label: {
+                Button(role: .destructive) {
+                    if hasDeployedStake(in: view) {
+                        showWithdrawLeaveConfirmation = true
+                    } else {
+                        showLeaveConfirmation = true
+                    }
+                } label: {
                     Label(isLeaving ? "Leaving…" : "Leave cabal", systemImage: "rectangle.portrait.and.arrow.right")
                 }
                 .disabled(isLeaving)
@@ -267,12 +279,19 @@ struct GroupDetailView: View {
         toast = MonacoToast(message: DepositFailureToastTracker.message(for: failure))
     }
 
-    private func leaveGroup() async {
+    private func hasDeployedStake(in view: GroupViewDTO) -> Bool {
+        (Int64(view.you.shareUnits) ?? 0) > 0
+    }
+
+    private func leaveGroup(withdrawStake: Bool) async {
         guard let token = auth.accessToken, !isLeaving else { return }
         isLeaving = true
         defer { isLeaving = false }
         do {
-            try await apiClient.leaveGroup(accessToken: token, groupId: groupId)
+            try await apiClient.leaveGroup(accessToken: token, groupId: groupId, withdrawStake: withdrawStake)
+            if withdrawStake {
+                toast = MonacoToast(message: "Stake moved to your balance.")
+            }
             await onLeft()
             dismiss()
         } catch MonacoAPIError.leaveBlocked(let reason) {

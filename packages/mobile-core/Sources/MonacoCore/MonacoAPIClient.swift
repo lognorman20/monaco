@@ -207,11 +207,13 @@ public final class MonacoAPIClient: @unchecked Sendable {
         }
     }
 
-    public func leaveGroup(groupId: String) async throws {
+    public func leaveGroup(groupId: String, withdrawStake: Bool = false) async throws {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/leave")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await applyAuthorizationHeader(to: &request)
+        request.httpBody = try JSONEncoder().encode(LeaveGroupRequestDTO(withdrawStake: withdrawStake))
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
         switch http.statusCode {
@@ -219,6 +221,19 @@ public final class MonacoAPIClient: @unchecked Sendable {
         case 409: throw MonacoAPIError.leaveBlocked(parseLeaveConflict(from: data))
         default: throw MonacoAPIError.httpStatus(http.statusCode)
         }
+    }
+
+    public func withdrawToBalance(groupId: String, shareAmountMicros: Int64? = nil) async throws -> WithdrawToBalanceJobDTO {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/withdraw-to-balance")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try await applyAuthorizationHeader(to: &request)
+        request.httpBody = try JSONEncoder().encode(WithdrawToBalanceRequestDTO(shareAmountMicros: shareAmountMicros))
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
+        guard http.statusCode == 200 else { throw MonacoAPIError.httpStatus(http.statusCode) }
+        return try JSONDecoder().decode(WithdrawToBalanceJobDTO.self, from: data)
     }
 
     public func getGroupView(groupId: String) async throws -> GroupViewDTO {
