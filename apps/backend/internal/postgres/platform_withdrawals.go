@@ -151,10 +151,28 @@ WHERE tx_signature = $1`
 	return row, true, nil
 }
 
+type platformWithdrawalTestHooks struct {
+	failSetBroadcastSignature bool
+	setBroadcastSignatureErr  error
+}
+
+// SetFailPlatformWithdrawalBroadcastSignatureForTests forces the next SetPlatformWithdrawalBroadcastSignature call to fail.
+func (s *Store) SetFailPlatformWithdrawalBroadcastSignatureForTests(fail bool, err error) {
+	s.platformWithdrawalTestHooks.failSetBroadcastSignature = fail
+	s.platformWithdrawalTestHooks.setBroadcastSignatureErr = err
+}
+
 // SetPlatformWithdrawalBroadcastSignature records the broadcast signature on a pending row.
 func (s *Store) SetPlatformWithdrawalBroadcastSignature(ctx context.Context, withdrawalID, txSignature string) error {
 	if withdrawalID == "" || txSignature == "" {
 		return fmt.Errorf("withdrawal id and tx signature are required")
+	}
+	if s.platformWithdrawalTestHooks.failSetBroadcastSignature {
+		err := s.platformWithdrawalTestHooks.setBroadcastSignatureErr
+		if err == nil {
+			err = fmt.Errorf("injected set platform withdrawal broadcast signature error")
+		}
+		return err
 	}
 
 	const updateSQL = `

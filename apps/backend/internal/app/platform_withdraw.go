@@ -149,11 +149,13 @@ func (s *PlatformWithdrawService) CreatePlatformWithdrawal(ctx context.Context, 
 		_, _, _ = s.store.FailPlatformWithdrawal(ctx, row.ID, "signature lookup failed")
 		return PlatformWithdrawal{}, err
 	} else if found && existing.ID != row.ID {
+		_, _, _ = s.store.FailPlatformWithdrawal(ctx, row.ID, "duplicate tx signature")
 		return platformWithdrawalFromRow(existing), nil
 	}
 
 	if err := s.store.SetPlatformWithdrawalBroadcastSignature(ctx, row.ID, result.TxSignature); err != nil {
-		return PlatformWithdrawal{}, err
+		_, _, _ = s.store.FailPlatformWithdrawal(ctx, row.ID, "persist signature failed")
+		return PlatformWithdrawal{}, fmt.Errorf("persist broadcast signature: %w", err)
 	}
 
 	slog.Info("platform withdrawal broadcast",

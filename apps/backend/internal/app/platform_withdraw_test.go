@@ -144,3 +144,105 @@ func TestCreatePlatformWithdrawal_idempotentOnTxSignature(t *testing.T) {
 		t.Fatalf("status = %q, want confirmed", second.Status)
 	}
 }
+
+func TestCreatePlatformWithdrawal_failsPendingRowWhenPersistSignatureFails(t *testing.T) {
+	h, svc, _ := newPlatformWithdrawHarness(t)
+	ctx := context.Background()
+	sessions := NewSessionService(h.Store, h.Privy)
+	token := privy.AccessToken(h.ISO.UniqueToken("pw-persist-fail"))
+	session := openTestSession(t, h.ISO, sessions, h.Privy, "pw-persist-fail", "Persist Fail")
+
+	wallet, found, err := h.Store.GetMemberWalletByUserID(ctx, session.UserID)
+	if err != nil || !found {
+		t.Fatalf("GetMemberWalletByUserID: found=%v err=%v", found, err)
+	}
+	privy.SetMemberUSDCBalance(h.Privy, wallet.SolanaAddress, 2_000_000)
+
+	injectedErr := errors.New("injected persist signature failure")
+	h.Store.SetFailPlatformWithdrawalBroadcastSignatureForTests(true, injectedErr)
+	t.Cleanup(func() {
+		h.Store.SetFailPlatformWithdrawalBroadcastSignatureForTests(false, nil)
+	})
+
+	dest := "11111111111111111111111111111112"
+	_, err = svc.CreatePlatformWithdrawal(ctx, string(token), 500_000, dest)
+	if err == nil {
+		t.Fatal("expected persist signature error")
+	}
+	if !errors.Is(err, injectedErr) {
+		t.Fatalf("err = %v, want injected persist signature failure", err)
+	}
+
+	hasPending, err := h.Store.HasPendingPlatformWithdrawalForUser(ctx, session.UserID)
+	if err != nil {
+		t.Fatalf("HasPendingPlatformWithdrawalForUser: %v", err)
+	}
+	if hasPending {
+		t.Fatal("expected orphan pending row to be failed")
+	}
+
+	h.Store.SetFailPlatformWithdrawalBroadcastSignatureForTests(false, nil)
+	_, err = svc.CreatePlatformWithdrawal(ctx, string(token), 500_000, dest)
+	if err != nil {
+		t.Fatalf("retry after failed persist should succeed: %v", err)
+	}
+}
+
+func TestCreatePlatformWithdrawal_failsDuplicatePendingRowOnExistingSignature(t *testing.T) {
+	h, svc, solanaRPC := newPlatformWithdrawHarness(t)
+	ctx := context.Background()
+	sessions := NewSessionService(h.Store, h.Privy)
+	token := privy.AccessToken(h.ISO.UniqueToken("pw-dup-sig"))
+	session := openTestSession(t, h.ISO, sessions, h.Privy, "pw-dup-sig", "Dup Sig")
+
+	wallet, found, err := h.Store.GetMemberWalletByUserID(ctx, session.UserID)
+	if err != nil || !found {
+		t.Fatalf("GetMemberWalletByUserID: found=%v err=%v", found, err)
+	}
+	privy.SetMemberUSDCBalance(h.Privy, wallet.SolanaAddress, 3_000_000)
+
+	dest := "11111111111111111111111111111112"
+	first, err := svc.CreatePlatformWithdrawal(ctx, string(token), 500_000, dest)
+	if err != nil {
+		t.Fatalf("first CreatePlatformWithdrawal: %v", err)
+	}
+
+	solanaRPC.Confirm(first.TxSignature)
+	confirmed, err := svc.GetPlatformWithdrawal(ctx, string(token), first.ID)
+	if err != nil {
+		t.Fatalf("GetPlatformWithdrawal: %v", err)
+	}
+	if confirmed.Status != PlatformWithdrawalStatusConfirmed {
+		t.Fatalf("status = %q, want confirmed", confirmed.Status)
+	}
+
+	privy.SetForcedTransferSignature(h.Privy, first.TxSignature)
+	t.Cleanup(func() {
+		privy.SetForcedTransferSignature(h.Privy, "")
+	})
+
+	second, err := svc.CreatePlatformWithdrawal(ctx, string(token), 700_000, dest)
+	if err != nil {
+		t.Fatalf("duplicate signature CreatePlatformWithdrawal: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("duplicate signature id = %q, want %q", second.ID, first.ID)
+	}
+
+	hasPending, err := h.Store.HasPendingPlatformWithdrawalForUser(ctx, session.UserID)
+	if err != nil {
+		t.Fatalf("HasPendingPlatformWithdrawalForUser: %v", err)
+	}
+	if hasPending {
+		t.Fatal("expected duplicate pending row to be failed")
+	}
+
+	privy.SetForcedTransferSignature(h.Privy, "")
+	third, err := svc.CreatePlatformWithdrawal(ctx, string(token), 400_000, dest)
+	if err != nil {
+		t.Fatalf("withdrawal after duplicate cleanup: %v", err)
+	}
+	if third.ID == first.ID {
+		t.Fatalf("expected new withdrawal row, got reused id %q", third.ID)
+	}
+}

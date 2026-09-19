@@ -25,6 +25,7 @@ type fakePrivyClient struct {
 	transferCount   int
 	rejectSubmitTransfer bool
 	rejectSubmitTransferErr error
+	forcedTransferSignature string
 	validProofs     map[string]struct{}
 	lastPayout      PayUSDCRequest
 	payoutCount     int
@@ -230,7 +231,10 @@ func (f *fakePrivyClient) SubmitMemberUSDCTransfer(ctx context.Context, req Tran
 	if f.memberBalances[req.MemberAddress] < 0 {
 		f.memberBalances[req.MemberAddress] = 0
 	}
-	sig := deterministicTxSignature(req.MemberAddress, req.ToAddress, req.Amount, f.transferCount)
+	sig := f.forcedTransferSignature
+	if sig == "" {
+		sig = deterministicTxSignature(req.MemberAddress, req.ToAddress, req.Amount, f.transferCount)
+	}
 	return TransferResult{TxSignature: sig}, nil
 }
 
@@ -346,6 +350,17 @@ func BuildValidPayoutProof(userID, payoutAddress string) PayoutProof {
 		Message:       message,
 		Signature:     deterministicPayoutSignature(userID, payoutAddress),
 	}
+}
+
+// SetForcedTransferSignature forces SubmitMemberUSDCTransfer to return a fixed signature for tests.
+func SetForcedTransferSignature(client Client, signature string) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		panic("privy: SetForcedTransferSignature requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.forcedTransferSignature = signature
+	fake.mu.Unlock()
 }
 
 // SetRejectSubmitTransfer forces SubmitMemberUSDCTransfer to fail for tests.
