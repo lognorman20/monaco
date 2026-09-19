@@ -11,11 +11,14 @@ final class AppSessionStore {
     var me: MeResponse?
     var platformBalance: PlatformBalanceDTO?
     var popularAssets: [MarketAssetDTO] = []
+    var homePnLSeries: [HomePnLSeriesPointDTO]?
+    var isHomePnLSeriesLoading = false
     var isBalanceLoading = false
     var errorMessage: String?
     var isLoading = true
 
     private let apiClient = MonacoAPIClient()
+    private var refreshGeneration = 0
 
     var joinedCabals: [HomeGroupBoardRowDTO] {
         (home?.groups ?? []).filter(\.isJoined)
@@ -30,7 +33,7 @@ final class AppSessionStore {
             return
         }
 
-        if home == nil {
+        if me == nil {
             isLoading = true
         }
         errorMessage = nil
@@ -43,6 +46,7 @@ final class AppSessionStore {
             }
             auth.recordBackendSession(userId: session.userId)
             me = session
+            isLoading = false
             await refresh(auth: auth, accessToken: token)
         } catch MonacoAPIError.httpStatus(let status) where status == 401 {
             await auth.logout()
@@ -50,6 +54,7 @@ final class AppSessionStore {
             errorMessage = "Could not open session (HTTP \(status))."
             isLoading = false
         } catch {
+            if error.isRequestCancellation { return }
             errorMessage = "Could not connect to Monaco."
             isLoading = false
         }
@@ -67,42 +72,81 @@ final class AppSessionStore {
             return
         }
 
+        refreshGeneration += 1
+        let generation = refreshGeneration
+
         do {
             isBalanceLoading = platformBalance == nil
-            async let homeLoad = apiClient.getHome(accessToken: token)
             async let dashboardLoad = apiClient.getHomeDashboard(accessToken: token, leaderboardRange: leaderboardRange)
             async let meLoad = apiClient.me(accessToken: token)
             async let balanceLoad = apiClient.getPlatformBalance(accessToken: token)
-            async let popularLoad = apiClient.getPopularAssets(accessToken: token, limit: 10)
-            home = try await homeLoad
-            dashboard = try await dashboardLoad
+            let loadedDashboard = try await dashboardLoad
+            guard generation == refreshGeneration else { return }
+            dashboard = loadedDashboard
             if let profile = try? await meLoad {
                 me = profile
             }
             if let balance = try? await balanceLoad {
                 platformBalance = balance
             }
-            if let popular = try? await popularLoad {
-                popularAssets = popular.assets
-            }
             errorMessage = nil
+            isBalanceLoading = false
+
+            Task {
+                async let deferred: Void = refreshDeferredHomePayloads(auth: auth, accessToken: token)
+                async let pnlSeries: Void = refreshHomePnLSeries(auth: auth, accessToken: token)
+                _ = await (deferred, pnlSeries)
+            }
         } catch MonacoAPIError.httpStatus(let status) where status == 401 {
             await auth.logout()
         } catch MonacoAPIError.httpStatus(let status) {
+            guard generation == refreshGeneration else { return }
             errorMessage = "Could not load home (HTTP \(status))."
-            home = nil
         } catch {
-            if error.isRequestCancellation {
-                isLoading = false
-                isBalanceLoading = false
-                return
-            }
+            if error.isRequestCancellation { return }
+            guard generation == refreshGeneration else { return }
             errorMessage = "Could not load your boards."
-            home = nil
         }
 
-        isLoading = false
-        isBalanceLoading = false
+        if generation == refreshGeneration {
+            isBalanceLoading = false
+        }
+    }
+
+    /// Legacy home boards + popular strip. Does not block Home first paint.
+    func refreshDeferredHomePayloads(auth: PrivyAuthService, accessToken: String? = nil) async {
+        await refreshHomeBoards(accessToken: accessToken ?? auth.accessToken)
+        await refreshPopular(auth: auth)
+    }
+
+    /// Loads GET /v1/home for profile/cabals surfaces. Create-group flows (209) can call this alone.
+    func refreshHomeBoards(accessToken: String?) async {
+        guard let accessToken else { return }
+        do {
+            home = try await apiClient.getHome(accessToken: accessToken)
+        } catch {
+            if error.isRequestCancellation { return }
+            if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
+                return
+            }
+        }
+    }
+
+    /// GET /v1/home/pnl-series for the Home chart. Does not block login or dashboard shell.
+    func refreshHomePnLSeries(auth: PrivyAuthService, accessToken: String? = nil) async {
+        let token = accessToken ?? auth.accessToken
+        guard let token else { return }
+        isHomePnLSeriesLoading = homePnLSeries == nil
+        defer { isHomePnLSeriesLoading = false }
+        do {
+            let series = try await apiClient.getHomePnLSeries(accessToken: token, range: .oneHour)
+            homePnLSeries = series.points
+        } catch {
+            if error.isRequestCancellation { return }
+            if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
+                await auth.logout()
+            }
+        }
     }
 
     func refreshPopular(auth: PrivyAuthService) async {

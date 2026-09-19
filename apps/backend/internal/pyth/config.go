@@ -14,5 +14,5 @@ func NewHermesClientFromConfig(cfg *config.Config) (Client, error) {
 	if cfg.PythAPIKey == "" {
 		return nil, fmt.Errorf("PYTH_API_KEY is required for Pyth marks")
 	}
-	return NewHermesClient(cfg.PythAPIKey), nil
+	return NewHermesClientWithBaseURL(cfg.PythHermesBaseURL, cfg.PythAPIKey), nil
 }

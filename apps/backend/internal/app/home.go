@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
@@ -60,6 +61,7 @@ type HomeResult struct {
 
 // GetHome returns all groups on the group board plus a people board from the viewer's clubs.
 func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResult, error) {
+	ctx = HomeContextWithPotNavCache(ctx)
 	logHomeGetStart()
 
 	identity, err := h.privy.VerifySession(ctx, privy.AccessToken(accessToken))
@@ -95,46 +97,41 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 		return HomeResult{}, err
 	}
 
-	allGroupIDs, err := h.store.ListGroupIDs(ctx)
+	directory, err := h.store.ListGroupDirectory(ctx)
 	if err != nil {
 		return HomeResult{}, err
 	}
 
-	groupInputs := make([]domain.GroupBoardInput, 0, len(allGroupIDs))
+	groupInputs := make([]domain.GroupBoardInput, 0, len(directory))
 	memberPnLByUser := make(map[string][]domain.MemberPnL)
 
-	for _, groupID := range allGroupIDs {
-		group, groupFound, err := h.store.GetGroupByID(ctx, groupID)
-		if err != nil {
-			return HomeResult{}, err
-		}
-		if !groupFound {
-			continue
-		}
+	for _, dir := range directory {
+		groupID := dir.ID
+		netUsdcIn := dir.NetUsdcInMicros
+		_, isJoined := joinedGroups[groupID]
 
-		netUsdcIn, err := h.groupNetUsdcIn(ctx, groupID)
-		if err != nil {
-			return HomeResult{}, err
-		}
-
-		potNav, totalSharesMicro, err := h.groupPotNavAndShares(ctx, groupID, netUsdcIn)
-		if err != nil {
-			if _, isJoined := joinedGroups[group.ID]; isJoined {
-				return HomeResult{}, err
+		var potNav, totalSharesMicro int64
+		if homeDiscoveryNeedsMarkedPot(isJoined, netUsdcIn) {
+			var err error
+			potNav, totalSharesMicro, err = h.groupPotNavAndShares(ctx, groupID, netUsdcIn)
+			if err != nil {
+				if isJoined {
+					return HomeResult{}, err
+				}
+				slog.Warn("home get group pot failed; using net usdc in for discovery row", "group_id", groupID, "err", err)
+				potNav = netUsdcIn
+				totalSharesMicro = 0
 			}
-			slog.Warn("home get group pot failed; using net usdc in for discovery row", "group_id", groupID, "err", err)
-			potNav = netUsdcIn
-			totalSharesMicro = 0
 		}
 
 		groupInputs = append(groupInputs, domain.GroupBoardInput{
-			GroupID:   group.ID,
-			GroupName: group.Name,
+			GroupID:   groupID,
+			GroupName: dir.Name,
 			PotNav:    domain.USDCMicros(potNav),
 			NetUsdcIn: domain.USDCMicros(netUsdcIn),
 		})
 
-		if _, isJoined := joinedGroups[group.ID]; !isJoined {
+		if !isJoined {
 			continue
 		}
 		if err := h.collectGroupMemberPnL(ctx, groupID, potNav, totalSharesMicro, memberPnLByUser); err != nil {
@@ -203,6 +200,10 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 	return result, nil
 }
 
+func homeDiscoveryNeedsMarkedPot(isJoined bool, netUsdcIn int64) bool {
+	return isJoined || domain.IncludeOnBoard(domain.USDCMicros(netUsdcIn))
+}
+
 func (h *HomeService) groupNetUsdcIn(ctx context.Context, groupID string) (int64, error) {
 	positions, err := h.store.ListPositionsByGroup(ctx, groupID)
 	if err != nil {
@@ -233,6 +234,48 @@ func (h *HomeService) GroupTreasuryTotalMicros(ctx context.Context, groupID stri
 }
 
 func (h *HomeService) groupPotNavAndShares(ctx context.Context, groupID string, netUsdcIn int64) (int64, int64, error) {
+	cache := homePotNavCacheFrom(ctx)
+	if cache == nil {
+		return h.computeGroupPotNavAndShares(ctx, groupID, netUsdcIn)
+	}
+
+	cache.mu.Lock()
+	if entry, ok := cache.entries[groupID]; ok {
+		cache.mu.Unlock()
+		return entry.potNav, entry.totalShares, entry.err
+	}
+	if wg, ok := cache.inflight[groupID]; ok {
+		cache.mu.Unlock()
+		wg.Wait()
+		cache.mu.Lock()
+		entry := cache.entries[groupID]
+		cache.mu.Unlock()
+		return entry.potNav, entry.totalShares, entry.err
+	}
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	if cache.inflight == nil {
+		cache.inflight = make(map[string]*sync.WaitGroup)
+	}
+	cache.inflight[groupID] = wg
+	cache.mu.Unlock()
+
+	potNav, totalShares, err := h.computeGroupPotNavAndShares(ctx, groupID, netUsdcIn)
+
+	cache.mu.Lock()
+	cache.entries[groupID] = homePotNavCacheEntry{
+		potNav:      potNav,
+		totalShares: totalShares,
+		err:         err,
+	}
+	cache.computes++
+	delete(cache.inflight, groupID)
+	cache.mu.Unlock()
+	wg.Done()
+	return potNav, totalShares, err
+}
+
+func (h *HomeService) computeGroupPotNavAndShares(ctx context.Context, groupID string, netUsdcIn int64) (int64, int64, error) {
 	treasuryUSDC, err := h.groupTreasuryUSDC(ctx, groupID, netUsdcIn)
 	if err != nil {
 		return 0, 0, err
