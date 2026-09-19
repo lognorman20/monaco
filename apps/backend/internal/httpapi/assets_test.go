@@ -122,6 +122,74 @@ func TestGET_assets_popular_returnsPinnedAssets(t *testing.T) {
 	}
 }
 
+func TestGET_assets_popular_pythOnly_skipsJupiterQuoteBuy(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+		Symbol:     "AAPLx",
+		Name:       "Apple",
+		SolanaMint: jupiter.AAPLxMint,
+		Routable:   true,
+	})
+	pyth.RegisterAssetMark(handlers.Pyth, "AAPLx", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
+	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, 1_000_000, jupiter.BuyQuote{
+		Routable:   true,
+		InputMint:  jupiter.USDCMint,
+		OutputMint: jupiter.AAPLxMint,
+		InAmount:   "1000000",
+		OutAmount:  "100000000",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/popular?limit=3", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handlers.PopularAssetsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	if got := jupiter.QuoteBuyCallCount(jupiterClient); got != 0 {
+		t.Fatalf("QuoteBuy calls = %d, want 0 on popular enrichment", got)
+	}
+}
+
+func TestGET_assets_popular_missingPythMark_omitsPriceWithoutJupiter(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+		Symbol:     "AAPLx",
+		Name:       "Apple",
+		SolanaMint: jupiter.AAPLxMint,
+		Routable:   true,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/popular?limit=3", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handlers.PopularAssetsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	var payload popularAssetsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if len(payload.Assets) != 1 {
+		t.Fatalf("assets len = %d, want 1", len(payload.Assets))
+	}
+	if payload.Assets[0].PriceUsdcMicros != nil {
+		t.Fatalf("priceUsdcMicros = %v, want nil without Pyth mark", payload.Assets[0].PriceUsdcMicros)
+	}
+	if got := jupiter.QuoteBuyCallCount(jupiterClient); got != 0 {
+		t.Fatalf("QuoteBuy calls = %d, want 0 when Pyth mark missing", got)
+	}
+}
+
 func TestGET_assets_symbol_returnsDetailAndLiquidity(t *testing.T) {
 	t.Parallel()
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/packages/domain"
@@ -59,6 +60,53 @@ func TestGET_homeDashboard_authenticated_returnsEmptyDashboard(t *testing.T) {
 	}
 	if payload.Leaderboard.Range != "ALL" {
 		t.Fatalf("leaderboard range = %q, want ALL", payload.Leaderboard.Range)
+	}
+}
+
+func TestGET_homeDashboard_fundedGroup_computesPotNavOncePerJoinedGroup(t *testing.T) {
+	t.Parallel()
+	homeHandlers, authHandlers, groupHandlers, privyClient, store, iso := integrationHomeApp(t)
+	session, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "dashboard-dedup", "Alfred")
+
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Dedup cabal"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+string(token))
+	createRec := httptest.NewRecorder()
+	groupHandlers.CreateGroupHandler(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create group status = %d, want 200; body = %s", createRec.Code, createRec.Body.String())
+	}
+
+	var created createGroupResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create group json: %v", err)
+	}
+	trackCreatedGroup(iso, created.GroupID)
+
+	ctx := context.Background()
+	tx, err := store.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if _, err := store.IncrementPositionTx(ctx, tx, session.UserID, created.GroupID, 100_000_000, 100_000_000); err != nil {
+		t.Fatalf("IncrementPositionTx: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit position: %v", err)
+	}
+	privy.SetTreasuryUSDCBalance(privyClient, created.TreasuryAddress, 100_000_000)
+
+	ctx = app.HomeContextWithPotNavCache(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/v1/home/dashboard", nil).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer "+string(token))
+	rec := httptest.NewRecorder()
+	homeHandlers.HomeDashboardHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	if got := app.HomePotNavComputeCount(ctx); got != 1 {
+		t.Fatalf("groupPotNavAndShares computes = %d, want 1 per joined group on dashboard", got)
 	}
 }
 
