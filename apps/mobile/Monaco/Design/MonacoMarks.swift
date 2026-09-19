@@ -30,19 +30,27 @@ struct CabalMark: View {
             .accessibilityHidden(true)
     }
 
-    /// First grapheme of the first two words that start with a letter or digit, uppercased.
-    /// Emoji- or punctuation-only names fall back to their first grapheme. Empty names render an empty tile.
+    /// Connectors and articles never become initials ("Semis or bust" → "SB", not "SO").
+    static let skippedWords: Set<String> = ["or", "of", "the", "and", "a", "an", "&", "+", "to", "in", "on", "for", "with", "at", "by"]
+
+    /// First letters of the first and last significant words, uppercased: "Weekend investors" → "WI",
+    /// "Semis or bust" → "SB". One significant word gives one letter ("Rent" → "R").
+    /// Words that do not start with a letter or digit are ignored; emoji- or punctuation-only names fall
+    /// back to their first grapheme. Empty names render an empty tile.
     static func initials(for name: String) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let words = trimmed.split(whereSeparator: { $0.isWhitespace })
-        let letters = words
-            .compactMap { $0.first }
-            .filter { $0.isLetter || $0.isNumber }
-            .prefix(2)
-        if !letters.isEmpty {
-            return letters.map { String($0).uppercased() }.joined()
+        let words = trimmed
+            .split(whereSeparator: { $0.isWhitespace })
+            .filter { word in word.first.map { $0.isLetter || $0.isNumber } ?? false }
+        let significant = words.filter { !skippedWords.contains($0.lowercased()) }
+        let pool = significant.isEmpty ? words : significant
+        guard let first = pool.first?.first else {
+            return trimmed.first.map { String($0) } ?? ""
         }
-        return trimmed.first.map { String($0) } ?? ""
+        guard pool.count > 1, let last = pool.last?.first else {
+            return String(first).uppercased()
+        }
+        return (String(first) + String(last)).uppercased()
     }
 }
 
