@@ -47,6 +47,7 @@ struct GroupDetailView: View {
     @State private var heroScrolledAway = false
 
     private let activityPollInterval: Duration = .seconds(15)
+    private let activityPollIntervalWhilePending: Duration = DepositPolling.sweepStatusInterval
 
     init(
         auth: PrivyAuthService,
@@ -332,9 +333,15 @@ struct GroupDetailView: View {
 
     private func pollActivityWhileVisible() async {
         while !Task.isCancelled {
-            try? await Task.sleep(for: activityPollInterval)
+            try? await Task.sleep(for: activityHasPendingDeposits ? activityPollIntervalWhilePending : activityPollInterval)
             guard !Task.isCancelled else { return }
             await loadActivity(showLoadingIndicator: false)
+        }
+    }
+
+    private var activityHasPendingDeposits: Bool {
+        activityItems.contains { item in
+            item.kind.lowercased() == "deposit" && DepositStatusNormalizer.isPending(item.status)
         }
     }
 

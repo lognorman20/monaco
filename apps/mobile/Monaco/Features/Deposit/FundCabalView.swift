@@ -209,16 +209,16 @@ struct FundCabalView: View {
         isSubmitting = true
         defer { isSubmitting = false }
 
+        let fundedAmountLabel = AmountEntryText.display(amountText)
         do {
             let fund = try await apiClient.fundGroup(accessToken: token, groupId: groupId, amount: micros)
             Haptics.success()
             let name = selectedCabalName ?? "your cabal"
-            toast = MonacoToast(message: "Adding \(AmountEntryText.display(amountText)) to \(name)…", isSuccess: true)
+            toast = MonacoToast(message: "Adding \(fundedAmountLabel) to \(name)…", isSuccess: true)
             amountText = ""
             await loadBalance()
-            await pollFundSweep(depositId: fund.depositId)
-            toast = MonacoToast(message: "Added money to \(name).", isSuccess: true)
             await onFunded()
+            trackFundSweep(depositId: fund.depositId, cabalName: name, amountLabel: fundedAmountLabel)
         } catch MonacoAPIError.httpStatus(400) {
             toast = MonacoToast(message: "More than you have. Try a smaller amount.", isSuccess: false)
         } catch MonacoAPIError.httpStatus(403) {
@@ -248,22 +248,31 @@ struct FundCabalView: View {
         }
     }
 
-    private func pollFundSweep(depositId: String) async {
+    private func trackFundSweep(depositId: String, cabalName: String, amountLabel: String) {
+        Task {
+            await pollFundSweep(depositId: depositId, cabalName: cabalName, amountLabel: amountLabel)
+        }
+    }
+
+    private func pollFundSweep(depositId: String, cabalName: String, amountLabel: String) async {
         guard let token = auth.accessToken else { return }
         var machine = DepositPollStateMachine()
-        while !Task.isCancelled {
-            guard let deposit = try? await apiClient.getDeposit(accessToken: token, depositId: depositId) else {
-                try? await Task.sleep(for: DepositPolling.sweepStatusInterval)
-                continue
-            }
-            machine.apply(status: deposit.status)
-            if machine.isTerminal {
-                if case .failed = machine.phase {
-                    toast = MonacoToast(message: "Couldn't add money to the cabal. Try again.", isSuccess: false)
-                }
-                return
-            }
-            try? await Task.sleep(for: DepositPolling.sweepStatusInterval)
+        let phase = await machine.pollUntilTerminal {
+            let deposit = try await apiClient.getDeposit(accessToken: token, depositId: depositId)
+            return deposit.status
+        }
+        switch phase {
+        case .credited:
+            toast = MonacoToast(message: "Added \(amountLabel) to \(cabalName).", isSuccess: true)
+            await onFunded()
+        case .failed:
+            toast = MonacoToast(message: "Couldn't add money to the cabal. Try again.", isSuccess: false)
+            await onFunded()
+        case .idle, .awaitingSweep:
+            toast = MonacoToast(
+                message: "Still adding \(amountLabel) to \(cabalName). Check activity for updates.",
+                isSuccess: true
+            )
         }
     }
 }

@@ -236,12 +236,10 @@ enum GroupActivityRules {
 
     /// Nil when confirmed: a row only says its status when something needs attention.
     static func statusLabel(_ status: String) -> (text: String, isFailure: Bool)? {
-        switch status.lowercased() {
-        case "confirmed": nil
-        case "pending": ("Pending", false)
-        case "failed": ("Failed", true)
-        default: (status.capitalized, false)
-        }
+        if DepositStatusNormalizer.isConfirmed(status) { return nil }
+        if DepositStatusNormalizer.isPending(status) { return ("Pending", false) }
+        if DepositStatusNormalizer.isFailed(status) { return ("Failed", true) }
+        return (status.capitalized, false)
     }
 
     /// Dollar figure for the row, or nil when a sell has no proceeds yet (shown in shares instead).

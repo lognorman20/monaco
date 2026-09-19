@@ -48,6 +48,7 @@ struct TransactionDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: loadTaskID) {
             await loadDetail()
+            await pollDepositDetailWhilePending()
         }
     }
 
@@ -90,6 +91,24 @@ struct TransactionDetailView: View {
             return
         } catch {
             errorMessage = "Couldn't load this. Try again"
+        }
+    }
+
+    private func pollDepositDetailWhilePending() async {
+        guard isDeposit else { return }
+        guard let token = auth.accessToken else { return }
+        var machine = DepositPollStateMachine()
+        if let status = deposit?.status {
+            machine.apply(status: status)
+        } else if DepositStatusNormalizer.isPending(activityItem.status) {
+            machine.apply(status: activityItem.status)
+        }
+        guard !machine.isTerminal else { return }
+
+        _ = await machine.pollUntilTerminal {
+            let latest = try await apiClient.getDeposit(accessToken: token, depositId: activityItem.id)
+            deposit = latest
+            return latest.status
         }
     }
 }
@@ -211,12 +230,10 @@ struct TransactionReceipt: Equatable {
     }
 
     private static func status(_ raw: String) -> Status {
-        switch raw.lowercased() {
-        case "confirmed": .confirmed
-        case "pending": .pending
-        case "failed": .failed
-        default: .other(raw)
-        }
+        if DepositStatusNormalizer.isConfirmed(raw) { return .confirmed }
+        if DepositStatusNormalizer.isPending(raw) { return .pending }
+        if DepositStatusNormalizer.isFailed(raw) { return .failed }
+        return .other(raw)
     }
 
     private static func stockName(_ symbol: String?) -> String {
