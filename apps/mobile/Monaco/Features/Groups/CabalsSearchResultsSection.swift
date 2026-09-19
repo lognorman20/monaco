@@ -20,22 +20,16 @@ struct CabalsSearchResultsSection: View {
                     .frame(maxWidth: .infinity, minHeight: 80)
                     .accessibilityIdentifier("cabals-search-loading")
             case .empty:
-                MonacoEmptyStateCard(
-                    message: "No cabal called \u{201C}\(model.query.trimmingCharacters(in: .whitespacesAndNewlines))\u{201D}.",
-                    systemImage: "magnifyingglass"
+                EmptyState(
+                    title: "No cabal called \u{201C}\(model.query.trimmingCharacters(in: .whitespacesAndNewlines))\u{201D}."
                 )
                 .accessibilityIdentifier("cabals-search-empty")
             case .failed:
-                VStack(spacing: MonacoTheme.Space.s) {
-                    Text("Search didn't go through.")
-                        .font(MonacoTheme.TypeRole.body)
-                        .foregroundStyle(MonacoTheme.muted)
-                    Button("Try again") { model.retrySearch() }
-                        .buttonStyle(.monacoSecondary)
-                        .accessibilityIdentifier("cabals-search-retry")
-                }
-                .frame(maxWidth: .infinity)
-                .monacoSurfaceCard()
+                EmptyState(
+                    title: "Search didn't go through",
+                    actionTitle: "Try again",
+                    action: { model.retrySearch() }
+                )
                 .accessibilityIdentifier("cabals-search-error")
             case .results:
                 results
