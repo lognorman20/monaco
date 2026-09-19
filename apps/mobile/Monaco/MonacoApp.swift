@@ -15,9 +15,22 @@ struct MonacoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            root
                 .environmentObject(auth)
                 .tint(MonacoTheme.ink)
         }
+    }
+
+    @ViewBuilder
+    private var root: some View {
+        #if DEBUG
+        if ChatSampleQA.isEnabled {
+            ChatSampleQA.rootView()
+        } else {
+            ContentView()
+        }
+        #else
+        ContentView()
+        #endif
     }
 }

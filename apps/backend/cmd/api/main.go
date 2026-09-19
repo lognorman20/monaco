@@ -77,6 +77,8 @@ var apiRoutes = []string{
 	"GET /v1/assets/{symbol}/chart",
 	"POST /v1/groups/{id}/quotes",
 	"POST /v1/groups/{id}/proposals",
+	"GET /v1/groups/{id}/messages",
+	"POST /v1/groups/{id}/messages",
 	"GET /v1/proposals/{id}",
 	"POST /v1/proposals/{id}/votes",
 	"POST /v1/groups/{id}/agents/intents",
@@ -220,6 +222,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 		addr = v
 	}
 
+	groupChat := app.NewGroupChatService(store, privyClient)
+	groupMessageHandlers := &httpapi.GroupMessageHandlers{Chat: groupChat}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", httpapi.HealthHandler)
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
@@ -265,6 +270,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("POST /v1/groups/{id}/quotes", quoteHandlers.QuoteHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/proposals", proposalHandlers.ListGroupProposalsHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/proposals", proposalHandlers.CreateProposalHandler)
+	mux.HandleFunc("GET /v1/groups/{id}/messages", groupMessageHandlers.ListGroupMessagesHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/messages", groupMessageHandlers.PostGroupMessageHandler)
 	mux.HandleFunc("GET /v1/proposals/{id}", proposalHandlers.GetProposalDetailHandler)
 	mux.HandleFunc("POST /v1/proposals/{id}/votes", proposalHandlers.CastVoteHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/agents/intents", agentHandlers.SubmitAgentIntentHandler)
