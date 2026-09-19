@@ -3,7 +3,7 @@
 // Two profiles exist:
 //   - mixed: ghost members (Maya Chen, Jordan Hale, Priya Shah) on the operator's REAL club.
 //     Display-only positions, deposits, proposals, and votes. No member_wallets, no transactions.
-//   - scale: three wholly fake clubs (groups.is_faker) with a dummy treasury, fake deposits,
+//   - scale: six wholly fake clubs (groups.is_faker) with a dummy treasury, fake deposits,
 //     a confirmed buy (real xStock mint + cost basis), an optional sell, failed/open/passed
 //     proposals, votes, and a week of NAV snapshots.
 //
@@ -176,6 +176,64 @@ var scaleClubs = []clubSpec{
 				Thesis: "Down a lot from the high. If the robotaxi news lands, we want to own some."},
 		},
 		BuySymbol: "AAPLx", BuyMint: jupiter.AAPLxMint, BuyCostPx: 1.03, ChartDrift: 0.02,
+	},
+	{
+		// Small, loud winners: most of the pot went into one buy well below today's mark.
+		Key: "dorm-4b", Name: "Dorm 4B fund",
+		Creator: person{Slug: "ellie", Name: "Ellie Novak"},
+		Members: []person{{Slug: "raj", Name: "Raj Mehta"}, {Slug: "chloe", Name: "Chloe Dubois"}, {Slug: "noah", Name: "Noah Kim"}},
+		Deposits: []depositSpec{
+			{Who: "ellie", USDC: 400, HoursAgo: 7*24 + 4, SharePx: 1},
+			{Who: "raj", USDC: 300, HoursAgo: 6 * 24, SharePx: 1},
+			{Who: "chloe", USDC: 250, HoursAgo: 5*24 + 10, SharePx: 1},
+			{Who: "noah", USDC: 200, HoursAgo: 4 * 24, SharePx: 1},
+		},
+		Proposals: []proposalSpec{
+			{Key: "buy", Proposer: "ellie", Symbol: "TSLAx", USDC: 1100, Status: "passed", HoursAgo: 3*24 + 20, ExpiresHours: 24, Buy: true,
+				Votes:  []voteSpec{{"ellie", "yes"}, {"raj", "yes"}, {"noah", "yes"}},
+				Thesis: "All in on one name. We're students, we can afford to be wrong."},
+			{Key: "open", Proposer: "chloe", Symbol: "AAPLx", USDC: 40, Status: "open", HoursAgo: 4, ExpiresHours: 24,
+				Votes:  []voteSpec{{"chloe", "yes"}},
+				Thesis: "Take a little off the table into something boring."},
+		},
+		BuySymbol: "TSLAx", BuyMint: jupiter.TSLAxMint, BuyCostPx: 0.76, ChartDrift: 0.32,
+	},
+	{
+		// Slightly underwater: bought near a local top.
+		Key: "rent-money", Name: "Rent money",
+		Creator: person{Slug: "mateo", Name: "Mateo Rossi"},
+		Members: []person{{Slug: "grace", Name: "Grace Liu"}, {Slug: "felix", Name: "Felix Wagner"}, {Slug: "amara", Name: "Amara Obi"}},
+		Deposits: []depositSpec{
+			{Who: "mateo", USDC: 900, HoursAgo: 7*24 + 1, SharePx: 1},
+			{Who: "grace", USDC: 700, HoursAgo: 6*24 + 8, SharePx: 1},
+			{Who: "felix", USDC: 500, HoursAgo: 5 * 24, SharePx: 1},
+			{Who: "amara", USDC: 600, HoursAgo: 3 * 24, SharePx: 1},
+		},
+		Proposals: []proposalSpec{
+			{Key: "buy", Proposer: "grace", Symbol: "AAPLx", USDC: 2400, Status: "passed", HoursAgo: 2*24 + 12, ExpiresHours: 24, Buy: true,
+				Votes:  []voteSpec{{"grace", "yes"}, {"mateo", "yes"}, {"amara", "yes"}, {"felix", "no"}},
+				Thesis: "Safe enough to park rent money for a month. Famous last words."},
+		},
+		BuySymbol: "AAPLx", BuyMint: jupiter.AAPLxMint, BuyCostPx: 1.045, ChartDrift: -0.04,
+	},
+	{
+		// Flat and patient.
+		Key: "index-huggers", Name: "Index huggers",
+		Creator: person{Slug: "iris", Name: "Iris Holm"},
+		Members: []person{{Slug: "owen", Name: "Owen Price"}, {Slug: "lucia", Name: "Lucia Moreno"}, {Slug: "dev", Name: "Dev Anand"}, {Slug: "maria", Name: "Maria Costa"}},
+		Deposits: []depositSpec{
+			{Who: "iris", USDC: 1500, HoursAgo: 7*24 + 6, SharePx: 1},
+			{Who: "owen", USDC: 1000, HoursAgo: 6*24 + 2, SharePx: 1},
+			{Who: "lucia", USDC: 800, HoursAgo: 5*24 + 3, SharePx: 1},
+			{Who: "dev", USDC: 1200, HoursAgo: 4 * 24, SharePx: 1},
+			{Who: "maria", USDC: 500, HoursAgo: 2 * 24, SharePx: 1},
+		},
+		Proposals: []proposalSpec{
+			{Key: "buy", Proposer: "iris", Symbol: "AAPLx", USDC: 3000, Status: "passed", HoursAgo: 5 * 24, ExpiresHours: 24, Buy: true,
+				Votes:  []voteSpec{{"iris", "yes"}, {"owen", "yes"}, {"dev", "yes"}},
+				Thesis: "Closest thing to the index we can buy here. Then we leave it alone."},
+		},
+		BuySymbol: "AAPLx", BuyMint: jupiter.AAPLxMint, BuyCostPx: 0.97, ChartDrift: 0.02,
 	},
 }
 

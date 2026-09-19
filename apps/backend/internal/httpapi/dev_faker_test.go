@@ -150,8 +150,8 @@ func TestDevFaker_allProfileSeedsIdempotently(t *testing.T) {
 	var a, b devFakerResponse
 	_ = json.Unmarshal(first.Body.Bytes(), &a)
 	_ = json.Unmarshal(second.Body.Bytes(), &b)
-	if len(a.Scale.Clubs) != 3 || len(b.Scale.Clubs) != 3 {
-		t.Fatalf("clubs = %d / %d, want 3", len(a.Scale.Clubs), len(b.Scale.Clubs))
+	if len(a.Scale.Clubs) != 6 || len(b.Scale.Clubs) != 6 {
+		t.Fatalf("clubs = %d / %d, want 6", len(a.Scale.Clubs), len(b.Scale.Clubs))
 	}
 	for i := range a.Scale.Clubs {
 		if a.Scale.Clubs[i].GroupID != b.Scale.Clubs[i].GroupID {

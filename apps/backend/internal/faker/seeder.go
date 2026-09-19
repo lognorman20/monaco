@@ -289,7 +289,7 @@ VALUES ($1, $2, $3, $4, $5) RETURNING id`, proposalID, ids[c.Who], parent, c.Bod
 	return out, nil
 }
 
-// SeedScale upserts the three wholly fake scale clubs.
+// SeedScale upserts the wholly fake scale clubs.
 func (s *Seeder) SeedScale(ctx context.Context) (ScaleResult, error) {
 	now := s.now().UTC()
 	var result ScaleResult

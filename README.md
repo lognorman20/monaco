@@ -128,7 +128,8 @@ full Privy setup. Local Postgres only. It never calls Privy, Solana RPC, or Jupi
 
 Two profiles:
 
-- **scale**: three fake clubs (Ridgewood Value Club, Night Shift Traders, Harbor Street Fund).
+- **scale**: six fake clubs (Ridgewood Value Club, Night Shift Traders, Harbor Street Fund, plus the
+  smaller Dorm 4B fund, Rent money and Index huggers).
   Each has a fake creator, five depositors, deposits spread over the last week, a confirmed
   AAPLx/TSLAx buy, a governed sell (Ridgewood and Night Shift), failed and open proposals, votes,
   and NAV history for charts. Any signed-in user sees them on Home (group board and people
@@ -147,7 +148,7 @@ Two profiles:
 
 ```bash
 just reset db                        # optional: start from an empty DB
-just faker scale                     # three fake clubs
+just faker scale                     # six fake clubs
 just faker mixed <your_group_id>     # ghosts on your real club
 just faker all <your_group_id>       # both
 just faker demo <your_group_id> [<real_proposal_id>]   # recording setup

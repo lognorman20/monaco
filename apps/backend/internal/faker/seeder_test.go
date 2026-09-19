@@ -98,12 +98,15 @@ func TestSeedMixedAndScale_idempotentAndInert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SeedScale: %v", err)
 	}
-	if len(mixed.UserIDs) != 3 || len(scale.Clubs) != 3 {
-		t.Fatalf("seeded %d ghosts, %d clubs; want 3 and 3", len(mixed.UserIDs), len(scale.Clubs))
+	if len(mixed.UserIDs) != 3 || len(scale.Clubs) != len(scaleClubs) || len(scaleClubs) != 6 {
+		t.Fatalf("seeded %d ghosts, %d clubs; want 3 and 6", len(mixed.UserIDs), len(scale.Clubs))
 	}
 
 	snapshot := func() [6]int {
-		clubIDs := []string{scale.Clubs[0].GroupID, scale.Clubs[1].GroupID, scale.Clubs[2].GroupID}
+		var clubIDs []string
+		for _, c := range scale.Clubs {
+			clubIDs = append(clubIDs, c.GroupID)
+		}
 		return [6]int{
 			countRows(t, e, `SELECT count(*) FROM users WHERE privy_user_id LIKE $1`, "faker:user:test-"+e.iso.Suffix()+"-%"),
 			countRows(t, e, `SELECT count(*) FROM groups WHERE faker_key LIKE $1`, "scale:test-"+e.iso.Suffix()+"-%"),
@@ -143,8 +146,8 @@ func TestSeedMixedAndScale_idempotentAndInert(t *testing.T) {
 	if first[5] != 4 {
 		t.Errorf("real club members = %d, want operator + 3 ghosts", first[5])
 	}
-	if first[4] != 5 {
-		t.Errorf("transactions = %d, want 3 buys + 2 sells in scale clubs, none in mixed", first[4])
+	if first[4] != 8 {
+		t.Errorf("transactions = %d, want 6 buys + 2 sells in scale clubs, none in mixed", first[4])
 	}
 
 	// Never any member wallets for faker users, never FAKE* treasuries on faker clubs.
@@ -179,7 +182,12 @@ func TestSeedMixedAndScale_idempotentAndInert(t *testing.T) {
 	for _, g := range home.Groups {
 		onHome[g.GroupID] = true
 	}
-	for _, c := range scale.Clubs {
+	for i, c := range scale.Clubs {
+		spec := scaleClubs[i]
+		var netIn float64
+		for _, d := range spec.Deposits {
+			netIn += float64(d.USDC)
+		}
 		if !onHome[c.GroupID] {
 			t.Errorf("home missing %s", c.Name)
 		}
@@ -188,17 +196,18 @@ func TestSeedMixedAndScale_idempotentAndInert(t *testing.T) {
 			t.Fatalf("GetGroupView(%s): %v", c.Name, err)
 		}
 		// Sanity: pot NAV (ledger USDC + 8-decimal holdings at cost) sits near net deposits,
-		// never 100x off. Clubs take in 8.5k-14k USDC.
-		if pot, err := strconv.ParseFloat(view.PotTotalUsd, 64); err != nil || pot < 7_000 || pot > 16_000 {
-			t.Errorf("%s pot total = %s, want within 7000-16000 USD", c.Name, view.PotTotalUsd)
+		// never 100x off.
+		if pot, err := strconv.ParseFloat(view.PotTotalUsd, 64); err != nil || pot < netIn*0.6 || pot > netIn*1.6 {
+			t.Errorf("%s pot total = %s, want within 60-160%% of %.0f USD in", c.Name, view.PotTotalUsd, netIn)
 		}
-		if len(view.Members) != 6 || view.TreasuryAddress != "" {
+		if len(view.Members) != 1+len(spec.Members) || view.TreasuryAddress != "" {
 			t.Errorf("%s view members=%d treasury=%q", c.Name, len(view.Members), view.TreasuryAddress)
 		}
 		activity, err := e.home.ListGroupActivity(ctx, e.token, c.GroupID)
-		if err != nil || len(activity) < 7 {
+		if err != nil || len(activity) < len(spec.Deposits)+1 {
 			t.Errorf("%s activity rows=%d err=%v", c.Name, len(activity), err)
 		}
+		t.Logf("%s pot %s from %.0f in", c.Name, view.PotTotalUsd, netIn)
 		if n := countRows(t, e, `SELECT count(*) FROM nav_snapshots WHERE group_id = $1`, c.GroupID); n < 10 {
 			t.Errorf("%s nav snapshots = %d, want a week of history", c.Name, n)
 		}
