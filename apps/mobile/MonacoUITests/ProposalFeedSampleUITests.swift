@@ -215,12 +215,17 @@ final class ProposeFlowSampleUITests: XCTestCase {
         let half = app.buttons["50%"]
         XCTAssertTrue(half.waitForExistence(timeout: 5))
         half.tap()
+        let thesis = element("proposal-sell-thesis-field")
+        XCTAssertTrue(thesis.waitForExistence(timeout: 3))
+        thesis.tap()
+        thesis.typeText("Take some profit before earnings.")
         sleep(1)
         capture("21-sell-amount")
 
         app.buttons["Review"].tap()
         let send = app.buttons["Send to cabal"]
         XCTAssertTrue(send.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Take some profit before earnings."].exists)
         sleep(1)
         capture("22-sell-review")
         send.tap()
