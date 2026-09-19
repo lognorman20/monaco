@@ -40,6 +40,9 @@ func (g *GovernanceService) QuoteProposal(ctx context.Context, in QuoteProposalI
 	if in.GroupID == "" || in.UserID == "" {
 		return QuoteProposalResult{}, fmt.Errorf("group_id and user_id are required")
 	}
+	if err := rejectFakerGroup(ctx, g.store, in.GroupID); err != nil {
+		return QuoteProposalResult{}, err
+	}
 	member, err := g.store.IsGroupMember(ctx, in.GroupID, in.UserID)
 	if err != nil {
 		return QuoteProposalResult{}, err

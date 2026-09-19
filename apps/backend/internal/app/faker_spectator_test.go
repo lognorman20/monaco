@@ -206,7 +206,7 @@ func TestFakerSpectator_mutationsRejectedOnScaleClub(t *testing.T) {
 	if _, err := fx.governance.JoinGroup(ctx, fx.operatorToken, fx.fakerGroupID); !errors.Is(err, ErrFakerGroupReadOnly) {
 		t.Errorf("JoinGroup err = %v, want ErrFakerGroupReadOnly", err)
 	}
-	if err := fx.governance.LeaveGroup(ctx, fx.operatorToken, fx.fakerGroupID); !errors.Is(err, ErrFakerGroupReadOnly) {
+	if err := fx.governance.LeaveGroup(ctx, LeaveGroupRequest{AccessToken: fx.operatorToken, GroupID: fx.fakerGroupID, WithdrawStake: true}); !errors.Is(err, ErrFakerGroupReadOnly) {
 		t.Errorf("LeaveGroup err = %v, want ErrFakerGroupReadOnly", err)
 	}
 	if _, err := fx.home.deposits.CreateDeposit(ctx, fx.operatorToken, fx.fakerGroupID, 1_000_000); !errors.Is(err, ErrFakerGroupReadOnly) {
