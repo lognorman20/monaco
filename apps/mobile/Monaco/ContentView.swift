@@ -14,6 +14,8 @@ struct ContentView: View {
         #if DEBUG
         if let scenario = ProfileSampleScenario.requested {
             ProfileSampleHarness(scenario: scenario, auth: auth)
+        } else if let scenario = HomeSampleScenario.requested {
+            HomeSampleHarness(scenario: scenario, auth: auth)
         } else if CabalsTabSampleData.isEnabled {
             CabalsTabSampleHarness(auth: auth)
         } else if let scenario = GroupDetailSampleScenario.requested {
