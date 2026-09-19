@@ -63,7 +63,9 @@ struct GroupHeroSection: View {
                         .foregroundStyle(MonacoTheme.muted)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
-                    PnLText(dollarPnl: view.you.dollarPnl, style: .caption)
+                    if GroupHeroMath.hasSlice(view.you) {
+                        PnLText(dollarPnl: view.you.dollarPnl, style: .caption)
+                    }
                 }
             }
             .accessibilityElement(children: .combine)
@@ -120,6 +122,10 @@ enum GroupHeroMath {
         formatter.minimumIntegerDigits = 1
         let magnitude = formatter.string(from: NSDecimalNumber(decimal: rounded < 0 ? -rounded : rounded)) ?? "0.00"
         return (rounded < 0 ? "-" : "+") + magnitude
+    }
+
+    static func hasSlice(_ slice: MemberSliceDTO) -> Bool {
+        (Double(slice.slicePercent) ?? 0) > 0
     }
 
     /// "57% of the pot", or a nudge when the member hasn't put money in yet.

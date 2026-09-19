@@ -30,11 +30,16 @@ struct GroupChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                Text(GroupChatCopy.title(groupName: groupName))
-                    .font(.headline)
-                    .foregroundStyle(MonacoTheme.ink)
-                    .lineLimit(1)
-                    .accessibilityAddTraits(.isHeader)
+                HStack(spacing: 8) {
+                    CabalMark(groupId: groupId, name: GroupChatCopy.title(groupName: groupName), size: 28)
+                        .accessibilityHidden(true)
+                    Text(GroupChatCopy.title(groupName: groupName))
+                        .font(.headline)
+                        .foregroundStyle(MonacoTheme.ink)
+                        .lineLimit(1)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
             }
         }
         .task {
@@ -114,7 +119,7 @@ struct GroupChatView: View {
                             || next.map { separatorLabel(for: $0, previous: message) != nil } == true
                         if let separator {
                             Text(separator)
-                                .font(.caption2.weight(.semibold))
+                                .font(MonacoTheme.Typo.micro)
                                 .foregroundStyle(MonacoTheme.muted)
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, index == 0 ? 8 : 16)
@@ -176,10 +181,11 @@ struct GroupChatView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 11)
                     .frame(minHeight: 44)
-                    .background(MonacoTheme.border.opacity(0.45), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .background(MonacoTheme.surfaceSunken, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .accessibilityIdentifier("group-chat-composer")
 
                 Button {
+                    Haptics.tap()
                     Task { await send() }
                 } label: {
                     ZStack {
@@ -340,12 +346,13 @@ private struct GroupChatBubble: View {
 
     /// Rounded 20 all round, with a tighter corner on the sender's side at the end of a run.
     private var bubbleShape: UnevenRoundedRectangle {
-        let tail: CGFloat = endsRun ? 6 : 20
+        let radius = MonacoTheme.Radius.bubble
+        let tail: CGFloat = endsRun ? 6 : radius
         return UnevenRoundedRectangle(
-            topLeadingRadius: 20,
-            bottomLeadingRadius: message.mine ? 20 : tail,
-            bottomTrailingRadius: message.mine ? tail : 20,
-            topTrailingRadius: 20,
+            topLeadingRadius: radius,
+            bottomLeadingRadius: message.mine ? radius : tail,
+            bottomTrailingRadius: message.mine ? tail : radius,
+            topTrailingRadius: radius,
             style: .continuous
         )
     }

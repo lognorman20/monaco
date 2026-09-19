@@ -156,6 +156,16 @@ struct GroupActivityRow: View {
                 .lineLimit(1)
             }
             Spacer(minLength: 8)
+            if !GroupActivityRules.canRetry(item) {
+                amount
+            }
+        }
+        .padding(.vertical, 10)
+        .frame(minHeight: 60)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var amount: some View {
             Group {
                 if let micros = GroupActivityRules.amountMicros(item) {
                     MoneyText(micros: micros, style: .row)
@@ -166,10 +176,6 @@ struct GroupActivityRow: View {
                 }
             }
             .lineLimit(1)
-        }
-        .padding(.vertical, 10)
-        .frame(minHeight: 60)
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -202,8 +208,25 @@ enum GroupActivityRules {
         }
     }
 
+    /// "Bought Apple", "Buying Apple", "Money added"; agent kinds keep the shared formatter's copy.
     static func title(for item: GroupActivityItemDTO) -> String {
-        GroupActivityTitleFormatter.format(
+        let status = item.status.lowercased()
+        let stock = item.symbol.map { AssetDisplayNames.name(forSymbol: $0) ?? AssetSymbolFormatter.display($0) } ?? "stock"
+        let byAgent = item.initiatedBy?.lowercased() == "agent"
+            ? item.agentDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            : ""
+        let prefix = byAgent.isEmpty ? "" : "\(byAgent) · "
+        switch item.kind.lowercased() {
+        case "deposit":
+            return status == "confirmed" ? "Money added" : "Adding money"
+        case "buy":
+            return prefix + (status == "confirmed" ? "Bought \(stock)" : status == "failed" ? "Buy \(stock)" : "Buying \(stock)")
+        case "sell":
+            return prefix + (status == "confirmed" ? "Sold \(stock)" : status == "failed" ? "Sell \(stock)" : "Selling \(stock)")
+        default:
+            break
+        }
+        return GroupActivityTitleFormatter.format(
             kind: item.kind,
             symbol: item.symbol,
             agentDisplayName: item.agentDisplayName,
@@ -227,7 +250,8 @@ enum GroupActivityRules {
             if let proceeds = item.proceedsUsdcMicros, let micros = Int64(proceeds), micros > 0 {
                 return micros
             }
-            if item.tokenAmount != nil { return nil }
+            // A sell's amountMicros is not dollars; without proceeds the row shows shares instead.
+            return nil
         }
         return item.amountMicros
     }
@@ -240,6 +264,7 @@ enum GroupActivityRules {
             if let tokenAmount = item.tokenAmount, let atomics = Double(tokenAmount) {
                 return sharesLabel(atomics / 100_000_000.0)
             }
+            return "—"
         }
         return UsdAmountFormatter.format(micros: item.amountMicros)
     }

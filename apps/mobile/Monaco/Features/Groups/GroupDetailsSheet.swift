@@ -59,8 +59,8 @@ struct GroupDetailsSheet: View {
                     .padding(.top, 8)
                     .accessibilityIdentifier("group-action-leave")
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
+                .padding(.horizontal, MonacoTheme.Space.gutter)
+                .padding(.vertical, MonacoTheme.Space.m)
             }
             .monacoCanvas()
             .navigationTitle("Cabal details")
@@ -81,7 +81,7 @@ struct GroupDetailsSheet: View {
     private func field<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.footnote.weight(.semibold))
+                .font(MonacoTheme.Typo.caption.weight(.semibold))
                 .foregroundStyle(MonacoTheme.muted)
             content()
         }
@@ -91,6 +91,7 @@ struct GroupDetailsSheet: View {
     private func copyButton(_ field: CopiedField, value: String) -> some View {
         Button {
             UIPasteboard.general.string = value
+            Haptics.selection()
             copiedField = field
             Task {
                 try? await Task.sleep(for: .seconds(2))

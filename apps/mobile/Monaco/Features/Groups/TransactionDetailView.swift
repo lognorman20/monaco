@@ -174,7 +174,8 @@ struct TransactionReceipt: Equatable {
                 fallbackHero = GroupActivityRules.sharesLabel(shares)
             }
             var rows: [Row] = []
-            if shares > 0 {
+            // When the hero already shows shares, don't repeat them as a row.
+            if shares > 0, fallbackHero == nil {
                 rows.append(Row(label: "Shares", value: GroupActivityRules.sharesLabel(shares)))
                 if let proceeds, proceeds > 0 {
                     let perShare = Int64((Double(proceeds) / shares).rounded())
@@ -220,7 +221,7 @@ struct TransactionReceipt: Equatable {
 
     private static func stockName(_ symbol: String?) -> String {
         guard let symbol, !symbol.isEmpty else { return "stock" }
-        return AssetSymbolFormatter.format(symbol)
+        return AssetDisplayNames.name(forSymbol: symbol) ?? AssetSymbolFormatter.display(symbol)
     }
 
     /// Local time on display; the API stores UTC.
@@ -244,23 +245,24 @@ struct TransactionReceiptView: View {
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(MonacoTheme.ink)
                         .frame(width: 56, height: 56)
-                        .background(Circle().fill(MonacoTheme.surface))
+                        .background(Circle().fill(MonacoTheme.surfaceSunken))
                         .accessibilityHidden(true)
                     Text(receipt.headline)
-                        .font(.body.weight(.semibold))
+                        .font(MonacoTheme.Typo.title)
                         .foregroundStyle(MonacoTheme.ink)
                         .multilineTextAlignment(.center)
                     Group {
                         if let micros = receipt.amountMicros {
-                            Text(UsdAmountFormatter.format(micros: micros))
+                            MoneyText(micros: micros, style: .hero)
                         } else {
                             Text(receipt.fallbackHero ?? "—")
+                                .font(MonacoTheme.Typo.moneyHero)
+                                .foregroundStyle(MonacoTheme.ink)
                         }
                     }
-                    .font(.system(size: 44, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(MonacoTheme.ink)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     Text(receipt.statusLabel)
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(statusColor)
@@ -277,7 +279,7 @@ struct TransactionReceiptView: View {
                         .frame(maxWidth: .infinity)
                 }
 
-                VStack(spacing: 0) {
+                MonacoGroupedList {
                     ForEach(receipt.rows) { row in
                         HStack {
                             Text(row.label)
@@ -289,9 +291,14 @@ struct TransactionReceiptView: View {
                                 .foregroundStyle(MonacoTheme.ink)
                                 .multilineTextAlignment(.trailing)
                         }
-                        .font(.body)
-                        .padding(.horizontal, 16)
+                        .font(MonacoTheme.Typo.body)
+                        .padding(.horizontal, MonacoTheme.Space.m)
                         .frame(minHeight: 52)
+                        .overlay(alignment: .bottom) {
+                            if row.id != receipt.rows.last?.id || receipt.solscanURL != nil {
+                                Rectangle().fill(MonacoTheme.hairline).frame(height: 1).padding(.leading, MonacoTheme.Space.m)
+                            }
+                        }
                         .accessibilityElement(children: .combine)
                     }
                     if let url = receipt.solscanURL {
@@ -311,7 +318,6 @@ struct TransactionReceiptView: View {
                         .accessibilityIdentifier("transaction-detail-solscan")
                     }
                 }
-                .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
 
                 if let onRetry {
                     Group {
@@ -321,17 +327,19 @@ struct TransactionReceiptView: View {
                                 .frame(minHeight: 50)
                                 .accessibilityIdentifier("transaction-detail-retry-loading")
                         } else {
-                            Button("Try again", action: onRetry)
-                                .buttonStyle(.monacoPrimary)
+                            Button(action: onRetry) {
+                                Text("Try again").frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.monacoPrimary)
                                 .accessibilityIdentifier("transaction-detail-retry")
                         }
                     }
                     .frame(maxWidth: .infinity)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 16)
-            .padding(.bottom, 32)
+            .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.top, MonacoTheme.Space.m)
+            .padding(.bottom, MonacoTheme.Space.xl)
         }
         .accessibilityIdentifier("transaction-receipt")
     }
