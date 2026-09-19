@@ -122,10 +122,25 @@ enum MonacoTheme {
             }
         }
 
-        /// Stable across launches: FNV-1a 64 over the UTF-8 bytes, mod 5. Never `String.hashValue`.
+        /// The one tint function for a cabal. Every surface (rows, strip cards, hero, chat header, profile)
+        /// passes the cabal's `groupId`, never its name, so a cabal is the same colour everywhere.
+        /// Stable across launches: FNV-1a 64 over the UTF-8 bytes of the trimmed, lowercased id, mod 5
+        /// (lowercased because Swift's `UUID.uuidString` is uppercase while the API sends lowercase).
+        /// Never `String.hashValue`, which is randomised per launch.
         static func forGroupId(_ groupId: String) -> CabalTint {
             let all = CabalTint.allCases
-            return all[Int(fnv1a64(groupId) % UInt64(all.count))]
+            let key = groupId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return all[Int(fnv1a64(key) % UInt64(all.count))]
+        }
+
+        /// Background fill for a cabal: `CabalTint.forGroupId(groupId).fill`.
+        static func fill(forGroupId groupId: String) -> Color {
+            forGroupId(groupId).fill
+        }
+
+        /// Chart line colour for a cabal: `CabalTint.forGroupId(groupId).stroke`.
+        static func stroke(forGroupId groupId: String) -> Color {
+            forGroupId(groupId).stroke
         }
 
         static func fnv1a64(_ string: String) -> UInt64 {

@@ -17,6 +17,20 @@ struct CabalTintTests {
         }
     }
 
+    @Test func tintIgnoresCaseAndWhitespaceOfTheId() {
+        let id = "3f5b2c9e-8d1a-4e7f-9b6c-2a1d0e4f7c88"
+        let tint = MonacoTheme.CabalTint.forGroupId(id)
+        #expect(MonacoTheme.CabalTint.forGroupId(id.uppercased()) == tint)
+        #expect(MonacoTheme.CabalTint.forGroupId(" \(id)\n") == tint)
+        #expect(MonacoTheme.CabalTint.forGroupId(UUID(uuidString: id)!.uuidString) == tint)
+    }
+
+    @Test func tintIsPinnedForKnownIds() {
+        // Pinned so a change to the hash or the case list is a deliberate, visible decision.
+        #expect(MonacoTheme.CabalTint.forGroupId("") == .butter)
+        #expect(MonacoTheme.CabalTint.forGroupId("a") == .peach)
+    }
+
     @Test func tintsSpreadAcrossAllFive() {
         let ids = (0..<200).map { "group-\($0)" }
         let used = Set(ids.map { MonacoTheme.CabalTint.forGroupId($0) })
@@ -27,15 +41,22 @@ struct CabalTintTests {
 struct CabalMarkInitialsTests {
     @Test(arguments: [
         ("Weekend investors", "WI"),
-        ("semis or bust", "SO"),
+        ("Semis or bust", "SB"),
+        ("semis or bust", "SB"),
+        ("Index huggers", "IH"),
+        ("Dorm 4B fund", "DF"),
+        ("The Rent Money Club", "RC"),
+        ("Bulls & bears", "BB"),
         ("Rent", "R"),
+        ("The", "T"),
         ("🚀 Moon crew", "MC"),
         ("🚀🚀🚀", "🚀"),
         ("  ", ""),
         ("", ""),
         ("!!!", "!"),
-        ("4B dorm fund", "4D"),
+        ("4B dorm fund", "4F"),
         ("Élan vital", "ÉV"),
+        ("The extremely long cabal name for testing", "ET"),
     ])
     func initials(name: String, expected: String) {
         #expect(CabalMark.initials(for: name) == expected)
