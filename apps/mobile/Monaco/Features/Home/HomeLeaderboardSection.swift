@@ -8,7 +8,7 @@ struct HomeLeaderboardSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            Text("Leaderboard")
+            Text("Top investors")
                 .font(MonacoTheme.TypeRole.title)
                 .foregroundStyle(MonacoTheme.ink)
 

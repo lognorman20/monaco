@@ -1,57 +1,33 @@
 import MonacoCore
 import SwiftUI
 
-struct HomeNetWorthSection<DepositLink: View>: View {
+/// The hero: total money across every cabal, plus all-time P&L. No actions live here —
+/// see `HomeBalanceRowSection` for Add money / Cash out.
+struct HomeNetWorthSection: View {
     let dashboard: HomeDashboardDTO
-    let balance: PlatformBalanceDTO?
-    let isBalanceLoading: Bool
-    @ViewBuilder var depositLink: DepositLink
 
     var body: some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-                MonacoHeroHeader(
-                    title: UsdAmountFormatter.format(decimalString: dashboard.netWorthUsd),
-                    caption: "Your cabals"
-                )
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("home-net-worth")
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            MonacoHeroHeader(
+                title: UsdAmountFormatter.format(decimalString: dashboard.netWorthUsd),
+                caption: "Your money in cabals"
+            )
+            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
 
-                HStack(spacing: MonacoTheme.Space.m) {
-                    Text(dashboard.netWorthDollarPnl)
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(MonacoTheme.signed(dashboard.netWorthDollarPnl))
-                    Text(PercentReturnFormatter.format(dashboard.netWorthPercentReturn))
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(MonacoTheme.signed(dashboard.netWorthPercentReturn))
-                }
-            }
-
-            HStack(alignment: .center, spacing: MonacoTheme.Space.m) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Account")
-                        .font(MonacoTheme.TypeRole.caption)
-                        .foregroundStyle(MonacoTheme.muted)
-                    if let balance {
-                        Text(UsdAmountFormatter.format(micros: balance.availableUsdcMicros))
-                            .font(.body.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(MonacoTheme.ink)
-                            .accessibilityIdentifier("platform-balance-value")
-                    } else if isBalanceLoading {
-                        ProgressView()
-                            .tint(MonacoTheme.accent)
-                            .accessibilityIdentifier("platform-balance-loading")
-                    } else {
-                        Text("$0.00")
-                            .font(.body.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(MonacoTheme.ink)
-                            .accessibilityIdentifier("platform-balance-value")
-                    }
-                }
-                Spacer(minLength: 8)
-                depositLink
+            HStack(spacing: MonacoTheme.Space.s) {
+                Text(dashboard.netWorthDollarPnl)
+                    .font(.subheadline.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(MonacoTheme.signed(dashboard.netWorthDollarPnl))
+                Text(PercentReturnFormatter.format(dashboard.netWorthPercentReturn))
+                    .font(.subheadline.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(MonacoTheme.signed(dashboard.netWorthPercentReturn))
+                Text("all time")
+                    .font(MonacoTheme.TypeRole.caption)
+                    .foregroundStyle(MonacoTheme.muted)
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("home-net-worth")
     }
 }
 
