@@ -257,6 +257,15 @@ struct GroupDetailView: View {
         "\(groupId)-\(auth.accessToken ?? "")"
     }
 
+    /// Called by the propose sheet once the cabal has the proposal (WP4's `onProposed`): close the
+    /// sheet, reload the open votes, and confirm. Wire as `ProposeChooserView(…, onProposed: proposalSent)`
+    /// when WP4's chooser lands on this branch.
+    private func proposalSent(_ proposalId: String) {
+        showProposeSheet = false
+        Haptics.success()
+        toast = MonacoToast(message: "Proposal sent to \(displayName)", isSuccess: true)
+    }
+
     /// The details sheet asks to leave; the confirmation shows once the sheet is gone.
     private func presentLeaveConfirmationIfRequested() {
         guard leaveRequestedFromDetails, let groupView else { return }
