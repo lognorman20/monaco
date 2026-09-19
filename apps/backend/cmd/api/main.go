@@ -20,6 +20,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/storage"
 	"github.com/monaco/monaco/apps/backend/internal/solana/balance"
 	"github.com/monaco/monaco/apps/backend/internal/worker"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
@@ -39,6 +40,7 @@ var apiRoutes = []string{
 	"GET /health",
 	"POST /v1/auth/session",
 	"GET /v1/me",
+	"POST /v1/me/profile-photo",
 	"GET /v1/me/balance",
 	"POST /v1/me/withdrawals",
 	"GET /v1/me/withdrawals/{id}",
@@ -124,6 +126,14 @@ func boot(ctx context.Context) (*bootResult, error) {
 	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
 	platformWithdrawals := app.NewPlatformWithdrawService(store, privyClient, deposits, solanaRPC, relayer.PrivateKey())
 	sessions := app.NewSessionService(store, privyClient)
+	var storageClient storage.Client
+	if cfg.SupabaseURL != "" && cfg.SupabaseServiceRoleKey != "" {
+		storageClient = storage.NewSupabaseClient(cfg.SupabaseURL, cfg.SupabaseServiceRoleKey)
+		slog.Info("supabase storage ready")
+	} else {
+		slog.Info("supabase storage skipped", "reason", "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY unset")
+	}
+	profilePhotos := app.NewProfilePhotoService(store, privyClient, storageClient)
 	home := app.NewHomeService(store, privyClient, pythClient, deposits, symbols)
 	groups := app.NewGroupService(store, privyClient)
 	governance := app.NewGovernanceService(store, privyClient)
@@ -136,7 +146,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	redeem := app.NewRedeemService(store, privyClient, pythClient, jupiterClient, swap, signer)
 	governance.SetRedeemService(redeem)
 	auth := &httpapi.AuthHandlers{Sessions: sessions}
-	me := &httpapi.MeHandlers{Sessions: sessions}
+	me := &httpapi.MeHandlers{Sessions: sessions, ProfilePhoto: profilePhotos}
 	homeHandlers := &httpapi.HomeHandlers{Home: home}
 	groupHandlers := &httpapi.GroupHandlers{Groups: groups, Governance: governance, Home: home, Redeem: redeem}
 	executeOnPass := app.NewExecuteOnPassService(swap, store)
@@ -176,6 +186,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /health", httpapi.HealthHandler)
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
+	mux.HandleFunc("POST /v1/me/profile-photo", me.UploadProfilePhotoHandler)
 	mux.HandleFunc("GET /v1/me/balance", depositHandlers.GetPlatformBalanceHandler)
 	mux.HandleFunc("POST /v1/me/withdrawals", platformWithdrawHandlers.CreatePlatformWithdrawalHandler)
 	mux.HandleFunc("GET /v1/me/withdrawals/{id}", platformWithdrawHandlers.GetPlatformWithdrawalHandler)
