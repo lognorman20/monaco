@@ -22,6 +22,9 @@ type fakeJupiterClient struct {
 	executeErrs   map[string]error
 	lastSuccesses map[string]ExecuteResult
 	quoteBuyCalls int
+
+	settlementHooks map[string]func(ExecuteResult)
+	settled         map[string]struct{}
 }
 
 // NewFakeClient returns an in-memory Jupiter client for tests.
@@ -35,7 +38,38 @@ func NewFakeClient() Client {
 		executePolls:  make(map[string][]ExecuteResult),
 		executeErrs:   make(map[string]error),
 		lastSuccesses: make(map[string]ExecuteResult),
+
+		settlementHooks: make(map[string]func(ExecuteResult)),
+		settled:         make(map[string]struct{}),
 	}
+}
+
+// RegisterSettlementHook runs fn once, when requestID first polls back as a confirmed success.
+// The Jupiter and Privy fakes hold separate state, so tests use this to move the swap's proceeds
+// into the treasury the way an on-chain fill would.
+func RegisterSettlementHook(client Client, requestID string, fn func(ExecuteResult)) {
+	fake, ok := client.(*fakeJupiterClient)
+	if !ok {
+		panic("jupiter: RegisterSettlementHook requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.settlementHooks[requestID] = fn
+	fake.mu.Unlock()
+}
+
+// takeSettlementHook returns the pending settlement hook for a confirmed fill, once.
+func (f *fakeJupiterClient) takeSettlementHook(requestID string) func(ExecuteResult) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, done := f.settled[requestID]; done {
+		return nil
+	}
+	hook, ok := f.settlementHooks[requestID]
+	if !ok {
+		return nil
+	}
+	f.settled[requestID] = struct{}{}
+	return hook
 }
 
 func quoteKey(outputMint string, usdcAmount int64) string {
@@ -279,6 +313,11 @@ func (f *fakeJupiterClient) nextExecuteResult(ctx context.Context, groupID, user
 	result.RequestID = requestID
 	if result.Signature == "" {
 		result.Signature = deterministicTxSignature(requestID, result.Status)
+	}
+	if result.IsConfirmedSuccess() {
+		if hook := f.takeSettlementHook(requestID); hook != nil {
+			hook(result)
+		}
 	}
 	logPollTransition(groupID, userID, symbol, result.Signature, ExecuteStatusPending, result.Status, result.Code)
 	return result, nil

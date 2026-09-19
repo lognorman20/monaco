@@ -658,7 +658,7 @@ func (h *GroupHandlers) WithdrawToBalanceHandler(w http.ResponseWriter, r *http.
 			return
 		}
 		if errors.Is(err, app.ErrInvalidRedeemRequest) {
-			logJSONError(ctx, log, "invalid_redeem", w, http.StatusBadRequest, "invalid withdraw request", "group_id", groupID)
+			logJSONError(ctx, log, "invalid_redeem", w, http.StatusBadRequest, "Cash out at least $0.10.", "group_id", groupID, "err", err.Error())
 			return
 		}
 		if errors.Is(err, app.ErrRedeemAlreadyInProgress) {
@@ -666,7 +666,15 @@ func (h *GroupHandlers) WithdrawToBalanceHandler(w http.ResponseWriter, r *http.
 			return
 		}
 		if errors.Is(err, app.ErrQuoteNotRoutable) {
-			logJSONError(ctx, log, "quote_not_routable", w, http.StatusBadRequest, err.Error(), "group_id", groupID)
+			logJSONError(ctx, log, "quote_not_routable", w, http.StatusBadRequest,
+				"That amount is too small to sell the pot's stock. Try a larger amount, or wait until the pot holds more USDC.",
+				"group_id", groupID, "err", err.Error())
+			return
+		}
+		if errors.Is(err, app.ErrRedeemPotIlliquid) {
+			logJSONError(ctx, log, "redeem_pot_illiquid", w, http.StatusBadRequest,
+				"The pot could not raise enough USDC to cash that out. Try a smaller amount, or try again in a minute.",
+				"group_id", groupID, "err", err.Error())
 			return
 		}
 		logJSONError(ctx, log, "withdraw_to_balance_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
