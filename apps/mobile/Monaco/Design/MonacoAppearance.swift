@@ -5,23 +5,48 @@ import UIKit
 enum MonacoAppearance {
     static func configureUIKit() {
         let surface = UIColor(MonacoTheme.surface)
-        let background = UIColor(MonacoTheme.background)
         let primaryText = UIColor(MonacoTheme.primaryText)
+        let muted = UIColor(MonacoTheme.muted)
         let border = UIColor(MonacoTheme.border)
+        let titleFont = UIFont(name: "AvenirNext-DemiBold", size: 17) ?? .systemFont(ofSize: 17, weight: .semibold)
 
         let navigationBar = UINavigationBarAppearance()
-        navigationBar.configureWithOpaqueBackground()
-        navigationBar.backgroundColor = surface
-        navigationBar.shadowColor = border
-        navigationBar.titleTextAttributes = [.foregroundColor: primaryText]
-        navigationBar.largeTitleTextAttributes = [.foregroundColor: primaryText]
+        navigationBar.configureWithTransparentBackground()
+        navigationBar.backgroundColor = .clear
+        navigationBar.shadowColor = .clear
+        navigationBar.titleTextAttributes = [
+            .foregroundColor: primaryText,
+            .font: titleFont,
+        ]
+        navigationBar.largeTitleTextAttributes = [
+            .foregroundColor: primaryText,
+            .font: UIFont(name: "AvenirNext-Bold", size: 28) ?? .systemFont(ofSize: 28, weight: .bold),
+        ]
 
         UINavigationBar.appearance().standardAppearance = navigationBar
         UINavigationBar.appearance().scrollEdgeAppearance = navigationBar
         UINavigationBar.appearance().compactAppearance = navigationBar
-        UINavigationBar.appearance().tintColor = UIColor(MonacoTheme.accent)
+        UINavigationBar.appearance().tintColor = UIColor(MonacoTheme.ink)
+        UINavigationBar.appearance().prefersLargeTitles = false
 
-        UITableView.appearance().backgroundColor = background
+        let tabBar = UITabBarAppearance()
+        tabBar.configureWithOpaqueBackground()
+        tabBar.backgroundColor = surface
+        tabBar.shadowColor = border
+        let tabItem = UITabBarItemAppearance()
+        tabItem.normal.iconColor = muted
+        tabItem.normal.titleTextAttributes = [.foregroundColor: muted]
+        tabItem.selected.iconColor = primaryText
+        tabItem.selected.titleTextAttributes = [.foregroundColor: primaryText]
+        tabBar.stackedLayoutAppearance = tabItem
+        tabBar.inlineLayoutAppearance = tabItem
+        tabBar.compactInlineLayoutAppearance = tabItem
+        UITabBar.appearance().standardAppearance = tabBar
+        UITabBar.appearance().scrollEdgeAppearance = tabBar
+        UITabBar.appearance().tintColor = primaryText
+        UITabBar.appearance().unselectedItemTintColor = muted
+
+        UITableView.appearance().backgroundColor = .clear
         UITableView.appearance().separatorColor = border
         UITableViewCell.appearance().backgroundColor = surface
 
@@ -46,12 +71,17 @@ enum MonacoAppearance {
 struct MonacoRootAppearanceModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .background(MonacoTheme.background)
+            .monacoCanvas()
             .foregroundStyle(MonacoTheme.primaryText)
     }
 }
 
 extension View {
+    /// Paper white + top peach wash. Apply once at a screen root.
+    func monacoCanvas() -> some View {
+        background { MonacoCanvasBackground() }
+    }
+
     /// Apply at screen root (or rely on `ContentView` / `MonacoApp` wiring).
     func monacoRootAppearance() -> some View {
         modifier(MonacoRootAppearanceModifier())
@@ -60,11 +90,14 @@ extension View {
     /// Card-style container on the app canvas.
     func monacoSurfaceCard() -> some View {
         self
-            .padding()
-            .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(MonacoTheme.Space.m)
+            .background(
+                MonacoTheme.surface,
+                in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
+            )
             .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(MonacoTheme.border, lineWidth: 1)
+                RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
+                    .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
             }
     }
 
@@ -72,32 +105,32 @@ extension View {
     func monacoInsetList() -> some View {
         listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
-            .background(MonacoTheme.background)
+            .background(Color.clear)
     }
 
     /// High-contrast segmented control strip for board tabs.
     func monacoSegmentedBoardPicker() -> some View {
-        padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(MonacoTheme.surface)
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(MonacoTheme.border)
-                    .frame(height: 1)
-            }
+        padding(.horizontal, MonacoTheme.Space.m)
+        .padding(.vertical, 12)
+        .background(MonacoTheme.surface)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(MonacoTheme.hairline)
+                .frame(height: 1)
+        }
     }
 
-    /// Toolbar / nav bar SF Symbol — accent tint, readable weight.
+    /// Toolbar / nav bar SF Symbol — ink tint, readable weight.
     func monacoToolbarIcon() -> some View {
         font(.body.weight(.semibold))
-            .foregroundStyle(MonacoTheme.accent)
+            .foregroundStyle(MonacoTheme.ink)
             .symbolRenderingMode(.hierarchical)
     }
 
     /// Form screen root — canvas background, visible rows/separators, readable fields.
     func monacoFormScreen() -> some View {
         scrollContentBackground(.hidden)
-            .background(MonacoTheme.background)
+            .monacoCanvas()
             .foregroundStyle(MonacoTheme.primaryText)
             .tint(MonacoTheme.accent)
             .listRowBackground(MonacoTheme.surface)
@@ -106,7 +139,7 @@ extension View {
 
     /// Footnote / hint copy inside forms.
     func monacoSecondaryCaption() -> some View {
-        font(.footnote)
+        font(MonacoTheme.TypeRole.caption)
             .foregroundStyle(MonacoTheme.secondaryText)
     }
 
@@ -153,7 +186,7 @@ struct MonacoEmptyStateCard: View {
                 .foregroundStyle(MonacoTheme.accent)
                 .symbolRenderingMode(.hierarchical)
             Text(message)
-                .font(.subheadline)
+                .font(MonacoTheme.TypeRole.body)
                 .foregroundStyle(MonacoTheme.secondaryText)
                 .multilineTextAlignment(.center)
         }
@@ -170,12 +203,12 @@ struct MonacoPrimaryButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body.weight(.semibold))
+            .font(MonacoTheme.TypeRole.body.weight(.semibold))
             .foregroundStyle(isEnabled ? MonacoTheme.primaryButtonLabel : MonacoTheme.disabled)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                Capsule()
                     .fill(isEnabled ? MonacoTheme.primaryButtonFill : MonacoTheme.disabled.opacity(0.35))
             )
             .opacity(configuration.isPressed ? 0.85 : 1)
@@ -187,17 +220,14 @@ struct MonacoSecondaryButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body.weight(.semibold))
+            .font(MonacoTheme.TypeRole.body.weight(.semibold))
             .foregroundStyle(isEnabled ? MonacoTheme.secondaryButtonLabel : MonacoTheme.disabled)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(MonacoTheme.secondaryButtonFill)
-            )
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .background(Capsule().fill(MonacoTheme.secondaryButtonFill))
             .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(isEnabled ? MonacoTheme.border : MonacoTheme.disabled.opacity(0.5), lineWidth: 1)
+                Capsule()
+                    .strokeBorder(isEnabled ? MonacoTheme.hairline : MonacoTheme.disabled.opacity(0.5), lineWidth: 1)
             }
             .opacity(configuration.isPressed ? 0.85 : 1)
     }
@@ -216,16 +246,13 @@ struct MonacoDestructiveButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.body.weight(.semibold))
+            .font(MonacoTheme.TypeRole.body.weight(.semibold))
             .foregroundStyle(isEnabled ? MonacoTheme.destructive : MonacoTheme.disabled)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(MonacoTheme.surface)
-            )
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .background(Capsule().fill(MonacoTheme.surface))
             .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                Capsule()
                     .strokeBorder(isEnabled ? MonacoTheme.destructive : MonacoTheme.disabled.opacity(0.5), lineWidth: 1)
             }
             .opacity(configuration.isPressed ? 0.85 : 1)

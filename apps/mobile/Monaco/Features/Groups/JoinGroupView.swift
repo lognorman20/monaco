@@ -32,6 +32,7 @@ struct JoinGroupView: View {
                 .disabled(isJoining || didJoin || requestPending || groupId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
+        .monacoFormScreen()
         .monacoToast($toast)
         .navigationTitle("Join cabal")
     }

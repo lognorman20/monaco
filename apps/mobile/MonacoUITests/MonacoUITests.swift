@@ -77,10 +77,7 @@ final class MonacoUITests: XCTestCase {
 
         app.buttons["Verify code"].tap()
 
-        XCTAssertTrue(
-            app.staticTexts["Member wallet"].waitForExistence(timeout: 30)
-                || app.staticTexts["Your account"].waitForExistence(timeout: 30)
-        )
+        XCTAssertTrue(appLandedInApp(app), "expected Home tab or account after login")
 
         app.buttons["Create group"].tap()
 
@@ -99,8 +96,16 @@ final class MonacoUITests: XCTestCase {
     }
 
     @MainActor
+    private func appLandedInApp(_ app: XCUIApplication, timeout: TimeInterval = 30) -> Bool {
+        app.tabBars.buttons["Home"].waitForExistence(timeout: timeout)
+            || app.staticTexts["Account balance"].waitForExistence(timeout: 2)
+            || app.staticTexts["Your account"].waitForExistence(timeout: 2)
+            || app.staticTexts["Member wallet"].waitForExistence(timeout: 2)
+    }
+
+    @MainActor
     private func loginIfNeeded(_ app: XCUIApplication) {
-        if app.staticTexts["Your account"].waitForExistence(timeout: 5) {
+        if appLandedInApp(app, timeout: 5) {
             return
         }
 
@@ -118,10 +123,7 @@ final class MonacoUITests: XCTestCase {
 
         app.buttons["Verify code"].tap()
 
-        XCTAssertTrue(
-            app.staticTexts["Member wallet"].waitForExistence(timeout: 30)
-                || app.staticTexts["Your account"].waitForExistence(timeout: 30)
-        )
+        XCTAssertTrue(appLandedInApp(app), "expected Home tab or account after login")
     }
 
     @MainActor
@@ -130,6 +132,95 @@ final class MonacoUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    @MainActor
+    func testCreateCabalUsesCanvas() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment = privyLaunchEnvironment()
+        app.launch()
+        loginIfNeeded(app)
+
+        tabButton(app, "Cabals").tap()
+        let menu = app.buttons["cabals-create-join-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 8), "create/join menu")
+        menu.tap()
+        let create = app.buttons["Create cabal"]
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
+        create.tap()
+        XCTAssertTrue(app.navigationBars["Create cabal"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.textFields["create-group-name"].waitForExistence(timeout: 5)
+            || app.textFields["Cabal name"].waitForExistence(timeout: 5))
+        attachScreenshot(app, name: "create-cabal-canvas")
+    }
+
+    @MainActor
+    func testFiveTabShell() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment = privyLaunchEnvironment()
+        app.launch()
+        loginIfNeeded(app)
+
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(tabButton(app, "Home").waitForExistence(timeout: 30), "session restore should land on tabs")
+
+        for name in ["Home", "Profile", "Cabals", "Assets", "Settings"] {
+            let tab = tabButton(app, name)
+            XCTAssertTrue(tab.waitForExistence(timeout: 5), "missing tab \(name)")
+            tab.tap()
+        }
+
+        tabButton(app, "Assets").tap()
+        XCTAssertTrue(
+            app.staticTexts["Popular"].waitForExistence(timeout: 8)
+                || app.otherElements["assets-root"].waitForExistence(timeout: 2),
+            "Assets tab should show browse chrome"
+        )
+        attachScreenshot(app, name: "issue-161-assets")
+
+        tabButton(app, "Cabals").tap()
+        XCTAssertTrue(app.navigationBars["Cabals"].waitForExistence(timeout: 8), "Cabals tab root")
+        let cabalRow = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "cabals-row-")
+        ).firstMatch
+        let emptyCabals = app.staticTexts["No cabals yet. Create or join one to start investing together."]
+        if cabalRow.waitForExistence(timeout: 8) {
+            cabalRow.tap()
+            XCTAssertTrue(
+                app.buttons["group-action-fund"].waitForExistence(timeout: 12)
+                    || app.navigationBars.element.waitForExistence(timeout: 8),
+                "cabal row should push detail or join"
+            )
+            attachScreenshot(app, name: "issue-161-cabal-detail")
+            if app.navigationBars.buttons.count > 0 {
+                app.navigationBars.buttons.element(boundBy: 0).tap()
+            }
+        } else if !emptyCabals.exists, app.cells.count > 0 {
+            app.cells.element(boundBy: 0).tap()
+            XCTAssertTrue(app.navigationBars.element.waitForExistence(timeout: 8))
+            attachScreenshot(app, name: "issue-161-cabal-detail")
+            if app.navigationBars.buttons.count > 0 {
+                app.navigationBars.buttons.element(boundBy: 0).tap()
+            }
+        }
+
+        tabButton(app, "Settings").tap()
+        attachScreenshot(app, name: "issue-161-settings")
+        let signOut = app.buttons["settings-sign-out"].exists ? app.buttons["settings-sign-out"] : app.buttons["Sign out"]
+        XCTAssertTrue(signOut.waitForExistence(timeout: 10))
+        signOut.tap()
+        XCTAssertTrue(app.textFields["Phone number"].waitForExistence(timeout: 20), "sign out should return to login")
+        attachScreenshot(app, name: "issue-161-signed-out")
+    }
+
+    @MainActor
+    private func tabButton(_ app: XCUIApplication, _ name: String) -> XCUIElement {
+        let byId = app.tabBars.buttons["tab-\(name.lowercased())"]
+        if byId.exists {
+            return byId
+        }
+        return app.tabBars.buttons[name]
     }
 
     @MainActor
@@ -256,10 +347,7 @@ final class MonacoUITests: XCTestCase {
 
         app.buttons["Verify code"].tap()
 
-        XCTAssertTrue(
-            app.staticTexts["Your account"].waitForExistence(timeout: 60)
-                || app.staticTexts["Member wallet"].waitForExistence(timeout: 60)
-        )
+        XCTAssertTrue(appLandedInApp(app, timeout: 60), "expected Home tab or account after email login")
     }
 
     @MainActor

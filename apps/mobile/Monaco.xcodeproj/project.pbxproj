@@ -611,7 +611,7 @@
 /* Begin XCLocalSwiftPackageReference section */
 		C0DE000130590361008E7964 /* XCLocalSwiftPackageReference "../../packages/mobile-core" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../packages/mobile-core;
+			relativePath = "../../packages/mobile-core";
 		};
 /* End XCLocalSwiftPackageReference section */
 

@@ -37,5 +37,14 @@ public enum MainFlowCopyManifest {
         "Member board",
         "Sweep in progress",
         "No cabals yet. Create or join one to start investing together.",
+        "Home",
+        "Profile",
+        "Cabals",
+        "Assets",
+        "Settings",
+        "Join a cabal to see members on the leaderboard.",
+        "Open a cabal to propose a stock. Search and prices land here once you are in a pot.",
+        "Your cabals",
+        "Join a cabal to see it here.",
     ]
 }

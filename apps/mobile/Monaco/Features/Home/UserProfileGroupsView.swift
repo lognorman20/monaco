@@ -43,7 +43,7 @@ struct UserProfileGroupsView: View {
             }
         }
         .monacoInsetList()
-        .background(MonacoTheme.background)
+        .monacoCanvas()
         .navigationTitle(displayName)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: userId) {

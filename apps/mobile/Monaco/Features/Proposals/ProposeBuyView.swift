@@ -111,6 +111,7 @@ struct ProposeBuyView: View {
                 }
             }
         }
+        .monacoFormScreen()
         .navigationTitle("Propose buy")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: searchQuery) { _, _ in

@@ -59,6 +59,7 @@ struct DevBuyView: View {
                 }
             }
         }
+        .monacoFormScreen()
         .navigationTitle("Dev buy")
         .navigationBarTitleDisplayMode(.inline)
     }

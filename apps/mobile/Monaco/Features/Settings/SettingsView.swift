@@ -73,6 +73,7 @@ struct SettingsView: View {
                     Task { await auth.logout() }
                 }
                 .monacoFormDestructiveAction()
+                .accessibilityIdentifier("settings-sign-out")
             }
         }
         .monacoFormScreen()

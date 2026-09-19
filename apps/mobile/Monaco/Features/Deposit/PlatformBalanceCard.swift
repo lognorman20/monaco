@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PlatformBalanceCard: View {
     let balance: PlatformBalanceDTO?
+    var isLoading: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -18,10 +19,15 @@ struct PlatformBalanceCard: View {
                         .font(.caption)
                         .foregroundStyle(MonacoTheme.secondaryText)
                 }
+            } else if isLoading {
+                ProgressView()
+                    .tint(MonacoTheme.accent)
+                    .accessibilityIdentifier("platform-balance-loading")
             } else {
-                Text("—")
-                    .font(.title2.bold())
-                    .foregroundStyle(MonacoTheme.secondaryText)
+                Text("$0.00")
+                    .font(.title2.bold().monospacedDigit())
+                    .foregroundStyle(MonacoTheme.primaryText)
+                    .accessibilityIdentifier("platform-balance-value")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

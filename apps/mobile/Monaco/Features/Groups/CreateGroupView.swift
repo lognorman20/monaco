@@ -151,6 +151,7 @@ struct CreateGroupView: View {
                 }
             }
         }
+        .monacoFormScreen()
         .navigationTitle("Create cabal")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: auth.accessToken) {
