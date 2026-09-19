@@ -132,7 +132,7 @@ Two profiles:
   Each has a fake creator, five depositors, deposits spread over the last week, a confirmed
   AAPLx/TSLAx buy, a governed sell (Ridgewood and Night Shift), failed and open proposals, votes,
   and NAV history for charts. Any signed-in user sees them on Home (group board and people
-  leaderboard) and can open them read-only. You are never added as a member. Join, fund/deposit,
+  leaderboard) and the Cabals tab (search, leaderboard, P&L history) and can open them read-only. You are never added as a member. Join, fund/deposit,
   quote, propose (buy, sell, or agent), vote, agent intents, and leave/withdraw return
   `403 faker_group_read_only`.
 - **mixed**: adds ghost members Maya Chen, Jordan Hale, and Priya Shah to **your own real club**

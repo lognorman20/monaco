@@ -28,7 +28,7 @@ import (
 //     Realized gains (a sale or a payout) are in the snapshot's USDC.
 //   - net contributed at a snapshot is nav_snapshots.net_contributed_micros,
 //     recorded in that same transaction (exact). Rows written before migration
-//     000016 lack it; for those we estimate by walking back from the next known
+//     000012 lack it; for those we estimate by walking back from the next known
 //     value (a later exact snapshot, or the live total) and undoing confirmed
 //     deposits/withdrawals created in between. Two known gaps in that estimate:
 //     the ledger has created_at but no confirmation time, and treasury

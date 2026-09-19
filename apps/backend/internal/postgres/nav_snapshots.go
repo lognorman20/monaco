@@ -37,7 +37,7 @@ type NavSnapshotRow struct {
 	TotalShares       int64
 	// NetContributedMicros is the group's net USDC in (deposits credited minus
 	// payouts) as of this snapshot, recorded in the same transaction. Nil for
-	// rows written before migration 000016.
+	// rows written before migration 000012.
 	NetContributedMicros *int64
 	Reason               NavSnapshotReason
 	CreatedAt            time.Time
@@ -98,12 +98,16 @@ func (s *Store) InsertNavSnapshotTx(ctx context.Context, tx *sql.Tx, groupID str
 	// net_contributed_micros is read inside the same transaction as the
 	// position change that triggered this snapshot, so it pairs exactly with
 	// pot_nav_micros: group P&L at this instant = pot - net contributed.
+	// Only pot-backed positions count (ghost faker positions in a real group
+	// never funded the pot), matching the live net-in the P&L series ends on.
 	const insertSQL = `
 INSERT INTO nav_snapshots (group_id, pot_nav_micros, nav_per_share_micros, total_shares, reason, net_contributed_micros)
 VALUES ($1, $2, $3, $4, $5, (
-  SELECT COALESCE(SUM(amount_deposited - amount_withdrawn), 0)
-  FROM positions
-  WHERE group_id = $1
+  SELECT COALESCE(SUM(p.amount_deposited - p.amount_withdrawn), 0)
+  FROM positions p
+  JOIN users u ON u.id = p.user_id
+  JOIN groups g ON g.id = p.group_id
+  WHERE p.group_id = $1 AND ` + potPositionPredicate + `
 ))
 RETURNING ` + navSnapshotColumns
 

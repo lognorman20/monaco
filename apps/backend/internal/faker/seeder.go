@@ -459,7 +459,8 @@ VALUES ($1, $2, $3, 'sell', $4, $5, 'confirmed', $6, $7, $8, $9, $9)`,
 }
 
 // insertNavSnapshots writes a week of synthetic NAV points (every 12h plus event points) so
-// P&L charts and ranged leaderboards have history.
+// P&L charts and ranged leaderboards have history. Each point records the net USDC in at
+// that instant, as the app's own snapshots do, so the Groups tab P&L series is exact.
 func insertNavSnapshots(ctx context.Context, tx *sql.Tx, groupID string, club clubSpec, now time.Time) error {
 	type ev struct {
 		at             time.Time
@@ -513,8 +514,8 @@ func insertNavSnapshots(ctx context.Context, tx *sql.Tx, groupID string, club cl
 			reason = "transaction_confirm"
 		}
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO nav_snapshots (group_id, pot_nav_micros, nav_per_share_micros, total_shares, reason, created_at)
-VALUES ($1, $2, $3, $4, $5, $6)`, groupID, pot, navPerShare, shares, reason, at); err != nil {
+INSERT INTO nav_snapshots (group_id, pot_nav_micros, nav_per_share_micros, total_shares, reason, net_contributed_micros, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)`, groupID, pot, navPerShare, shares, reason, netIn, at); err != nil {
 			return fmt.Errorf("insert faker nav snapshot: %w", err)
 		}
 	}
