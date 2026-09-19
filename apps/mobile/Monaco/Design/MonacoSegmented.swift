@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Capsule track on `surfaceSunken` with an ink thumb that slides between options.
+/// Capsule track on `surfaceSunken` with an ink thumb that slides between options:
+/// the selected label in canvas on the thumb, the others muted on the track.
 /// Replaces `Picker(.segmented)` and its global appearance hack.
 struct MonacoSegmented<T: Hashable>: View {
     private let options: [T]
@@ -31,7 +32,7 @@ struct MonacoSegmented<T: Hashable>: View {
                         .font(MonacoTheme.Typo.callout.weight(.semibold))
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
-                        .foregroundStyle(isSelected ? MonacoTheme.primaryButtonLabel : MonacoTheme.ink)
+                        .foregroundStyle(isSelected ? MonacoTheme.primaryButtonLabel : MonacoTheme.muted)
                         .padding(.horizontal, 12)
                         .frame(maxWidth: .infinity, minHeight: 36)
                         .background {

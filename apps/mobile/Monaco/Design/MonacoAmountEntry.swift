@@ -158,17 +158,13 @@ struct AmountEntry: View {
 private struct AmountCaret: View {
     let visible: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var on = true
 
     var body: some View {
         RoundedRectangle(cornerRadius: 1.5)
             .fill(MonacoTheme.ink)
             .frame(width: 3, height: 40)
-            .opacity(visible && (reduceMotion || on) ? 1 : 0)
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) { on = false }
-            }
+            .opacityLoop(to: 0, halfPeriod: 0.5, active: visible && !reduceMotion)
+            .opacity(visible ? 1 : 0)
     }
 }
 

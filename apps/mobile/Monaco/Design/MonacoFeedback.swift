@@ -73,16 +73,30 @@ private struct SkeletonModifier: ViewModifier {
 private struct SkeletonPulse: ViewModifier {
     let active: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var dimmed = false
 
     func body(content: Content) -> some View {
-        content
-            .opacity(active && !reduceMotion && dimmed ? 0.55 : 1)
-            .onAppear {
-                guard active, !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
-                    dimmed = true
-                }
+        content.opacityLoop(to: 0.55, halfPeriod: 1.2, active: active && !reduceMotion)
+    }
+}
+
+extension View {
+    /// Loops this view's opacity between 1 and `low`, easing each way over `halfPeriod`, while `active`.
+    ///
+    /// The loop is a `PhaseAnimator`, so its animation only ever reaches the opacity. Starting a loop with
+    /// `withAnimation(.repeatForever)` in `onAppear` instead puts every change of that first update into
+    /// the repeating transaction, including layout that is still settling elsewhere on screen (safe-area
+    /// insets under a navigation bar, a sheet or the keyboard): sibling views then drift back and forth
+    /// between two positions until some later transaction happens to replace the animation.
+    @ViewBuilder
+    func opacityLoop(to low: Double, halfPeriod: Double, active: Bool = true) -> some View {
+        if active {
+            phaseAnimator([1.0, low]) { view, opacity in
+                view.opacity(opacity)
+            } animation: { _ in
+                .easeInOut(duration: halfPeriod)
             }
+        } else {
+            self
+        }
     }
 }

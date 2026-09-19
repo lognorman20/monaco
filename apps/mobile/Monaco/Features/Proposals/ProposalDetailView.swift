@@ -374,15 +374,9 @@ struct ProposalExecutionTracker: View {
 /// Slow breathing on the current step while the swap runs.
 private struct TrackerPulse: ViewModifier {
     let active: Bool
-    @State private var on = false
 
     func body(content: Content) -> some View {
-        content
-            .opacity(active && on ? 0.35 : 1)
-            .onAppear {
-                guard active else { return }
-                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) { on = true }
-            }
+        content.opacityLoop(to: 0.35, halfPeriod: 0.8, active: active)
     }
 }
 
