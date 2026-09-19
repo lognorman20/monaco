@@ -37,6 +37,7 @@ struct GroupAgentDTO: Codable, Equatable {
     let status: String
     let agentDisplayName: String
     let allocationUsdcMicros: String
+    let apiKey: String?
 }
 
 struct GroupViewDTO: Codable, Equatable {

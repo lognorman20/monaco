@@ -1,7 +1,7 @@
 import MonacoCore
 import SwiftUI
 
-/// The bot key, shown once to the proposer after the vote passes.
+/// The bot key with copy affordance; also used on the agent detail screen.
 struct AgentKeyRevealView: View {
     let apiKey: String
     var onCopied: () -> Void = {}

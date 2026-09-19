@@ -11,7 +11,7 @@ public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
     /// Agent governance proposals (`add_agent`, `pause_agent`, ...) name the agent and its budget.
     public let agentDisplayName: String?
     public let allocationUsdcMicros: String?
-    /// One-time plaintext API key on a passed `add_agent` proposal detail; never on list items.
+    /// Plaintext API key on a passed `add_agent` proposal detail for cabal members; never on list items.
     public let mintedAgentKey: String?
     public let status: String
     public let canVote: Bool?

@@ -502,7 +502,9 @@ struct GroupDetailContent: View {
                 }
 
                 if let agent = view.agent {
-                    AgentSectionView(agent: agent)
+                    AgentSectionView(agent: agent) {
+                        onToast(MonacoToast(message: ProposeFlowCopy.keyCopied, isSuccess: true))
+                    }
                 }
 
                 MemberBoardSection(members: view.members, currentUserId: currentUserId)

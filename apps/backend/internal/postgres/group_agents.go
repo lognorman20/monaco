@@ -23,12 +23,13 @@ type GroupAgentRow struct {
 	AllocationUsdcMicros int64
 	APIKeyHash           sql.NullString
 	APIKeyPrefix         sql.NullString
+	APIKey               sql.NullString
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
 }
 
 const groupAgentSelectColumns = `id, group_id, status, install_proposal_id, pause_proposal_id, resume_proposal_id,
-  revoke_proposal_id, agent_display_name, allocation_usdc_micros, api_key_hash, api_key_prefix, created_at, updated_at`
+  revoke_proposal_id, agent_display_name, allocation_usdc_micros, api_key_hash, api_key_prefix, api_key, created_at, updated_at`
 
 func scanGroupAgentRow(scanner interface{ Scan(dest ...any) error }) (GroupAgentRow, error) {
 	var row GroupAgentRow
@@ -45,6 +46,7 @@ func scanGroupAgentRow(scanner interface{ Scan(dest ...any) error }) (GroupAgent
 		&row.AllocationUsdcMicros,
 		&row.APIKeyHash,
 		&row.APIKeyPrefix,
+		&row.APIKey,
 		&row.CreatedAt,
 		&row.UpdatedAt,
 	); err != nil {
@@ -63,8 +65,8 @@ func (s *Store) InsertGroupAgentTx(ctx context.Context, tx *sql.Tx, row GroupAge
 	const insertSQL = `
 INSERT INTO group_agents (
   group_id, status, install_proposal_id, agent_display_name, allocation_usdc_micros,
-  api_key_hash, api_key_prefix
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+  api_key_hash, api_key_prefix, api_key
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING ` + groupAgentSelectColumns
 
 	var installID any
@@ -79,6 +81,10 @@ RETURNING ` + groupAgentSelectColumns
 	if row.APIKeyPrefix.Valid {
 		keyPrefix = row.APIKeyPrefix.String
 	}
+	var apiKey any
+	if row.APIKey.Valid {
+		apiKey = row.APIKey.String
+	}
 
 	out, err := scanGroupAgentRow(tx.QueryRowContext(ctx, insertSQL,
 		row.GroupID,
@@ -88,6 +94,7 @@ RETURNING ` + groupAgentSelectColumns
 		row.AllocationUsdcMicros,
 		keyHash,
 		keyPrefix,
+		apiKey,
 	))
 	if err != nil {
 		return GroupAgentRow{}, fmt.Errorf("insert group agent: %w", err)
@@ -161,7 +168,7 @@ WHERE id = $1`
 func (s *Store) RevokeGroupAgentKeyTx(ctx context.Context, tx *sql.Tx, agentID string) error {
 	const updateSQL = `
 UPDATE group_agents
-SET api_key_hash = NULL, api_key_prefix = NULL, status = 'revoked', updated_at = now()
+SET api_key_hash = NULL, api_key_prefix = NULL, api_key = NULL, status = 'revoked', updated_at = now()
 WHERE id = $1`
 	if _, err := tx.ExecContext(ctx, updateSQL, agentID); err != nil {
 		return fmt.Errorf("revoke group agent key: %w", err)

@@ -37,6 +37,8 @@ type AgentView struct {
 	Status               domain.AgentStatus
 	AgentDisplayName     string
 	AllocationUsdcMicros int64
+	// APIKey is set only for cabal members when the agent is active or paused.
+	APIKey string
 }
 
 func (g *GovernanceService) validateAgentProposal(ctx context.Context, in CreateAgentProposalInput) error {
@@ -120,11 +122,10 @@ func (g *GovernanceService) handleAgentProposalPassTx(ctx context.Context, tx *s
 			AllocationUsdcMicros: row.AllocationUsdcMicros,
 			APIKeyHash:           sql.NullString{String: hash, Valid: true},
 			APIKeyPrefix:         sql.NullString{String: prefix, Valid: true},
+			APIKey:               sql.NullString{String: plaintext, Valid: true},
 		}
-		if _, err := g.store.InsertGroupAgentTx(ctx, tx, agentRow); err != nil {
-			return err
-		}
-		return g.store.InsertAgentKeyRevealTx(ctx, tx, proposal.ID, plaintext)
+		_, err = g.store.InsertGroupAgentTx(ctx, tx, agentRow)
+		return err
 	case domain.ProposalKindPauseAgent:
 		agent, found, err := g.store.GetActiveOrPausedGroupAgentByGroupID(ctx, proposal.GroupID)
 		if err != nil {
@@ -160,8 +161,18 @@ func (g *GovernanceService) handleAgentProposalPassTx(ctx context.Context, tx *s
 	}
 }
 
+// AuthorizeGroupReader returns the viewer user id after session and read-access checks.
+func (g *GovernanceService) AuthorizeGroupReader(ctx context.Context, accessToken, groupID string) (string, error) {
+	return authorizeGroupReader(ctx, g.store, g.privy, accessToken, groupID)
+}
+
 // GetGroupAgentView returns the current agent summary for a group.
 func (g *GovernanceService) GetGroupAgentView(ctx context.Context, groupID string) (*AgentView, error) {
+	return g.GetGroupAgentViewForMember(ctx, groupID, "")
+}
+
+// GetGroupAgentViewForMember returns the agent summary. APIKey is included only for cabal members.
+func (g *GovernanceService) GetGroupAgentViewForMember(ctx context.Context, groupID, viewerID string) (*AgentView, error) {
 	agent, found, err := g.store.GetActiveOrPausedGroupAgentByGroupID(ctx, groupID)
 	if err != nil {
 		return nil, err
@@ -169,20 +180,45 @@ func (g *GovernanceService) GetGroupAgentView(ctx context.Context, groupID strin
 	if !found {
 		return nil, nil
 	}
-	return &AgentView{
+	view := &AgentView{
 		ID:                   agent.ID,
 		Status:               agent.Status,
 		AgentDisplayName:     agent.AgentDisplayName,
 		AllocationUsdcMicros: agent.AllocationUsdcMicros,
-	}, nil
+	}
+	if viewerID == "" {
+		return view, nil
+	}
+	member, err := g.store.IsGroupMember(ctx, groupID, viewerID)
+	if err != nil {
+		return nil, err
+	}
+	if member && agent.APIKey.Valid {
+		view.APIKey = agent.APIKey.String
+	}
+	return view, nil
 }
 
-// ConsumeAgentKeyForProposer returns the one-time minted key for the add-agent proposer.
-func (g *GovernanceService) ConsumeAgentKeyForProposer(ctx context.Context, proposalID, proposerID, viewerID string, status ProposalStatus) (string, bool, error) {
-	if status != ProposalPassed || viewerID != proposerID {
-		return "", false, nil
+// AgentAPIKeyForMember returns the stored agent key when the viewer is a cabal member.
+func (g *GovernanceService) AgentAPIKeyForMember(ctx context.Context, groupID, viewerID string, kind domain.ProposalKind, status ProposalStatus) (string, error) {
+	if kind != domain.ProposalKindAddAgent || status != ProposalPassed {
+		return "", nil
 	}
-	return g.store.ConsumeAgentKeyReveal(ctx, proposalID)
+	member, err := g.store.IsGroupMember(ctx, groupID, viewerID)
+	if err != nil {
+		return "", err
+	}
+	if !member {
+		return "", nil
+	}
+	agent, found, err := g.store.GetActiveOrPausedGroupAgentByGroupID(ctx, groupID)
+	if err != nil {
+		return "", err
+	}
+	if !found || !agent.APIKey.Valid {
+		return "", nil
+	}
+	return agent.APIKey.String, nil
 }
 
 func groupAgentFromRow(row postgres.GroupAgentRow) domain.GroupAgent {
