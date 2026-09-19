@@ -1,6 +1,12 @@
 import SwiftUI
 
 /// Group screen: pot, you slice, member board, activity, proposals, and actions.
+private enum CabalActionDestination: Hashable {
+    case deposit
+    case propose
+    case sell
+}
+
 struct GroupDetailView: View {
     @ObservedObject var auth: PrivyAuthService
     let groupId: String
@@ -25,6 +31,7 @@ struct GroupDetailView: View {
     @State private var joinRequests: [JoinRequestDTO] = []
     @State private var joinRequestsLoading = false
     @State private var decidingRequestIDs: Set<String> = []
+    @State private var cabalActionDestination: CabalActionDestination?
 
     private let activityPollInterval: Duration = .seconds(15)
 
@@ -76,6 +83,9 @@ struct GroupDetailView: View {
             } message: {
                 Text("Your deployed stake will be sold to USDC at market prices and credited to your account balance. Deposit history stays on record.")
             }
+            .navigationDestination(item: $cabalActionDestination) { destination in
+                cabalActionDestinationView(for: destination)
+            }
     }
 
     @ViewBuilder
@@ -124,62 +134,80 @@ struct GroupDetailView: View {
     private func cabalActionSection(for view: GroupViewDTO) -> some View {
         Section {
             VStack(spacing: MonacoTheme.Space.s) {
-                NavigationLink {
-                    FundCabalView(
-                        auth: auth,
-                        joinedCabals: [HomeGroupBoardRowDTO(
-                            groupId: groupId,
-                            name: view.name,
-                            potValueUsd: view.resolvedPotTotalUsd,
-                            percentReturn: nil,
-                            dollarPnl: view.you.dollarPnl,
-                            isJoined: true
-                        )],
-                        preselectedGroupId: groupId,
-                        onFunded: {
-                            await loadGroup()
-                            await loadActivity()
-                        }
-                    )
+                Button {
+                    cabalActionDestination = .deposit
                 } label: {
-                    Text("Fund this cabal")
+                    Text("Deposit")
                         .frame(maxWidth: .infinity)
                 }
-                .monacoFormPrimaryAction()
+                .buttonStyle(.monacoPrimary)
                 .accessibilityIdentifier("group-action-fund")
 
                 HStack(spacing: MonacoTheme.Space.s) {
-                    NavigationLink {
-                        ProposeChooserView(auth: auth, groupId: groupId, groupView: view)
+                    Button {
+                        cabalActionDestination = .propose
                     } label: {
                         Text("Propose")
                             .frame(maxWidth: .infinity)
                     }
-                    .monacoFormSecondaryAction()
+                    .buttonStyle(.monacoSecondary)
                     .accessibilityIdentifier("group-action-propose")
 
-                    NavigationLink {
-                        SellCabalView(
-                            auth: auth,
-                            groupId: groupId,
-                            maxShareUnits: Int64(view.you.shareUnits) ?? 0,
-                            equityUsd: view.you.equityUsd,
-                            onSold: {
-                                await loadGroup()
-                                await loadActivity()
-                            }
-                        )
+                    Button {
+                        cabalActionDestination = .sell
                     } label: {
                         Text("Sell")
                             .frame(maxWidth: .infinity)
                     }
-                    .monacoFormSecondaryAction()
+                    .buttonStyle(.monacoSecondary)
                     .accessibilityIdentifier("group-action-sell")
                 }
             }
             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
+        }
+    }
+
+    @ViewBuilder
+    private func cabalActionDestinationView(for destination: CabalActionDestination) -> some View {
+        switch destination {
+        case .deposit:
+            if let view = groupView {
+                FundCabalView(
+                    auth: auth,
+                    joinedCabals: [HomeGroupBoardRowDTO(
+                        groupId: groupId,
+                        name: view.name,
+                        potValueUsd: view.resolvedPotTotalUsd,
+                        percentReturn: nil,
+                        dollarPnl: view.you.dollarPnl,
+                        isJoined: true
+                    )],
+                    preselectedGroupId: groupId,
+                    onFunded: {
+                        await loadGroup()
+                        await loadActivity()
+                    }
+                )
+            }
+        case .propose:
+            if let view = groupView {
+                ProposeChooserView(auth: auth, groupId: groupId, groupView: view)
+            }
+        case .sell:
+            if let view = groupView {
+                SellCabalView(
+                    auth: auth,
+                    groupId: groupId,
+                    maxShareUnits: Int64(view.you.shareUnits) ?? 0,
+                    equityUsd: view.you.equityUsd,
+                    onSold: {
+                        await loadGroup()
+                        await loadActivity()
+                    }
+                )
+            }
         }
     }
 
