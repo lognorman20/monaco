@@ -25,16 +25,3 @@ struct RetryTransactionResponse: Codable, Equatable {
     let status: String
     let txSignature: String?
 }
-
-struct ProposalListResponse: Codable, Equatable {
-    let proposals: [ProposalDTO]
-}
-
-struct ProposalVoteDTO: Codable, Equatable, Identifiable {
-    let voterId: String
-    let displayName: String
-    let choice: String
-    let castAt: String?
-
-    var id: String { voterId }
-}

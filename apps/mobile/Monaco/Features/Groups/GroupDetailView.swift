@@ -25,6 +25,8 @@ struct GroupDetailView: View {
     @State private var joinRequests: [JoinRequestDTO] = []
     @State private var joinRequestsLoading = false
     @State private var decidingRequestIDs: Set<String> = []
+    @State private var proposalService: LiveProposalFeedService
+    @State private var proposalRefreshCount = 0
 
     private let activityPollInterval: Duration = .seconds(15)
 
@@ -41,6 +43,7 @@ struct GroupDetailView: View {
         self.initialView = initialView
         self.onLeft = onLeft
         _isLoading = State(initialValue: initialView == nil)
+        _proposalService = State(initialValue: LiveProposalFeedService(auth: auth))
     }
 
     var body: some View {
@@ -61,6 +64,7 @@ struct GroupDetailView: View {
                 await pollActivityWhileVisible()
             }
             .refreshable {
+                proposalRefreshCount += 1
                 await loadGroup()
                 await loadActivity()
                 await loadJoinRequests()
@@ -165,7 +169,11 @@ struct GroupDetailView: View {
                 }
             )
 
-            ProposalHistorySection(auth: auth, groupId: groupId)
+            ProposalHistorySection(
+                service: proposalService,
+                groupId: groupId,
+                refreshToken: "\(proposalRefreshCount)"
+            )
 
             Section("Actions") {
                 NavigationLink {
