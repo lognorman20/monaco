@@ -78,32 +78,58 @@ struct GroupHeroSection: View {
     }
 }
 
-/// Up to four overlapping member avatars, then "+N".
+/// Up to four member avatars, then "+N". Each is a full circle ringed in the hero tint; the
+/// overlap stays under a fifth of the diameter so every avatar's initials stay fully visible.
 struct GroupMemberAvatarStack: View {
     let members: [LeaderboardRowDTO]
-    var size: CGFloat = 28
+    var size: CGFloat = 32
     var visibleLimit = 4
     var ringColor: Color = MonacoTheme.surface
+
+    private var overlap: CGFloat { (size * 0.19).rounded() }
 
     var body: some View {
         let visible = Array(members.prefix(visibleLimit))
         let overflow = members.count - visible.count
-        HStack(spacing: -8) {
+        HStack(spacing: -overlap) {
             ForEach(visible) { member in
-                MonacoAvatar(photoURL: member.profilePhotoUrl, displayName: member.displayName, size: size)
-                    .overlay(Circle().strokeBorder(ringColor, lineWidth: 2))
+                avatar(member)
             }
             if overflow > 0 {
-                Text("+\(overflow)")
-                    .font(.caption2.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(MonacoTheme.ink)
-                    .frame(width: size, height: size)
-                    .background(Circle().fill(MonacoTheme.surface))
-                    .overlay(Circle().strokeBorder(ringColor, lineWidth: 2))
+                bubble {
+                    Text("+\(overflow)")
+                        .font(.system(size: size * 0.36, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(MonacoTheme.ink)
+                }
             }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(members.count == 1 ? "1 member" : "\(members.count) members")
+    }
+
+    @ViewBuilder
+    private func avatar(_ member: LeaderboardRowDTO) -> some View {
+        let photo = member.profilePhotoUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if photo.isEmpty {
+            bubble {
+                Text(CabalMark.initials(for: member.displayName))
+                    .font(.system(size: size * 0.36, weight: .semibold))
+                    .foregroundStyle(MonacoTheme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+        } else {
+            MonacoAvatar(photoURL: photo, displayName: member.displayName, size: size)
+                .overlay(Circle().strokeBorder(ringColor, lineWidth: 2))
+        }
+    }
+
+    private func bubble<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        Circle()
+            .fill(MonacoTheme.surface)
+            .overlay(Circle().strokeBorder(ringColor, lineWidth: 2))
+            .overlay(content().padding(.horizontal, 5))
+            .frame(width: size, height: size)
     }
 }
 
