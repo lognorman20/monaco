@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Move USDC from account balance into a joined cabal treasury.
 struct FundCabalView: View {
@@ -16,6 +17,15 @@ struct FundCabalView: View {
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var toast: MonacoToast?
+
+    private var isSingleCabalContext: Bool {
+        preselectedGroupId != nil
+    }
+
+    private var showDepositPrompt: Bool {
+        guard let balance, !isLoadingBalance else { return false }
+        return balance.availableUsdcMicros <= 0
+    }
 
     var body: some View {
         Form {
@@ -41,17 +51,41 @@ struct FundCabalView: View {
                 Text("Account balance")
             }
 
-            Section("Choose cabal") {
-                if joinedCabals.isEmpty {
-                    Text("Join a cabal first, then fund it from your account balance.")
+            if showDepositPrompt {
+                Section("Add USDC first") {
+                    Text("Send USDC on Solana to your deposit address. Your account balance updates when it arrives, then you can fund this cabal.")
                         .monacoSecondaryCaption()
-                } else {
-                    Picker("Cabal", selection: $selectedGroupId) {
-                        ForEach(joinedCabals) { cabal in
-                            Text(cabal.name).tag(Optional(cabal.groupId))
+                    if let address = validDepositAddress {
+                        MonacoWalletAddressText(address: address)
+                            .accessibilityIdentifier("fund-cabal-deposit-address")
+                            .onTapGesture { copyAddress(address) }
+                        Button {
+                            copyAddress(address)
+                        } label: {
+                            Label("Copy deposit address", systemImage: "doc.on.doc")
                         }
+                        .monacoFormSecondaryAction()
+                        .accessibilityIdentifier("fund-cabal-copy-deposit-address")
+                    } else {
+                        Text("Deposit address not ready yet.")
+                            .foregroundStyle(MonacoTheme.warning)
                     }
-                    .accessibilityIdentifier("fund-cabal-picker")
+                }
+            }
+
+            if !isSingleCabalContext {
+                Section("Choose cabal") {
+                    if joinedCabals.isEmpty {
+                        Text("Join a cabal first, then fund it from your account balance.")
+                            .monacoSecondaryCaption()
+                    } else {
+                        Picker("Cabal", selection: $selectedGroupId) {
+                            ForEach(joinedCabals) { cabal in
+                                Text(cabal.name).tag(Optional(cabal.groupId))
+                            }
+                        }
+                        .accessibilityIdentifier("fund-cabal-picker")
+                    }
                 }
             }
 
@@ -73,12 +107,12 @@ struct FundCabalView: View {
                     Task { await submitFund() }
                 }
                 .monacoFormPrimaryAction()
-                .disabled(isSubmitting || joinedCabals.isEmpty || selectedGroupId == nil)
+                .disabled(isSubmitting || joinedCabals.isEmpty || selectedGroupId == nil || showDepositPrompt)
                 .accessibilityIdentifier("fund-cabal-submit-button")
             }
         }
         .monacoFormScreen()
-        .navigationTitle("Fund a cabal")
+        .navigationTitle(isSingleCabalContext ? "Fund this cabal" : "Fund a cabal")
         .navigationBarTitleDisplayMode(.inline)
         .monacoToast($toast)
         .task(id: auth.accessToken) {
@@ -87,6 +121,20 @@ struct FundCabalView: View {
                 selectedGroupId = preselectedGroupId ?? joinedCabals.first?.groupId
             }
         }
+    }
+
+    private var validDepositAddress: String? {
+        guard let address = balance?.memberWalletAddress.trimmingCharacters(in: .whitespacesAndNewlines),
+              !address.isEmpty,
+              !address.hasPrefix("FAKE") else {
+            return nil
+        }
+        return address
+    }
+
+    private func copyAddress(_ address: String) {
+        UIPasteboard.general.string = address
+        toast = MonacoToast(message: "Address copied.", isSuccess: true)
     }
 
     private func loadBalance() async {

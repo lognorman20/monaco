@@ -6,7 +6,7 @@ public enum ScreenSnapshotRenderer {
     public static func groupScreen(from view: GroupViewDTO) -> String {
         var lines: [String] = ["# \(view.name)", "", "## Pot"]
         if view.pot.isEmpty {
-            lines.append("No holdings yet. Add money to get started.")
+            lines.append("No holdings yet. Fund this cabal to get started.")
         } else {
             lines.append("Total | $\(view.resolvedPotTotalUsd)")
             for row in view.pot {

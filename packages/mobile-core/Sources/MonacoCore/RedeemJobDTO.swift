@@ -22,10 +22,15 @@ public struct RedeemRequestDTO: Encodable, Equatable, Sendable {
     }
 }
 
+/// Minimum partial withdraw slice in USDC micros ($0.10); matches backend RedeemDustMinimumMicros.
+public enum RedeemDustMinimum {
+    public static let usdcMicros: Int64 = 100_000
+}
+
 public struct RedeemSliderGate {
     public let dustMinimumMicros: Int64
 
-    public init(dustMinimumMicros: Int64 = 1_000_000) {
+    public init(dustMinimumMicros: Int64 = RedeemDustMinimum.usdcMicros) {
         self.dustMinimumMicros = dustMinimumMicros
     }
 

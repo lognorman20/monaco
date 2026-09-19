@@ -163,13 +163,6 @@ struct GroupDetailView: View {
 
             Section("Actions") {
                 NavigationLink {
-                    DepositView(auth: auth, groupId: groupId)
-                } label: {
-                    Label("Add money", systemImage: "plus.circle")
-                }
-                .accessibilityIdentifier("deposit-usdc-link")
-
-                NavigationLink {
                     FundCabalView(
                         auth: auth,
                         joinedCabals: [HomeGroupBoardRowDTO(
@@ -197,6 +190,23 @@ struct GroupDetailView: View {
                     Label("Propose buy", systemImage: "chart.line.uptrend.xyaxis")
                 }
                 .accessibilityIdentifier("group-action-propose")
+
+                NavigationLink {
+                    SellCabalView(
+                        auth: auth,
+                        groupId: groupId,
+                        maxShareUnits: Int64(view.you.shareUnits) ?? 0,
+                        equityUsd: view.you.equityUsd,
+                        onSold: {
+                            await loadGroup()
+                            await loadActivity()
+                        }
+                    )
+                } label: {
+                    Label("Sell", systemImage: "chart.line.downtrend.xyaxis")
+                }
+                .accessibilityIdentifier("group-action-sell")
+
                 Button(role: .destructive) {
                     if hasDeployedStake(in: view) {
                         showWithdrawLeaveConfirmation = true

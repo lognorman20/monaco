@@ -140,6 +140,17 @@ final class MonacoUITests: XCTestCase {
 
         loginIfNeeded(app)
 
+        let homeDeposit = app.buttons["home-deposit-link"]
+        XCTAssertTrue(homeDeposit.waitForExistence(timeout: 10))
+        homeDeposit.tap()
+
+        XCTAssertTrue(app.navigationBars["Deposit"].waitForExistence(timeout: 10))
+        let depositAddressReady = app.otherElements["deposit-address-value"].waitForExistence(timeout: 15)
+            || app.otherElements["deposit-address-loading"].waitForExistence(timeout: 5)
+        XCTAssertTrue(depositAddressReady)
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
         app.buttons["Create group"].tap()
 
         let nameField = app.textFields["Group name"]
@@ -151,15 +162,17 @@ final class MonacoUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Treasury address"].waitForExistence(timeout: 30))
 
-        let depositLink = app.buttons["deposit-usdc-link"]
-        XCTAssertTrue(depositLink.waitForExistence(timeout: 10))
-        app.scrollToElement(depositLink)
-        XCTAssertTrue(depositLink.isHittable)
-        depositLink.tap()
+        let fundAction = app.buttons["group-action-fund"]
+        XCTAssertTrue(fundAction.waitForExistence(timeout: 10))
+        app.scrollToElement(fundAction)
+        XCTAssertTrue(fundAction.isHittable)
+        XCTAssertTrue(app.buttons["group-action-sell"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["deposit-usdc-link"].exists)
 
-        XCTAssertTrue(app.staticTexts["Member wallet"].waitForExistence(timeout: 15))
-        XCTAssertTrue(app.textFields["deposit-amount-field"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["create-deposit-button"].waitForExistence(timeout: 10))
+        fundAction.tap()
+
+        XCTAssertTrue(app.navigationBars["Fund this cabal"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["fund-cabal-amount-field"].waitForExistence(timeout: 10))
         attachScreenshot(app, name: "m2-t13-deposit-reachable")
     }
 
@@ -170,7 +183,20 @@ final class MonacoUITests: XCTestCase {
         app.launch()
 
         loginIfNeeded(app)
-        attachScreenshot(app, name: "m2-t13-xbmcp-01-me")
+        attachScreenshot(app, name: "m2-t13-xbmcp-01-home")
+
+        let homeDeposit = app.buttons["home-deposit-link"]
+        XCTAssertTrue(homeDeposit.waitForExistence(timeout: 10))
+        homeDeposit.tap()
+
+        XCTAssertTrue(app.navigationBars["Deposit"].waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            app.otherElements["deposit-address-value"].waitForExistence(timeout: 30)
+                || app.otherElements["deposit-address-loading"].waitForExistence(timeout: 5)
+        )
+        attachScreenshot(app, name: "m2-t13-xbmcp-02-deposit-address")
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
 
         app.buttons["Create group"].tap()
 
@@ -182,41 +208,24 @@ final class MonacoUITests: XCTestCase {
         app.buttons["Create group"].tap()
 
         XCTAssertTrue(app.staticTexts["Treasury address"].waitForExistence(timeout: 30))
-        attachScreenshot(app, name: "m2-t13-xbmcp-02-treasury")
+        attachScreenshot(app, name: "m2-t13-xbmcp-03-treasury")
 
-        let depositLink = app.buttons["deposit-usdc-link"]
-        XCTAssertTrue(depositLink.waitForExistence(timeout: 10))
-        app.scrollToElement(depositLink)
-        depositLink.tap()
+        let fundAction = app.buttons["group-action-fund"]
+        XCTAssertTrue(fundAction.waitForExistence(timeout: 10))
+        app.scrollToElement(fundAction)
+        fundAction.tap()
 
-        XCTAssertTrue(app.staticTexts["Member wallet"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.navigationBars["Fund this cabal"].waitForExistence(timeout: 10))
 
-        let amountField = app.textFields["deposit-amount-field"]
+        let amountField = app.textFields["fund-cabal-amount-field"]
         XCTAssertTrue(amountField.waitForExistence(timeout: 10))
         amountField.tap()
         amountField.typeText("1")
 
-        attachScreenshot(app, name: "m2-t13-xbmcp-03-amount")
+        attachScreenshot(app, name: "m2-t13-xbmcp-04-fund-amount")
 
-        app.buttons["create-deposit-button"].tap()
-
-        let refreshButton = app.buttons["Refresh status"]
-        XCTAssertTrue(refreshButton.waitForExistence(timeout: 15))
-        attachScreenshot(app, name: "m2-t13-xbmcp-04-created")
-
-        let deadline = Date().addingTimeInterval(120)
-        var confirmed = false
-        while Date() < deadline {
-            refreshButton.tap()
-            if app.staticTexts["confirmed"].waitForExistence(timeout: 3) {
-                confirmed = true
-                break
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(5))
-        }
-
-        attachScreenshot(app, name: "m2-t13-xbmcp-05-final")
-        XCTAssertTrue(confirmed, "Deposit did not reach confirmed within 120s — check SweepPoller and member USDC balance")
+        app.buttons["fund-cabal-submit-button"].tap()
+        attachScreenshot(app, name: "m2-t13-xbmcp-05-fund-submitted")
     }
 
     @MainActor

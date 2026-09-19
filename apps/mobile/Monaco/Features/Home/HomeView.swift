@@ -22,16 +22,16 @@ struct HomeView: View {
                 .padding([.horizontal, .top])
 
             NavigationLink {
-                FundCabalView(auth: auth, joinedCabals: joinedCabals, onFunded: refreshBalance)
+                DepositView(auth: auth, joinedCabals: joinedCabals)
             } label: {
-                Label("Fund a cabal", systemImage: "arrow.right.circle")
+                Label("Deposit", systemImage: "plus.circle")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.monacoSecondary)
             .padding(.horizontal)
             .padding(.bottom, 8)
-            .accessibilityIdentifier("home-fund-cabal-link")
+            .accessibilityIdentifier("home-deposit-link")
 
             Picker("Board", selection: $selectedTab) {
                 Text("Cabals").tag(0)
@@ -51,7 +51,7 @@ struct HomeView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
-                    SettingsView(auth: auth, memberWalletAddress: nil, treasuryAddress: nil)
+                    SettingsView(auth: auth)
                 } label: {
                     Image(systemName: "gearshape")
                         .monacoToolbarIcon()
