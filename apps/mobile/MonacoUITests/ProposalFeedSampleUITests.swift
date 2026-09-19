@@ -33,6 +33,8 @@ final class ProposalFeedSampleUITests: XCTestCase {
         let yes = element("proposal-card-vote-yes-sample-0")
         XCTAssertTrue(yes.waitForExistence(timeout: 10))
         XCTAssertTrue(element("proposal-card-comment-count-sample-0").exists)
+        // The proposer's thesis shows as a two-line excerpt on the card.
+        XCTAssertTrue(element("proposal-card-reason-sample-0").exists)
         capture("01-feed")
 
         // Vote yes from the card: buttons disappear and the tally updates.
@@ -63,6 +65,9 @@ final class ProposalFeedSampleUITests: XCTestCase {
         element("proposal-card-open-sample-0").tap()
         XCTAssertTrue(element("comment-thread").waitForExistence(timeout: 5))
         XCTAssertTrue(element("comment-row-c-2").exists)
+        // Detail quotes the full thesis once, in its own block.
+        XCTAssertTrue(element("proposal-detail-thesis").exists)
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "proposal-card-reason-sample-0").count, 0)
         capture("04-detail-thread")
 
         // Post a top-level comment.
@@ -175,9 +180,16 @@ final class ProposeFlowSampleUITests: XCTestCase {
         capture("13-amount-over")
         preset.tap()
 
+        // Optional thesis: sent with the proposal and repeated on the review receipt.
+        element("proposal-add-reason").tap()
+        let thesis = element("proposal-thesis-field")
+        XCTAssertTrue(thesis.waitForExistence(timeout: 3))
+        thesis.typeText("Earnings Thursday.")
+
         app.buttons["Review"].tap()
         let send = app.buttons["Send to cabal"]
         XCTAssertTrue(send.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Earnings Thursday."].exists)
         sleep(1)
         capture("14-review")
         send.tap()
