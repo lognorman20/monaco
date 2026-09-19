@@ -82,7 +82,8 @@ struct ProfileCabalsSection: View {
                             title: row.name,
                             subtitle: row.subtitle,
                             trailing: row.trailing,
-                            trailingCaption: row.trailingCaption
+                            trailingCaption: row.trailingCaption,
+                            trailingColor: MonacoTheme.signed(row.dollarPnl)
                         )
                     }
                     .buttonStyle(.plain)
