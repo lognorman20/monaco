@@ -195,6 +195,9 @@ func TestSeedMixedAndScale_idempotentAndInert(t *testing.T) {
 		if n := countRows(t, e, `SELECT count(*) FROM nav_snapshots WHERE group_id = $1`, c.GroupID); n < 10 {
 			t.Errorf("%s nav snapshots = %d, want a week of history", c.Name, n)
 		}
+		if n := countRows(t, e, `SELECT count(*) FROM nav_snapshots WHERE group_id = $1 AND net_contributed_micros IS NULL`, c.GroupID); n != 0 {
+			t.Errorf("%s nav snapshots missing net contributed = %d, want 0", c.Name, n)
+		}
 	}
 	realView, err := e.home.GetGroupView(ctx, e.token, e.groupID)
 	if err != nil {
