@@ -99,7 +99,19 @@ struct HomeView: View {
                     onLeft: { await session.refresh(auth: auth, leaderboardRange: leaderboardRange) }
                 )
 
-                HomePnLChartSection(points: dashboard.pnlSeries1H)
+                if session.isHomePnLSeriesLoading, session.homePnLSeries == nil {
+                    VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                        Text("P&L · last hour")
+                            .font(MonacoTheme.TypeRole.title)
+                            .foregroundStyle(MonacoTheme.ink)
+                        ProgressView()
+                            .tint(MonacoTheme.accent)
+                            .frame(maxWidth: .infinity, minHeight: 160)
+                            .accessibilityIdentifier("home-pnl-chart-loading")
+                    }
+                } else {
+                    HomePnLChartSection(points: session.homePnLSeries ?? dashboard.pnlSeries1H)
+                }
 
                 HomeLeaderboardSection(
                     auth: auth,

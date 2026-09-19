@@ -11,6 +11,8 @@ final class AppSessionStore {
     var me: MeResponse?
     var platformBalance: PlatformBalanceDTO?
     var popularAssets: [MarketAssetDTO] = []
+    var homePnLSeries: [HomePnLSeriesPointDTO]?
+    var isHomePnLSeriesLoading = false
     var isBalanceLoading = false
     var errorMessage: String?
     var isLoading = true
@@ -83,7 +85,11 @@ final class AppSessionStore {
             isLoading = false
             isBalanceLoading = false
 
-            Task { await refreshDeferredHomePayloads(auth: auth, accessToken: token) }
+            Task {
+                async let deferred: Void = refreshDeferredHomePayloads(auth: auth, accessToken: token)
+                async let pnlSeries: Void = refreshHomePnLSeries(auth: auth, accessToken: token)
+                _ = await (deferred, pnlSeries)
+            }
         } catch MonacoAPIError.httpStatus(let status) where status == 401 {
             await auth.logout()
         } catch MonacoAPIError.httpStatus(let status) {
@@ -118,6 +124,23 @@ final class AppSessionStore {
             if error.isRequestCancellation { return }
             if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
                 return
+            }
+        }
+    }
+
+    /// GET /v1/home/pnl-series for the Home chart. Does not block login or dashboard shell.
+    func refreshHomePnLSeries(auth: PrivyAuthService, accessToken: String? = nil) async {
+        let token = accessToken ?? auth.accessToken
+        guard let token else { return }
+        isHomePnLSeriesLoading = homePnLSeries == nil
+        defer { isHomePnLSeriesLoading = false }
+        do {
+            let series = try await apiClient.getHomePnLSeries(accessToken: token, range: .oneHour)
+            homePnLSeries = series.points
+        } catch {
+            if error.isRequestCancellation { return }
+            if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
+                await auth.logout()
             }
         }
     }

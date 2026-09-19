@@ -104,11 +104,6 @@ func (h *HomeService) GetHomeDashboard(ctx context.Context, accessToken string, 
 		}
 	}
 
-	pnlSeries, err := h.buildViewerPnLSeries(ctx, positions, time.Now().Add(-1*time.Hour))
-	if err != nil {
-		return HomeDashboardResult{}, err
-	}
-
 	leaderboard, err := h.buildRangedLeaderboard(ctx, joinedGroupIDs, leaderboardRange)
 	if err != nil {
 		return HomeDashboardResult{}, err
@@ -124,7 +119,7 @@ func (h *HomeService) GetHomeDashboard(ctx context.Context, accessToken string, 
 		NetWorthDollarPnL:     formatSignedDollarPnL(netPnL),
 		NetWorthPercentReturn: netPercent,
 		MyGroups:              myGroups,
-		PnlSeries1H:           pnlSeries,
+		PnlSeries1H:           []HomePnLSeriesPoint{},
 		Leaderboard:           leaderboard,
 		MissedProposals:       missed,
 	}, nil
