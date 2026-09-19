@@ -22,16 +22,20 @@ struct ProposalFeedView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: MonacoTheme.Space.sm, pinnedViews: [.sectionHeaders]) {
-                Section {
+        VStack(spacing: 0) {
+            tabPicker
+                .padding(.horizontal, MonacoTheme.Space.gutter)
+            ScrollView {
+                LazyVStack(spacing: MonacoTheme.Space.sm) {
                     content
-                } header: {
-                    tabPicker
                 }
+                .padding(.horizontal, MonacoTheme.Space.gutter)
+                .padding(.top, MonacoTheme.Space.xs)
+                .padding(.bottom, MonacoTheme.Space.l)
             }
-            .padding(.horizontal, MonacoTheme.Space.gutter)
-            .padding(.bottom, MonacoTheme.Space.l)
+            .refreshable {
+                await load(tab)
+            }
         }
         .background(MonacoTheme.canvas.ignoresSafeArea())
         .navigationTitle(title)
@@ -41,9 +45,6 @@ struct ProposalFeedView: View {
             async let open: Void = load(.open)
             async let closed: Void = load(.closed)
             _ = await (open, closed)
-        }
-        .refreshable {
-            await load(tab)
         }
         .monacoToast($toast)
         .accessibilityElement(children: .contain)
@@ -62,7 +63,6 @@ struct ProposalFeedView: View {
             return tab.title
         }
         .padding(.vertical, MonacoTheme.Space.s)
-        .background(MonacoTheme.canvas)
         .accessibilityIdentifier("proposal-feed-tab-picker")
     }
 

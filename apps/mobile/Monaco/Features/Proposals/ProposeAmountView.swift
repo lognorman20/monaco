@@ -104,6 +104,7 @@ struct ProposeAmountView: View {
             await loadPot()
             await loadPrice()
         }
+        .proposeFlowFullHeight()
         .accessibilityIdentifier("propose-amount")
     }
 

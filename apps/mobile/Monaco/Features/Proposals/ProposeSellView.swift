@@ -230,6 +230,7 @@ struct ProposeSellAmountView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(MonacoTheme.canvas.ignoresSafeArea())
+        .proposeFlowFullHeight()
         .navigationTitle(ProposeFlowCopy.amountTitle)
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: amountText) { _, _ in errorMessage = nil }
@@ -376,6 +377,7 @@ struct ProposeSellReviewView: View {
             .padding(.vertical, MonacoTheme.Space.l)
         }
         .background(MonacoTheme.canvas.ignoresSafeArea())
+        .proposeFlowFullHeight()
         .navigationTitle(ProposeFlowCopy.review)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {

@@ -209,10 +209,18 @@ struct ProposalCardView<Destination: View>: View {
     @ViewBuilder
     private var actions: some View {
         if let viewerChoice {
-            Text(ProposalFeedCopy.viewerVoted(viewerChoice))
-                .font(MonacoTheme.Typo.callout.weight(.semibold))
-                .foregroundStyle(MonacoTheme.ink)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            HStack(spacing: MonacoTheme.Space.s) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(MonacoTheme.primaryButtonLabel)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(viewerChoice.lowercased() == "no" ? MonacoTheme.loss : MonacoTheme.ink))
+                Text(ProposalFeedCopy.viewerVoted(viewerChoice))
+                    .font(MonacoTheme.Typo.callout.weight(.semibold))
+                    .foregroundStyle(MonacoTheme.ink)
+            }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
                 .transition(.opacity)
                 .accessibilityIdentifier("proposal-card-voted-\(proposal.id)")
         } else if proposal.showsVoteActions {

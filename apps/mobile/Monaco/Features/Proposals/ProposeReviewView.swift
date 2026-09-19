@@ -87,6 +87,7 @@ struct ProposeReviewView: View {
                 .accessibilityIdentifier("proposal-submit-button")
             }
         }
+        .proposeFlowFullHeight()
         .accessibilityIdentifier("propose-review")
     }
 
