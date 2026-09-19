@@ -1,6 +1,6 @@
 package app
 
-// #202 demo coverage: the key is shown to the proposer exactly once, a buy intent within
+// #202 demo coverage: cabal members can read the agent key, a buy intent within
 // budget executes end to end through the fake Jupiter/Privy providers, a second intent that
 // would breach the allocation is rejected without touching the swap path, and the
 // pause/resume/revoke lifecycle gates intents the way the operator runbook promises.
@@ -68,17 +68,17 @@ func addAgentAndReveal(t *testing.T, h governanceHarness, groupID, proposerID st
 	if passed.Status != ProposalPassed {
 		t.Fatalf("add agent proposal status = %s, want passed", passed.Status)
 	}
-	key, ok, err := h.Governance.ConsumeAgentKeyForProposer(context.Background(), proposal.ID, proposerID, proposerID, passed.Status)
+	key, err = h.Governance.AgentAPIKeyForMember(context.Background(), groupID, proposerID, domain.ProposalKindAddAgent, passed.Status)
 	if err != nil {
-		t.Fatalf("ConsumeAgentKeyForProposer: %v", err)
+		t.Fatalf("AgentAPIKeyForMember: %v", err)
 	}
-	if !ok || key == "" {
-		t.Fatalf("expected key reveal, got ok=%v key=%q", ok, key)
+	if key == "" {
+		t.Fatal("expected agent api key for member")
 	}
 	return proposal.ID, key
 }
 
-func TestAgentKeyReveal_shownOnceToProposerOnly(t *testing.T) {
+func TestAgentKey_readableByMembersNotBystanders(t *testing.T) {
 	h := integrationGovernanceApp(t)
 	proposer := openTestSession(t, h.ISO, h.Sessions, h.Privy, "key-proposer", "Key Proposer")
 	other := openTestSession(t, h.ISO, h.Sessions, h.Privy, "key-bystander", "Key Bystander")
@@ -109,31 +109,28 @@ func TestAgentKeyReveal_shownOnceToProposerOnly(t *testing.T) {
 		t.Fatalf("cast vote: %v", err)
 	}
 
-	// A bystander viewing the same passed proposal never sees the key, and their look does not
-	// burn the one-time reveal for the real proposer.
-	bystanderKey, ok, err := h.Governance.ConsumeAgentKeyForProposer(context.Background(), proposal.ID, proposer.UserID, other.UserID, passed.Status)
+	bystanderKey, err := h.Governance.AgentAPIKeyForMember(context.Background(), created.GroupID, other.UserID, domain.ProposalKindAddAgent, passed.Status)
 	if err != nil {
-		t.Fatalf("ConsumeAgentKeyForProposer(bystander): %v", err)
+		t.Fatalf("AgentAPIKeyForMember(bystander): %v", err)
 	}
-	if ok || bystanderKey != "" {
-		t.Fatalf("bystander got key ok=%v key=%q, want none", ok, bystanderKey)
+	if bystanderKey != "" {
+		t.Fatalf("bystander got key %q, want none", bystanderKey)
 	}
 
-	key, ok, err := h.Governance.ConsumeAgentKeyForProposer(context.Background(), proposal.ID, proposer.UserID, proposer.UserID, passed.Status)
+	key, err := h.Governance.AgentAPIKeyForMember(context.Background(), created.GroupID, proposer.UserID, domain.ProposalKindAddAgent, passed.Status)
 	if err != nil {
-		t.Fatalf("ConsumeAgentKeyForProposer(proposer): %v", err)
+		t.Fatalf("AgentAPIKeyForMember(member): %v", err)
 	}
-	if !ok || len(key) != 5 {
-		t.Fatalf("expected a 5-char key on first reveal, got ok=%v key=%q", ok, key)
+	if len(key) != 5 {
+		t.Fatalf("expected a 5-char key for member, got %q", key)
 	}
 
-	// Second look, even by the proposer, comes back empty: the app can only show it once.
-	again, ok, err := h.Governance.ConsumeAgentKeyForProposer(context.Background(), proposal.ID, proposer.UserID, proposer.UserID, passed.Status)
+	again, err := h.Governance.AgentAPIKeyForMember(context.Background(), created.GroupID, proposer.UserID, domain.ProposalKindAddAgent, passed.Status)
 	if err != nil {
-		t.Fatalf("ConsumeAgentKeyForProposer(second read): %v", err)
+		t.Fatalf("AgentAPIKeyForMember(second read): %v", err)
 	}
-	if ok || again != "" {
-		t.Fatalf("expected key consumed after first reveal, got ok=%v key=%q", ok, again)
+	if again != key {
+		t.Fatalf("expected same key on repeat member read, got %q then %q", key, again)
 	}
 }
 
