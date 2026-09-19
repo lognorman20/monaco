@@ -18,11 +18,8 @@ type authSessionRequest struct {
 	AccessToken string `json:"accessToken"`
 }
 
-type authSessionResponse struct {
-	UserID              string `json:"userId"`
-	DisplayName         string `json:"displayName"`
-	MemberWalletAddress string `json:"memberWalletAddress"`
-}
+// authSessionResponse is the same profile shape as GET /v1/me.
+type authSessionResponse = meResponse
 
 // SessionHandler handles POST /v1/auth/session.
 func (h *AuthHandlers) SessionHandler(w http.ResponseWriter, r *http.Request) {
@@ -45,12 +42,5 @@ func (h *AuthHandlers) SessionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(authSessionResponse{
-		UserID:              result.UserID,
-		DisplayName:         result.DisplayName,
-		MemberWalletAddress: result.MemberWalletAddress,
-	})
-	logJSONOK(ctx, log, "session_opened", "user_id", result.UserID)
+	writeMeResponse(ctx, log, w, http.StatusOK, result, "session_opened", "user_id", result.UserID)
 }

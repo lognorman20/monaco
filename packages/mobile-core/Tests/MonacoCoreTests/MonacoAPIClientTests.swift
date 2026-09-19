@@ -17,9 +17,11 @@ final class MonacoAPIClientTests: XCTestCase {
             capturedAuthorization = request.value(forHTTPHeaderField: "Authorization")
             let responseBody = """
             {
-              "user_id": "550e8400-e29b-41d4-a716-446655440000",
-              "display_name": "Alfred",
-              "member_wallet_address": "FAKEabcdef1234567890abcdef1234567890"
+              "userId": "550e8400-e29b-41d4-a716-446655440000",
+              "displayName": "Alfred",
+              "memberWalletAddress": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+              "profilePhotoUrl": null,
+              "createdAt": "2026-09-01T14:30:00Z"
             }
             """
             let response = HTTPURLResponse(
@@ -278,9 +280,14 @@ final class MonacoAPIClientTests: XCTestCase {
         let dto = try JSONDecoder().decode(MeDTO.self, from: data)
 
         // Assert
-        XCTAssertEqual(dto.userID, "550e8400-e29b-41d4-a716-446655440000")
+        XCTAssertEqual(dto.userId, "550e8400-e29b-41d4-a716-446655440000")
         XCTAssertEqual(dto.displayName, "Alfred")
-        XCTAssertEqual(dto.memberWalletAddress, "FAKEabcdef1234567890abcdef1234567890")
+        XCTAssertEqual(dto.memberWalletAddress, "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU")
+        XCTAssertEqual(
+            dto.profilePhotoUrl,
+            "https://example.supabase.co/storage/v1/object/public/avatars/550e8400-e29b-41d4-a716-446655440000/3f2a.jpg"
+        )
+        XCTAssertEqual(dto.createdAt, Date(timeIntervalSince1970: 1_788_273_000))
     }
 
     private func makeMockURLSession() -> URLSession {

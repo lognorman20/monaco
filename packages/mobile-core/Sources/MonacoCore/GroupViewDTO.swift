@@ -56,15 +56,24 @@ public struct LeaderboardRowDTO: Codable, Equatable, Sendable, Identifiable {
     public let rank: Int
     public let userId: String
     public let displayName: String
+    public let profilePhotoUrl: String?
     public let percentReturn: String?
     public let dollarPnl: String
 
     public var id: String { userId }
 
-    public init(rank: Int, userId: String, displayName: String, percentReturn: String?, dollarPnl: String) {
+    public init(
+        rank: Int,
+        userId: String,
+        displayName: String,
+        profilePhotoUrl: String? = nil,
+        percentReturn: String?,
+        dollarPnl: String
+    ) {
         self.rank = rank
         self.userId = userId
         self.displayName = displayName
+        self.profilePhotoUrl = profilePhotoUrl
         self.percentReturn = percentReturn
         self.dollarPnl = dollarPnl
     }

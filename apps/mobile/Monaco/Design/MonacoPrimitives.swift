@@ -120,22 +120,38 @@ struct MonacoHeroHeader: View {
 }
 
 /// Image-or-mark + title + trailing metric.
-struct MonacoRowCard: View {
-    let systemImage: String
+struct MonacoRowCard<Leading: View>: View {
     let title: String
     let subtitle: String?
     let trailing: String?
     var subtitleColor: Color = MonacoTheme.muted
     var trailingColor: Color = MonacoTheme.ink
+    /// Muted second line under `trailing` (e.g. percent under dollar P&L).
+    let trailingCaption: String?
+    let leading: Leading
+
+    init(
+        title: String,
+        subtitle: String?,
+        trailing: String?,
+        trailingCaption: String? = nil,
+        subtitleColor: Color = MonacoTheme.muted,
+        trailingColor: Color = MonacoTheme.ink,
+        @ViewBuilder leading: () -> Leading
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.trailing = trailing
+        self.trailingCaption = trailingCaption
+        self.subtitleColor = subtitleColor
+        self.trailingColor = trailingColor
+        self.leading = leading()
+    }
 
     var body: some View {
         HStack(spacing: MonacoTheme.Space.m) {
-            Image(systemName: systemImage)
-                .font(.title3)
-                .foregroundStyle(MonacoTheme.accent)
-                .symbolRenderingMode(.hierarchical)
+            leading
                 .frame(width: 44, height: 44)
-                .background(MonacoTheme.canvas, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(MonacoTheme.TypeRole.title)
@@ -148,9 +164,17 @@ struct MonacoRowCard: View {
             }
             Spacer(minLength: 8)
             if let trailing, !trailing.isEmpty {
-                Text(trailing)
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(trailingColor)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(trailing)
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(trailingColor)
+                    if let trailingCaption, !trailingCaption.isEmpty {
+                        Text(trailingCaption)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(MonacoTheme.muted)
+                    }
+                }
+                .fixedSize()
             }
         }
         .padding(MonacoTheme.Space.m)
@@ -161,6 +185,43 @@ struct MonacoRowCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
                 .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+        }
+    }
+}
+
+/// SF Symbol tile used as the default `MonacoRowCard` leading mark.
+struct MonacoRowIcon: View {
+    let systemImage: String
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.title3)
+            .foregroundStyle(MonacoTheme.accent)
+            .symbolRenderingMode(.hierarchical)
+            .frame(width: 44, height: 44)
+            .background(MonacoTheme.canvas, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+extension MonacoRowCard where Leading == MonacoRowIcon {
+    init(
+        systemImage: String,
+        title: String,
+        subtitle: String?,
+        trailing: String?,
+        trailingCaption: String? = nil,
+        subtitleColor: Color = MonacoTheme.muted,
+        trailingColor: Color = MonacoTheme.ink
+    ) {
+        self.init(
+            title: title,
+            subtitle: subtitle,
+            trailing: trailing,
+            trailingCaption: trailingCaption,
+            subtitleColor: subtitleColor,
+            trailingColor: trailingColor
+        ) {
+            MonacoRowIcon(systemImage: systemImage)
         }
     }
 }

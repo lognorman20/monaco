@@ -1,3 +1,4 @@
+import MonacoCore
 import Observation
 import SwiftUI
 

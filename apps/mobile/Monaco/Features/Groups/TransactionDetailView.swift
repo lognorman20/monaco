@@ -76,7 +76,7 @@ struct TransactionDetailView: View {
                         Text("From address")
                             .font(.subheadline)
                             .foregroundStyle(MonacoTheme.secondaryText)
-                        MonacoWalletAddressText(address: fromAddress, font: .footnote.monospaced())
+                        MonacoWalletAddressText(address: fromAddress, textStyle: .footnote)
                     }
                 }
                 signatureRow(deposit.txSignature)
@@ -189,7 +189,7 @@ struct TransactionDetailView: View {
                 Text("Tx signature")
                     .font(.subheadline)
                     .foregroundStyle(MonacoTheme.secondaryText)
-                MonacoWalletAddressText(address: signature, font: .footnote.monospaced())
+                MonacoWalletAddressText(address: signature, textStyle: .footnote)
             }
         } else {
             LabeledContent("Tx signature", value: "N/A")
@@ -203,7 +203,7 @@ struct TransactionDetailView: View {
                 Text(label)
                     .font(.subheadline)
                     .foregroundStyle(MonacoTheme.secondaryText)
-                MonacoWalletAddressText(address: value, font: .footnote.monospaced())
+                MonacoWalletAddressText(address: value, textStyle: .footnote)
             }
         } else {
             LabeledContent(label, value: "N/A")

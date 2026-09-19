@@ -78,7 +78,7 @@ struct PotSectionView: View {
                 .font(.caption)
                 .foregroundStyle(MonacoTheme.secondaryText)
 
-            MonacoWalletAddressText(address: address, font: .footnote.monospaced())
+            MonacoWalletAddressText(address: address, textStyle: .footnote)
                 .accessibilityIdentifier("group-treasury-address-value")
                 .onTapGesture {
                     copyTreasuryAddress(address)

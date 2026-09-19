@@ -23,8 +23,15 @@ Create once on the dev project (dashboard or API):
 
 Object keys: `{user_id}/{random}.{jpg|png|webp}`.
 
+## Limits
+
+- Multipart field `photo`, at most 2MB, jpeg/png/webp (checked by magic bytes, not the declared type). The app downscales and re-encodes to JPEG before upload.
+- Per-user rate limit: 3 uploads at once, then one per 20 s. Past that the API returns 429 with `Retry-After` and nothing is written to storage.
+- Each upload writes a new object; older objects for the user are not deleted yet.
+
 ## Verify
 
-- `GET /v1/me` includes `profilePhotoUrl` (null when unset)
+- `GET /v1/me`, `PATCH /v1/me`, and `POST /v1/auth/session` include `profilePhotoUrl` (null when unset) and `createdAt`
 - `POST /v1/me/profile-photo` multipart field `photo`, max ~2MB, jpeg/png/webp
-- Settings → placeholder, Upload PFP, preview after upload
+- Profile tab (or Settings → Profile photo) → tap the avatar, pick a photo, toast "Profile photo updated."
+- Home leaderboard and cabal member boards show the photo after the app refreshes

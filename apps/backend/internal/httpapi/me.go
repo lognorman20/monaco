@@ -5,24 +5,40 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 )
 
-// MeHandlers serves GET /v1/me and POST /v1/me/profile-photo.
+// maxPatchMeBodyBytes bounds PATCH /v1/me bodies. A 32-character name is at most
+// 128 bytes of UTF-8; the rest is JSON framing and headroom.
+const maxPatchMeBodyBytes = 4 << 10
+
+// MeHandlers serves GET/PATCH /v1/me and POST /v1/me/profile-photo.
 type MeHandlers struct {
 	Sessions     *app.SessionService
 	ProfilePhoto *app.ProfilePhotoService
 }
 
+// meResponse is the signed-in profile returned by GET/PATCH /v1/me,
+// POST /v1/me/profile-photo, and POST /v1/auth/session.
 type meResponse struct {
 	UserID              string  `json:"userId"`
 	DisplayName         string  `json:"displayName"`
 	MemberWalletAddress string  `json:"memberWalletAddress"`
 	ProfilePhotoURL     *string `json:"profilePhotoUrl"`
+	CreatedAt           string  `json:"createdAt"`
+}
+
+// patchMeRequest is the PATCH /v1/me body. displayName is required; a pointer
+// distinguishes a missing field from an empty string.
+type patchMeRequest struct {
+	DisplayName *string `json:"displayName"`
 }
 
 // MeHandler handles GET /v1/me.
@@ -43,6 +59,61 @@ func (h *MeHandlers) MeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeMeResponse(ctx, log, w, http.StatusOK, result, "ok", "user_id", result.UserID)
+}
+
+// PatchMeHandler handles PATCH /v1/me: update the signed-in user's display name.
+func (h *MeHandlers) PatchMeHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	log := newRequestLog(r, "PATCH /v1/me")
+
+	token, ok := bearerToken(r)
+	if !ok {
+		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxPatchMeBodyBytes)
+	decoder := json.NewDecoder(r.Body)
+	var req patchMeRequest
+	err := decoder.Decode(&req)
+	if err == nil {
+		// Exactly one JSON value: anything after it is a malformed body.
+		if _, trailingErr := decoder.Token(); !errors.Is(trailingErr, io.EOF) {
+			err = trailingErr
+			if err == nil {
+				err = errors.New("trailing data after JSON body")
+			}
+		}
+	}
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			logJSONError(ctx, log, "body_too_large", w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
+		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.DisplayName == nil {
+		logJSONError(ctx, log, "invalid_display_name", w, http.StatusBadRequest, "displayName is required")
+		return
+	}
+
+	result, err := h.Sessions.SetDisplayName(ctx, token, *req.DisplayName)
+	if err != nil {
+		var nameErr *app.DisplayNameError
+		switch {
+		case errors.As(err, &nameErr):
+			logJSONError(ctx, log, "invalid_display_name", w, http.StatusBadRequest, nameErr.Message(), "reason", string(nameErr.Reason))
+		case errors.Is(err, app.ErrRateLimited):
+			writeRateLimited(ctx, log, w, err)
+		default:
+			writeMeError(ctx, log, w, err)
+		}
+		return
+	}
+
+	writeMeResponse(ctx, log, w, http.StatusOK, result, "updated", "user_id", result.UserID)
 }
 
 // UploadProfilePhotoHandler handles POST /v1/me/profile-photo.
@@ -73,7 +144,7 @@ func (h *MeHandlers) UploadProfilePhotoHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	file, header, err := r.FormFile("photo")
+	file, _, err := r.FormFile("photo")
 	if err != nil {
 		logJSONError(ctx, log, "missing_photo", w, http.StatusBadRequest, "photo field is required")
 		return
@@ -85,7 +156,6 @@ func (h *MeHandlers) UploadProfilePhotoHandler(w http.ResponseWriter, r *http.Re
 		logJSONError(ctx, log, "read_photo_failed", w, http.StatusBadRequest, "could not read photo")
 		return
 	}
-	_ = header
 
 	result, err := h.ProfilePhoto.UploadProfilePhoto(ctx, token, data)
 	if err != nil {
@@ -104,17 +174,26 @@ func writeMeResponse(ctx context.Context, log *requestLog, w http.ResponseWriter
 }
 
 func meResponseFromResult(result app.MeResult) meResponse {
-	var profilePhotoURL *string
-	trimmed := strings.TrimSpace(result.ProfilePhotoURL)
-	if trimmed != "" {
-		profilePhotoURL = &trimmed
+	createdAt := ""
+	if !result.CreatedAt.IsZero() {
+		createdAt = result.CreatedAt.UTC().Format(time.RFC3339)
 	}
 	return meResponse{
 		UserID:              result.UserID,
 		DisplayName:         result.DisplayName,
 		MemberWalletAddress: result.MemberWalletAddress,
-		ProfilePhotoURL:     profilePhotoURL,
+		ProfilePhotoURL:     optionalString(result.ProfilePhotoURL),
+		CreatedAt:           createdAt,
 	}
+}
+
+// optionalString maps blank strings to JSON null.
+func optionalString(value string) *string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 func writeMeError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error) {
@@ -129,12 +208,26 @@ func writeMeError(ctx context.Context, log *requestLog, w http.ResponseWriter, e
 	logJSONError(ctx, log, "get_me_failed", w, http.StatusInternalServerError, "internal server error", "err", err.Error())
 }
 
+// writeRateLimited responds 429 with a whole-second Retry-After header.
+func writeRateLimited(ctx context.Context, log *requestLog, w http.ResponseWriter, err error) {
+	retryAfter := time.Second
+	var limited *app.RateLimitError
+	if errors.As(err, &limited) && limited.RetryAfter > retryAfter {
+		retryAfter = limited.RetryAfter
+	}
+	seconds := int(math.Ceil(retryAfter.Seconds()))
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	logJSONError(ctx, log, "rate_limited", w, http.StatusTooManyRequests, "too many requests, try again shortly", "retry_after_s", seconds)
+}
+
 func writeProfilePhotoUploadError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, privy.ErrInvalidToken):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 	case errors.Is(err, app.ErrUserNotFound):
 		logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found")
+	case errors.Is(err, app.ErrRateLimited):
+		writeRateLimited(ctx, log, w, err)
 	case errors.Is(err, app.ErrProfilePhotoTooLarge):
 		logJSONError(ctx, log, "photo_too_large", w, http.StatusBadRequest, "photo must be at most 2MB")
 	case errors.Is(err, app.ErrProfilePhotoInvalid):

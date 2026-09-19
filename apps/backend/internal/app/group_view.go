@@ -35,11 +35,12 @@ type GroupViewMemberSlice struct {
 
 // GroupViewMemberRow is one ranked member on the in-group board.
 type GroupViewMemberRow struct {
-	Rank          int
-	UserID        string
-	DisplayName   string
-	PercentReturn *string
-	DollarPnL     string
+	Rank            int
+	UserID          string
+	DisplayName     string
+	ProfilePhotoURL string
+	PercentReturn   *string
+	DollarPnL       string
 }
 
 // GroupViewResult is GET /v1/groups/{id}/view.
@@ -275,28 +276,26 @@ func (h *HomeService) buildGroupViewMemberRows(
 	for _, row := range board {
 		userIDs = append(userIDs, row.UserID)
 	}
-	displayNames, err := h.store.ListUserDisplayNamesByIDs(ctx, userIDs)
+	profiles, err := h.store.ListUserProfilesByIDs(ctx, userIDs)
 	if err != nil {
 		return nil, err
 	}
 
 	rows := make([]GroupViewMemberRow, 0, len(board))
 	for rank, row := range board {
-		displayName := displayNames[row.UserID]
-		if displayName == "" {
-			displayName = "Member"
-		}
+		displayName, profilePhotoURL := boardIdentity(profiles, row.UserID)
 		dollarPnL := formatSignedDollarPnL(int64(row.Equity - row.NetUsdcIn))
 		var percentReturn *string
 		if row.PercentReturn != nil {
 			percentReturn = formatPercentReturnDecimal(*row.PercentReturn)
 		}
 		rows = append(rows, GroupViewMemberRow{
-			Rank:          rank + 1,
-			UserID:        row.UserID,
-			DisplayName:   displayName,
-			PercentReturn: percentReturn,
-			DollarPnL:     dollarPnL,
+			Rank:            rank + 1,
+			UserID:          row.UserID,
+			DisplayName:     displayName,
+			ProfilePhotoURL: profilePhotoURL,
+			PercentReturn:   percentReturn,
+			DollarPnL:       dollarPnL,
 		})
 	}
 	return rows, nil

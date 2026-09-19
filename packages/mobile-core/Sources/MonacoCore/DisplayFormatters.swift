@@ -1,9 +1,11 @@
 import Foundation
 
 public enum PercentReturnFormatter {
+    /// Formats a backend return ratio ("0.124", "-0.036") as "+12.4%" / "-3.6%".
+    /// Strings that are already percentages ("+12.4%") pass through.
     public static func format(_ raw: String?) -> String {
         guard let raw, !raw.isEmpty else { return "—" }
-        if raw.hasPrefix("+") || raw.hasPrefix("-") { return raw }
+        if raw.hasSuffix("%") { return raw }
         if let value = Double(raw) {
             let pct = value * 100
             let prefix = pct >= 0 ? "+" : ""

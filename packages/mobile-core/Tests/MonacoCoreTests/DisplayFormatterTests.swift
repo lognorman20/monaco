@@ -14,6 +14,14 @@ final class DisplayFormatterTests: XCTestCase {
         XCTAssertTrue(formatted.contains("%"))
     }
 
+    func testPercentReturnFormatter_negativeRatio_formatsAsPercent() {
+        // Backend sends signed ratios for losses, e.g. formatPercentReturnDecimal(-0.036).
+        XCTAssertEqual(PercentReturnFormatter.format("-0.036"), "-3.6%")
+        XCTAssertEqual(PercentReturnFormatter.format("0"), "+0.0%")
+        XCTAssertEqual(PercentReturnFormatter.format("+0.124"), "+12.4%")
+        XCTAssertEqual(PercentReturnFormatter.format("+12.4%"), "+12.4%")
+    }
+
     func testPercentReturnFormatter_nilPercentReturn_showsEmDashOrHidden() {
         // Arrange
         let raw: String? = nil

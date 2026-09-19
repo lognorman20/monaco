@@ -47,12 +47,20 @@ public struct HomeGroupBoardRowDTO: Codable, Equatable, Sendable {
 public struct HomePeopleBoardRowDTO: Codable, Equatable, Sendable {
     public let userID: String
     public let displayName: String
+    public let profilePhotoUrl: String?
     public let percentReturn: String?
     public let dollarPnl: String
 
-    public init(userID: String, displayName: String, percentReturn: String?, dollarPnl: String) {
+    public init(
+        userID: String,
+        displayName: String,
+        profilePhotoUrl: String? = nil,
+        percentReturn: String?,
+        dollarPnl: String
+    ) {
         self.userID = userID
         self.displayName = displayName
+        self.profilePhotoUrl = profilePhotoUrl
         self.percentReturn = percentReturn
         self.dollarPnl = dollarPnl
     }
@@ -60,6 +68,7 @@ public struct HomePeopleBoardRowDTO: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case userID = "userId"
         case displayName
+        case profilePhotoUrl
         case percentReturn
         case dollarPnl
     }
