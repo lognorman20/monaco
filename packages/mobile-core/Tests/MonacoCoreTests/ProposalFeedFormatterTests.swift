@@ -176,12 +176,18 @@ final class ProposalFeedFormatterTests: XCTestCase {
         XCTAssertEqual(ProposalFeedCopy.viewerVoted("NO"), "You voted no")
     }
 
+    func testTitle_tradeUsesCompanyNameThenTicker() {
+        XCTAssertEqual(ProposalFeedCopy.title(for: ProposalDTO(id: "p", symbol: "AAPLx", status: "open")), "Apple")
+        XCTAssertEqual(ProposalFeedCopy.title(for: ProposalDTO(id: "p", symbol: "NVDAx", status: "open", kind: "sell")), "Nvidia")
+        XCTAssertEqual(ProposalFeedCopy.title(for: ProposalDTO(id: "p", symbol: "ZZZZx", status: "open")), "ZZZZ")
+    }
+
     func testSubtitle_tradeShowsTickerAndSide() {
-        XCTAssertTrue(ProposalFeedCopy.subtitle(for: ProposalDTO(id: "p", symbol: "AAPLx", status: "open")).hasSuffix(" · Buy"))
-        XCTAssertTrue(ProposalFeedCopy.subtitle(for: ProposalDTO(id: "p", symbol: "AAPLx", status: "open", kind: "sell")).hasSuffix(" · Sell"))
+        XCTAssertEqual(ProposalFeedCopy.subtitle(for: ProposalDTO(id: "p", symbol: "AAPLx", status: "open")), "AAPL · Buy")
+        XCTAssertEqual(ProposalFeedCopy.subtitle(for: ProposalDTO(id: "p", symbol: "AAPLx", status: "open", kind: "sell")), "AAPL · Sell")
         XCTAssertEqual(
             ProposalFeedCopy.subtitle(for: ProposalDTO(id: "p", symbol: "", status: "open", kind: "add_agent", allocationUsdcMicros: "500000000")),
-            "Trading bot · $500.00 budget from the pot"
+            "New trading bot · Budget from the pot"
         )
     }
 
@@ -306,5 +312,14 @@ final class ProposalFeedFormatterTests: XCTestCase {
         XCTAssertEqual(ProposalShareFormatter.shares(fromAtomics: "300000000"), "3")
         XCTAssertEqual(ProposalShareFormatter.shares(fromAtomics: "12345678"), "0.12345678")
         XCTAssertEqual(ProposalShareFormatter.shares(fromAtomics: "abc"), "abc")
+    }
+
+    func testReasonLength_matchesBackendThesisRule() {
+        XCTAssertEqual(ProposeFlowCopy.reasonMax, 500)
+        XCTAssertEqual(ProposeFlowCopy.reasonLength("  Earnings beat.  \n"), 14)
+        XCTAssertEqual(ProposeFlowCopy.reasonLength("   "), 0)
+        // The backend counts UTF-8 bytes, so accented text uses more of the limit.
+        XCTAssertEqual(ProposeFlowCopy.reasonLength("é"), 2)
+        XCTAssertEqual(ProposeFlowCopy.reasonCounter(480), "480 of 500")
     }
 }

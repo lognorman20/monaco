@@ -1,36 +1,46 @@
 import MonacoCore
 import SwiftUI
 
-/// Scrollable card feed of a cabal's proposals with open/closed tabs and inline voting.
-/// Tapping a card opens `ProposalDetailView` with the discussion thread.
+/// A cabal's proposals as cards, Open and Closed, with inline voting.
+/// Tapping a card opens `ProposalDetailView` with the reason, ballots and discussion.
 struct ProposalFeedView: View {
     let service: ProposalFeedService
     let groupId: String
     var title = ProposalFeedCopy.feedTitle
+    /// A proposal that just arrived (from the propose flow): its card pulses once.
+    var highlightProposalId: String?
 
     @State private var tab: ProposalFeedTab = .open
     @State private var proposals: [ProposalFeedTab: [ProposalDTO]] = [:]
-    @State private var isLoading = false
-    @State private var errorMessage: String?
+    @State private var failedTabs: Set<ProposalFeedTab> = []
     @State private var votingIDs: Set<String> = []
+    /// Ballots cast from this screen. Feed rows carry no ballots, so this is how a card knows
+    /// to say "You voted yes" after the server stops offering the buttons.
+    @State private var viewerChoices: [String: String] = [:]
     @State private var toast: MonacoToast?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 12, pinnedViews: [.sectionHeaders]) {
+            LazyVStack(spacing: MonacoTheme.Space.sm, pinnedViews: [.sectionHeaders]) {
                 Section {
                     content
                 } header: {
                     tabPicker
                 }
             }
-            .padding(.bottom, 24)
+            .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.bottom, MonacoTheme.Space.l)
         }
-        .background(MonacoTheme.background)
+        .background(MonacoTheme.canvas.ignoresSafeArea())
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: tab) {
-            await load(tab)
+        .task {
+            // Both tabs up front so the segment counts are real.
+            async let open: Void = load(.open)
+            async let closed: Void = load(.closed)
+            _ = await (open, closed)
         }
         .refreshable {
             await load(tab)
@@ -45,40 +55,33 @@ struct ProposalFeedView: View {
     }
 
     private var tabPicker: some View {
-        Picker("Proposal status", selection: $tab) {
-            ForEach(ProposalFeedTab.allCases) { tab in
-                Text(tab.title).tag(tab)
+        MonacoSegmented(ProposalFeedTab.allCases, selection: $tab) { tab in
+            if let count = proposals[tab]?.count, count > 0 {
+                return "\(tab.title) \(count)"
             }
+            return tab.title
         }
-        .pickerStyle(.segmented)
-        .monacoSegmentedBoardPicker()
+        .padding(.vertical, MonacoTheme.Space.s)
+        .background(MonacoTheme.canvas)
         .accessibilityIdentifier("proposal-feed-tab-picker")
     }
 
     @ViewBuilder
     private var content: some View {
-        if isLoading && proposals[tab] == nil {
-            ProgressView()
-                .tint(MonacoTheme.accent)
-                .padding(.top, 32)
-                .accessibilityIdentifier("proposal-feed-loading")
-        } else if let errorMessage, proposals[tab] == nil {
-            VStack(spacing: 12) {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(MonacoTheme.warning)
-                Button("Try again") { Task { await load(tab) } }
-                    .buttonStyle(.monacoSecondary)
+        if proposals[tab] == nil && !failedTabs.contains(tab) {
+            ForEach(0..<3, id: \.self) { _ in
+                ProposalCardSkeleton()
             }
-            .padding(.top, 32)
+            .accessibilityIdentifier("proposal-feed-loading")
+        } else if failedTabs.contains(tab), proposals[tab] == nil {
+            EmptyState(title: ProposalFeedCopy.loadFailed, actionTitle: ProposalFeedCopy.tryAgain) {
+                Task { await load(tab) }
+            }
+            .padding(.top, MonacoTheme.Space.xl)
             .accessibilityIdentifier("proposal-feed-error")
         } else if visible.isEmpty {
-            Text(tab == .open ? ProposalFeedCopy.emptyOpen : ProposalFeedCopy.emptyClosed)
-                .font(.subheadline)
-                .foregroundStyle(MonacoTheme.secondaryText)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-                .padding(.top, 32)
+            EmptyState(title: tab == .open ? ProposalFeedCopy.emptyOpen : ProposalFeedCopy.emptyClosed)
+                .padding(.top, MonacoTheme.Space.xl)
                 .accessibilityIdentifier("proposal-feed-empty")
         } else {
             ForEach(visible) { proposal in
@@ -88,23 +91,26 @@ struct ProposalFeedView: View {
                     onVote: { choice in Task { await vote(choice, on: proposal) } },
                     destination: {
                         ProposalDetailView(service: service, proposalId: proposal.id, initialProposal: proposal)
-                    }
+                    },
+                    viewerChoice: viewerChoices[proposal.id],
+                    highlight: proposal.id == highlightProposalId
                 )
-                .padding(.horizontal, 16)
             }
         }
     }
 
     private func load(_ tab: ProposalFeedTab) async {
-        isLoading = true
-        errorMessage = nil
-        defer { isLoading = false }
         do {
-            proposals[tab] = try await service.listProposals(groupId: groupId, tab: tab)
+            let loaded = try await service.listProposals(groupId: groupId, tab: tab)
+            withAnimation(reduceMotion ? nil : .snappy) {
+                proposals[tab] = loaded
+            }
+            failedTabs.remove(tab)
         } catch is CancellationError {
             return
         } catch {
-            errorMessage = ProposalFeedCopy.loadFailed
+            if error.isRequestCancellation { return }
+            failedTabs.insert(tab)
         }
     }
 
@@ -113,10 +119,38 @@ struct ProposalFeedView: View {
         defer { votingIDs.remove(proposal.id) }
         let result = await ProposalVoting.cast(choice, proposalId: proposal.id, service: service)
         toast = result.toast
+        if result.succeeded {
+            Haptics.success()
+            withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.7)) {
+                viewerChoices[proposal.id] = choice.rawValue
+            }
+        }
         // A vote can close the proposal (threshold reached), so refresh both tabs from the server.
         await load(.open)
-        if result.succeeded, proposals[.closed] != nil {
+        if result.succeeded {
             await load(.closed)
         }
+    }
+}
+
+/// Placeholder in the shape of a proposal card.
+struct ProposalCardSkeleton: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+            HStack(spacing: MonacoTheme.Space.sm) {
+                SkeletonBlock(width: 40, height: 40, radius: 13)
+                VStack(alignment: .leading, spacing: 6) {
+                    SkeletonBlock(width: 110, height: 14)
+                    SkeletonBlock(width: 70, height: 11)
+                }
+            }
+            SkeletonBlock(width: 120, height: 28)
+            SkeletonBlock(height: 12)
+            SkeletonBlock(width: 180, height: 12)
+        }
+        .padding(MonacoTheme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
+        .accessibilityLabel("Loading")
     }
 }

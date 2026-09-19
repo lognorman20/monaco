@@ -53,10 +53,11 @@ public enum ProposalFeedCopy {
 
     public static let agentTitle = "Cabal agent"
 
-    /// Card title: the stock for trades, the agent's name for agent governance proposals.
+    /// Card title: the company name for trades ("Apple", falling back to the ticker), the bot's name
+    /// for agent governance proposals.
     public static func title(for proposal: ProposalDTO) -> String {
         if proposal.isTrade {
-            return AssetSymbolFormatter.format(proposal.symbol)
+            return AssetDisplayNames.name(forSymbol: proposal.symbol) ?? AssetSymbolFormatter.display(proposal.symbol)
         }
         let name = proposal.agentDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return name.isEmpty ? agentTitle : name
@@ -84,15 +85,13 @@ public enum ProposalFeedCopy {
         }
     }
 
-    /// Card subtitle under the title, e.g. "AAPL · Buy", "Trading bot · $500.00 budget from the pot".
+    /// Card subtitle under the title, e.g. "AAPL · Buy". The amount line carries the dollars.
     public static func subtitle(for proposal: ProposalDTO) -> String {
-        let ticker = AssetSymbolFormatter.format(proposal.symbol)
+        let ticker = AssetSymbolFormatter.display(proposal.symbol)
         switch proposal.resolvedKind {
         case "buy": return "\(ticker) · Buy"
         case "sell": return "\(ticker) · Sell"
-        case "add_agent":
-            let budget = ProposalAmountFormatter.dollars(fromMicros: proposal.allocationUsdcMicros ?? "0")
-            return "Trading bot · \(budget) budget from the pot"
+        case "add_agent": return "New trading bot · Budget from the pot"
         case "pause_agent": return "Pause the trading bot"
         case "resume_agent": return "Turn the trading bot back on"
         case "revoke_agent": return "Remove the trading bot"
@@ -215,12 +214,19 @@ public enum ProposeFlowCopy {
     public static let reasonPlaceholderSell = "Why should the cabal sell this?"
     public static let review = "Review"
     public static let potLoadFailed = "Couldn't load the pot. Try again"
-    public static let reasonMax = 2_000
+    /// Longest reason (proposal thesis) the backend accepts, measured by `reasonLength`.
+    public static let reasonMax = 500
     /// The counter appears only near the limit.
-    public static let reasonCounterFrom = 1_800
-    public static func reasonCounter(_ count: Int) -> String {
-        "\(count) of 2,000"
+    public static let reasonCounterFrom = 400
+    /// Length the backend checks: the trimmed thesis in UTF-8 bytes, so the limit here never
+    /// passes text the server would reject. Equals the character count for plain text.
+    public static func reasonLength(_ text: String) -> Int {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).utf8.count
     }
+    public static func reasonCounter(_ count: Int) -> String {
+        "\(count) of \(reasonMax)"
+    }
+    public static let reasonTooLong = "Keep the reason under 500 characters"
 
     // Step 3
     public static let youreProposing = "You're proposing"
@@ -294,7 +300,7 @@ public enum ProposeFlowCopy {
         pauseBotRow, resumeBotRow, removeBotRow,
         buyTitle, searchPlaceholder, popularTitle, resultsTitle, cantBuy, stocksLoadFailed, noMatches("Apple"),
         amountTitle, potHelper("$548.20"), overPot, addReason, reasonPlaceholderBuy, reasonPlaceholderSell,
-        review, potLoadFailed, reasonCounter(1_900),
+        review, potLoadFailed, reasonCounter(480), reasonTooLong,
         youreProposing, youreSelling, ofStock("Apple"), priceRow, perShare("$231.40"), sharesRow,
         aboutShares("0.2161 shares"), cabalRow, reasonRow, sendToCabal, proposalSent("Weekend investors"),
         proposalSentGeneric, priceCheckFailed, cantBuyStock("Apple"), changeAmount, sendFailed, noConnection,

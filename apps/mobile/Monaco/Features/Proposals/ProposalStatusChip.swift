@@ -1,43 +1,37 @@
 import MonacoCore
 import SwiftUI
 
+/// The one chip a closed proposal shows: Bought / Sold / Didn't pass / Expired / Failed.
+/// Open proposals show none.
 struct ProposalStatusChip: View {
+    let label: String
+    let stage: ProposalExecutionStage?
     let status: String
     var kind: String = "buy"
 
     var body: some View {
         Text(label)
-            .font(.caption.bold())
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(tint.opacity(0.15))
+            .font(MonacoTheme.Typo.micro)
             .foregroundStyle(tint)
-            .clipShape(Capsule())
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(fill))
+            .lineLimit(1)
+            .fixedSize()
             .accessibilityIdentifier("proposal-status-\(kind.lowercased())-\(status.lowercased())")
     }
 
-    private var display: ProposalStatusDisplay? {
-        ProposalStatusDisplay.from(status: status)
-    }
-
-    private var label: String {
-        let state = display?.label ?? status.capitalized
-        switch kind.lowercased() {
-        case "sell": return "Sell \(state)"
-        case "add_agent": return "Add agent \(state)"
-        case "pause_agent": return "Pause agent \(state)"
-        case "resume_agent": return "Resume agent \(state)"
-        case "revoke_agent": return "Revoke agent \(state)"
-        default: return "Buy \(state)"
-        }
+    private var isPositive: Bool {
+        ProposalStatusDisplay.from(status: status) == .passed && stage != .failed
     }
 
     private var tint: Color {
-        switch display {
-        case .open: MonacoTheme.accent
-        case .passed: MonacoTheme.success
-        case .failed: MonacoTheme.destructive
-        case .expired, .none: MonacoTheme.secondaryText
-        }
+        if stage == .failed { return MonacoTheme.loss }
+        if stage == .executing { return MonacoTheme.warning }
+        return isPositive ? MonacoTheme.ink : MonacoTheme.muted
+    }
+
+    private var fill: Color {
+        stage == .failed ? MonacoTheme.lossWash : MonacoTheme.surfaceSunken
     }
 }
