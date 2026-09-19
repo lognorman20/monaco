@@ -14,7 +14,8 @@
       "userId": "u1",
       "displayName": "Alfred",
       "percentReturn": "0.124",
-      "dollarPnl": "+48.20"
+      "dollarPnl": "+48.20",
+      "profilePhotoUrl": "https://example.supabase.co/storage/v1/object/public/avatars/u1/a1.jpg"
     }
   ]
 }

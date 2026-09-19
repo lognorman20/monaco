@@ -13,6 +13,10 @@ public enum MonacoAPIError: Error, Equatable {
     case invalidResponse
     case httpStatus(Int)
     case leaveBlocked(LeaveGroupBlockReason)
+    /// 4xx with a server `{"error": "..."}` message meant for the user.
+    case rejected(status: Int, message: String)
+    /// 429. `retryAfterSeconds` comes from the `Retry-After` header when present.
+    case rateLimited(retryAfterSeconds: Int?)
 }
 
 public typealias AccessTokenProvider = @Sendable () async throws -> String?
@@ -103,6 +107,57 @@ public final class MonacoAPIClient: @unchecked Sendable {
             throw MonacoAPIError.httpStatus(http.statusCode)
         }
         return try JSONDecoder().decode(MeDTO.self, from: data)
+    }
+
+    /// `PATCH /v1/me` — set the signed-in user's display name.
+    public func updateProfile(displayName: String) async throws -> MeDTO {
+        let url = baseURL.appending(path: "v1/me")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try await applyAuthorizationHeader(to: &request)
+        request.httpBody = try JSONEncoder().encode(UpdateProfileRequestDTO(displayName: displayName))
+
+        let (data, response) = try await session.data(for: request)
+        try Self.requireOK(response, data: data)
+        return try JSONDecoder().decode(MeDTO.self, from: data)
+    }
+
+    /// `POST /v1/me/profile-photo` — multipart field `photo`; jpeg, png, or webp up to 2MB.
+    public func uploadProfilePhoto(imageData: Data, mimeType: String) async throws -> MeDTO {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        let url = baseURL.appending(path: "v1/me/profile-photo")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        try await applyAuthorizationHeader(to: &request)
+        request.httpBody = ProfilePhotoMultipart.body(imageData: imageData, mimeType: mimeType, boundary: boundary)
+
+        let (data, response) = try await session.data(for: request)
+        try Self.requireOK(response, data: data)
+        return try JSONDecoder().decode(MeDTO.self, from: data)
+    }
+
+    /// Maps non-200 responses to `MonacoAPIError`, keeping server copy for 4xx.
+    static func requireOK(_ response: URLResponse, data: Data) throws {
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode != 200 else { return }
+        if http.statusCode == 429 {
+            let retryAfter = http.value(forHTTPHeaderField: "Retry-After").flatMap { Int($0) }
+            throw MonacoAPIError.rateLimited(retryAfterSeconds: retryAfter)
+        }
+        if (400..<500).contains(http.statusCode), http.statusCode != 401,
+           let body = try? JSONDecoder().decode(APIErrorBody.self, from: data),
+           !body.error.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw MonacoAPIError.rejected(status: http.statusCode, message: body.error)
+        }
+        throw MonacoAPIError.httpStatus(http.statusCode)
+    }
+
+    private struct APIErrorBody: Decodable {
+        let error: String
     }
 
     public func getHome() async throws -> HomeViewDTO {
