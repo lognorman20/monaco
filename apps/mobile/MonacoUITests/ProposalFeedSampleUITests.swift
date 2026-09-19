@@ -177,6 +177,9 @@ final class ProposeFlowSampleUITests: XCTestCase {
 
         let preset = app.buttons["$50"]
         XCTAssertTrue(preset.waitForExistence(timeout: 5))
+        // One empty state: the "$0" figure, no placeholder drawn over it; VoiceOver reads "Amount".
+        XCTAssertEqual(element("amount-entry-field").label, "Amount")
+        XCTAssertEqual(element("amount-entry-field").placeholderValue ?? "", "")
         sleep(1)
         capture("12a-amount-empty")
         preset.tap()

@@ -90,15 +90,18 @@ struct AmountEntry: View {
             .accessibilityHidden(true)
 
             // The real field sits over the figure: a big tap target, and what VoiceOver focuses.
-            TextField("Amount", text: $amountText)
+            // No title: a TextField draws its title as a placeholder in its own colour, which
+            // `.foregroundStyle(.clear)` does not reach, so it would sit on top of the "$0" figure.
+            // The figure is the empty state; VoiceOver gets its name from the label below.
+            TextField(text: $amountText, prompt: nil) { EmptyView() }
                 .keyboardType(.decimalPad)
                 .focused($focused)
                 .foregroundStyle(.clear)
                 .tint(.clear)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityLabel("Amount in dollars")
-                .accessibilityValue(amountText.isEmpty ? "0" : AmountEntryText.display(amountText))
+                .accessibilityLabel("Amount")
+                .accessibilityValue(AmountEntryText.display(amountText))
                 .accessibilityIdentifier("amount-entry-field")
         }
         .frame(maxWidth: .infinity, minHeight: 72)
