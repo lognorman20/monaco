@@ -1,124 +1,153 @@
-import SwiftUI
 import MonacoCore
+import SwiftUI
 
-/// Proposal detail with proposer, votes, expiry, and yes/no actions.
+/// Proposal detail: card header with inline voting, ballots, buy status, and the comment thread
+/// with a composer pinned to the bottom.
 struct ProposalDetailView: View {
-    @ObservedObject var auth: PrivyAuthService
+    let service: ProposalFeedService
     let proposalId: String
-    let initialProposal: ProposalDTO?
-
-    private let apiClient = MonacoAPIClient()
 
     @State private var proposal: ProposalDTO?
     @State private var errorMessage: String?
     @State private var isLoading: Bool
     @State private var isVoting = false
-    @State private var didVote = false
+    @State private var comments: [ProposalCommentDTO] = []
+    @State private var commentsLoading = true
+    @State private var commentsError: String?
+    @State private var draft = ""
+    @State private var replyTarget: ProposalCommentDTO?
+    @State private var isPosting = false
     @State private var toast: MonacoToast?
 
-    init(auth: PrivyAuthService, proposal: ProposalDTO) {
-        self.auth = auth
-        self.proposalId = proposal.id
-        self.initialProposal = proposal
-        _proposal = State(initialValue: proposal)
-        _isLoading = State(initialValue: false)
-    }
-
-    init(auth: PrivyAuthService, proposalId: String, initialProposal: ProposalDTO? = nil) {
-        self.auth = auth
+    init(service: ProposalFeedService, proposalId: String, initialProposal: ProposalDTO? = nil) {
+        self.service = service
         self.proposalId = proposalId
-        self.initialProposal = initialProposal
         _proposal = State(initialValue: initialProposal)
         _isLoading = State(initialValue: initialProposal == nil)
     }
 
-    var body: some View {
-        Form {
-            if let proposal {
-                detailContent(proposal)
-            } else if let errorMessage {
-                Section {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(MonacoTheme.warning)
-                    Button("Try again") {
-                        Task { await loadProposal() }
-                    }
-                    .monacoFormSecondaryAction()
-                }
-            } else if isLoading {
-                Section {
-                    ProgressView("Loading proposal…")
-                        .tint(MonacoTheme.accent)
-                }
-            }
-        }
-        .monacoFormScreen()
-        .monacoToast($toast)
-        .navigationTitle("Proposal")
-        .navigationBarTitleDisplayMode(.inline)
-        .task(id: loadTaskID) {
-            if initialProposal == nil || proposal?.votes == nil {
-                await loadProposal()
-            }
-        }
+    /// Entry point for screens outside the feed (home missed votes, activity rows).
+    init(auth: PrivyAuthService, proposalId: String) {
+        self.init(service: LiveProposalFeedService(auth: auth), proposalId: proposalId)
     }
 
-    private var loadTaskID: String {
-        "\(proposalId)-\(auth.accessToken ?? "")"
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if let proposal {
+                    ProposalCardView(
+                        proposal: proposal,
+                        isVoting: isVoting,
+                        onVote: { choice in Task { await vote(choice) } }
+                    )
+                    thesis(proposal)
+                    ballots(proposal)
+                    agentDetails(proposal)
+                    buyStatus(proposal)
+                    CommentThreadView(
+                        comments: comments,
+                        isLoading: commentsLoading,
+                        errorMessage: commentsError,
+                        onRetry: { Task { await loadComments() } },
+                        onReply: { replyTarget = $0 }
+                    )
+                } else if let errorMessage {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(MonacoTheme.warning)
+                        Button("Try again") { Task { await loadProposal() } }
+                            .buttonStyle(.monacoSecondary)
+                    }
+                    .monacoSurfaceCard()
+                } else if isLoading {
+                    ProgressView()
+                        .tint(MonacoTheme.accent)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 32)
+                }
+            }
+            .padding(16)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .background(MonacoTheme.background)
+        .safeAreaInset(edge: .bottom) {
+            if proposal != nil {
+                CommentComposer(
+                    text: $draft,
+                    replyTarget: replyTarget,
+                    isPosting: isPosting,
+                    onCancelReply: { replyTarget = nil },
+                    onPost: { body in Task { await postComment(body) } }
+                )
+            }
+        }
+        .monacoToast($toast)
+        .navigationTitle(ProposalFeedCopy.feedTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: proposalId) {
+            // Feed items carry no ballots; always fetch detail so votes and canVote are current.
+            await loadProposal()
+            await loadComments()
+        }
+        .refreshable {
+            await loadProposal()
+            await loadComments()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("proposal-detail")
     }
 
     @ViewBuilder
-    private func detailContent(_ proposal: ProposalDTO) -> some View {
-        Section {
-            HStack {
-                Text(proposal.symbol)
-                    .font(.title2.bold())
-                Spacer()
-                ProposalStatusChip(status: proposal.status, kind: proposal.resolvedKind)
-            }
-            Text(proposalHeadline(proposal))
-                .font(.subheadline)
-                .foregroundStyle(MonacoTheme.secondaryText)
-
-            if let proposerName = proposal.proposerName {
-                LabeledContent("Proposed by", value: proposerName)
-            }
-            if let createdAt = proposal.createdAt {
-                LabeledContent("Created", value: formatTimestamp(createdAt))
-            }
-            if proposal.status.lowercased() == "open", let expiresAt = proposal.expiresAt {
-                LabeledContent("Expires", value: formatTimestamp(expiresAt))
-                Text(timeRemaining(until: expiresAt))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(MonacoTheme.accent)
-            }
-        }
-
+    private func thesis(_ proposal: ProposalDTO) -> some View {
         if let thesis = proposal.thesis, !thesis.isEmpty {
-            Section("Thesis") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Thesis")
+                    .font(.headline)
                 Text(thesis)
                     .font(.body)
                     .foregroundStyle(MonacoTheme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("proposal-detail-thesis")
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .monacoSurfaceCard()
         }
+    }
 
-        if let summary = proposal.voteSummary {
-            Section("Vote outcome") {
-                LabeledContent("Threshold", value: summary.threshold.capitalized)
-                LabeledContent("Eligible voters", value: "\(summary.eligibleCount)")
-                LabeledContent("Yes / No", value: "\(summary.yesCount) / \(summary.noCount)")
+    @ViewBuilder
+    private func ballots(_ proposal: ProposalDTO) -> some View {
+        if let votes = proposal.votes, !votes.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Votes")
+                    .font(.headline)
+                ForEach(votes) { vote in
+                    HStack {
+                        Text(vote.displayName)
+                        Spacer()
+                        Text(vote.choice.capitalized)
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(vote.choice.lowercased() == "yes" ? MonacoTheme.success : MonacoTheme.destructive)
+                    }
+                    .font(.subheadline)
+                }
             }
+            .monacoSurfaceCard()
+            .accessibilityIdentifier("proposal-detail-votes")
         }
+    }
 
+    @ViewBuilder
+    private func agentDetails(_ proposal: ProposalDTO) -> some View {
         if proposal.resolvedKind == "add_agent" {
-            Section("Agent") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Agent")
+                    .font(.headline)
                 if let name = proposal.agentDisplayName {
                     LabeledContent("Agent name", value: name)
                 }
                 if let allocation = proposal.allocationUsdcMicros {
-                    LabeledContent("Budget", value: formatAllocation(allocation))
+                    LabeledContent("Budget", value: ProposalAmountFormatter.dollars(fromMicros: allocation))
                 }
                 if let key = proposal.mintedAgentKey, !key.isEmpty {
                     AgentKeyRevealView(apiKey: key) {
@@ -126,175 +155,95 @@ struct ProposalDetailView: View {
                     }
                 }
             }
+            .font(.subheadline)
+            .monacoSurfaceCard()
+            .accessibilityIdentifier("proposal-detail-agent")
         }
+    }
 
-        if let execution = proposal.execution, proposal.resolvedKind == "buy" || proposal.resolvedKind == "sell" {
-            Section("Execution") {
-                LabeledContent("Status", value: executionStatusLabel(execution.state))
-                LabeledContent("Tx signature", value: displayOrNA(execution.txSignature))
-                LabeledContent("Transaction ID", value: displayOrNA(execution.transactionId))
-                LabeledContent("Execute request", value: displayOrNA(execution.executeRequestId))
-                if let executedAt = execution.executedAt {
-                    LabeledContent("Executed", value: formatTimestamp(executedAt))
-                } else {
-                    LabeledContent("Executed", value: "N/A")
-                }
-                if let reason = execution.failureReason, !reason.isEmpty {
-                    LabeledContent("Failure reason", value: reason)
-                }
-            }
-        }
-
-        if let votes = proposal.votes {
-            Section("Votes") {
-                if votes.isEmpty {
-                    Text("No votes yet.")
-                        .font(.footnote)
+    @ViewBuilder
+    private func buyStatus(_ proposal: ProposalDTO) -> some View {
+        if proposal.isTrade, let execution = proposal.execution, execution.state.lowercased() != "not_applicable" {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(proposal.isSell ? "Sell status" : "Buy status")
+                    .font(.headline)
+                Text(executionLabel(execution.state))
+                    .font(.subheadline)
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                if let executedAt = execution.executedAt, let date = ProposalTimeFormatter.parse(executedAt) {
+                    Text(date.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
                         .foregroundStyle(MonacoTheme.secondaryText)
-                } else {
-                    ForEach(votes) { vote in
-                        HStack {
-                            Text(vote.displayName)
-                            Spacer()
-                            Text(vote.choice.capitalized)
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(vote.choice.lowercased() == "yes" ? MonacoTheme.success : MonacoTheme.warning)
-                        }
-                    }
                 }
             }
-        }
-
-        if proposal.status.lowercased() == "open", proposal.canVote == true, !didVote {
-            Section("Your vote") {
-                Button(isVoting ? "Submitting…" : "Vote yes") {
-                    Task { await castVote(choice: "yes", proposal: proposal) }
-                }
-                .disabled(isVoting)
-                .accessibilityIdentifier("proposal-vote-yes")
-
-                Button(isVoting ? "Submitting…" : "Vote no") {
-                    Task { await castVote(choice: "no", proposal: proposal) }
-                }
-                .disabled(isVoting)
-                .accessibilityIdentifier("proposal-vote-no")
-            }
-        }
-
-    }
-
-    private func proposalHeadline(_ proposal: ProposalDTO) -> String {
-        switch proposal.resolvedKind {
-        case "sell":
-            return "Cabal sell proposal for \(formattedTokenAmount(proposal)) \(AssetSymbolFormatter.format(proposal.symbol))"
-        case "add_agent":
-            return "Add agent \(proposal.agentDisplayName ?? proposal.symbol) with \(formatAllocation(proposal.allocationUsdcMicros ?? "0")) budget"
-        case "pause_agent":
-            return "Pause the cabal trading agent"
-        case "resume_agent":
-            return "Resume the cabal trading agent"
-        case "revoke_agent":
-            return "Revoke the cabal trading agent"
-        default:
-            return "Cabal buy proposal for \(formattedUsdc(proposal)) USDC"
+            .monacoSurfaceCard()
+            .accessibilityIdentifier("proposal-detail-buy-status")
         }
     }
 
-    private func formatAllocation(_ raw: String) -> String {
-        guard let micros = Int64(raw) else { return raw }
-        return String(format: "$%.2f", Double(micros) / 1_000_000.0)
-    }
-
-    private func formattedTokenAmount(_ proposal: ProposalDTO) -> String {
-        guard let raw = proposal.tokenAmount, let atomics = Decimal(string: raw) else {
-            return proposal.tokenAmount ?? "0"
-        }
-        let shares = atomics / Decimal(sign: .plus, exponent: 8, significand: 1)
-        return NSDecimalNumber(decimal: shares).stringValue
-    }
-
-    private func formattedUsdc(_ proposal: ProposalDTO) -> String {
-        guard let raw = proposal.usdcMicros, let micro = Int64(raw) else { return proposal.usdcMicros ?? "0" }
-        let dollars = Double(micro) / 1_000_000.0
-        return String(format: "%.2f", dollars)
-    }
-
-    private func displayOrNA(_ value: String?) -> String {
-        guard let value, !value.isEmpty else { return "N/A" }
-        return value
-    }
-
-    private func executionStatusLabel(_ state: String) -> String {
+    private func executionLabel(_ state: String) -> String {
         switch state.lowercased() {
-        case "confirmed": "Confirmed on chain"
-        case "pending": "Pending swap"
-        case "failed": "Swap failed"
-        case "not_applicable": "N/A"
+        case "confirmed": "Done"
+        case "pending": "In progress"
+        case "failed": "Failed. Retry it from the cabal's activity."
         default: state.capitalized
         }
     }
 
-    private func formatTimestamp(_ raw: String) -> String {
-        guard let date = ISO8601DateFormatter().date(from: raw) else { return raw }
-        return date.formatted(date: .abbreviated, time: .shortened)
-    }
-
-    private func timeRemaining(until raw: String) -> String {
-        guard let expiry = ISO8601DateFormatter().date(from: raw) else {
-            return "Time left unknown"
-        }
-        let remaining = expiry.timeIntervalSinceNow
-        if remaining <= 0 {
-            return "Voting window closed"
-        }
-        let hours = Int(remaining) / 3600
-        let minutes = (Int(remaining) % 3600) / 60
-        if hours >= 24 {
-            let days = hours / 24
-            return "\(days) day\(days == 1 ? "" : "s") left to vote"
-        }
-        if hours > 0 {
-            return "\(hours)h \(minutes)m left to vote"
-        }
-        return "\(minutes)m left to vote"
-    }
-
     private func loadProposal() async {
-        guard let token = auth.accessToken else {
-            isLoading = false
-            errorMessage = "Missing sign-in token."
-            return
-        }
-
-        isLoading = true
+        isLoading = proposal == nil
         errorMessage = nil
         defer { isLoading = false }
-
         do {
-            proposal = try await apiClient.getProposalDetail(accessToken: token, proposalId: proposalId)
+            proposal = try await service.proposal(id: proposalId)
         } catch is CancellationError {
             return
-        } catch MonacoAPIError.httpStatus(let code) {
-            errorMessage = "Could not load proposal (HTTP \(code))."
         } catch {
-            errorMessage = "Could not load proposal."
+            if proposal == nil {
+                errorMessage = "Could not load this proposal."
+            }
         }
     }
 
-    private func castVote(choice: String, proposal: ProposalDTO) async {
-        guard let token = auth.accessToken else { return }
+    private func loadComments() async {
+        commentsLoading = true
+        commentsError = nil
+        defer { commentsLoading = false }
+        do {
+            comments = try await service.comments(proposalId: proposalId)
+        } catch is CancellationError {
+            return
+        } catch {
+            commentsError = ProposalFeedCopy.commentsLoadFailed
+        }
+    }
+
+    private func vote(_ choice: ProposalVoteChoice) async {
+        guard !isVoting else { return }
         isVoting = true
         defer { isVoting = false }
+        let result = await ProposalVoting.cast(choice, proposalId: proposalId, service: service)
+        toast = result.toast
+        await loadProposal()
+    }
 
+    private func postComment(_ body: String) async {
+        guard !isPosting else { return }
+        isPosting = true
+        defer { isPosting = false }
+        let parent = replyTarget
         do {
-            try await apiClient.castVote(accessToken: token, proposalId: proposal.id, choice: choice)
-            didVote = true
-            toast = MonacoToast(message: "Vote recorded", isSuccess: true)
+            _ = try await service.postComment(proposalId: proposalId, body: body, parentId: parent?.id)
+            draft = ""
+            replyTarget = nil
+            toast = MonacoToast(
+                message: parent == nil ? ProposalFeedCopy.commentPosted : ProposalFeedCopy.replyPosted,
+                isSuccess: true
+            )
+            await loadComments()
             await loadProposal()
-        } catch MonacoAPIError.httpStatus(let code) {
-            toast = MonacoToast(message: "Vote failed (HTTP \(code)).")
         } catch {
-            toast = MonacoToast(message: "Could not submit vote.")
+            toast = MonacoToast(message: ProposalFeedErrorCopy.comment(error))
         }
     }
 }

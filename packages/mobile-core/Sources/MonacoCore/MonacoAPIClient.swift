@@ -448,6 +448,81 @@ public final class MonacoAPIClient: @unchecked Sendable {
         }
     }
 
+    public func listGroupProposals(groupId: String, tab: ProposalFeedTab) async throws -> ProposalListResponseDTO {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/groups/\(groupId)/proposals"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "tab", value: tab.rawValue)]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(ProposalListResponseDTO.self, from: data)
+    }
+
+    public func getProposalDetail(proposalId: String) async throws -> ProposalDTO {
+        let url = baseURL.appending(path: "v1/proposals/\(proposalId)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(ProposalDTO.self, from: data)
+    }
+
+    public func listProposalComments(proposalId: String) async throws -> ProposalCommentsResponseDTO {
+        let url = baseURL.appending(path: "v1/proposals/\(proposalId)/comments")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(ProposalCommentsResponseDTO.self, from: data)
+    }
+
+    /// Posts a top-level comment, or a reply when `parentId` is set. Server trims and validates the body.
+    public func postProposalComment(proposalId: String, body: String, parentId: String? = nil) async throws -> ProposalCommentDTO {
+        let url = baseURL.appending(path: "v1/proposals/\(proposalId)/comments")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try await applyAuthorizationHeader(to: &request)
+        request.httpBody = try JSONEncoder().encode(CommentRequestDTO(body: body, parentId: parentId))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 201 || http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(ProposalCommentDTO.self, from: data)
+    }
+
     public func leaveGroup(groupId: String, withdrawStake: Bool = false) async throws {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/leave")
         var request = URLRequest(url: url)
@@ -645,6 +720,11 @@ public final class MonacoAPIClient: @unchecked Sendable {
 
     private struct VoteRequestDTO: Encodable {
         let choice: String
+    }
+
+    private struct CommentRequestDTO: Encodable {
+        let body: String
+        let parentId: String?
     }
 
     private func parseLeaveConflict(from data: Data) -> LeaveGroupBlockReason {
