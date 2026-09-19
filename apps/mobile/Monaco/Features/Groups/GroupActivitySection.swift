@@ -1,6 +1,7 @@
-import SwiftUI
 import MonacoCore
+import SwiftUI
 
+/// Group screen: the latest five things that happened to the pot, with "See all".
 struct GroupActivitySection: View {
     @ObservedObject var auth: PrivyAuthService
     let items: [GroupActivityItemDTO]
@@ -8,126 +9,112 @@ struct GroupActivitySection: View {
     let errorMessage: String?
     let retryingTransactionIDs: Set<String>
     let onRetry: (GroupActivityItemDTO) -> Void
+    var onSeeAll: () -> Void = {}
 
-    @State private var isExpanded = false
-
-    private let collapsedItemLimit = 4
-
-    private var visibleItems: [GroupActivityItemDTO] {
-        isExpanded ? items : Array(items.prefix(collapsedItemLimit))
-    }
-
-    private var hasMoreThanCollapsedLimit: Bool {
-        items.count > collapsedItemLimit
-    }
+    static let previewLimit = 5
 
     var body: some View {
-        Section {
-            header
-
-            content
-
-            if !isLoading, errorMessage == nil, hasMoreThanCollapsedLimit {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isExpanded.toggle()
-                    }
-                } label: {
-                    HStack {
-                        Text(isExpanded ? "Show less" : "Show all")
-                        Spacer()
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .foregroundStyle(MonacoTheme.accent)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Activity")
+                    .font(MonacoTheme.TypeRole.title)
+                    .foregroundStyle(MonacoTheme.ink)
+                Spacer()
+                if items.count > Self.previewLimit {
+                    Button("See all", action: onSeeAll)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(MonacoTheme.ink)
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier("group-activity-see-all")
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("group-activity-toggle")
             }
-        }
-    }
 
-    private var header: some View {
-        HStack(spacing: MonacoTheme.Space.s) {
-            Text("Transaction history")
-                .font(MonacoTheme.TypeRole.title)
-                .foregroundStyle(MonacoTheme.primaryText)
-            Spacer(minLength: 8)
-            if !isLoading, errorMessage == nil, !items.isEmpty {
-                Text("\(items.count)")
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(MonacoTheme.secondaryText)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(MonacoTheme.surface, in: Capsule())
-                    .overlay {
-                        Capsule().strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+            if isLoading && items.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(MonacoTheme.border.opacity(0.5))
+                            .frame(height: 44)
+                            .padding(.vertical, 8)
                     }
-                    .accessibilityIdentifier("group-activity-count")
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Loading activity")
+                .accessibilityIdentifier("group-activity-loading")
+            } else if let errorMessage, items.isEmpty {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(MonacoTheme.muted)
+                    .accessibilityIdentifier("group-activity-error")
+            } else if items.isEmpty {
+                Text("Nothing yet. Money in, buys, and sells show up here.")
+                    .font(.footnote)
+                    .foregroundStyle(MonacoTheme.muted)
+                    .accessibilityIdentifier("group-activity-empty")
+            } else {
+                GroupActivityList(
+                    auth: auth,
+                    items: Array(items.prefix(Self.previewLimit)),
+                    retryingTransactionIDs: retryingTransactionIDs,
+                    onRetry: onRetry
+                )
             }
         }
+        .accessibilityIdentifier("group-activity")
     }
+}
 
-    @ViewBuilder
-    private var content: some View {
-        if isLoading {
-            HStack(spacing: 12) {
-                ProgressView()
-                    .tint(MonacoTheme.accent)
-                Text("Loading activity…")
-                    .font(.footnote)
-                    .foregroundStyle(MonacoTheme.secondaryText)
-            }
-            .accessibilityIdentifier("group-activity-loading")
-        } else if let errorMessage {
-            VStack(alignment: .leading, spacing: 8) {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(MonacoTheme.warning)
-            }
-            .accessibilityIdentifier("group-activity-error")
-        } else if items.isEmpty {
-            Text("No transactions yet.")
-                .font(.footnote)
-                .foregroundStyle(MonacoTheme.secondaryText)
-                .accessibilityIdentifier("group-activity-empty")
-        } else {
-            ForEach(visibleItems) { item in
-                VStack(alignment: .leading, spacing: 4) {
+/// Rows of activity inside one surface, each pushing its receipt.
+struct GroupActivityList: View {
+    @ObservedObject var auth: PrivyAuthService
+    let items: [GroupActivityItemDTO]
+    let retryingTransactionIDs: Set<String>
+    let onRetry: (GroupActivityItemDTO) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(items) { item in
+                HStack(spacing: 0) {
                     NavigationLink {
-                        activityDetailDestination(for: item)
+                        destination(for: item)
                     } label: {
-                        activityRowSummary(item)
+                        GroupActivityRow(item: item)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityIdentifier("group-activity-row-\(item.id)")
 
-                    if canRetry(item) {
-                        HStack {
-                            Spacer()
-                            if retryingTransactionIDs.contains(item.id) {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .tint(MonacoTheme.accent)
-                                    .accessibilityIdentifier("group-activity-retry-loading-\(item.id)")
-                            } else {
-                                Button("Retry") {
-                                    onRetry(item)
-                                }
-                                .font(.caption.weight(.semibold))
-                                .buttonStyle(.borderless)
-                                .foregroundStyle(MonacoTheme.accent)
-                                .accessibilityIdentifier("group-activity-retry-\(item.id)")
-                            }
-                        }
+                    if GroupActivityRules.canRetry(item) {
+                        retryControl(item)
                     }
                 }
+                .padding(.horizontal, 16)
             }
+        }
+        .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func retryControl(_ item: GroupActivityItemDTO) -> some View {
+        if retryingTransactionIDs.contains(item.id) {
+            ProgressView()
+                .tint(MonacoTheme.ink)
+                .frame(width: 44, height: 44)
+                .accessibilityIdentifier("group-activity-retry-loading-\(item.id)")
+        } else {
+            Button("Retry") { onRetry(item) }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(MonacoTheme.loss)
+                .frame(minWidth: 44, minHeight: 44)
+                .padding(.leading, 8)
+                .accessibilityIdentifier("group-activity-retry-\(item.id)")
         }
     }
 
     @ViewBuilder
-    private func activityDetailDestination(for item: GroupActivityItemDTO) -> some View {
-        if needsProposalFallback(item) {
+    private func destination(for item: GroupActivityItemDTO) -> some View {
+        if GroupActivityRules.needsProposalFallback(item) {
             ActivityDetailDestination(
                 auth: auth,
                 activityItem: item,
@@ -143,8 +130,58 @@ struct GroupActivitySection: View {
             )
         }
     }
+}
 
-    private func needsProposalFallback(_ item: GroupActivityItemDTO) -> Bool {
+/// Glyph · title / time · amount, with status only when something isn't confirmed.
+struct GroupActivityRow: View {
+    let item: GroupActivityItemDTO
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: GroupActivityRules.glyph(for: item.kind))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(MonacoTheme.ink)
+                .frame(width: 32, height: 32)
+                .background(Circle().fill(MonacoTheme.border.opacity(0.5)))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(GroupActivityRules.title(for: item))
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(MonacoTheme.ink)
+                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(GroupActivityRules.timeLabel(item.createdAt))
+                        .foregroundStyle(MonacoTheme.muted)
+                    if let status = GroupActivityRules.statusLabel(item.status) {
+                        Text("·").foregroundStyle(MonacoTheme.muted)
+                        Text(status.text)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(status.isFailure ? MonacoTheme.loss : MonacoTheme.warning)
+                    }
+                }
+                .font(.footnote)
+                .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            Text(GroupActivityRules.amountLabel(item))
+                .font(.body.weight(.semibold).monospacedDigit())
+                .foregroundStyle(MonacoTheme.ink)
+                .lineLimit(1)
+        }
+        .padding(.vertical, 10)
+        .frame(minHeight: 60)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Activity row rules shared by the group section, the full list, and tests of intent.
+enum GroupActivityRules {
+    static func canRetry(_ item: GroupActivityItemDTO) -> Bool {
+        guard item.status.lowercased() == "failed" else { return false }
+        return ["buy", "sell"].contains(item.kind.lowercased())
+    }
+
+    static func needsProposalFallback(_ item: GroupActivityItemDTO) -> Bool {
         if isAgentGovernanceKind(item.kind) {
             return true
         }
@@ -153,44 +190,20 @@ struct GroupActivitySection: View {
             && (item.txSignature ?? "").isEmpty
     }
 
-    private func isAgentGovernanceKind(_ kind: String) -> Bool {
+    static func isAgentGovernanceKind(_ kind: String) -> Bool {
         ["add_agent", "pause_agent", "resume_agent", "revoke_agent"].contains(kind.lowercased())
     }
 
-    private func activityRowSummary(_ item: GroupActivityItemDTO) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(activityTitle(item))
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(MonacoTheme.primaryText)
-                Spacer()
-                Text(formatAmount(item))
-                    .font(.body.monospacedDigit())
-                    .foregroundStyle(MonacoTheme.primaryText)
-            }
-            HStack {
-                Text(formatTimestamp(item.createdAt))
-                    .font(.caption)
-                    .foregroundStyle(MonacoTheme.secondaryText)
-                Spacer()
-                Text(statusLabel(item.status))
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(statusColor(item.status))
-            }
+    static func glyph(for kind: String) -> String {
+        switch kind.lowercased() {
+        case "buy": "arrow.down"
+        case "sell": "arrow.up"
+        case "deposit": "plus"
+        default: isAgentGovernanceKind(kind) ? "cpu" : "circle"
         }
     }
 
-    private func canRetry(_ item: GroupActivityItemDTO) -> Bool {
-        guard item.status.lowercased() == "failed" else { return false }
-        switch item.kind.lowercased() {
-        case "buy", "sell":
-            return true
-        default:
-            return false
-        }
-    }
-
-    private func activityTitle(_ item: GroupActivityItemDTO) -> String {
+    static func title(for item: GroupActivityItemDTO) -> String {
         GroupActivityTitleFormatter.format(
             kind: item.kind,
             symbol: item.symbol,
@@ -199,61 +212,43 @@ struct GroupActivitySection: View {
         )
     }
 
-    private func formatAmount(_ item: GroupActivityItemDTO) -> String {
+    /// Nil when confirmed: a row only says its status when something needs attention.
+    static func statusLabel(_ status: String) -> (text: String, isFailure: Bool)? {
+        switch status.lowercased() {
+        case "confirmed": nil
+        case "pending": ("Pending", false)
+        case "failed": ("Failed", true)
+        default: (status.capitalized, false)
+        }
+    }
+
+    static func amountLabel(_ item: GroupActivityItemDTO) -> String {
         if item.kind.lowercased() == "sell" {
             if let proceeds = item.proceedsUsdcMicros, let micros = Int64(proceeds), micros > 0 {
-                return String(format: "$%.2f", Double(micros) / 1_000_000.0)
+                return UsdAmountFormatter.format(micros: micros)
             }
             if let tokenAmount = item.tokenAmount, let atomics = Double(tokenAmount) {
-                return "\(AssetSymbolFormatter.format(item.symbol ?? "")) \(formatTokenAmount(atomics / 100_000_000.0))"
+                return sharesLabel(atomics / 100_000_000.0)
             }
         }
-        let dollars = Double(item.amountMicros) / 1_000_000.0
-        switch item.kind.lowercased() {
-        case "buy":
-            return String(format: "$%.2f", dollars)
-        case "sell":
-            if let symbol = item.symbol {
-                return "\(AssetSymbolFormatter.format(symbol)) \(formatTokenAmount(dollars))"
-            }
-            return String(format: "$%.2f", dollars)
-        default:
-            return String(format: "$%.2f", dollars)
-        }
+        return UsdAmountFormatter.format(micros: item.amountMicros)
     }
 
-    private func formatTokenAmount(_ amount: Double) -> String {
-        String(format: "%.8f", amount).replacingOccurrences(of: "0+$", with: "", options: .regularExpression)
+    static func sharesLabel(_ shares: Double) -> String {
+        let trimmed = String(format: "%.4f", shares)
+            .replacingOccurrences(of: "0+$", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\.$", with: "", options: .regularExpression)
+        return trimmed == "1" ? "1 share" : "\(trimmed) shares"
     }
 
-    private func formatTimestamp(_ raw: String) -> String {
-        guard let date = ISO8601DateFormatter().date(from: raw) else { return raw }
+    static func timeLabel(_ raw: String) -> String {
+        guard let date = parseDate(raw) else { return "" }
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 
-    private func statusLabel(_ status: String) -> String {
-        switch status.lowercased() {
-        case "confirmed":
-            return "Confirmed"
-        case "pending":
-            return "Pending"
-        case "failed":
-            return "Failed"
-        default:
-            return status.capitalized
-        }
-    }
-
-    private func statusColor(_ status: String) -> Color {
-        switch status.lowercased() {
-        case "confirmed":
-            return MonacoTheme.success
-        case "pending":
-            return MonacoTheme.warning
-        case "failed":
-            return MonacoTheme.warning
-        default:
-            return MonacoTheme.secondaryText
-        }
+    static func parseDate(_ raw: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
     }
 }

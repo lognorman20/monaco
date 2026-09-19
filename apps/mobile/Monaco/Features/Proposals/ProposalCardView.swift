@@ -9,6 +9,8 @@ struct ProposalCardView<Destination: View>: View {
     var onVote: (ProposalVoteChoice) -> Void = { _ in }
     /// Detail screen pushed when the summary is tapped; nil when the card is the detail header.
     var destination: (() -> Destination)?
+    /// Prefix for the thesis excerpt's accessibility identifier; group detail uses its own.
+    var thesisIdentifierPrefix = "proposal-card-thesis"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -53,6 +55,15 @@ struct ProposalCardView<Destination: View>: View {
                 Text(byline)
                     .font(.footnote)
                     .foregroundStyle(MonacoTheme.secondaryText)
+            }
+
+            // Two-line excerpt; the detail screen shows the full thesis below its header.
+            if destination != nil, let thesis = proposal.thesis?.trimmingCharacters(in: .whitespacesAndNewlines), !thesis.isEmpty {
+                Text(thesis)
+                    .font(.subheadline)
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("\(thesisIdentifierPrefix)-\(proposal.id)")
             }
 
             if let summary = proposal.voteSummary {
