@@ -83,13 +83,53 @@ final class ProposalsAPITests: XCTestCase {
         let json = try XCTUnwrap(capturedBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
         XCTAssertEqual(json["symbol"] as? String, "AAPLx")
         XCTAssertEqual(json["usdc"] as? Int64, 5_000_000)
+        XCTAssertEqual(json["kind"] as? String, "buy")
+        XCTAssertTrue(quote.routable)
+    }
+
+    func testAPIClient_postQuotes_sellSendsTokenAmount() async throws {
+        let token = TestFixtures.fixtureSessionToken
+        var capturedBody: Data?
+
+        MockURLProtocol.requestHandler = { request in
+            capturedBody = Self.httpBody(from: request)
+            let body = """
+            {"symbol":"AAPLx","kind":"sell","tokenAmount":"50000000","routable":true,"outputUsdcMicros":"1500000"}
+            """
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, Data(body.utf8))
+        }
+
+        let client = MonacoAPIClient(
+            baseURL: URL(string: "https://api.test")!,
+            session: makeMockURLSession(),
+            accessTokenProvider: { token }
+        )
+
+        let quote = try await client.postQuote(
+            groupId: "grp-1",
+            symbol: "AAPLx",
+            kind: "sell",
+            tokenAmount: 50_000_000
+        )
+
+        let json = try XCTUnwrap(capturedBody.flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        XCTAssertEqual(json["kind"] as? String, "sell")
+        XCTAssertEqual(json["tokenAmount"] as? Int64, 50_000_000)
+        XCTAssertNil(json["usdc"])
+        XCTAssertEqual(quote.tokenAmount, "50000000")
         XCTAssertTrue(quote.routable)
     }
 
     func testAPIClient_postProposal_doesNotCallWhenRoutableFalse() {
         // Arrange
         let gate = ProposalSubmitGate()
-        let quote = BuyQuoteDTO(symbol: "AAPLx", usdcMicros: "1000000", routable: false)
+        let quote = BuyQuoteDTO(symbol: "AAPLx", routable: false, usdcMicros: "1000000")
 
         // Act
         let maySubmit = gate.maySubmitProposal(quote: quote)

@@ -146,6 +146,10 @@ type ExecuteOnPassResult struct {
 // ExecuteOnPass builds, signs, POSTs Jupiter execute, polls Success code 0, and persists the buy.
 // Only proposals with status passed may execute. Idempotency on proposal id is wired for M4-T21.
 func (s *ExecuteOnPassService) ExecuteOnPass(ctx context.Context, proposal Proposal) (ExecuteOnPassResult, error) {
+	kind := proposal.Kind
+	if kind == "" {
+		kind = ProposalKindBuy
+	}
 	logExecuteOnPassStart(proposal.ID, proposal.GroupID, proposal.Symbol, proposal.UsdcMicros)
 
 	if proposal.Status != ProposalPassed {
@@ -160,6 +164,18 @@ func (s *ExecuteOnPassService) ExecuteOnPass(ctx context.Context, proposal Propo
 		logExecuteOnPassBranchWarn("execute on pass rejected", "symbol required", "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, fmt.Errorf("symbol is required")
 	}
+
+	switch kind {
+	case ProposalKindBuy:
+		return s.executeBuyOnPass(ctx, proposal)
+	case ProposalKindSell:
+		return s.executeSellOnPass(ctx, proposal)
+	default:
+		return ExecuteOnPassResult{}, fmt.Errorf("invalid proposal kind")
+	}
+}
+
+func (s *ExecuteOnPassService) executeBuyOnPass(ctx context.Context, proposal Proposal) (ExecuteOnPassResult, error) {
 	if proposal.UsdcMicros <= 0 {
 		logExecuteOnPassBranchWarn("execute on pass rejected", "usdc not positive", "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, fmt.Errorf("usdc must be positive")
@@ -203,6 +219,43 @@ func (s *ExecuteOnPassService) ExecuteOnPass(ctx context.Context, proposal Propo
 		Transaction: linked,
 		Created:     executeResult.Created,
 	}, nil
+}
+
+func (s *ExecuteOnPassService) executeSellOnPass(ctx context.Context, proposal Proposal) (ExecuteOnPassResult, error) {
+	if proposal.TokenAmount <= 0 {
+		return ExecuteOnPassResult{}, fmt.Errorf("token amount must be positive")
+	}
+	if existing, found, err := s.store.GetConfirmedTransactionByProposalAndAction(ctx, proposal.ID, postgres.TransactionActionSell); err != nil {
+		return ExecuteOnPassResult{}, err
+	} else if found {
+		logExecuteOnPassIdempotent(proposal.ID, existing.ID)
+		return ExecuteOnPassResult{Transaction: existing, Created: false}, nil
+	}
+	if latest, found, err := s.store.GetLatestTransactionByProposalAndAction(ctx, proposal.ID, postgres.TransactionActionSell); err != nil {
+		return ExecuteOnPassResult{}, err
+	} else if found && (latest.Status == postgres.TransactionStatusFailed || latest.Status == postgres.TransactionStatusPending) {
+		return ExecuteOnPassResult{}, fmt.Errorf("sell execute already attempted")
+	}
+
+	inputMint, err := s.swap.buy.ResolveOutputMint(ctx, proposal.Symbol)
+	if err != nil {
+		return ExecuteOnPassResult{}, err
+	}
+	result, err := s.swap.SellToUSDC(ctx, SellToUSDCRequest{
+		GroupID:    proposal.GroupID,
+		UserID:     proposal.ProposerID,
+		Symbol:     proposal.Symbol,
+		InputMint:  inputMint,
+		Amount:     proposal.TokenAmount,
+		ProposalID: proposal.ID,
+	})
+	if err != nil {
+		logExecuteOnPassBranchError("execute on pass sell failed", err,
+			"proposal_id", proposal.ID, "group_id", proposal.GroupID, "symbol", proposal.Symbol)
+		return ExecuteOnPassResult{}, err
+	}
+	logExecuteOnPassSuccess(proposal.ID, result.Transaction.ID, result.Created)
+	return ExecuteOnPassResult{Transaction: result.Transaction, Created: result.Created}, nil
 }
 
 func (s *ExecuteOnPassService) existingBuyForProposal(ctx context.Context, proposalID string) (postgres.TransactionRow, bool, error) {

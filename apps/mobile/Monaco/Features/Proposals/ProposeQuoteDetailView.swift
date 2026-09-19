@@ -102,6 +102,7 @@ struct ProposeQuoteDetailView: View {
                 accessToken: token,
                 groupId: groupId,
                 symbol: symbol,
+                kind: "buy",
                 usdc: usdcMicros
             )
         } catch {
@@ -122,6 +123,7 @@ struct ProposeQuoteDetailView: View {
                 accessToken: token,
                 groupId: groupId,
                 symbol: quote.symbol,
+                kind: "buy",
                 usdc: usdcMicros
             )
             toast = MonacoToast(message: proposalSubmittedMessage(id: response.proposalId), isSuccess: true)
@@ -146,7 +148,8 @@ struct ProposeQuoteDetailView: View {
             return formatUsd(value) + " / share"
         }
         guard let outputAmount = quote.outputAmount,
-              let usdc = microsToDecimal(quote.usdcMicros),
+              let usdcRaw = quote.usdcMicros,
+              let usdc = microsToDecimal(usdcRaw),
               let shares = xStockAtomicsToShares(outputAmount),
               shares > 0 else {
             return nil

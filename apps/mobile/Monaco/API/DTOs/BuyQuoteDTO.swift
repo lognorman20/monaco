@@ -2,9 +2,12 @@ import Foundation
 
 struct BuyQuoteDTO: Codable, Equatable {
     let symbol: String
-    let usdcMicros: String
+    let kind: String?
+    let usdcMicros: String?
+    let tokenAmount: String?
     let routable: Bool
     let outputAmount: String?
+    let outputUsdcMicros: String?
     let priceUsdcMicros: String?
 }
 

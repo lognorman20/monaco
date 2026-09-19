@@ -31,7 +31,7 @@ func TestPotRowsFromPythInput_perAssetDollarPnL(t *testing.T) {
 				Holdings: []pyth.MarkedHolding{{
 					Symbol:    "AAPLx",
 					Mint:      jupiter.AAPLxMint,
-					Units:     500_000,
+					Units:     50_000_000,
 					MarkUsdc:  2_400_000,
 					CostBasis: 1_000_000,
 				}},
@@ -47,7 +47,7 @@ func TestPotRowsFromPythInput_perAssetDollarPnL(t *testing.T) {
 				Holdings: []pyth.MarkedHolding{{
 					Symbol:    "AAPLx",
 					Mint:      jupiter.AAPLxMint,
-					Units:     500_000,
+					Units:     50_000_000,
 					MarkUsdc:  1_600_000,
 					CostBasis: 1_000_000,
 				}},
@@ -85,6 +85,19 @@ func TestPotRowsFromPythInput_perAssetDollarPnL(t *testing.T) {
 			if rows[1].DollarPnL != tc.wantPnL {
 				t.Fatalf("holding dollarPnl = %q, want %q", rows[1].DollarPnL, tc.wantPnL)
 			}
+			if rows[1].TokenAmount != "50000000" {
+				t.Fatalf("tokenAmount = %q, want 50000000", rows[1].TokenAmount)
+			}
 		})
+	}
+}
+
+func TestTokenAtomicsToDecimalUnits_usesEightDecimals(t *testing.T) {
+	got, err := tokenAtomicsToDecimalUnits(75_000_000)
+	if err != nil {
+		t.Fatalf("tokenAtomicsToDecimalUnits: %v", err)
+	}
+	if got != "0.75" {
+		t.Fatalf("units = %q, want 0.75", got)
 	}
 }

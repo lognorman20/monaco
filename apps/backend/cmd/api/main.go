@@ -142,6 +142,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	executeOnPass := app.NewExecuteOnPassService(swap, store)
 	governance.SetBuyService(buy)
 	governance.SetHomeService(home)
+	governance.SetSwapService(swap)
 	transactionHandlers := &httpapi.TransactionHandlers{
 		Store:    store,
 		Privy:    privyClient,
@@ -155,9 +156,10 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Catalog: catalogSearcher,
 	}
 	quoteHandlers := &httpapi.QuoteHandlers{
-		Store: store,
-		Privy: privyClient,
-		Buy:   buy,
+		Store:      store,
+		Privy:      privyClient,
+		Buy:        buy,
+		Governance: governance,
 	}
 	proposalHandlers := &httpapi.ProposalHandlers{
 		Store:      store,

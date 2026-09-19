@@ -83,13 +83,15 @@ func (p *ProposalExecutePoller) tick(ctx context.Context) {
 			continue
 		}
 		proposal := app.Proposal{
-			ID:         row.ID,
-			GroupID:    row.GroupID,
-			ProposerID: row.ProposerID,
-			Symbol:     row.Symbol,
-			UsdcMicros: row.UsdcMicros,
-			Status:     row.Status,
-			ExpiresAt:  row.ExpiresAt.UTC().Unix(),
+			ID:          row.ID,
+			GroupID:     row.GroupID,
+			ProposerID:  row.ProposerID,
+			Symbol:      row.Symbol,
+			Kind:        row.Kind,
+			UsdcMicros:  row.UsdcMicros,
+			TokenAmount: row.TokenAmount,
+			Status:      row.Status,
+			ExpiresAt:   row.ExpiresAt.UTC().Unix(),
 		}
 		result, err := p.exec.ExecuteOnPass(ctx, proposal)
 		if err != nil {

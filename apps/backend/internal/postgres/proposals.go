@@ -12,14 +12,78 @@ import (
 
 // ProposalRow is a row in proposals.
 type ProposalRow struct {
-	ID         string
-	GroupID    string
-	ProposerID string
-	Symbol     string
-	UsdcMicros int64
-	Status     domain.ProposalStatus
-	ExpiresAt  time.Time
-	CreatedAt  time.Time
+	ID          string
+	GroupID     string
+	ProposerID  string
+	Symbol      string
+	Kind        domain.ProposalKind
+	UsdcMicros  int64
+	TokenAmount int64
+	Status      domain.ProposalStatus
+	ExpiresAt   time.Time
+	CreatedAt   time.Time
+}
+
+// InsertProposalParams is the kind-aware insert contract for proposals.
+type InsertProposalParams struct {
+	GroupID     string
+	ProposerID  string
+	Symbol      string
+	Kind        domain.ProposalKind
+	UsdcMicros  int64
+	TokenAmount int64
+	ExpiresAt   time.Time
+}
+
+const proposalSelectColumns = `id, group_id, proposer_id, symbol, kind, usdc_micros, token_amount, status, expires_at, created_at`
+
+func scanProposalRow(scanner interface{ Scan(dest ...any) error }) (ProposalRow, error) {
+	var row ProposalRow
+	var kindRaw, statusRaw string
+	var usdc, token sql.NullInt64
+	if err := scanner.Scan(
+		&row.ID,
+		&row.GroupID,
+		&row.ProposerID,
+		&row.Symbol,
+		&kindRaw,
+		&usdc,
+		&token,
+		&statusRaw,
+		&row.ExpiresAt,
+		&row.CreatedAt,
+	); err != nil {
+		return ProposalRow{}, err
+	}
+	kind, err := domain.ParseProposalKind(kindRaw)
+	if err != nil {
+		return ProposalRow{}, err
+	}
+	status, err := domain.ParseProposalStatus(statusRaw)
+	if err != nil {
+		return ProposalRow{}, err
+	}
+	row.Kind = kind
+	row.Status = status
+	if usdc.Valid {
+		row.UsdcMicros = usdc.Int64
+	}
+	if token.Valid {
+		row.TokenAmount = token.Int64
+	}
+	return row, nil
+}
+
+func collectProposalRows(rows *sql.Rows, scanErr string) ([]ProposalRow, error) {
+	var out []ProposalRow
+	for rows.Next() {
+		row, err := scanProposalRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", scanErr, err)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 // VoteRow is a row in votes.
@@ -31,42 +95,50 @@ type VoteRow struct {
 }
 
 // InsertProposalTx persists a new open proposal within tx.
-func (s *Store) InsertProposalTx(ctx context.Context, tx *sql.Tx, groupID, proposerID, symbol string, usdcMicros int64, expiresAt time.Time) (ProposalRow, error) {
-	if groupID == "" || proposerID == "" {
+func (s *Store) InsertProposalTx(ctx context.Context, tx *sql.Tx, params InsertProposalParams) (ProposalRow, error) {
+	if params.GroupID == "" || params.ProposerID == "" {
 		return ProposalRow{}, fmt.Errorf("group_id and proposer_id are required")
 	}
-	if symbol == "" {
+	if params.Symbol == "" {
 		return ProposalRow{}, fmt.Errorf("symbol is required")
 	}
-	if usdcMicros <= 0 {
-		return ProposalRow{}, fmt.Errorf("usdc_micros must be positive")
+
+	kind := params.Kind
+	if kind == "" {
+		kind = domain.ProposalKindBuy
+	}
+	switch kind {
+	case domain.ProposalKindBuy:
+		if params.UsdcMicros <= 0 || params.TokenAmount != 0 {
+			return ProposalRow{}, fmt.Errorf("buy proposal requires positive usdc_micros only")
+		}
+	case domain.ProposalKindSell:
+		if params.TokenAmount <= 0 || params.UsdcMicros != 0 {
+			return ProposalRow{}, fmt.Errorf("sell proposal requires positive token_amount only")
+		}
+	default:
+		return ProposalRow{}, fmt.Errorf("invalid proposal kind")
 	}
 
-	const insertSQL = `
-INSERT INTO proposals (group_id, proposer_id, symbol, usdc_micros, status, expires_at)
-VALUES ($1, $2, $3, $4, 'open', $5)
-RETURNING id, group_id, proposer_id, symbol, usdc_micros, status, expires_at, created_at`
+	var usdc any
+	var token any
+	if kind == domain.ProposalKindBuy {
+		usdc = params.UsdcMicros
+		token = nil
+	} else {
+		usdc = nil
+		token = params.TokenAmount
+	}
 
-	var row ProposalRow
-	var status string
-	err := tx.QueryRowContext(ctx, insertSQL, groupID, proposerID, symbol, usdcMicros, expiresAt).Scan(
-		&row.ID,
-		&row.GroupID,
-		&row.ProposerID,
-		&row.Symbol,
-		&row.UsdcMicros,
-		&status,
-		&row.ExpiresAt,
-		&row.CreatedAt,
-	)
+	insertSQL := `
+INSERT INTO proposals (group_id, proposer_id, symbol, kind, usdc_micros, token_amount, status, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, 'open', $7)
+RETURNING ` + proposalSelectColumns
+
+	row, err := scanProposalRow(tx.QueryRowContext(ctx, insertSQL, params.GroupID, params.ProposerID, params.Symbol, string(kind), usdc, token, params.ExpiresAt))
 	if err != nil {
 		return ProposalRow{}, fmt.Errorf("insert proposal: %w", err)
 	}
-	parsedStatus, err := domain.ParseProposalStatus(status)
-	if err != nil {
-		return ProposalRow{}, err
-	}
-	row.Status = parsedStatus
 	return row, nil
 }
 
@@ -85,34 +157,18 @@ func getProposalByID(ctx context.Context, q queryRower, proposalID string) (Prop
 		return ProposalRow{}, false, fmt.Errorf("proposal_id is required")
 	}
 
-	const selectSQL = `
-SELECT id, group_id, proposer_id, symbol, usdc_micros, status, expires_at, created_at
+	selectSQL := `
+SELECT ` + proposalSelectColumns + `
 FROM proposals
 WHERE id = $1`
 
-	var row ProposalRow
-	var status string
-	err := q.QueryRowContext(ctx, selectSQL, proposalID).Scan(
-		&row.ID,
-		&row.GroupID,
-		&row.ProposerID,
-		&row.Symbol,
-		&row.UsdcMicros,
-		&status,
-		&row.ExpiresAt,
-		&row.CreatedAt,
-	)
+	row, err := scanProposalRow(q.QueryRowContext(ctx, selectSQL, proposalID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return ProposalRow{}, false, nil
 	}
 	if err != nil {
 		return ProposalRow{}, false, fmt.Errorf("get proposal by id: %w", err)
 	}
-	parsedStatus, err := domain.ParseProposalStatus(status)
-	if err != nil {
-		return ProposalRow{}, false, err
-	}
-	row.Status = parsedStatus
 	return row, true, nil
 }
 
@@ -275,8 +331,8 @@ func (s *Store) ListProposalsByGroupID(ctx context.Context, groupID string, stat
 		statusValues = append(statusValues, string(status))
 	}
 
-	const selectSQL = `
-SELECT id, group_id, proposer_id, symbol, usdc_micros, status, expires_at, created_at
+	selectSQL := `
+SELECT ` + proposalSelectColumns + `
 FROM proposals
 WHERE group_id = $1 AND status = ANY($2::text[])
 ORDER BY created_at DESC
@@ -287,31 +343,7 @@ LIMIT 100`
 		return nil, fmt.Errorf("list proposals by group: %w", err)
 	}
 	defer rows.Close()
-
-	var out []ProposalRow
-	for rows.Next() {
-		var row ProposalRow
-		var status string
-		if err := rows.Scan(
-			&row.ID,
-			&row.GroupID,
-			&row.ProposerID,
-			&row.Symbol,
-			&row.UsdcMicros,
-			&status,
-			&row.ExpiresAt,
-			&row.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan proposal: %w", err)
-		}
-		parsedStatus, err := domain.ParseProposalStatus(status)
-		if err != nil {
-			return nil, err
-		}
-		row.Status = parsedStatus
-		out = append(out, row)
-	}
-	return out, rows.Err()
+	return collectProposalRows(rows, "scan proposal")
 }
 
 // ListProposalsByGroupIDTx returns proposals for groupID filtered by statuses within tx.
@@ -328,8 +360,8 @@ func (s *Store) ListProposalsByGroupIDTx(ctx context.Context, tx *sql.Tx, groupI
 		statusValues = append(statusValues, string(status))
 	}
 
-	const selectSQL = `
-SELECT id, group_id, proposer_id, symbol, usdc_micros, status, expires_at, created_at
+	selectSQL := `
+SELECT ` + proposalSelectColumns + `
 FROM proposals
 WHERE group_id = $1 AND status = ANY($2::text[])
 ORDER BY created_at DESC
@@ -340,31 +372,7 @@ LIMIT 100`
 		return nil, fmt.Errorf("list proposals by group tx: %w", err)
 	}
 	defer rows.Close()
-
-	var out []ProposalRow
-	for rows.Next() {
-		var row ProposalRow
-		var status string
-		if err := rows.Scan(
-			&row.ID,
-			&row.GroupID,
-			&row.ProposerID,
-			&row.Symbol,
-			&row.UsdcMicros,
-			&status,
-			&row.ExpiresAt,
-			&row.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan proposal: %w", err)
-		}
-		parsedStatus, err := domain.ParseProposalStatus(status)
-		if err != nil {
-			return nil, err
-		}
-		row.Status = parsedStatus
-		out = append(out, row)
-	}
-	return out, rows.Err()
+	return collectProposalRows(rows, "scan proposal")
 }
 
 // ListPassedProposalsPendingExecute returns passed proposals without a confirmed buy row.
@@ -373,16 +381,29 @@ func (s *Store) ListPassedProposalsPendingExecute(ctx context.Context, limit int
 		limit = 20
 	}
 
-	const selectSQL = `
-SELECT p.id, p.group_id, p.proposer_id, p.symbol, p.usdc_micros, p.status, p.expires_at, p.created_at
+	selectSQL := `
+SELECT ` + proposalSelectColumns + `
 FROM proposals p
 WHERE p.status = 'passed'
-  AND NOT EXISTS (
-    SELECT 1
-    FROM transactions t
-    WHERE t.proposal_id = p.id
-      AND t.action = 'buy'
-      AND t.status = 'confirmed'
+  AND (
+    (
+      p.kind = 'buy'
+      AND NOT EXISTS (
+        SELECT 1 FROM transactions t
+        WHERE t.proposal_id = p.id
+          AND t.action = 'buy'
+          AND t.status = 'confirmed'
+      )
+    )
+    OR
+    (
+      p.kind = 'sell'
+      AND NOT EXISTS (
+        SELECT 1 FROM transactions t
+        WHERE t.proposal_id = p.id
+          AND t.action = 'sell'
+      )
+    )
   )
 ORDER BY p.created_at ASC
 LIMIT $1`
@@ -392,31 +413,7 @@ LIMIT $1`
 		return nil, fmt.Errorf("list passed proposals pending execute: %w", err)
 	}
 	defer rows.Close()
-
-	var out []ProposalRow
-	for rows.Next() {
-		var row ProposalRow
-		var status string
-		if err := rows.Scan(
-			&row.ID,
-			&row.GroupID,
-			&row.ProposerID,
-			&row.Symbol,
-			&row.UsdcMicros,
-			&status,
-			&row.ExpiresAt,
-			&row.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan passed proposal pending execute: %w", err)
-		}
-		parsedStatus, err := domain.ParseProposalStatus(status)
-		if err != nil {
-			return nil, err
-		}
-		row.Status = parsedStatus
-		out = append(out, row)
-	}
-	return out, rows.Err()
+	return collectProposalRows(rows, "scan passed proposal pending execute")
 }
 
 // ListPassedProposalsAwaitingExecuteByGroupID returns passed proposals with no linked swap row yet.
@@ -425,8 +422,8 @@ func (s *Store) ListPassedProposalsAwaitingExecuteByGroupID(ctx context.Context,
 		return nil, fmt.Errorf("group_id is required")
 	}
 
-	const selectSQL = `
-SELECT p.id, p.group_id, p.proposer_id, p.symbol, p.usdc_micros, p.status, p.expires_at, p.created_at
+	selectSQL := `
+SELECT ` + proposalSelectColumns + `
 FROM proposals p
 WHERE p.group_id = $1
   AND p.status = 'passed'
@@ -443,31 +440,7 @@ LIMIT 100`
 		return nil, fmt.Errorf("list passed proposals awaiting execute by group: %w", err)
 	}
 	defer rows.Close()
-
-	var out []ProposalRow
-	for rows.Next() {
-		var row ProposalRow
-		var status string
-		if err := rows.Scan(
-			&row.ID,
-			&row.GroupID,
-			&row.ProposerID,
-			&row.Symbol,
-			&row.UsdcMicros,
-			&status,
-			&row.ExpiresAt,
-			&row.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan passed proposal awaiting execute: %w", err)
-		}
-		parsedStatus, err := domain.ParseProposalStatus(status)
-		if err != nil {
-			return nil, err
-		}
-		row.Status = parsedStatus
-		out = append(out, row)
-	}
-	return out, rows.Err()
+	return collectProposalRows(rows, "scan passed proposal awaiting execute")
 }
 
 // CountTransactionsForProposal returns swap rows linked to proposalID.

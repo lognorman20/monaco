@@ -57,3 +57,9 @@ const (
 
 type WithdrawalStatus = domain.WithdrawalStatus
 type Proposal = domain.Proposal
+type ProposalKind = domain.ProposalKind
+
+const (
+	ProposalKindBuy  = domain.ProposalKindBuy
+	ProposalKindSell = domain.ProposalKindSell
+)

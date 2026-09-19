@@ -36,6 +36,16 @@ final class GroupViewDTOTests: XCTestCase {
         XCTAssertEqual(row.afterHours, true)
     }
 
+    func testPotRowDTO_decodesExactTokenAmount() throws {
+        let json = """
+        {"symbol":"AAPLx","units":"0.5","markUsd":"100","valueUsd":"50","dollarPnl":"+0.00","tokenAmount":"50000000"}
+        """
+
+        let row = try JSONDecoder().decode(PotRowDTO.self, from: Data(json.utf8))
+
+        XCTAssertEqual(row.tokenAmount, "50000000")
+    }
+
     func testBoardCells_renderServerRankOrder_withoutResortingByDollars() {
         // Arrange
         let members = [

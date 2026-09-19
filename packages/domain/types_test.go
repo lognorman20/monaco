@@ -38,6 +38,21 @@ func TestParseVoteThreshold_validValues(t *testing.T) {
 	}
 }
 
+func TestParseProposalKind_validValues(t *testing.T) {
+	for _, raw := range []string{"buy", "sell"} {
+		got, err := ParseProposalKind(raw)
+		if err != nil || string(got) != raw {
+			t.Fatalf("ParseProposalKind(%q) = %q, %v", raw, got, err)
+		}
+	}
+}
+
+func TestParseProposalKind_rejectsUnknown(t *testing.T) {
+	if _, err := ParseProposalKind("redeem"); err == nil {
+		t.Fatal("expected invalid proposal kind")
+	}
+}
+
 func TestParseProposalStatus_validValues(t *testing.T) {
 	for _, raw := range []string{"open", "passed", "failed", "expired"} {
 		status, err := ParseProposalStatus(raw)

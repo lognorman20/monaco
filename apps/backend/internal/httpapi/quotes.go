@@ -18,22 +18,28 @@ import (
 
 // QuoteHandlers serves buy quote HTTP routes.
 type QuoteHandlers struct {
-	Store *postgres.Store
-	Privy privy.Client
-	Buy   *app.BuyService
+	Store      *postgres.Store
+	Privy      privy.Client
+	Buy        *app.BuyService
+	Governance *app.GovernanceService
 }
 
 type quoteRequest struct {
-	Symbol string `json:"symbol"`
-	USDC   int64  `json:"usdc"`
+	Kind        string `json:"kind"`
+	Symbol      string `json:"symbol"`
+	USDC        int64  `json:"usdc"`
+	TokenAmount int64  `json:"tokenAmount"`
 }
 
 type quoteResponse struct {
-	Symbol          string `json:"symbol"`
-	USDCMicros      string `json:"usdcMicros"`
-	Routable        bool   `json:"routable"`
-	OutputAmount    string `json:"outputAmount,omitempty"`
-	PriceUsdcMicros string `json:"priceUsdcMicros,omitempty"`
+	Kind             string `json:"kind,omitempty"`
+	Symbol           string `json:"symbol"`
+	USDCMicros       string `json:"usdcMicros,omitempty"`
+	TokenAmount      string `json:"tokenAmount,omitempty"`
+	Routable         bool   `json:"routable"`
+	OutputAmount     string `json:"outputAmount,omitempty"`
+	OutputUsdcMicros string `json:"outputUsdcMicros,omitempty"`
+	PriceUsdcMicros  string `json:"priceUsdcMicros,omitempty"`
 }
 
 // ProposalQuoteInput is the quote gate input shared with proposal create (M4-T13).
@@ -98,14 +104,74 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 		logJSONError(ctx, log, "missing_symbol", w, http.StatusBadRequest, "symbol is required", "group_id", groupID)
 		return
 	}
-	if req.USDC <= 0 {
-		logJSONError(ctx, log, "invalid_usdc", w, http.StatusBadRequest, "usdc must be positive", "group_id", groupID, "symbol", req.Symbol)
+	kind := strings.TrimSpace(req.Kind)
+	if kind == "" {
+		kind = "buy"
+	}
+	if kind != "buy" && kind != "sell" {
+		logJSONError(ctx, log, "invalid_kind", w, http.StatusBadRequest, "kind must be buy or sell", "group_id", groupID)
 		return
 	}
 
 	userID, err := h.authorizeGroupMember(ctx, token, groupID)
 	if err != nil {
 		writeQuoteError(ctx, log, w, err, "group_id", groupID, "symbol", req.Symbol)
+		return
+	}
+
+	if kind == "sell" {
+		if req.TokenAmount <= 0 {
+			logJSONError(ctx, log, "invalid_token_amount", w, http.StatusBadRequest, "tokenAmount must be positive", "group_id", groupID, "symbol", req.Symbol)
+			return
+		}
+		if h.Governance == nil {
+			logJSONError(ctx, log, "quote_check_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID)
+			return
+		}
+		quoted, err := h.Governance.QuoteProposal(ctx, app.QuoteProposalInput{
+			GroupID:     groupID,
+			UserID:      userID,
+			Symbol:      req.Symbol,
+			Kind:        app.ProposalKindSell,
+			TokenAmount: req.TokenAmount,
+		})
+		if err != nil {
+			if errors.Is(err, app.ErrExceedsTreasuryHolding) {
+				logJSONError(ctx, log, "exceeds_treasury_holding", w, http.StatusBadRequest, "amount exceeds treasury holding", "group_id", groupID, "symbol", req.Symbol, "user_id", userID)
+				return
+			}
+			if errors.Is(err, xstocks.ErrNotFound) {
+				logJSONError(ctx, log, "symbol_not_found", w, http.StatusNotFound, "symbol not found", "group_id", groupID, "symbol", req.Symbol, "user_id", userID)
+				return
+			}
+			if errors.Is(err, app.ErrQuoteNotRoutable) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(quoteResponse{
+					Kind:        "sell",
+					Symbol:      req.Symbol,
+					TokenAmount: strconv.FormatInt(req.TokenAmount, 10),
+					Routable:    false,
+				})
+				return
+			}
+			writeQuoteError(ctx, log, w, err, "group_id", groupID, "symbol", req.Symbol)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(quoteResponse{
+			Kind:             "sell",
+			Symbol:           req.Symbol,
+			TokenAmount:      strconv.FormatInt(req.TokenAmount, 10),
+			Routable:         quoted.Routable,
+			OutputUsdcMicros: quoted.OutputUsdcMicros,
+		})
+		return
+	}
+
+	if req.USDC <= 0 {
+		logJSONError(ctx, log, "invalid_usdc", w, http.StatusBadRequest, "usdc must be positive", "group_id", groupID, "symbol", req.Symbol)
 		return
 	}
 
@@ -200,7 +266,12 @@ func (h *QuoteHandlers) authorizeGroupMember(ctx context.Context, accessToken, g
 	if !found {
 		return "", app.ErrGroupNotFound
 	}
-	if group.CreatorUserID != user.ID {
+	_ = group
+	member, err := h.Store.IsGroupMember(ctx, groupID, user.ID)
+	if err != nil {
+		return "", err
+	}
+	if !member {
 		return "", app.ErrNotGroupMember
 	}
 

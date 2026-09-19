@@ -48,7 +48,7 @@ struct ActivityDetailDestination: View {
     }
 
     private var shouldResolveProposalFallback: Bool {
-        activityItem.kind.lowercased() == "buy"
+        ["buy", "sell"].contains(activityItem.kind.lowercased())
             && activityItem.status.lowercased() == "pending"
             && (activityItem.txSignature ?? "").isEmpty
     }

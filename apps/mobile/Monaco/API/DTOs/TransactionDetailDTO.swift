@@ -18,4 +18,5 @@ struct TransactionDetailDTO: Codable, Equatable {
     let createdAt: String
     let confirmedAt: String?
     let failureReason: String?
+    let proceedsUsdcMicros: Int64?
 }

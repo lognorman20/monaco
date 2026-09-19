@@ -23,6 +23,25 @@ final class ProposalDTOTests: XCTestCase {
         XCTAssertEqual(decoded.map(\.status), statuses)
         for (dto, status) in zip(decoded, statuses) {
             XCTAssertEqual(ProposalStatusDisplay.from(status: dto.status)?.label, ProposalStatusDisplay.from(status: status)?.label)
+            XCTAssertEqual(dto.resolvedKind, "buy")
         }
+    }
+
+    func testProposalDTO_decodesSellKindAndTokenAmount() throws {
+        let json = """
+        {
+          "id": "prop-sell",
+          "symbol": "AAPLx",
+          "kind": "sell",
+          "tokenAmount": "50000000",
+          "status": "open"
+        }
+        """
+
+        let dto = try JSONDecoder().decode(ProposalDTO.self, from: Data(json.utf8))
+
+        XCTAssertEqual(dto.resolvedKind, "sell")
+        XCTAssertEqual(dto.tokenAmount, "50000000")
+        XCTAssertNil(dto.usdcMicros)
     }
 }

@@ -131,7 +131,16 @@ func (h *CatalogHandlers) authorizeGroupMember(ctx context.Context, accessToken,
 	if err != nil {
 		return "", err
 	}
-	if !found || group.CreatorUserID != user.ID {
+	if !found {
+		return "", app.ErrGroupNotFound
+	}
+	_ = group
+
+	member, err := h.Store.IsGroupMember(ctx, groupID, user.ID)
+	if err != nil {
+		return "", err
+	}
+	if !member {
 		return "", app.ErrNotGroupMember
 	}
 
@@ -142,7 +151,8 @@ func (h *CatalogHandlers) authorizeGroupMember(ctx context.Context, accessToken,
 	if !found {
 		return "", app.ErrGroupNotFound
 	}
-	return treasury.SolanaAddress, nil
+	_ = treasury
+	return user.ID, nil
 }
 
 func writeCatalogError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, attrs ...any) {

@@ -400,13 +400,22 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(SearchAssetsResponse.self, from: data)
     }
 
-    func postQuote(accessToken: String, groupId: String, symbol: String, usdc: Int64) async throws -> BuyQuoteDTO {
+    func postQuote(
+        accessToken: String,
+        groupId: String,
+        symbol: String,
+        kind: String = "buy",
+        usdc: Int64? = nil,
+        tokenAmount: Int64? = nil
+    ) async throws -> BuyQuoteDTO {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/quotes")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try applyAuthorizationHeader(accessToken: accessToken, to: &request)
-        request.httpBody = try JSONEncoder().encode(QuoteRequest(symbol: symbol, usdc: usdc))
+        request.httpBody = try JSONEncoder().encode(
+            QuoteRequest(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount)
+        )
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -418,13 +427,22 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(BuyQuoteDTO.self, from: data)
     }
 
-    func createProposal(accessToken: String, groupId: String, symbol: String, usdc: Int64) async throws -> CreateProposalResponse {
+    func createProposal(
+        accessToken: String,
+        groupId: String,
+        symbol: String,
+        kind: String = "buy",
+        usdc: Int64? = nil,
+        tokenAmount: Int64? = nil
+    ) async throws -> CreateProposalResponse {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/proposals")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try applyAuthorizationHeader(accessToken: accessToken, to: &request)
-        request.httpBody = try JSONEncoder().encode(ProposalRequest(symbol: symbol, usdc: usdc))
+        request.httpBody = try JSONEncoder().encode(
+            ProposalRequest(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount)
+        )
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -653,12 +671,40 @@ private struct CreateDepositRequest: Encodable {
 
 private struct QuoteRequest: Encodable {
     let symbol: String
-    let usdc: Int64
+    let kind: String?
+    let usdc: Int64?
+    let tokenAmount: Int64?
+
+    enum CodingKeys: String, CodingKey {
+        case symbol, kind, usdc, tokenAmount
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(symbol, forKey: .symbol)
+        if let kind { try container.encode(kind, forKey: .kind) }
+        if let usdc { try container.encode(usdc, forKey: .usdc) }
+        if let tokenAmount { try container.encode(tokenAmount, forKey: .tokenAmount) }
+    }
 }
 
 private struct ProposalRequest: Encodable {
     let symbol: String
-    let usdc: Int64
+    let kind: String?
+    let usdc: Int64?
+    let tokenAmount: Int64?
+
+    enum CodingKeys: String, CodingKey {
+        case symbol, kind, usdc, tokenAmount
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(symbol, forKey: .symbol)
+        if let kind { try container.encode(kind, forKey: .kind) }
+        if let usdc { try container.encode(usdc, forKey: .usdc) }
+        if let tokenAmount { try container.encode(tokenAmount, forKey: .tokenAmount) }
+    }
 }
 
 private struct VoteRequest: Encodable {

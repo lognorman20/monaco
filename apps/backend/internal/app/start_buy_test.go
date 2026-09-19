@@ -55,6 +55,7 @@ func integrationExecuteOnPassApp(t *testing.T) executeOnPassHarness {
 	buy := NewBuyService(h.Jupiter, h.XStocks)
 	governance := NewGovernanceService(h.Store, h.Privy)
 	governance.SetBuyService(buy)
+	governance.SetSwapService(h.Swap)
 	return executeOnPassHarness{
 		Governance:  governance,
 		ExecutePass: NewExecuteOnPassService(h.Swap, h.Store),
@@ -260,4 +261,98 @@ func seedPassedExecuteProposal(t *testing.T, h executeOnPassHarness, label strin
 		t.Fatalf("status = %q, want passed", passed.Status)
 	}
 	return passed
+}
+
+func TestExecuteOnPass_sellDoesNotChangeMemberShareUnits(t *testing.T) {
+	h := integrationExecuteOnPassApp(t)
+	ctx := context.Background()
+	sessions := NewSessionService(h.App.Store, h.App.Privy)
+	user := openTestSession(t, h.App.ISO, sessions, h.App.Privy, "sell-exec", "Sell Exec")
+	token := h.App.ISO.UniqueToken("sell-exec")
+	created, err := h.Governance.CreateGroupWithRules(ctx, token, testGroupName(h.App.ISO, "sell-exec"), DefaultGroupRules())
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	h.App.ISO.TrackGroup(created.GroupID)
+
+	const held = int64(100_000_000)
+	xstocks.RegisterSolanaMint(h.App.XStocks, "AAPLx", jupiter.AAPLxMint)
+	_, _, err = h.App.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
+		GroupID:          created.GroupID,
+		Amount:           10_000_000,
+		InputMint:        jupiter.USDCMint,
+		OutputMint:       jupiter.AAPLxMint,
+		TxSignature:      testTxSignature(h.App.ISO, "sell-exec-buy"),
+		ExecuteRequestID: testRequestID(h.App.ISO, "sell-exec-buy"),
+		CostBasisPrice:   10_000_000,
+		CostBasisAmount:  held,
+	})
+	if err != nil {
+		t.Fatalf("ConfirmBuyTransaction: %v", err)
+	}
+
+	beforeShares, err := h.App.Store.SumShareUnitsByGroup(ctx, created.GroupID)
+	if err != nil {
+		t.Fatalf("SumShareUnitsByGroup before: %v", err)
+	}
+
+	requestID := testRequestID(h.App.ISO, "sell-exec")
+	jupiter.RegisterSellQuote(h.App.Jupiter, jupiter.AAPLxMint, held, jupiter.SellQuote{
+		Routable:   true,
+		InputMint:  jupiter.AAPLxMint,
+		OutputMint: jupiter.USDCMint,
+		InAmount:   "100000000",
+		OutAmount:  "10000000",
+		RequestID:  requestID,
+	})
+	jupiter.RegisterExecutePoll(h.App.Jupiter, requestID, []jupiter.ExecuteResult{{
+		Status:             jupiter.ExecuteStatusSuccess,
+		Code:               0,
+		Signature:          testTxSignature(h.App.ISO, "sell-exec"),
+		InputAmountResult:  "100000000",
+		OutputAmountResult: "10000000",
+	}})
+	treasury, err := h.App.Privy.EnsureTreasury(ctx, privy.GroupID(created.GroupID))
+	if err != nil {
+		t.Fatalf("EnsureTreasury: %v", err)
+	}
+	h.App.Swap.SetTreasuryBalances(treasury.SolanaAddress, TreasuryBalances{USDC: 1_000_000, XStock: held})
+
+	proposal, err := h.Governance.CreateProposal(ctx, CreateProposalInput{
+		GroupID:     created.GroupID,
+		ProposerID:  user.UserID,
+		Symbol:      "AAPLx",
+		Kind:        domain.ProposalKindSell,
+		TokenAmount: held,
+	})
+	if err != nil {
+		t.Fatalf("CreateProposal: %v", err)
+	}
+	passed, err := h.Governance.CastVote(ctx, CastVoteInput{
+		ProposalID: proposal.ID,
+		VoterID:    user.UserID,
+		Choice:     domain.VoteYes,
+	})
+	if err != nil {
+		t.Fatalf("CastVote: %v", err)
+	}
+	if passed.Status != ProposalPassed {
+		t.Fatalf("status = %q, want passed", passed.Status)
+	}
+
+	result, err := h.ExecutePass.ExecuteOnPass(ctx, passed)
+	if err != nil {
+		t.Fatalf("ExecuteOnPass sell: %v", err)
+	}
+	if result.Transaction.Action != postgres.TransactionActionSell {
+		t.Fatalf("action = %q, want sell", result.Transaction.Action)
+	}
+
+	afterShares, err := h.App.Store.SumShareUnitsByGroup(ctx, created.GroupID)
+	if err != nil {
+		t.Fatalf("SumShareUnitsByGroup after: %v", err)
+	}
+	if afterShares != beforeShares {
+		t.Fatalf("share units changed: before=%d after=%d", beforeShares, afterShares)
+	}
 }

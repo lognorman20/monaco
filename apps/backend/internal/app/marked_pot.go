@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"strconv"
 	"strings"
 
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/packages/domain"
 )
-
-const tokenAtomicScale int64 = 1_000_000
 
 func tokenAtomicsToDecimalUnits(atomics int64) (domain.ShareUnits, error) {
 	if atomics < 0 {
@@ -22,8 +22,8 @@ func tokenAtomicsToDecimalUnits(atomics int64) (domain.ShareUnits, error) {
 	if atomics == 0 {
 		return domain.ShareUnits("0"), nil
 	}
-	r := new(big.Rat).SetFrac(big.NewInt(atomics), big.NewInt(tokenAtomicScale))
-	s := strings.TrimRight(r.FloatString(6), "0")
+	r := new(big.Rat).SetFrac(big.NewInt(atomics), big.NewInt(jupiter.XStockAtomicScale))
+	s := strings.TrimRight(r.FloatString(8), "0")
 	s = strings.TrimRight(s, ".")
 	return domain.ShareUnits(s), nil
 }
@@ -35,7 +35,7 @@ func costBasisMarkPerUnitMicros(totalUSDCMicros, tokenAtomics int64) (int64, err
 	if tokenAtomics <= 0 {
 		return 0, fmt.Errorf("cost basis token amount must be positive")
 	}
-	mark := (totalUSDCMicros * tokenAtomicScale) / tokenAtomics
+	mark := (totalUSDCMicros * jupiter.XStockAtomicScale) / tokenAtomics
 	if mark <= 0 {
 		return 0, fmt.Errorf("derived mark per unit must be positive")
 	}
@@ -273,18 +273,19 @@ func potRowsFromPythInput(input pyth.NavInput) ([]GroupViewPotRow, error) {
 		if err != nil {
 			return nil, err
 		}
-		valueMicros := holding.Units * holding.MarkUsdc / tokenAtomicScale
+		valueMicros := holding.Units * holding.MarkUsdc / jupiter.XStockAtomicScale
 		var afterHours *bool
 		if holding.AfterHours {
 			afterHours = boolPtr(true)
 		}
 		rows = append(rows, GroupViewPotRow{
-			Symbol:     holding.Symbol,
-			Units:      string(units),
-			MarkUsd:    formatMicrosAsUsdDecimal(holding.MarkUsdc),
-			ValueUsd:   formatMicrosAsUsdDecimal(int64(valueMicros)),
-			DollarPnL:  formatSignedDollarPnL(int64(valueMicros) - holding.CostBasis),
-			AfterHours: afterHours,
+			Symbol:      holding.Symbol,
+			Units:       string(units),
+			MarkUsd:     formatMicrosAsUsdDecimal(holding.MarkUsdc),
+			ValueUsd:    formatMicrosAsUsdDecimal(int64(valueMicros)),
+			DollarPnL:   formatSignedDollarPnL(int64(valueMicros) - holding.CostBasis),
+			AfterHours:  afterHours,
+			TokenAmount: strconv.FormatInt(holding.Units, 10),
 		})
 	}
 	return rows, nil

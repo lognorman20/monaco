@@ -254,23 +254,23 @@ struct TransactionDetailView: View {
         switch transaction.action.lowercased() {
         case "buy":
             if let symbol = transaction.outputSymbol {
-                return "\(AssetSymbolFormatter.format(symbol)) \(formatTokenAmount(Double(micros) / 1_000_000.0))"
+                return "\(AssetSymbolFormatter.format(symbol)) \(formatTokenAmount(Double(micros) / 100_000_000.0))"
             }
-            return formatTokenAmount(Double(micros) / 1_000_000.0)
+            return formatTokenAmount(Double(micros) / 100_000_000.0)
+        case "sell":
+            let proceeds = transaction.proceedsUsdcMicros ?? transaction.costBasisAmount ?? micros
+            return formatUsdc(proceeds)
         default:
             return formatUsdc(micros)
         }
     }
 
-    private func formatUsdc(_ micros: Int64) -> String {
-        String(format: "$%.2f", Double(micros) / 1_000_000.0)
+    private func formatTokenAmount(_ amount: Double) -> String {
+        String(format: "%.8f", amount).replacingOccurrences(of: "0+$", with: "", options: .regularExpression)
     }
 
-    private func formatTokenAmount(_ amount: Double) -> String {
-        if amount >= 1 {
-            return String(format: "%.4f", amount)
-        }
-        return String(format: "%.6f", amount)
+    private func formatUsdc(_ micros: Int64) -> String {
+        String(format: "$%.2f", Double(micros) / 1_000_000.0)
     }
 
     private func statusLabel(_ status: String) -> String {

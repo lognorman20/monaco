@@ -1,6 +1,7 @@
 package jupiter
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -50,7 +51,7 @@ func TestJupiterQuoteBuy_noRoute_returnsRoutableFalse(t *testing.T) {
 	})
 
 	// Act
-	quote, err := client.QuoteBuy(t.Context(), QuoteBuyParams{
+	quote, err := client.QuoteBuy(context.Background(), QuoteBuyParams{
 		GroupID:    "group-1",
 		UserID:     "user-1",
 		Symbol:     "AAPLx",
@@ -98,6 +99,33 @@ func TestJupiterQuoteBuy_rfqWithoutTransaction_notRoutableWhenTakerRequired(t *t
 	}
 }
 
+func TestJupiterQuoteSell_rfqWithoutTransaction_notRoutableWhenTakerRequired(t *testing.T) {
+	t.Parallel()
+
+	const inputMint = "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp"
+	body := []byte(`{
+  "inputMint": "` + inputMint + `",
+  "outputMint": "` + USDCMint + `",
+  "inAmount": "50000000",
+  "outAmount": "1500000",
+  "transaction": null,
+  "requestId": "req-sell-rfq-no-tx"
+}`)
+
+	quote, err := ParseSellQuoteResponse(body, false)
+	if err != nil {
+		t.Fatalf("ParseSellQuoteResponse(price-only) error = %v", err)
+	}
+	if !quote.Routable {
+		t.Fatal("expected price-only sell RFQ quote to be routable")
+	}
+
+	_, err = ParseSellQuoteResponse(body, true)
+	if !errors.Is(err, ErrNoRoute) {
+		t.Fatalf("ParseSellQuoteResponse(executable) error = %v, want ErrNoRoute", err)
+	}
+}
+
 func TestFetchBuyOrder_withPayer_includesPayerQueryParam(t *testing.T) {
 	t.Parallel()
 
@@ -115,7 +143,7 @@ func TestFetchBuyOrder_withPayer_includesPayerQueryParam(t *testing.T) {
 
 	client := NewHTTPClientWithBaseURL(server.URL, server.Client())
 	client.payer = payer
-	_, err := client.fetchBuyOrder(t.Context(), buyOrderRequest{
+	_, err := client.fetchBuyOrder(context.Background(), buyOrderRequest{
 		OutputMint: "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
 		Amount:     150_000,
 		Taker:      taker,
@@ -150,7 +178,7 @@ func TestJupiterQuoteBuy_httpError_propagatesAsRefusal(t *testing.T) {
 	client := NewHTTPClientWithBaseURL(server.URL, server.Client())
 
 	// Act
-	quote, err := client.QuoteBuy(t.Context(), QuoteBuyParams{
+	quote, err := client.QuoteBuy(context.Background(), QuoteBuyParams{
 		GroupID:    "group-1",
 		UserID:     "user-1",
 		Symbol:     "AAPLx",
