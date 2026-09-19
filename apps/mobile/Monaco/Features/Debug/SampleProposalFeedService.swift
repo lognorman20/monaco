@@ -148,7 +148,8 @@ final class SampleProposalFeedService: ProposalFeedService {
     }
 }
 
-/// Root for the sample-data launch: a labelled feed so screenshots can't be mistaken for live data.
+/// Root for the sample-data launch (Debug only): the feed under its real title, "Proposals", so it can be
+/// recorded as is. The launch argument, not the screen, is what marks it as sample data.
 /// Extra arguments open other proposal screens on the same sample data:
 /// `-MonacoProposeSample` (a cabal screen with the Propose sheet) and
 /// `-MonacoProposalSampleDetail <id>` (one proposal's detail, e.g. `sample-22` for the swap tracker).
@@ -172,7 +173,7 @@ struct SampleProposalFeedRoot: View {
                 }
             } else {
                 NavigationStack {
-                    ProposalFeedView(service: service, groupId: "sample", title: "Sample data")
+                    ProposalFeedView(service: service, groupId: "sample")
                 }
             }
         }
@@ -190,9 +191,6 @@ private struct SampleProposeRoot: View {
         NavigationStack {
             VStack(spacing: MonacoTheme.Space.l) {
                 CabalMark(groupId: SampleProposeService.groupView.id, name: SampleProposeService.groupView.name, size: 64)
-                Text("Sample data")
-                    .font(MonacoTheme.Typo.caption)
-                    .foregroundStyle(MonacoTheme.muted)
                 CircleAction("Propose", systemImage: "arrow.up.right") { showsPropose = true }
                     .accessibilityIdentifier("group-action-propose")
             }
