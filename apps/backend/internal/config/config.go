@@ -13,17 +13,17 @@ import (
 const SolanaCluster = "mainnet-beta"
 
 const (
-	envDatabaseURL                   = "DATABASE_URL"
-	envPrivyAppID                    = "PRIVY_APP_ID"
-	envPrivyAppSecret                = "PRIVY_APP_SECRET"
-	envPrivyAuthorizationPrivateKey  = "PRIVY_AUTHORIZATION_PRIVATE_KEY"
-	envPrivyAuthorizationKeyID       = "PRIVY_AUTHORIZATION_KEY_ID"
-	envRelayerPrivateKey             = "RELAYER_PRIVATE_KEY"
-	envSolanaRPCURL                  = "SOLANA_RPC_URL"
-	envPythAPIKey                    = "PYTH_API_KEY"
-	envPythHermesBaseURL             = "PYTH_HERMES_BASE_URL"
-	envSupabaseURL                   = "SUPABASE_URL"
-	envSupabaseServiceRoleKey        = "SUPABASE_SERVICE_ROLE_KEY"
+	envDatabaseURL                  = "DATABASE_URL"
+	envPrivyAppID                   = "PRIVY_APP_ID"
+	envPrivyAppSecret               = "PRIVY_APP_SECRET"
+	envPrivyAuthorizationPrivateKey = "PRIVY_AUTHORIZATION_PRIVATE_KEY"
+	envPrivyAuthorizationKeyID      = "PRIVY_AUTHORIZATION_KEY_ID"
+	envRelayerPrivateKey            = "RELAYER_PRIVATE_KEY"
+	envSolanaRPCURL                 = "SOLANA_RPC_URL"
+	envPythAPIKey                   = "PYTH_API_KEY"
+	envPythHermesBaseURL            = "PYTH_HERMES_BASE_URL"
+	envSupabaseURL                  = "SUPABASE_URL"
+	envSupabaseServiceRoleKey       = "SUPABASE_SERVICE_ROLE_KEY"
 )
 
 // Config holds runtime credentials for the Monaco API.
@@ -48,18 +48,18 @@ const (
 //     keys authenticate but return 403 "Not entitled" for equity price updates.
 //   - PYTH_HERMES_BASE_URL: Optional Hermes base URL override (default https://pyth.dourolabs.app/hermes).
 type Config struct {
-	DatabaseURL                   string
-	PrivyAppID                    string
-	PrivyAppSecret                string
-	PrivyAuthorizationPrivateKey  string
-	PrivyAuthorizationKeyID       string
-	RelayerPrivateKey             string
-	SolanaRPCURL                  string
-	PythAPIKey                    string
-	PythHermesBaseURL             string
-	SupabaseURL                   string
-	SupabaseServiceRoleKey        string
-	SolanaCluster                 string
+	DatabaseURL                  string
+	PrivyAppID                   string
+	PrivyAppSecret               string
+	PrivyAuthorizationPrivateKey string
+	PrivyAuthorizationKeyID      string
+	RelayerPrivateKey            string
+	SolanaRPCURL                 string
+	PythAPIKey                   string
+	PythHermesBaseURL            string
+	SupabaseURL                  string
+	SupabaseServiceRoleKey       string
+	SolanaCluster                string
 }
 
 // Load reads required settings from the process environment.

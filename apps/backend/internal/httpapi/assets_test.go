@@ -122,6 +122,55 @@ func TestGET_assets_popular_returnsPinnedAssets(t *testing.T) {
 	}
 }
 
+func TestGET_assets_popular_marksConcurrently_preservesOrder(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+		Symbol:     "AAPLx",
+		Name:       "Apple",
+		SolanaMint: jupiter.AAPLxMint,
+		Routable:   true,
+	})
+	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+		Symbol:     "MSFTx",
+		Name:       "Microsoft",
+		SolanaMint: "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
+		Routable:   true,
+	})
+	// MSFTx's mark is registered before AAPLx's so a sequential-only enrichment
+	// loop would still pass by luck; only a race in the concurrent path could
+	// scramble the response order relative to catalog order.
+	pyth.RegisterAssetMark(handlers.Pyth, "MSFTx", pyth.AssetMark{PriceUsdcMicros: 400_000_000})
+	pyth.RegisterAssetMark(handlers.Pyth, "AAPLx", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/popular?limit=3", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handlers.PopularAssetsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	var payload popularAssetsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if len(payload.Assets) != 2 {
+		t.Fatalf("assets len = %d, want 2", len(payload.Assets))
+	}
+	if payload.Assets[0].Symbol != "AAPLx" || payload.Assets[1].Symbol != "MSFTx" {
+		t.Fatalf("order = [%s, %s], want [AAPLx, MSFTx]", payload.Assets[0].Symbol, payload.Assets[1].Symbol)
+	}
+	if payload.Assets[0].PriceUsdcMicros == nil || *payload.Assets[0].PriceUsdcMicros != 185_000_000 {
+		t.Fatalf("AAPLx price = %v, want 185000000", payload.Assets[0].PriceUsdcMicros)
+	}
+	if payload.Assets[1].PriceUsdcMicros == nil || *payload.Assets[1].PriceUsdcMicros != 400_000_000 {
+		t.Fatalf("MSFTx price = %v, want 400000000", payload.Assets[1].PriceUsdcMicros)
+	}
+}
+
 func TestGET_assets_popular_pythOnly_skipsJupiterQuoteBuy(t *testing.T) {
 	t.Parallel()
 

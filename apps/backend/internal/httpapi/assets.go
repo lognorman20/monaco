@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
@@ -260,11 +261,20 @@ func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []xstocks.Cata
 	return out
 }
 
+// enrichPopularAssets marks each asset concurrently — each mark is an independent
+// Pyth round trip, so a sequential loop pays their combined latency instead of the
+// slowest single one.
 func (h *AssetsHandlers) enrichPopularAssets(ctx context.Context, assets []xstocks.CatalogAsset) []marketAssetResponse {
-	out := make([]marketAssetResponse, 0, len(assets))
-	for _, asset := range assets {
-		out = append(out, h.enrichPopularAsset(ctx, asset))
+	out := make([]marketAssetResponse, len(assets))
+	var wg sync.WaitGroup
+	for i, asset := range assets {
+		wg.Add(1)
+		go func(i int, asset xstocks.CatalogAsset) {
+			defer wg.Done()
+			out[i] = h.enrichPopularAsset(ctx, asset)
+		}(i, asset)
 	}
+	wg.Wait()
 	return out
 }
 
