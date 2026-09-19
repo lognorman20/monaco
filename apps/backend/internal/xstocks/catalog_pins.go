@@ -10,8 +10,7 @@ import (
 var pinnedCatalogSymbols = []string{
 	"AAPLx",  // Apple
 	"MSFTx",  // Microsoft
-	"GOOGLx", // Alphabet (Class A)
-	"GOOGx",  // Alphabet (Class C)
+	"GOOGLx", // Alphabet (Class A) — xStocks has no separate Class C "GOOGx" ticker
 	"AMZNx",  // Amazon
 	"NVDAx",  // NVIDIA
 	"METAx",  // Meta

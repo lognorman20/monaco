@@ -64,8 +64,8 @@ func (c *HermesClient) setHermesAuth(req *http.Request) error {
 }
 
 type priceFeedResponse struct {
-	ID           string `json:"id"`
-	MarketHours  marketHours `json:"market_hours"`
+	ID          string      `json:"id"`
+	MarketHours marketHours `json:"market_hours"`
 }
 
 type marketHours struct {
