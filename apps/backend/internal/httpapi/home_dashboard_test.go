@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/packages/domain"
 )
@@ -167,7 +168,14 @@ func TestGET_homeDashboard_openProposal_listsUntilVoted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
-	proposal, err := store.InsertProposalTx(ctx, tx, created.GroupID, session.UserID, "AAPL", 1_000_000, time.Now().Add(24*time.Hour))
+	proposal, err := store.InsertProposalTx(ctx, tx, postgres.InsertProposalParams{
+		GroupID:    created.GroupID,
+		ProposerID: session.UserID,
+		Symbol:     "AAPL",
+		Kind:       domain.ProposalKindBuy,
+		UsdcMicros: 1_000_000,
+		ExpiresAt:  time.Now().Add(24 * time.Hour),
+	})
 	if err != nil {
 		t.Fatalf("InsertProposalTx: %v", err)
 	}
