@@ -9,73 +9,80 @@ struct PotSectionView: View {
 
     @State private var didCopyTreasury = false
 
+    private var sortedPot: [PotRowDTO] {
+        pot.sorted { lhs, rhs in
+            (Double(lhs.valueUsd) ?? 0) > (Double(rhs.valueUsd) ?? 0)
+        }
+    }
+
     var body: some View {
         Section {
+            MonacoHeroHeader(
+                title: UsdAmountFormatter.format(decimalString: potTotalUsd),
+                caption: "Total pot"
+            )
+            .accessibilityIdentifier("pot-total-value")
+            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
             if pot.isEmpty {
                 Text("No holdings yet. Fund this cabal to get started.")
-                    .font(.footnote)
+                    .font(MonacoTheme.TypeRole.body)
                     .foregroundStyle(MonacoTheme.secondaryText)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             } else {
-                ForEach(pot) { row in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(AssetSymbolFormatter.format(row.symbol))
-                                .font(.body.bold())
-                                .foregroundStyle(MonacoTheme.primaryText)
-                            if row.afterHours == true {
-                                Text("After hours")
-                                    .font(.caption2.bold())
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(MonacoTheme.warning.opacity(0.15))
-                                    .foregroundStyle(MonacoTheme.warning)
-                                    .clipShape(Capsule())
-                                    .accessibilityIdentifier("pot-after-hours-\(row.symbol)")
-                            }
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text("$\(row.valueUsd)")
-                                    .font(.body.monospacedDigit())
-                                    .foregroundStyle(MonacoTheme.primaryText)
-                                Text(row.dollarPnl)
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundStyle(pnlColor(for: row.dollarPnl))
-                                    .accessibilityIdentifier("pot-row-pnl-\(row.symbol)")
-                            }
-                        }
-                        HStack {
-                            Text("\(row.units) units @ $\(row.markUsd)")
-                                .font(.caption)
-                                .foregroundStyle(MonacoTheme.secondaryText)
-                            Spacer()
-                        }
-                    }
-                    .accessibilityIdentifier("pot-row-\(row.symbol)")
+                ForEach(sortedPot) { row in
+                    holdingCard(row)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
             }
 
             if let treasuryAddress {
                 treasuryAddressBlock(treasuryAddress)
-            }
-        } header: {
-            HStack {
-                Text("Pot")
-                Spacer()
-                if !pot.isEmpty {
-                    Text("$\(potTotalUsd)")
-                        .font(.subheadline.bold().monospacedDigit())
-                        .foregroundStyle(MonacoTheme.primaryText)
-                        .accessibilityIdentifier("pot-total-value")
-                }
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
         }
     }
 
     @ViewBuilder
+    private func holdingCard(_ row: PotRowDTO) -> some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            if row.afterHours == true {
+                Text("After hours")
+                    .font(.caption2.bold())
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(MonacoTheme.warning.opacity(0.15))
+                    .foregroundStyle(MonacoTheme.warning)
+                    .clipShape(Capsule())
+                    .accessibilityIdentifier("pot-after-hours-\(row.symbol)")
+            }
+
+            MonacoRowCard(
+                systemImage: "chart.line.uptrend.xyaxis",
+                title: AssetSymbolFormatter.format(row.symbol),
+                subtitle: "\(row.units) units @ $\(row.markUsd)",
+                trailing: UsdAmountFormatter.format(decimalString: row.valueUsd),
+                trailingCaption: row.dollarPnl,
+                trailingCaptionColor: MonacoTheme.signed(row.dollarPnl),
+                trailingCaptionAccessibilityIdentifier: "pot-row-pnl-\(row.symbol)"
+            )
+        }
+        .accessibilityIdentifier("pot-row-\(row.symbol)")
+    }
+
+    @ViewBuilder
     private func treasuryAddressBlock(_ address: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             Text("Cabal treasury")
-                .font(.caption)
+                .font(MonacoTheme.TypeRole.caption)
                 .foregroundStyle(MonacoTheme.secondaryText)
 
             MonacoWalletAddressText(address: address, textStyle: .footnote)
@@ -104,7 +111,6 @@ struct PotSectionView: View {
                 }
             }
         }
-        .padding(.top, 4)
         .accessibilityIdentifier("group-treasury-address-block")
     }
 
@@ -115,9 +121,5 @@ struct PotSectionView: View {
             try? await Task.sleep(for: .seconds(2))
             didCopyTreasury = false
         }
-    }
-
-    private func pnlColor(for dollarPnl: String) -> Color {
-        MonacoTheme.signed(dollarPnl)
     }
 }

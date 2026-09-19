@@ -126,6 +126,8 @@ struct MonacoRowCard<Leading: View>: View {
     let trailing: String?
     var subtitleColor: Color = MonacoTheme.muted
     var trailingColor: Color = MonacoTheme.ink
+    var trailingCaptionColor: Color = MonacoTheme.muted
+    var trailingCaptionAccessibilityIdentifier: String?
     /// Muted second line under `trailing` (e.g. percent under dollar P&L).
     let trailingCaption: String?
     let leading: Leading
@@ -137,6 +139,8 @@ struct MonacoRowCard<Leading: View>: View {
         trailingCaption: String? = nil,
         subtitleColor: Color = MonacoTheme.muted,
         trailingColor: Color = MonacoTheme.ink,
+        trailingCaptionColor: Color = MonacoTheme.muted,
+        trailingCaptionAccessibilityIdentifier: String? = nil,
         @ViewBuilder leading: () -> Leading
     ) {
         self.title = title
@@ -145,6 +149,8 @@ struct MonacoRowCard<Leading: View>: View {
         self.trailingCaption = trailingCaption
         self.subtitleColor = subtitleColor
         self.trailingColor = trailingColor
+        self.trailingCaptionColor = trailingCaptionColor
+        self.trailingCaptionAccessibilityIdentifier = trailingCaptionAccessibilityIdentifier
         self.leading = leading()
     }
 
@@ -171,7 +177,8 @@ struct MonacoRowCard<Leading: View>: View {
                     if let trailingCaption, !trailingCaption.isEmpty {
                         Text(trailingCaption)
                             .font(.caption.monospacedDigit())
-                            .foregroundStyle(MonacoTheme.muted)
+                            .foregroundStyle(trailingCaptionColor)
+                            .monacoOptionalAccessibilityIdentifier(trailingCaptionAccessibilityIdentifier)
                     }
                 }
                 .fixedSize()
@@ -211,7 +218,9 @@ extension MonacoRowCard where Leading == MonacoRowIcon {
         trailing: String?,
         trailingCaption: String? = nil,
         subtitleColor: Color = MonacoTheme.muted,
-        trailingColor: Color = MonacoTheme.ink
+        trailingColor: Color = MonacoTheme.ink,
+        trailingCaptionColor: Color = MonacoTheme.muted,
+        trailingCaptionAccessibilityIdentifier: String? = nil
     ) {
         self.init(
             title: title,
@@ -219,9 +228,22 @@ extension MonacoRowCard where Leading == MonacoRowIcon {
             trailing: trailing,
             trailingCaption: trailingCaption,
             subtitleColor: subtitleColor,
-            trailingColor: trailingColor
+            trailingColor: trailingColor,
+            trailingCaptionColor: trailingCaptionColor,
+            trailingCaptionAccessibilityIdentifier: trailingCaptionAccessibilityIdentifier
         ) {
             MonacoRowIcon(systemImage: systemImage)
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func monacoOptionalAccessibilityIdentifier(_ identifier: String?) -> some View {
+        if let identifier {
+            accessibilityIdentifier(identifier)
+        } else {
+            self
         }
     }
 }

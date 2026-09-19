@@ -9,56 +9,114 @@ struct GroupActivitySection: View {
     let retryingTransactionIDs: Set<String>
     let onRetry: (GroupActivityItemDTO) -> Void
 
+    @State private var isExpanded = false
+
+    private let collapsedItemLimit = 4
+
+    private var visibleItems: [GroupActivityItemDTO] {
+        isExpanded ? items : Array(items.prefix(collapsedItemLimit))
+    }
+
+    private var hasMoreThanCollapsedLimit: Bool {
+        items.count > collapsedItemLimit
+    }
+
     var body: some View {
-        Section("Transaction history") {
-            if isLoading {
-                HStack(spacing: 12) {
-                    ProgressView()
-                        .tint(MonacoTheme.accent)
-                    Text("Loading activity…")
-                        .font(.footnote)
-                        .foregroundStyle(MonacoTheme.secondaryText)
+        Section {
+            header
+
+            content
+
+            if !isLoading, errorMessage == nil, hasMoreThanCollapsedLimit {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text(isExpanded ? "Show less" : "Show all")
+                        Spacer()
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(MonacoTheme.accent)
                 }
-                .accessibilityIdentifier("group-activity-loading")
-            } else if let errorMessage {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(MonacoTheme.warning)
-                }
-                .accessibilityIdentifier("group-activity-error")
-            } else if items.isEmpty {
-                Text("No transactions yet.")
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("group-activity-toggle")
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: MonacoTheme.Space.s) {
+            Text("Transaction history")
+                .font(MonacoTheme.TypeRole.title)
+                .foregroundStyle(MonacoTheme.primaryText)
+            Spacer(minLength: 8)
+            if !isLoading, errorMessage == nil, !items.isEmpty {
+                Text("\(items.count)")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(MonacoTheme.surface, in: Capsule())
+                    .overlay {
+                        Capsule().strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+                    }
+                    .accessibilityIdentifier("group-activity-count")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if isLoading {
+            HStack(spacing: 12) {
+                ProgressView()
+                    .tint(MonacoTheme.accent)
+                Text("Loading activity…")
                     .font(.footnote)
                     .foregroundStyle(MonacoTheme.secondaryText)
-                    .accessibilityIdentifier("group-activity-empty")
-            } else {
-                ForEach(items) { item in
-                    VStack(alignment: .leading, spacing: 4) {
-                        NavigationLink {
-                            activityDetailDestination(for: item)
-                        } label: {
-                            activityRowSummary(item)
-                        }
-                        .accessibilityIdentifier("group-activity-row-\(item.id)")
+            }
+            .accessibilityIdentifier("group-activity-loading")
+        } else if let errorMessage {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(MonacoTheme.warning)
+            }
+            .accessibilityIdentifier("group-activity-error")
+        } else if items.isEmpty {
+            Text("No transactions yet.")
+                .font(.footnote)
+                .foregroundStyle(MonacoTheme.secondaryText)
+                .accessibilityIdentifier("group-activity-empty")
+        } else {
+            ForEach(visibleItems) { item in
+                VStack(alignment: .leading, spacing: 4) {
+                    NavigationLink {
+                        activityDetailDestination(for: item)
+                    } label: {
+                        activityRowSummary(item)
+                    }
+                    .accessibilityIdentifier("group-activity-row-\(item.id)")
 
-                        if canRetry(item) {
-                            HStack {
-                                Spacer()
-                                if retryingTransactionIDs.contains(item.id) {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                        .tint(MonacoTheme.accent)
-                                        .accessibilityIdentifier("group-activity-retry-loading-\(item.id)")
-                                } else {
-                                    Button("Retry") {
-                                        onRetry(item)
-                                    }
-                                    .font(.caption.weight(.semibold))
-                                    .buttonStyle(.borderless)
-                                    .foregroundStyle(MonacoTheme.accent)
-                                    .accessibilityIdentifier("group-activity-retry-\(item.id)")
+                    if canRetry(item) {
+                        HStack {
+                            Spacer()
+                            if retryingTransactionIDs.contains(item.id) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .tint(MonacoTheme.accent)
+                                    .accessibilityIdentifier("group-activity-retry-loading-\(item.id)")
+                            } else {
+                                Button("Retry") {
+                                    onRetry(item)
                                 }
+                                .font(.caption.weight(.semibold))
+                                .buttonStyle(.borderless)
+                                .foregroundStyle(MonacoTheme.accent)
+                                .accessibilityIdentifier("group-activity-retry-\(item.id)")
                             }
                         }
                     }
