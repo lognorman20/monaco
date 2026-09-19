@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -21,10 +22,11 @@ func NewStore(db *sql.DB) *Store {
 
 // User is a row in users.
 type User struct {
-	ID          string
-	PrivyUserID string
-	DisplayName sql.NullString
-	CreatedAt   time.Time
+	ID              string
+	PrivyUserID     string
+	DisplayName     sql.NullString
+	ProfilePhotoURL sql.NullString
+	CreatedAt       time.Time
 }
 
 // UpsertUser inserts a user keyed by privy_user_id or returns the existing row.
@@ -43,13 +45,14 @@ INSERT INTO users (privy_user_id, display_name)
 VALUES ($1, $2)
 ON CONFLICT (privy_user_id) DO UPDATE
   SET privy_user_id = users.privy_user_id
-RETURNING id, privy_user_id, display_name, created_at`
+RETURNING id, privy_user_id, display_name, profile_photo_url, created_at`
 
 	var user User
 	err := s.db.QueryRowContext(ctx, upsertSQL, privyUserID, displayNameArg).Scan(
 		&user.ID,
 		&user.PrivyUserID,
 		&user.DisplayName,
+		&user.ProfilePhotoURL,
 		&user.CreatedAt,
 	)
 	if err != nil {
@@ -66,7 +69,7 @@ func (s *Store) GetUserByPrivyUserID(ctx context.Context, privyUserID string) (U
 	}
 
 	const selectSQL = `
-SELECT id, privy_user_id, display_name, created_at
+SELECT id, privy_user_id, display_name, profile_photo_url, created_at
 FROM users
 WHERE privy_user_id = $1`
 
@@ -75,6 +78,7 @@ WHERE privy_user_id = $1`
 		&user.ID,
 		&user.PrivyUserID,
 		&user.DisplayName,
+		&user.ProfilePhotoURL,
 		&user.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -119,4 +123,34 @@ WHERE id = ANY($1::uuid[])`
 		return nil, fmt.Errorf("iterate user display names: %w", err)
 	}
 	return names, nil
+}
+
+// UpdateUserProfilePhotoURL persists the canonical avatar URL for userID.
+func (s *Store) UpdateUserProfilePhotoURL(ctx context.Context, userID, profilePhotoURL string) (User, error) {
+	if userID == "" {
+		return User{}, fmt.Errorf("user_id is required")
+	}
+	trimmed := strings.TrimSpace(profilePhotoURL)
+	if trimmed == "" {
+		return User{}, fmt.Errorf("profile_photo_url is required")
+	}
+
+	const updateSQL = `
+UPDATE users
+SET profile_photo_url = $2
+WHERE id = $1
+RETURNING id, privy_user_id, display_name, profile_photo_url, created_at`
+
+	var user User
+	err := s.db.QueryRowContext(ctx, updateSQL, userID, trimmed).Scan(
+		&user.ID,
+		&user.PrivyUserID,
+		&user.DisplayName,
+		&user.ProfilePhotoURL,
+		&user.CreatedAt,
+	)
+	if err != nil {
+		return User{}, fmt.Errorf("update user profile photo url: %w", err)
+	}
+	return user, nil
 }

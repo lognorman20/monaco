@@ -38,6 +38,7 @@ type MeResult struct {
 	UserID              string
 	DisplayName         string
 	MemberWalletAddress string
+	ProfilePhotoURL     string
 }
 
 // MemberWallet is the persisted member Solana wallet for a user.
@@ -121,17 +122,8 @@ func (s *SessionService) GetMe(ctx context.Context, accessToken string) (MeResul
 		return MeResult{}, ErrUserNotFound
 	}
 
-	displayName := ""
-	if user.DisplayName.Valid {
-		displayName = user.DisplayName.String
-	}
-
 	logSessionGetMeSuccess(user.ID)
-	return MeResult{
-		UserID:              user.ID,
-		DisplayName:         displayName,
-		MemberWalletAddress: wallet.SolanaAddress,
-	}, nil
+	return meResultFromUser(user, wallet.SolanaAddress), nil
 }
 
 // EnsureMemberWallet provisions a member wallet once per user and returns the persisted row.

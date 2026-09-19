@@ -21,6 +21,8 @@ const (
 	envRelayerPrivateKey             = "RELAYER_PRIVATE_KEY"
 	envSolanaRPCURL                  = "SOLANA_RPC_URL"
 	envPythAPIKey                    = "PYTH_API_KEY"
+	envSupabaseURL                   = "SUPABASE_URL"
+	envSupabaseServiceRoleKey        = "SUPABASE_SERVICE_ROLE_KEY"
 )
 
 // Config holds runtime credentials for the Monaco API.
@@ -50,6 +52,8 @@ type Config struct {
 	RelayerPrivateKey             string
 	SolanaRPCURL                  string
 	PythAPIKey                    string
+	SupabaseURL                   string
+	SupabaseServiceRoleKey        string
 	SolanaCluster                 string
 }
 
@@ -65,6 +69,8 @@ func Load() (*Config, error) {
 		RelayerPrivateKey:            strings.TrimSpace(os.Getenv(envRelayerPrivateKey)),
 		SolanaRPCURL:                 strings.TrimSpace(os.Getenv(envSolanaRPCURL)),
 		PythAPIKey:                   strings.TrimSpace(os.Getenv(envPythAPIKey)),
+		SupabaseURL:                  strings.TrimSpace(os.Getenv(envSupabaseURL)),
+		SupabaseServiceRoleKey:       strings.TrimSpace(os.Getenv(envSupabaseServiceRoleKey)),
 		SolanaCluster:                SolanaCluster,
 	}
 
