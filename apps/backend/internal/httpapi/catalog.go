@@ -20,6 +20,8 @@ type CatalogHandlers struct {
 	Store   *postgres.Store
 	Privy   privy.Client
 	Catalog xstocks.CatalogSearcher
+	// KeyGuard throttles wrong agent keys. Nil disables throttling.
+	KeyGuard *AgentKeyGuard
 }
 
 type catalogAssetResponse struct {
@@ -51,7 +53,12 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 
 	agentKey := strings.TrimSpace(r.Header.Get(agentKeyHeader))
 	if agentKey != "" {
+		if over, wait := h.KeyGuard.blocked(r, groupID); over {
+			writeAgentKeyThrottled(ctx, log, w, wait, groupID)
+			return
+		}
 		if _, err := resolveAgentForGroup(ctx, h.Store, groupID, agentKey); err != nil {
+			h.KeyGuard.recordFailure(r, groupID, err)
 			writeAgentAuthError(ctx, log, w, err, groupID)
 			return
 		}
