@@ -470,6 +470,76 @@ LIMIT 100`
 	return out, rows.Err()
 }
 
+// MissedProposalRow is an open proposal the viewer has not voted on.
+type MissedProposalRow struct {
+	ProposalID string
+	GroupID    string
+	GroupName  string
+	Symbol     string
+	Status     domain.ProposalStatus
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+}
+
+// ListMissedOpenProposalsForUser returns newest open proposals in groupIDs without a vote from userID.
+func (s *Store) ListMissedOpenProposalsForUser(ctx context.Context, userID string, groupIDs []string, limit int) ([]MissedProposalRow, error) {
+	if userID == "" {
+		return nil, fmt.Errorf("user_id is required")
+	}
+	if len(groupIDs) == 0 {
+		return []MissedProposalRow{}, nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	const selectSQL = `
+SELECT p.id, p.group_id, g.name, p.symbol, p.status, p.created_at, p.expires_at
+FROM proposals p
+JOIN groups g ON g.id = p.group_id
+WHERE p.group_id = ANY($1::uuid[])
+  AND p.status = 'open'
+  AND p.expires_at > NOW()
+  AND NOT EXISTS (
+    SELECT 1 FROM votes v WHERE v.proposal_id = p.id AND v.voter_id = $2
+  )
+ORDER BY p.created_at DESC
+LIMIT $3`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, groupIDs, userID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list missed open proposals: %w", err)
+	}
+	defer rows.Close()
+
+	var out []MissedProposalRow
+	for rows.Next() {
+		var row MissedProposalRow
+		var status string
+		if err := rows.Scan(
+			&row.ProposalID,
+			&row.GroupID,
+			&row.GroupName,
+			&row.Symbol,
+			&status,
+			&row.CreatedAt,
+			&row.ExpiresAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan missed proposal: %w", err)
+		}
+		parsedStatus, err := domain.ParseProposalStatus(status)
+		if err != nil {
+			return nil, err
+		}
+		row.Status = parsedStatus
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate missed proposals: %w", err)
+	}
+	return out, nil
+}
+
 // CountTransactionsForProposal returns swap rows linked to proposalID.
 func (s *Store) CountTransactionsForProposal(ctx context.Context, proposalID string) (int, error) {
 	if proposalID == "" {

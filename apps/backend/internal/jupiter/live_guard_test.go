@@ -1,6 +1,7 @@
 package jupiter
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -52,7 +53,7 @@ func TestLiveJupiterHTTPBlockedDuringGoTest(t *testing.T) {
 	t.Parallel()
 
 	client := NewHTTPClient()
-	_, err := client.QuoteBuy(t.Context(), QuoteBuyParams{
+	_, err := client.QuoteBuy(context.Background(), QuoteBuyParams{
 		GroupID:    "group-guard",
 		UserID:     "user-guard",
 		Symbol:     "AAPLx",

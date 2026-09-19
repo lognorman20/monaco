@@ -6,6 +6,7 @@ import SwiftUI
 @MainActor
 final class AppSessionStore {
     var home: HomeViewDTO?
+    var dashboard: HomeDashboardDTO?
     var me: MeResponse?
     var platformBalance: PlatformBalanceDTO?
     var isBalanceLoading = false
@@ -52,7 +53,11 @@ final class AppSessionStore {
         }
     }
 
-    func refresh(auth: PrivyAuthService, accessToken: String? = nil) async {
+    func refresh(
+        auth: PrivyAuthService,
+        accessToken: String? = nil,
+        leaderboardRange: HomeLeaderboardRange = .all
+    ) async {
         let token = accessToken ?? auth.accessToken
         guard let token else {
             errorMessage = "Missing sign-in token."
@@ -63,9 +68,11 @@ final class AppSessionStore {
         do {
             isBalanceLoading = platformBalance == nil
             async let homeLoad = apiClient.getHome(accessToken: token)
+            async let dashboardLoad = apiClient.getHomeDashboard(accessToken: token, leaderboardRange: leaderboardRange)
             async let meLoad = apiClient.me(accessToken: token)
             async let balanceLoad = apiClient.getPlatformBalance(accessToken: token)
             home = try await homeLoad
+            dashboard = try await dashboardLoad
             if let profile = try? await meLoad {
                 me = profile
             }
@@ -79,11 +86,30 @@ final class AppSessionStore {
             errorMessage = "Could not load home (HTTP \(status))."
             home = nil
         } catch {
+            if error.isRequestCancellation {
+                isLoading = false
+                isBalanceLoading = false
+                return
+            }
             errorMessage = "Could not load your boards."
             home = nil
         }
 
         isLoading = false
         isBalanceLoading = false
+    }
+
+    func refreshDashboard(auth: PrivyAuthService, leaderboardRange: HomeLeaderboardRange) async {
+        guard let token = auth.accessToken else { return }
+        do {
+            dashboard = try await apiClient.getHomeDashboard(accessToken: token, leaderboardRange: leaderboardRange)
+        } catch {
+            if error.isRequestCancellation {
+                return
+            }
+            if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
+                await auth.logout()
+            }
+        }
     }
 }

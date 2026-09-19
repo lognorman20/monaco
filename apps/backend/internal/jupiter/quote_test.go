@@ -1,6 +1,7 @@
 package jupiter
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -50,7 +51,7 @@ func TestJupiterQuoteBuy_noRoute_returnsRoutableFalse(t *testing.T) {
 	})
 
 	// Act
-	quote, err := client.QuoteBuy(t.Context(), QuoteBuyParams{
+	quote, err := client.QuoteBuy(context.Background(), QuoteBuyParams{
 		GroupID:    "group-1",
 		UserID:     "user-1",
 		Symbol:     "AAPLx",
@@ -115,7 +116,7 @@ func TestFetchBuyOrder_withPayer_includesPayerQueryParam(t *testing.T) {
 
 	client := NewHTTPClientWithBaseURL(server.URL, server.Client())
 	client.payer = payer
-	_, err := client.fetchBuyOrder(t.Context(), buyOrderRequest{
+	_, err := client.fetchBuyOrder(context.Background(), buyOrderRequest{
 		OutputMint: "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
 		Amount:     150_000,
 		Taker:      taker,
@@ -150,7 +151,7 @@ func TestJupiterQuoteBuy_httpError_propagatesAsRefusal(t *testing.T) {
 	client := NewHTTPClientWithBaseURL(server.URL, server.Client())
 
 	// Act
-	quote, err := client.QuoteBuy(t.Context(), QuoteBuyParams{
+	quote, err := client.QuoteBuy(context.Background(), QuoteBuyParams{
 		GroupID:    "group-1",
 		UserID:     "user-1",
 		Symbol:     "AAPLx",

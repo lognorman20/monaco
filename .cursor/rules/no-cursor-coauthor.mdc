@@ -1,0 +1,10 @@
+---
+description: Never add Cursor Co-authored-by trailers to git commits
+alwaysApply: true
+---
+
+# No Cursor commit trailers
+
+Never add `Co-authored-by: Cursor <cursoragent@cursor.com>` (or any other Cursor/agent co-author trailer) to git commits.
+
+Commit messages stay the author's. Do not append Cursor, Copilot, or coding-agent `Co-authored-by` lines.

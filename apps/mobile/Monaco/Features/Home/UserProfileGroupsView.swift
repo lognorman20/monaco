@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Profile list of clubs shared with a people-board row member.
+/// Profile list of cabals shared with a people-board row member.
 struct UserProfileGroupsView: View {
     @ObservedObject var auth: PrivyAuthService
     let userId: String
@@ -14,9 +14,9 @@ struct UserProfileGroupsView: View {
 
     var body: some View {
         List {
-            Section("\(displayName)'s clubs") {
+            Section("\(displayName)'s cabals") {
                 if isLoading {
-                    ProgressView("Loading clubs…")
+                    ProgressView("Loading cabals…")
                         .foregroundStyle(MonacoTheme.secondaryText)
                 } else if let errorMessage {
                     MonacoEmptyStateCard(
@@ -25,7 +25,7 @@ struct UserProfileGroupsView: View {
                     )
                 } else if groups.isEmpty {
                     MonacoEmptyStateCard(
-                        message: "No shared clubs yet.",
+                        message: "No shared cabals yet.",
                         systemImage: "person.3"
                     )
                 } else {

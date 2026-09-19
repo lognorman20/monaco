@@ -45,5 +45,11 @@ public enum MainFlowCopyManifest {
         "Open a cabal to propose a stock. Search and prices land here once you are in a pot.",
         "Your cabals",
         "Join a cabal to see it here.",
+        "Join a cabal to see your positions here.",
+        "P&L history shows up after you fund a cabal.",
+        "You're caught up.",
+        "Needs your vote",
+        "No shared cabals yet.",
+        "Loading cabals…",
     ]
 }
