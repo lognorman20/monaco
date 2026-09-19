@@ -16,28 +16,35 @@ struct PotSectionView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Holdings")
-                .font(MonacoTheme.TypeRole.title)
-                .foregroundStyle(MonacoTheme.ink)
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+            MonacoSectionHeader("Holdings")
 
             if stocks.isEmpty && !hasCash {
-                emptyState
+                EmptyState(
+                    title: "Nothing bought yet",
+                    message: "Add money, then propose the first buy.",
+                    actionTitle: "Add money",
+                    action: onAddMoney
+                )
+                .accessibilityIdentifier("pot-empty")
             } else {
-                VStack(spacing: 0) {
+                MonacoGroupedList {
                     ForEach(stocks) { row in
                         stockRow(row, isLast: row.id == stocks.last?.id && cash == nil)
                     }
                     if let cash {
-                        cashRow(cash)
+                        MonacoRow(title: "Cash", isLast: true) {
+                            StockMark(symbol: "USDC")
+                        } trailing: {
+                            MoneyText(decimalString: cash.valueUsd, style: .row)
+                        }
+                        .accessibilityIdentifier("pot-row-\(cash.symbol)")
                     }
                 }
-                .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
-                .clipShape(RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
 
                 if stocks.isEmpty {
                     Text("Nothing bought yet. Propose the first buy.")
-                        .font(.footnote)
+                        .font(MonacoTheme.Typo.caption)
                         .foregroundStyle(MonacoTheme.muted)
                         .accessibilityIdentifier("pot-nothing-bought")
                 }
@@ -47,71 +54,32 @@ struct PotSectionView: View {
     }
 
     private func stockRow(_ row: PotRowDTO, isLast: Bool) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(AssetSymbolFormatter.format(row.symbol))
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(MonacoTheme.ink)
-                    .lineLimit(1)
-                Text("\(row.units) shares · \(UsdAmountFormatter.format(decimalString: row.markUsd))")
-                    .font(.footnote)
-                    .foregroundStyle(MonacoTheme.muted)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(UsdAmountFormatter.format(decimalString: row.valueUsd))
-                    .font(.body.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(MonacoTheme.ink)
-                Text(row.dollarPnl)
-                    .font(.footnote.monospacedDigit())
-                    .foregroundStyle(MonacoTheme.signed(row.dollarPnl))
-                    .accessibilityIdentifier("pot-row-pnl-\(row.symbol)")
-                if row.afterHours == true {
-                    Text("After hours")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(MonacoTheme.warning)
-                        .accessibilityIdentifier("pot-after-hours-\(row.symbol)")
-                }
+        MonacoRow(
+            title: AssetDisplayNames.name(forSymbol: row.symbol) ?? AssetSymbolFormatter.display(row.symbol),
+            subtitle: "\(sharesLabel(row)) · \(UsdAmountFormatter.format(decimalString: row.markUsd))",
+            isLast: isLast
+        ) {
+            StockMark(symbol: AssetSymbolFormatter.display(row.symbol))
+        } trailing: {
+            MoneyText(decimalString: row.valueUsd, style: .row)
+            PnLText(dollarPnl: row.dollarPnl, style: .caption)
+                .accessibilityIdentifier("pot-row-pnl-\(row.symbol)")
+            if row.afterHours == true {
+                Text("After hours")
+                    .font(MonacoTheme.Typo.micro)
+                    .foregroundStyle(MonacoTheme.warning)
+                    .accessibilityIdentifier("pot-after-hours-\(row.symbol)")
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(minHeight: 60)
-        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("pot-row-\(row.symbol)")
     }
 
-    private func cashRow(_ row: PotRowDTO) -> some View {
-        HStack(spacing: 12) {
-            Text("Cash")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(MonacoTheme.ink)
-            Spacer(minLength: 8)
-            Text(UsdAmountFormatter.format(decimalString: row.valueUsd))
-                .font(.body.weight(.semibold).monospacedDigit())
-                .foregroundStyle(MonacoTheme.ink)
+    /// Shares from the raw token amount when present; the decimal `units` string otherwise.
+    private func sharesLabel(_ row: PotRowDTO) -> String {
+        if let atomics = row.tokenAmount, !atomics.isEmpty {
+            return ProposalShareFormatter.sharesLabel(fromAtomics: atomics)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(minHeight: 60)
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("pot-row-\(row.symbol)")
-    }
-
-    private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Nothing bought yet")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(MonacoTheme.ink)
-            Text("Add money, then propose the first buy.")
-                .font(.subheadline)
-                .foregroundStyle(MonacoTheme.muted)
-            Button("Add money", action: onAddMoney)
-                .buttonStyle(.monacoSecondary)
-                .accessibilityIdentifier("pot-empty-add-money")
-        }
-        .accessibilityIdentifier("pot-empty")
+        return "\(row.units) shares"
     }
 
     static func isCash(_ row: PotRowDTO) -> Bool {

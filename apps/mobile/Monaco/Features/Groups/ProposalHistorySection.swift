@@ -27,21 +27,14 @@ struct ProposalHistorySection: View {
         openProposals.contains(where: \.showsVoteActions) ? ProposalFeedCopy.needsYourVote : "Open votes"
     }
 
+    /// Always-present zero-height container so `.task` fires even when nothing is open; the parent
+    /// stacks this with the next section so an empty preview adds no gap.
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 0) {
             if !openProposals.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(title)
-                            .font(MonacoTheme.TypeRole.title)
-                            .foregroundStyle(MonacoTheme.ink)
-                        Spacer()
-                        Button("See all", action: onSeeAll)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(MonacoTheme.ink)
-                            .frame(minHeight: 44)
-                            .accessibilityIdentifier("group-proposals-feed-link")
-                    }
+                    MonacoSectionHeader(title, trailing: "See all", action: onSeeAll)
+                        .accessibilityIdentifier("group-proposals-feed-link")
                     VStack(spacing: 12) {
                         ForEach(preview) { proposal in
                             ProposalCardView(
@@ -56,6 +49,7 @@ struct ProposalHistorySection: View {
                         }
                     }
                 }
+                .padding(.bottom, 32)
                 .accessibilityIdentifier("group-open-votes")
             }
         }
@@ -77,6 +71,7 @@ struct ProposalHistorySection: View {
         guard votingIDs.insert(proposal.id).inserted else { return }
         defer { votingIDs.remove(proposal.id) }
         let result = await ProposalVoting.cast(choice, proposalId: proposal.id, service: service)
+        if result.succeeded { Haptics.success() }
         onToast(result.toast)
         await load()
     }

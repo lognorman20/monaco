@@ -5,59 +5,65 @@ import SwiftUI
 struct GroupHeroSection: View {
     let view: GroupViewDTO
 
+    private var tint: MonacoTheme.CabalTint { .forGroupId(view.id) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .center, spacing: 12) {
+            // The tinted block is the cabal's identity, so no CabalMark here: on its own tint it
+            // would vanish. Name gets the full width; members sit under it.
+            VStack(alignment: .leading, spacing: 10) {
                 Text(view.name)
-                    .font(MonacoTheme.TypeRole.display)
+                    .font(MonacoTheme.Typo.display)
                     .foregroundStyle(MonacoTheme.ink)
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                GroupMemberAvatarStack(members: view.members)
+                    .accessibilityAddTraits(.isHeader)
+                HStack(spacing: 8) {
+                    GroupMemberAvatarStack(members: view.members, ringColor: tint.fill)
+                    Text(view.members.count == 1 ? "1 member" : "\(view.members.count) members")
+                        .font(MonacoTheme.Typo.caption)
+                        .foregroundStyle(MonacoTheme.muted)
+                }
+                .accessibilityElement(children: .combine)
             }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("In the pot")
-                    .font(.footnote)
+                    .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(MonacoTheme.muted)
-                Text(UsdAmountFormatter.format(decimalString: view.resolvedPotTotalUsd))
-                    .font(.system(size: 44, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(MonacoTheme.ink)
+                MoneyText(decimalString: view.resolvedPotTotalUsd, style: .hero)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .accessibilityIdentifier("pot-total-value")
-                HStack(spacing: 6) {
-                    Text(GroupHeroMath.potDollarPnl(view.pot))
-                        .font(.footnote.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(MonacoTheme.signed(GroupHeroMath.potDollarPnl(view.pot)))
+                HStack(spacing: 8) {
+                    PnLBadge(dollarPnl: GroupHeroMath.potDollarPnl(view.pot), percentReturn: nil)
                     Text("all time")
-                        .font(.footnote)
+                        .font(MonacoTheme.Typo.caption)
                         .foregroundStyle(MonacoTheme.muted)
                 }
             }
+            .accessibilityElement(children: .combine)
 
             Rectangle()
                 .fill(MonacoTheme.ink.opacity(0.1))
                 .frame(height: 1)
 
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .lastTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Your slice")
-                        .font(.footnote)
+                        .font(MonacoTheme.Typo.caption)
                         .foregroundStyle(MonacoTheme.muted)
-                    Text(UsdAmountFormatter.format(decimalString: view.you.equityUsd))
-                        .font(.body.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(MonacoTheme.ink)
+                    MoneyText(decimalString: view.you.equityUsd, style: .row)
                 }
                 Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(GroupHeroMath.sliceCaption(view.you))
-                        .font(.footnote)
+                        .font(MonacoTheme.Typo.caption)
                         .foregroundStyle(MonacoTheme.muted)
-                    Text(view.you.dollarPnl)
-                        .font(.footnote.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(MonacoTheme.signed(view.you.dollarPnl))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    PnLText(dollarPnl: view.you.dollarPnl, style: .caption)
                 }
             }
             .accessibilityElement(children: .combine)
@@ -65,7 +71,7 @@ struct GroupHeroSection: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .background(tint.fill, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.hero, style: .continuous))
         .accessibilityIdentifier("group-hero")
     }
 }
@@ -75,6 +81,7 @@ struct GroupMemberAvatarStack: View {
     let members: [LeaderboardRowDTO]
     var size: CGFloat = 28
     var visibleLimit = 4
+    var ringColor: Color = MonacoTheme.surface
 
     var body: some View {
         let visible = Array(members.prefix(visibleLimit))
@@ -82,7 +89,7 @@ struct GroupMemberAvatarStack: View {
         HStack(spacing: -8) {
             ForEach(visible) { member in
                 MonacoAvatar(photoURL: member.profilePhotoUrl, displayName: member.displayName, size: size)
-                    .overlay(Circle().strokeBorder(MonacoTheme.surface, lineWidth: 2))
+                    .overlay(Circle().strokeBorder(ringColor, lineWidth: 2))
             }
             if overflow > 0 {
                 Text("+\(overflow)")
@@ -90,6 +97,7 @@ struct GroupMemberAvatarStack: View {
                     .foregroundStyle(MonacoTheme.ink)
                     .frame(width: size, height: size)
                     .background(Circle().fill(MonacoTheme.surface))
+                    .overlay(Circle().strokeBorder(ringColor, lineWidth: 2))
             }
         }
         .accessibilityElement(children: .ignore)

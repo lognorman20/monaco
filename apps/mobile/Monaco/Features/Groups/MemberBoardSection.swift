@@ -7,58 +7,71 @@ struct MemberBoardSection: View {
     var currentUserId: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Leaderboard")
-                .font(MonacoTheme.TypeRole.title)
-                .foregroundStyle(MonacoTheme.ink)
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+            MonacoSectionHeader("Leaderboard")
 
             if members.isEmpty {
                 Text("No members yet.")
-                    .font(.footnote)
+                    .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(MonacoTheme.muted)
             } else {
-                VStack(spacing: 0) {
+                MonacoGroupedList {
                     ForEach(members) { row in
-                        memberRow(row)
+                        memberRow(row, isLast: row.id == members.last?.id)
                     }
                 }
-                .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
-                .clipShape(RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
             }
         }
         .accessibilityIdentifier("group-leaderboard")
     }
 
-    private func memberRow(_ row: LeaderboardRowDTO) -> some View {
-        HStack(spacing: 12) {
+    private func memberRow(_ row: LeaderboardRowDTO, isLast: Bool) -> some View {
+        HStack(spacing: MonacoTheme.Space.sm) {
             Text("\(row.rank)")
-                .font(.body.weight(.semibold).monospacedDigit())
+                .font(MonacoTheme.Typo.moneyRow)
                 .foregroundStyle(MonacoTheme.muted)
                 .frame(width: 24, alignment: .leading)
             MonacoAvatar(photoURL: row.profilePhotoUrl, displayName: row.displayName, size: 36)
-            Text(displayName(row))
-                .font(.body.weight(.semibold))
-                .foregroundStyle(MonacoTheme.ink)
-                .lineLimit(1)
-            Spacer(minLength: 8)
+            HStack(spacing: 4) {
+                Text(row.displayName)
+                    .font(MonacoTheme.Typo.rowTitle)
+                    .foregroundStyle(MonacoTheme.ink)
+                    .lineLimit(1)
+                if isViewer(row) {
+                    Text("(you)")
+                        .font(MonacoTheme.Typo.body)
+                        .foregroundStyle(MonacoTheme.muted)
+                        .fixedSize()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 2) {
-                Text(PercentReturnFormatter.format(row.percentReturn))
-                    .font(.body.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(MonacoTheme.signed(row.percentReturn))
-                Text(row.dollarPnl)
-                    .font(.footnote.monospacedDigit())
-                    .foregroundStyle(MonacoTheme.signed(row.dollarPnl))
+                PercentText(percentReturn: row.percentReturn, style: .row)
+                PnLText(dollarPnl: row.dollarPnl, style: .caption)
+            }
+            .fixedSize()
+        }
+        .padding(.horizontal, MonacoTheme.Space.m)
+        .padding(.vertical, 8)
+        .frame(minHeight: 60)
+        .overlay {
+            if row.rank == 1 {
+                RoundedRectangle(cornerRadius: MonacoTheme.Radius.card - 4, style: .continuous)
+                    .strokeBorder(MonacoTheme.ink, lineWidth: 1)
+                    .padding(4)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(minHeight: 60)
+        .overlay(alignment: .bottom) {
+            if !isLast, row.rank != 1 {
+                Rectangle().fill(MonacoTheme.hairline).frame(height: 1).padding(.leading, 72)
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("member-board-row-\(row.rank)")
     }
 
-    private func displayName(_ row: LeaderboardRowDTO) -> String {
-        guard let currentUserId, row.userId == currentUserId else { return row.displayName }
-        return "\(row.displayName) (you)"
+    private func isViewer(_ row: LeaderboardRowDTO) -> Bool {
+        guard let currentUserId else { return false }
+        return row.userId == currentUserId
     }
 }

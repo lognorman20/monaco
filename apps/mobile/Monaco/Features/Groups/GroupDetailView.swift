@@ -474,18 +474,19 @@ struct GroupDetailContent: View {
                     )
                 }
 
-                ProposalHistorySection(
-                    service: proposalService,
-                    groupId: view.id,
-                    refreshToken: proposalRefreshToken,
-                    onSeeAll: { onRoute(.proposals) },
-                    onToast: onToast
-                )
-
-                PotSectionView(
-                    pot: view.pot,
-                    onAddMoney: { onRoute(.addMoney) }
-                )
+                VStack(alignment: .leading, spacing: 0) {
+                    ProposalHistorySection(
+                        service: proposalService,
+                        groupId: view.id,
+                        refreshToken: proposalRefreshToken,
+                        onSeeAll: { onRoute(.proposals) },
+                        onToast: onToast
+                    )
+                    PotSectionView(
+                        pot: view.pot,
+                        onAddMoney: { onRoute(.addMoney) }
+                    )
+                }
 
                 if let agent = view.agent {
                     AgentSectionView(agent: agent)
@@ -503,7 +504,7 @@ struct GroupDetailContent: View {
                     onSeeAll: { onRoute(.activity) }
                 )
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, MonacoTheme.Space.gutter)
             .padding(.top, 8)
             .padding(.bottom, 32)
         }
@@ -531,25 +532,9 @@ struct GroupActionRow: View {
     }
 
     private func action(_ title: String, systemImage: String, id: String, perform: @escaping () -> Void) -> some View {
-        Button(action: perform) {
-            VStack(spacing: 8) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(MonacoTheme.primaryButtonLabel)
-                    .frame(width: 56, height: 56)
-                    .background(Circle().fill(MonacoTheme.primaryButtonFill))
-                Text(title)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(MonacoTheme.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
+        CircleAction(title, systemImage: systemImage, action: perform)
             .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityIdentifier(id)
+            .accessibilityIdentifier(id)
     }
 }
 
@@ -561,19 +546,18 @@ struct GroupJoinRequestsCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(requests.count == 1 ? "1 person wants to join" : "\(requests.count) people want to join")
-                .font(MonacoTheme.TypeRole.title)
-                .foregroundStyle(MonacoTheme.ink)
+            MonacoSectionHeader(requests.count == 1 ? "1 person wants to join" : "\(requests.count) people want to join")
             VStack(spacing: 0) {
                 ForEach(requests) { request in
                     let name = request.displayName.isEmpty ? "Member" : request.displayName
-                    HStack(spacing: 12) {
+                    HStack(spacing: 8) {
                         MonacoAvatar(photoURL: request.profilePhotoUrl, displayName: name, size: 36)
                         Text(name)
-                            .font(.body.weight(.semibold))
+                            .font(MonacoTheme.Typo.rowTitle)
                             .foregroundStyle(MonacoTheme.ink)
                             .lineLimit(1)
-                        Spacer(minLength: 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .layoutPriority(1)
                         Button("Deny") { onDecide(request, false) }
                             .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
@@ -581,12 +565,15 @@ struct GroupJoinRequestsCard: View {
                             .foregroundStyle(MonacoTheme.muted)
                             .frame(minWidth: 44, minHeight: 44)
                             .accessibilityIdentifier("join-request-deny-\(request.id)")
-                        Button("Approve") { onDecide(request, true) }
+                        Button("Approve") {
+                            Haptics.success()
+                            onDecide(request, true)
+                        }
                             .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
                             .fixedSize()
                             .foregroundStyle(MonacoTheme.primaryButtonLabel)
-                            .padding(.horizontal, 16)
+                            .padding(.horizontal, 14)
                             .frame(minHeight: 36)
                             .background(Capsule().fill(MonacoTheme.primaryButtonFill))
                             .frame(minHeight: 44)
@@ -597,7 +584,7 @@ struct GroupJoinRequestsCard: View {
                     .padding(.vertical, 6)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, MonacoTheme.Space.m)
             .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
         }
         .accessibilityIdentifier("group-join-requests")
@@ -608,26 +595,21 @@ struct GroupJoinRequestsCard: View {
 struct GroupDetailSkeleton: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 32) {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(MonacoTheme.border.opacity(0.5))
-                .frame(height: 260)
+            SkeletonBlock(height: 300, radius: MonacoTheme.Radius.hero)
             HStack {
                 ForEach(0..<4, id: \.self) { _ in
-                    Circle()
-                        .fill(MonacoTheme.border.opacity(0.5))
-                        .frame(width: 56, height: 56)
+                    SkeletonBlock(width: 56, height: 56, radius: 28)
                         .frame(maxWidth: .infinity)
                 }
             }
-            VStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
+                SkeletonBlock(width: 120, height: 22)
                 ForEach(0..<3, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(MonacoTheme.border.opacity(0.5))
-                        .frame(height: 60)
+                    SkeletonBlock(height: 60, radius: 14)
                 }
             }
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, MonacoTheme.Space.gutter)
         .padding(.top, 8)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Loading cabal")

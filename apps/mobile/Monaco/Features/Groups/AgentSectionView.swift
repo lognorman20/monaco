@@ -6,30 +6,13 @@ struct AgentSectionView: View {
     let agent: GroupAgentDTO
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "cpu")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(MonacoTheme.ink)
-                .frame(width: 44, height: 44)
-                .background(MonacoTheme.border.opacity(0.5), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(agent.agentDisplayName)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(MonacoTheme.ink)
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(.footnote)
-                    .foregroundStyle(MonacoTheme.muted)
-                    .lineLimit(1)
+        MonacoGroupedList {
+            MonacoRow(title: agent.agentDisplayName, subtitle: subtitle, isLast: true) {
+                StockMark(systemImage: "cpu")
+            } trailing: {
+                AgentStatusText(status: agent.status)
             }
-            Spacer(minLength: 8)
-            AgentStatusText(status: agent.status)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(minHeight: 60)
-        .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
-        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("group-agent-card")
     }
 
@@ -45,7 +28,7 @@ struct AgentStatusText: View {
 
     var body: some View {
         Text(label)
-            .font(.footnote.weight(.semibold))
+            .font(MonacoTheme.Typo.caption.weight(.semibold))
             .foregroundStyle(color)
             .accessibilityIdentifier("agent-status-\(status.lowercased())")
     }

@@ -15,27 +15,17 @@ struct GroupActivitySection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Activity")
-                    .font(MonacoTheme.TypeRole.title)
-                    .foregroundStyle(MonacoTheme.ink)
-                Spacer()
-                if items.count > Self.previewLimit {
-                    Button("See all", action: onSeeAll)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(MonacoTheme.ink)
-                        .frame(minHeight: 44)
-                        .accessibilityIdentifier("group-activity-see-all")
-                }
+            if items.count > Self.previewLimit {
+                MonacoSectionHeader("Activity", trailing: "See all", action: onSeeAll)
+                    .accessibilityIdentifier("group-activity-see-all")
+            } else {
+                MonacoSectionHeader("Activity")
             }
 
             if isLoading && items.isEmpty {
-                VStack(spacing: 0) {
+                VStack(spacing: 12) {
                     ForEach(0..<3, id: \.self) { _ in
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(MonacoTheme.border.opacity(0.5))
-                            .frame(height: 44)
-                            .padding(.vertical, 8)
+                        SkeletonBlock(height: 44)
                     }
                 }
                 .accessibilityElement(children: .ignore)
@@ -43,12 +33,12 @@ struct GroupActivitySection: View {
                 .accessibilityIdentifier("group-activity-loading")
             } else if let errorMessage, items.isEmpty {
                 Text(errorMessage)
-                    .font(.footnote)
+                    .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(MonacoTheme.muted)
                     .accessibilityIdentifier("group-activity-error")
             } else if items.isEmpty {
                 Text("Nothing yet. Money in, buys, and sells show up here.")
-                    .font(.footnote)
+                    .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(MonacoTheme.muted)
                     .accessibilityIdentifier("group-activity-empty")
             } else {
@@ -72,7 +62,7 @@ struct GroupActivityList: View {
     let onRetry: (GroupActivityItemDTO) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
+        MonacoGroupedList {
             ForEach(items) { item in
                 HStack(spacing: 0) {
                     NavigationLink {
@@ -88,11 +78,14 @@ struct GroupActivityList: View {
                         retryControl(item)
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, MonacoTheme.Space.m)
+                .overlay(alignment: .bottom) {
+                    if item.id != items.last?.id {
+                        Rectangle().fill(MonacoTheme.hairline).frame(height: 1).padding(.leading, 60)
+                    }
+                }
             }
         }
-        .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
     }
 
     @ViewBuilder
@@ -142,11 +135,11 @@ struct GroupActivityRow: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(MonacoTheme.ink)
                 .frame(width: 32, height: 32)
-                .background(Circle().fill(MonacoTheme.border.opacity(0.5)))
+                .background(Circle().fill(MonacoTheme.surfaceSunken))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(GroupActivityRules.title(for: item))
-                    .font(.body.weight(.semibold))
+                    .font(MonacoTheme.Typo.rowTitle)
                     .foregroundStyle(MonacoTheme.ink)
                     .lineLimit(1)
                 HStack(spacing: 4) {
@@ -159,14 +152,20 @@ struct GroupActivityRow: View {
                             .foregroundStyle(status.isFailure ? MonacoTheme.loss : MonacoTheme.warning)
                     }
                 }
-                .font(.footnote)
+                .font(MonacoTheme.Typo.caption)
                 .lineLimit(1)
             }
             Spacer(minLength: 8)
-            Text(GroupActivityRules.amountLabel(item))
-                .font(.body.weight(.semibold).monospacedDigit())
-                .foregroundStyle(MonacoTheme.ink)
-                .lineLimit(1)
+            Group {
+                if let micros = GroupActivityRules.amountMicros(item) {
+                    MoneyText(micros: micros, style: .row)
+                } else {
+                    Text(GroupActivityRules.amountLabel(item))
+                        .font(MonacoTheme.Typo.moneyRow)
+                        .foregroundStyle(MonacoTheme.ink)
+                }
+            }
+            .lineLimit(1)
         }
         .padding(.vertical, 10)
         .frame(minHeight: 60)
@@ -222,6 +221,17 @@ enum GroupActivityRules {
         }
     }
 
+    /// Dollar figure for the row, or nil when a sell has no proceeds yet (shown in shares instead).
+    static func amountMicros(_ item: GroupActivityItemDTO) -> Int64? {
+        if item.kind.lowercased() == "sell" {
+            if let proceeds = item.proceedsUsdcMicros, let micros = Int64(proceeds), micros > 0 {
+                return micros
+            }
+            if item.tokenAmount != nil { return nil }
+        }
+        return item.amountMicros
+    }
+
     static func amountLabel(_ item: GroupActivityItemDTO) -> String {
         if item.kind.lowercased() == "sell" {
             if let proceeds = item.proceedsUsdcMicros, let micros = Int64(proceeds), micros > 0 {
@@ -242,8 +252,7 @@ enum GroupActivityRules {
     }
 
     static func timeLabel(_ raw: String) -> String {
-        guard let date = parseDate(raw) else { return "" }
-        return date.formatted(date: .abbreviated, time: .shortened)
+        RelativeTimeFormatter.label(iso: raw)
     }
 
     static func parseDate(_ raw: String) -> Date? {
