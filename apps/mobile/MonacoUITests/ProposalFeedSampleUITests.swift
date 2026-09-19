@@ -185,4 +185,33 @@ final class ProposeFlowSampleUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Proposal sent to Weekend investors"].waitForExistence(timeout: 5))
         capture("15-sent")
     }
+
+    func testSell_dollarsToShares_reviewShowsEstimate() throws {
+        let propose = element("group-action-propose")
+        XCTAssertTrue(propose.waitForExistence(timeout: 10))
+        propose.tap()
+        let sell = element("propose-kind-sell")
+        XCTAssertTrue(sell.waitForExistence(timeout: 5))
+        sell.tap()
+
+        let apple = element("proposal-sell-AAPLx")
+        XCTAssertTrue(apple.waitForExistence(timeout: 5))
+        sleep(1)
+        capture("20-sell-pick")
+        apple.tap()
+
+        let half = app.buttons["50%"]
+        XCTAssertTrue(half.waitForExistence(timeout: 5))
+        half.tap()
+        sleep(1)
+        capture("21-sell-amount")
+
+        app.buttons["Review"].tap()
+        let send = app.buttons["Send to cabal"]
+        XCTAssertTrue(send.waitForExistence(timeout: 5))
+        sleep(1)
+        capture("22-sell-review")
+        send.tap()
+        XCTAssertTrue(app.staticTexts["Proposal sent to Weekend investors"].waitForExistence(timeout: 5))
+    }
 }
