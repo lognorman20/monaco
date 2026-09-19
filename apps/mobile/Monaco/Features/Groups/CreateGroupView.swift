@@ -62,7 +62,7 @@ enum VoteExpiryOption: Int64, CaseIterable, Identifiable {
 /// Product create-group flow: join policy, voter set, threshold, and vote expiry.
 struct CreateGroupView: View {
     @ObservedObject var auth: PrivyAuthService
-    /// Present inside the signed-in shell; refreshed after create so every tab shows the new cabal.
+    /// Present inside the signed-in shell; lightweight session patch after create.
     @Environment(AppSessionStore.self) private var session: AppSessionStore?
 
     private let apiClient = MonacoAPIClient()
@@ -74,7 +74,7 @@ struct CreateGroupView: View {
     @State private var voteExpiry: VoteExpiryOption = .oneDay
     @State private var creatorUserId: String?
 
-    @State private var createdGroup: CreateGroupResponse?
+    @State private var navigateToCreated: CreateGroupResponse?
     @State private var errorMessage: String?
     @State private var isCreating = false
 
@@ -83,7 +83,7 @@ struct CreateGroupView: View {
             Section {
                 TextField("Cabal name", text: $groupName)
                     .textInputAutocapitalization(.words)
-                    .disabled(isCreating || createdGroup != nil)
+                    .disabled(isCreating)
                     .accessibilityIdentifier("create-group-name")
             } header: {
                 Text("Name your cabal")
@@ -98,7 +98,7 @@ struct CreateGroupView: View {
                     }
                 }
                 .pickerStyle(.inline)
-                .disabled(isCreating || createdGroup != nil)
+                .disabled(isCreating)
 
             }
 
@@ -109,7 +109,7 @@ struct CreateGroupView: View {
                     }
                 }
                 .pickerStyle(.inline)
-                .disabled(isCreating || createdGroup != nil)
+                .disabled(isCreating)
             }
 
             Section("Passing a buy proposal") {
@@ -119,34 +119,25 @@ struct CreateGroupView: View {
                     }
                 }
                 .pickerStyle(.inline)
-                .disabled(isCreating || createdGroup != nil)
+                .disabled(isCreating)
 
                 Picker("Vote window", selection: $voteExpiry) {
                     ForEach(VoteExpiryOption.allCases) { option in
                         Text(option.label).tag(option)
                     }
                 }
-                .disabled(isCreating || createdGroup != nil)
+                .disabled(isCreating)
             }
 
             Section {
                 Button(isCreating ? "Creating…" : "Start investing together") {
                     Task { await createGroup() }
                 }
-                .disabled(isCreating || !canSubmit || createdGroup != nil)
+                .disabled(isCreating || !canSubmit)
                 .accessibilityIdentifier("create-group-submit")
             }
 
-            if let createdGroup {
-                Section("You're in") {
-                    Text(createdGroup.name)
-                        .font(.headline)
-                    Text("Invite friends to join and add money to the pot.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityIdentifier("create-group-success")
-            } else if let errorMessage {
+            if let errorMessage {
                 Section {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
@@ -159,6 +150,14 @@ struct CreateGroupView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: auth.accessToken) {
             await loadCreatorProfile()
+        }
+        .navigationDestination(item: $navigateToCreated) { created in
+            GroupDetailView(
+                auth: auth,
+                groupId: created.groupId,
+                groupName: created.name
+            )
+            .accessibilityIdentifier("create-group-success")
         }
     }
 
@@ -208,7 +207,6 @@ struct CreateGroupView: View {
 
         isCreating = true
         errorMessage = nil
-        createdGroup = nil
 
         do {
             let created = try await apiClient.createGroup(
@@ -220,8 +218,8 @@ struct CreateGroupView: View {
                 threshold: threshold.rawValue,
                 voteExpirySeconds: voteExpiry.rawValue
             )
-            createdGroup = created
-            await session?.refresh(auth: auth)
+            session?.refreshAfterCreate(auth: auth, created: created)
+            navigateToCreated = created
         } catch MonacoAPIError.httpStatus(let status) {
             errorMessage = "Could not create cabal (HTTP \(status))."
         } catch {
