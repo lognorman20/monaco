@@ -22,6 +22,17 @@ struct FundCabalView: View {
         preselectedGroupId != nil
     }
 
+    private var preselectedCabalName: String? {
+        guard let preselectedGroupId else { return nil }
+        return joinedCabals.first(where: { $0.groupId == preselectedGroupId })?.name
+    }
+
+    private var screenTitle: String {
+        guard isSingleCabalContext else { return "Add money" }
+        guard let preselectedCabalName else { return "Add money" }
+        return "Add money to \(preselectedCabalName)"
+    }
+
     private var showDepositPrompt: Bool {
         guard let balance, !isLoadingBalance else { return false }
         return balance.availableUsdcMicros <= 0
@@ -103,7 +114,7 @@ struct FundCabalView: View {
             }
 
             Section {
-                Button(isSubmitting ? "Funding…" : "Fund cabal") {
+                Button(isSubmitting ? "Adding money…" : "Add money") {
                     Task { await submitFund() }
                 }
                 .monacoFormPrimaryAction()
@@ -112,7 +123,7 @@ struct FundCabalView: View {
             }
         }
         .monacoFormScreen()
-        .navigationTitle(isSingleCabalContext ? "Fund this cabal" : "Fund a cabal")
+        .navigationTitle(screenTitle)
         .navigationBarTitleDisplayMode(.inline)
         .monacoToast($toast)
         .task(id: auth.accessToken) {
@@ -149,11 +160,11 @@ struct FundCabalView: View {
         errorMessage = nil
         do {
             balance = try await apiClient.getPlatformBalance(accessToken: token)
-        } catch MonacoAPIError.httpStatus(let status) {
-            errorMessage = "Could not load balance (HTTP \(status))."
+        } catch MonacoAPIError.httpStatus {
+            errorMessage = "Couldn't load your balance. Pull down to try again."
             balance = nil
         } catch {
-            errorMessage = "Could not load account balance."
+            errorMessage = "No connection. Check your internet and try again."
             balance = nil
         }
         isLoadingBalance = false
@@ -163,11 +174,11 @@ struct FundCabalView: View {
         guard let token = auth.accessToken else { return }
         guard let groupId = selectedGroupId else { return }
         guard let micros = parseUsdcMicros(amountText), micros > 0 else {
-            toast = MonacoToast(message: "Enter a valid USDC amount.", isSuccess: false)
+            toast = MonacoToast(message: "Enter a valid amount.", isSuccess: false)
             return
         }
         if let available = balance?.availableUsdcMicros, micros > available {
-            toast = MonacoToast(message: "Amount exceeds your available balance.", isSuccess: false)
+            toast = MonacoToast(message: "More than you have. Try a smaller amount.", isSuccess: false)
             return
         }
 
@@ -176,18 +187,18 @@ struct FundCabalView: View {
 
         do {
             _ = try await apiClient.fundGroup(accessToken: token, groupId: groupId, amount: micros)
-            toast = MonacoToast(message: "Funding started — your share updates when the transfer confirms.", isSuccess: true)
+            toast = MonacoToast(message: "Added money — your share updates in about a minute.", isSuccess: true)
             amountText = ""
             await loadBalance()
             await onFunded()
         } catch MonacoAPIError.httpStatus(400) {
-            toast = MonacoToast(message: "Amount exceeds your available balance.", isSuccess: false)
+            toast = MonacoToast(message: "More than you have. Try a smaller amount.", isSuccess: false)
         } catch MonacoAPIError.httpStatus(403) {
-            toast = MonacoToast(message: "You must be a cabal member to fund it.", isSuccess: false)
-        } catch MonacoAPIError.httpStatus(let status) {
-            toast = MonacoToast(message: "Could not fund cabal (HTTP \(status)).", isSuccess: false)
+            toast = MonacoToast(message: "You must be a cabal member to add money to it.", isSuccess: false)
+        } catch MonacoAPIError.httpStatus {
+            toast = MonacoToast(message: "Couldn't add that money. Try again.", isSuccess: false)
         } catch {
-            toast = MonacoToast(message: "Could not fund cabal. Try again.", isSuccess: false)
+            toast = MonacoToast(message: "No connection. Check your internet and try again.", isSuccess: false)
         }
     }
 

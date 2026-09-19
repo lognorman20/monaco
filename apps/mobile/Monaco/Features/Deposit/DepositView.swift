@@ -18,7 +18,7 @@ struct DepositView: View {
     var body: some View {
         Form {
             Section {
-                Text("Send USDC on Solana to your deposit address. It stays in your account balance until you fund a cabal.")
+                Text("Send USDC on the Solana network only. It shows up in your account balance in about a minute.")
                     .monacoSecondaryCaption()
             }
 
@@ -54,7 +54,7 @@ struct DepositView: View {
             Section("How it works") {
                 stepRow(number: 1, text: "Send USDC on Solana to the address above.")
                 stepRow(number: 2, text: "Your account balance updates when USDC arrives.")
-                stepRow(number: 3, text: "Fund a cabal to move USDC into its treasury and credit your share.")
+                stepRow(number: 3, text: "Fund a cabal to move USDC into the pot and credit your share.")
             }
 
             if !joinedCabals.isEmpty {
@@ -73,7 +73,7 @@ struct DepositView: View {
             }
         }
         .monacoFormScreen()
-        .navigationTitle("Deposit")
+        .navigationTitle("Add money")
         .navigationBarTitleDisplayMode(.inline)
         .monacoToast($toast)
         .task(id: auth.accessToken) {
@@ -139,10 +139,10 @@ struct DepositView: View {
                 return
             }
             depositAddress = address
-        } catch MonacoAPIError.httpStatus(let status) {
-            errorMessage = "Could not load address (HTTP \(status))."
+        } catch MonacoAPIError.httpStatus {
+            errorMessage = "Couldn't load your deposit address. Pull down to try again."
         } catch {
-            errorMessage = "Could not load deposit address."
+            errorMessage = "No connection. Check your internet and try again."
         }
 
         isLoading = false

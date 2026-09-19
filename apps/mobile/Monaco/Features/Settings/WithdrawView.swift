@@ -109,11 +109,11 @@ struct WithdrawView: View {
         errorMessage = nil
         do {
             balance = try await apiClient.getPlatformBalance(accessToken: token)
-        } catch MonacoAPIError.httpStatus(let status) {
-            errorMessage = "Could not load balance (HTTP \(status))."
+        } catch MonacoAPIError.httpStatus {
+            errorMessage = "Couldn't load your balance. Pull down to try again."
             balance = nil
         } catch {
-            errorMessage = "Could not load account balance."
+            errorMessage = "No connection. Check your internet and try again."
             balance = nil
         }
         isLoadingBalance = false
@@ -132,7 +132,7 @@ struct WithdrawView: View {
         }
         if let available = balance?.availableUsdcMicros, micros > available {
             toast = MonacoToast(
-                message: "Withdraw less or move cabal stake to your balance first.",
+                message: "Withdraw less, or cash out of a cabal to your balance first.",
                 isSuccess: false
             )
             return
@@ -154,15 +154,15 @@ struct WithdrawView: View {
             await loadBalance()
         } catch MonacoAPIError.httpStatus(400) {
             toast = MonacoToast(
-                message: "Withdraw less or move cabal stake to your balance first.",
+                message: "Withdraw less, or cash out of a cabal to your balance first.",
                 isSuccess: false
             )
         } catch MonacoAPIError.httpStatus(409) {
             toast = MonacoToast(message: "A withdrawal is already in progress.", isSuccess: false)
-        } catch MonacoAPIError.httpStatus(let status) {
-            toast = MonacoToast(message: "Could not withdraw (HTTP \(status)).", isSuccess: false)
+        } catch MonacoAPIError.httpStatus {
+            toast = MonacoToast(message: "Couldn't withdraw. Try again.", isSuccess: false)
         } catch {
-            toast = MonacoToast(message: "Could not withdraw. Try again.", isSuccess: false)
+            toast = MonacoToast(message: "No connection. Check your internet and try again.", isSuccess: false)
         }
     }
 
@@ -197,7 +197,7 @@ private struct WithdrawConfirmView: View {
             }
 
             Section {
-                Text("Double-check this address. Transfers cannot be reversed.")
+                Text("Double-check this address. Transfers can't be undone.")
                     .foregroundStyle(MonacoTheme.warning)
                     .font(.footnote)
             }

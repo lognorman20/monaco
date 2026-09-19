@@ -50,12 +50,12 @@ final class AppSessionStore {
             await refresh(auth: auth, accessToken: token)
         } catch MonacoAPIError.httpStatus(let status) where status == 401 {
             await auth.logout()
-        } catch MonacoAPIError.httpStatus(let status) {
-            errorMessage = "Could not open session (HTTP \(status))."
+        } catch MonacoAPIError.httpStatus {
+            errorMessage = "Couldn't load this. Pull down to try again."
             isLoading = false
         } catch {
             if error.isRequestCancellation { return }
-            errorMessage = "Could not connect to Monaco."
+            errorMessage = "No connection. Check your internet and try again."
             isLoading = false
         }
     }
@@ -99,13 +99,13 @@ final class AppSessionStore {
             }
         } catch MonacoAPIError.httpStatus(let status) where status == 401 {
             await auth.logout()
-        } catch MonacoAPIError.httpStatus(let status) {
+        } catch MonacoAPIError.httpStatus {
             guard generation == refreshGeneration else { return }
-            errorMessage = "Could not load home (HTTP \(status))."
+            errorMessage = "Couldn't load this. Pull down to try again."
         } catch {
             if error.isRequestCancellation { return }
             guard generation == refreshGeneration else { return }
-            errorMessage = "Could not load your boards."
+            errorMessage = "No connection. Check your internet and try again."
         }
 
         if generation == refreshGeneration {
