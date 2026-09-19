@@ -40,7 +40,8 @@ struct ProfileSampleHarness: View {
         NavigationStack {
             ProfileTabView(
                 auth: auth,
-                initialNameDraft: scenario == .validation ? "Logan Norman of the Weekend Investors" : nil
+                initialNameDraft: scenario == .validation ? "Logan Norman of the Weekend Investors" : nil,
+                initiallyShowEditProfile: scenario == .validation
             )
         }
         .defaultScrollAnchor(scenario == .cabals || scenario == .empty ? .bottom : .top)

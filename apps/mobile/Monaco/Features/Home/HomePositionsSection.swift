@@ -32,7 +32,7 @@ struct HomePositionsSection: View {
                         } label: {
                             MonacoRow(
                                 title: row.name,
-                                subtitle: "Your slice \(UsdAmountFormatter.format(decimalString: row.equityUsd)) · \(SlicePercentFormatter.format(row.slicePercent))",
+                                subtitle: "Your slice \(UsdAmountFormatter.format(decimalString: row.equityUsd))",
                                 chevron: true,
                                 isLast: row.groupId == rows.last?.groupId,
                                 leading: { CabalMark(groupId: row.groupId, name: row.name) },
