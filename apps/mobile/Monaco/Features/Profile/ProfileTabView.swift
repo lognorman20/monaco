@@ -136,7 +136,7 @@ struct ProfileTabView: View {
                         .font(MonacoTheme.TypeRole.caption)
                         .foregroundStyle(MonacoTheme.muted)
                     if let depositAddress {
-                        MonacoWalletAddressText(address: depositAddress, font: .callout.monospaced())
+                        MonacoWalletAddressText(address: depositAddress, textStyle: .callout)
                             .accessibilityIdentifier("profile-deposit-address")
                         Text("Send USDC on Solana here to add to your account balance.")
                             .monacoSecondaryCaption()
