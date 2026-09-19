@@ -1,0 +1,25 @@
+{
+  "groups": [
+    {
+      "groupId": "3f9a1b2c-4d5e-4f6a-8b7c-9d0e1f2a3b4c",
+      "name": "Weekend investors",
+      "memberCount": 8,
+      "potValueUsd": "548.20",
+      "percentReturn": "0.124",
+      "dollarPnl": "+48.20",
+      "isJoined": true,
+      "joinMode": "open"
+    },
+    {
+      "groupId": "7c6b5a49-3827-4f10-9e8d-7c6b5a493827",
+      "name": "Rent money",
+      "memberCount": 4,
+      "potValueUsd": "212.00",
+      "percentReturn": null,
+      "dollarPnl": "+0.00",
+      "isJoined": false,
+      "joinMode": "request"
+    }
+  ],
+  "nextCursor": "eyJvZmZzZXQiOjIwfQ=="
+}
