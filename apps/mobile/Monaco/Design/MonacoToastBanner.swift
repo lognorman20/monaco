@@ -56,6 +56,7 @@ private struct MonacoToastModifier: ViewModifier {
             .overlay(alignment: .bottom) {
                 if let toast {
                     MonacoToastBanner(message: toast.message, isSuccess: toast.isSuccess)
+                        .id(toast.id)
                         .offset(y: max(dragOffset, 0))
                         .gesture(
                             DragGesture(minimumDistance: 8)
