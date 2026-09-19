@@ -71,9 +71,6 @@ struct ProposalHistorySection: View {
         .task(id: loadTaskID) {
             await loadProposals()
         }
-        .onChange(of: selectedTab) { _, _ in
-            Task { await loadProposals() }
-        }
     }
 
     private var loadTaskID: String {
@@ -155,8 +152,10 @@ struct ProposalHistorySection: View {
         } catch is CancellationError {
             return
         } catch MonacoAPIError.httpStatus(let code) {
+            if Task.isCancelled { return }
             errorMessage = "Could not load proposals (HTTP \(code))."
         } catch {
+            if error.isRequestCancellation { return }
             errorMessage = "Could not load proposals."
         }
     }

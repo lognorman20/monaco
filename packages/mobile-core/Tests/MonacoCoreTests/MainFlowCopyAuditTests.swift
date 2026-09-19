@@ -11,6 +11,9 @@ final class MainFlowCopyAuditTests: XCTestCase {
 
         // Assert
         XCTAssertTrue(clean)
+        for name in ["Home", "Profile", "Cabals", "Assets", "Settings"] {
+            XCTAssertTrue(strings.contains(name), "missing tab label \(name)")
+        }
         for term in MainFlowCopyAudit.forbiddenTerms {
             XCTAssertFalse(
                 strings.contains { $0.lowercased().contains(term.trimmingCharacters(in: .whitespaces)) },

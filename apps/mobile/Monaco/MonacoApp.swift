@@ -17,7 +17,7 @@ struct MonacoApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(auth)
-                .tint(MonacoTheme.primaryButtonFill)
+                .tint(MonacoTheme.ink)
         }
     }
 }

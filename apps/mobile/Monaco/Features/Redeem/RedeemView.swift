@@ -65,6 +65,7 @@ struct RedeemView: View {
                 }
             }
         }
+        .monacoFormScreen()
         .navigationTitle("Cash out")
         .navigationBarTitleDisplayMode(.inline)
     }

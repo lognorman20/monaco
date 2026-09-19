@@ -20,6 +20,6 @@ extension View {
     }
 
     func authScreenBackground() -> some View {
-        background(MonacoTheme.background)
+        monacoCanvas()
     }
 }

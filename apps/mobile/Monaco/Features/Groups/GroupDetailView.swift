@@ -46,7 +46,7 @@ struct GroupDetailView: View {
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(MonacoTheme.background)
+            .monacoCanvas()
             .navigationTitle(groupView?.name ?? groupName ?? "Cabal")
             .navigationBarTitleDisplayMode(.inline)
             .task(id: loadTaskID) {
@@ -221,7 +221,7 @@ struct GroupDetailView: View {
             }
         }
         .monacoInsetList()
-        .background(MonacoTheme.background)
+        .background(Color.clear)
     }
 
     private func loadGroup() async {
@@ -240,8 +240,10 @@ struct GroupDetailView: View {
         } catch is CancellationError {
             return
         } catch MonacoAPIError.httpStatus(let code) {
+            if Task.isCancelled { return }
             errorMessage = "Could not load cabal (HTTP \(code))."
         } catch {
+            if error.isRequestCancellation { return }
             errorMessage = "Could not load cabal."
         }
     }
@@ -270,8 +272,10 @@ struct GroupDetailView: View {
         } catch is CancellationError {
             return
         } catch MonacoAPIError.httpStatus(let code) {
+            if Task.isCancelled { return }
             activityError = "Could not load activity (HTTP \(code))."
         } catch {
+            if error.isRequestCancellation { return }
             activityError = "Could not load activity."
         }
     }
