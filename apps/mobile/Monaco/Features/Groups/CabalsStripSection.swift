@@ -15,7 +15,7 @@ struct CabalsStripSection: View {
 
             if rows.isEmpty {
                 MonacoEmptyStateCard(
-                    message: "You're not in a cabal yet. Search above or create one from the + menu.",
+                    message: "You're not in a cabal yet. Search above or start one with the + button.",
                     systemImage: "person.3"
                 )
                 .accessibilityIdentifier("cabals-strip-empty")
@@ -73,8 +73,8 @@ private struct CabalStripCard: View {
     }
 }
 
-/// "+$48.20 · +12.4%" colored by gain or loss. Percent is omitted until the
-/// cabal has money in.
+/// "+12.4% · +$48.20" colored by gain or loss, percent leading since cabals
+/// are ranked by return. Percent is omitted until the cabal has money in.
 struct CabalPnLLabel: View {
     let dollarPnl: String
     let percentReturn: String?
@@ -83,7 +83,7 @@ struct CabalPnLLabel: View {
         let loss = SignedUsdFormatter.isLoss(dollarPnl)
         let text = percentReturn == nil
             ? SignedUsdFormatter.format(dollarPnl)
-            : "\(SignedUsdFormatter.format(dollarPnl)) · \(PercentReturnFormatter.format(percentReturn))"
+            : "\(PercentReturnFormatter.format(percentReturn)) · \(SignedUsdFormatter.format(dollarPnl))"
         Text(text)
             .font(MonacoTheme.TypeRole.caption.monospacedDigit())
             .foregroundStyle(loss ? MonacoTheme.loss : MonacoTheme.profit)

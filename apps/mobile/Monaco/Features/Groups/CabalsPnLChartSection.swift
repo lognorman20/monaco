@@ -30,20 +30,38 @@ struct CabalsPnLChartSection: View {
         GroupPnLChartModel.drawable(model.series)
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            Text("Your cabals' P&L")
-                .font(MonacoTheme.TypeRole.title)
-                .foregroundStyle(MonacoTheme.ink)
-            rangePicker
+    /// A scrub-worthy line needs at least 3 points; the chart only earns its
+    /// place once two or more cabals clear that bar. Below it, the chart is
+    /// hidden entirely rather than showing an empty card.
+    private var hasEnoughData: Bool {
+        drawable.filter { $0.points.count >= 3 }.count >= 2
+    }
 
-            MonacoCard {
-                content
-                    .frame(maxWidth: .infinity, minHeight: 180)
+    /// While loading or recovering from an error we still want feedback, but
+    /// a genuinely sparse chart (or no cabals at all) renders nothing.
+    private var shouldRender: Bool {
+        guard hasCabals else { return false }
+        if model.isChartLoading, model.series.isEmpty { return true }
+        if model.chartFailed, model.series.isEmpty { return true }
+        return hasEnoughData
+    }
+
+    var body: some View {
+        if shouldRender {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                Text("Your cabals' P&L")
+                    .font(MonacoTheme.TypeRole.title)
+                    .foregroundStyle(MonacoTheme.ink)
+                rangePicker
+
+                MonacoCard {
+                    content
+                        .frame(maxWidth: .infinity, minHeight: 180)
+                }
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("cabals-pnl-section")
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("cabals-pnl-section")
     }
 
     private var rangePicker: some View {
@@ -63,16 +81,12 @@ struct CabalsPnLChartSection: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.isChartLoading {
+        if model.isChartLoading, model.series.isEmpty {
             ProgressView()
                 .tint(MonacoTheme.ink)
                 .accessibilityIdentifier("cabals-pnl-loading")
-        } else if !hasCabals {
-            emptyMessage("Join or create a cabal to chart its gains here.", id: "cabals-pnl-empty")
         } else if model.chartFailed, model.series.isEmpty {
             emptyMessage("Couldn't load the chart. Pull down to try again.", id: "cabals-pnl-error")
-        } else if drawable.isEmpty {
-            emptyMessage("Lines appear once your cabals add money and trade.", id: "cabals-pnl-sparse")
         } else {
             chart
         }

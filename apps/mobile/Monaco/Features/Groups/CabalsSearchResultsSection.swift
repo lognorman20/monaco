@@ -21,7 +21,7 @@ struct CabalsSearchResultsSection: View {
                     .accessibilityIdentifier("cabals-search-loading")
             case .empty:
                 MonacoEmptyStateCard(
-                    message: "No cabal named \u{201C}\(model.query.trimmingCharacters(in: .whitespacesAndNewlines))\u{201D}. Check the spelling or create it from the + menu.",
+                    message: "No cabal called \u{201C}\(model.query.trimmingCharacters(in: .whitespacesAndNewlines))\u{201D}.",
                     systemImage: "magnifyingglass"
                 )
                 .accessibilityIdentifier("cabals-search-empty")

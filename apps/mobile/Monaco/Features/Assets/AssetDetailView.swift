@@ -34,13 +34,12 @@ struct AssetDetailView: View {
                 } else if let detail {
                     header(detail)
                     if !detail.liquidity.routable {
-                        Text("No route for this stock right now.")
+                        Text("Can't be bought right now.")
                             .font(MonacoTheme.TypeRole.caption)
                             .foregroundStyle(MonacoTheme.warning)
                             .accessibilityIdentifier("asset-detail-no-route")
                     }
                     chartSection
-                    liquidityCard(detail.liquidity)
                     actionRow
                 }
             }
@@ -114,25 +113,6 @@ struct AssetDetailView: View {
                 )
             }
         }
-    }
-
-    private func liquidityCard(_ liquidity: AssetLiquidityDTO) -> some View {
-        MonacoCard {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-                Text(liquidity.label)
-                    .font(MonacoTheme.TypeRole.title)
-                    .foregroundStyle(MonacoTheme.ink)
-                Text(liquidity.routable ? "Route available" : "No route for this stock right now.")
-                    .font(MonacoTheme.TypeRole.body)
-                    .foregroundStyle(MonacoTheme.muted)
-                if let spread = liquidity.spreadBps {
-                    Text("Spread \(spread) bps")
-                        .font(MonacoTheme.TypeRole.caption)
-                        .foregroundStyle(MonacoTheme.muted)
-                }
-            }
-        }
-        .accessibilityIdentifier("asset-detail-jupiter")
     }
 
     private var actionRow: some View {

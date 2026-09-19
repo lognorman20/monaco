@@ -39,7 +39,7 @@ struct AssetsTabView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
             MonacoSearchField(
-                placeholder: "Search a stock",
+                placeholder: "Search Apple, Tesla, NVDA…",
                 text: $searchQuery,
                 isEnabled: true
             )
@@ -57,8 +57,8 @@ struct AssetsTabView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .monacoCanvas()
         .foregroundStyle(MonacoTheme.ink)
-        .navigationTitle("Assets")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Stocks")
+        .navigationBarTitleDisplayMode(.large)
         .accessibilityIdentifier("assets-root")
         .navigationDestination(isPresented: Binding(
             get: { selectedSymbol != nil },

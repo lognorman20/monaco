@@ -74,10 +74,10 @@ struct CabalsLeaderboardSection: View {
 
 func cabalRowDetail(memberCount: Int, isJoined: Bool, joinMode: GroupJoinMode) -> String {
     let members = memberCount == 1 ? "1 member" : "\(memberCount) members"
-    if isJoined { return "\(members) · Joined" }
+    if isJoined { return "\(members) · You're in" }
     switch joinMode {
     case .open: return "\(members) · Open"
-    case .request: return "\(members) · Approval"
+    case .request: return "\(members) · Ask to join"
     }
 }
 
