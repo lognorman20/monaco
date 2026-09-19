@@ -65,6 +65,7 @@ struct MainTabView: View {
             .accessibilityIdentifier("tab-settings")
         }
         .tint(MonacoTheme.accent)
+        .sensoryFeedback(.selection, trigger: selectedTab)
         .onChange(of: selectedTab) { _, _ in
             Task { await onRefresh() }
         }

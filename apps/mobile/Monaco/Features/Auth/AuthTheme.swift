@@ -7,10 +7,10 @@ extension View {
             .frame(minHeight: 44)
             .background(MonacoTheme.surface)
             .foregroundStyle(MonacoTheme.primaryText)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .clipShape(RoundedRectangle(cornerRadius: 18))
             .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(MonacoTheme.border, lineWidth: 1.5)
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(MonacoTheme.border, lineWidth: 0.8)
             }
     }
 

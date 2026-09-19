@@ -91,7 +91,7 @@ struct OnboardingFlowView: View {
             onboardingProgress
 
             Text("Choose a username")
-                .font(.largeTitle.bold())
+                .font(MonacoTheme.display(34))
                 .accessibilityAddTraits(.isHeader)
                 .foregroundStyle(MonacoTheme.primaryText)
 
@@ -134,7 +134,7 @@ struct OnboardingFlowView: View {
 
             Text(title)
                 .accessibilityIdentifier(stepIdentifier)
-                .font(.largeTitle.bold())
+                .font(MonacoTheme.display(34))
                 .accessibilityAddTraits(.isHeader)
                 .foregroundStyle(MonacoTheme.primaryText)
 

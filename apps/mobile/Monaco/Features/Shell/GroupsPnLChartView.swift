@@ -6,10 +6,10 @@ struct GroupsPnLChartView: View {
 
     var body: some View {
         if series.isEmpty || series.allSatisfy({ $0.points.isEmpty }) {
-            MonacoEmptyStateCard(
-                message: "P&L history appears after your cabals have NAV snapshots.",
-                systemImage: "chart.line.uptrend.xyaxis"
-            )
+            Label("Your cabal’s chart appears once its portfolio history is available.", systemImage: "chart.line.uptrend.xyaxis")
+                .font(.subheadline)
+                .foregroundStyle(MonacoTheme.secondaryText)
+                .frame(maxWidth: .infinity, minHeight: 100, alignment: .leading)
         } else {
             VStack(alignment: .leading, spacing: 12) {
                 Chart {
@@ -58,7 +58,7 @@ struct GroupsPnLChartView: View {
     private var chartColors: [Color] {
         [
             MonacoTheme.accent,
-            MonacoTheme.success,
+            Color(red: 0.56, green: 0.66, blue: 0.87),
             MonacoTheme.warning,
             Color.blue,
             Color.purple,
