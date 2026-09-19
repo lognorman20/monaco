@@ -287,8 +287,10 @@ func deleteFakerGroupChildren(ctx context.Context, tx *sql.Tx, groupID string) e
 		return fmt.Errorf("faker: refusing to reset real group %s", groupID)
 	}
 	steps := []string{
+		`DELETE FROM agent_intents WHERE group_id = $1`,
 		`DELETE FROM votes WHERE proposal_id IN (SELECT id FROM proposals WHERE group_id = $1)`,
 		`DELETE FROM transactions WHERE group_id = $1`,
+		`DELETE FROM group_agents WHERE group_id = $1`,
 		`DELETE FROM proposals WHERE group_id = $1`,
 		`DELETE FROM redeem_jobs WHERE group_id = $1`,
 		`DELETE FROM payout_proofs WHERE group_id = $1`,
