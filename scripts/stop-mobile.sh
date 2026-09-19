@@ -25,3 +25,13 @@ fi
 if pkill -f '[x]codebuild.*Monaco\.xcodeproj' 2>/dev/null; then
   echo "stopped xcodebuild for Monaco"
 fi
+
+_ios_clipboard_bridge() {
+  local cmd="$1"
+  if command -v ios-sim-clipboard-bridge >/dev/null 2>&1; then
+    ios-sim-clipboard-bridge "$cmd" || true
+  elif [[ -x "${HOME}/.local/bin/ios-sim-clipboard-bridge" ]]; then
+    "${HOME}/.local/bin/ios-sim-clipboard-bridge" "$cmd" || true
+  fi
+}
+_ios_clipboard_bridge stop
