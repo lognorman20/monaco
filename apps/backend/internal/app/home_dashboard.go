@@ -80,6 +80,7 @@ type viewerGroupPosition struct {
 
 // GetHomeDashboard returns the authenticated home dashboard projection.
 func (h *HomeService) GetHomeDashboard(ctx context.Context, accessToken string, leaderboardRange HomeLeaderboardRange) (HomeDashboardResult, error) {
+	ctx = HomeContextWithPotNavCache(ctx)
 	user, joinedGroupIDs, err := h.authenticateHomeUser(ctx, accessToken)
 	if err != nil {
 		return HomeDashboardResult{}, err
@@ -131,6 +132,7 @@ func (h *HomeService) GetHomeDashboard(ctx context.Context, accessToken string, 
 
 // GetHomePnLSeries returns aggregate viewer P&L points for a time range.
 func (h *HomeService) GetHomePnLSeries(ctx context.Context, accessToken string, seriesRange HomeLeaderboardRange) ([]HomePnLSeriesPoint, error) {
+	ctx = HomeContextWithPotNavCache(ctx)
 	user, joinedGroupIDs, err := h.authenticateHomeUser(ctx, accessToken)
 	if err != nil {
 		return nil, err
