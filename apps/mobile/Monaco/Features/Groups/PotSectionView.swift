@@ -8,7 +8,6 @@ struct PotSectionView: View {
     let treasuryAddress: String?
 
     @State private var didCopyTreasury = false
-    @State private var isTreasuryExpanded = false
 
     private var sortedPot: [PotRowDTO] {
         pot.sorted { lhs, rhs in
@@ -82,48 +81,33 @@ struct PotSectionView: View {
     @ViewBuilder
     private func treasuryAddressBlock(_ address: String) -> some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isTreasuryExpanded.toggle()
+            Text("Cabal treasury")
+                .font(MonacoTheme.TypeRole.caption)
+                .foregroundStyle(MonacoTheme.secondaryText)
+
+            MonacoWalletAddressText(address: address, textStyle: .footnote)
+                .accessibilityIdentifier("group-treasury-address-value")
+                .onTapGesture {
+                    copyTreasuryAddress(address)
                 }
-            } label: {
-                HStack {
-                    Text("Cabal treasury")
-                        .font(MonacoTheme.TypeRole.caption)
-                        .foregroundStyle(MonacoTheme.secondaryText)
-                    Spacer()
-                    Image(systemName: isTreasuryExpanded ? "chevron.up" : "chevron.down")
+
+            HStack {
+                Button {
+                    copyTreasuryAddress(address)
+                } label: {
+                    Label(
+                        didCopyTreasury ? "Copied" : "Copy address",
+                        systemImage: didCopyTreasury ? "checkmark" : "doc.on.doc"
+                    )
+                }
+                .buttonStyle(.monacoSecondary)
+                .accessibilityIdentifier("group-treasury-copy-button")
+
+                if didCopyTreasury {
+                    Text("Copied")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(MonacoTheme.secondaryText)
-                }
-            }
-            .buttonStyle(.plain)
-
-            if isTreasuryExpanded {
-                MonacoWalletAddressText(address: address, textStyle: .footnote)
-                    .accessibilityIdentifier("group-treasury-address-value")
-                    .onTapGesture {
-                        copyTreasuryAddress(address)
-                    }
-
-                HStack {
-                    Button {
-                        copyTreasuryAddress(address)
-                    } label: {
-                        Label(
-                            didCopyTreasury ? "Copied" : "Copy address",
-                            systemImage: didCopyTreasury ? "checkmark" : "doc.on.doc"
-                        )
-                    }
-                    .buttonStyle(.monacoSecondary)
-                    .accessibilityIdentifier("group-treasury-copy-button")
-
-                    if didCopyTreasury {
-                        Text("Copied")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(MonacoTheme.success)
-                            .accessibilityIdentifier("group-treasury-copied-feedback")
-                    }
+                        .foregroundStyle(MonacoTheme.success)
+                        .accessibilityIdentifier("group-treasury-copied-feedback")
                 }
             }
         }

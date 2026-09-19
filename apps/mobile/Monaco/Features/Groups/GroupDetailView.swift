@@ -176,21 +176,29 @@ struct GroupDetailView: View {
                     .monacoFormSecondaryAction()
                     .accessibilityIdentifier("group-action-sell")
                 }
-
-                Button {
-                    if hasDeployedStake(in: view) {
-                        showWithdrawLeaveConfirmation = true
-                    } else {
-                        showLeaveConfirmation = true
-                    }
-                } label: {
-                    Text(isLeaving ? "Leaving…" : "Leave cabal")
-                        .frame(maxWidth: .infinity)
-                }
-                .monacoFormDestructiveAction()
-                .disabled(isLeaving)
-                .accessibilityIdentifier("group-action-leave")
             }
+            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        }
+    }
+
+    @ViewBuilder
+    private func leaveCabalSection(for view: GroupViewDTO) -> some View {
+        Section {
+            Button {
+                if hasDeployedStake(in: view) {
+                    showWithdrawLeaveConfirmation = true
+                } else {
+                    showLeaveConfirmation = true
+                }
+            } label: {
+                Text(isLeaving ? "Leaving…" : "Leave cabal")
+                    .frame(maxWidth: .infinity)
+            }
+            .monacoFormDestructiveAction()
+            .disabled(isLeaving)
+            .accessibilityIdentifier("group-action-leave")
             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
@@ -246,6 +254,8 @@ struct GroupDetailView: View {
             )
 
             ProposalHistorySection(auth: auth, groupId: groupId)
+
+            leaveCabalSection(for: view)
         }
         .monacoInsetList()
         .background(Color.clear)

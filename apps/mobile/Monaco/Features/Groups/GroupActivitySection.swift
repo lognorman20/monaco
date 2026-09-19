@@ -11,25 +11,43 @@ struct GroupActivitySection: View {
 
     @State private var isExpanded = false
 
+    private let collapsedItemLimit = 4
+
+    private var visibleItems: [GroupActivityItemDTO] {
+        isExpanded ? items : Array(items.prefix(collapsedItemLimit))
+    }
+
+    private var hasMoreThanCollapsedLimit: Bool {
+        items.count > collapsedItemLimit
+    }
+
     var body: some View {
         Section {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                toggleLabel
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("group-activity-toggle")
+            header
 
-            if isExpanded {
-                expandedContent
+            content
+
+            if !isLoading, errorMessage == nil, hasMoreThanCollapsedLimit {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text(isExpanded ? "Show less" : "Show all")
+                        Spacer()
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(MonacoTheme.accent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("group-activity-toggle")
             }
         }
     }
 
-    private var toggleLabel: some View {
+    private var header: some View {
         HStack(spacing: MonacoTheme.Space.s) {
             Text("Transaction history")
                 .font(MonacoTheme.TypeRole.title)
@@ -47,14 +65,11 @@ struct GroupActivitySection: View {
                     }
                     .accessibilityIdentifier("group-activity-count")
             }
-            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(MonacoTheme.secondaryText)
         }
     }
 
     @ViewBuilder
-    private var expandedContent: some View {
+    private var content: some View {
         if isLoading {
             HStack(spacing: 12) {
                 ProgressView()
@@ -77,7 +92,7 @@ struct GroupActivitySection: View {
                 .foregroundStyle(MonacoTheme.secondaryText)
                 .accessibilityIdentifier("group-activity-empty")
         } else {
-            ForEach(items) { item in
+            ForEach(visibleItems) { item in
                 VStack(alignment: .leading, spacing: 4) {
                     NavigationLink {
                         activityDetailDestination(for: item)
