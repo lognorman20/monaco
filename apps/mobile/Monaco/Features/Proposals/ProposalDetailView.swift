@@ -1,4 +1,5 @@
 import SwiftUI
+import MonacoCore
 
 /// Proposal detail with proposer, votes, expiry, and yes/no actions.
 struct ProposalDetailView: View {
@@ -102,7 +103,23 @@ struct ProposalDetailView: View {
             }
         }
 
-        if let execution = proposal.execution {
+        if proposal.resolvedKind == "add_agent" {
+            Section("Agent") {
+                if let name = proposal.agentDisplayName {
+                    LabeledContent("Agent name", value: name)
+                }
+                if let allocation = proposal.allocationUsdcMicros {
+                    LabeledContent("Budget", value: formatAllocation(allocation))
+                }
+                if let key = proposal.mintedAgentKey, !key.isEmpty {
+                    AgentKeyRevealView(apiKey: key) {
+                        toast = MonacoToast(message: "API key copied", isSuccess: true)
+                    }
+                }
+            }
+        }
+
+        if let execution = proposal.execution, proposal.resolvedKind == "buy" || proposal.resolvedKind == "sell" {
             Section("Execution") {
                 LabeledContent("Status", value: executionStatusLabel(execution.state))
                 LabeledContent("Tx signature", value: displayOrNA(execution.txSignature))
@@ -158,10 +175,25 @@ struct ProposalDetailView: View {
     }
 
     private func proposalHeadline(_ proposal: ProposalDTO) -> String {
-        if proposal.resolvedKind == "sell" {
-            return "Cabal sell proposal for \(formattedTokenAmount(proposal)) \(proposal.symbol)"
+        switch proposal.resolvedKind {
+        case "sell":
+            return "Cabal sell proposal for \(formattedTokenAmount(proposal)) \(AssetSymbolFormatter.format(proposal.symbol))"
+        case "add_agent":
+            return "Add agent \(proposal.agentDisplayName ?? proposal.symbol) with \(formatAllocation(proposal.allocationUsdcMicros ?? "0")) budget"
+        case "pause_agent":
+            return "Pause the cabal trading agent"
+        case "resume_agent":
+            return "Resume the cabal trading agent"
+        case "revoke_agent":
+            return "Revoke the cabal trading agent"
+        default:
+            return "Cabal buy proposal for \(formattedUsdc(proposal)) USDC"
         }
-        return "Cabal buy proposal for \(formattedUsdc(proposal)) USDC"
+    }
+
+    private func formatAllocation(_ raw: String) -> String {
+        guard let micros = Int64(raw) else { return raw }
+        return String(format: "$%.2f", Double(micros) / 1_000_000.0)
     }
 
     private func formattedTokenAmount(_ proposal: ProposalDTO) -> String {

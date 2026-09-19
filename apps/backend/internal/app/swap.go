@@ -14,11 +14,13 @@ import (
 
 // DevExecuteBuyRequest is input for the M3 dev-only buy execute path.
 type DevExecuteBuyRequest struct {
-	GroupID    string
-	UserID     string
-	Symbol     string
-	USDCAmount int64
-	ProposalID string
+	GroupID       string
+	UserID        string
+	Symbol        string
+	USDCAmount    int64
+	ProposalID    string
+	AgentIntentID string
+	InitiatedBy   string
 }
 
 // DevExecuteBuyResult is the persisted confirmed buy transaction.
@@ -29,12 +31,14 @@ type DevExecuteBuyResult struct {
 
 // SellToUSDCRequest sells treasury xStock back to USDC.
 type SellToUSDCRequest struct {
-	GroupID    string
-	UserID     string
-	Symbol     string
-	InputMint  string
-	Amount     int64
-	ProposalID string
+	GroupID       string
+	UserID        string
+	Symbol        string
+	InputMint     string
+	Amount        int64
+	ProposalID    string
+	AgentIntentID string
+	InitiatedBy   string
 }
 
 // SellToUSDCResult is the persisted confirmed sell transaction.
@@ -173,6 +177,8 @@ func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyReques
 	if _, _, err := s.store.InsertPendingTransaction(ctx, postgres.InsertPendingTransactionParams{
 		GroupID:          req.GroupID,
 		ProposalID:       req.ProposalID,
+		AgentIntentID:    req.AgentIntentID,
+		InitiatedBy:      req.InitiatedBy,
 		Action:           postgres.TransactionActionBuy,
 		InputMint:        jupiter.USDCMint,
 		OutputMint:       outputMint,
@@ -307,6 +313,8 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 	if _, _, err := s.store.InsertPendingTransaction(ctx, postgres.InsertPendingTransactionParams{
 		GroupID:          req.GroupID,
 		ProposalID:       req.ProposalID,
+		AgentIntentID:    req.AgentIntentID,
+		InitiatedBy:      req.InitiatedBy,
 		Action:           postgres.TransactionActionSell,
 		InputMint:        req.InputMint,
 		OutputMint:       jupiter.USDCMint,

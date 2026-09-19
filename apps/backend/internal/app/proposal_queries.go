@@ -54,21 +54,24 @@ type ProposalExecutionDetail struct {
 
 // ProposalDetailResult is GET /v1/proposals/{id}.
 type ProposalDetailResult struct {
-	ID           string
-	GroupID      string
-	Symbol       string
-	Kind         domain.ProposalKind
-	UsdcMicros   int64
-	TokenAmount  int64
-	Status       ProposalStatus
-	CreatedAt    time.Time
-	ExpiresAt    time.Time
-	ProposerID   string
-	ProposerName string
-	CanVote      bool
-	Votes        []ProposalVoteDetail
-	VoteSummary  ProposalVoteSummary
-	Execution    ProposalExecutionDetail
+	ID                   string
+	GroupID              string
+	Symbol               string
+	Kind                 domain.ProposalKind
+	UsdcMicros           int64
+	TokenAmount          int64
+	AgentDisplayName     string
+	AllocationUsdcMicros int64
+	MintedAgentKey       string
+	Status               ProposalStatus
+	CreatedAt            time.Time
+	ExpiresAt            time.Time
+	ProposerID           string
+	ProposerName         string
+	CanVote              bool
+	Votes                []ProposalVoteDetail
+	VoteSummary          ProposalVoteSummary
+	Execution            ProposalExecutionDetail
 }
 
 // ListGroupProposals returns open or closed proposals for a group member.
@@ -265,32 +268,49 @@ func (g *GovernanceService) GetProposalDetail(ctx context.Context, accessToken, 
 		}
 	}
 
-	action := postgres.TransactionActionBuy
-	if row.Kind == domain.ProposalKindSell {
-		action = postgres.TransactionActionSell
+	var execution ProposalExecutionDetail
+	if domain.IsAgentGovernanceKind(row.Kind) {
+		execution = ProposalExecutionDetail{State: "not_applicable"}
+	} else {
+		action := postgres.TransactionActionBuy
+		if row.Kind == domain.ProposalKindSell {
+			action = postgres.TransactionActionSell
+		}
+		txRow, txFound, err := g.store.GetLatestTransactionByProposalAndAction(ctx, proposalID, action)
+		if err != nil {
+			return ProposalDetailResult{}, err
+		}
+		execution = buildProposalExecutionDetail(proposal.Status, txRow, txFound)
 	}
-	txRow, txFound, err := g.store.GetLatestTransactionByProposalAndAction(ctx, proposalID, action)
-	if err != nil {
-		return ProposalDetailResult{}, err
+
+	mintedKey := ""
+	if row.Kind == domain.ProposalKindAddAgent {
+		if key, ok, err := g.ConsumeAgentKeyForProposer(ctx, proposalID, row.ProposerID, user.ID, proposal.Status); err != nil {
+			return ProposalDetailResult{}, err
+		} else if ok {
+			mintedKey = key
+		}
 	}
-	execution := buildProposalExecutionDetail(proposal.Status, txRow, txFound)
 
 	return ProposalDetailResult{
-		ID:           row.ID,
-		GroupID:      row.GroupID,
-		Symbol:       row.Symbol,
-		Kind:         row.Kind,
-		UsdcMicros:   row.UsdcMicros,
-		TokenAmount:  row.TokenAmount,
-		Status:       row.Status,
-		CreatedAt:    row.CreatedAt,
-		ExpiresAt:    row.ExpiresAt,
-		ProposerID:   row.ProposerID,
-		ProposerName: proposerName,
-		CanVote:      canVote,
-		Votes:        votes,
-		VoteSummary:  voteSummary,
-		Execution:    execution,
+		ID:                   row.ID,
+		GroupID:              row.GroupID,
+		Symbol:               row.Symbol,
+		Kind:                 row.Kind,
+		UsdcMicros:           row.UsdcMicros,
+		TokenAmount:          row.TokenAmount,
+		AgentDisplayName:     row.AgentDisplayName,
+		AllocationUsdcMicros: row.AllocationUsdcMicros,
+		MintedAgentKey:       mintedKey,
+		Status:               row.Status,
+		CreatedAt:            row.CreatedAt,
+		ExpiresAt:            row.ExpiresAt,
+		ProposerID:           row.ProposerID,
+		ProposerName:         proposerName,
+		CanVote:              canVote,
+		Votes:                votes,
+		VoteSummary:          voteSummary,
+		Execution:            execution,
 	}, nil
 }
 

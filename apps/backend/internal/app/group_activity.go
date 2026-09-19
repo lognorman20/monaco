@@ -15,15 +15,17 @@ import (
 
 // GroupActivityItem is one row in GET /v1/groups/{id}/activity.
 type GroupActivityItem struct {
-	ID                  string
-	Kind                string
-	Status              string
-	Symbol              string
-	AmountMicros        int64
-	TokenAmount         int64
-	ProceedsUsdcMicros  int64
-	CreatedAt           time.Time
-	TxSignature         string
+	ID                 string
+	Kind               string
+	Status             string
+	Symbol             string
+	AmountMicros       int64
+	TokenAmount        int64
+	ProceedsUsdcMicros int64
+	CreatedAt          time.Time
+	TxSignature        string
+	InitiatedBy        string
+	AgentDisplayName   string
 }
 
 // ListGroupActivity returns deposits and treasury swaps for a group member.
@@ -42,7 +44,7 @@ func (h *HomeService) ListGroupActivity(ctx context.Context, accessToken, groupI
 	if err != nil {
 		return nil, err
 	}
-	transactions, err := h.store.ListTransactionsByGroupID(ctx, groupID)
+	transactions, err := h.store.ListTransactionActivityByGroupID(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -89,17 +91,23 @@ func (h *HomeService) ListGroupActivity(ctx context.Context, accessToken, groupI
 	}
 	for _, proposal := range awaitingExecute {
 		item := GroupActivityItem{
-			ID:           proposal.ID,
-			Kind:         postgres.TransactionActionBuy,
-			Status:       postgres.TransactionStatusPending,
-			Symbol:       proposal.Symbol,
-			AmountMicros: proposal.UsdcMicros,
-			CreatedAt:    proposal.CreatedAt,
+			ID:        proposal.ID,
+			Kind:      string(proposal.Kind),
+			Status:    postgres.TransactionStatusPending,
+			CreatedAt: proposal.CreatedAt,
 		}
-		if proposal.Kind == domain.ProposalKindSell {
-			item.Kind = postgres.TransactionActionSell
+		switch proposal.Kind {
+		case domain.ProposalKindSell:
+			item.Symbol = proposal.Symbol
 			item.TokenAmount = proposal.TokenAmount
-			item.AmountMicros = 0
+		case domain.ProposalKindAddAgent:
+			item.AgentDisplayName = agentDisplayNameFromProposal(proposal)
+			item.AmountMicros = proposal.AllocationUsdcMicros
+		case domain.ProposalKindPauseAgent, domain.ProposalKindResumeAgent, domain.ProposalKindRevokeAgent:
+			item.AgentDisplayName = agentDisplayNameFromProposal(proposal)
+		default:
+			item.Symbol = proposal.Symbol
+			item.AmountMicros = proposal.UsdcMicros
 		}
 		items = append(items, item)
 	}
@@ -137,13 +145,17 @@ func (h *HomeService) authorizeGroupMember(ctx context.Context, accessToken, gro
 	return user.ID, nil
 }
 
-func (h *HomeService) activityItemFromTransaction(ctx context.Context, tx postgres.TransactionRow) GroupActivityItem {
+func (h *HomeService) activityItemFromTransaction(ctx context.Context, tx postgres.TransactionActivityRow) GroupActivityItem {
 	item := GroupActivityItem{
 		ID:           tx.ID,
 		Kind:         tx.Action,
 		Status:       tx.Status,
 		AmountMicros: tx.Amount,
 		CreatedAt:    tx.CreatedAt,
+		InitiatedBy:  tx.InitiatedBy,
+	}
+	if tx.InitiatedBy == "agent" {
+		item.AgentDisplayName = tx.AgentDisplayName
 	}
 	switch tx.Action {
 	case postgres.TransactionActionBuy:
@@ -160,6 +172,13 @@ func (h *HomeService) activityItemFromTransaction(ctx context.Context, tx postgr
 		item.TxSignature = tx.TxSignature.String
 	}
 	return item
+}
+
+func agentDisplayNameFromProposal(proposal postgres.ProposalRow) string {
+	if proposal.AgentDisplayName != "" {
+		return proposal.AgentDisplayName
+	}
+	return proposal.Symbol
 }
 
 func (h *HomeService) symbolForMint(ctx context.Context, mint string) string {

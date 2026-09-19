@@ -1,15 +1,18 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/packages/domain"
 )
 
 func integrationCatalogApp(t *testing.T) (*CatalogHandlers, *GroupHandlers, *AuthHandlers, privy.Client, *postgres.TestIsolation) {
@@ -89,6 +92,71 @@ func TestGET_assets_allowsNonCreatorMember(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGET_assets_acceptsAgentAPIKey(t *testing.T) {
+	t.Parallel()
+
+	catalogHandlers, groupHandlers, authHandlers, _, iso := integrationCatalogApp(t)
+	token, groupID, creatorID := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Privy)
+	_ = token
+
+	governance := groupHandlers.Governance
+	proposal, err := governance.CreateProposal(context.Background(), app.CreateProposalInput{
+		GroupID:              groupID,
+		ProposerID:           creatorID,
+		Kind:                 domain.ProposalKindAddAgent,
+		AgentDisplayName:     "Catalog Bot",
+		AllocationUsdcMicros: 1_000_000,
+	})
+	if err != nil {
+		t.Fatalf("create add agent proposal: %v", err)
+	}
+	if _, err := governance.CastVote(context.Background(), app.CastVoteInput{
+		ProposalID: proposal.ID,
+		VoterID:    creatorID,
+		Choice:     domain.VoteYes,
+	}); err != nil {
+		t.Fatalf("cast vote: %v", err)
+	}
+
+	detail, err := governance.GetProposalDetail(context.Background(), string(token), proposal.ID)
+	if err != nil {
+		t.Fatalf("get proposal detail: %v", err)
+	}
+	key := detail.MintedAgentKey
+	if key == "" {
+		t.Fatal("expected minted agent key for proposer")
+	}
+
+	xstocks.RegisterCatalogAsset(catalogHandlers.Catalog, xstocks.CatalogAsset{
+		Symbol:     "AAPLx",
+		Name:       "Apple",
+		SolanaMint: "MintAAPL",
+	})
+	xstocks.RegisterCatalogAsset(catalogHandlers.Catalog, xstocks.CatalogAsset{
+		Symbol:     "TSLAx",
+		Name:       "Tesla",
+		SolanaMint: "MintTSLA",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/groups/"+groupID+"/assets?limit=10", nil)
+	req.SetPathValue("id", groupID)
+	req.Header.Set("X-Monaco-Agent-Key", key)
+	rec := httptest.NewRecorder()
+	catalogHandlers.SearchAssetsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+
+	var payload searchAssetsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if len(payload.Assets) != 2 {
+		t.Fatalf("expected full catalog for agent key, got %+v", payload.Assets)
 	}
 }
 

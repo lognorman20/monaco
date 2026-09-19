@@ -39,12 +39,6 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 	ctx := r.Context()
 	log := newRequestLog(r, "GET /v1/groups/{id}/assets")
 
-	token, ok := bearerToken(r)
-	if !ok {
-		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
-		return
-	}
-
 	groupID := strings.TrimSpace(r.PathValue("id"))
 	if groupID == "" {
 		logJSONError(ctx, log, "missing_group_id", w, http.StatusNotFound, "group not found")
@@ -55,9 +49,22 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 	limit := parseCatalogLimit(r.URL.Query().Get("limit"))
 	offset := parseCatalogOffset(r.URL.Query().Get("offset"))
 
-	if _, err := h.authorizeGroupMember(ctx, token, groupID); err != nil {
-		writeCatalogError(ctx, log, w, err, "group_id", groupID, "query", query)
-		return
+	agentKey := strings.TrimSpace(r.Header.Get(agentKeyHeader))
+	if agentKey != "" {
+		if _, err := resolveAgentForGroup(ctx, h.Store, groupID, agentKey); err != nil {
+			writeAgentAuthError(ctx, log, w, err, groupID)
+			return
+		}
+	} else {
+		token, ok := bearerToken(r)
+		if !ok {
+			logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
+			return
+		}
+		if _, err := h.authorizeGroupMember(ctx, token, groupID); err != nil {
+			writeCatalogError(ctx, log, w, err, "group_id", groupID, "query", query)
+			return
+		}
 	}
 
 	page, err := h.Catalog.Search(ctx, query, limit, offset)

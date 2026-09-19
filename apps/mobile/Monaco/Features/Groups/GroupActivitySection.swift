@@ -87,9 +87,16 @@ struct GroupActivitySection: View {
     }
 
     private func needsProposalFallback(_ item: GroupActivityItemDTO) -> Bool {
-        ["buy", "sell"].contains(item.kind.lowercased())
+        if isAgentGovernanceKind(item.kind) {
+            return true
+        }
+        return ["buy", "sell"].contains(item.kind.lowercased())
             && item.status.lowercased() == "pending"
             && (item.txSignature ?? "").isEmpty
+    }
+
+    private func isAgentGovernanceKind(_ kind: String) -> Bool {
+        ["add_agent", "pause_agent", "resume_agent", "revoke_agent"].contains(kind.lowercased())
     }
 
     private func activityRowSummary(_ item: GroupActivityItemDTO) -> some View {
@@ -126,17 +133,12 @@ struct GroupActivitySection: View {
     }
 
     private func activityTitle(_ item: GroupActivityItemDTO) -> String {
-        let symbol = AssetSymbolFormatter.format(item.symbol ?? "USDC")
-        switch item.kind.lowercased() {
-        case "deposit":
-            return "Deposit"
-        case "buy":
-            return "Buy \(symbol)"
-        case "sell":
-            return "Sell \(symbol)"
-        default:
-            return item.kind.capitalized
-        }
+        GroupActivityTitleFormatter.format(
+            kind: item.kind,
+            symbol: item.symbol,
+            agentDisplayName: item.agentDisplayName,
+            initiatedBy: item.initiatedBy
+        )
     }
 
     private func formatAmount(_ item: GroupActivityItemDTO) -> String {

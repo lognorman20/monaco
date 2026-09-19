@@ -129,6 +129,9 @@ struct GroupDetailView: View {
                 treasuryAddress: view.treasuryAddress
             )
             YouSectionView(slice: view.you)
+            if let agent = view.agent {
+                AgentSectionView(agent: agent)
+            }
             MemberBoardSection(members: view.members)
 
             if joinRequestsLoading || !joinRequests.isEmpty {

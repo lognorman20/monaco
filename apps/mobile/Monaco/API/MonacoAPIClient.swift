@@ -647,10 +647,12 @@ final class MonacoAPIClient {
     func createProposal(
         accessToken: String,
         groupId: String,
-        symbol: String,
         kind: String = "buy",
-        usdc: Int64? = nil,
-        tokenAmount: Int64? = nil
+        symbol: String? = nil,
+        usdcMicros: Int64? = nil,
+        tokenAmount: Int64? = nil,
+        agentDisplayName: String? = nil,
+        allocationUsdcMicros: Int64? = nil
     ) async throws -> CreateProposalResponse {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/proposals")
         var request = URLRequest(url: url)
@@ -658,7 +660,14 @@ final class MonacoAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try applyAuthorizationHeader(accessToken: accessToken, to: &request)
         request.httpBody = try JSONEncoder().encode(
-            ProposalRequest(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount)
+            ProposalRequest(
+                kind: kind,
+                symbol: symbol,
+                usdc: usdcMicros,
+                tokenAmount: tokenAmount,
+                agentDisplayName: agentDisplayName,
+                allocationUsdcMicros: allocationUsdcMicros
+            )
         )
 
         let (data, response) = try await session.data(for: request)
@@ -917,21 +926,25 @@ private struct QuoteRequest: Encodable {
 }
 
 private struct ProposalRequest: Encodable {
-    let symbol: String
     let kind: String?
+    let symbol: String?
     let usdc: Int64?
     let tokenAmount: Int64?
+    let agentDisplayName: String?
+    let allocationUsdcMicros: Int64?
 
     enum CodingKeys: String, CodingKey {
-        case symbol, kind, usdc, tokenAmount
+        case kind, symbol, usdc, tokenAmount, agentDisplayName, allocationUsdcMicros
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(symbol, forKey: .symbol)
         if let kind { try container.encode(kind, forKey: .kind) }
+        if let symbol { try container.encode(symbol, forKey: .symbol) }
         if let usdc { try container.encode(usdc, forKey: .usdc) }
         if let tokenAmount { try container.encode(tokenAmount, forKey: .tokenAmount) }
+        if let agentDisplayName { try container.encode(agentDisplayName, forKey: .agentDisplayName) }
+        if let allocationUsdcMicros { try container.encode(allocationUsdcMicros, forKey: .allocationUsdcMicros) }
     }
 }
 

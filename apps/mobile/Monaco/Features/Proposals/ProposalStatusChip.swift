@@ -20,8 +20,20 @@ struct ProposalStatusChip: View {
     }
 
     private var label: String {
-        let side = kind.lowercased() == "sell" ? "Sell" : "Buy"
-        return "\(side) \(chipStyle?.label ?? status.capitalized)"
+        switch kind.lowercased() {
+        case "sell":
+            return "Sell \(chipStyle?.label ?? status.capitalized)"
+        case "add_agent":
+            return "Add agent \(chipStyle?.label ?? status.capitalized)"
+        case "pause_agent":
+            return "Pause agent \(chipStyle?.label ?? status.capitalized)"
+        case "resume_agent":
+            return "Resume agent \(chipStyle?.label ?? status.capitalized)"
+        case "revoke_agent":
+            return "Revoke agent \(chipStyle?.label ?? status.capitalized)"
+        default:
+            return "Buy \(chipStyle?.label ?? status.capitalized)"
+        }
     }
 
     private var backgroundColor: Color {

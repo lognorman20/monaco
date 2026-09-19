@@ -60,6 +60,10 @@ type Proposal = domain.Proposal
 type ProposalKind = domain.ProposalKind
 
 const (
-	ProposalKindBuy  = domain.ProposalKindBuy
-	ProposalKindSell = domain.ProposalKindSell
+	ProposalKindBuy         = domain.ProposalKindBuy
+	ProposalKindSell        = domain.ProposalKindSell
+	ProposalKindAddAgent    = domain.ProposalKindAddAgent
+	ProposalKindPauseAgent  = domain.ProposalKindPauseAgent
+	ProposalKindResumeAgent = domain.ProposalKindResumeAgent
+	ProposalKindRevokeAgent = domain.ProposalKindRevokeAgent
 )

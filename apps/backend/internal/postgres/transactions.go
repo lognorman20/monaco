@@ -64,6 +64,8 @@ type ConfirmSellTransactionParams struct {
 type InsertPendingTransactionParams struct {
 	GroupID          string
 	ProposalID       string
+	AgentIntentID    string
+	InitiatedBy      string
 	Action           string
 	InputMint        string
 	OutputMint       string
@@ -89,15 +91,24 @@ func (s *Store) InsertPendingTransaction(ctx context.Context, params InsertPendi
 		return existing, false, nil
 	}
 
+	initiatedBy := params.InitiatedBy
+	if initiatedBy == "" {
+		initiatedBy = "member_proposal"
+	}
+
 	const insertSQL = `
-INSERT INTO transactions (group_id, proposal_id, amount, action, input_mint, output_mint, status, execute_request_id)
-VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
+INSERT INTO transactions (group_id, proposal_id, agent_intent_id, initiated_by, amount, action, input_mint, output_mint, status, execute_request_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)
 RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
           tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
 
 	var proposalID sql.NullString
 	if params.ProposalID != "" {
 		proposalID = sql.NullString{String: params.ProposalID, Valid: true}
+	}
+	var agentIntentID sql.NullString
+	if params.AgentIntentID != "" {
+		agentIntentID = sql.NullString{String: params.AgentIntentID, Valid: true}
 	}
 
 	var row TransactionRow
@@ -106,6 +117,8 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		insertSQL,
 		params.GroupID,
 		proposalID,
+		agentIntentID,
+		initiatedBy,
 		params.Amount,
 		params.Action,
 		params.InputMint,
@@ -503,6 +516,64 @@ WHERE execute_request_id = $1 AND status = 'confirmed'`
 		return TransactionRow{}, false, fmt.Errorf("get transaction by execute_request_id: %w", err)
 	}
 	return row, true, nil
+}
+
+// TransactionActivityRow is a transaction row enriched for group activity feeds.
+type TransactionActivityRow struct {
+	TransactionRow
+	InitiatedBy      string
+	AgentDisplayName string
+}
+
+// ListTransactionActivityByGroupID returns transactions for activity with agent attribution.
+func (s *Store) ListTransactionActivityByGroupID(ctx context.Context, groupID string) ([]TransactionActivityRow, error) {
+	if groupID == "" {
+		return nil, fmt.Errorf("group_id is required")
+	}
+
+	const selectSQL = `
+SELECT t.id, t.group_id, t.proposal_id, t.amount, t.action, t.input_mint, t.output_mint, t.status,
+       t.tx_signature, t.execute_request_id, t.cost_basis_price, t.cost_basis_amount, t.created_at, t.confirmed_at,
+       COALESCE(t.initiated_by, ''), COALESCE(ga.agent_display_name, '')
+FROM transactions t
+LEFT JOIN agent_intents ai ON ai.id = t.agent_intent_id
+LEFT JOIN group_agents ga ON ga.id = ai.group_agent_id
+WHERE t.group_id = $1
+ORDER BY t.created_at DESC
+LIMIT 100`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("list transaction activity by group: %w", err)
+	}
+	defer rows.Close()
+
+	var out []TransactionActivityRow
+	for rows.Next() {
+		var row TransactionActivityRow
+		if err := rows.Scan(
+			&row.ID,
+			&row.GroupID,
+			&row.ProposalID,
+			&row.Amount,
+			&row.Action,
+			&row.InputMint,
+			&row.OutputMint,
+			&row.Status,
+			&row.TxSignature,
+			&row.ExecuteRequestID,
+			&row.CostBasisPrice,
+			&row.CostBasisAmount,
+			&row.CreatedAt,
+			&row.ConfirmedAt,
+			&row.InitiatedBy,
+			&row.AgentDisplayName,
+		); err != nil {
+			return nil, fmt.Errorf("scan transaction activity: %w", err)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 // ListTransactionsByGroupID returns transactions for a group newest first.
