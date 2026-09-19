@@ -26,7 +26,7 @@ final class ProposalFeedFormatterTests: XCTestCase {
         XCTAssertEqual(label, raw)
     }
 
-    func testVoteProgress_fractionsAndCaption() {
+    func testVoteProgress_majorityCaptionAndDots() {
         // Arrange
         let summary = ProposalVoteSummaryDTO(yesCount: 2, noCount: 1, eligibleCount: 6, threshold: "majority")
 
@@ -34,12 +34,33 @@ final class ProposalFeedFormatterTests: XCTestCase {
         let progress = ProposalVoteProgress(summary: summary)
 
         // Assert
-        XCTAssertEqual(progress.yesFraction, 2.0 / 6.0, accuracy: 0.0001)
-        XCTAssertEqual(progress.noFraction, 1.0 / 6.0, accuracy: 0.0001)
-        XCTAssertEqual(progress.caption, "2 yes · 1 no · 3 still to vote")
+        XCTAssertEqual(progress.caption, "3 of 6 voted · 4 yes to pass")
+        XCTAssertEqual(progress.closedCaption, "2 yes · 1 no")
+        XCTAssertEqual(progress.dots, [.yes, .yes, .no, .pending, .pending, .pending])
     }
 
-    func testVoteProgress_votesExceedEligible_neverOverfillsBar() {
+    func testVoteProgress_yesNeeded_matchesBackendPassRule() {
+        // Majority passes when yes > no + remaining, i.e. floor(n/2) + 1; unanimous needs everyone.
+        func needed(_ n: Int, _ threshold: String) -> Int {
+            ProposalVoteProgress(summary: ProposalVoteSummaryDTO(yesCount: 0, noCount: 0, eligibleCount: n, threshold: threshold)).yesNeeded
+        }
+        XCTAssertEqual(needed(1, "majority"), 1)
+        XCTAssertEqual(needed(2, "majority"), 2)
+        XCTAssertEqual(needed(5, "majority"), 3)
+        XCTAssertEqual(needed(6, "majority"), 4)
+        XCTAssertEqual(needed(5, "unanimous"), 5)
+        XCTAssertEqual(needed(5, "Unanimous"), 5)
+    }
+
+    func testVoteProgress_demoCase_oneOfTwoVoted() {
+        // Arrange: golden path. Account B voted yes; the viewer's yes passes it.
+        let summary = ProposalVoteSummaryDTO(yesCount: 1, noCount: 0, eligibleCount: 2, threshold: "majority")
+
+        // Act / Assert
+        XCTAssertEqual(ProposalVoteProgress(summary: summary).caption, "1 of 2 voted · 2 yes to pass")
+    }
+
+    func testVoteProgress_votesExceedEligible_countsBallots() {
         // Arrange: a voter left the cabal after voting.
         let summary = ProposalVoteSummaryDTO(yesCount: 3, noCount: 1, eligibleCount: 3, threshold: "majority")
 
@@ -47,11 +68,12 @@ final class ProposalFeedFormatterTests: XCTestCase {
         let progress = ProposalVoteProgress(summary: summary)
 
         // Assert
-        XCTAssertLessThanOrEqual(progress.yesFraction + progress.noFraction, 1.0)
-        XCTAssertEqual(progress.caption, "3 yes · 1 no")
+        XCTAssertEqual(progress.eligibleCount, 4)
+        XCTAssertEqual(progress.pendingCount, 0)
+        XCTAssertEqual(progress.dots?.count, 4)
     }
 
-    func testVoteProgress_zeroEligible_isZeroNotNaN() {
+    func testVoteProgress_zeroEligible_hasNoDotsAndPlainCaption() {
         // Arrange
         let summary = ProposalVoteSummaryDTO(yesCount: 0, noCount: 0, eligibleCount: 0, threshold: "majority")
 
@@ -59,16 +81,44 @@ final class ProposalFeedFormatterTests: XCTestCase {
         let progress = ProposalVoteProgress(summary: summary)
 
         // Assert
-        XCTAssertEqual(progress.yesFraction, 0)
-        XCTAssertEqual(progress.noFraction, 0)
+        XCTAssertNil(progress.dots)
+        XCTAssertEqual(progress.caption, "No one can vote on this yet")
     }
 
-    func testClosesLabel_hoursAndMinutesLeft() {
+    func testVoteProgress_moreThanTwelveVoters_captionOnly() {
+        // Arrange
+        let summary = ProposalVoteSummaryDTO(yesCount: 4, noCount: 2, eligibleCount: 13, threshold: "majority")
+
+        // Act
+        let progress = ProposalVoteProgress(summary: summary)
+
+        // Assert
+        XCTAssertNil(progress.dots)
+        XCTAssertEqual(progress.caption, "6 of 13 voted · 7 yes to pass")
+        XCTAssertEqual(ProposalVoteProgress(summary: ProposalVoteSummaryDTO(yesCount: 0, noCount: 0, eligibleCount: 12, threshold: "majority")).dots?.count, 12)
+    }
+
+    func testClosesLabel_hoursLeft() {
         // Act
         let label = ProposalTimeFormatter.closesLabel(expiresAt: "2026-09-18T17:20:00Z", now: now)
 
         // Assert
-        XCTAssertEqual(label, "Closes in 5h 20m")
+        XCTAssertEqual(label, "Closes in 5h")
+    }
+
+    func testClosesLabel_buckets() {
+        XCTAssertEqual(ProposalTimeFormatter.closesLabel(expiresAt: "2026-09-19T11:59:00Z", now: now), "Closes in 23h")
+        XCTAssertEqual(ProposalTimeFormatter.closesLabel(expiresAt: "2026-09-19T20:00:00Z", now: now), "Closes in 32h")
+        XCTAssertEqual(ProposalTimeFormatter.closesLabel(expiresAt: "2026-09-21T13:00:00Z", now: now), "Closes in 3d")
+        XCTAssertEqual(ProposalTimeFormatter.closesLabel(expiresAt: "2026-09-18T12:12:30Z", now: now), "Closes in 12m")
+        XCTAssertEqual(ProposalTimeFormatter.closesLabel(expiresAt: "2026-09-18T12:00:20Z", now: now), "Closes in 1m")
+    }
+
+    func testClosesSoon_onlyInTheLastHour() {
+        XCTAssertTrue(ProposalTimeFormatter.closesSoon(expiresAt: "2026-09-18T12:40:00Z", now: now))
+        XCTAssertFalse(ProposalTimeFormatter.closesSoon(expiresAt: "2026-09-18T13:00:01Z", now: now))
+        XCTAssertFalse(ProposalTimeFormatter.closesSoon(expiresAt: "2026-09-18T11:00:00Z", now: now))
+        XCTAssertFalse(ProposalTimeFormatter.closesSoon(expiresAt: "garbage", now: now))
     }
 
     func testClosesLabel_pastExpiry_saysClosed() {
@@ -106,6 +156,100 @@ final class ProposalFeedFormatterTests: XCTestCase {
 
         // Assert
         XCTAssertTrue(clean)
+    }
+
+    func testProposeFlowCopy_passesMainFlowCopyAudit() {
+        // Assert: every string passes, and none leaks jargon the plan bans from primary copy.
+        XCTAssertTrue(MainFlowCopyAudit.stringsAreClean(ProposeFlowCopy.auditedStrings))
+        let jargon = ["treasury", "route", "quote", "usdc", "bps", "units", "stake", "http", "api", "!"]
+        for string in ProposeFlowCopy.auditedStrings + ProposalFeedCopy.auditedStrings {
+            for term in jargon {
+                XCTAssertFalse(string.lowercased().contains(term), "\"\(string)\" contains \"\(term)\"")
+            }
+        }
+    }
+
+    func testVoteCopy_plainYesNo() {
+        XCTAssertEqual(ProposalFeedCopy.voteYes, "Yes")
+        XCTAssertEqual(ProposalFeedCopy.voteNo, "No")
+        XCTAssertEqual(ProposalFeedCopy.viewerVoted("yes"), "You voted yes")
+        XCTAssertEqual(ProposalFeedCopy.viewerVoted("NO"), "You voted no")
+    }
+
+    func testSubtitle_tradeShowsTickerAndSide() {
+        XCTAssertTrue(ProposalFeedCopy.subtitle(for: ProposalDTO(id: "p", symbol: "AAPLx", status: "open")).hasSuffix(" · Buy"))
+        XCTAssertTrue(ProposalFeedCopy.subtitle(for: ProposalDTO(id: "p", symbol: "AAPLx", status: "open", kind: "sell")).hasSuffix(" · Sell"))
+        XCTAssertEqual(
+            ProposalFeedCopy.subtitle(for: ProposalDTO(id: "p", symbol: "", status: "open", kind: "add_agent", allocationUsdcMicros: "500000000")),
+            "Trading bot · $500.00 budget from the pot"
+        )
+    }
+
+    func testClosedLabel_perOutcome() {
+        func label(_ status: String, kind: String = "buy", execution: String? = nil) -> String? {
+            ProposalFeedCopy.closedLabel(for: ProposalDTO(
+                id: "p", symbol: "AAPLx", status: status, kind: kind,
+                execution: execution.map { ProposalExecutionDTO(state: $0) }
+            ))
+        }
+        XCTAssertNil(label("open"))
+        XCTAssertEqual(label("passed"), "Bought")
+        XCTAssertEqual(label("passed", execution: "confirmed"), "Bought")
+        XCTAssertEqual(label("passed", kind: "sell"), "Sold")
+        XCTAssertEqual(label("passed", execution: "pending"), "Buying")
+        XCTAssertEqual(label("passed", execution: "failed"), "Failed")
+        XCTAssertEqual(label("failed"), "Didn't pass")
+        XCTAssertEqual(label("expired"), "Expired")
+        XCTAssertEqual(label("passed", kind: "add_agent"), "Passed")
+    }
+
+    func testExecutionStage_tracksVoteThenSwap() {
+        func stage(_ status: String, kind: String = "buy", execution: String? = nil) -> ProposalExecutionStage? {
+            ProposalExecutionStage.of(ProposalDTO(
+                id: "p", symbol: "AAPLx", status: status, kind: kind,
+                execution: execution.map { ProposalExecutionDTO(state: $0) }
+            ))
+        }
+        XCTAssertEqual(stage("open"), .voting)
+        XCTAssertEqual(stage("passed", execution: "pending"), .executing)
+        XCTAssertEqual(stage("passed", execution: "confirmed"), .done)
+        XCTAssertEqual(stage("passed", execution: "failed"), .failed)
+        XCTAssertNil(stage("passed", execution: "not_applicable"), "seeded passed proposals never swap")
+        XCTAssertNil(stage("failed"))
+        XCTAssertNil(stage("expired"))
+        XCTAssertNil(stage("open", kind: "add_agent"))
+        XCTAssertEqual(ProposalExecutionStage.failed.stepIndex, 1)
+        XCTAssertEqual(ProposalExecutionStage.done.stepIndex, 2)
+    }
+
+    func testAwaitingExecution_onlyWhilePending() {
+        let pending = ProposalDTO(id: "p", symbol: "AAPLx", status: "passed", execution: ProposalExecutionDTO(state: "pending"))
+        let done = ProposalDTO(id: "p", symbol: "AAPLx", status: "passed", execution: ProposalExecutionDTO(state: "confirmed"))
+        let failed = ProposalDTO(id: "p", symbol: "AAPLx", status: "passed", execution: ProposalExecutionDTO(state: "failed"))
+        let open = ProposalDTO(id: "p", symbol: "AAPLx", status: "open")
+        XCTAssertTrue(pending.isAwaitingExecution)
+        XCTAssertFalse(done.isAwaitingExecution)
+        XCTAssertFalse(failed.isAwaitingExecution)
+        XCTAssertFalse(open.isAwaitingExecution)
+    }
+
+    func testViewerChoice_matchesViewerBallotOnly() {
+        let proposal = ProposalDTO(id: "p", symbol: "AAPLx", status: "open", votes: [
+            ProposalVoteDTO(voterId: "b", displayName: "Bea", choice: "yes"),
+            ProposalVoteDTO(voterId: "me", displayName: "Logan", choice: "No"),
+        ])
+        XCTAssertEqual(proposal.viewerChoice(viewerId: "me"), "no")
+        XCTAssertNil(proposal.viewerChoice(viewerId: "someone"))
+        XCTAssertNil(proposal.viewerChoice(viewerId: nil))
+        XCTAssertNil(proposal.viewerChoice(viewerId: ""))
+    }
+
+    func testReadOnlyProposal_neverShowsVoteActions() {
+        // Faker ghost proposals come back open with canVote false: tally only.
+        let ghost = ProposalDTO(id: "p", symbol: "TSLAx", status: "open", canVote: false)
+        let unknown = ProposalDTO(id: "p", symbol: "TSLAx", status: "open")
+        XCTAssertFalse(ghost.showsVoteActions)
+        XCTAssertFalse(unknown.showsVoteActions)
     }
 
     func testHeadline_sellProposal_usesShareCount() {
