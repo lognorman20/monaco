@@ -1,22 +1,22 @@
 import MonacoCore
 import SwiftUI
 
-/// Horizontal strip of the viewer's cabals: name, pot, P&L. Tap opens the cabal.
+/// Horizontal strip of the viewer's cabals: tinted tile, name, pot, P&L. Tap opens the cabal.
 struct CabalsStripSection: View {
     @ObservedObject var auth: PrivyAuthService
     let rows: [HomeGroupBoardRowDTO]
     var onChanged: () async -> Void
 
+    private static let cardSize = CGSize(width: 176, height: 148)
+
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            Text("Your cabals")
-                .font(MonacoTheme.TypeRole.title)
-                .foregroundStyle(MonacoTheme.ink)
+            MonacoSectionHeader("Your cabals")
 
             if rows.isEmpty {
-                MonacoEmptyStateCard(
-                    message: "You're not in a cabal yet. Search above or create one from the + menu.",
-                    systemImage: "person.3"
+                EmptyState(
+                    title: "No cabals yet",
+                    message: "Search above or start one with the + button."
                 )
                 .accessibilityIdentifier("cabals-strip-empty")
             } else {
@@ -26,11 +26,18 @@ struct CabalsStripSection: View {
                             NavigationLink {
                                 GroupDetailView(auth: auth, groupId: row.groupId, groupName: row.name, onLeft: onChanged)
                             } label: {
-                                CabalStripCard(row: row)
+                                CabalStripCard(row: row, size: Self.cardSize)
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("cabals-strip-card-\(row.groupId)")
                         }
+                        NavigationLink {
+                            CreateGroupView(auth: auth)
+                        } label: {
+                            NewCabalStripCard(size: Self.cardSize)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("cabals-strip-new")
                     }
                     .padding(.vertical, 2)
                 }
@@ -42,52 +49,49 @@ struct CabalsStripSection: View {
 
 private struct CabalStripCard: View {
     let row: HomeGroupBoardRowDTO
+    let size: CGSize
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
+            CabalMark(groupId: row.groupId, name: row.name, size: 36)
             Text(row.name)
-                .font(MonacoTheme.TypeRole.body.weight(.semibold))
+                .font(MonacoTheme.Typo.rowTitle)
                 .foregroundStyle(MonacoTheme.ink)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
-            Text(UsdAmountFormatter.format(decimalString: row.potValueUsd))
-                .font(.title3.monospacedDigit().weight(.semibold))
-                .foregroundStyle(MonacoTheme.ink)
-                .minimumScaleFactor(0.7)
-                .lineLimit(1)
-            CabalPnLLabel(dollarPnl: row.dollarPnl, percentReturn: row.percentReturn)
+            MoneyText(decimalString: row.potValueUsd, style: .large)
+            PnLBadge(dollarPnl: row.dollarPnl, percentReturn: row.percentReturn, style: .caption)
         }
         .padding(MonacoTheme.Space.m)
-        .frame(width: 168, height: 132, alignment: .topLeading)
+        .frame(width: size.width, alignment: .topLeading)
+        .frame(minHeight: size.height, alignment: .topLeading)
         .background(
-            MonacoTheme.surface,
+            MonacoTheme.CabalTint.forGroupId(row.groupId).fill,
             in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
         )
-        .overlay {
-            RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
-                .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
-        }
         .accessibilityElement(children: .combine)
     }
 }
 
-/// "+$48.20 · +12.4%" colored by gain or loss. Percent is omitted until the
-/// cabal has money in.
-struct CabalPnLLabel: View {
-    let dollarPnl: String
-    let percentReturn: String?
+private struct NewCabalStripCard: View {
+    let size: CGSize
 
     var body: some View {
-        let loss = SignedUsdFormatter.isLoss(dollarPnl)
-        let text = percentReturn == nil
-            ? SignedUsdFormatter.format(dollarPnl)
-            : "\(SignedUsdFormatter.format(dollarPnl)) · \(PercentReturnFormatter.format(percentReturn))"
-        Text(text)
-            .font(MonacoTheme.TypeRole.caption.monospacedDigit())
-            .foregroundStyle(loss ? MonacoTheme.loss : MonacoTheme.profit)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
+        VStack(spacing: MonacoTheme.Space.s) {
+            Image(systemName: "plus")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(MonacoTheme.muted)
+            Text("New cabal")
+                .font(MonacoTheme.Typo.callout.weight(.semibold))
+                .foregroundStyle(MonacoTheme.muted)
+        }
+        .frame(width: size.width, height: size.height)
+        .overlay {
+            RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
+                .strokeBorder(MonacoTheme.hairline, style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
+        }
+        .accessibilityLabel("New cabal")
     }
 }

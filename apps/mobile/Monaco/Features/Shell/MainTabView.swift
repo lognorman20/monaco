@@ -1,26 +1,25 @@
 import SwiftUI
 
+/// The four tab roots. Account actions (withdraw, advanced, sign out) live on Profile.
+enum MainTab: Hashable {
+    case home, cabals, stocks, profile
+}
+
 /// Post-auth frame. Tab chrome only — screens live in their feature folders.
 struct MainTabView: View {
     @ObservedObject var auth: PrivyAuthService
+    @State private var selectedTab: MainTab = .home
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             NavigationStack {
-                HomeView(auth: auth)
+                HomeView(auth: auth, selectedTab: $selectedTab)
             }
             .tabItem {
                 Label("Home", systemImage: "house")
                     .accessibilityIdentifier("tab-home")
             }
-
-            NavigationStack {
-                ProfileTabView(auth: auth)
-            }
-            .tabItem {
-                Label("Profile", systemImage: "person")
-                    .accessibilityIdentifier("tab-profile")
-            }
+            .tag(MainTab.home)
 
             NavigationStack {
                 CabalsTabView(auth: auth)
@@ -29,15 +28,29 @@ struct MainTabView: View {
                 Label("Cabals", systemImage: "person.3")
                     .accessibilityIdentifier("tab-cabals")
             }
+            .tag(MainTab.cabals)
 
             NavigationStack {
                 AssetsTabView(auth: auth)
             }
             .tabItem {
-                Label("Assets", systemImage: "chart.pie")
+                Label("Stocks", systemImage: "chart.line.uptrend.xyaxis")
                     .accessibilityIdentifier("tab-assets")
             }
+            .tag(MainTab.stocks)
+
+            NavigationStack {
+                ProfileTabView(auth: auth)
+            }
+            .tabItem {
+                Label("Profile", systemImage: "person.crop.circle")
+                    .accessibilityIdentifier("tab-profile")
+            }
+            .tag(MainTab.profile)
         }
         .tint(MonacoTheme.ink)
+        .onChange(of: selectedTab) { _, _ in
+            Haptics.selection()
+        }
     }
 }

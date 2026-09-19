@@ -10,6 +10,8 @@ enum ProposalVoteChoice: String {
 /// Views depend on this protocol so the feed can run against the API or in-memory sample data.
 @MainActor
 protocol ProposalFeedService: AnyObject {
+    /// The signed-in member's id, to find their ballot on a detail payload. Nil when unknown.
+    var viewerId: String? { get }
     func listProposals(groupId: String, tab: ProposalFeedTab) async throws -> [ProposalDTO]
     func proposal(id: String) async throws -> ProposalDTO
     func castVote(proposalId: String, choice: ProposalVoteChoice) async throws
@@ -29,6 +31,10 @@ final class LiveProposalFeedService: ProposalFeedService {
                 await MainActor.run { auth?.accessToken }
             }
         )
+    }
+
+    var viewerId: String? {
+        MonacoSessionStore().storedUserId
     }
 
     func listProposals(groupId: String, tab: ProposalFeedTab) async throws -> [ProposalDTO] {

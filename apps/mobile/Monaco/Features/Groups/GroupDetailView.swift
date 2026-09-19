@@ -1,13 +1,17 @@
+import MonacoCore
 import SwiftUI
 
-/// Group screen: pot, you slice, member board, activity, proposals, and actions.
-private enum CabalActionDestination: Hashable {
-    case deposit
-    case propose
-    case sell
+/// Screens pushed from the group screen's action row and section headers.
+enum GroupDetailRoute: Hashable {
+    case addMoney
+    case cashOut
     case chat
+    case proposals
+    case activity
 }
 
+/// Group screen: hero, action row, open votes, holdings, leaderboard, and activity.
+/// Owns loading, polling, leave, retry, and join-request state; `GroupDetailContent` is the layout.
 struct GroupDetailView: View {
     @ObservedObject var auth: PrivyAuthService
     let groupId: String
@@ -17,6 +21,7 @@ struct GroupDetailView: View {
 
     private let apiClient = MonacoAPIClient()
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppSessionStore.self) private var session: AppSessionStore?
 
     @State private var groupView: GroupViewDTO?
     @State private var showLeaveConfirmation = false
@@ -32,9 +37,14 @@ struct GroupDetailView: View {
     @State private var joinRequests: [JoinRequestDTO] = []
     @State private var joinRequestsLoading = false
     @State private var decidingRequestIDs: Set<String> = []
-    @State private var cabalActionDestination: CabalActionDestination?
     @State private var proposalService: LiveProposalFeedService
     @State private var proposalRefreshCount = 0
+    @State private var route: GroupDetailRoute?
+    @State private var showProposeSheet = false
+    /// The propose sheet's height; the chooser raises it to `.large` while a flow is pushed.
+    @State private var showDetailsSheet = false
+    @State private var leaveRequestedFromDetails = false
+    @State private var heroScrolledAway = false
 
     private let activityPollInterval: Duration = .seconds(15)
 
@@ -54,12 +64,33 @@ struct GroupDetailView: View {
         _proposalService = State(initialValue: LiveProposalFeedService(auth: auth))
     }
 
+    private var displayName: String {
+        groupView?.name ?? groupName ?? "Cabal"
+    }
+
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .monacoCanvas()
-            .navigationTitle(groupView?.name ?? groupName ?? "Cabal")
+            // The hero carries the name; the bar only shows it once the hero scrolls away.
+            .navigationTitle(groupView == nil || heroScrolledAway ? displayName : "")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if groupView != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showDetailsSheet = true
+                        } label: {
+                            Image(systemName: "info.circle")
+                        }
+                        .accessibilityLabel("Cabal details")
+                        .accessibilityIdentifier("group-details-button")
+                    }
+                }
+            }
+            .navigationDestination(item: $route) { route in
+                destination(for: route)
+            }
             .task(id: loadTaskID) {
                 if let initialView, groupView == nil {
                     groupView = initialView
@@ -77,244 +108,176 @@ struct GroupDetailView: View {
                 await loadActivity()
                 await loadJoinRequests()
             }
+            .sheet(isPresented: $showProposeSheet, onDismiss: {
+                proposalRefreshCount += 1
+            }) {
+                if let groupView {
+                    ProposeSheet(auth: auth, groupId: groupId, groupView: groupView, onProposed: proposalSent)
+                }
+            }
+            .sheet(isPresented: $showDetailsSheet, onDismiss: presentLeaveConfirmationIfRequested) {
+                if let groupView {
+                    GroupDetailsSheet(
+                        groupId: groupId,
+                        treasuryAddress: groupView.treasuryAddress,
+                        isLeaving: isLeaving,
+                        onLeave: {
+                            leaveRequestedFromDetails = true
+                            showDetailsSheet = false
+                        }
+                    )
+                }
+            }
             .monacoToast($toast)
-            .confirmationDialog("Leave this cabal?", isPresented: $showLeaveConfirmation, titleVisibility: .visible) {
+            .confirmationDialog("Leave \(displayName)?", isPresented: $showLeaveConfirmation, titleVisibility: .visible) {
                 Button("Leave cabal", role: .destructive) { Task { await leaveGroup(withdrawStake: false) } }
             } message: {
-                Text("You will lose access to this cabal's board. Your deposit history stays on record.")
+                Text("You'll lose access to this cabal's votes and chat.")
             }
-            .confirmationDialog("Withdraw stake and leave?", isPresented: $showWithdrawLeaveConfirmation, titleVisibility: .visible) {
-                Button("Withdraw and leave", role: .destructive) { Task { await leaveGroup(withdrawStake: true) } }
+            .confirmationDialog("Leave \(displayName)?", isPresented: $showWithdrawLeaveConfirmation, titleVisibility: .visible) {
+                Button("Sell and leave", role: .destructive) { Task { await leaveGroup(withdrawStake: true) } }
             } message: {
-                Text("Your deployed stake will be sold to USDC at market prices and credited to your account balance. Deposit history stays on record.")
-            }
-            .navigationDestination(item: $cabalActionDestination) { destination in
-                cabalActionDestinationView(for: destination)
+                Text("We'll sell your slice at today's prices and move the cash to your account balance.")
             }
     }
 
     @ViewBuilder
     private var content: some View {
         if let groupView {
-            groupContent(groupView)
+            GroupDetailContent(
+                auth: auth,
+                view: groupView,
+                currentUserId: session?.me?.userId,
+                proposalService: proposalService,
+                proposalRefreshToken: "\(proposalRefreshCount)",
+                activityItems: activityItems,
+                activityLoading: activityLoading,
+                activityError: activityError,
+                retryingTransactionIDs: retryingTransactionIDs,
+                joinRequests: joinRequests,
+                decidingRequestIDs: decidingRequestIDs,
+                onRoute: { route = $0 },
+                onPropose: { showProposeSheet = true },
+                onRetry: { item in Task { await retryTransaction(item) } },
+                onDecideJoinRequest: { request, approve in
+                    Task { await decideJoinRequest(request, approve: approve) }
+                },
+                onToast: { toast = $0 },
+                onHeroScrolledAway: { heroScrolledAway = $0 }
+            )
         } else if let errorMessage {
             statusCard {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(MonacoTheme.warning)
+                Text(errorMessage)
+                    .font(.body)
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .multilineTextAlignment(.center)
                 Button("Try again") {
                     Task { await loadGroup() }
                 }
-                .buttonStyle(.monacoPrimary)
+                .buttonStyle(.monacoSecondary)
             }
+            .accessibilityIdentifier("group-detail-error")
         } else if isLoading {
-            ProgressView("Loading cabal…")
-                .foregroundStyle(MonacoTheme.secondaryText)
-                .tint(MonacoTheme.accent)
+            GroupDetailSkeleton()
         } else {
             statusCard {
-                Text("Could not load cabal.")
+                Text("Couldn't load this cabal. Pull down to try again")
+                    .font(.body)
                     .foregroundStyle(MonacoTheme.secondaryText)
+                    .multilineTextAlignment(.center)
                 Button("Try again") {
                     Task { await loadGroup() }
                 }
-                .buttonStyle(.monacoPrimary)
+                .buttonStyle(.monacoSecondary)
             }
         }
     }
 
+    /// Scrollable so pull-to-refresh works from the error state too.
     private func statusCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            content()
+        ScrollView {
+            VStack(spacing: 16) {
+                content()
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 48)
         }
-        .padding()
-        .monacoSurfaceCard()
-        .padding()
+    }
+
+    @ViewBuilder
+    private func destination(for route: GroupDetailRoute) -> some View {
+        switch route {
+        case .addMoney:
+            FundCabalView(
+                auth: auth,
+                joinedCabals: [HomeGroupBoardRowDTO(
+                    groupId: groupId,
+                    name: displayName,
+                    potValueUsd: groupView?.resolvedPotTotalUsd ?? "0",
+                    percentReturn: nil,
+                    dollarPnl: groupView?.you.dollarPnl ?? "+0.00",
+                    isJoined: true
+                )],
+                preselectedGroupId: groupId,
+                onFunded: {
+                    await loadGroup()
+                    await loadActivity()
+                }
+            )
+        case .cashOut:
+            SellCabalView(
+                auth: auth,
+                groupId: groupId,
+                maxShareUnits: Int64(groupView?.you.shareUnits ?? "") ?? 0,
+                equityUsd: groupView?.you.equityUsd ?? "0",
+                onSold: {
+                    await loadGroup()
+                    await loadActivity()
+                },
+                onToast: { toast = $0 }
+            )
+        case .chat:
+            GroupChatView(auth: auth, groupId: groupId, groupName: displayName)
+        case .proposals:
+            ProposalFeedView(service: proposalService, groupId: groupId)
+        case .activity:
+            GroupActivityListView(
+                auth: auth,
+                items: activityItems,
+                retryingTransactionIDs: retryingTransactionIDs,
+                onRetry: { item in Task { await retryTransaction(item) } }
+            )
+        }
     }
 
     private var loadTaskID: String {
         "\(groupId)-\(auth.accessToken ?? "")"
     }
 
-    @ViewBuilder
-    private func cabalActionSection(for view: GroupViewDTO) -> some View {
-        Section {
-            VStack(spacing: MonacoTheme.Space.s) {
-                Button {
-                    cabalActionDestination = .deposit
-                } label: {
-                    Text("Deposit")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.monacoPrimary)
-                .accessibilityIdentifier("group-action-fund")
-
-                HStack(spacing: MonacoTheme.Space.s) {
-                    Button {
-                        cabalActionDestination = .propose
-                    } label: {
-                        Text("Propose")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.monacoSecondary)
-                    .accessibilityIdentifier("group-action-propose")
-
-                    Button {
-                        cabalActionDestination = .sell
-                    } label: {
-                        Text("Sell")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.monacoSecondary)
-                    .accessibilityIdentifier("group-action-sell")
-                }
-
-                Button {
-                    cabalActionDestination = .chat
-                } label: {
-                    Label("Cabal chat", systemImage: "bubble.left.and.bubble.right")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.monacoSecondary)
-                .accessibilityIdentifier("group-action-chat")
-            }
-            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-        }
+    /// Called by the propose sheet once the cabal has the proposal: close the sheet and confirm.
+    /// Closing the sheet reloads the open votes.
+    private func proposalSent(_ proposalId: String) {
+        showProposeSheet = false
+        Haptics.success()
+        toast = MonacoToast(message: "Proposal sent to \(displayName)", isSuccess: true)
     }
 
-    @ViewBuilder
-    private func cabalActionDestinationView(for destination: CabalActionDestination) -> some View {
-        switch destination {
-        case .deposit:
-            if let view = groupView {
-                FundCabalView(
-                    auth: auth,
-                    joinedCabals: [HomeGroupBoardRowDTO(
-                        groupId: groupId,
-                        name: view.name,
-                        potValueUsd: view.resolvedPotTotalUsd,
-                        percentReturn: nil,
-                        dollarPnl: view.you.dollarPnl,
-                        isJoined: true
-                    )],
-                    preselectedGroupId: groupId,
-                    onFunded: {
-                        await loadGroup()
-                        await loadActivity()
-                    }
-                )
-            }
-        case .propose:
-            if let view = groupView {
-                ProposeChooserView(auth: auth, groupId: groupId, groupView: view)
-            }
-        case .sell:
-            if let view = groupView {
-                SellCabalView(
-                    auth: auth,
-                    groupId: groupId,
-                    maxShareUnits: Int64(view.you.shareUnits) ?? 0,
-                    equityUsd: view.you.equityUsd,
-                    onSold: {
-                        await loadGroup()
-                        await loadActivity()
-                    }
-                )
-            }
-        case .chat:
-            if let view = groupView {
-                GroupChatView(auth: auth, groupId: groupId, groupName: view.name)
-            }
+    /// The details sheet asks to leave; the confirmation shows once the sheet is gone.
+    private func presentLeaveConfirmationIfRequested() {
+        guard leaveRequestedFromDetails, let groupView else { return }
+        leaveRequestedFromDetails = false
+        if hasDeployedStake(in: groupView) {
+            showWithdrawLeaveConfirmation = true
+        } else {
+            showLeaveConfirmation = true
         }
-    }
-
-    @ViewBuilder
-    private func leaveCabalSection(for view: GroupViewDTO) -> some View {
-        Section {
-            Button {
-                if hasDeployedStake(in: view) {
-                    showWithdrawLeaveConfirmation = true
-                } else {
-                    showLeaveConfirmation = true
-                }
-            } label: {
-                Text(isLeaving ? "Leaving…" : "Leave cabal")
-                    .frame(maxWidth: .infinity)
-            }
-            .monacoFormDestructiveAction()
-            .disabled(isLeaving)
-            .accessibilityIdentifier("group-action-leave")
-            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 12, trailing: 16))
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-        }
-    }
-
-    @ViewBuilder
-    private func groupContent(_ view: GroupViewDTO) -> some View {
-        List {
-            PotSectionView(
-                potTotalUsd: view.resolvedPotTotalUsd,
-                pot: view.pot,
-                treasuryAddress: view.treasuryAddress
-            )
-
-            cabalActionSection(for: view)
-
-            YouSectionView(slice: view.you)
-            if let agent = view.agent {
-                AgentSectionView(agent: agent)
-            }
-            MemberBoardSection(members: view.members)
-
-            if joinRequestsLoading || !joinRequests.isEmpty {
-                Section("Join requests") {
-                    if joinRequestsLoading && joinRequests.isEmpty { ProgressView("Loading requests…") }
-                    ForEach(joinRequests) { request in
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(spacing: 8) {
-                                MonacoAvatar(photoURL: request.profilePhotoUrl, displayName: request.displayName, size: 28)
-                                Text(request.displayName.isEmpty ? "Member" : request.displayName).font(.headline)
-                            }
-                            HStack {
-                                Button("Approve") { Task { await decideJoinRequest(request, approve: true) } }
-                                    .disabled(decidingRequestIDs.contains(request.id))
-                                Button("Deny", role: .destructive) { Task { await decideJoinRequest(request, approve: false) } }
-                                    .disabled(decidingRequestIDs.contains(request.id))
-                            }
-                        }
-                    }
-                }
-            }
-
-            GroupActivitySection(
-                auth: auth,
-                items: activityItems,
-                isLoading: activityLoading,
-                errorMessage: activityError,
-                retryingTransactionIDs: retryingTransactionIDs,
-                onRetry: { item in
-                    Task { await retryTransaction(item) }
-                }
-            )
-
-            ProposalHistorySection(
-                service: proposalService,
-                groupId: groupId,
-                refreshToken: "\(proposalRefreshCount)"
-            )
-
-            leaveCabalSection(for: view)
-        }
-        .monacoInsetList()
-        .background(Color.clear)
     }
 
     private func loadGroup() async {
         guard let token = auth.accessToken else {
             isLoading = false
-            errorMessage = "Missing sign-in token."
+            errorMessage = "Sign in again to see this cabal."
             return
         }
 
@@ -326,19 +289,19 @@ struct GroupDetailView: View {
             groupView = try await apiClient.getGroupView(accessToken: token, groupId: groupId)
         } catch is CancellationError {
             return
-        } catch MonacoAPIError.httpStatus(let code) {
+        } catch MonacoAPIError.httpStatus {
             if Task.isCancelled { return }
-            errorMessage = "Could not load cabal (HTTP \(code))."
+            errorMessage = "Couldn't load this cabal. Pull down to try again"
         } catch {
             if error.isRequestCancellation { return }
-            errorMessage = "Could not load cabal."
+            errorMessage = "Couldn't load this cabal. Pull down to try again"
         }
     }
 
     private func loadActivity(showLoadingIndicator: Bool = true) async {
         guard let token = auth.accessToken else {
             activityLoading = false
-            activityError = "Missing sign-in token."
+            activityError = "Sign in again to see activity."
             return
         }
 
@@ -358,12 +321,12 @@ struct GroupDetailView: View {
             surfaceDepositFailureToasts(from: response.items)
         } catch is CancellationError {
             return
-        } catch MonacoAPIError.httpStatus(let code) {
+        } catch MonacoAPIError.httpStatus {
             if Task.isCancelled { return }
-            activityError = "Could not load activity (HTTP \(code))."
+            activityError = "Couldn't load activity. Pull down to try again"
         } catch {
             if error.isRequestCancellation { return }
-            activityError = "Could not load activity."
+            activityError = "Couldn't load activity. Pull down to try again"
         }
     }
 
@@ -391,33 +354,33 @@ struct GroupDetailView: View {
         do {
             try await apiClient.leaveGroup(accessToken: token, groupId: groupId, withdrawStake: withdrawStake)
             if withdrawStake {
-                toast = MonacoToast(message: "Stake moved to your balance.")
+                toast = MonacoToast(message: "Cash moved to your account balance", isSuccess: true)
             }
             await onLeft()
             dismiss()
         } catch MonacoAPIError.leaveBlocked(let reason) {
             toast = MonacoToast(message: leaveBlockedMessage(for: reason))
-        } catch MonacoAPIError.httpStatus(let code) {
-            toast = MonacoToast(message: "Could not leave cabal (HTTP \(code)).")
+        } catch MonacoAPIError.httpStatus {
+            toast = MonacoToast(message: "Couldn't leave this cabal. Try again")
         } catch {
-            toast = MonacoToast(message: "Could not leave cabal.")
+            toast = MonacoToast(message: "Couldn't leave this cabal. Try again")
         }
     }
 
     private func leaveBlockedMessage(for reason: LeaveGroupBlockReason) -> String {
         switch reason {
-        case .shareUnitsRemaining: return "Redeem your slice before leaving."
-        case .lastMemberWithTreasury: return "You are the only member and the treasury still holds value."
-        case .pendingRedeem: return "Finish your pending redeem before leaving."
-        case .soleRemainingVote: return "Cast your vote on open proposals before leaving."
-        case .creatorMustTransfer: return "Transfer cabal ownership before leaving."
-        case .unknown: return "You cannot leave this cabal right now."
+        case .shareUnitsRemaining: return "Cash out your slice first."
+        case .lastMemberWithTreasury: return "You're the last member and the pot still has money in it."
+        case .pendingRedeem: return "Your cash out is still finishing. Try again in a minute."
+        case .soleRemainingVote: return "Vote on the open proposals before you leave."
+        case .creatorMustTransfer: return "Hand the cabal to another member before you leave."
+        case .unknown: return "You can't leave this cabal right now."
         }
     }
 
     private func retryTransaction(_ item: GroupActivityItemDTO) async {
         guard let token = auth.accessToken else {
-            toast = MonacoToast(message: "Missing sign-in token.")
+            toast = MonacoToast(message: "Sign in again to retry.")
             return
         }
         guard !retryingTransactionIDs.contains(item.id) else { return }
@@ -429,18 +392,19 @@ struct GroupDetailView: View {
             let result = try await apiClient.retryTransaction(accessToken: token, transactionId: item.id)
             await loadActivity(showLoadingIndicator: false)
             if result.status.lowercased() == "confirmed" {
-                toast = MonacoToast(message: "Swap confirmed.")
+                let done = item.kind.lowercased() == "sell" ? "Sold" : "Bought"
+                toast = MonacoToast(message: "\(done). Holdings updated", isSuccess: true)
             } else if result.status.lowercased() == "failed" {
-                toast = MonacoToast(message: "Swap failed again. Try later.")
+                toast = MonacoToast(message: "It didn't go through again. Try later")
             }
         } catch is CancellationError {
             return
         } catch MonacoAPIError.httpStatus(let code) where code == 409 {
-            toast = MonacoToast(message: "This swap can't be retried.")
-        } catch MonacoAPIError.httpStatus(let code) {
-            toast = MonacoToast(message: "Retry failed (HTTP \(code)).")
+            toast = MonacoToast(message: "This one can't be retried")
+        } catch MonacoAPIError.httpStatus {
+            toast = MonacoToast(message: "Retry didn't go through. Try again")
         } catch {
-            toast = MonacoToast(message: "Retry failed. Try again.")
+            toast = MonacoToast(message: "Retry didn't go through. Try again")
         }
     }
 
@@ -459,7 +423,7 @@ struct GroupDetailView: View {
 
     private func decideJoinRequest(_ request: JoinRequestDTO, approve: Bool) async {
         guard let token = auth.accessToken else {
-            toast = MonacoToast(message: "Missing sign-in token.")
+            toast = MonacoToast(message: "Sign in again to answer requests.")
             return
         }
         guard !decidingRequestIDs.contains(request.id) else { return }
@@ -471,11 +435,190 @@ struct GroupDetailView: View {
             } else {
                 try await apiClient.denyJoinRequest(accessToken: token, groupId: groupId, requestId: request.id)
             }
-            toast = MonacoToast(message: approve ? "Member approved." : "Join request denied.")
+            toast = MonacoToast(message: approve ? "\(request.displayName.isEmpty ? "Member" : request.displayName) is in" : "Request declined", isSuccess: true)
             await loadJoinRequests()
             await loadGroup()
         } catch {
-            toast = MonacoToast(message: "Could not update request.")
+            toast = MonacoToast(message: "Couldn't update the request. Try again")
         }
+    }
+}
+
+/// Scrollable layout of the group screen. Pure: data in, actions out.
+struct GroupDetailContent: View {
+    @ObservedObject var auth: PrivyAuthService
+    let view: GroupViewDTO
+    let currentUserId: String?
+    let proposalService: ProposalFeedService
+    let proposalRefreshToken: String
+    let activityItems: [GroupActivityItemDTO]
+    let activityLoading: Bool
+    let activityError: String?
+    let retryingTransactionIDs: Set<String>
+    let joinRequests: [JoinRequestDTO]
+    let decidingRequestIDs: Set<String>
+    let onRoute: (GroupDetailRoute) -> Void
+    let onPropose: () -> Void
+    let onRetry: (GroupActivityItemDTO) -> Void
+    let onDecideJoinRequest: (JoinRequestDTO, Bool) -> Void
+    let onToast: (MonacoToast) -> Void
+    var onHeroScrolledAway: (Bool) -> Void = { _ in }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 32) {
+                VStack(spacing: 20) {
+                    GroupHeroSection(view: view)
+                    GroupActionRow(onRoute: onRoute, onPropose: onPropose)
+                }
+
+                if !joinRequests.isEmpty {
+                    GroupJoinRequestsCard(
+                        requests: joinRequests,
+                        decidingRequestIDs: decidingRequestIDs,
+                        onDecide: onDecideJoinRequest
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 0) {
+                    ProposalHistorySection(
+                        service: proposalService,
+                        groupId: view.id,
+                        refreshToken: proposalRefreshToken,
+                        onSeeAll: { onRoute(.proposals) },
+                        onToast: onToast
+                    )
+                    PotSectionView(
+                        pot: view.pot,
+                        onAddMoney: { onRoute(.addMoney) }
+                    )
+                }
+
+                if let agent = view.agent {
+                    AgentSectionView(agent: agent)
+                }
+
+                MemberBoardSection(members: view.members, currentUserId: currentUserId)
+
+                GroupActivitySection(
+                    auth: auth,
+                    items: activityItems,
+                    isLoading: activityLoading,
+                    errorMessage: activityError,
+                    retryingTransactionIDs: retryingTransactionIDs,
+                    onRetry: onRetry,
+                    onSeeAll: { onRoute(.activity) }
+                )
+            }
+            .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.top, 8)
+            .padding(.bottom, 32)
+        }
+        .scrollIndicators(.hidden)
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentOffset.y + geometry.contentInsets.top > 140
+        } action: { _, scrolledAway in
+            onHeroScrolledAway(scrolledAway)
+        }
+    }
+}
+
+/// Add money · Propose · Cash out · Chat, directly under the hero.
+struct GroupActionRow: View {
+    let onRoute: (GroupDetailRoute) -> Void
+    let onPropose: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            action("Add money", systemImage: "plus", id: "group-action-fund") { onRoute(.addMoney) }
+            action("Propose", systemImage: "arrow.up.right", id: "group-action-propose", perform: onPropose)
+            action("Cash out", systemImage: "arrow.down.left", id: "group-action-sell") { onRoute(.cashOut) }
+            action("Chat", systemImage: "bubble.left", id: "group-action-chat") { onRoute(.chat) }
+        }
+    }
+
+    private func action(_ title: String, systemImage: String, id: String, perform: @escaping () -> Void) -> some View {
+        CircleAction(title, systemImage: systemImage, action: perform)
+            .frame(maxWidth: .infinity)
+            .accessibilityIdentifier(id)
+    }
+}
+
+/// Admin-only: people waiting to join, answered inline.
+struct GroupJoinRequestsCard: View {
+    let requests: [JoinRequestDTO]
+    let decidingRequestIDs: Set<String>
+    let onDecide: (JoinRequestDTO, Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            MonacoSectionHeader(requests.count == 1 ? "1 person wants to join" : "\(requests.count) people want to join")
+            VStack(spacing: 0) {
+                ForEach(requests) { request in
+                    let name = request.displayName.isEmpty ? "Member" : request.displayName
+                    HStack(spacing: 8) {
+                        MonacoAvatar(photoURL: request.profilePhotoUrl, displayName: name, size: 36)
+                        Text(name)
+                            .font(MonacoTheme.Typo.rowTitle)
+                            .foregroundStyle(MonacoTheme.ink)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .layoutPriority(1)
+                        Button("Deny") { onDecide(request, false) }
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                            .fixedSize()
+                            .foregroundStyle(MonacoTheme.muted)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .accessibilityIdentifier("join-request-deny-\(request.id)")
+                        Button("Approve") {
+                            Haptics.success()
+                            onDecide(request, true)
+                        }
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                            .fixedSize()
+                            .foregroundStyle(MonacoTheme.primaryButtonLabel)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 36)
+                            .background(Capsule().fill(MonacoTheme.primaryButtonFill))
+                            .frame(minHeight: 44)
+                            .accessibilityIdentifier("join-request-approve-\(request.id)")
+                    }
+                    .disabled(decidingRequestIDs.contains(request.id))
+                    .opacity(decidingRequestIDs.contains(request.id) ? 0.5 : 1)
+                    .padding(.vertical, 6)
+                }
+            }
+            .padding(.horizontal, MonacoTheme.Space.m)
+            .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
+        }
+        .accessibilityIdentifier("group-join-requests")
+    }
+}
+
+/// Placeholder shaped like the loaded screen: hero, action row, three rows.
+struct GroupDetailSkeleton: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 32) {
+            SkeletonBlock(height: 300, radius: MonacoTheme.Radius.hero)
+            HStack {
+                ForEach(0..<4, id: \.self) { _ in
+                    SkeletonBlock(width: 56, height: 56, radius: 28)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                SkeletonBlock(width: 120, height: 22)
+                ForEach(0..<3, id: \.self) { _ in
+                    SkeletonBlock(height: 60, radius: 14)
+                }
+            }
+        }
+        .padding(.horizontal, MonacoTheme.Space.gutter)
+        .padding(.top, 8)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading cabal")
+        .accessibilityIdentifier("group-detail-loading")
     }
 }

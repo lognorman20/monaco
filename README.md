@@ -128,7 +128,8 @@ full Privy setup. Local Postgres only. It never calls Privy, Solana RPC, or Jupi
 
 Two profiles:
 
-- **scale**: three fake clubs (Ridgewood Value Club, Night Shift Traders, Harbor Street Fund).
+- **scale**: six fake clubs (Ridgewood Value Club, Night Shift Traders, Harbor Street Fund, plus the
+  smaller Dorm 4B fund, Rent money and Index huggers).
   Each has a fake creator, five depositors, deposits spread over the last week, a confirmed
   AAPLx/TSLAx buy, a governed sell (Ridgewood and Night Shift), failed and open proposals, votes,
   and NAV history for charts. Any signed-in user sees them on Home (group board and people
@@ -139,13 +140,28 @@ Two profiles:
   (you must be its creator). They show up on the member board with P&L, deposits, and ghost-only
   proposals. They never count toward the pot, surplus credits, or the voter set, and they have no
   wallets or swaps. You can still deposit and propose for real.
+- **demo**: the recording variant of **mixed**. Same ghosts, plus six chat messages from the last
+  90 minutes, a thesis on the ghost Tesla proposal and one ghost comment on it. It skips the
+  pending and failed ghost deposits and the failed and expired ghost proposals, so no "Failed"
+  rows show on screen. Pass a second id, a real member's open proposal in the same club, to add
+  two ghost comments to it (Maya asks, Jordan replies).
 
 ```bash
 just reset db                        # optional: start from an empty DB
-just faker scale                     # three fake clubs
+just faker scale                     # six fake clubs
 just faker mixed <your_group_id>     # ghosts on your real club
 just faker all <your_group_id>       # both
+just faker demo <your_group_id> [<real_proposal_id>]   # recording setup
 ```
+
+Ghost votes cannot make a proposal votable (ghosts are outside the voter set), so the live vote
+in a demo is on a proposal a second real account creates in the app. Seed `demo` first, then
+re-run it with that proposal's id to add the comments. Re-running is safe.
+
+Photos: set `FAKER_PHOTO_BASE_URL` (for example
+`https://<project>.supabase.co/storage/v1/object/public/avatars/faker`) and upload `maya.jpg`,
+`jordan.jpg` and `priya.jpg` (square, 200 KB or less) there; see `docs/ops-profile-photos.md`.
+Without it the ghosts show initials.
 
 Re-running is safe: users are keyed by `faker:user:<name>` and clubs by `groups.faker_key`, so
 a re-run replaces the fake rows and moves the timestamps up to now, with no duplicates.
@@ -157,7 +173,8 @@ only accepts loopback callers with no proxy headers and a local `DATABASE_URL`:
 ```bash
 curl -s -X POST http://127.0.0.1:8080/v1/dev/faker \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"profile":"all","group_id":"<your_group_id>"}'   # profile: mixed | scale | all
+  -d '{"profile":"all","group_id":"<your_group_id>"}'   # profile: mixed | scale | all | demo
+# demo also takes "proposal_id": a real member's proposal in that club
 ```
 
 Safety: faker rows are flagged (`users.is_faker`, `groups.is_faker`, migration 000016). The

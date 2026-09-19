@@ -74,12 +74,9 @@ struct UserProfileGroupsView: View {
 
         do {
             groups = try await apiClient.getUserSharedGroups(accessToken: accessToken, userId: userId)
-        } catch MonacoAPIError.httpStatus(let status) {
-            groups = []
-            errorMessage = "Could not load clubs (HTTP \(status))."
         } catch {
             groups = []
-            errorMessage = "Could not load shared clubs."
+            errorMessage = "Couldn't load this. Pull down to try again"
         }
     }
 }

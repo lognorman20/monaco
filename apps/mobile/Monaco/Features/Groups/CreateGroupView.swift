@@ -9,8 +9,8 @@ enum JoinPolicyMode: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .open: "Anyone can join"
-        case .request: "Admin approval required"
+        case .open: "Anyone with the link"
+        case .request: "I approve"
         }
     }
 }
@@ -23,8 +23,8 @@ enum VoterSetMode: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .allMembers: "All members vote"
-        case .namedSubset: "You decide (named voters)"
+        case .allMembers: "Everyone"
+        case .namedSubset: "Just me"
         }
     }
 }
@@ -38,7 +38,7 @@ enum VoteThresholdMode: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .majority: "Majority"
-        case .unanimous: "Everyone must agree"
+        case .unanimous: "Everyone agrees"
         }
     }
 }
@@ -130,7 +130,7 @@ struct CreateGroupView: View {
             }
 
             Section {
-                Button(isCreating ? "Creating…" : "Start investing together") {
+                Button(isCreating ? "Creating…" : "Create cabal") {
                     Task { await createGroup() }
                 }
                 .disabled(isCreating || !canSubmit)
@@ -146,7 +146,7 @@ struct CreateGroupView: View {
             }
         }
         .monacoFormScreen()
-        .navigationTitle("Create cabal")
+        .navigationTitle("New cabal")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: auth.accessToken) {
             await loadCreatorProfile()
@@ -218,12 +218,11 @@ struct CreateGroupView: View {
                 threshold: threshold.rawValue,
                 voteExpirySeconds: voteExpiry.rawValue
             )
+            // #215: patch the session locally and refresh in the background; no full reload.
             session?.refreshAfterCreate(auth: auth, created: created)
             navigateToCreated = created
-        } catch MonacoAPIError.httpStatus(let status) {
-            errorMessage = "Could not create cabal (HTTP \(status))."
         } catch {
-            errorMessage = "Could not create cabal. Try again."
+            errorMessage = "Couldn't create this cabal. Try again."
         }
 
         isCreating = false

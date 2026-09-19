@@ -15,46 +15,49 @@ struct CommentThreadView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(ProposalFeedCopy.commentsTitle)
-                    .font(.headline)
-                Spacer()
-                if !comments.isEmpty {
-                    Text(ProposalFeedCopy.commentCount(comments.count))
-                        .font(.caption)
-                        .foregroundStyle(MonacoTheme.secondaryText)
-                }
-            }
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            MonacoSectionHeader(
+                ProposalFeedCopy.commentsTitle,
+                trailing: comments.isEmpty ? nil : ProposalFeedCopy.commentCount(comments.count)
+            )
 
             if isLoading && comments.isEmpty {
-                ProgressView()
-                    .tint(MonacoTheme.accent)
-                    .frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+                    ForEach(0..<2, id: \.self) { _ in
+                        HStack(alignment: .top, spacing: MonacoTheme.Space.sm) {
+                            SkeletonBlock(width: 28, height: 28, radius: 14)
+                            VStack(alignment: .leading, spacing: 6) {
+                                SkeletonBlock(width: 100, height: 12)
+                                SkeletonBlock(height: 12)
+                            }
+                        }
+                    }
+                }
             } else if let errorMessage, comments.isEmpty {
                 HStack {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(MonacoTheme.warning)
+                    Text(errorMessage)
+                        .font(MonacoTheme.Typo.callout)
+                        .foregroundStyle(MonacoTheme.muted)
                     Spacer()
-                    Button("Try again", action: onRetry)
-                        .font(.footnote.weight(.semibold))
+                    Button(ProposalFeedCopy.tryAgain, action: onRetry)
+                        .font(MonacoTheme.Typo.callout.weight(.semibold))
+                        .foregroundStyle(MonacoTheme.ink)
+                        .frame(minHeight: 44)
                 }
                 .accessibilityIdentifier("comment-thread-error")
             } else if rows.isEmpty {
                 Text(ProposalFeedCopy.emptyThread)
-                    .font(.subheadline)
-                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .font(MonacoTheme.Typo.callout)
+                    .foregroundStyle(MonacoTheme.muted)
                     .accessibilityIdentifier("comment-thread-empty")
             } else {
-                LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(rows) { row in
                         CommentRow(row: row, onReply: { onReply(row.comment) })
                     }
                 }
             }
         }
-        .monacoSurfaceCard()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("comment-thread")
     }
@@ -64,48 +67,59 @@ struct CommentRow: View {
     let row: ProposalCommentThreadRow
     let onReply: () -> Void
 
-    private static let indentWidth: CGFloat = 14
+    private static let indentWidth: CGFloat = 18
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             ForEach(0..<row.indentLevel, id: \.self) { _ in
                 Rectangle()
-                    .fill(MonacoTheme.border)
-                    .frame(width: 1)
-                    .padding(.leading, Self.indentWidth - 1)
+                    .fill(MonacoTheme.hairline)
+                    .frame(width: 2)
+                    .padding(.trailing, Self.indentWidth - 2)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(row.comment.authorName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(MonacoTheme.primaryText)
-                    Text(ProposalTimeFormatter.ageLabel(row.comment.createdAt))
-                        .font(.caption)
-                        .foregroundStyle(MonacoTheme.secondaryText)
+            HStack(alignment: .top, spacing: MonacoTheme.Space.sm) {
+                MonacoAvatar(photoURL: nil, displayName: row.comment.authorName, size: 28)
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(row.comment.authorName)
+                            .font(MonacoTheme.Typo.callout.weight(.semibold))
+                            .foregroundStyle(MonacoTheme.ink)
+                            .lineLimit(1)
+                        Text(RelativeTimeFormatter.label(iso: row.comment.createdAt))
+                            .font(MonacoTheme.Typo.caption)
+                            .foregroundStyle(MonacoTheme.tertiaryText)
+                    }
+                    Text(row.comment.body)
+                        .font(MonacoTheme.Typo.callout)
+                        .foregroundStyle(MonacoTheme.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
                 }
-                Text(row.comment.body)
-                    .font(.subheadline)
-                    .foregroundStyle(MonacoTheme.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-                Button(ProposalFeedCopy.reply, action: onReply)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(MonacoTheme.accent)
-                    .buttonStyle(.borderless)
-                    .frame(minHeight: 32)
-                    .accessibilityIdentifier("comment-reply-\(row.comment.id)")
+                Spacer(minLength: 0)
+                Button(action: onReply) {
+                    Image(systemName: "arrowshape.turn.up.left")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(MonacoTheme.muted)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(ProposalFeedCopy.replyAccessibility)
+                .accessibilityIdentifier("comment-reply-\(row.comment.id)")
+                .padding(.top, -8)
+                .padding(.trailing, -12)
             }
-            .padding(.leading, row.indentLevel > 0 ? 10 : 0)
-            .padding(.vertical, 8)
-            Spacer(minLength: 0)
         }
+        .padding(.vertical, MonacoTheme.Space.s)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("comment-row-\(row.comment.id)")
     }
 }
 
-/// Bottom composer. Posts top-level comments, or a reply when `replyTarget` is set.
+/// Bottom composer: pill field and a round send button. Posts a top-level comment, or a reply when
+/// `replyTarget` is set.
 struct CommentComposer: View {
     @Binding var text: String
     let replyTarget: ProposalCommentDTO?
@@ -119,64 +133,86 @@ struct CommentComposer: View {
         ProposalCommentDraft(text: text)
     }
 
+    private var canPost: Bool {
+        draft.body != nil && !isPosting
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             if let replyTarget {
                 HStack {
                     Text(ProposalFeedCopy.replyingTo(replyTarget.authorName))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(MonacoTheme.secondaryText)
+                        .font(MonacoTheme.Typo.caption.weight(.semibold))
+                        .foregroundStyle(MonacoTheme.muted)
                     Spacer()
                     Button {
                         onCancelReply()
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(MonacoTheme.secondaryText)
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(MonacoTheme.muted)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("Cancel reply")
                     .accessibilityIdentifier("comment-composer-cancel-reply")
                 }
             }
 
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField(ProposalFeedCopy.composerPlaceholder, text: $text, axis: .vertical)
-                    .lineLimit(1...5)
-                    .focused($focused)
-                    .monacoFormTextField()
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(MonacoTheme.background, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .accessibilityIdentifier("comment-composer-field")
+            HStack(alignment: .bottom, spacing: MonacoTheme.Space.s) {
+                TextField(
+                    "",
+                    text: $text,
+                    prompt: Text(ProposalFeedCopy.composerPlaceholder).foregroundStyle(MonacoTheme.tertiaryText),
+                    axis: .vertical
+                )
+                .font(MonacoTheme.Typo.body)
+                .foregroundStyle(MonacoTheme.ink)
+                .tint(MonacoTheme.ink)
+                .lineLimit(1...5)
+                .focused($focused)
+                .padding(.horizontal, MonacoTheme.Space.m)
+                .padding(.vertical, 11)
+                .frame(minHeight: 44)
+                .background(MonacoTheme.surfaceSunken, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .accessibilityIdentifier("comment-composer-field")
 
                 Button {
                     if let body = draft.body {
-                        focused = false
                         onPost(body)
                     }
                 } label: {
-                    if isPosting {
-                        ProgressView().tint(MonacoTheme.primaryButtonLabel)
-                    } else {
-                        Text(ProposalFeedCopy.send)
+                    ZStack {
+                        Circle().fill(canPost ? MonacoTheme.primaryButtonFill : MonacoTheme.disabled)
+                        if isPosting {
+                            ProgressView().tint(MonacoTheme.primaryButtonLabel)
+                        } else {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(MonacoTheme.primaryButtonLabel)
+                        }
                     }
+                    .frame(width: 44, height: 44)
                 }
-                .buttonStyle(.monacoPrimary)
-                .disabled(draft.body == nil || isPosting)
+                .buttonStyle(.plain)
+                .disabled(!canPost)
+                .accessibilityLabel(ProposalFeedCopy.postAccessibility)
                 .accessibilityIdentifier("comment-composer-send")
             }
 
             if case .tooLong = draft {
                 Text(ProposalFeedCopy.commentTooLong)
-                    .font(.caption)
-                    .foregroundStyle(MonacoTheme.warning)
+                    .font(MonacoTheme.Typo.caption)
+                    .foregroundStyle(MonacoTheme.loss)
                     .accessibilityIdentifier("comment-composer-too-long")
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(MonacoTheme.surface)
+        .padding(.horizontal, MonacoTheme.Space.gutter)
+        .padding(.vertical, MonacoTheme.Space.s)
+        .background(MonacoTheme.canvas.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) {
-            Rectangle().fill(MonacoTheme.border).frame(height: 1)
+            Rectangle().fill(MonacoTheme.hairline).frame(height: 1)
         }
         .onChange(of: replyTarget?.id) { _, newValue in
             if newValue != nil { focused = true }

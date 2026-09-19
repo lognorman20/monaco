@@ -5,38 +5,46 @@ struct HomePositionsSection: View {
     @ObservedObject var auth: PrivyAuthService
     let rows: [HomeMyGroupRowDTO]
     var onLeft: () async -> Void = {}
+    var onBrowseCabals: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            Text("Your positions")
-                .font(MonacoTheme.TypeRole.title)
-                .foregroundStyle(MonacoTheme.ink)
+            MonacoSectionHeader("Your cabals")
 
             if rows.isEmpty {
-                MonacoEmptyStateCard(
-                    message: "Join a cabal to see your positions here.",
-                    systemImage: "person.3"
+                EmptyState(
+                    title: "No cabals yet",
+                    message: "Start one with friends or join an open one.",
+                    actionTitle: "Browse cabals",
+                    action: onBrowseCabals
                 )
+                .accessibilityIdentifier("home-cabals-empty")
             } else {
-                ForEach(rows) { row in
-                    NavigationLink {
-                        GroupDetailView(
-                            auth: auth,
-                            groupId: row.groupId,
-                            groupName: row.name,
-                            onLeft: onLeft
-                        )
-                    } label: {
-                        MonacoRowCard(
-                            systemImage: "person.3.fill",
-                            title: row.name,
-                            subtitle: "\(UsdAmountFormatter.format(decimalString: row.equityUsd)) · \(SlicePercentFormatter.format(row.slicePercent)) of pot",
-                            trailing: "\(PercentReturnFormatter.format(row.percentReturn))  \(row.dollarPnl)",
-                            trailingColor: MonacoTheme.signed(row.dollarPnl)
-                        )
+                MonacoGroupedList {
+                    ForEach(rows) { row in
+                        NavigationLink {
+                            GroupDetailView(
+                                auth: auth,
+                                groupId: row.groupId,
+                                groupName: row.name,
+                                onLeft: onLeft
+                            )
+                        } label: {
+                            MonacoRow(
+                                title: row.name,
+                                subtitle: "Your slice \(UsdAmountFormatter.format(decimalString: row.equityUsd))",
+                                chevron: true,
+                                isLast: row.groupId == rows.last?.groupId,
+                                leading: { CabalMark(groupId: row.groupId, name: row.name) },
+                                trailing: {
+                                    PnLText(dollarPnl: row.dollarPnl, style: .row)
+                                    PercentText(percentReturn: row.percentReturn, style: .caption)
+                                }
+                            )
+                        }
+                        .buttonStyle(.monacoRow)
+                        .accessibilityIdentifier("home-my-group-\(row.groupId)")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("home-my-group-\(row.groupId)")
                 }
             }
         }

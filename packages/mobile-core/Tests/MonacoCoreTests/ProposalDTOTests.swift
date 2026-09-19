@@ -87,7 +87,8 @@ final class ProposalDTOTests: XCTestCase {
               "expiresAt": "2026-09-19T01:00:00Z",
               "canVote": true,
               "voteSummary": {"yesCount": 2, "noCount": 1, "eligibleCount": 5, "threshold": "majority"},
-              "commentCount": 4
+              "commentCount": 4,
+              "thesis": "Earnings Thursday."
             }
           ]
         }
@@ -101,6 +102,8 @@ final class ProposalDTOTests: XCTestCase {
         XCTAssertEqual(card.voteSummary, ProposalVoteSummaryDTO(yesCount: 2, noCount: 1, eligibleCount: 5, threshold: "majority"))
         XCTAssertEqual(card.commentCount, 4)
         XCTAssertEqual(card.proposerName, "Ada")
+        // The feed card's reason line reads the thesis straight from the list item.
+        XCTAssertEqual(card.thesis, "Earnings Thursday.")
         XCTAssertTrue(card.showsVoteActions)
         XCTAssertNil(card.votes)
     }

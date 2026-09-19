@@ -1,7 +1,8 @@
+import MonacoCore
 import SwiftUI
 import UIKit
 
-/// Move USDC from account balance into a joined cabal treasury.
+/// Move USDC from account balance into a joined cabal's pot.
 struct FundCabalView: View {
     @ObservedObject var auth: PrivyAuthService
     let joinedCabals: [HomeGroupBoardRowDTO]
@@ -22,103 +23,132 @@ struct FundCabalView: View {
         preselectedGroupId != nil
     }
 
+    private var selectedCabalName: String? {
+        joinedCabals.first(where: { $0.groupId == selectedGroupId })?.name
+    }
+
+    private var screenTitle: String {
+        guard let selectedCabalName else { return "Add money" }
+        return "Add money to \(selectedCabalName)"
+    }
+
+    private var maxDollars: Decimal? {
+        guard let micros = balance?.availableUsdcMicros, micros > 0 else { return nil }
+        return Decimal(micros) / Decimal(1_000_000)
+    }
+
     private var showDepositPrompt: Bool {
         guard let balance, !isLoadingBalance else { return false }
         return balance.availableUsdcMicros <= 0
     }
 
+    private var ctaTitle: String {
+        guard let value = AmountEntryText.decimal(amountText), value > 0 else { return "Add money" }
+        return "Add \(AmountEntryText.display(amountText)) to the pot"
+    }
+
+    private var canSubmit: Bool {
+        guard let value = AmountEntryText.decimal(amountText), value > 0 else { return false }
+        if let maxDollars { return value <= maxDollars }
+        return false
+    }
+
     var body: some View {
-        Form {
-            Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
+                if !isSingleCabalContext, !joinedCabals.isEmpty {
+                    cabalPicker
+                }
+
                 if isLoadingBalance {
-                    HStack(spacing: 12) {
-                        ProgressView().tint(MonacoTheme.accent)
-                        Text("Loading account balance…")
-                            .monacoSecondaryCaption()
-                    }
-                } else if let balance {
-                    LabeledContent("Available", value: formatUsdc(balance.availableUsdcMicros))
-                        .accessibilityIdentifier("fund-cabal-available-balance")
-                    if balance.pendingAllocationMicros > 0 {
-                        Text("$\(formatUsdAmount(balance.pendingAllocationMicros)) is moving into a cabal.")
-                            .monacoSecondaryCaption()
-                    }
+                    ProgressView()
+                        .tint(MonacoTheme.accent)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, MonacoTheme.Space.xl)
+                } else if joinedCabals.isEmpty {
+                    Text("Join a cabal first, then fund it from your account balance.")
+                        .font(MonacoTheme.Typo.body)
+                        .foregroundStyle(MonacoTheme.muted)
+                } else if showDepositPrompt {
+                    depositPrompt
                 } else {
-                    Text(errorMessage ?? "Could not load account balance.")
+                    AmountEntry(
+                        amountText: $amountText,
+                        max: maxDollars,
+                        presets: [.dollars(25), .dollars(50), .dollars(100), .fraction(1, label: "Max")],
+                        helper: "From your account balance"
+                    )
+                    .padding(.top, MonacoTheme.Space.l)
+                }
+
+                if let errorMessage, balance == nil, !isLoadingBalance {
+                    Text(errorMessage)
+                        .font(MonacoTheme.Typo.callout)
                         .foregroundStyle(MonacoTheme.warning)
                 }
-            } header: {
-                Text("Account balance")
             }
-
-            if showDepositPrompt {
-                Section("Add USDC first") {
-                    Text("Send USDC on Solana to your deposit address. Your account balance updates when it arrives, then you can fund this cabal.")
-                        .monacoSecondaryCaption()
-                    if let address = validDepositAddress {
-                        MonacoWalletAddressText(address: address)
-                            .accessibilityIdentifier("fund-cabal-deposit-address")
-                            .onTapGesture { copyAddress(address) }
-                        Button {
-                            copyAddress(address)
-                        } label: {
-                            Label("Copy deposit address", systemImage: "doc.on.doc")
-                        }
-                        .monacoFormSecondaryAction()
-                        .accessibilityIdentifier("fund-cabal-copy-deposit-address")
-                    } else {
-                        Text("Deposit address not ready yet.")
-                            .foregroundStyle(MonacoTheme.warning)
+            .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.top, MonacoTheme.Space.m)
+            .padding(.bottom, MonacoTheme.Space.xl)
+        }
+        .monacoCanvas()
+        .safeAreaInset(edge: .bottom) {
+            if !showDepositPrompt, !joinedCabals.isEmpty, !isLoadingBalance {
+                BottomCTA {
+                    Button(isSubmitting ? "Adding money…" : ctaTitle) {
+                        Task { await submitFund() }
                     }
+                    .buttonStyle(.monacoPrimary)
+                    .disabled(isSubmitting || selectedGroupId == nil || !canSubmit)
+                    .accessibilityIdentifier("fund-cabal-submit-button")
                 }
-            }
-
-            if !isSingleCabalContext {
-                Section("Choose cabal") {
-                    if joinedCabals.isEmpty {
-                        Text("Join a cabal first, then fund it from your account balance.")
-                            .monacoSecondaryCaption()
-                    } else {
-                        Picker("Cabal", selection: $selectedGroupId) {
-                            ForEach(joinedCabals) { cabal in
-                                Text(cabal.name).tag(Optional(cabal.groupId))
-                            }
-                        }
-                        .accessibilityIdentifier("fund-cabal-picker")
-                    }
-                }
-            }
-
-            Section("Amount") {
-                TextField("USDC amount", text: $amountText)
-                    .keyboardType(.decimalPad)
-                    .accessibilityIdentifier("fund-cabal-amount-field")
-                if let maxMicros = balance?.availableUsdcMicros, maxMicros > 0 {
-                    Button("Use max (\(formatUsdc(maxMicros)))") {
-                        amountText = String(format: "%.2f", Double(maxMicros) / 1_000_000.0)
-                    }
-                    .monacoFormSecondaryAction()
-                    .accessibilityIdentifier("fund-cabal-max-button")
-                }
-            }
-
-            Section {
-                Button(isSubmitting ? "Funding…" : "Fund cabal") {
-                    Task { await submitFund() }
-                }
-                .monacoFormPrimaryAction()
-                .disabled(isSubmitting || joinedCabals.isEmpty || selectedGroupId == nil || showDepositPrompt)
-                .accessibilityIdentifier("fund-cabal-submit-button")
             }
         }
-        .monacoFormScreen()
-        .navigationTitle(isSingleCabalContext ? "Fund this cabal" : "Fund a cabal")
+        .navigationTitle(screenTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .monacoToast($toast)
+        .monacoToast($toast, bottomInset: 72)
         .task(id: auth.accessToken) {
             await loadBalance()
             if selectedGroupId == nil {
                 selectedGroupId = preselectedGroupId ?? joinedCabals.first?.groupId
+            }
+        }
+    }
+
+    private var cabalPicker: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            MonacoSectionHeader("Cabal")
+            Picker("Cabal", selection: $selectedGroupId) {
+                ForEach(joinedCabals) { cabal in
+                    Text(cabal.name).tag(Optional(cabal.groupId))
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(MonacoTheme.ink)
+            .accessibilityIdentifier("fund-cabal-picker")
+        }
+    }
+
+    private var depositPrompt: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            MonacoSectionHeader("Add USDC first")
+            Text("Send USDC on Solana to your deposit address. Your account balance updates when it arrives, then you can fund this cabal.")
+                .font(MonacoTheme.Typo.callout)
+                .foregroundStyle(MonacoTheme.muted)
+            if let address = validDepositAddress {
+                MonacoWalletAddressText(address: address)
+                    .accessibilityIdentifier("fund-cabal-deposit-address")
+                Button {
+                    copyAddress(address)
+                } label: {
+                    Text("Copy deposit address")
+                }
+                .buttonStyle(.monacoSecondary)
+                .accessibilityIdentifier("fund-cabal-copy-deposit-address")
+            } else {
+                Text("Deposit address not ready yet.")
+                    .font(MonacoTheme.Typo.body)
+                    .foregroundStyle(MonacoTheme.warning)
             }
         }
     }
@@ -149,11 +179,11 @@ struct FundCabalView: View {
         errorMessage = nil
         do {
             balance = try await apiClient.getPlatformBalance(accessToken: token)
-        } catch MonacoAPIError.httpStatus(let status) {
-            errorMessage = "Could not load balance (HTTP \(status))."
+        } catch MonacoAPIError.httpStatus {
+            errorMessage = "Couldn't load your balance. Pull down to try again."
             balance = nil
         } catch {
-            errorMessage = "Could not load account balance."
+            errorMessage = "No connection. Check your internet and try again."
             balance = nil
         }
         isLoadingBalance = false
@@ -162,12 +192,16 @@ struct FundCabalView: View {
     private func submitFund() async {
         guard let token = auth.accessToken else { return }
         guard let groupId = selectedGroupId else { return }
-        guard let micros = parseUsdcMicros(amountText), micros > 0 else {
-            toast = MonacoToast(message: "Enter a valid USDC amount.", isSuccess: false)
+        guard let value = AmountEntryText.decimal(amountText), value > 0 else {
+            toast = MonacoToast(message: "Enter a valid amount.", isSuccess: false)
             return
         }
+        var rounded = Decimal()
+        var scaled = value * 1_000_000
+        NSDecimalRound(&rounded, &scaled, 0, .plain)
+        let micros = (rounded as NSDecimalNumber).int64Value
         if let available = balance?.availableUsdcMicros, micros > available {
-            toast = MonacoToast(message: "Amount exceeds your available balance.", isSuccess: false)
+            toast = MonacoToast(message: "More than you have. Try a smaller amount.", isSuccess: false)
             return
         }
 
@@ -176,32 +210,20 @@ struct FundCabalView: View {
 
         do {
             _ = try await apiClient.fundGroup(accessToken: token, groupId: groupId, amount: micros)
-            toast = MonacoToast(message: "Funding started — your share updates when the transfer confirms.", isSuccess: true)
+            Haptics.success()
+            let name = selectedCabalName ?? "your cabal"
+            toast = MonacoToast(message: "Added \(AmountEntryText.display(amountText)) to \(name).", isSuccess: true)
             amountText = ""
             await loadBalance()
             await onFunded()
         } catch MonacoAPIError.httpStatus(400) {
-            toast = MonacoToast(message: "Amount exceeds your available balance.", isSuccess: false)
+            toast = MonacoToast(message: "More than you have. Try a smaller amount.", isSuccess: false)
         } catch MonacoAPIError.httpStatus(403) {
-            toast = MonacoToast(message: "You must be a cabal member to fund it.", isSuccess: false)
-        } catch MonacoAPIError.httpStatus(let status) {
-            toast = MonacoToast(message: "Could not fund cabal (HTTP \(status)).", isSuccess: false)
+            toast = MonacoToast(message: "You must be a cabal member to add money to it.", isSuccess: false)
+        } catch MonacoAPIError.httpStatus {
+            toast = MonacoToast(message: "Couldn't add that money. Try again.", isSuccess: false)
         } catch {
-            toast = MonacoToast(message: "Could not fund cabal. Try again.", isSuccess: false)
+            toast = MonacoToast(message: "No connection. Check your internet and try again.", isSuccess: false)
         }
-    }
-
-    private func parseUsdcMicros(_ raw: String) -> Int64? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let value = Double(trimmed), value > 0 else { return nil }
-        return Int64((value * 1_000_000.0).rounded())
-    }
-
-    private func formatUsdc(_ micros: Int64) -> String {
-        String(format: "$%.2f", Double(micros) / 1_000_000.0)
-    }
-
-    private func formatUsdAmount(_ micros: Int64) -> String {
-        String(format: "%.2f", Double(micros) / 1_000_000.0)
     }
 }

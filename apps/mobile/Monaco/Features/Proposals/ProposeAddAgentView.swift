@@ -1,96 +1,207 @@
+import MonacoCore
 import SwiftUI
 
+/// Propose adding a trading bot with a budget from the pot. The key is minted only after the vote passes.
 struct ProposeAddAgentView: View {
-    @ObservedObject var auth: PrivyAuthService
     let groupId: String
-    let treasuryTotalMicros: Int64?
+    var onProposed: ((_ proposalId: String) -> Void)?
 
-    private let apiClient = MonacoAPIClient()
+    private let service: ProposeService
 
-    @State private var agentName = ""
-    @State private var allocationText = ""
-    @State private var isSubmitting = false
-    @State private var errorMessage: String?
-    @State private var toast: MonacoToast?
     @Environment(\.dismiss) private var dismiss
+    @State private var pot: ProposePot?
+    @State private var name = ""
+    @State private var amountText = ""
+    @State private var isSending = false
+    @State private var errorMessage: String?
+
+    init(service: ProposeService, groupId: String, pot: ProposePot?, onProposed: ((_ proposalId: String) -> Void)? = nil) {
+        self.service = service
+        self.groupId = groupId
+        self.onProposed = onProposed
+        _pot = State(initialValue: pot)
+    }
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var budgetMicros: Int64? {
+        ProposeMath.micros(fromAmountText: amountText)
+    }
+
+    private var isOverPot: Bool {
+        guard let budgetMicros, let pot else { return false }
+        return budgetMicros > pot.totalMicros
+    }
+
+    private var canSend: Bool {
+        !trimmedName.isEmpty && budgetMicros != nil && !isOverPot && !isSending
+    }
 
     var body: some View {
-        Form {
-            Section {
-                Text("Members vote once to add an AI agent with a treasury budget. After the vote passes, you copy the API key into your bot.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
+        ScrollView {
+            VStack(spacing: MonacoTheme.Space.xl) {
+                AmountEntry(
+                    amountText: $amountText,
+                    max: pot.map { ProposeMath.usd(fromMicros: $0.totalMicros) },
+                    presets: [.dollars(50), .dollars(100), .dollars(250)],
+                    helper: ProposeFlowCopy.botBudgetHelper,
+                    overLimitHelper: ProposeFlowCopy.overPot
+                )
+                .accessibilityIdentifier("add-agent-allocation-field")
 
-            Section("Agent") {
-                TextField("Agent name", text: $agentName)
+                MonacoTextField(ProposeFlowCopy.botNamePlaceholder, text: $name)
                     .accessibilityIdentifier("add-agent-name-field")
-                TextField("Allocation (USDC)", text: $allocationText)
-                    .keyboardType(.decimalPad)
-                    .accessibilityIdentifier("add-agent-allocation-field")
-                if let treasuryTotalMicros {
-                    Text("Treasury total: \(formatUsd(micros: treasuryTotalMicros))")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+
+                Text(ProposeFlowCopy.botExplainer)
+                    .font(MonacoTheme.Typo.callout)
+                    .foregroundStyle(MonacoTheme.muted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(MonacoTheme.Typo.callout)
+                        .foregroundStyle(MonacoTheme.loss)
+                        .multilineTextAlignment(.center)
                 }
             }
-
-            if let errorMessage {
-                Section {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(MonacoTheme.warning)
+            .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.vertical, MonacoTheme.Space.m)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .background(MonacoTheme.canvas.ignoresSafeArea())
+        .navigationTitle(ProposeFlowCopy.addBotTitle)
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            BottomCTA {
+                Button {
+                    Task { await send() }
+                } label: {
+                    ZStack {
+                        Text(ProposeFlowCopy.sendToCabal).opacity(isSending ? 0 : 1)
+                        if isSending { ProgressView().tint(MonacoTheme.primaryButtonLabel) }
+                    }
                 }
-            }
-
-            Section {
-                Button(isSubmitting ? "Submitting…" : "Propose add agent") {
-                    Task { await submit() }
-                }
-                .disabled(isSubmitting || !canSubmit)
+                .buttonStyle(.monacoPrimary)
+                .disabled(!canSend)
                 .accessibilityIdentifier("add-agent-submit")
             }
         }
-        .monacoFormScreen()
-        .monacoToast($toast)
-        .navigationTitle("Add agent")
-    }
-
-    private var canSubmit: Bool {
-        !agentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && allocationMicros > 0
-    }
-
-    private var allocationMicros: Int64 {
-        guard let decimal = Decimal(string: allocationText.trimmingCharacters(in: .whitespaces)), decimal > 0 else {
-            return 0
+        .task {
+            if pot == nil { pot = try? await service.pot(groupId: groupId) }
         }
-        return (decimal as NSDecimalNumber).multiplying(by: 1_000_000).int64Value
     }
 
-    private func submit() async {
-        guard let token = auth.accessToken else { return }
-        isSubmitting = true
+    private func send() async {
+        guard canSend, let budgetMicros else { return }
+        Haptics.tap()
+        isSending = true
         errorMessage = nil
-        defer { isSubmitting = false }
-
+        defer { isSending = false }
         do {
-            _ = try await apiClient.createProposal(
-                accessToken: token,
-                groupId: groupId,
-                kind: "add_agent",
-                symbol: nil,
-                usdcMicros: nil,
-                tokenAmount: nil,
-                agentDisplayName: agentName.trimmingCharacters(in: .whitespacesAndNewlines),
-                allocationUsdcMicros: allocationMicros
-            )
-            toast = MonacoToast(message: "Add agent proposal created", isSuccess: true)
-            dismiss()
+            let id = try await service.propose(groupId: groupId, draft: .addAgent(name: trimmedName, allocationMicros: budgetMicros))
+            if let onProposed {
+                onProposed(id)
+            } else {
+                Haptics.success()
+                dismiss()
+            }
         } catch {
-            errorMessage = error.localizedDescription
+            if error.isRequestCancellation { return }
+            errorMessage = ProposeErrorCopy.propose(error)
+            Haptics.warning()
+        }
+    }
+}
+
+/// Pause, resume, or remove the cabal's trading bot: one question and one button.
+struct ProposeAgentLifecycleView: View {
+    let groupId: String
+    let kind: String
+    let botName: String
+    var onProposed: ((_ proposalId: String) -> Void)?
+
+    private let service: ProposeService
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var isSending = false
+    @State private var errorMessage: String?
+
+    init(service: ProposeService, groupId: String, kind: String, botName: String, onProposed: ((_ proposalId: String) -> Void)? = nil) {
+        self.service = service
+        self.groupId = groupId
+        self.kind = kind
+        self.botName = botName
+        self.onProposed = onProposed
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+            HStack(spacing: MonacoTheme.Space.sm) {
+                StockMark(systemImage: "cpu", size: 56)
+                Text(botName)
+                    .font(MonacoTheme.Typo.title)
+                    .foregroundStyle(MonacoTheme.ink)
+                    .lineLimit(1)
+            }
+            Text(ProposeFlowCopy.lifecycleTitle(kind: kind))
+                .font(MonacoTheme.Typo.display)
+                .foregroundStyle(MonacoTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(ProposeFlowCopy.lifecycleMessage(kind: kind, botName: botName))
+                .font(MonacoTheme.Typo.body)
+                .foregroundStyle(MonacoTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(MonacoTheme.Typo.callout)
+                    .foregroundStyle(MonacoTheme.loss)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, MonacoTheme.Space.gutter)
+        .padding(.top, MonacoTheme.Space.l)
+        .background(MonacoTheme.canvas.ignoresSafeArea())
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            BottomCTA {
+                Button {
+                    Task { await send() }
+                } label: {
+                    ZStack {
+                        Text(ProposeFlowCopy.sendToCabal).opacity(isSending ? 0 : 1)
+                        if isSending { ProgressView().tint(MonacoTheme.primaryButtonLabel) }
+                    }
+                }
+                .buttonStyle(.monacoPrimary)
+                .disabled(isSending)
+                .accessibilityIdentifier("agent-lifecycle-submit")
+            }
         }
     }
 
-    private func formatUsd(micros: Int64) -> String {
-        String(format: "$%.2f", Double(micros) / 1_000_000.0)
+    private func send() async {
+        guard !isSending else { return }
+        Haptics.tap()
+        isSending = true
+        errorMessage = nil
+        defer { isSending = false }
+        do {
+            let id = try await service.propose(groupId: groupId, draft: .agentLifecycle(kind: kind))
+            if let onProposed {
+                onProposed(id)
+            } else {
+                Haptics.success()
+                dismiss()
+            }
+        } catch {
+            if error.isRequestCancellation { return }
+            errorMessage = ProposeErrorCopy.propose(error)
+            Haptics.warning()
+        }
     }
 }

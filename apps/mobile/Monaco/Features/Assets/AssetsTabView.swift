@@ -39,26 +39,24 @@ struct AssetsTabView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
             MonacoSearchField(
-                placeholder: "Search a stock",
+                placeholder: "Search Apple, Tesla, NVDA…",
                 text: $searchQuery,
                 isEnabled: true
             )
             .accessibilityIdentifier("assets-search-field")
 
             if !isSearching {
-                Text("Popular")
-                    .font(MonacoTheme.TypeRole.title)
-                    .foregroundStyle(MonacoTheme.ink)
+                MonacoSectionHeader("Popular")
             }
 
-            gridRegion
+            listRegion
         }
         .padding(MonacoTheme.Space.m)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .monacoCanvas()
         .foregroundStyle(MonacoTheme.ink)
-        .navigationTitle("Assets")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Stocks")
+        .navigationBarTitleDisplayMode(.large)
         .accessibilityIdentifier("assets-root")
         .navigationDestination(isPresented: Binding(
             get: { selectedSymbol != nil },
@@ -82,56 +80,48 @@ struct AssetsTabView: View {
     }
 
     @ViewBuilder
-    private var gridRegion: some View {
+    private var listRegion: some View {
         if isSearching, isLoadingList, assets.isEmpty, !listFailed {
             centeredStatus {
                 ProgressView()
                     .tint(MonacoTheme.ink)
                 Text("Loading stocks…")
-                    .font(MonacoTheme.TypeRole.caption)
+                    .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(MonacoTheme.muted)
             }
             .accessibilityIdentifier("assets-search-loading")
         } else if isSearching, listFailed, assets.isEmpty {
             centeredStatus {
-                MonacoEmptyStateCard(
-                    message: "Could not load stocks.",
-                    systemImage: "exclamationmark.triangle"
+                EmptyState(
+                    title: "Could not load stocks",
+                    actionTitle: "Retry",
+                    action: { Task { await loadList(reset: true) } }
                 )
-                Button("Retry") {
-                    Task { await loadList(reset: true) }
-                }
-                .buttonStyle(.monacoSecondary)
             }
         } else if isSearching, !isLoadingList, assets.isEmpty {
             centeredStatus {
-                MonacoEmptyStateCard(
-                    message: "No matches for that search.",
-                    systemImage: "chart.pie"
-                )
+                EmptyState(title: "No matches for that search")
             }
         } else if !isSearching, popular.isEmpty {
             ScrollView {
-                MonacoCard {
-                    Text("Popular names show up here once prices load.")
-                        .font(MonacoTheme.TypeRole.body)
-                        .foregroundStyle(MonacoTheme.muted)
-                }
-                .accessibilityIdentifier("assets-grid-popular")
+                EmptyState(title: "Popular names show up here once prices load")
+                    .accessibilityIdentifier("assets-grid-popular")
             }
             .refreshable {
                 await session.refreshPopular(auth: auth)
             }
         } else {
             ScrollView {
-                LazyVGrid(columns: gridColumns, spacing: MonacoTheme.Space.s) {
-                    ForEach(gridAssets) { asset in
+                MonacoGroupedList {
+                    ForEach(Array(gridAssets.enumerated()), id: \.element.id) { index, asset in
                         Button {
                             selectedSymbol = asset.symbol
                         } label: {
-                            assetTile(asset)
+                            assetRow(asset, isLast: index == gridAssets.count - 1)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.monacoRow)
+                        .disabled(!asset.routable)
+                        .opacity(asset.routable ? 1 : 0.6)
                         .accessibilityIdentifier(
                             isSearching ? "assets-row-\(asset.symbol)" : "assets-popular-\(asset.symbol)"
                         )
@@ -168,44 +158,26 @@ struct AssetsTabView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// 2 columns on a phone portrait sheet; more columns as the canvas widens.
-    private var gridColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 152, maximum: 280), spacing: MonacoTheme.Space.s, alignment: .top)]
-    }
-
-    private func assetTile(_ asset: MarketAssetDTO) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(asset.displayTicker)
-                .font(MonacoTheme.TypeRole.title)
-                .foregroundStyle(MonacoTheme.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-            Text(formattedPrice(asset.priceUsdcMicros))
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(MonacoTheme.muted)
-            if let change = asset.change24h, !change.isEmpty {
-                Text(PercentReturnFormatter.format(change))
-                    .font(MonacoTheme.TypeRole.caption.monospacedDigit())
-                    .foregroundStyle(MonacoTheme.signed(change))
+    private func assetRow(_ asset: MarketAssetDTO, isLast: Bool) -> some View {
+        let ticker = AssetSymbolFormatter.display(asset.symbol)
+        return MonacoRow(
+            title: AssetDisplayNames.name(forSymbol: asset.symbol) ?? ticker,
+            subtitle: asset.routable ? ticker : "Can't be bought right now",
+            isLast: isLast,
+            leading: { StockMark(symbol: asset.symbol, size: 40) },
+            trailing: {
+                if let micros = asset.priceUsdcMicros {
+                    MoneyText(micros: micros, style: .row)
+                } else {
+                    Text("—").font(MonacoTheme.Typo.moneyRow).foregroundStyle(MonacoTheme.muted)
+                }
+                if let change = asset.change24h, !change.isEmpty {
+                    PercentText(percentReturn: change, style: .caption)
+                }
             }
-        }
-        .padding(MonacoTheme.Space.m)
-        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
-        .background(
-            MonacoTheme.surface,
-            in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
         )
-        .overlay {
-            RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
-                .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
-        }
-        .opacity(asset.routable ? 1 : 0.7)
     }
 
-    private func formattedPrice(_ micros: Int64?) -> String {
-        guard let micros else { return "—" }
-        return UsdAmountFormatter.format(micros: micros)
-    }
 
     private func scheduleListSearch() {
         searchTask?.cancel()

@@ -114,6 +114,11 @@ func TestDevFaker_guardsAndUnhappyPaths(t *testing.T) {
 		{name: "mixed bad uuid", token: owner, body: `{"profile":"mixed","group_id":"nope"}`, want: http.StatusBadRequest},
 		{name: "mixed unknown group", token: owner, body: `{"profile":"mixed","group_id":"00000000-0000-0000-0000-000000000000"}`, want: http.StatusNotFound},
 		{name: "mixed non-creator", token: other, body: `{"profile":"mixed","group_id":"` + groupID + `"}`, want: http.StatusForbidden},
+		{name: "demo without group", token: owner, body: `{"profile":"demo"}`, want: http.StatusBadRequest},
+		{name: "demo non-creator", token: other, body: `{"profile":"demo","group_id":"` + groupID + `"}`, want: http.StatusForbidden},
+		{name: "demo bad proposal uuid", token: owner, body: `{"profile":"demo","group_id":"` + groupID + `","proposal_id":"nope"}`, want: http.StatusBadRequest},
+		{name: "demo unknown proposal", token: owner, body: `{"profile":"demo","group_id":"` + groupID + `","proposal_id":"00000000-0000-0000-0000-000000000000"}`, want: http.StatusNotFound},
+		{name: "proposal id outside demo", token: owner, body: `{"profile":"mixed","group_id":"` + groupID + `","proposal_id":"00000000-0000-0000-0000-000000000000"}`, want: http.StatusBadRequest},
 	}
 	for _, tc := range cases {
 		e.handlers.Enabled = true
@@ -145,8 +150,8 @@ func TestDevFaker_allProfileSeedsIdempotently(t *testing.T) {
 	var a, b devFakerResponse
 	_ = json.Unmarshal(first.Body.Bytes(), &a)
 	_ = json.Unmarshal(second.Body.Bytes(), &b)
-	if len(a.Scale.Clubs) != 3 || len(b.Scale.Clubs) != 3 {
-		t.Fatalf("clubs = %d / %d, want 3", len(a.Scale.Clubs), len(b.Scale.Clubs))
+	if len(a.Scale.Clubs) != 6 || len(b.Scale.Clubs) != 6 {
+		t.Fatalf("clubs = %d / %d, want 6", len(a.Scale.Clubs), len(b.Scale.Clubs))
 	}
 	for i := range a.Scale.Clubs {
 		if a.Scale.Clubs[i].GroupID != b.Scale.Clubs[i].GroupID {
