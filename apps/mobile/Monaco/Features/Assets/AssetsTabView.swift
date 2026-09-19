@@ -120,8 +120,6 @@ struct AssetsTabView: View {
                             assetRow(asset, isLast: index == gridAssets.count - 1)
                         }
                         .buttonStyle(.monacoRow)
-                        .disabled(!asset.routable)
-                        .opacity(asset.routable ? 1 : 0.6)
                         .accessibilityIdentifier(
                             isSearching ? "assets-row-\(asset.symbol)" : "assets-popular-\(asset.symbol)"
                         )
@@ -162,7 +160,7 @@ struct AssetsTabView: View {
         let ticker = AssetSymbolFormatter.display(asset.symbol)
         return MonacoRow(
             title: AssetDisplayNames.name(forSymbol: asset.symbol) ?? ticker,
-            subtitle: asset.routable ? ticker : "Can't be bought right now",
+            subtitle: ticker,
             isLast: isLast,
             leading: { StockMark(symbol: asset.symbol, size: 40) },
             trailing: {
