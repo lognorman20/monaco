@@ -2,14 +2,12 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -34,11 +32,10 @@ func (h *HomeService) ListGroupActivity(ctx context.Context, accessToken, groupI
 		return nil, fmt.Errorf("group id is required")
 	}
 
-	user, err := h.authorizeGroupMember(ctx, accessToken, groupID)
-	if err != nil {
+	// Members read their club; any authed user may spectate a faker scale club (#153).
+	if _, err := authorizeGroupReader(ctx, h.store, h.privy, accessToken, groupID); err != nil {
 		return nil, err
 	}
-	_ = user
 
 	deposits, err := h.store.ListDepositsByGroupID(ctx, groupID)
 	if err != nil {
@@ -116,33 +113,6 @@ func (h *HomeService) ListGroupActivity(ctx context.Context, accessToken, groupI
 		return items[i].CreatedAt.After(items[j].CreatedAt)
 	})
 	return items, nil
-}
-
-func (h *HomeService) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {
-	identity, err := h.privy.VerifySession(ctx, privy.AccessToken(accessToken))
-	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return "", privy.ErrInvalidToken
-		}
-		return "", fmt.Errorf("verify session: %w", err)
-	}
-
-	user, found, err := h.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
-	if err != nil {
-		return "", err
-	}
-	if !found {
-		return "", ErrUserNotFound
-	}
-
-	member, err := h.store.IsGroupMember(ctx, groupID, user.ID)
-	if err != nil {
-		return "", err
-	}
-	if !member {
-		return "", ErrGroupNotFound
-	}
-	return user.ID, nil
 }
 
 func (h *HomeService) activityItemFromTransaction(ctx context.Context, tx postgres.TransactionActivityRow) GroupActivityItem {

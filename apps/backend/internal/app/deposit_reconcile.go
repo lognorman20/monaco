@@ -10,9 +10,19 @@ import (
 
 // CreditUncreditedTreasuryUSDC mints share_units and amount_deposited for USDC-only pots
 // when treasury USDC exceeds attributed share units (1:1 M2 invariant).
+// Faker scale clubs (#153) are skipped: their treasury is a dummy row with no chain balance.
+// Ghost (faker) positions in real groups are excluded from the share sum and from credits.
 func (d *DepositService) CreditUncreditedTreasuryUSDC(ctx context.Context, groupID string) (bool, error) {
 	if groupID == "" {
 		return false, fmt.Errorf("group id is required")
+	}
+
+	isFaker, err := d.store.IsFakerGroup(ctx, groupID)
+	if err != nil {
+		return false, err
+	}
+	if isFaker {
+		return false, nil
 	}
 
 	hasPending, err := d.store.HasPendingDepositsForGroup(ctx, groupID)
@@ -127,7 +137,7 @@ func (d *DepositService) surplusCredits(
 	credits := make(map[string]int64)
 	var allocated int64
 	for _, position := range positions {
-		if position.ShareUnits <= 0 {
+		if position.Ghost || position.ShareUnits <= 0 {
 			continue
 		}
 		credit, err := domain.MulDivFloor(surplus, position.ShareUnits, totalSharesMicro)
@@ -144,7 +154,7 @@ func (d *DepositService) surplusCredits(
 	remainder := surplus - allocated
 	if remainder > 0 {
 		for _, position := range positions {
-			if position.ShareUnits > 0 {
+			if !position.Ghost && position.ShareUnits > 0 {
 				credits[position.UserID] += remainder
 				break
 			}

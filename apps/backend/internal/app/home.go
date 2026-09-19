@@ -97,6 +97,13 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 		return HomeResult{}, err
 	}
 
+	// Faker scale clubs (#153) join the people board for every viewer as spectator clubs.
+	// The viewer is never inserted into their group_members, so IsJoined stays false.
+	peopleBoardGroups, err := h.peopleBoardGroupSet(ctx, joinedGroupIDs)
+	if err != nil {
+		return HomeResult{}, err
+	}
+
 	directory, err := h.store.ListGroupDirectory(ctx)
 	if err != nil {
 		return HomeResult{}, err
@@ -131,7 +138,7 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 			NetUsdcIn: domain.USDCMicros(netUsdcIn),
 		})
 
-		if !isJoined {
+		if _, onPeopleBoard := peopleBoardGroups[groupID]; !onPeopleBoard {
 			continue
 		}
 		if err := h.collectGroupMemberPnL(ctx, groupID, potNav, totalSharesMicro, memberPnLByUser); err != nil {
@@ -204,16 +211,47 @@ func homeDiscoveryNeedsMarkedPot(isJoined bool, netUsdcIn int64) bool {
 	return isJoined || domain.IncludeOnBoard(domain.USDCMicros(netUsdcIn))
 }
 
+// peopleBoardGroupSet returns joined groups plus faker scale clubs (#153).
+func (h *HomeService) peopleBoardGroupSet(ctx context.Context, joinedGroupIDs []string) (map[string]struct{}, error) {
+	ids, err := h.peopleBoardGroupIDs(ctx, joinedGroupIDs)
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		set[id] = struct{}{}
+	}
+	return set, nil
+}
+
+// peopleBoardGroupIDs unions joined group ids with faker scale club ids, joined first.
+func (h *HomeService) peopleBoardGroupIDs(ctx context.Context, joinedGroupIDs []string) ([]string, error) {
+	fakerGroupIDs, err := h.store.ListFakerGroupIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(joinedGroupIDs)+len(fakerGroupIDs))
+	seen := make(map[string]struct{}, len(joinedGroupIDs)+len(fakerGroupIDs))
+	for _, ids := range [][]string{joinedGroupIDs, fakerGroupIDs} {
+		for _, id := range ids {
+			if _, dup := seen[id]; dup {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
+// groupNetUsdcIn returns net deposits backed by the pot. Ghost (faker) positions in real
+// groups are excluded so they never distort the real club's P&L.
 func (h *HomeService) groupNetUsdcIn(ctx context.Context, groupID string) (int64, error) {
 	positions, err := h.store.ListPositionsByGroup(ctx, groupID)
 	if err != nil {
 		return 0, err
 	}
-	var net int64
-	for _, position := range positions {
-		net += position.AmountDeposited - position.AmountWithdrawn
-	}
-	return net, nil
+	return potNetUsdcIn(positions), nil
 }
 
 // GroupTreasuryTotalMicros returns marked pot NAV for a group after reconciling
@@ -303,6 +341,15 @@ func (h *HomeService) computeGroupPotNavAndShares(ctx context.Context, groupID s
 }
 
 func (h *HomeService) groupTreasuryUSDC(ctx context.Context, groupID string, netUsdcIn int64) (int64, error) {
+	isFaker, err := h.store.IsFakerGroup(ctx, groupID)
+	if err != nil {
+		return 0, err
+	}
+	if isFaker {
+		// Faker scale club (#153): dummy treasury, display NAV from the seeded ledger. No Privy.
+		return h.store.FakerLedgerUSDC(ctx, groupID)
+	}
+
 	treasury, found, err := h.store.GetTreasuryByGroupID(ctx, groupID)
 	if err != nil {
 		return 0, err
@@ -344,46 +391,12 @@ func (h *HomeService) collectGroupMemberPnL(
 		return nil
 	}
 
-	positions, err := h.store.ListPositionsByGroup(ctx, groupID)
+	members, totalShares, boardPot, err := h.memberBoardInputs(ctx, groupID, memberIDs, potNav, totalSharesMicro)
 	if err != nil {
 		return err
 	}
-	positionByUser := make(map[string]postgres.PositionRow, len(positions))
-	for _, position := range positions {
-		positionByUser[position.UserID] = position
-	}
 
-	totalShares, err := domain.ShareUnitsMicrosToDomain(totalSharesMicro)
-	if err != nil {
-		return err
-	}
-	if totalShares.IsZero() {
-		totalSharesMicro, err = h.store.SumShareUnitsByGroup(ctx, groupID)
-		if err != nil {
-			return err
-		}
-		totalShares, err = domain.ShareUnitsMicrosToDomain(totalSharesMicro)
-		if err != nil {
-			return err
-		}
-	}
-
-	members := make([]domain.MemberPosition, 0, len(memberIDs))
-	for _, userID := range memberIDs {
-		position := positionByUser[userID]
-		shareUnits, err := domain.ShareUnitsMicrosToDomain(position.ShareUnits)
-		if err != nil {
-			return err
-		}
-		members = append(members, domain.MemberPosition{
-			UserID:          userID,
-			ShareUnits:      shareUnits,
-			AmountDeposited: domain.USDCMicros(position.AmountDeposited),
-			AmountWithdrawn: domain.USDCMicros(position.AmountWithdrawn),
-		})
-	}
-
-	board, err := BuildInGroupViewMemberBoard(members, totalShares, domain.PotNAV{TotalUsdc: domain.USDCMicros(potNav)})
+	board, err := BuildInGroupViewMemberBoard(members, totalShares, domain.PotNAV{TotalUsdc: domain.USDCMicros(boardPot)})
 	if err != nil {
 		return err
 	}
@@ -482,4 +495,52 @@ func boardIdentity(profiles map[string]postgres.UserProfileSummary, userID strin
 		displayName = "Member"
 	}
 	return displayName, profile.ProfilePhotoURL
+}
+
+// memberBoardInputs loads positions for memberIDs and returns domain positions plus the
+// (total shares, pot) basis to value them against. Ghost (faker) members in a real group are
+// valued at the real NAV per share without diluting real members (#153).
+func (h *HomeService) memberBoardInputs(
+	ctx context.Context,
+	groupID string,
+	memberIDs []string,
+	potNav int64,
+	totalSharesMicro int64,
+) ([]domain.MemberPosition, domain.ShareUnits, int64, error) {
+	positions, err := h.store.ListPositionsByGroup(ctx, groupID)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	positionByUser := make(map[string]postgres.PositionRow, len(positions))
+	for _, position := range positions {
+		positionByUser[position.UserID] = position
+	}
+
+	if totalSharesMicro == 0 {
+		totalSharesMicro, err = h.store.SumShareUnitsByGroup(ctx, groupID)
+		if err != nil {
+			return nil, "", 0, err
+		}
+	}
+	basisShares, basisPot := boardShareBasis(totalSharesMicro, potNav, positions)
+	totalShares, err := domain.ShareUnitsMicrosToDomain(basisShares)
+	if err != nil {
+		return nil, "", 0, err
+	}
+
+	members := make([]domain.MemberPosition, 0, len(memberIDs))
+	for _, userID := range memberIDs {
+		position := positionByUser[userID]
+		shareUnits, err := domain.ShareUnitsMicrosToDomain(position.ShareUnits)
+		if err != nil {
+			return nil, "", 0, err
+		}
+		members = append(members, domain.MemberPosition{
+			UserID:          userID,
+			ShareUnits:      shareUnits,
+			AmountDeposited: domain.USDCMicros(position.AmountDeposited),
+			AmountWithdrawn: domain.USDCMicros(position.AmountWithdrawn),
+		})
+	}
+	return members, totalShares, basisPot, nil
 }

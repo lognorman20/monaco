@@ -106,6 +106,13 @@ func (h *HomeService) GetHomeDashboard(ctx context.Context, accessToken string, 
 		}
 	}
 
+	// People leaderboard spans joined clubs plus faker scale clubs (#153); MyGroups,
+	// P&L series, and missed proposals stay limited to clubs the viewer actually joined.
+	leaderboardGroupIDs, err := h.peopleBoardGroupIDs(ctx, joinedGroupIDs)
+	if err != nil {
+		return HomeDashboardResult{}, err
+	}
+
 	var (
 		leaderboard HomeLeaderboardSection
 		missed      []HomeMissedProposalRow
@@ -116,7 +123,7 @@ func (h *HomeService) GetHomeDashboard(ctx context.Context, accessToken string, 
 	tail.Add(2)
 	go func() {
 		defer tail.Done()
-		leaderboard, lbErr = h.buildRangedLeaderboard(ctx, joinedGroupIDs, leaderboardRange)
+		leaderboard, lbErr = h.buildRangedLeaderboard(ctx, leaderboardGroupIDs, leaderboardRange)
 	}()
 	go func() {
 		defer tail.Done()
@@ -412,13 +419,13 @@ func (h *HomeService) buildViewerPnLSeries(ctx context.Context, positions []view
 // buildRangedLeaderboard ranks people by percent return over the window.
 // Window math uses current share units against the NAV snapshot at or before
 // window start — not a historical share ledger or daily rollup.
-func (h *HomeService) buildRangedLeaderboard(ctx context.Context, joinedGroupIDs []string, leaderboardRange HomeLeaderboardRange) (HomeLeaderboardSection, error) {
-	if len(joinedGroupIDs) == 0 {
+func (h *HomeService) buildRangedLeaderboard(ctx context.Context, boardGroupIDs []string, leaderboardRange HomeLeaderboardRange) (HomeLeaderboardSection, error) {
+	if len(boardGroupIDs) == 0 {
 		return HomeLeaderboardSection{Range: leaderboardRange, People: []HomePeopleRow{}}, nil
 	}
 
 	if leaderboardRange == "" || leaderboardRange == HomeLeaderboardRangeALL {
-		people, err := h.buildLifetimePeopleBoard(ctx, joinedGroupIDs)
+		people, err := h.buildLifetimePeopleBoard(ctx, boardGroupIDs)
 		if err != nil {
 			return HomeLeaderboardSection{}, err
 		}
@@ -439,7 +446,7 @@ func (h *HomeService) buildRangedLeaderboard(ctx context.Context, joinedGroupIDs
 	}
 
 	ranged := make(map[string]*rangedPerson)
-	for _, groupID := range joinedGroupIDs {
+	for _, groupID := range boardGroupIDs {
 		startSnap, found, err := h.store.GetNavSnapshotAtOrBefore(ctx, groupID, since)
 		if err != nil {
 			return HomeLeaderboardSection{}, err
@@ -471,6 +478,7 @@ func (h *HomeService) buildRangedLeaderboard(ctx context.Context, joinedGroupIDs
 		for _, position := range positions {
 			positionByUser[position.UserID] = position
 		}
+		basisShares, basisPot := boardShareBasis(totalSharesMicro, potNav, positions)
 
 		for _, userID := range memberIDs {
 			position := positionByUser[userID]
@@ -479,7 +487,7 @@ func (h *HomeService) buildRangedLeaderboard(ctx context.Context, joinedGroupIDs
 				continue
 			}
 
-			endEquity, err := shareOfPotMicros(position.ShareUnits, potNav, totalSharesMicro)
+			endEquity, err := shareOfPotMicros(position.ShareUnits, basisPot, basisShares)
 			if err != nil {
 				return HomeLeaderboardSection{}, err
 			}
@@ -556,8 +564,8 @@ func (h *HomeService) buildRangedLeaderboard(ctx context.Context, joinedGroupIDs
 	return HomeLeaderboardSection{Range: leaderboardRange, People: people}, nil
 }
 
-func (h *HomeService) buildLifetimePeopleBoard(ctx context.Context, joinedGroupIDs []string) ([]HomePeopleRow, error) {
-	memberPnLByUser, err := h.collectJoinedGroupMemberPnL(ctx, joinedGroupIDs)
+func (h *HomeService) buildLifetimePeopleBoard(ctx context.Context, boardGroupIDs []string) ([]HomePeopleRow, error) {
+	memberPnLByUser, err := h.collectBoardGroupMemberPnL(ctx, boardGroupIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -589,9 +597,9 @@ func (h *HomeService) buildLifetimePeopleBoard(ctx context.Context, joinedGroupI
 	return people, nil
 }
 
-func (h *HomeService) collectJoinedGroupMemberPnL(ctx context.Context, joinedGroupIDs []string) (map[string][]domain.MemberPnL, error) {
+func (h *HomeService) collectBoardGroupMemberPnL(ctx context.Context, boardGroupIDs []string) (map[string][]domain.MemberPnL, error) {
 	memberPnLByUser := make(map[string][]domain.MemberPnL)
-	for _, groupID := range joinedGroupIDs {
+	for _, groupID := range boardGroupIDs {
 		netUsdcIn, err := h.groupNetUsdcIn(ctx, groupID)
 		if err != nil {
 			return nil, err

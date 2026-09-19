@@ -88,6 +88,26 @@ func TestMulDivFloor_handlesProductsBeyondInt64(t *testing.T) {
 	}
 }
 
+func TestMulDivFloor_shareUnitsTimesNavBeyondInt64(t *testing.T) {
+	// Share micros × pot NAV micros for $4k-$13k pots: each product exceeds MaxInt64.
+	cases := []struct {
+		name    string
+		a, b, c int64
+		want    int64
+	}{
+		{"4k shares of a 13k-share, $13k pot", 4_000_000_000, 13_000_000_000, 13_000_000_000, 4_000_000_000},
+		{"6k share units at a 2.9k-share, $2.9k NAV", 6_000_000_000, 2_900_000_000, 2_900_000_000, 6_000_000_000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := MulDivFloor(tc.a, tc.b, tc.c)
+			if err != nil || got != tc.want {
+				t.Fatalf("got %d, %v; want %d", got, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestMulDivFloor_floorsTowardZero(t *testing.T) {
 	got, err := MulDivFloor(10, 10, 3)
 	if err != nil || got != 33 {

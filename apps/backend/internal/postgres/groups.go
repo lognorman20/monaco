@@ -20,6 +20,9 @@ type Group struct {
 	Name          string
 	CreatorUserID string
 	CreatedAt     time.Time
+	// IsFaker marks a wholly fake demo club (#153). Faker groups are read-only
+	// spectator clubs and are skipped by every chain/Privy/Jupiter path.
+	IsFaker bool
 }
 
 // InsertGroup persists a new group row.
@@ -43,7 +46,7 @@ func insertGroup(ctx context.Context, q queryRower, name string, creatorUserID s
 	const insertSQL = `
 INSERT INTO groups (name, creator_user_id)
 VALUES ($1, $2)
-RETURNING id, name, creator_user_id, created_at`
+RETURNING id, name, creator_user_id, created_at, is_faker`
 
 	var group Group
 	err := q.QueryRowContext(ctx, insertSQL, name, creatorUserID).Scan(
@@ -51,6 +54,7 @@ RETURNING id, name, creator_user_id, created_at`
 		&group.Name,
 		&group.CreatorUserID,
 		&group.CreatedAt,
+		&group.IsFaker,
 	)
 	if err != nil {
 		return Group{}, fmt.Errorf("insert group: %w", err)
@@ -66,7 +70,7 @@ func (s *Store) GetGroupByIDForUpdateTx(ctx context.Context, tx *sql.Tx, id stri
 	}
 
 	const selectSQL = `
-SELECT id, name, creator_user_id, created_at
+SELECT id, name, creator_user_id, created_at, is_faker
 FROM groups
 WHERE id = $1
 FOR UPDATE`
@@ -77,6 +81,7 @@ FOR UPDATE`
 		&group.Name,
 		&group.CreatorUserID,
 		&group.CreatedAt,
+		&group.IsFaker,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Group{}, false, nil
@@ -95,7 +100,7 @@ func (s *Store) GetGroupByID(ctx context.Context, id string) (Group, bool, error
 	}
 
 	const selectSQL = `
-SELECT id, name, creator_user_id, created_at
+SELECT id, name, creator_user_id, created_at, is_faker
 FROM groups
 WHERE id = $1`
 
@@ -105,6 +110,7 @@ WHERE id = $1`
 		&group.Name,
 		&group.CreatorUserID,
 		&group.CreatedAt,
+		&group.IsFaker,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Group{}, false, nil
@@ -176,9 +182,9 @@ func (s *Store) InsertGroupWithRulesTx(ctx context.Context, tx *sql.Tx, name, cr
 	if name == "" || creatorUserID == "" {
 		return Group{}, fmt.Errorf("name and creator_user_id are required")
 	}
-	const insertSQL = `INSERT INTO groups (name, creator_user_id, join_mode, voter_set_mode, threshold, vote_expiry_seconds) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, name, creator_user_id, created_at`
+	const insertSQL = `INSERT INTO groups (name, creator_user_id, join_mode, voter_set_mode, threshold, vote_expiry_seconds) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, name, creator_user_id, created_at, is_faker`
 	var group Group
-	err := tx.QueryRowContext(ctx, insertSQL, name, creatorUserID, string(rules.JoinPolicy.Mode), string(rules.VoterSet.Mode), string(rules.Threshold), int64(rules.VoteExpirySeconds)).Scan(&group.ID, &group.Name, &group.CreatorUserID, &group.CreatedAt)
+	err := tx.QueryRowContext(ctx, insertSQL, name, creatorUserID, string(rules.JoinPolicy.Mode), string(rules.VoterSet.Mode), string(rules.Threshold), int64(rules.VoteExpirySeconds)).Scan(&group.ID, &group.Name, &group.CreatorUserID, &group.CreatedAt, &group.IsFaker)
 	if err != nil {
 		return Group{}, fmt.Errorf("insert group with rules: %w", err)
 	}
