@@ -15,6 +15,7 @@ func clearConfigEnv(t *testing.T) {
 	t.Setenv("PRIVY_AUTHORIZATION_KEY_ID", "")
 	t.Setenv("RELAYER_PRIVATE_KEY", "")
 	t.Setenv("PYTH_API_KEY", "")
+	t.Setenv("PYTH_HERMES_BASE_URL", "")
 }
 
 func setValidConfigEnv(t *testing.T) {
@@ -154,6 +155,20 @@ func TestLoad_optionalPythAPIKey_isLoadedWhenSet(t *testing.T) {
 	}
 	if cfg.PythAPIKey != "test-pyth-key" {
 		t.Fatalf("PythAPIKey = %q", cfg.PythAPIKey)
+	}
+}
+
+func TestLoad_optionalPythHermesBaseURL_isTrimmedWhenSet(t *testing.T) {
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+	t.Setenv("PYTH_HERMES_BASE_URL", " https://example.test/hermes/ ")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.PythHermesBaseURL != "https://example.test/hermes" {
+		t.Fatalf("PythHermesBaseURL = %q", cfg.PythHermesBaseURL)
 	}
 }
 

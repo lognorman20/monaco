@@ -34,3 +34,22 @@ func TestNewHermesClientFromConfig_withAPIKey_returnsClient(t *testing.T) {
 		t.Fatal("expected client")
 	}
 }
+
+func TestNewHermesClientFromConfig_withBaseURLOverride_usesCustomHost(t *testing.T) {
+	cfg := &config.Config{
+		PythAPIKey:        "test-pyth-key",
+		PythHermesBaseURL: "https://example.test/hermes",
+	}
+
+	client, err := NewHermesClientFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("NewHermesClientFromConfig: %v", err)
+	}
+	hermes, ok := client.(*HermesClient)
+	if !ok {
+		t.Fatalf("client type = %T", client)
+	}
+	if hermes.baseURL != "https://example.test/hermes" {
+		t.Fatalf("baseURL = %q", hermes.baseURL)
+	}
+}
