@@ -21,7 +21,7 @@ struct EmailLoginView: View {
             TextField(
                 "",
                 text: $emailAddress,
-                prompt: Text("Email address").foregroundStyle(MonacoTheme.disabled)
+                prompt: Text("Email address").foregroundStyle(MonacoTheme.tertiaryText)
             )
                 .keyboardType(.emailAddress)
                 .textContentType(.emailAddress)
@@ -35,7 +35,7 @@ struct EmailLoginView: View {
                 TextField(
                     "",
                     text: $otpCode,
-                    prompt: Text("6-digit code").foregroundStyle(MonacoTheme.disabled)
+                    prompt: Text("6-digit code").foregroundStyle(MonacoTheme.tertiaryText)
                 )
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
@@ -105,11 +105,11 @@ struct EmailLoginView: View {
         case .sendingCode:
             return "Sending code…"
         case .awaitingCode:
-            return "Enter the code from your email."
+            return "Enter the 6-digit code we sent to \(normalizedEmail)."
         case .verifyingCode:
             return "Signing you in…"
         case .authenticated:
-            return "Signed in."
+            return nil
         case .failed(let message):
             return message
         }

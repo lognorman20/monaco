@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// M5 product launch shell: hero + SMS or email OTP sign-in.
+/// Brand block, then SMS or email one-time-code sign-in.
 struct LoginView: View {
     @ObservedObject var auth: PrivyAuthService
 
@@ -25,29 +25,24 @@ struct LoginView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.xl) {
                 LaunchScreenView()
+                    .padding(.top, MonacoTheme.Space.xl)
 
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("Sign in")
-                        .font(.title2.bold())
-                        .foregroundStyle(MonacoTheme.primaryText)
-
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
                     if showsMethodPicker {
-                        Picker("Sign-in method", selection: $selectedMethod) {
-                            ForEach(availableMethods) { method in
-                                Text(method.rawValue).tag(method)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .tint(MonacoTheme.accent)
+                        MonacoSegmented(availableMethods, selection: $selectedMethod) { $0.rawValue }
+                            .accessibilityLabel("Sign-in method")
                     }
 
                     loginContent
                 }
+                .monacoFullWidthButtons()
             }
-            .padding(.vertical, 24)
+            .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.bottom, MonacoTheme.Space.l)
         }
+        .scrollDismissesKeyboard(.interactively)
         .authScreenBackground()
         .tint(MonacoTheme.accent)
         .foregroundStyle(MonacoTheme.primaryText)

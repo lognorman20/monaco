@@ -1,34 +1,34 @@
 import SwiftUI
 
-/// M5 product launch hero — social investing copy, no debug addresses.
+/// Brand block at the top of login: the mark at launch-screen size, wordmark, one headline.
 struct LaunchScreenView: View {
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "person.3.fill")
-                .font(.system(size: 56))
-                .foregroundStyle(MonacoTheme.accent)
-                .accessibilityLabel("Monaco")
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+            MonacoMark(size: 88)
+                .padding(.bottom, MonacoTheme.Space.s)
 
             Text("Monaco")
-                .font(.largeTitle.bold())
-                .foregroundStyle(MonacoTheme.primaryText)
+                .font(.custom("AvenirNext-Bold", size: 40, relativeTo: .largeTitle))
+                .foregroundStyle(MonacoTheme.ink)
+                .accessibilityAddTraits(.isHeader)
 
-            Text("Invest with your people")
-                .font(.title3)
-                .foregroundStyle(MonacoTheme.secondaryText)
-                .multilineTextAlignment(.center)
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                Text("Your group chat, with a portfolio.")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(MonacoTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            Text("Pool money with friends, vote on buys, and track who’s winning.")
-                .font(.subheadline)
-                .foregroundStyle(MonacoTheme.secondaryText)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
+                Text("Pool money with friends, vote on every buy, and see who's up.")
+                    .font(MonacoTheme.Typo.body)
+                    .foregroundStyle(MonacoTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 #Preview {
     LaunchScreenView()
+        .padding()
 }

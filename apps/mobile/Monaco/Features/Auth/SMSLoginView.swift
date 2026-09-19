@@ -15,13 +15,13 @@ struct SMSLoginView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("We’ll text you a one-time code to sign in.")
+            Text("We’ll text you a code to sign in.")
                 .authSecondaryCaption()
 
             TextField(
                 "",
                 text: $phoneNumber,
-                prompt: Text("Phone number").foregroundStyle(MonacoTheme.disabled)
+                prompt: Text("Phone number").foregroundStyle(MonacoTheme.tertiaryText)
             )
                 .keyboardType(.phonePad)
                 .textContentType(.telephoneNumber)
@@ -35,7 +35,7 @@ struct SMSLoginView: View {
                 TextField(
                     "",
                     text: $otpCode,
-                    prompt: Text("6-digit code").foregroundStyle(MonacoTheme.disabled)
+                    prompt: Text("6-digit code").foregroundStyle(MonacoTheme.tertiaryText)
                 )
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
@@ -92,6 +92,16 @@ struct SMSLoginView: View {
         return trimmed
     }
 
+    /// "(555) 123-4567" for US numbers, otherwise what was typed.
+    private var displayPhone: String {
+        let digits = normalizedPhone.filter(\.isNumber)
+        if normalizedPhone.hasPrefix("+1"), digits.count == 11 {
+            let d = Array(digits.dropFirst())
+            return "(\(String(d[0..<3]))) \(String(d[3..<6]))-\(String(d[6..<10]))"
+        }
+        return normalizedPhone
+    }
+
     private var showsOTPField: Bool {
         switch auth.phase {
         case .awaitingCode, .verifyingCode, .authenticated:
@@ -116,11 +126,11 @@ struct SMSLoginView: View {
         case .sendingCode:
             return "Sending code…"
         case .awaitingCode:
-            return "Enter the code from your text message."
+            return "Enter the 6-digit code we sent to \(displayPhone)."
         case .verifyingCode:
             return "Signing you in…"
         case .authenticated:
-            return "Signed in."
+            return nil
         case .failed(let message):
             return message
         }
