@@ -1,8 +1,4 @@
-import Foundation
+import MonacoCore
 
-struct MeResponse: Codable, Equatable {
-    let userId: String
-    let displayName: String
-    let memberWalletAddress: String
-    let profilePhotoUrl: String?
-}
+/// Canonical profile DTO lives in MonacoCore; the app keeps its historical name.
+typealias MeResponse = MeDTO

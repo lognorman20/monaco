@@ -17,6 +17,7 @@ struct MemberBoardSection: View {
                             .font(.caption.bold())
                             .foregroundStyle(MonacoTheme.secondaryText)
                             .frame(width: 28, alignment: .leading)
+                        MonacoAvatar(photoURL: row.profilePhotoUrl, displayName: row.displayName, size: 28)
                         Text(row.displayName)
                             .font(.body.bold())
                             .foregroundStyle(MonacoTheme.primaryText)

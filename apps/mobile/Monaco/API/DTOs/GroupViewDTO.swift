@@ -24,6 +24,7 @@ struct LeaderboardRowDTO: Codable, Equatable, Identifiable {
     let rank: Int
     let userId: String
     let displayName: String
+    var profilePhotoUrl: String? = nil
     let percentReturn: String?
     let dollarPnl: String
 

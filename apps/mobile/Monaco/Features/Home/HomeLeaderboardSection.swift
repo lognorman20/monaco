@@ -41,13 +41,14 @@ struct HomeLeaderboardSection: View {
                         )
                     } label: {
                         MonacoRowCard(
-                            systemImage: "person.fill",
                             title: row.displayName,
                             subtitle: PercentReturnFormatter.format(row.percentReturn),
                             trailing: row.dollarPnl,
                             subtitleColor: MonacoTheme.signed(row.percentReturn),
                             trailingColor: MonacoTheme.signed(row.dollarPnl)
-                        )
+                        ) {
+                            MonacoAvatar(photoURL: row.profilePhotoUrl, displayName: row.displayName, size: 44)
+                        }
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("home-leaderboard-row-\(row.userId)")

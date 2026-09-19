@@ -1,3 +1,4 @@
+import MonacoCore
 import SwiftUI
 
 /// M1 post-login proof screen: opens backend session then loads GET /v1/me.

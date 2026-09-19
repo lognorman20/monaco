@@ -19,6 +19,7 @@ struct HomeGroupBoardRowDTO: Codable, Equatable, Identifiable {
 struct HomePeopleBoardRowDTO: Codable, Equatable, Identifiable {
     let userId: String
     let displayName: String
+    var profilePhotoUrl: String? = nil
     let percentReturn: String?
     let dollarPnl: String
 

@@ -120,22 +120,34 @@ struct MonacoHeroHeader: View {
 }
 
 /// Image-or-mark + title + trailing metric.
-struct MonacoRowCard: View {
-    let systemImage: String
+struct MonacoRowCard<Leading: View>: View {
     let title: String
     let subtitle: String?
     let trailing: String?
     var subtitleColor: Color = MonacoTheme.muted
     var trailingColor: Color = MonacoTheme.ink
+    let leading: Leading
+
+    init(
+        title: String,
+        subtitle: String?,
+        trailing: String?,
+        subtitleColor: Color = MonacoTheme.muted,
+        trailingColor: Color = MonacoTheme.ink,
+        @ViewBuilder leading: () -> Leading
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.trailing = trailing
+        self.subtitleColor = subtitleColor
+        self.trailingColor = trailingColor
+        self.leading = leading()
+    }
 
     var body: some View {
         HStack(spacing: MonacoTheme.Space.m) {
-            Image(systemName: systemImage)
-                .font(.title3)
-                .foregroundStyle(MonacoTheme.accent)
-                .symbolRenderingMode(.hierarchical)
+            leading
                 .frame(width: 44, height: 44)
-                .background(MonacoTheme.canvas, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(MonacoTheme.TypeRole.title)
@@ -161,6 +173,41 @@ struct MonacoRowCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
                 .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+        }
+    }
+}
+
+/// SF Symbol tile used as the default `MonacoRowCard` leading mark.
+struct MonacoRowIcon: View {
+    let systemImage: String
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.title3)
+            .foregroundStyle(MonacoTheme.accent)
+            .symbolRenderingMode(.hierarchical)
+            .frame(width: 44, height: 44)
+            .background(MonacoTheme.canvas, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+extension MonacoRowCard where Leading == MonacoRowIcon {
+    init(
+        systemImage: String,
+        title: String,
+        subtitle: String?,
+        trailing: String?,
+        subtitleColor: Color = MonacoTheme.muted,
+        trailingColor: Color = MonacoTheme.ink
+    ) {
+        self.init(
+            title: title,
+            subtitle: subtitle,
+            trailing: trailing,
+            subtitleColor: subtitleColor,
+            trailingColor: trailingColor
+        ) {
+            MonacoRowIcon(systemImage: systemImage)
         }
     }
 }

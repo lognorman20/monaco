@@ -89,32 +89,6 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(MeResponse.self, from: data)
     }
 
-    func uploadProfilePhoto(accessToken: String, imageData: Data, mimeType: String) async throws -> MeResponse {
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var body = Data()
-        body.append("--\(boundary)\r\n")
-        body.append("Content-Disposition: form-data; name=\"photo\"; filename=\"profile\"\r\n")
-        body.append("Content-Type: \(mimeType)\r\n\r\n")
-        body.append(imageData)
-        body.append("\r\n--\(boundary)--\r\n")
-
-        let url = baseURL.appending(path: "v1/me/profile-photo")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
-        request.httpBody = body
-
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(MeResponse.self, from: data)
-    }
-
     func getPlatformBalance(accessToken: String) async throws -> PlatformBalanceDTO {
         let url = baseURL.appending(path: "v1/me/balance")
         var request = URLRequest(url: url)
@@ -847,14 +821,6 @@ final class MonacoAPIClient {
         return parsed
     }
 
-}
-
-private extension Data {
-    mutating func append(_ string: String) {
-        if let data = string.data(using: .utf8) {
-            append(data)
-        }
-    }
 }
 
 extension MonacoAPIClient {
