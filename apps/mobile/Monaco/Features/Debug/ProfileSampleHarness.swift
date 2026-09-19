@@ -100,7 +100,8 @@ struct ProfileSampleHarness: View {
     }
 
     /// Writes a generated landscape to tmp so AsyncImage loads it from a file URL.
-    private static func samplePhotoURL() -> URL? {
+    /// A generated portrait written to a temp file, so avatars show a photo without the network.
+    static func samplePhotoURL() -> URL? {
         let size = CGSize(width: 256, height: 256)
         let image = UIGraphicsImageRenderer(size: size).image { context in
             let cg = context.cgContext

@@ -185,8 +185,14 @@ enum GroupDetailSampleData {
         agent: nil
     )
 
+    /// One request with a profile photo, one falling back to initials.
     static let joinRequests = [
-        JoinRequestDTO(id: "jr1", userId: "u9", displayName: "Priya Nair", requestedAt: "2026-09-18T10:00:00Z"),
+        JoinRequestDTO(
+            id: "jr1", userId: "u9", displayName: "Priya Nair",
+            profilePhotoUrl: ProfileSampleHarness.samplePhotoURL()?.absoluteString,
+            requestedAt: "2026-09-18T10:00:00Z"
+        ),
+        JoinRequestDTO(id: "jr2", userId: "u10", displayName: "Jordan Hale", requestedAt: "2026-09-18T11:00:00Z"),
     ]
 
     static var activity: [GroupActivityItemDTO] {
