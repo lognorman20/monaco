@@ -13,39 +13,43 @@ struct GroupActivitySection: View {
 
     var body: some View {
         Section {
-            if isExpanded {
-                expandedContent
-            }
-        } header: {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isExpanded.toggle()
                 }
             } label: {
-                HStack(spacing: MonacoTheme.Space.s) {
-                    Text("Transaction history")
-                        .font(MonacoTheme.TypeRole.title)
-                        .foregroundStyle(MonacoTheme.primaryText)
-                    Spacer(minLength: 8)
-                    if !isLoading, errorMessage == nil, !items.isEmpty {
-                        Text("\(items.count)")
-                            .font(.caption.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(MonacoTheme.secondaryText)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(MonacoTheme.surface, in: Capsule())
-                            .overlay {
-                                Capsule().strokeBorder(MonacoTheme.hairline, lineWidth: 1)
-                            }
-                            .accessibilityIdentifier("group-activity-count")
-                    }
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(MonacoTheme.secondaryText)
-                }
+                toggleLabel
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("group-activity-toggle")
+
+            if isExpanded {
+                expandedContent
+            }
+        }
+    }
+
+    private var toggleLabel: some View {
+        HStack(spacing: MonacoTheme.Space.s) {
+            Text("Transaction history")
+                .font(MonacoTheme.TypeRole.title)
+                .foregroundStyle(MonacoTheme.primaryText)
+            Spacer(minLength: 8)
+            if !isLoading, errorMessage == nil, !items.isEmpty {
+                Text("\(items.count)")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(MonacoTheme.surface, in: Capsule())
+                    .overlay {
+                        Capsule().strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+                    }
+                    .accessibilityIdentifier("group-activity-count")
+            }
+            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(MonacoTheme.secondaryText)
         }
     }
 
