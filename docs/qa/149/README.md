@@ -1,14 +1,14 @@
 # Proposal feed and comments verification
 
-Issue #149. Base: `oh-yea`. Adds `proposal_comments` (migration 000009), `GET/POST /v1/proposals/{id}/comments`, feed card fields on the group proposal list (`canVote`, `voteSummary`, `commentCount`), `commentCount` on detail, and the SwiftUI card feed, detail thread, and composer.
+Issue #149. Base: `main` (after propose-sell #194). Adds `proposal_comments` (migration 000012), `GET/POST /v1/proposals/{id}/comments`, feed card fields on the group proposal list (`canVote`, `voteSummary`, `commentCount`), `commentCount` on detail, and the SwiftUI card feed, detail thread, and composer. Cards and detail render both sides: "Buy $12.50 of AAPLx" and "Sell 0.5 NVDAx" (token amount at 8 decimals), with a Buy/Sell status chip.
 
 ## Verified
 
-- Backend runtime suite passes with `go test -p 1 ./...` on a dedicated local Compose Postgres database (`monaco_149` / `monaco_149_test`) and fake Privy/Jupiter providers, except two failures that are not from this change: the Jupiter package vet error (`testing.B.Context` needs Go 1.24; module declares 1.23, fixed separately by PR #183; the package passes with `-vet=off`) and `TestOpenTestDB_connectsToDerivedDatabase`, which hard-codes the shared `monaco_test` name. Domain tests pass.
+- Backend suite passes with `go test -vet=off -p 1 ./...` on a dedicated local Compose Postgres database (`monaco_149_test`) and fake Privy/Jupiter providers, with main's home-dashboard test compile fix (#199) applied locally only. The one failure, `TestOpenTestDB_connectsToDerivedDatabase`, hard-codes the shared `monaco_test` name. Domain tests pass.
 - Comment HTTP tests cover: member post and reply, oldest-first thread with `parentId`, empty thread, non-member 404 on list and post (no text leaked), missing auth 401, whitespace-only / missing / over 1,000 code points / over the 16 KiB byte cap / NUL / malformed JSON / malformed or unknown parent id bodies (400, nothing stored), exactly 1,000 code points accepted, reply to a comment on another proposal 400, unknown or malformed proposal id 404, 11th comment in a minute 429 with `Retry-After`, and list/detail card fields before and after voting.
-- 73 host mobile-core tests pass (`swift test`): DTO decoding (feed card, legacy list payload, detail), comment decode, thread nesting, orphan and cycle handling, draft length rule, formatters, feed copy audit, client paths, bodies, and error statuses.
+- 89 host mobile-core tests pass (`swift test`): DTO decoding (feed card, legacy list payload, detail), comment decode, thread nesting, orphan and cycle handling, draft length rule, formatters (including sell share counts and headlines), feed copy audit, client paths, bodies, and error statuses.
 - Native Debug simulator build passes with a public compile-only Privy configuration.
-- XCUITest `ProposalFeedSampleUITests` passes on the SimSlim-prepared simulator (iOS 18.0) using the Debug-only `-MonacoProposalFeedSample` launch argument, which swaps in an in-memory service. It votes yes from a card, scrolls through 20 open cards, opens the thread, posts a comment, replies to a comment, and checks that Post stays disabled for a whitespace-only draft. Screenshots below come from that run.
+- XCUITest `ProposalFeedSampleUITests` passes on the SimSlim-prepared simulator (iOS 18.0) using the Debug-only `-MonacoProposalFeedSample` launch argument, which swaps in an in-memory service. The sample feed includes a sell proposal. It votes yes from a card, scrolls through 20 open cards, opens the thread, posts a comment, replies to a comment, and checks that Post stays disabled for a whitespace-only draft. Screenshots below come from that run.
 
 ## Still required before merge
 
