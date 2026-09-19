@@ -53,7 +53,7 @@ struct GroupPickerForProposalView: View {
         .accessibilityIdentifier("group-picker-root")
         .task {
             if session.home == nil {
-                await session.refresh(auth: auth)
+                await session.refreshHomeBoards(accessToken: auth.accessToken)
             }
         }
     }

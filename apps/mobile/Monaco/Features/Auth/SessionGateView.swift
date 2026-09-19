@@ -17,7 +17,7 @@ struct SessionGateView: View {
                     .frame(maxWidth: .infinity, minHeight: 200)
             } else if needsOnboarding {
                 Color.clear.accessibilityIdentifier("onboarding-hook")
-            } else if session.home != nil {
+            } else if session.dashboard != nil {
                 MainTabView(auth: auth)
             } else if let errorMessage = session.errorMessage {
                 VStack(alignment: .leading, spacing: 12) {

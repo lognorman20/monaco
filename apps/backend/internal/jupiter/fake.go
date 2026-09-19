@@ -21,6 +21,7 @@ type fakeJupiterClient struct {
 	executePolls  map[string][]ExecuteResult
 	executeErrs   map[string]error
 	lastSuccesses map[string]ExecuteResult
+	quoteBuyCalls int
 }
 
 // NewFakeClient returns an in-memory Jupiter client for tests.
@@ -118,7 +119,22 @@ func RegisterSellQuote(client Client, inputMint string, amount int64, quote Sell
 	fake.mu.Unlock()
 }
 
+// QuoteBuyCallCount returns how many QuoteBuy calls hit this fake client. Test hook.
+func QuoteBuyCallCount(client Client) int {
+	fake, ok := client.(*fakeJupiterClient)
+	if !ok {
+		return 0
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	return fake.quoteBuyCalls
+}
+
 func (f *fakeJupiterClient) QuoteBuy(ctx context.Context, params QuoteBuyParams) (BuyQuote, error) {
+	f.mu.Lock()
+	f.quoteBuyCalls++
+	f.mu.Unlock()
+
 	logQuoteAttempt(params.GroupID, params.UserID, params.Symbol, params.USDCAmount)
 
 	if strings.TrimSpace(params.Taker) != "" {

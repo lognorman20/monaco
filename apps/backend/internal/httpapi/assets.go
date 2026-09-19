@@ -127,7 +127,7 @@ func (h *AssetsHandlers) PopularAssetsHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	resp := popularAssetsResponse{Assets: h.enrichAssets(ctx, assets)}
+	resp := popularAssetsResponse{Assets: h.enrichPopularAssets(ctx, assets)}
 	writeMarketJSON(ctx, log, w, http.StatusOK, resp, "ok", "limit", limit, "result_count", len(resp.Assets))
 }
 
@@ -260,6 +260,28 @@ func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []xstocks.Cata
 	return out
 }
 
+func (h *AssetsHandlers) enrichPopularAssets(ctx context.Context, assets []xstocks.CatalogAsset) []marketAssetResponse {
+	out := make([]marketAssetResponse, 0, len(assets))
+	for _, asset := range assets {
+		out = append(out, h.enrichPopularAsset(ctx, asset))
+	}
+	return out
+}
+
+func (h *AssetsHandlers) enrichPopularAsset(ctx context.Context, asset xstocks.CatalogAsset) marketAssetResponse {
+	resp := marketAssetResponse{
+		Symbol:     asset.Symbol,
+		Name:       asset.Name,
+		SolanaMint: asset.SolanaMint,
+		Routable:   asset.Routable,
+	}
+	if price, change, ok := h.assetMarkPrice(ctx, asset); ok {
+		resp.PriceUsdcMicros = &price
+		resp.Change24h = change
+	}
+	return resp
+}
+
 func (h *AssetsHandlers) enrichAsset(ctx context.Context, asset xstocks.CatalogAsset) marketAssetResponse {
 	resp := marketAssetResponse{
 		Symbol:     asset.Symbol,
@@ -292,12 +314,20 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset xstocks.Cat
 	return detail
 }
 
+func (h *AssetsHandlers) assetMarkPrice(ctx context.Context, asset xstocks.CatalogAsset) (int64, *string, bool) {
+	if h.Pyth == nil {
+		return 0, nil, false
+	}
+	mark, err := h.Pyth.AssetMark(ctx, asset.Symbol)
+	if err == nil && mark.PriceUsdcMicros > 0 {
+		return mark.PriceUsdcMicros, mark.Change24h, true
+	}
+	return 0, nil, false
+}
+
 func (h *AssetsHandlers) assetPrice(ctx context.Context, asset xstocks.CatalogAsset) (int64, *string, bool) {
-	if h.Pyth != nil {
-		mark, err := h.Pyth.AssetMark(ctx, asset.Symbol)
-		if err == nil && mark.PriceUsdcMicros > 0 {
-			return mark.PriceUsdcMicros, mark.Change24h, true
-		}
+	if price, change, ok := h.assetMarkPrice(ctx, asset); ok {
+		return price, change, true
 	}
 	if h.Jupiter == nil || strings.TrimSpace(asset.SolanaMint) == "" {
 		return 0, nil, false
