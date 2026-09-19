@@ -33,6 +33,7 @@ type marketAssetResponse struct {
 	Routable        bool    `json:"routable"`
 	PriceUsdcMicros *int64  `json:"priceUsdcMicros,omitempty"`
 	Change24h       *string `json:"change24h,omitempty"`
+	LogoURL         *string `json:"logoUrl,omitempty"`
 }
 
 type listAssetsResponse struct {
@@ -88,8 +89,17 @@ func (h *AssetsHandlers) ListAssetsHandler(w http.ResponseWriter, r *http.Reques
 	limit := parseCatalogLimit(r.URL.Query().Get("limit"))
 	offset := parseCatalogOffset(r.URL.Query().Get("offset"))
 
-	page, err := h.Catalog.Search(ctx, query, limit, offset)
+	var page xstocks.CatalogSearchPage
+	var err error
+	if query == "" {
+		page, err = h.Catalog.Browse(ctx, limit, offset)
+	} else {
+		page, err = h.Catalog.Search(ctx, query, limit, offset)
+	}
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return
+		}
 		if errors.Is(err, xstocks.ErrInvalidResponse) {
 			logJSONError(ctx, log, "invalid_catalog_query", w, http.StatusBadRequest, "invalid catalog query", "query", query)
 			return
@@ -263,9 +273,12 @@ func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []xstocks.Cata
 func (h *AssetsHandlers) enrichAsset(ctx context.Context, asset xstocks.CatalogAsset) marketAssetResponse {
 	resp := marketAssetResponse{
 		Symbol:     asset.Symbol,
-		Name:       asset.Name,
+		Name:       xstocks.CatalogDisplayName(asset.Name),
 		SolanaMint: asset.SolanaMint,
 		Routable:   asset.Routable,
+	}
+	if logo := xstocks.CatalogAssetLogoURL(asset.Symbol); logo != "" {
+		resp.LogoURL = &logo
 	}
 	if price, change, ok := h.assetPrice(ctx, asset); ok {
 		resp.PriceUsdcMicros = &price
@@ -360,8 +373,8 @@ func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset xstocks.Cat
 }
 
 func parsePopularLimit(raw string) int {
-	const defaultLimit = 10
-	const maxLimit = 20
+	const defaultLimit = 5
+	const maxLimit = 5
 	limit, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || limit <= 0 {
 		return defaultLimit

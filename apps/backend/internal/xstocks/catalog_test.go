@@ -171,7 +171,7 @@ func TestHTTPCatalogSearcher_tickerQuery_resolvesViaSymbolEndpoint(t *testing.T)
 	}
 }
 
-func TestHTTPCatalogSearcher_pinsMajorSymbolsOnBrowse(t *testing.T) {
+func TestHTTPCatalogSearcher_browseExcludesPopularStripSymbols(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -188,27 +188,27 @@ func TestHTTPCatalogSearcher_pinsMajorSymbolsOnBrowse(t *testing.T) {
 					},
 				},
 				{
-					Symbol: "YYYx",
-					Name:   "Yyy Corp xStock",
-					Deployments: []deployment{
-						{Address: "MintYYY", Network: solanaNetwork},
-					},
-				},
-			}
-		case 1:
-			nodes = []catalogAssetNode{
-				{
 					Symbol: "AAPLx",
 					Name:   "Apple xStock",
 					Deployments: []deployment{
 						{Address: aaplxSolanaMint, Network: solanaNetwork},
 					},
 				},
+			}
+		case 1:
+			nodes = []catalogAssetNode{
 				{
 					Symbol: "TSLAx",
 					Name:   "Tesla xStock",
 					Deployments: []deployment{
 						{Address: "MintTSLA", Network: solanaNetwork},
+					},
+				},
+				{
+					Symbol: "YYYx",
+					Name:   "Yyy Corp xStock",
+					Deployments: []deployment{
+						{Address: "MintYYY", Network: solanaNetwork},
 					},
 				},
 			}
@@ -221,15 +221,17 @@ func TestHTTPCatalogSearcher_pinsMajorSymbolsOnBrowse(t *testing.T) {
 	defer server.Close()
 
 	searcher := NewHTTPCatalogSearcherWithClient(server.URL, server.Client())
-	page, err := searcher.Search(context.Background(), "", 2, 0)
+	page, err := searcher.Browse(context.Background(), 10, 0)
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
 	if len(page.Assets) != 2 {
-		t.Fatalf("assets len = %d, want 2", len(page.Assets))
+		t.Fatalf("assets len = %d, want 2 non-popular browse rows", len(page.Assets))
 	}
-	if page.Assets[0].Symbol != "AAPLx" || page.Assets[1].Symbol != "TSLAx" {
-		t.Fatalf("assets = [%s, %s], want [AAPLx, TSLAx]", page.Assets[0].Symbol, page.Assets[1].Symbol)
+	for _, asset := range page.Assets {
+		if asset.Symbol == "AAPLx" || asset.Symbol == "TSLAx" {
+			t.Fatalf("browse list must exclude popular strip symbol %q", asset.Symbol)
+		}
 	}
 }
 
@@ -350,6 +352,85 @@ func TestFakeCatalogSearcher_paginationStableWithRoutability(t *testing.T) {
 	}
 	if second.Assets[0].Symbol != "AAAx" && second.Assets[0].Symbol != "CCAx" {
 		t.Fatalf("second page = %+v, want AAAx or CCAx after routable BBAx", second.Assets[0])
+	}
+}
+
+func TestHTTPCatalogSearcher_partialTickerQuery_resolvesViaSymbolEndpoint(t *testing.T) {
+	t.Parallel()
+
+	var listPagesRequested int
+	var symbolRequested string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "/api/v2/public/assets/"
+		symbol := strings.TrimPrefix(r.URL.Path, prefix)
+		if symbol != "" {
+			symbolRequested = symbol
+			body := loadFixture(t, "aaplx.json")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(body)
+			return
+		}
+
+		listPagesRequested++
+		body := marshalCatalogListPage(t, nil, 0, false)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	searcher := NewHTTPCatalogSearcherWithClient(server.URL, server.Client())
+	page, err := searcher.Search(context.Background(), "Aap", 25, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if symbolRequested == "" {
+		t.Fatal("expected symbol endpoint lookup for partial ticker query")
+	}
+	if listPagesRequested != 0 {
+		t.Fatalf("list pages requested = %d, want 0 for partial ticker query", listPagesRequested)
+	}
+	if len(page.Assets) != 1 || page.Assets[0].Symbol != "AAPLx" {
+		t.Fatalf("assets = %+v, want single AAPLx from fixture", page.Assets)
+	}
+}
+
+func TestHTTPCatalogSearcher_reusesMintIndexAcrossQueries(t *testing.T) {
+	t.Parallel()
+
+	var listPagesRequested int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "/api/v2/public/assets/"
+		if strings.TrimPrefix(r.URL.Path, prefix) != "" {
+			http.NotFound(w, r)
+			return
+		}
+		listPagesRequested++
+		body := marshalCatalogListPage(t, []catalogAssetNode{
+			{
+				Symbol: "AAPLx",
+				Name:   "Apple xStock",
+				Deployments: []deployment{
+					{Address: aaplxSolanaMint, Network: solanaNetwork},
+				},
+			},
+		}, 0, false)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	searcher := NewHTTPCatalogSearcherWithClient(server.URL, server.Client())
+	if _, err := searcher.Search(context.Background(), "apple", 5, 0); err != nil {
+		t.Fatalf("first Search: %v", err)
+	}
+	if _, err := searcher.Search(context.Background(), "apple", 5, 0); err != nil {
+		t.Fatalf("second Search: %v", err)
+	}
+	if listPagesRequested != 1 {
+		t.Fatalf("list pages requested = %d, want 1 index build for repeated queries", listPagesRequested)
 	}
 }
 

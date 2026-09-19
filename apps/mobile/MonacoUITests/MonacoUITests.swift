@@ -143,11 +143,17 @@ final class MonacoUITests: XCTestCase {
 
         tabButton(app, "Assets").tap()
         XCTAssertTrue(app.staticTexts["Popular"].waitForExistence(timeout: 20), "Assets tab root")
+        XCTAssertTrue(app.otherElements["assets-popular-strip"].waitForExistence(timeout: 20), "horizontal popular strip")
 
         let popularChip = app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "assets-popular-")
         ).element(boundBy: 0)
         XCTAssertTrue(popularChip.waitForExistence(timeout: 30), "popular strip with prices")
+
+        let browseList = app.otherElements["assets-browse-list"]
+        if browseList.waitForExistence(timeout: 10) {
+            XCTAssertTrue(browseList.exists, "paginated browse list below popular strip")
+        }
 
         let search = app.textFields["assets-search-field"].exists
             ? app.textFields["assets-search-field"]

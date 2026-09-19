@@ -5,21 +5,21 @@ final class GroupActivityTitleFormatterTests: XCTestCase {
     func testMemberBuyKeepsExistingCopy() {
         XCTAssertEqual(
             GroupActivityTitleFormatter.format(kind: "buy", symbol: "AAPLx", agentDisplayName: nil, initiatedBy: nil),
-            "Buy AAPLx"
+            "Buy AAPL"
         )
     }
 
     func testAgentBuyUsesAgentNameAndLowercaseVerb() {
         XCTAssertEqual(
             GroupActivityTitleFormatter.format(kind: "buy", symbol: "AAPLx", agentDisplayName: "Mr Cheese", initiatedBy: "agent"),
-            "Mr Cheese buy AAPLx"
+            "Mr Cheese buy AAPL"
         )
     }
 
     func testAgentSellUsesAgentNameAndLowercaseVerb() {
         XCTAssertEqual(
             GroupActivityTitleFormatter.format(kind: "sell", symbol: "TSLAx", agentDisplayName: "Mr Cheese", initiatedBy: "agent"),
-            "Mr Cheese sell TSLAx"
+            "Mr Cheese sell TSLA"
         )
     }
 

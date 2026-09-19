@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -97,12 +98,12 @@ func TestGET_assets_popular_returnsPinnedAssets(t *testing.T) {
 	token := seedAssetsToken(t, iso, authHandlers, privyClient)
 	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
 		Symbol:     "AAPLx",
-		Name:       "Apple",
+		Name:       "Apple xStock",
 		SolanaMint: jupiter.AAPLxMint,
 		Routable:   true,
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/assets/popular?limit=3", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/popular?limit=5", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	handlers.PopularAssetsHandler(rec, req)
@@ -120,7 +121,31 @@ func TestGET_assets_popular_returnsPinnedAssets(t *testing.T) {
 	if payload.Assets[0].Symbol != "AAPLx" {
 		t.Fatalf("symbol = %q, want AAPLx", payload.Assets[0].Symbol)
 	}
+	if payload.Assets[0].Name != "Apple" {
+		t.Fatalf("name = %q, want cleaned Apple", payload.Assets[0].Name)
+	}
+	if payload.Assets[0].LogoURL == nil || *payload.Assets[0].LogoURL == "" {
+		t.Fatal("expected logoUrl for AAPLx")
+	}
 }
+
+func TestGET_assets_canceledContext_isNot500(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	xstocks.RegisterCatalogSearchError(handlers.Catalog, context.Canceled)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets?query=Goog", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handlers.ListAssetsHandler(rec, req)
+
+	if rec.Code == http.StatusInternalServerError {
+		t.Fatalf("status = 500, canceled catalog search must not surface as internal error")
+	}
+}
+
 
 func TestGET_assets_symbol_returnsDetailAndLiquidity(t *testing.T) {
 	t.Parallel()

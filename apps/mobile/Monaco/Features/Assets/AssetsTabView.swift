@@ -1,7 +1,7 @@
 import MonacoCore
 import SwiftUI
 
-/// Market browse: pinned search, one scrolling grid. Search replaces Popular.
+/// Market browse: horizontal popular strip, paginated list, and search.
 struct AssetsTabView: View {
     @ObservedObject var auth: PrivyAuthService
     @Environment(AppSessionStore.self) private var session
@@ -11,12 +11,17 @@ struct AssetsTabView: View {
     private let searchDebounceNanos: UInt64 = 300_000_000
 
     @State private var searchQuery = ""
-    @State private var assets: [MarketAssetDTO] = []
-    @State private var hasMore = false
-    @State private var listOffset = 0
-    @State private var isLoadingList = false
+    @State private var searchAssets: [MarketAssetDTO] = []
+    @State private var browseAssets: [MarketAssetDTO] = []
+    @State private var searchHasMore = false
+    @State private var browseHasMore = false
+    @State private var searchOffset = 0
+    @State private var browseOffset = 0
+    @State private var isLoadingSearch = false
+    @State private var isLoadingBrowse = false
     @State private var isLoadingMore = false
-    @State private var listFailed = false
+    @State private var searchFailed = false
+    @State private var browseFailed = false
     @State private var searchTask: Task<Void, Never>?
     @State private var selectedSymbol: String?
 
@@ -32,10 +37,6 @@ struct AssetsTabView: View {
         !trimmedQuery.isEmpty
     }
 
-    private var gridAssets: [MarketAssetDTO] {
-        isSearching ? assets : popular
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
             MonacoSearchField(
@@ -45,13 +46,7 @@ struct AssetsTabView: View {
             )
             .accessibilityIdentifier("assets-search-field")
 
-            if !isSearching {
-                Text("Popular")
-                    .font(MonacoTheme.TypeRole.title)
-                    .foregroundStyle(MonacoTheme.ink)
-            }
-
-            gridRegion
+            contentRegion
         }
         .padding(MonacoTheme.Space.m)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -75,6 +70,9 @@ struct AssetsTabView: View {
             if session.popularAssets.isEmpty {
                 await session.refreshPopular(auth: auth)
             }
+            if browseAssets.isEmpty && !isSearching {
+                await loadBrowse(reset: true)
+            }
         }
         .onDisappear {
             searchTask?.cancel()
@@ -82,8 +80,62 @@ struct AssetsTabView: View {
     }
 
     @ViewBuilder
-    private var gridRegion: some View {
-        if isSearching, isLoadingList, assets.isEmpty, !listFailed {
+    private var contentRegion: some View {
+        if isSearching {
+            searchRegion
+        } else {
+            browseRegion
+        }
+    }
+
+    @ViewBuilder
+    private var browseRegion: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+                popularStrip
+
+                if isLoadingBrowse, browseAssets.isEmpty, !browseFailed {
+                    browseLoadingState
+                } else if browseFailed, browseAssets.isEmpty {
+                    browseErrorState
+                } else if !isLoadingBrowse, browseAssets.isEmpty {
+                    MonacoEmptyStateCard(
+                        message: "No stocks to browse right now.",
+                        systemImage: "chart.pie"
+                    )
+                } else {
+                    Text("All stocks")
+                        .font(MonacoTheme.TypeRole.title)
+                        .foregroundStyle(MonacoTheme.ink)
+
+                    LazyVStack(spacing: MonacoTheme.Space.s) {
+                        ForEach(browseAssets) { asset in
+                            assetListRow(asset, identifierPrefix: "assets-browse")
+                        }
+                    }
+                    .accessibilityIdentifier("assets-browse-list")
+
+                    if browseHasMore {
+                        Button(isLoadingMore ? "Loading…" : "Load more") {
+                            Task { await loadBrowse(reset: false) }
+                        }
+                        .buttonStyle(.monacoSecondary)
+                        .disabled(isLoadingMore)
+                        .padding(.top, MonacoTheme.Space.s)
+                        .accessibilityIdentifier("assets-browse-load-more")
+                    }
+                }
+            }
+        }
+        .refreshable {
+            await session.refreshPopular(auth: auth)
+            await loadBrowse(reset: true)
+        }
+    }
+
+    @ViewBuilder
+    private var searchRegion: some View {
+        if isLoadingSearch, searchAssets.isEmpty, !searchFailed {
             centeredStatus {
                 ProgressView()
                     .tint(MonacoTheme.ink)
@@ -92,55 +144,36 @@ struct AssetsTabView: View {
                     .foregroundStyle(MonacoTheme.muted)
             }
             .accessibilityIdentifier("assets-search-loading")
-        } else if isSearching, listFailed, assets.isEmpty {
+        } else if searchFailed, searchAssets.isEmpty {
             centeredStatus {
                 MonacoEmptyStateCard(
                     message: "Could not load stocks.",
                     systemImage: "exclamationmark.triangle"
                 )
                 Button("Retry") {
-                    Task { await loadList(reset: true) }
+                    Task { await loadSearch(reset: true) }
                 }
                 .buttonStyle(.monacoSecondary)
             }
-        } else if isSearching, !isLoadingList, assets.isEmpty {
+        } else if !isLoadingSearch, searchAssets.isEmpty {
             centeredStatus {
                 MonacoEmptyStateCard(
                     message: "No matches for that search.",
                     systemImage: "chart.pie"
                 )
             }
-        } else if !isSearching, popular.isEmpty {
-            ScrollView {
-                MonacoCard {
-                    Text("Popular names show up here once prices load.")
-                        .font(MonacoTheme.TypeRole.body)
-                        .foregroundStyle(MonacoTheme.muted)
-                }
-                .accessibilityIdentifier("assets-grid-popular")
-            }
-            .refreshable {
-                await session.refreshPopular(auth: auth)
-            }
         } else {
             ScrollView {
-                LazyVGrid(columns: gridColumns, spacing: MonacoTheme.Space.s) {
-                    ForEach(gridAssets) { asset in
-                        Button {
-                            selectedSymbol = asset.symbol
-                        } label: {
-                            assetTile(asset)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier(
-                            isSearching ? "assets-row-\(asset.symbol)" : "assets-popular-\(asset.symbol)"
-                        )
+                LazyVStack(spacing: MonacoTheme.Space.s) {
+                    ForEach(searchAssets) { asset in
+                        assetListRow(asset, identifierPrefix: "assets-row")
                     }
                 }
+                .accessibilityIdentifier("assets-grid-search")
 
-                if isSearching, hasMore {
+                if searchHasMore {
                     Button(isLoadingMore ? "Loading…" : "Load more") {
-                        Task { await loadList(reset: false) }
+                        Task { await loadSearch(reset: false) }
                     }
                     .buttonStyle(.monacoSecondary)
                     .disabled(isLoadingMore)
@@ -149,13 +182,66 @@ struct AssetsTabView: View {
                 }
             }
             .refreshable {
-                if isSearching {
-                    await loadList(reset: true)
-                } else {
-                    await session.refreshPopular(auth: auth)
-                }
+                await loadSearch(reset: true)
             }
-            .accessibilityIdentifier(isSearching ? "assets-grid-search" : "assets-grid-popular")
+        }
+    }
+
+    @ViewBuilder
+    private var popularStrip: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            Text("Popular")
+                .font(MonacoTheme.TypeRole.title)
+                .foregroundStyle(MonacoTheme.ink)
+
+            if popular.isEmpty {
+                MonacoCard {
+                    Text("Popular names show up here once prices load.")
+                        .font(MonacoTheme.TypeRole.body)
+                        .foregroundStyle(MonacoTheme.muted)
+                }
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: MonacoTheme.Space.s) {
+                        ForEach(popular) { asset in
+                            Button {
+                                selectedSymbol = asset.symbol
+                            } label: {
+                                popularCard(asset)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("assets-popular-\(asset.symbol)")
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .accessibilityIdentifier("assets-popular-strip")
+            }
+        }
+    }
+
+    private var browseLoadingState: some View {
+        HStack(spacing: MonacoTheme.Space.s) {
+            ProgressView()
+                .tint(MonacoTheme.ink)
+            Text("Loading stocks…")
+                .font(MonacoTheme.TypeRole.caption)
+                .foregroundStyle(MonacoTheme.muted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityIdentifier("assets-browse-loading")
+    }
+
+    private var browseErrorState: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            MonacoEmptyStateCard(
+                message: "Could not load stocks.",
+                systemImage: "exclamationmark.triangle"
+            )
+            Button("Retry") {
+                Task { await loadBrowse(reset: true) }
+            }
+            .buttonStyle(.monacoSecondary)
         }
     }
 
@@ -168,18 +254,13 @@ struct AssetsTabView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// 2 columns on a phone portrait sheet; more columns as the canvas widens.
-    private var gridColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 152, maximum: 280), spacing: MonacoTheme.Space.s, alignment: .top)]
-    }
-
-    private func assetTile(_ asset: MarketAssetDTO) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+    private func popularCard(_ asset: MarketAssetDTO) -> some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            AssetLogoView(logoURL: asset.logoUrl, symbol: asset.displayTicker, size: 40)
             Text(asset.displayTicker)
                 .font(MonacoTheme.TypeRole.title)
                 .foregroundStyle(MonacoTheme.ink)
                 .lineLimit(1)
-                .minimumScaleFactor(0.75)
             Text(formattedPrice(asset.priceUsdcMicros))
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(MonacoTheme.muted)
@@ -190,7 +271,7 @@ struct AssetsTabView: View {
             }
         }
         .padding(MonacoTheme.Space.m)
-        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        .frame(width: 132, alignment: .leading)
         .background(
             MonacoTheme.surface,
             in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
@@ -202,6 +283,50 @@ struct AssetsTabView: View {
         .opacity(asset.routable ? 1 : 0.7)
     }
 
+    private func assetListRow(_ asset: MarketAssetDTO, identifierPrefix: String) -> some View {
+        Button {
+            selectedSymbol = asset.symbol
+        } label: {
+            HStack(spacing: MonacoTheme.Space.m) {
+                AssetLogoView(logoURL: asset.logoUrl, symbol: asset.displayTicker, size: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(asset.displayTicker)
+                        .font(MonacoTheme.TypeRole.title)
+                        .foregroundStyle(MonacoTheme.ink)
+                        .lineLimit(1)
+                    Text(asset.displayName)
+                        .font(MonacoTheme.TypeRole.caption)
+                        .foregroundStyle(MonacoTheme.muted)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: MonacoTheme.Space.s)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(formattedPrice(asset.priceUsdcMicros))
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(MonacoTheme.ink)
+                    if let change = asset.change24h, !change.isEmpty {
+                        Text(PercentReturnFormatter.format(change))
+                            .font(MonacoTheme.TypeRole.caption.monospacedDigit())
+                            .foregroundStyle(MonacoTheme.signed(change))
+                    }
+                }
+            }
+            .padding(MonacoTheme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                MonacoTheme.surface,
+                in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
+                    .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+            }
+            .opacity(asset.routable ? 1 : 0.7)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("\(identifierPrefix)-\(asset.symbol)")
+    }
+
     private func formattedPrice(_ micros: Int64?) -> String {
         guard let micros else { return "—" }
         return UsdAmountFormatter.format(micros: micros)
@@ -211,16 +336,19 @@ struct AssetsTabView: View {
         searchTask?.cancel()
         let query = trimmedQuery
         if query.isEmpty {
-            assets = []
-            hasMore = false
-            listOffset = 0
-            isLoadingList = false
-            listFailed = false
+            searchAssets = []
+            searchHasMore = false
+            searchOffset = 0
+            isLoadingSearch = false
+            searchFailed = false
+            if browseAssets.isEmpty {
+                Task { await loadBrowse(reset: true) }
+            }
             return
         }
-        isLoadingList = true
-        assets = []
-        listFailed = false
+        isLoadingSearch = true
+        searchAssets = []
+        searchFailed = false
         searchTask = Task {
             do {
                 try await Task.sleep(nanoseconds: searchDebounceNanos)
@@ -228,29 +356,29 @@ struct AssetsTabView: View {
                 return
             }
             guard !Task.isCancelled else { return }
-            await loadList(reset: true)
+            await loadSearch(reset: true)
         }
     }
 
-    private func loadList(reset: Bool) async {
+    private func loadSearch(reset: Bool) async {
         guard let token = auth.accessToken else { return }
         let query = trimmedQuery
         guard !query.isEmpty else { return }
 
         if reset {
-            isLoadingList = true
-            listFailed = false
-            listOffset = 0
-            hasMore = false
+            isLoadingSearch = true
+            searchFailed = false
+            searchOffset = 0
+            searchHasMore = false
         } else {
             isLoadingMore = true
         }
         defer {
-            isLoadingList = false
+            isLoadingSearch = false
             isLoadingMore = false
         }
 
-        let offset = reset ? 0 : listOffset
+        let offset = reset ? 0 : searchOffset
         do {
             let response = try await apiClient.listMarketAssets(
                 accessToken: token,
@@ -259,18 +387,113 @@ struct AssetsTabView: View {
                 offset: offset
             )
             if reset {
-                assets = response.assets
+                searchAssets = response.assets
             } else {
-                assets.append(contentsOf: response.assets)
+                searchAssets.append(contentsOf: response.assets)
             }
-            listOffset = assets.count
-            hasMore = response.hasMore
+            searchOffset = searchAssets.count
+            searchHasMore = response.hasMore
         } catch {
             if error.isRequestCancellation { return }
             if reset {
-                listFailed = true
-                assets = []
+                searchFailed = true
+                searchAssets = []
             }
+        }
+    }
+
+    private func loadBrowse(reset: Bool) async {
+        guard let token = auth.accessToken else { return }
+        guard trimmedQuery.isEmpty else { return }
+
+        if reset {
+            isLoadingBrowse = true
+            browseFailed = false
+            browseOffset = 0
+            browseHasMore = false
+        } else {
+            isLoadingMore = true
+        }
+        defer {
+            isLoadingBrowse = false
+            isLoadingMore = false
+        }
+
+        let offset = reset ? 0 : browseOffset
+        do {
+            let response = try await apiClient.listMarketAssets(
+                accessToken: token,
+                query: "",
+                limit: pageSize,
+                offset: offset
+            )
+            if reset {
+                browseAssets = response.assets
+            } else {
+                browseAssets.append(contentsOf: response.assets)
+            }
+            browseOffset = browseAssets.count
+            browseHasMore = response.hasMore
+        } catch {
+            if error.isRequestCancellation { return }
+            if reset {
+                browseFailed = true
+                browseAssets = []
+            }
+        }
+    }
+}
+
+private struct AssetLogoView: View {
+    let logoURL: String?
+    let symbol: String
+    var size: CGFloat = 44
+
+    private var resolvedURL: URL? {
+        let trimmed = logoURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return nil }
+        return URL(string: trimmed)
+    }
+
+    var body: some View {
+        Group {
+            if let resolvedURL {
+                AsyncImage(url: resolvedURL, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        placeholder
+                    default:
+                        placeholder.overlay {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .tint(MonacoTheme.muted)
+                        }
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                .fill(MonacoTheme.canvasWash)
+            Text(String(symbol.prefix(1)))
+                .font(.custom("AvenirNext-DemiBold", size: size * 0.38))
+                .foregroundStyle(MonacoTheme.accent)
         }
     }
 }

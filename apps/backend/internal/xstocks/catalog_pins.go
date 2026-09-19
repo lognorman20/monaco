@@ -5,6 +5,23 @@ import (
 	"strings"
 )
 
+// popularStripSymbols is the fixed Assets tab horizontal strip (display order).
+var popularStripSymbols = []string{
+	"AAPLx",  // Apple
+	"NVDAx",  // NVIDIA
+	"TSLAx",  // Tesla
+	"METAx",  // Meta
+	"GOOGLx", // Alphabet (Class A)
+}
+
+func popularStripSymbolSet() map[string]struct{} {
+	set := make(map[string]struct{}, len(popularStripSymbols))
+	for _, symbol := range popularStripSymbols {
+		set[strings.ToUpper(symbol)] = struct{}{}
+	}
+	return set
+}
+
 // pinnedCatalogSymbols lists well-known xStock tickers shown first when browsing
 // or when they match a search query. Order is display priority.
 var pinnedCatalogSymbols = []string{

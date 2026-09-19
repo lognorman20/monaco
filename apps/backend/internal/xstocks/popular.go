@@ -6,25 +6,30 @@ import (
 	"sync"
 )
 
-// Popular returns pinned major xStocks up to limit, resolved via catalog search.
+const maxPopularStrip = 5
+
+// Popular returns the Assets tab strip symbols in product order, capped at five.
 func Popular(ctx context.Context, searcher CatalogSearcher, limit int) ([]CatalogAsset, error) {
 	if limit <= 0 {
-		limit = 10
+		limit = maxPopularStrip
 	}
-	if limit > len(pinnedCatalogSymbols) {
-		limit = len(pinnedCatalogSymbols)
+	if limit > maxPopularStrip {
+		limit = maxPopularStrip
+	}
+	if limit > len(popularStripSymbols) {
+		limit = len(popularStripSymbols)
 	}
 
 	type slot struct {
 		asset CatalogAsset
 		ok    bool
 	}
-	slots := make([]slot, len(pinnedCatalogSymbols))
+	slots := make([]slot, len(popularStripSymbols))
 	var wg sync.WaitGroup
 	var firstErr error
 	var errOnce sync.Once
 
-	for i, symbol := range pinnedCatalogSymbols {
+	for i, symbol := range popularStripSymbols {
 		wg.Add(1)
 		go func(i int, symbol string) {
 			defer wg.Done()
@@ -45,7 +50,6 @@ func Popular(ctx context.Context, searcher CatalogSearcher, limit int) ([]Catalo
 	}
 
 	out := make([]CatalogAsset, 0, limit)
-	seen := make(map[string]struct{}, limit)
 	for _, item := range slots {
 		if len(out) >= limit {
 			break
@@ -57,10 +61,6 @@ func Popular(ctx context.Context, searcher CatalogSearcher, limit int) ([]Catalo
 		if key == "" {
 			continue
 		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
 		out = append(out, item.asset)
 	}
 	return out, nil

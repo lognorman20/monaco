@@ -551,7 +551,7 @@ final class MonacoAPIClient {
 
     func getPopularAssets(
         accessToken: String,
-        limit: Int = 10
+        limit: Int = 5
     ) async throws -> PopularAssetsResponse {
         var components = URLComponents(
             url: baseURL.appending(path: "v1/assets/popular"),
