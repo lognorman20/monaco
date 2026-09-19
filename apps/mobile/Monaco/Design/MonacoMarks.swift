@@ -7,22 +7,26 @@ struct CabalMark: View {
     private let initials: String
     private let name: String
     private let size: CGFloat
+    private let onInk: Bool
 
-    init(groupId: String, name: String, size: CGFloat = 44) {
+    /// `onInk` brightens the tile and drops the initials to deep ink, so the mark still
+    /// carries the cabal's identity on a deep ink hero card.
+    init(groupId: String, name: String, size: CGFloat = 44, onInk: Bool = false) {
         tint = .forGroupId(groupId)
         initials = CabalMark.initials(for: name)
         self.name = name
         self.size = size
+        self.onInk = onInk
     }
 
     var body: some View {
         RoundedRectangle(cornerRadius: MarkGeometry.radius(for: size), style: .continuous)
-            .fill(tint.fill)
+            .fill(onInk ? tint.onInk : tint.fill)
             .frame(width: size, height: size)
             .overlay {
                 Text(initials)
                     .font(.custom("AvenirNext-DemiBold", fixedSize: size * (initials.count > 1 ? 0.36 : 0.42)))
-                    .foregroundStyle(tint.onFill)
+                    .foregroundStyle(onInk ? MonacoTheme.heroInk : tint.onFill)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
                     .padding(size * 0.08)

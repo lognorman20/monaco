@@ -68,9 +68,13 @@ private struct CabalStripCard: View {
         .frame(width: size.width, alignment: .topLeading)
         .frame(minHeight: size.height, alignment: .topLeading)
         .background(
-            MonacoTheme.CabalTint.forGroupId(row.groupId).fill,
+            MonacoTheme.surface,
             in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
         )
+        .overlay {
+            RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
+                .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+        }
         .accessibilityElement(children: .combine)
     }
 }

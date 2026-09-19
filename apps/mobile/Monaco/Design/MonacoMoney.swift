@@ -67,18 +67,22 @@ struct MoneyText: View {
 struct PnLText: View {
     private let dollarPnl: String
     private let style: MoneyStyle
+    private let onInk: Bool
 
-    init(dollarPnl: String, style: MoneyStyle) {
+    /// `onInk` switches to the saturated pair for figures on a deep ink hero card.
+    init(dollarPnl: String, style: MoneyStyle, onInk: Bool = false) {
         self.dollarPnl = dollarPnl
         self.style = style
+        self.onInk = onInk
     }
 
     var body: some View {
-        MoneyFigure(
+        let tone = PnLTone(dollarPnl: dollarPnl)
+        return MoneyFigure(
             text: SignedUsdFormatter.format(dollarPnl),
             value: SignedUsdFormatter.parse(dollarPnl).map { ($0 as NSDecimalNumber).doubleValue },
             style: style,
-            color: PnLTone(dollarPnl: dollarPnl).color
+            color: onInk ? tone.inkCardColor : tone.color
         )
         .accessibilityLabel(PnLSpeech.dollars(dollarPnl))
     }

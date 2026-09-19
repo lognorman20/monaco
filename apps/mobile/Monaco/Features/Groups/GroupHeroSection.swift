@@ -2,27 +2,28 @@ import MonacoCore
 import SwiftUI
 
 /// Top of the group screen: identity, the pot, how it's doing, and your slice of it.
+/// A deep ink money card in both schemes; the cabal's tint is the mark and the accent
+/// rule, never a full-bleed wash.
 struct GroupHeroSection: View {
     let view: GroupViewDTO
 
-    private var tint: MonacoTheme.CabalTint { .forGroupId(view.id) }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            // The tinted block is the cabal's identity, so no CabalMark here: on its own tint it
-            // would vanish. Name gets the full width; members sit under it.
-            VStack(alignment: .leading, spacing: 10) {
-                Text(view.name)
-                    .font(MonacoTheme.Typo.display)
-                    .foregroundStyle(MonacoTheme.ink)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
-                    .accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: MonacoTheme.Space.sm) {
+                    CabalMark(groupId: view.id, name: view.name, size: 36, onInk: true)
+                    Text(view.name)
+                        .font(MonacoTheme.Typo.title)
+                        .foregroundStyle(MonacoTheme.onHero)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.75)
+                        .accessibilityAddTraits(.isHeader)
+                }
                 HStack(spacing: 8) {
-                    GroupMemberAvatarStack(members: view.members, ringColor: tint.fill)
+                    GroupMemberAvatarStack(members: view.members, ringColor: MonacoTheme.heroInk)
                     Text(view.members.count == 1 ? "1 member" : "\(view.members.count) members")
                         .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.muted)
+                        .foregroundStyle(MonacoTheme.onHeroMuted)
                 }
                 .accessibilityElement(children: .combine)
             }
@@ -30,50 +31,48 @@ struct GroupHeroSection: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("In the pot")
                     .font(MonacoTheme.Typo.caption)
-                    .foregroundStyle(MonacoTheme.muted)
-                MoneyText(decimalString: view.resolvedPotTotalUsd, style: .hero)
+                    .foregroundStyle(MonacoTheme.onHeroMuted)
+                MoneyText(decimalString: view.resolvedPotTotalUsd, style: .hero, color: MonacoTheme.onHero)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
                     .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .accessibilityIdentifier("pot-total-value")
                 HStack(spacing: 8) {
-                    PnLBadge(dollarPnl: GroupHeroMath.potDollarPnl(view.pot), percentReturn: nil)
+                    PnLBadge(dollarPnl: GroupHeroMath.potDollarPnl(view.pot), percentReturn: nil, onInk: true)
                     Text("all time")
                         .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.muted)
+                        .foregroundStyle(MonacoTheme.onHeroMuted)
                 }
             }
             .accessibilityElement(children: .combine)
 
             Rectangle()
-                .fill(MonacoTheme.ink.opacity(0.1))
+                .fill(MonacoTheme.onHeroHairline)
                 .frame(height: 1)
 
             HStack(alignment: .lastTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Your slice")
                         .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.muted)
-                    MoneyText(decimalString: view.you.equityUsd, style: .row)
+                        .foregroundStyle(MonacoTheme.onHeroMuted)
+                    MoneyText(decimalString: view.you.equityUsd, style: .row, color: MonacoTheme.onHero)
                 }
                 Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(GroupHeroMath.sliceCaption(view.you))
                         .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.muted)
+                        .foregroundStyle(MonacoTheme.onHeroMuted)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                     if GroupHeroMath.hasSlice(view.you) {
-                        PnLText(dollarPnl: view.you.dollarPnl, style: .caption)
+                        PnLText(dollarPnl: view.you.dollarPnl, style: .caption, onInk: true)
                     }
                 }
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("group-hero-slice")
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint.fill, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.hero, style: .continuous))
+        .monacoHeroCard()
         .accessibilityIdentifier("group-hero")
     }
 }
@@ -99,7 +98,7 @@ struct GroupMemberAvatarStack: View {
                 bubble {
                     Text("+\(overflow)")
                         .font(.system(size: size * 0.36, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(MonacoTheme.ink)
+                        .foregroundStyle(MonacoTheme.heroInk)
                 }
             }
         }
@@ -114,7 +113,7 @@ struct GroupMemberAvatarStack: View {
             bubble {
                 Text(CabalMark.initials(for: member.displayName))
                     .font(.system(size: size * 0.36, weight: .semibold))
-                    .foregroundStyle(MonacoTheme.ink)
+                    .foregroundStyle(MonacoTheme.heroInk)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
@@ -126,7 +125,7 @@ struct GroupMemberAvatarStack: View {
 
     private func bubble<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         Circle()
-            .fill(MonacoTheme.surface)
+            .fill(Color.white)
             .overlay(Circle().strokeBorder(ringColor, lineWidth: 2))
             .overlay(content().padding(.horizontal, 5))
             .frame(width: size, height: size)
