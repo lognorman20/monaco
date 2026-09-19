@@ -45,6 +45,9 @@ var apiRoutes = []string{
 	"POST /v1/me/withdrawals",
 	"GET /v1/me/withdrawals/{id}",
 	"GET /v1/home",
+	"GET /v1/home/dashboard",
+	"GET /v1/home/pnl-series",
+	"GET /v1/home/missed-proposals",
 	"POST /v1/groups",
 	"POST /v1/groups/{id}/join",
 	"POST /v1/groups/{id}/leave",
@@ -154,11 +157,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 	governance.SetHomeService(home)
 	governance.SetSwapService(swap)
 	transactionHandlers := &httpapi.TransactionHandlers{
-		Store:    store,
-		Privy:    privyClient,
-		XStocks:  xstocksResolver,
-		Swap:     swap,
-		Symbols:  symbols,
+		Store:   store,
+		Privy:   privyClient,
+		XStocks: xstocksResolver,
+		Swap:    swap,
+		Symbols: symbols,
 	}
 	catalogHandlers := &httpapi.CatalogHandlers{
 		Store:   store,
@@ -191,6 +194,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("POST /v1/me/withdrawals", platformWithdrawHandlers.CreatePlatformWithdrawalHandler)
 	mux.HandleFunc("GET /v1/me/withdrawals/{id}", platformWithdrawHandlers.GetPlatformWithdrawalHandler)
 	mux.HandleFunc("GET /v1/home", homeHandlers.HomeHandler)
+	mux.HandleFunc("GET /v1/home/dashboard", homeHandlers.HomeDashboardHandler)
+	mux.HandleFunc("GET /v1/home/pnl-series", homeHandlers.HomePnLSeriesHandler)
+	mux.HandleFunc("GET /v1/home/missed-proposals", homeHandlers.HomeMissedProposalsHandler)
 	mux.HandleFunc("GET /v1/users/{id}/groups", homeHandlers.UserSharedGroupsHandler)
 	mux.HandleFunc("POST /v1/groups", groupHandlers.CreateGroupHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/join", groupHandlers.JoinGroupHandler)

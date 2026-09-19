@@ -121,6 +121,72 @@ public final class MonacoAPIClient: @unchecked Sendable {
         return try JSONDecoder().decode(HomeViewDTO.self, from: data)
     }
 
+    public func getHomeDashboard(leaderboardRange: HomeLeaderboardRange = .all) async throws -> HomeDashboardDTO {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/home/dashboard"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "leaderboardRange", value: leaderboardRange.rawValue),
+        ]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try monacoISO8601JSONDecoder().decode(HomeDashboardDTO.self, from: data)
+    }
+
+    public func getHomePnLSeries(range: HomeLeaderboardRange = .oneHour) async throws -> HomePnLSeriesDTO {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/home/pnl-series"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "range", value: range.rawValue),
+        ]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try monacoISO8601JSONDecoder().decode(HomePnLSeriesDTO.self, from: data)
+    }
+
+    public func getHomeMissedProposals() async throws -> HomeMissedProposalsDTO {
+        let url = baseURL.appending(path: "v1/home/missed-proposals")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try monacoISO8601JSONDecoder().decode(HomeMissedProposalsDTO.self, from: data)
+    }
+
     public func searchAssets(
         groupId: String,
         query: String,

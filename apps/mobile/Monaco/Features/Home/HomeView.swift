@@ -1,54 +1,48 @@
-import MonacoCore
 import SwiftUI
 
-/// App home with cabal board and people board.
+/// Home dashboard: net worth, positions, P&L chart, leaderboard, missed votes.
 struct HomeView: View {
     @ObservedObject var auth: PrivyAuthService
     @Environment(AppSessionStore.self) private var session
 
-    @State private var selectedTab = 0
-
-    private var home: HomeViewDTO {
-        session.home ?? HomeViewDTO(groups: [], people: [])
-    }
+    @State private var leaderboardRange: HomeLeaderboardRange = .all
 
     private var joinedCabals: [HomeGroupBoardRowDTO] {
         session.joinedCabals
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            PlatformBalanceCard(balance: session.platformBalance, isLoading: session.isBalanceLoading)
-                .padding([.horizontal, .top])
-
-            NavigationLink {
-                DepositView(auth: auth, joinedCabals: joinedCabals)
-            } label: {
-                Label("Deposit", systemImage: "plus.circle")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.monacoSecondary)
-            .padding(.horizontal)
-            .padding(.bottom, 8)
-            .accessibilityIdentifier("home-deposit-link")
-
-            Picker("Board", selection: $selectedTab) {
-                Text("Cabals").tag(0)
-                Text("People").tag(1)
-            }
-            .pickerStyle(.segmented)
-            .monacoSegmentedBoardPicker()
-
-            if selectedTab == 0 {
-                CabalListSection(
-                    auth: auth,
-                    rows: home.groups,
-                    onRefresh: { await session.refresh(auth: auth) },
-                    emptyMessage: "No cabals yet. Create or join one to start investing together."
-                )
+        Group {
+            if session.isLoading, session.dashboard == nil {
+                ProgressView("Loading home…")
+                    .tint(MonacoTheme.accent)
+                    .foregroundStyle(MonacoTheme.muted)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let dashboard = session.dashboard {
+                dashboardScroll(dashboard)
+            } else if let errorMessage = session.errorMessage {
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+                    Text(errorMessage)
+                        .font(MonacoTheme.TypeRole.body)
+                        .foregroundStyle(MonacoTheme.destructive)
+                    Button("Try again") {
+                        Task { await session.refresh(auth: auth, leaderboardRange: leaderboardRange) }
+                    }
+                    .buttonStyle(.monacoPrimary)
+                }
+                .padding(MonacoTheme.Space.m)
             } else {
-                peopleBoardSection
+                dashboardScroll(
+                    HomeDashboardDTO(
+                        netWorthUsd: "0.00",
+                        netWorthDollarPnl: "+0.00",
+                        netWorthPercentReturn: nil,
+                        myGroups: [],
+                        pnlSeries1H: [],
+                        leaderboard: HomeLeaderboardSectionDTO(range: "ALL", people: []),
+                        missedProposals: []
+                    )
+                )
             }
         }
         .monacoCanvas()
@@ -75,72 +69,84 @@ struct HomeView: View {
             }
         }
         .refreshable {
-            await session.refresh(auth: auth)
+            await session.refresh(auth: auth, leaderboardRange: leaderboardRange)
+        }
+        .onChange(of: leaderboardRange) { _, range in
+            Task { await session.refreshDashboard(auth: auth, leaderboardRange: range) }
         }
     }
 
-    private var peopleBoardSection: some View {
-        List {
-            if home.people.isEmpty {
-                MonacoEmptyStateCard(
-                    message: peopleEmptyMessage,
-                    systemImage: "chart.bar"
-                )
-            } else {
-                ForEach(home.people) { row in
+    private func dashboardScroll(_ dashboard: HomeDashboardDTO) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
+                HomeNetWorthSection(
+                    dashboard: dashboard,
+                    balance: session.platformBalance,
+                    isBalanceLoading: session.isBalanceLoading
+                ) {
                     NavigationLink {
-                        UserProfileGroupsView(
-                            auth: auth,
-                            userId: row.userId,
-                            displayName: row.displayName
-                        )
+                        DepositView(auth: auth, joinedCabals: joinedCabals)
                     } label: {
-                        MonacoRowCard(
-                            systemImage: "person.fill",
-                            title: row.displayName,
-                            subtitle: PercentReturnFormatter.format(row.percentReturn),
-                            trailing: row.dollarPnl
-                        )
+                        Text("Deposit")
                     }
-                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .accessibilityIdentifier("home-people-row-\(row.userId)")
+                    .buttonStyle(.monacoSecondary)
+                    .accessibilityIdentifier("home-deposit-link")
                 }
-            }
-        }
-        .monacoInsetList()
-    }
 
-    private var peopleEmptyMessage: String {
-        if home.groups.isEmpty {
-            return "Join a cabal to see members on the leaderboard."
+                HomePositionsSection(
+                    auth: auth,
+                    rows: dashboard.myGroups,
+                    onLeft: { await session.refresh(auth: auth, leaderboardRange: leaderboardRange) }
+                )
+
+                HomePnLChartSection(points: dashboard.pnlSeries1H)
+
+                HomeLeaderboardSection(
+                    auth: auth,
+                    range: $leaderboardRange,
+                    people: dashboard.leaderboard.people
+                )
+
+                HomeMissedVotesSection(
+                    auth: auth,
+                    rows: dashboard.missedProposals
+                )
+            }
+            .padding(.horizontal, MonacoTheme.Space.m)
+            .padding(.bottom, MonacoTheme.Space.l)
         }
-        return "No members in your cabals yet."
     }
 }
 
 #Preview {
     let session = AppSessionStore()
-    session.home = HomeViewDTO(
-        groups: [
-            HomeGroupBoardRowDTO(
+    session.dashboard = HomeDashboardDTO(
+        netWorthUsd: "1248.50",
+        netWorthDollarPnl: "+48.20",
+        netWorthPercentReturn: "0.040",
+        myGroups: [
+            HomeMyGroupRowDTO(
                 groupId: "g1",
                 name: "Weekend investors",
-                potValueUsd: "548.20",
-                percentReturn: "0.124",
-                dollarPnl: "+48.20",
-                isJoined: true
+                equityUsd: "3.35",
+                slicePercent: "0.12",
+                dollarPnl: "+0.10",
+                percentReturn: "0.031"
             ),
         ],
-        people: [
-            HomePeopleBoardRowDTO(
-                userId: "u1",
-                displayName: "Alfred",
-                percentReturn: "0.124",
-                dollarPnl: "+48.20"
-            ),
-        ]
+        pnlSeries1H: [],
+        leaderboard: HomeLeaderboardSectionDTO(
+            range: "ALL",
+            people: [
+                HomePeopleBoardRowDTO(
+                    userId: "u1",
+                    displayName: "Alfred",
+                    percentReturn: "0.124",
+                    dollarPnl: "+48.20"
+                ),
+            ]
+        ),
+        missedProposals: []
     )
     return NavigationStack {
         HomeView(auth: PrivyAuthService())
