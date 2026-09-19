@@ -45,27 +45,30 @@ struct CabalsSearchResultsSection: View {
 
     private var results: some View {
         LazyVStack(spacing: MonacoTheme.Space.s) {
-            ForEach(model.results) { row in
-                NavigationLink {
-                    CabalDiscoveryDestinationView(
-                        auth: auth,
-                        groupId: row.groupID,
-                        name: row.name,
-                        destination: GroupDiscoveryDestination(isJoined: row.isJoined, joinMode: row.joinMode),
-                        onChanged: onChanged
-                    )
-                } label: {
-                    CabalBoardRow(
-                        leading: nil,
-                        name: row.name,
-                        detail: cabalRowDetail(memberCount: row.memberCount, isJoined: row.isJoined, joinMode: row.joinMode),
-                        potValueUsd: row.potValueUsd,
-                        dollarPnl: row.dollarPnl,
-                        percentReturn: row.percentReturn
-                    )
+            MonacoGroupedList {
+                ForEach(Array(model.results.enumerated()), id: \.element.id) { index, row in
+                    NavigationLink {
+                        CabalDiscoveryDestinationView(
+                            auth: auth,
+                            groupId: row.groupID,
+                            name: row.name,
+                            destination: GroupDiscoveryDestination(isJoined: row.isJoined, joinMode: row.joinMode),
+                            onChanged: onChanged
+                        )
+                    } label: {
+                        CabalDiscoveryRowContent(
+                            rank: nil,
+                            groupId: row.groupID,
+                            name: row.name,
+                            detail: cabalRowDetail(memberCount: row.memberCount, isJoined: row.isJoined, joinMode: row.joinMode),
+                            potValueUsd: row.potValueUsd,
+                            percentReturn: row.percentReturn,
+                            isLast: index == model.results.count - 1
+                        )
+                    }
+                    .buttonStyle(.monacoRow)
+                    .accessibilityIdentifier("cabals-search-result-\(row.groupID)")
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("cabals-search-result-\(row.groupID)")
             }
 
             if model.nextCursor != nil {
