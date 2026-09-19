@@ -82,6 +82,10 @@ func (g *GroupService) CreateGroup(ctx context.Context, accessToken string, name
 	if err != nil {
 		return CreateGroupResult{}, err
 	}
+	// The creator is always a member; every member-scoped route authorizes via group_members.
+	if err := g.store.InsertGroupMemberTx(ctx, tx, group.ID, user.ID); err != nil {
+		return CreateGroupResult{}, err
+	}
 
 	treasuryRef, err := g.privy.EnsureTreasury(ctx, privy.GroupID(group.ID))
 	if err != nil {
@@ -107,7 +111,7 @@ func (g *GroupService) CreateGroup(ctx context.Context, accessToken string, name
 	}, nil
 }
 
-// GetGroup returns group name and treasury address for an authenticated creator.
+// GetGroup returns group name and treasury address for an authenticated group member.
 func (g *GroupService) GetGroup(ctx context.Context, accessToken string, groupID string) (GetGroupResult, error) {
 	if groupID == "" {
 		logGroupBranchWarn("group get rejected", "group id required")
@@ -140,8 +144,17 @@ func (g *GroupService) GetGroup(ctx context.Context, accessToken string, groupID
 		logGroupBranchError("group get lookup group failed", err, "group_id", groupID, "user_id", user.ID)
 		return GetGroupResult{}, err
 	}
-	if !found || group.CreatorUserID != user.ID {
-		logGroupBranchWarn("group get rejected", "group not found or not creator", "group_id", groupID, "user_id", user.ID)
+	if !found {
+		logGroupBranchWarn("group get rejected", "group not found", "group_id", groupID, "user_id", user.ID)
+		return GetGroupResult{}, ErrGroupNotFound
+	}
+	member, err := g.store.IsGroupMember(ctx, group.ID, user.ID)
+	if err != nil {
+		logGroupBranchError("group get membership check failed", err, "group_id", groupID, "user_id", user.ID)
+		return GetGroupResult{}, err
+	}
+	if !member {
+		logGroupBranchWarn("group get rejected", "not group member", "group_id", groupID, "user_id", user.ID)
 		return GetGroupResult{}, ErrGroupNotFound
 	}
 
