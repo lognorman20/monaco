@@ -29,6 +29,13 @@ struct LoginView: View {
                 LaunchScreenView()
                     .padding(.top, MonacoTheme.Space.xl)
 
+                if let reason = auth.lastSignOutReason {
+                    Text(reason)
+                        .font(MonacoTheme.Typo.callout)
+                        .foregroundStyle(MonacoTheme.destructive)
+                        .accessibilityIdentifier("signOutReasonNotice")
+                }
+
                 VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
                     if showsMethodPicker {
                         MonacoSegmented(availableMethods, selection: $selectedMethod) { $0.rawValue }
