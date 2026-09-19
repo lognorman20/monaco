@@ -5,8 +5,10 @@ Monaco runs trades for a cabal agent. Your bot POSTs intents; Monaco validates a
 ## Setup
 
 1. Member proposes **add agent** with name + USDC allocation.
-2. Cabal votes. On pass, Monaco mints `mco_…` API key.
-3. Proposer sees key **once** in proposal detail (mobile). Copy to bot env. **Never log the key.**
+2. Cabal votes. On pass, Monaco mints a **5-character** API key (e.g. `k7m2p`).
+3. Proposer sees key **once** in proposal detail (mobile). Copy or type into bot env. **Never log the key.**
+
+Existing keys minted before this format are invalid — re-add the agent to get a new key.
 
 ## Base URL
 
@@ -19,7 +21,7 @@ Use your deployed API host in production.
 Every agent call:
 
 ```http
-X-Monaco-Agent-Key: mco_...
+X-Monaco-Agent-Key: k7m2p
 ```
 
 No member JWT. Missing/invalid/revoked key → **401**. Wrong cabal in URL → **403**.

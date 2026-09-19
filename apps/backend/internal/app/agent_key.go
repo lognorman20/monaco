@@ -3,25 +3,31 @@ package app
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 )
 
-const agentKeyPrefix = "mco_"
+const (
+	agentKeyLength   = 5
+	agentKeyAlphabet = "23456789abcdefghjkmnpqrstuvwxyz" // no 0/O, 1/l/I
+)
 
 // MintAgentAPIKey returns a new plaintext key and its sha256 hash.
 func MintAgentAPIKey() (plaintext, hash, prefix string, err error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", "", "", fmt.Errorf("mint agent api key: %w", err)
+	alphabetLen := big.NewInt(int64(len(agentKeyAlphabet)))
+	buf := make([]byte, agentKeyLength)
+	for i := range buf {
+		n, err := rand.Int(rand.Reader, alphabetLen)
+		if err != nil {
+			return "", "", "", fmt.Errorf("mint agent api key: %w", err)
+		}
+		buf[i] = agentKeyAlphabet[n.Int64()]
 	}
-	plaintext = agentKeyPrefix + base64.RawURLEncoding.EncodeToString(buf)
+	plaintext = string(buf)
 	sum := sha256.Sum256([]byte(plaintext))
 	hash = hex.EncodeToString(sum[:])
-	if len(plaintext) >= 8 {
-		prefix = plaintext[:8]
-	}
+	prefix = plaintext
 	return plaintext, hash, prefix, nil
 }
 

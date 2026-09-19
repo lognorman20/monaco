@@ -63,10 +63,27 @@ func TestAgentAPIKey_mintAndHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	if plaintext == "" || hash == "" || prefix == "" {
-		t.Fatal("expected non-empty key material")
+	if len(plaintext) != agentKeyLength {
+		t.Fatalf("expected %d-char key, got %q", agentKeyLength, plaintext)
+	}
+	if prefix != plaintext {
+		t.Fatalf("prefix should be full key, got %q", prefix)
+	}
+	for _, c := range plaintext {
+		if !containsRune(agentKeyAlphabet, c) {
+			t.Fatalf("key contains ambiguous or invalid char %q in %q", c, plaintext)
+		}
 	}
 	if HashAgentAPIKey(plaintext) != hash {
 		t.Fatal("hash mismatch")
 	}
+}
+
+func containsRune(s string, r rune) bool {
+	for _, c := range s {
+		if c == r {
+			return true
+		}
+	}
+	return false
 }
