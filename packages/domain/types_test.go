@@ -39,7 +39,7 @@ func TestParseVoteThreshold_validValues(t *testing.T) {
 }
 
 func TestParseProposalKind_validValues(t *testing.T) {
-	for _, raw := range []string{"buy", "sell"} {
+	for _, raw := range []string{"buy", "sell", "add_agent", "pause_agent", "resume_agent", "revoke_agent"} {
 		got, err := ParseProposalKind(raw)
 		if err != nil || string(got) != raw {
 			t.Fatalf("ParseProposalKind(%q) = %q, %v", raw, got, err)

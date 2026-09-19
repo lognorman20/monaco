@@ -30,6 +30,13 @@ struct LeaderboardRowDTO: Codable, Equatable, Identifiable {
     var id: String { userId }
 }
 
+struct GroupAgentDTO: Codable, Equatable {
+    let id: String
+    let status: String
+    let agentDisplayName: String
+    let allocationUsdcMicros: String
+}
+
 struct GroupViewDTO: Codable, Equatable {
     let id: String
     let name: String
@@ -39,6 +46,7 @@ struct GroupViewDTO: Codable, Equatable {
     let you: MemberSliceDTO
     let members: [LeaderboardRowDTO]
     let proposals: [ProposalDTO]?
+    let agent: GroupAgentDTO?
 
     var resolvedPotTotalUsd: String {
         if let potTotalUsd, !potTotalUsd.isEmpty {

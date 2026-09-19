@@ -70,6 +70,25 @@ public struct LeaderboardRowDTO: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+public struct GroupAgentDTO: Codable, Equatable, Sendable {
+    public let id: String
+    public let status: String
+    public let agentDisplayName: String
+    public let allocationUsdcMicros: String
+
+    public init(
+        id: String,
+        status: String,
+        agentDisplayName: String,
+        allocationUsdcMicros: String
+    ) {
+        self.id = id
+        self.status = status
+        self.agentDisplayName = agentDisplayName
+        self.allocationUsdcMicros = allocationUsdcMicros
+    }
+}
+
 public struct GroupViewDTO: Codable, Equatable, Sendable {
     public let id: String
     public let name: String
@@ -79,6 +98,7 @@ public struct GroupViewDTO: Codable, Equatable, Sendable {
     public let you: MemberSliceDTO
     public let members: [LeaderboardRowDTO]
     public let proposals: [ProposalDTO]?
+    public let agent: GroupAgentDTO?
 
     public init(
         id: String,
@@ -88,7 +108,8 @@ public struct GroupViewDTO: Codable, Equatable, Sendable {
         pot: [PotRowDTO],
         you: MemberSliceDTO,
         members: [LeaderboardRowDTO],
-        proposals: [ProposalDTO]?
+        proposals: [ProposalDTO]?,
+        agent: GroupAgentDTO? = nil
     ) {
         self.id = id
         self.name = name
@@ -98,6 +119,7 @@ public struct GroupViewDTO: Codable, Equatable, Sendable {
         self.you = you
         self.members = members
         self.proposals = proposals
+        self.agent = agent
     }
 
     /// Marked pot NAV; falls back to summing row values when the server omits potTotalUsd.

@@ -84,14 +84,16 @@ var ErrExceedsTreasuryUSDC = errors.New("exceeds treasury usdc")
 // ErrExceedsTreasuryHolding means the sell amount is above confirmed treasury inventory.
 var ErrExceedsTreasuryHolding = errors.New("exceeds treasury holding")
 
-// CreateProposalInput is input for buy or sell proposal create.
+// CreateProposalInput is input for buy, sell, or agent lifecycle proposal create.
 type CreateProposalInput struct {
-	GroupID     string
-	ProposerID  string
-	Symbol      string
-	Kind        domain.ProposalKind
-	UsdcMicros  int64
-	TokenAmount int64
+	GroupID              string
+	ProposerID           string
+	Symbol               string
+	Kind                 domain.ProposalKind
+	UsdcMicros           int64
+	TokenAmount          int64
+	AgentDisplayName     string
+	AllocationUsdcMicros int64
 }
 
 // CastVoteInput is input for yes/no vote cast (M4-T14).
@@ -605,7 +607,7 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		logGovernanceBranchWarn("governance create proposal rejected", "missing ids")
 		return Proposal{}, fmt.Errorf("group_id and proposer_id are required")
 	}
-	if in.Symbol == "" {
+	if in.Symbol == "" && !domain.IsAgentGovernanceKind(kind) {
 		logGovernanceBranchWarn("governance create proposal rejected", "symbol required", "group_id", in.GroupID)
 		return Proposal{}, fmt.Errorf("symbol is required")
 	}
@@ -683,6 +685,16 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		}); err != nil {
 			return Proposal{}, err
 		}
+	case domain.ProposalKindAddAgent, domain.ProposalKindPauseAgent, domain.ProposalKindResumeAgent, domain.ProposalKindRevokeAgent:
+		if err := g.validateAgentProposal(ctx, CreateAgentProposalInput{
+			GroupID:              in.GroupID,
+			ProposerID:           in.ProposerID,
+			Kind:                 kind,
+			AgentDisplayName:     in.AgentDisplayName,
+			AllocationUsdcMicros: in.AllocationUsdcMicros,
+		}); err != nil {
+			return Proposal{}, err
+		}
 	default:
 		return Proposal{}, fmt.Errorf("invalid proposal kind")
 	}
@@ -702,13 +714,15 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 	}()
 
 	row, err := g.store.InsertProposalTx(ctx, tx, postgres.InsertProposalParams{
-		GroupID:     in.GroupID,
-		ProposerID:  in.ProposerID,
-		Symbol:      in.Symbol,
-		Kind:        kind,
-		UsdcMicros:  in.UsdcMicros,
-		TokenAmount: in.TokenAmount,
-		ExpiresAt:   expiresAt,
+		GroupID:              in.GroupID,
+		ProposerID:           in.ProposerID,
+		Symbol:               in.Symbol,
+		Kind:                 kind,
+		UsdcMicros:           in.UsdcMicros,
+		TokenAmount:          in.TokenAmount,
+		AgentDisplayName:     in.AgentDisplayName,
+		AllocationUsdcMicros: in.AllocationUsdcMicros,
+		ExpiresAt:            expiresAt,
 	})
 	if err != nil {
 		return Proposal{}, err
@@ -976,6 +990,14 @@ func (g *GovernanceService) tallyAndPersistTx(ctx context.Context, tx *sql.Tx, p
 		return proposal, nil
 	}
 
+	row, found, err := g.store.GetProposalByIDTx(ctx, tx, proposal.ID)
+	if err != nil {
+		return Proposal{}, err
+	}
+	if !found {
+		return Proposal{}, ErrProposalNotFound
+	}
+
 	ok, err := g.store.UpdateProposalStatusTx(ctx, tx, proposal.ID, ProposalOpen, nextStatus)
 	if err != nil {
 		return Proposal{}, err
@@ -983,6 +1005,11 @@ func (g *GovernanceService) tallyAndPersistTx(ctx context.Context, tx *sql.Tx, p
 	if ok {
 		logGovernanceProposalStatusTransition(proposal.ID, ProposalOpen, nextStatus)
 		proposal.Status = nextStatus
+		if nextStatus == ProposalPassed && domain.IsAgentGovernanceKind(proposal.Kind) {
+			if err := g.handleAgentProposalPassTx(ctx, tx, proposal, row); err != nil {
+				return Proposal{}, err
+			}
+		}
 	}
 	return proposal, nil
 }

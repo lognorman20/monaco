@@ -16,6 +16,9 @@ struct ProposalDTO: Codable, Equatable, Identifiable {
     let votes: [ProposalVoteDTO]?
     let voteSummary: ProposalVoteSummaryDTO?
     let execution: ProposalExecutionDTO?
+    let agentDisplayName: String?
+    let allocationUsdcMicros: String?
+    let mintedAgentKey: String?
 
     var resolvedKind: String {
         let raw = kind?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""

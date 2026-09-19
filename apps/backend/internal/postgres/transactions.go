@@ -64,6 +64,8 @@ type ConfirmSellTransactionParams struct {
 type InsertPendingTransactionParams struct {
 	GroupID          string
 	ProposalID       string
+	AgentIntentID    string
+	InitiatedBy      string
 	Action           string
 	InputMint        string
 	OutputMint       string
@@ -89,15 +91,24 @@ func (s *Store) InsertPendingTransaction(ctx context.Context, params InsertPendi
 		return existing, false, nil
 	}
 
+	initiatedBy := params.InitiatedBy
+	if initiatedBy == "" {
+		initiatedBy = "member_proposal"
+	}
+
 	const insertSQL = `
-INSERT INTO transactions (group_id, proposal_id, amount, action, input_mint, output_mint, status, execute_request_id)
-VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
+INSERT INTO transactions (group_id, proposal_id, agent_intent_id, initiated_by, amount, action, input_mint, output_mint, status, execute_request_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)
 RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
           tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
 
 	var proposalID sql.NullString
 	if params.ProposalID != "" {
 		proposalID = sql.NullString{String: params.ProposalID, Valid: true}
+	}
+	var agentIntentID sql.NullString
+	if params.AgentIntentID != "" {
+		agentIntentID = sql.NullString{String: params.AgentIntentID, Valid: true}
 	}
 
 	var row TransactionRow
@@ -106,6 +117,8 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		insertSQL,
 		params.GroupID,
 		proposalID,
+		agentIntentID,
+		initiatedBy,
 		params.Amount,
 		params.Action,
 		params.InputMint,

@@ -87,14 +87,29 @@ type Proposal struct {
 type ProposalKind string
 
 const (
-	ProposalKindBuy  ProposalKind = "buy"
-	ProposalKindSell ProposalKind = "sell"
+	ProposalKindBuy         ProposalKind = "buy"
+	ProposalKindSell        ProposalKind = "sell"
+	ProposalKindAddAgent    ProposalKind = "add_agent"
+	ProposalKindPauseAgent  ProposalKind = "pause_agent"
+	ProposalKindResumeAgent ProposalKind = "resume_agent"
+	ProposalKindRevokeAgent ProposalKind = "revoke_agent"
 )
+
+// IsAgentGovernanceKind reports whether kind is an agent lifecycle vote.
+func IsAgentGovernanceKind(kind ProposalKind) bool {
+	switch kind {
+	case ProposalKindAddAgent, ProposalKindPauseAgent, ProposalKindResumeAgent, ProposalKindRevokeAgent:
+		return true
+	default:
+		return false
+	}
+}
 
 // ParseProposalKind parses a proposals.kind column value.
 func ParseProposalKind(raw string) (ProposalKind, error) {
 	switch ProposalKind(raw) {
-	case ProposalKindBuy, ProposalKindSell:
+	case ProposalKindBuy, ProposalKindSell,
+		ProposalKindAddAgent, ProposalKindPauseAgent, ProposalKindResumeAgent, ProposalKindRevokeAgent:
 		return ProposalKind(raw), nil
 	default:
 		return "", fmt.Errorf("invalid proposal kind: %q", raw)

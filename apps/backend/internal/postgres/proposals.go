@@ -12,35 +12,41 @@ import (
 
 // ProposalRow is a row in proposals.
 type ProposalRow struct {
-	ID          string
-	GroupID     string
-	ProposerID  string
-	Symbol      string
-	Kind        domain.ProposalKind
-	UsdcMicros  int64
-	TokenAmount int64
-	Status      domain.ProposalStatus
-	ExpiresAt   time.Time
-	CreatedAt   time.Time
+	ID                   string
+	GroupID              string
+	ProposerID           string
+	Symbol               string
+	Kind                 domain.ProposalKind
+	UsdcMicros           int64
+	TokenAmount          int64
+	AgentDisplayName     string
+	AllocationUsdcMicros int64
+	Status               domain.ProposalStatus
+	ExpiresAt            time.Time
+	CreatedAt            time.Time
 }
 
 // InsertProposalParams is the kind-aware insert contract for proposals.
 type InsertProposalParams struct {
-	GroupID     string
-	ProposerID  string
-	Symbol      string
-	Kind        domain.ProposalKind
-	UsdcMicros  int64
-	TokenAmount int64
-	ExpiresAt   time.Time
+	GroupID              string
+	ProposerID           string
+	Symbol               string
+	Kind                 domain.ProposalKind
+	UsdcMicros           int64
+	TokenAmount          int64
+	AgentDisplayName     string
+	AllocationUsdcMicros int64
+	ExpiresAt            time.Time
 }
 
-const proposalSelectColumns = `id, group_id, proposer_id, symbol, kind, usdc_micros, token_amount, status, expires_at, created_at`
+const proposalSelectColumns = `id, group_id, proposer_id, symbol, kind, usdc_micros, token_amount,
+  agent_display_name, allocation_usdc_micros, status, expires_at, created_at`
 
 func scanProposalRow(scanner interface{ Scan(dest ...any) error }) (ProposalRow, error) {
 	var row ProposalRow
 	var kindRaw, statusRaw string
-	var usdc, token sql.NullInt64
+	var usdc, token, allocation sql.NullInt64
+	var agentName sql.NullString
 	if err := scanner.Scan(
 		&row.ID,
 		&row.GroupID,
@@ -49,6 +55,8 @@ func scanProposalRow(scanner interface{ Scan(dest ...any) error }) (ProposalRow,
 		&kindRaw,
 		&usdc,
 		&token,
+		&agentName,
+		&allocation,
 		&statusRaw,
 		&row.ExpiresAt,
 		&row.CreatedAt,
@@ -70,6 +78,12 @@ func scanProposalRow(scanner interface{ Scan(dest ...any) error }) (ProposalRow,
 	}
 	if token.Valid {
 		row.TokenAmount = token.Int64
+	}
+	if agentName.Valid {
+		row.AgentDisplayName = agentName.String
+	}
+	if allocation.Valid {
+		row.AllocationUsdcMicros = allocation.Int64
 	}
 	return row, nil
 }
@@ -99,9 +113,6 @@ func (s *Store) InsertProposalTx(ctx context.Context, tx *sql.Tx, params InsertP
 	if params.GroupID == "" || params.ProposerID == "" {
 		return ProposalRow{}, fmt.Errorf("group_id and proposer_id are required")
 	}
-	if params.Symbol == "" {
-		return ProposalRow{}, fmt.Errorf("symbol is required")
-	}
 
 	kind := params.Kind
 	if kind == "" {
@@ -109,12 +120,32 @@ func (s *Store) InsertProposalTx(ctx context.Context, tx *sql.Tx, params InsertP
 	}
 	switch kind {
 	case domain.ProposalKindBuy:
+		if params.Symbol == "" {
+			return ProposalRow{}, fmt.Errorf("symbol is required")
+		}
 		if params.UsdcMicros <= 0 || params.TokenAmount != 0 {
 			return ProposalRow{}, fmt.Errorf("buy proposal requires positive usdc_micros only")
 		}
 	case domain.ProposalKindSell:
+		if params.Symbol == "" {
+			return ProposalRow{}, fmt.Errorf("symbol is required")
+		}
 		if params.TokenAmount <= 0 || params.UsdcMicros != 0 {
 			return ProposalRow{}, fmt.Errorf("sell proposal requires positive token_amount only")
+		}
+	case domain.ProposalKindAddAgent:
+		if params.AgentDisplayName == "" {
+			return ProposalRow{}, fmt.Errorf("agent display name is required")
+		}
+		if params.AllocationUsdcMicros <= 0 {
+			return ProposalRow{}, fmt.Errorf("allocation must be positive")
+		}
+		if params.Symbol == "" {
+			params.Symbol = params.AgentDisplayName
+		}
+	case domain.ProposalKindPauseAgent, domain.ProposalKindResumeAgent, domain.ProposalKindRevokeAgent:
+		if params.Symbol == "" {
+			params.Symbol = "Agent"
 		}
 	default:
 		return ProposalRow{}, fmt.Errorf("invalid proposal kind")
@@ -122,20 +153,39 @@ func (s *Store) InsertProposalTx(ctx context.Context, tx *sql.Tx, params InsertP
 
 	var usdc any
 	var token any
-	if kind == domain.ProposalKindBuy {
+	switch kind {
+	case domain.ProposalKindBuy:
 		usdc = params.UsdcMicros
-		token = nil
-	} else {
-		usdc = nil
+	case domain.ProposalKindSell:
 		token = params.TokenAmount
 	}
 
+	var agentName any
+	if params.AgentDisplayName != "" {
+		agentName = params.AgentDisplayName
+	}
+	var allocation any
+	if params.AllocationUsdcMicros > 0 {
+		allocation = params.AllocationUsdcMicros
+	}
 	insertSQL := `
-INSERT INTO proposals (group_id, proposer_id, symbol, kind, usdc_micros, token_amount, status, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, 'open', $7)
+INSERT INTO proposals (
+  group_id, proposer_id, symbol, kind, usdc_micros, token_amount,
+  agent_display_name, allocation_usdc_micros, status, expires_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'open', $9)
 RETURNING ` + proposalSelectColumns
 
-	row, err := scanProposalRow(tx.QueryRowContext(ctx, insertSQL, params.GroupID, params.ProposerID, params.Symbol, string(kind), usdc, token, params.ExpiresAt))
+	row, err := scanProposalRow(tx.QueryRowContext(ctx, insertSQL,
+		params.GroupID,
+		params.ProposerID,
+		params.Symbol,
+		string(kind),
+		usdc,
+		token,
+		agentName,
+		allocation,
+		params.ExpiresAt,
+	))
 	if err != nil {
 		return ProposalRow{}, fmt.Errorf("insert proposal: %w", err)
 	}

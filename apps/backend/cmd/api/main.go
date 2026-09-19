@@ -74,6 +74,7 @@ var apiRoutes = []string{
 	"POST /v1/groups/{id}/proposals",
 	"GET /v1/proposals/{id}",
 	"POST /v1/proposals/{id}/votes",
+	"POST /v1/groups/{id}/agents/intents",
 }
 
 // boot loads config, registers the relayer fee payer, applies migrations, and builds the HTTP server.
@@ -194,6 +195,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Privy:      privyClient,
 		Governance: governance,
 	}
+	agentIntents := app.NewAgentIntentService(store, swap, symbols)
+	agentHandlers := &httpapi.AgentHandlers{Intents: agentIntents}
 
 	addr := "127.0.0.1:8080"
 	if v := os.Getenv("API_ADDR"); v != "" {
@@ -242,6 +245,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("POST /v1/groups/{id}/proposals", proposalHandlers.CreateProposalHandler)
 	mux.HandleFunc("GET /v1/proposals/{id}", proposalHandlers.GetProposalDetailHandler)
 	mux.HandleFunc("POST /v1/proposals/{id}/votes", proposalHandlers.CastVoteHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/agents/intents", agentHandlers.SubmitAgentIntentHandler)
 	logRoutesReady(apiRoutes)
 
 	poller := worker.NewSweepPoller(store, privyClient, solanaRPC, deposits, relayer.PrivateKey(), nil)

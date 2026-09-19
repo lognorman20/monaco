@@ -24,10 +24,12 @@ type ProposalHandlers struct {
 }
 
 type createProposalRequest struct {
-	Kind        string `json:"kind"`
-	Symbol      string `json:"symbol"`
-	USDC        int64  `json:"usdc"`
-	TokenAmount int64  `json:"tokenAmount"`
+	Kind                 string   `json:"kind"`
+	Symbol               string   `json:"symbol"`
+	USDC                 int64    `json:"usdc"`
+	TokenAmount          int64    `json:"tokenAmount"`
+	AgentDisplayName     string `json:"agentDisplayName"`
+	AllocationUsdcMicros int64  `json:"allocationUsdcMicros"`
 }
 
 type createProposalResponse struct {
@@ -60,17 +62,21 @@ func (h *ProposalHandlers) CreateProposalHandler(w http.ResponseWriter, r *http.
 		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body", "group_id", groupID)
 		return
 	}
-	if strings.TrimSpace(req.Symbol) == "" {
-		logJSONError(ctx, log, "missing_symbol", w, http.StatusBadRequest, "symbol is required", "group_id", groupID)
-		return
-	}
 	kind := strings.TrimSpace(req.Kind)
 	if kind == "" {
 		kind = "buy"
 	}
-	if kind != "buy" && kind != "sell" {
-		logJSONError(ctx, log, "invalid_kind", w, http.StatusBadRequest, "kind must be buy or sell", "group_id", groupID)
+	switch kind {
+	case "buy", "sell", "add_agent", "pause_agent", "resume_agent", "revoke_agent":
+	default:
+		logJSONError(ctx, log, "invalid_kind", w, http.StatusBadRequest, "invalid proposal kind", "group_id", groupID)
 		return
+	}
+	if kind == "buy" || kind == "sell" {
+		if strings.TrimSpace(req.Symbol) == "" {
+			logJSONError(ctx, log, "missing_symbol", w, http.StatusBadRequest, "symbol is required", "group_id", groupID)
+			return
+		}
 	}
 	if kind == "buy" && req.USDC <= 0 {
 		logJSONError(ctx, log, "invalid_usdc", w, http.StatusBadRequest, "usdc must be positive", "group_id", groupID, "symbol", req.Symbol)
@@ -80,6 +86,16 @@ func (h *ProposalHandlers) CreateProposalHandler(w http.ResponseWriter, r *http.
 		logJSONError(ctx, log, "invalid_token_amount", w, http.StatusBadRequest, "tokenAmount must be positive", "group_id", groupID, "symbol", req.Symbol)
 		return
 	}
+	if kind == "add_agent" {
+		if strings.TrimSpace(req.AgentDisplayName) == "" {
+			logJSONError(ctx, log, "missing_agent_name", w, http.StatusBadRequest, "agentDisplayName is required", "group_id", groupID)
+			return
+		}
+		if req.AllocationUsdcMicros <= 0 {
+			logJSONError(ctx, log, "invalid_allocation", w, http.StatusBadRequest, "allocationUsdcMicros must be positive", "group_id", groupID)
+			return
+		}
+	}
 
 	userID, err := h.authorizeUser(ctx, token)
 	if err != nil {
@@ -88,12 +104,14 @@ func (h *ProposalHandlers) CreateProposalHandler(w http.ResponseWriter, r *http.
 	}
 
 	proposal, err := h.Governance.CreateProposal(ctx, app.CreateProposalInput{
-		GroupID:     groupID,
-		ProposerID:  userID,
-		Symbol:      strings.TrimSpace(req.Symbol),
-		Kind:        app.ProposalKind(kind),
-		UsdcMicros:  req.USDC,
-		TokenAmount: req.TokenAmount,
+		GroupID:              groupID,
+		ProposerID:           userID,
+		Symbol:               strings.TrimSpace(req.Symbol),
+		Kind:                 app.ProposalKind(kind),
+		UsdcMicros:           req.USDC,
+		TokenAmount:          req.TokenAmount,
+		AgentDisplayName:     strings.TrimSpace(req.AgentDisplayName),
+		AllocationUsdcMicros: req.AllocationUsdcMicros,
 	})
 	if err != nil {
 		writeProposalCreateError(ctx, log, w, err, "group_id", groupID, "user_id", userID, "symbol", req.Symbol)
@@ -196,21 +214,24 @@ type proposalExecutionResponse struct {
 }
 
 type proposalDetailResponse struct {
-	ID           string                      `json:"id"`
-	GroupID      string                      `json:"groupId"`
-	Symbol       string                      `json:"symbol"`
-	Kind         string                      `json:"kind"`
-	UsdcMicros   string                      `json:"usdcMicros,omitempty"`
-	TokenAmount  string                      `json:"tokenAmount,omitempty"`
-	Status       string                      `json:"status"`
-	CreatedAt    string                      `json:"createdAt"`
-	ExpiresAt    string                      `json:"expiresAt"`
-	ProposerID   string                      `json:"proposerId"`
-	ProposerName string                      `json:"proposerName"`
-	CanVote      bool                        `json:"canVote"`
-	Votes        []proposalVoteResponse      `json:"votes"`
-	VoteSummary  proposalVoteSummaryResponse `json:"voteSummary"`
-	Execution    proposalExecutionResponse   `json:"execution"`
+	ID                   string                      `json:"id"`
+	GroupID              string                      `json:"groupId"`
+	Symbol               string                      `json:"symbol"`
+	Kind                 string                      `json:"kind"`
+	UsdcMicros           string                      `json:"usdcMicros,omitempty"`
+	TokenAmount          string                      `json:"tokenAmount,omitempty"`
+	AgentDisplayName     string                      `json:"agentDisplayName,omitempty"`
+	AllocationUsdcMicros string                      `json:"allocationUsdcMicros,omitempty"`
+	MintedAgentKey       string                      `json:"mintedAgentKey,omitempty"`
+	Status               string                      `json:"status"`
+	CreatedAt            string                      `json:"createdAt"`
+	ExpiresAt            string                      `json:"expiresAt"`
+	ProposerID           string                      `json:"proposerId"`
+	ProposerName         string                      `json:"proposerName"`
+	CanVote              bool                        `json:"canVote"`
+	Votes                []proposalVoteResponse      `json:"votes"`
+	VoteSummary          proposalVoteSummaryResponse `json:"voteSummary"`
+	Execution            proposalExecutionResponse   `json:"execution"`
 }
 
 // ListGroupProposalsHandler handles GET /v1/groups/{id}/proposals.
@@ -373,6 +394,15 @@ func (h *ProposalHandlers) GetProposalDetailHandler(w http.ResponseWriter, r *ht
 	if detail.TokenAmount > 0 {
 		detailResp.TokenAmount = strconv.FormatInt(detail.TokenAmount, 10)
 	}
+	if detail.AgentDisplayName != "" {
+		detailResp.AgentDisplayName = detail.AgentDisplayName
+	}
+	if detail.AllocationUsdcMicros > 0 {
+		detailResp.AllocationUsdcMicros = strconv.FormatInt(detail.AllocationUsdcMicros, 10)
+	}
+	if detail.MintedAgentKey != "" {
+		detailResp.MintedAgentKey = detail.MintedAgentKey
+	}
 	_ = json.NewEncoder(w).Encode(detailResp)
 	logJSONOK(ctx, log, "ok", "proposal_id", proposalID, "status", detail.Status)
 }
@@ -426,6 +456,10 @@ func writeProposalCreateError(ctx context.Context, log *requestLog, w http.Respo
 		logJSONError(ctx, log, "exceeds_treasury_usdc", w, http.StatusBadRequest, "amount exceeds treasury total available", attrs...)
 	case errors.Is(err, app.ErrExceedsTreasuryHolding):
 		logJSONError(ctx, log, "exceeds_treasury_holding", w, http.StatusBadRequest, "amount exceeds treasury holding", attrs...)
+	case errors.Is(err, app.ErrAgentAlreadyExists):
+		logJSONError(ctx, log, "agent_already_exists", w, http.StatusConflict, "group already has an active agent", attrs...)
+	case errors.Is(err, app.ErrAgentInvalidState):
+		logJSONError(ctx, log, "agent_invalid_state", w, http.StatusBadRequest, "agent is not in the required state", attrs...)
 	default:
 		all := append(attrs, "err", err.Error())
 		logJSONError(ctx, log, "create_proposal_failed", w, http.StatusInternalServerError, "internal server error", all...)

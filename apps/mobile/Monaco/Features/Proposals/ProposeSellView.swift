@@ -120,9 +120,8 @@ struct ProposeSellView: View {
             _ = try await apiClient.createProposal(
                 accessToken: token,
                 groupId: groupId,
-                symbol: selected.symbol,
                 kind: "sell",
-                usdc: nil,
+                symbol: selected.symbol,
                 tokenAmount: amount
             )
             toast = MonacoToast(message: "Proposal submitted", isSuccess: true)

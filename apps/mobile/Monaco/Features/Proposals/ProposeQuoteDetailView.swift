@@ -122,9 +122,9 @@ struct ProposeQuoteDetailView: View {
             let response = try await apiClient.createProposal(
                 accessToken: token,
                 groupId: groupId,
-                symbol: quote.symbol,
                 kind: "buy",
-                usdc: usdcMicros
+                symbol: quote.symbol,
+                usdcMicros: usdcMicros
             )
             toast = MonacoToast(message: proposalSubmittedMessage(id: response.proposalId), isSuccess: true)
         } catch MonacoAPIError.apiError(_, let message) where message == "amount exceeds treasury total available" {

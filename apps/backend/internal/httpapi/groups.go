@@ -410,6 +410,13 @@ type groupViewMemberRowResponse struct {
 	DollarPnL     string  `json:"dollarPnl"`
 }
 
+type groupViewAgentResponse struct {
+	ID                   string   `json:"id"`
+	Status               string   `json:"status"`
+	AgentDisplayName     string   `json:"agentDisplayName"`
+	AllocationUsdcMicros string `json:"allocationUsdcMicros"`
+}
+
 type groupViewResponse struct {
 	ID              string                       `json:"id"`
 	Name            string                       `json:"name"`
@@ -419,6 +426,7 @@ type groupViewResponse struct {
 	You             groupViewMemberSliceResponse `json:"you"`
 	Members         []groupViewMemberRowResponse `json:"members"`
 	Proposals       []any                        `json:"proposals"`
+	Agent           *groupViewAgentResponse      `json:"agent,omitempty"`
 }
 
 // GetGroupViewHandler handles GET /v1/groups/{id}/view.
@@ -475,6 +483,18 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 		})
 	}
 
+	var agentResp *groupViewAgentResponse
+	if h.Governance != nil {
+		if agentView, err := h.Governance.GetGroupAgentView(ctx, groupID); err == nil && agentView != nil {
+			agentResp = &groupViewAgentResponse{
+				ID:                   agentView.ID,
+				Status:               string(agentView.Status),
+				AgentDisplayName:     agentView.AgentDisplayName,
+				AllocationUsdcMicros: strconv.FormatInt(agentView.AllocationUsdcMicros, 10),
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(groupViewResponse{
@@ -492,6 +512,7 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 		},
 		Members:   members,
 		Proposals: []any{},
+		Agent:     agentResp,
 	})
 	logJSONOK(ctx, log, "ok", "group_id", groupID)
 }
