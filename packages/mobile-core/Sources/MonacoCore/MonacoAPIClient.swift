@@ -66,6 +66,29 @@ public final class MonacoAPIClient: @unchecked Sendable {
         return try JSONDecoder().decode(FundGroupResponseDTO.self, from: data)
     }
 
+    public func createPlatformWithdrawal(
+        amount: Int64,
+        toAddress: String
+    ) async throws -> PlatformWithdrawalResponseDTO {
+        let url = baseURL.appending(path: "v1/me/withdrawals")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try await applyAuthorizationHeader(to: &request)
+        request.httpBody = try JSONEncoder().encode(
+            CreatePlatformWithdrawalRequestDTO(amount: amount, toAddress: toAddress)
+        )
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(PlatformWithdrawalResponseDTO.self, from: data)
+    }
+
     public func me() async throws -> MeDTO {
         let url = baseURL.appending(path: "v1/me")
         var request = URLRequest(url: url)

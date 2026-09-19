@@ -166,6 +166,10 @@ Settings → Advanced may expose explorer links. The main flow never needs them.
 
 ## Withdraw
 
+**Platform withdraw** (Settings → Withdraw) sends idle USDC from the user's Privy **member wallet** to any Solana address they paste. It uses `GET /v1/me/balance` (chain USDC minus in-flight fund jobs and pending platform withdrawals) and `POST /v1/me/withdrawals`. It does not sell cabal holdings, debit share units, or pull from group treasuries. Deployed stake must return to the member wallet first (see leave / withdraw-to-balance flows).
+
+**Cabal cash out** (group screen redeem) is different: it debits share units, may sell pot holdings on Jupiter, and pays USDC from the **group treasury** to a proven payout address.
+
 Partial redeem is a first-class action on the group screen, same weight as buy. Payout is **USDC only**. Never send tokenized stock in kind.
 
 The user picks how many dollars (or how many shares) to take, from a dust minimum up to their full equity. Full exit is the same flow with the slider at max.

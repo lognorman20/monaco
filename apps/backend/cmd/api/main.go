@@ -40,6 +40,8 @@ var apiRoutes = []string{
 	"POST /v1/auth/session",
 	"GET /v1/me",
 	"GET /v1/me/balance",
+	"POST /v1/me/withdrawals",
+	"GET /v1/me/withdrawals/{id}",
 	"GET /v1/home",
 	"POST /v1/groups",
 	"POST /v1/groups/{id}/join",
@@ -118,6 +120,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	catalogSearcher.SetRoutabilityProber(catalogRoutability)
 	symbols := app.NewSymbolResolver(catalogSearcher)
 	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
+	platformWithdrawals := app.NewPlatformWithdrawService(store, privyClient, deposits, solanaRPC, relayer.PrivateKey())
 	sessions := app.NewSessionService(store, privyClient)
 	home := app.NewHomeService(store, privyClient, pythClient, deposits, symbols)
 	groups := app.NewGroupService(store, privyClient)
@@ -127,6 +130,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	homeHandlers := &httpapi.HomeHandlers{Home: home}
 	groupHandlers := &httpapi.GroupHandlers{Groups: groups, Governance: governance, Home: home}
 	depositHandlers := &httpapi.DepositHandlers{Deposits: deposits}
+	platformWithdrawHandlers := &httpapi.PlatformWithdrawHandlers{Withdrawals: platformWithdrawals}
 	xstocksResolver := xstocks.NewHTTPResolver()
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	signer := app.NewPrivyTreasurySigner(privyClient)
@@ -167,6 +171,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
 	mux.HandleFunc("GET /v1/me/balance", depositHandlers.GetPlatformBalanceHandler)
+	mux.HandleFunc("POST /v1/me/withdrawals", platformWithdrawHandlers.CreatePlatformWithdrawalHandler)
+	mux.HandleFunc("GET /v1/me/withdrawals/{id}", platformWithdrawHandlers.GetPlatformWithdrawalHandler)
 	mux.HandleFunc("GET /v1/home", homeHandlers.HomeHandler)
 	mux.HandleFunc("GET /v1/users/{id}/groups", homeHandlers.UserSharedGroupsHandler)
 	mux.HandleFunc("POST /v1/groups", groupHandlers.CreateGroupHandler)

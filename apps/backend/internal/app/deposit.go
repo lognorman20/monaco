@@ -229,10 +229,15 @@ func (d *DepositService) platformBalanceForWallet(ctx context.Context, userID, m
 	if err != nil {
 		return 0, 0, fmt.Errorf("member usdc balance: %w", err)
 	}
-	pending, err = d.store.SumPendingDepositAmountByUserID(ctx, userID)
+	pendingDeposits, err := d.store.SumPendingDepositAmountByUserID(ctx, userID)
 	if err != nil {
 		return 0, 0, err
 	}
+	pendingWithdrawals, err := d.store.SumPendingPlatformWithdrawalAmountByUserID(ctx, userID)
+	if err != nil {
+		return 0, 0, err
+	}
+	pending = pendingDeposits + pendingWithdrawals
 	available = chainBalance - pending
 	if available < 0 {
 		available = 0

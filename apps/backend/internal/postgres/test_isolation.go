@@ -154,6 +154,9 @@ func deleteTrackedGroups(ctx context.Context, db *sql.DB, groupIDs []string) err
 }
 
 func deleteTrackedUsers(ctx context.Context, db *sql.DB, userIDs []string) error {
+	if _, err := db.ExecContext(ctx, `DELETE FROM platform_withdrawals WHERE user_id = ANY($1::uuid[])`, userIDs); err != nil {
+		return fmt.Errorf("delete tracked users (platform_withdrawals): %w", err)
+	}
 	if _, err := db.ExecContext(ctx, `DELETE FROM member_wallets WHERE user_id = ANY($1::uuid[])`, userIDs); err != nil {
 		return fmt.Errorf("delete tracked users (member_wallets): %w", err)
 	}
