@@ -87,7 +87,7 @@ struct GroupActivitySection: View {
     }
 
     private func needsProposalFallback(_ item: GroupActivityItemDTO) -> Bool {
-        item.kind.lowercased() == "buy"
+        ["buy", "sell"].contains(item.kind.lowercased())
             && item.status.lowercased() == "pending"
             && (item.txSignature ?? "").isEmpty
     }
@@ -140,16 +140,21 @@ struct GroupActivitySection: View {
     }
 
     private func formatAmount(_ item: GroupActivityItemDTO) -> String {
+        if item.kind.lowercased() == "sell" {
+            if let proceeds = item.proceedsUsdcMicros, let micros = Int64(proceeds), micros > 0 {
+                return String(format: "$%.2f", Double(micros) / 1_000_000.0)
+            }
+            if let tokenAmount = item.tokenAmount, let atomics = Double(tokenAmount) {
+                return "\(AssetSymbolFormatter.format(item.symbol ?? "")) \(formatTokenAmount(atomics / 100_000_000.0))"
+            }
+        }
         let dollars = Double(item.amountMicros) / 1_000_000.0
         switch item.kind.lowercased() {
         case "buy":
             return String(format: "$%.2f", dollars)
         case "sell":
-            if item.status.lowercased() == "confirmed", item.symbol?.uppercased() == "USDC" {
-                return String(format: "$%.2f", dollars)
-            }
             if let symbol = item.symbol {
-                return "\(symbol) \(formatTokenAmount(dollars))"
+                return "\(AssetSymbolFormatter.format(symbol)) \(formatTokenAmount(dollars))"
             }
             return String(format: "$%.2f", dollars)
         default:
@@ -158,10 +163,7 @@ struct GroupActivitySection: View {
     }
 
     private func formatTokenAmount(_ amount: Double) -> String {
-        if amount >= 1 {
-            return String(format: "%.4f", amount)
-        }
-        return String(format: "%.6f", amount)
+        String(format: "%.8f", amount).replacingOccurrences(of: "0+$", with: "", options: .regularExpression)
     }
 
     private func formatTimestamp(_ raw: String) -> String {

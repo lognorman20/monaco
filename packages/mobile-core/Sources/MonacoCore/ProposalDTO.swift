@@ -3,16 +3,33 @@ import Foundation
 public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
     public let id: String
     public let symbol: String
-    public let usdcMicros: String
+    public let kind: String?
+    public let usdcMicros: String?
+    public let tokenAmount: String?
     public let status: String
     public let canVote: Bool?
 
-    public init(id: String, symbol: String, usdcMicros: String, status: String, canVote: Bool? = nil) {
+    public init(
+        id: String,
+        symbol: String,
+        status: String,
+        kind: String? = nil,
+        usdcMicros: String? = nil,
+        tokenAmount: String? = nil,
+        canVote: Bool? = nil
+    ) {
         self.id = id
         self.symbol = symbol
+        self.kind = kind
         self.usdcMicros = usdcMicros
+        self.tokenAmount = tokenAmount
         self.status = status
         self.canVote = canVote
+    }
+
+    public var resolvedKind: String {
+        let raw = kind?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        return raw.isEmpty ? "buy" : raw
     }
 }
 

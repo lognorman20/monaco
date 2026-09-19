@@ -92,10 +92,10 @@ struct ProposalHistorySection: View {
     private func proposalRow(_ proposal: ProposalDTO) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(proposal.symbol)
+                Text(proposal.resolvedKind == "sell" ? "Sell \(proposal.symbol)" : proposal.symbol)
                     .font(.body.weight(.semibold))
                 Spacer()
-                ProposalStatusChip(status: proposal.status)
+                ProposalStatusChip(status: proposal.status, kind: proposal.resolvedKind)
             }
             if let proposerName = proposal.proposerName {
                 Text("By \(proposerName)")

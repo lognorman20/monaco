@@ -1,6 +1,7 @@
 package jupiter
 
 import (
+	"context"
 	"testing"
 )
 
@@ -55,7 +56,7 @@ func TestJupiterPoll_transitionsFromPendingToSuccess(t *testing.T) {
 	})
 
 	// Act
-	result, err := PollUntilConfirmed(t.Context(), client, PollExecuteParams{
+	result, err := PollUntilConfirmed(context.Background(), client, PollExecuteParams{
 		GroupID:           "group-1",
 		UserID:            "user-1",
 		Symbol:            "AAPLx",
@@ -86,7 +87,7 @@ func TestJupiterPoll_timeoutOrNonZeroCode_marksTransactionFailed(t *testing.T) {
 	})
 
 	// Act
-	_, err := PollUntilConfirmed(t.Context(), client, PollExecuteParams{
+	_, err := PollUntilConfirmed(context.Background(), client, PollExecuteParams{
 		GroupID:           "group-1",
 		UserID:            "user-1",
 		Symbol:            "AAPLx",

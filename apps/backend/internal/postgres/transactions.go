@@ -646,26 +646,7 @@ func (s *Store) GetFillDerivedCostBasisByOutputMint(ctx context.Context, groupID
 	if groupID == "" || outputMint == "" {
 		return 0, 0, false, fmt.Errorf("group_id and output_mint are required")
 	}
-
-	const selectSQL = `
-SELECT cost_basis_price, cost_basis_amount
-FROM transactions
-WHERE group_id = $1 AND output_mint = $2 AND action = 'buy' AND status = 'confirmed'
-ORDER BY confirmed_at DESC NULLS LAST, created_at DESC
-LIMIT 1`
-
-	var price, amount sql.NullInt64
-	err := s.db.QueryRowContext(ctx, selectSQL, groupID, outputMint).Scan(&price, &amount)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, 0, false, nil
-	}
-	if err != nil {
-		return 0, 0, false, fmt.Errorf("get fill-derived cost basis: %w", err)
-	}
-	if !price.Valid || !amount.Valid {
-		return 0, 0, false, nil
-	}
-	return price.Int64, amount.Int64, true, nil
+	return fillDerivedCostBasisByOutputMintQuery(ctx, s.db, groupID, outputMint)
 }
 
 // CountConfirmedTransactionsBySignature counts confirmed rows for a signature.
@@ -724,20 +705,50 @@ LIMIT 1`
 
 // GetConfirmedTransactionByProposal returns the confirmed buy linked to a passed proposal.
 func (s *Store) GetConfirmedTransactionByProposal(ctx context.Context, proposalID string) (TransactionRow, bool, error) {
+	return s.GetConfirmedTransactionByProposalAndAction(ctx, proposalID, TransactionActionBuy)
+}
+
+func (s *Store) GetConfirmedTransactionByProposalAndAction(ctx context.Context, proposalID, action string) (TransactionRow, bool, error) {
 	if proposalID == "" {
 		return TransactionRow{}, false, fmt.Errorf("proposal_id is required")
+	}
+	if action != TransactionActionBuy && action != TransactionActionSell {
+		return TransactionRow{}, false, fmt.Errorf("invalid transaction action")
 	}
 
 	const selectSQL = `
 SELECT id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
        tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
 FROM transactions
-WHERE proposal_id = $1 AND action = 'buy' AND status = 'confirmed'
+WHERE proposal_id = $1 AND action = $2 AND status = 'confirmed'
 ORDER BY confirmed_at DESC NULLS LAST, created_at DESC
 LIMIT 1`
 
+	return scanTransactionByProposalQuery(ctx, s, selectSQL, proposalID, action, "get transaction by proposal and action")
+}
+
+func (s *Store) GetLatestTransactionByProposalAndAction(ctx context.Context, proposalID, action string) (TransactionRow, bool, error) {
+	if proposalID == "" {
+		return TransactionRow{}, false, fmt.Errorf("proposal_id is required")
+	}
+	if action != TransactionActionBuy && action != TransactionActionSell {
+		return TransactionRow{}, false, fmt.Errorf("invalid transaction action")
+	}
+
+	const selectSQL = `
+SELECT id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
+       tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
+FROM transactions
+WHERE proposal_id = $1 AND action = $2
+ORDER BY created_at DESC
+LIMIT 1`
+
+	return scanTransactionByProposalQuery(ctx, s, selectSQL, proposalID, action, "get latest transaction by proposal and action")
+}
+
+func scanTransactionByProposalQuery(ctx context.Context, s *Store, selectSQL, proposalID, action, errLabel string) (TransactionRow, bool, error) {
 	var row TransactionRow
-	err := s.db.QueryRowContext(ctx, selectSQL, proposalID).Scan(
+	err := s.db.QueryRowContext(ctx, selectSQL, proposalID, action).Scan(
 		&row.ID,
 		&row.GroupID,
 		&row.ProposalID,
@@ -757,7 +768,7 @@ LIMIT 1`
 		return TransactionRow{}, false, nil
 	}
 	if err != nil {
-		return TransactionRow{}, false, fmt.Errorf("get transaction by proposal: %w", err)
+		return TransactionRow{}, false, fmt.Errorf("%s: %w", errLabel, err)
 	}
 	return row, true, nil
 }

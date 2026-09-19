@@ -3,7 +3,9 @@ import Foundation
 struct ProposalDTO: Codable, Equatable, Identifiable {
     let id: String
     let symbol: String
-    let usdcMicros: String
+    let kind: String?
+    let usdcMicros: String?
+    let tokenAmount: String?
     let status: String
     let canVote: Bool?
     let proposerId: String?
@@ -14,6 +16,11 @@ struct ProposalDTO: Codable, Equatable, Identifiable {
     let votes: [ProposalVoteDTO]?
     let voteSummary: ProposalVoteSummaryDTO?
     let execution: ProposalExecutionDTO?
+
+    var resolvedKind: String {
+        let raw = kind?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        return raw.isEmpty ? "buy" : raw
+    }
 }
 
 enum ProposalStatusChipStyle: String {

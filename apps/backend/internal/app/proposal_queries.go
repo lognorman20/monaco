@@ -16,7 +16,9 @@ import (
 type ProposalListItem struct {
 	ID           string
 	Symbol       string
+	Kind         domain.ProposalKind
 	UsdcMicros   int64
+	TokenAmount  int64
 	Status       ProposalStatus
 	ProposerID   string
 	ProposerName string
@@ -55,7 +57,9 @@ type ProposalDetailResult struct {
 	ID           string
 	GroupID      string
 	Symbol       string
+	Kind         domain.ProposalKind
 	UsdcMicros   int64
+	TokenAmount  int64
 	Status       ProposalStatus
 	CreatedAt    time.Time
 	ExpiresAt    time.Time
@@ -115,7 +119,9 @@ func (g *GovernanceService) ListGroupProposals(ctx context.Context, accessToken,
 		items = append(items, ProposalListItem{
 			ID:           row.ID,
 			Symbol:       row.Symbol,
+			Kind:         row.Kind,
 			UsdcMicros:   row.UsdcMicros,
+			TokenAmount:  row.TokenAmount,
 			Status:       row.Status,
 			ProposerID:   row.ProposerID,
 			ProposerName: name,
@@ -259,7 +265,11 @@ func (g *GovernanceService) GetProposalDetail(ctx context.Context, accessToken, 
 		}
 	}
 
-	txRow, txFound, err := g.store.GetLatestBuyTransactionByProposal(ctx, proposalID)
+	action := postgres.TransactionActionBuy
+	if row.Kind == domain.ProposalKindSell {
+		action = postgres.TransactionActionSell
+	}
+	txRow, txFound, err := g.store.GetLatestTransactionByProposalAndAction(ctx, proposalID, action)
 	if err != nil {
 		return ProposalDetailResult{}, err
 	}
@@ -269,7 +279,9 @@ func (g *GovernanceService) GetProposalDetail(ctx context.Context, accessToken, 
 		ID:           row.ID,
 		GroupID:      row.GroupID,
 		Symbol:       row.Symbol,
+		Kind:         row.Kind,
 		UsdcMicros:   row.UsdcMicros,
+		TokenAmount:  row.TokenAmount,
 		Status:       row.Status,
 		CreatedAt:    row.CreatedAt,
 		ExpiresAt:    row.ExpiresAt,

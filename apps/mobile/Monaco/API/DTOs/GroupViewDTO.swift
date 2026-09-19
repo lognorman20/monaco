@@ -7,6 +7,7 @@ struct PotRowDTO: Codable, Equatable, Identifiable {
     let valueUsd: String
     let dollarPnl: String
     let afterHours: Bool?
+    let tokenAmount: String?
 
     var id: String { symbol }
 }

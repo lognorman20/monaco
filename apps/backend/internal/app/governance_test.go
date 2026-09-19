@@ -36,6 +36,7 @@ func integrationGovernanceApp(t *testing.T) governanceHarness {
 	governance := NewGovernanceService(h.Store, h.Privy)
 	governance.SetBuyService(buy)
 	governance.SetHomeService(home)
+	governance.SetSwapService(h.Swap)
 	return governanceHarness{
 		Governance: governance,
 		Store:      h.Store,
@@ -404,6 +405,83 @@ func TestPOST_vote_concurrentDoubleVote_recordsOneBallot(t *testing.T) {
 	}
 	if len(votes) != 1 {
 		t.Fatalf("expected 1 ballot row after race, got %d", len(votes))
+	}
+}
+
+func TestCreateProposal_sellHeldAmount_createsOpenProposal(t *testing.T) {
+	h := integrationGovernanceApp(t)
+	ctx := context.Background()
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "sell-prop", "Sell Prop")
+	token := h.ISO.UniqueToken("sell-prop")
+	created, err := h.Governance.CreateGroupWithRules(ctx, token, testGroupName(h.ISO, "sell-prop"), DefaultGroupRules())
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	h.ISO.TrackGroup(created.GroupID)
+
+	const held = int64(50_000_000)
+	xstocks.RegisterSolanaMint(h.XStocks, "AAPLx", jupiter.AAPLxMint)
+	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
+		GroupID:          created.GroupID,
+		Amount:           2_000_000,
+		InputMint:        jupiter.USDCMint,
+		OutputMint:       jupiter.AAPLxMint,
+		TxSignature:      testTxSignature(h.ISO, "sell-prop-buy"),
+		ExecuteRequestID: testRequestID(h.ISO, "sell-prop-buy"),
+		CostBasisPrice:   2_000_000,
+		CostBasisAmount:  held,
+	})
+	if err != nil {
+		t.Fatalf("ConfirmBuyTransaction: %v", err)
+	}
+	jupiter.RegisterSellQuote(h.Jupiter, jupiter.AAPLxMint, held, jupiter.SellQuote{
+		Routable:   true,
+		InputMint:  jupiter.AAPLxMint,
+		OutputMint: jupiter.USDCMint,
+		InAmount:   "50000000",
+		OutAmount:  "1500000",
+		RequestID:  "sell-quote-held",
+	})
+
+	proposal, err := h.Governance.CreateProposal(ctx, CreateProposalInput{
+		GroupID:     created.GroupID,
+		ProposerID:  userID.UserID,
+		Symbol:      "AAPLx",
+		Kind:        domain.ProposalKindSell,
+		TokenAmount: held,
+	})
+	if err != nil {
+		t.Fatalf("CreateProposal sell: %v", err)
+	}
+	if proposal.Kind != domain.ProposalKindSell || proposal.TokenAmount != held {
+		t.Fatalf("proposal = %+v", proposal)
+	}
+	if proposal.Status != ProposalOpen {
+		t.Fatalf("status = %q, want open", proposal.Status)
+	}
+}
+
+func TestCreateProposal_sellExceedsHolding_rejected(t *testing.T) {
+	h := integrationGovernanceApp(t)
+	ctx := context.Background()
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "sell-over", "Sell Over")
+	token := h.ISO.UniqueToken("sell-over")
+	created, err := h.Governance.CreateGroupWithRules(ctx, token, testGroupName(h.ISO, "sell-over"), DefaultGroupRules())
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	h.ISO.TrackGroup(created.GroupID)
+	xstocks.RegisterSolanaMint(h.XStocks, "AAPLx", jupiter.AAPLxMint)
+
+	_, err = h.Governance.CreateProposal(ctx, CreateProposalInput{
+		GroupID:     created.GroupID,
+		ProposerID:  userID.UserID,
+		Symbol:      "AAPLx",
+		Kind:        domain.ProposalKindSell,
+		TokenAmount: 1,
+	})
+	if !errors.Is(err, ErrExceedsTreasuryHolding) {
+		t.Fatalf("CreateProposal sell over holding: %v, want ErrExceedsTreasuryHolding", err)
 	}
 }
 

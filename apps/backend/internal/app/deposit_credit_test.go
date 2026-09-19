@@ -13,7 +13,7 @@ func TestDomainNavInputFromPyth_scalesTokenAtomicsToDecimalUnits(t *testing.T) {
 		TreasuryUsdc: 0,
 		Holdings: []pyth.MarkedHolding{{
 			Symbol:    "AAPLx",
-			Units:     500_000,
+			Units:     50_000_000,
 			MarkUsdc:  600_000_000,
 			CostBasis: 50_000_000,
 		}},

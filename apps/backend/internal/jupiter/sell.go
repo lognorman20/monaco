@@ -55,7 +55,7 @@ func (c *HTTPClient) QuoteSell(ctx context.Context, params QuoteSellParams) (Sel
 		return SellQuote{Routable: false, InputMint: params.InputMint, OutputMint: USDCMint}, err
 	}
 
-	quote, err := ParseSellQuoteResponse(body)
+	quote, err := ParseSellQuoteResponse(body, params.Taker != "")
 	if err != nil {
 		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, err.Error())
 		return SellQuote{Routable: false, InputMint: params.InputMint, OutputMint: USDCMint}, err
@@ -69,7 +69,9 @@ func (c *HTTPClient) QuoteSell(ctx context.Context, params QuoteSellParams) (Sel
 }
 
 // ParseSellQuoteResponse parses Jupiter v2 sell order JSON.
-func ParseSellQuoteResponse(body []byte) (SellQuote, error) {
+// requireTransaction mirrors ParseBuyQuoteResponse: price-only quotes omit
+// transaction when no taker is sent; executable quotes require it.
+func ParseSellQuoteResponse(body []byte, requireTransaction bool) (SellQuote, error) {
 	var raw orderResponse
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return SellQuote{}, fmt.Errorf("jupiter: invalid sell quote json: %w", err)
@@ -82,7 +84,7 @@ func ParseSellQuoteResponse(body []byte) (SellQuote, error) {
 		OutAmount:   raw.OutAmount,
 		RequestID:   raw.RequestID,
 		Transaction: raw.Transaction,
-		Routable:    isSellRoutable(raw),
+		Routable:    isSellRoutable(raw, requireTransaction),
 	}
 	if quote.OutputMint == "" {
 		quote.OutputMint = USDCMint
@@ -93,11 +95,11 @@ func ParseSellQuoteResponse(body []byte) (SellQuote, error) {
 	return quote, nil
 }
 
-func isSellRoutable(raw orderResponse) bool {
+func isSellRoutable(raw orderResponse, requireTransaction bool) bool {
 	if raw.ErrorCode != 0 || strings.TrimSpace(raw.Error) != "" || strings.TrimSpace(raw.ErrorMessage) != "" {
 		return false
 	}
-	if strings.TrimSpace(raw.Transaction) == "" {
+	if requireTransaction && strings.TrimSpace(raw.Transaction) == "" {
 		return false
 	}
 	outAmount := strings.TrimSpace(raw.OutAmount)

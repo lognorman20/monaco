@@ -15,12 +15,13 @@ import (
 
 // GroupViewPotRow is one line in the group pot section.
 type GroupViewPotRow struct {
-	Symbol     string
-	Units      string
-	MarkUsd    string
-	ValueUsd   string
-	DollarPnL  string
-	AfterHours *bool
+	Symbol      string
+	Units       string
+	MarkUsd     string
+	ValueUsd    string
+	DollarPnL   string
+	AfterHours  *bool
+	TokenAmount string
 }
 
 // GroupViewMemberSlice is the authenticated viewer's slice in a group.

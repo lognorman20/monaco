@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -348,12 +349,13 @@ func (h *GroupHandlers) GetGroupHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 type groupViewPotRowResponse struct {
-	Symbol     string `json:"symbol"`
-	Units      string `json:"units"`
-	MarkUsd    string `json:"markUsd"`
-	ValueUsd   string `json:"valueUsd"`
-	DollarPnL  string `json:"dollarPnl"`
-	AfterHours *bool  `json:"afterHours"`
+	Symbol      string `json:"symbol"`
+	Units       string `json:"units"`
+	MarkUsd     string `json:"markUsd"`
+	ValueUsd    string `json:"valueUsd"`
+	DollarPnL   string `json:"dollarPnl"`
+	AfterHours  *bool  `json:"afterHours"`
+	TokenAmount string `json:"tokenAmount,omitempty"`
 }
 
 type groupViewMemberSliceResponse struct {
@@ -417,12 +419,13 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 	pot := make([]groupViewPotRowResponse, 0, len(result.Pot))
 	for _, row := range result.Pot {
 		pot = append(pot, groupViewPotRowResponse{
-			Symbol:     row.Symbol,
-			Units:      row.Units,
-			MarkUsd:    row.MarkUsd,
-			ValueUsd:   row.ValueUsd,
-			DollarPnL:  row.DollarPnL,
-			AfterHours: row.AfterHours,
+			Symbol:      row.Symbol,
+			Units:       row.Units,
+			MarkUsd:     row.MarkUsd,
+			ValueUsd:    row.ValueUsd,
+			DollarPnL:   row.DollarPnL,
+			AfterHours:  row.AfterHours,
+			TokenAmount: row.TokenAmount,
 		})
 	}
 	members := make([]groupViewMemberRowResponse, 0, len(result.Members))
@@ -458,13 +461,15 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 }
 
 type groupActivityItemResponse struct {
-	ID           string `json:"id"`
-	Kind         string `json:"kind"`
-	Status       string `json:"status"`
-	Symbol       string `json:"symbol,omitempty"`
-	AmountMicros int64  `json:"amountMicros"`
-	CreatedAt    string `json:"createdAt"`
-	TxSignature  string `json:"txSignature,omitempty"`
+	ID                 string `json:"id"`
+	Kind               string `json:"kind"`
+	Status             string `json:"status"`
+	Symbol             string `json:"symbol,omitempty"`
+	AmountMicros       int64  `json:"amountMicros"`
+	TokenAmount        string `json:"tokenAmount,omitempty"`
+	ProceedsUsdcMicros string `json:"proceedsUsdcMicros,omitempty"`
+	CreatedAt          string `json:"createdAt"`
+	TxSignature        string `json:"txSignature,omitempty"`
 }
 
 type groupActivityResponse struct {
@@ -504,7 +509,7 @@ func (h *GroupHandlers) ListGroupActivityHandler(w http.ResponseWriter, r *http.
 
 	respItems := make([]groupActivityItemResponse, 0, len(items))
 	for _, item := range items {
-		respItems = append(respItems, groupActivityItemResponse{
+		resp := groupActivityItemResponse{
 			ID:           item.ID,
 			Kind:         item.Kind,
 			Status:       item.Status,
@@ -512,7 +517,14 @@ func (h *GroupHandlers) ListGroupActivityHandler(w http.ResponseWriter, r *http.
 			AmountMicros: item.AmountMicros,
 			CreatedAt:    item.CreatedAt.UTC().Format(time.RFC3339),
 			TxSignature:  item.TxSignature,
-		})
+		}
+		if item.TokenAmount > 0 {
+			resp.TokenAmount = strconv.FormatInt(item.TokenAmount, 10)
+		}
+		if item.ProceedsUsdcMicros > 0 {
+			resp.ProceedsUsdcMicros = strconv.FormatInt(item.ProceedsUsdcMicros, 10)
+		}
+		respItems = append(respItems, resp)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

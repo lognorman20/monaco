@@ -13,7 +13,6 @@ import (
 	"github.com/monaco/monaco/packages/domain"
 )
 
-const tokenAtomicScale int64 = 1_000_000
 
 type navSnapshotQuerier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
@@ -325,24 +324,38 @@ ORDER BY mint`
 
 func fillDerivedCostBasisByOutputMintQuery(ctx context.Context, q navSnapshotQuerier, groupID, outputMint string) (int64, int64, bool, error) {
 	const selectSQL = `
-SELECT cost_basis_price, cost_basis_amount
-FROM transactions
-WHERE group_id = $1 AND output_mint = $2 AND action = 'buy' AND status = 'confirmed'
-ORDER BY confirmed_at DESC NULLS LAST, created_at DESC
-LIMIT 1`
+WITH buys AS (
+  SELECT COALESCE(SUM(cost_basis_price), 0)  AS usdc,
+         COALESCE(SUM(cost_basis_amount), 0) AS tokens
+  FROM transactions
+  WHERE group_id = $1 AND output_mint = $2
+    AND action = 'buy' AND status = 'confirmed'
+),
+sells AS (
+  SELECT COALESCE(SUM(amount), 0) AS tokens
+  FROM transactions
+  WHERE group_id = $1 AND input_mint = $2
+    AND action = 'sell' AND status = 'confirmed'
+)
+SELECT buys.usdc, buys.tokens, sells.tokens FROM buys, sells`
 
-	var price, amount sql.NullInt64
-	err := q.QueryRowContext(ctx, selectSQL, groupID, outputMint).Scan(&price, &amount)
+	var buyUSDC, buyTokens, sellTokens int64
+	err := q.QueryRowContext(ctx, selectSQL, groupID, outputMint).Scan(&buyUSDC, &buyTokens, &sellTokens)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, 0, false, nil
 	}
 	if err != nil {
 		return 0, 0, false, fmt.Errorf("get fill-derived cost basis: %w", err)
 	}
-	if !price.Valid || !amount.Valid {
+	if buyTokens <= 0 {
 		return 0, 0, false, nil
 	}
-	return price.Int64, amount.Int64, true, nil
+	remaining := buyTokens - sellTokens
+	if remaining <= 0 {
+		return 0, 0, false, nil
+	}
+	remainingBasis := buyUSDC * remaining / buyTokens
+	return remainingBasis, remaining, true, nil
 }
 
 // NavSnapshotValuesFromPotNAV converts domain pot NAV into persisted micro values.
@@ -418,8 +431,8 @@ func tokenAtomicsToShareUnits(atomics int64) (domain.ShareUnits, error) {
 	if atomics == 0 {
 		return domain.ShareUnits("0"), nil
 	}
-	r := new(big.Rat).SetFrac(big.NewInt(atomics), big.NewInt(tokenAtomicScale))
-	s := strings.TrimRight(r.FloatString(6), "0")
+	r := new(big.Rat).SetFrac(big.NewInt(atomics), big.NewInt(jupiter.XStockAtomicScale))
+	s := strings.TrimRight(r.FloatString(8), "0")
 	s = strings.TrimRight(s, ".")
 	return domain.ShareUnits(s), nil
 }
@@ -440,7 +453,7 @@ func costBasisMarkPerUnitMicros(totalUSDCMicros, tokenAtomics int64) (int64, err
 	if tokenAtomics <= 0 {
 		return 0, fmt.Errorf("cost basis token amount must be positive")
 	}
-	mark := (totalUSDCMicros * tokenAtomicScale) / tokenAtomics
+	mark := (totalUSDCMicros * jupiter.XStockAtomicScale) / tokenAtomics
 	if mark <= 0 {
 		return 0, fmt.Errorf("derived mark per unit must be positive")
 	}

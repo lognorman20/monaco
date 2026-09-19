@@ -7,6 +7,7 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
     public let valueUsd: String
     public let dollarPnl: String
     public let afterHours: Bool?
+    public let tokenAmount: String?
 
     public var id: String { symbol }
 
@@ -16,7 +17,8 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
         markUsd: String,
         valueUsd: String,
         dollarPnl: String,
-        afterHours: Bool?
+        afterHours: Bool?,
+        tokenAmount: String? = nil
     ) {
         self.symbol = symbol
         self.units = units
@@ -24,6 +26,7 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
         self.valueUsd = valueUsd
         self.dollarPnl = dollarPnl
         self.afterHours = afterHours
+        self.tokenAmount = tokenAmount
     }
 }
 

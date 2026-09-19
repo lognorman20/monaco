@@ -70,15 +70,35 @@ func MemberMayVote(vs VoterSet, memberID string, allMemberIDs []string) bool {
 	}
 }
 
-// Proposal is a buy vote under consideration in a group.
+// Proposal is a buy or sell vote under consideration in a group.
 type Proposal struct {
-	ID         string
-	GroupID    string
-	ProposerID string
-	Symbol     string
-	UsdcMicros int64
-	Status     ProposalStatus
-	ExpiresAt  int64 // unix seconds
+	ID          string
+	GroupID     string
+	ProposerID  string
+	Symbol      string
+	Kind        ProposalKind
+	UsdcMicros  int64
+	TokenAmount int64
+	Status      ProposalStatus
+	ExpiresAt   int64 // unix seconds
+}
+
+// ProposalKind is persisted on proposals.kind.
+type ProposalKind string
+
+const (
+	ProposalKindBuy  ProposalKind = "buy"
+	ProposalKindSell ProposalKind = "sell"
+)
+
+// ParseProposalKind parses a proposals.kind column value.
+func ParseProposalKind(raw string) (ProposalKind, error) {
+	switch ProposalKind(raw) {
+	case ProposalKindBuy, ProposalKindSell:
+		return ProposalKind(raw), nil
+	default:
+		return "", fmt.Errorf("invalid proposal kind: %q", raw)
+	}
 }
 
 // VoteTallyInput is pure input for off-chain proposal tally.

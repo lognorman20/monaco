@@ -50,7 +50,7 @@ func TestGetGroupView_afterUSDCtoAAPLxSwap_potTotalUnchanged(t *testing.T) {
 	}
 
 	const swappedUSDC = int64(1_000_000)
-	const aaplAtomics = int64(500_000)
+	const aaplAtomics = int64(50_000_000)
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
@@ -145,7 +145,7 @@ func TestComputeGroupPotView_costBasisFallback_withoutPyth(t *testing.T) {
 	}
 
 	const swappedUSDC = int64(1_000_000)
-	const aaplAtomics = int64(500_000)
+	const aaplAtomics = int64(50_000_000)
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
@@ -209,7 +209,7 @@ func TestGetHome_pythError_stillSucceeds(t *testing.T) {
 	}
 
 	const swappedUSDC = int64(1_000_000)
-	const aaplAtomics = int64(500_000)
+	const aaplAtomics = int64(50_000_000)
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
@@ -287,7 +287,7 @@ func TestGetGroupView_pythError_stillSucceeds(t *testing.T) {
 	}
 
 	const swappedUSDC = int64(1_000_000)
-	const aaplAtomics = int64(500_000)
+	const aaplAtomics = int64(50_000_000)
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
@@ -355,7 +355,7 @@ func TestGetGroupView_perAssetDollarPnL_gainAndLoss(t *testing.T) {
 	}
 
 	const swappedUSDC = int64(1_000_000)
-	const aaplAtomics = int64(500_000)
+	const aaplAtomics = int64(50_000_000)
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,

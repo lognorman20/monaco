@@ -28,11 +28,12 @@ type DevExecuteBuyResult struct {
 
 // SellToUSDCRequest sells treasury xStock back to USDC.
 type SellToUSDCRequest struct {
-	GroupID   string
-	UserID    string
-	Symbol    string
-	InputMint string
-	Amount    int64
+	GroupID    string
+	UserID     string
+	Symbol     string
+	InputMint  string
+	Amount     int64
+	ProposalID string
 }
 
 // SellToUSDCResult is the persisted confirmed sell transaction.
@@ -300,6 +301,7 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 	logSwapExecuteSubmit(req.GroupID, req.UserID, req.Symbol, "", quote.RequestID)
 	if _, _, err := s.store.InsertPendingTransaction(ctx, postgres.InsertPendingTransactionParams{
 		GroupID:          req.GroupID,
+		ProposalID:       req.ProposalID,
 		Action:           postgres.TransactionActionSell,
 		InputMint:        req.InputMint,
 		OutputMint:       jupiter.USDCMint,

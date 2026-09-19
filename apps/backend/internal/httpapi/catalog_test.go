@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
@@ -55,6 +56,39 @@ func TestGET_assets_paginatesCatalogResults(t *testing.T) {
 	}
 	if !payload.HasMore {
 		t.Fatal("expected hasMore=true")
+	}
+}
+
+func TestGET_assets_allowsNonCreatorMember(t *testing.T) {
+	t.Parallel()
+
+	catalogHandlers, groupHandlers, authHandlers, privyClient, iso := integrationCatalogApp(t)
+	_, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Privy)
+	_, joinerToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "catalog-joiner", "Catalog Joiner")
+	joinReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+groupID+"/join", strings.NewReader(`{}`))
+	joinReq.SetPathValue("id", groupID)
+	joinReq.Header.Set("Content-Type", "application/json")
+	joinReq.Header.Set("Authorization", "Bearer "+string(joinerToken))
+	joinRec := httptest.NewRecorder()
+	groupHandlers.JoinGroupHandler(joinRec, joinReq)
+	if joinRec.Code != http.StatusNoContent {
+		t.Fatalf("join status = %d, want 204; body = %s", joinRec.Code, joinRec.Body.String())
+	}
+
+	xstocks.RegisterCatalogAsset(catalogHandlers.Catalog, xstocks.CatalogAsset{
+		Symbol:     "AAPLx",
+		Name:       "Apple",
+		SolanaMint: "MintAAPL",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/groups/"+groupID+"/assets?query=AAPL&limit=5", nil)
+	req.SetPathValue("id", groupID)
+	req.Header.Set("Authorization", "Bearer "+string(joinerToken))
+	rec := httptest.NewRecorder()
+	catalogHandlers.SearchAssetsHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
 	}
 }
 

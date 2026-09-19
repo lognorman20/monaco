@@ -25,8 +25,10 @@ func buildProposal(overrides func(*Proposal)) Proposal {
 		GroupID:    "group-1",
 		ProposerID: "user-1",
 		Symbol:     "AAPLx",
-		UsdcMicros: 180_000,
-		Status:     ProposalOpen,
+		UsdcMicros:  180_000,
+		Kind:        ProposalKindBuy,
+		TokenAmount: 0,
+		Status:      ProposalOpen,
 		ExpiresAt:  1_700_000_000,
 	}
 	if overrides != nil {
@@ -60,5 +62,11 @@ func TestBuildProposal_defaultsOpenStatus(t *testing.T) {
 	// Assert
 	if proposal.Status != ProposalOpen {
 		t.Fatalf("status: got %q want %q", proposal.Status, ProposalOpen)
+	}
+	if proposal.Kind != ProposalKindBuy {
+		t.Fatalf("kind: got %q want %q", proposal.Kind, ProposalKindBuy)
+	}
+	if proposal.TokenAmount != 0 {
+		t.Fatalf("token amount: got %d want 0", proposal.TokenAmount)
 	}
 }

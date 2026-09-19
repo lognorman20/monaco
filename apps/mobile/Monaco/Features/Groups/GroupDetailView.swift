@@ -164,9 +164,9 @@ struct GroupDetailView: View {
                 .accessibilityIdentifier("group-action-deposit")
 
                 NavigationLink {
-                    ProposeBuyView(auth: auth, groupId: groupId)
+                    ProposeChooserView(auth: auth, groupId: groupId, groupView: view)
                 } label: {
-                    Label("Propose buy", systemImage: "chart.line.uptrend.xyaxis")
+                    Label("Propose", systemImage: "chart.line.uptrend.xyaxis")
                 }
                 .accessibilityIdentifier("group-action-propose")
                 Button(role: .destructive) { showLeaveConfirmation = true } label: {

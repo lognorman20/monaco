@@ -17,6 +17,7 @@ type GovernanceService struct {
 	store *postgres.Store
 	privy privy.Client
 	buy   *BuyService
+	swap  *SwapService
 	home  *HomeService
 	now   func() time.Time
 }
@@ -28,6 +29,11 @@ func NewGovernanceService(store *postgres.Store, privyClient privy.Client) *Gove
 // SetBuyService wires quote gating for proposal create (M4-T13).
 func (g *GovernanceService) SetBuyService(buy *BuyService) {
 	g.buy = buy
+}
+
+// SetSwapService wires treasury sell quotes for proposal create.
+func (g *GovernanceService) SetSwapService(swap *SwapService) {
+	g.swap = swap
 }
 
 // SetHomeService wires treasury total + reconcile for proposal create.
@@ -69,12 +75,17 @@ var ErrNotEligibleVoter = errors.New("not eligible to vote")
 var ErrNotEligibleProposer = errors.New("not eligible to propose")
 var ErrExceedsTreasuryUSDC = errors.New("exceeds treasury usdc")
 
-// CreateProposalInput is input for buy proposal create (M4-T13).
+// ErrExceedsTreasuryHolding means the sell amount is above confirmed treasury inventory.
+var ErrExceedsTreasuryHolding = errors.New("exceeds treasury holding")
+
+// CreateProposalInput is input for buy or sell proposal create.
 type CreateProposalInput struct {
-	GroupID    string
-	ProposerID string
-	Symbol     string
-	UsdcMicros int64
+	GroupID     string
+	ProposerID  string
+	Symbol      string
+	Kind        domain.ProposalKind
+	UsdcMicros  int64
+	TokenAmount int64
 }
 
 // CastVoteInput is input for yes/no vote cast (M4-T14).
@@ -550,8 +561,12 @@ func validateCreateRules(rules GroupRules) error {
 	return nil
 }
 
-// CreateProposal inserts an open buy proposal when the quote is routable (M4-T13).
+// CreateProposal inserts an open buy or sell proposal when the quote is routable.
 func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposalInput) (Proposal, error) {
+	kind := in.Kind
+	if kind == "" {
+		kind = domain.ProposalKindBuy
+	}
 	logGovernanceCreateProposalStart(in.GroupID, in.ProposerID, in.Symbol, in.UsdcMicros)
 
 	if in.GroupID == "" || in.ProposerID == "" {
@@ -561,14 +576,6 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 	if in.Symbol == "" {
 		logGovernanceBranchWarn("governance create proposal rejected", "symbol required", "group_id", in.GroupID)
 		return Proposal{}, fmt.Errorf("symbol is required")
-	}
-	if in.UsdcMicros <= 0 {
-		logGovernanceBranchWarn("governance create proposal rejected", "usdc not positive", "group_id", in.GroupID)
-		return Proposal{}, fmt.Errorf("usdc must be positive")
-	}
-	if g.buy == nil {
-		logGovernanceBranchWarn("governance create proposal rejected", "buy service missing", "group_id", in.GroupID)
-		return Proposal{}, fmt.Errorf("buy service is required")
 	}
 
 	member, err := g.store.IsGroupMember(ctx, in.GroupID, in.ProposerID)
@@ -598,32 +605,54 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		return Proposal{}, ErrNotEligibleProposer
 	}
 
-	treasuryTotal, err := g.proposalTreasuryTotalMicros(ctx, in.GroupID)
-	if err != nil {
-		logGovernanceBranchError("governance create proposal treasury balance failed", err, "group_id", in.GroupID, "proposer_id", in.ProposerID)
-		return Proposal{}, err
-	}
-	if in.UsdcMicros > treasuryTotal {
-		logGovernanceBranchWarn("governance create proposal rejected", "exceeds treasury total", "group_id", in.GroupID, "proposer_id", in.ProposerID, "usdc_micros", in.UsdcMicros, "treasury_total_micros", treasuryTotal)
-		return Proposal{}, ErrExceedsTreasuryUSDC
-	}
-
-	// Price-only routability gate (no taker): matches POST /quotes and Jupiter RFQ.
-	// Treasury total gate above ensures amount <= pot NAV; executable /order with taker
-	// runs at vote-pass execute (OrderBuy).
-	_, err = g.buy.StartBuy(ctx, StartBuyRequest{
-		GroupID:    in.GroupID,
-		UserID:     in.ProposerID,
-		Symbol:     in.Symbol,
-		USDCAmount: in.UsdcMicros,
-	})
-	if err != nil {
-		if errors.Is(err, ErrQuoteNotRoutable) {
-			logGovernanceBranchWarn("governance create proposal rejected", "quote not routable", "group_id", in.GroupID, "proposer_id", in.ProposerID, "symbol", in.Symbol)
-			return Proposal{}, ErrQuoteNotRoutable
+	switch kind {
+	case domain.ProposalKindBuy:
+		if in.UsdcMicros <= 0 || in.TokenAmount != 0 {
+			logGovernanceBranchWarn("governance create proposal rejected", "usdc not positive", "group_id", in.GroupID)
+			return Proposal{}, fmt.Errorf("usdc must be positive")
 		}
-		logGovernanceBranchError("governance create proposal start buy failed", err, "group_id", in.GroupID, "proposer_id", in.ProposerID)
-		return Proposal{}, err
+		if g.buy == nil {
+			logGovernanceBranchWarn("governance create proposal rejected", "buy service missing", "group_id", in.GroupID)
+			return Proposal{}, fmt.Errorf("buy service is required")
+		}
+		treasuryTotal, err := g.proposalTreasuryTotalMicros(ctx, in.GroupID)
+		if err != nil {
+			logGovernanceBranchError("governance create proposal treasury balance failed", err, "group_id", in.GroupID, "proposer_id", in.ProposerID)
+			return Proposal{}, err
+		}
+		if in.UsdcMicros > treasuryTotal {
+			logGovernanceBranchWarn("governance create proposal rejected", "exceeds treasury total", "group_id", in.GroupID, "proposer_id", in.ProposerID, "usdc_micros", in.UsdcMicros, "treasury_total_micros", treasuryTotal)
+			return Proposal{}, ErrExceedsTreasuryUSDC
+		}
+		_, err = g.buy.StartBuy(ctx, StartBuyRequest{
+			GroupID:    in.GroupID,
+			UserID:     in.ProposerID,
+			Symbol:     in.Symbol,
+			USDCAmount: in.UsdcMicros,
+		})
+		if err != nil {
+			if errors.Is(err, ErrQuoteNotRoutable) {
+				logGovernanceBranchWarn("governance create proposal rejected", "quote not routable", "group_id", in.GroupID, "proposer_id", in.ProposerID, "symbol", in.Symbol)
+				return Proposal{}, ErrQuoteNotRoutable
+			}
+			logGovernanceBranchError("governance create proposal start buy failed", err, "group_id", in.GroupID, "proposer_id", in.ProposerID)
+			return Proposal{}, err
+		}
+	case domain.ProposalKindSell:
+		if in.TokenAmount <= 0 || in.UsdcMicros != 0 {
+			return Proposal{}, fmt.Errorf("token amount must be positive")
+		}
+		if _, err := g.quoteSellForMember(ctx, QuoteProposalInput{
+			GroupID:     in.GroupID,
+			UserID:      in.ProposerID,
+			Symbol:      in.Symbol,
+			Kind:        domain.ProposalKindSell,
+			TokenAmount: in.TokenAmount,
+		}); err != nil {
+			return Proposal{}, err
+		}
+	default:
+		return Proposal{}, fmt.Errorf("invalid proposal kind")
 	}
 
 	now := g.now().UTC()
@@ -640,7 +669,15 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		}
 	}()
 
-	row, err := g.store.InsertProposalTx(ctx, tx, in.GroupID, in.ProposerID, in.Symbol, in.UsdcMicros, expiresAt)
+	row, err := g.store.InsertProposalTx(ctx, tx, postgres.InsertProposalParams{
+		GroupID:     in.GroupID,
+		ProposerID:  in.ProposerID,
+		Symbol:      in.Symbol,
+		Kind:        kind,
+		UsdcMicros:  in.UsdcMicros,
+		TokenAmount: in.TokenAmount,
+		ExpiresAt:   expiresAt,
+	})
 	if err != nil {
 		return Proposal{}, err
 	}
@@ -920,12 +957,14 @@ func (g *GovernanceService) tallyAndPersistTx(ctx context.Context, tx *sql.Tx, p
 
 func proposalFromRow(row postgres.ProposalRow) Proposal {
 	return Proposal{
-		ID:         row.ID,
-		GroupID:    row.GroupID,
-		ProposerID: row.ProposerID,
-		Symbol:     row.Symbol,
-		UsdcMicros: row.UsdcMicros,
-		Status:     row.Status,
-		ExpiresAt:  row.ExpiresAt.UTC().Unix(),
+		ID:          row.ID,
+		GroupID:     row.GroupID,
+		ProposerID:  row.ProposerID,
+		Symbol:      row.Symbol,
+		Kind:        row.Kind,
+		UsdcMicros:  row.UsdcMicros,
+		TokenAmount: row.TokenAmount,
+		Status:      row.Status,
+		ExpiresAt:   row.ExpiresAt.UTC().Unix(),
 	}
 }

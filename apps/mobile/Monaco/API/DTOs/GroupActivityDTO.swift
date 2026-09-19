@@ -8,6 +8,8 @@ struct GroupActivityItemDTO: Codable, Equatable, Identifiable {
     let amountMicros: Int64
     let createdAt: String
     let txSignature: String?
+    let tokenAmount: String?
+    let proceedsUsdcMicros: String?
 }
 
 struct GroupActivityResponse: Codable, Equatable {

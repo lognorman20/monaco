@@ -24,8 +24,10 @@ type ProposalHandlers struct {
 }
 
 type createProposalRequest struct {
-	Symbol string `json:"symbol"`
-	USDC   int64  `json:"usdc"`
+	Kind        string `json:"kind"`
+	Symbol      string `json:"symbol"`
+	USDC        int64  `json:"usdc"`
+	TokenAmount int64  `json:"tokenAmount"`
 }
 
 type createProposalResponse struct {
@@ -62,8 +64,20 @@ func (h *ProposalHandlers) CreateProposalHandler(w http.ResponseWriter, r *http.
 		logJSONError(ctx, log, "missing_symbol", w, http.StatusBadRequest, "symbol is required", "group_id", groupID)
 		return
 	}
-	if req.USDC <= 0 {
+	kind := strings.TrimSpace(req.Kind)
+	if kind == "" {
+		kind = "buy"
+	}
+	if kind != "buy" && kind != "sell" {
+		logJSONError(ctx, log, "invalid_kind", w, http.StatusBadRequest, "kind must be buy or sell", "group_id", groupID)
+		return
+	}
+	if kind == "buy" && req.USDC <= 0 {
 		logJSONError(ctx, log, "invalid_usdc", w, http.StatusBadRequest, "usdc must be positive", "group_id", groupID, "symbol", req.Symbol)
+		return
+	}
+	if kind == "sell" && req.TokenAmount <= 0 {
+		logJSONError(ctx, log, "invalid_token_amount", w, http.StatusBadRequest, "tokenAmount must be positive", "group_id", groupID, "symbol", req.Symbol)
 		return
 	}
 
@@ -74,10 +88,12 @@ func (h *ProposalHandlers) CreateProposalHandler(w http.ResponseWriter, r *http.
 	}
 
 	proposal, err := h.Governance.CreateProposal(ctx, app.CreateProposalInput{
-		GroupID:    groupID,
-		ProposerID: userID,
-		Symbol:     strings.TrimSpace(req.Symbol),
-		UsdcMicros: req.USDC,
+		GroupID:     groupID,
+		ProposerID:  userID,
+		Symbol:      strings.TrimSpace(req.Symbol),
+		Kind:        app.ProposalKind(kind),
+		UsdcMicros:  req.USDC,
+		TokenAmount: req.TokenAmount,
 	})
 	if err != nil {
 		writeProposalCreateError(ctx, log, w, err, "group_id", groupID, "user_id", userID, "symbol", req.Symbol)
@@ -142,7 +158,9 @@ func (h *ProposalHandlers) CastVoteHandler(w http.ResponseWriter, r *http.Reques
 type proposalListItemResponse struct {
 	ID           string `json:"id"`
 	Symbol       string `json:"symbol"`
-	UsdcMicros   string `json:"usdcMicros"`
+	Kind         string `json:"kind"`
+	UsdcMicros   string `json:"usdcMicros,omitempty"`
+	TokenAmount  string `json:"tokenAmount,omitempty"`
 	Status       string `json:"status"`
 	ProposerID   string `json:"proposerId"`
 	ProposerName string `json:"proposerName"`
@@ -181,7 +199,9 @@ type proposalDetailResponse struct {
 	ID           string                      `json:"id"`
 	GroupID      string                      `json:"groupId"`
 	Symbol       string                      `json:"symbol"`
-	UsdcMicros   string                      `json:"usdcMicros"`
+	Kind         string                      `json:"kind"`
+	UsdcMicros   string                      `json:"usdcMicros,omitempty"`
+	TokenAmount  string                      `json:"tokenAmount,omitempty"`
 	Status       string                      `json:"status"`
 	CreatedAt    string                      `json:"createdAt"`
 	ExpiresAt    string                      `json:"expiresAt"`
@@ -234,11 +254,20 @@ func (h *ProposalHandlers) ListGroupProposalsHandler(w http.ResponseWriter, r *h
 		row := proposalListItemResponse{
 			ID:           item.ID,
 			Symbol:       item.Symbol,
-			UsdcMicros:   strconv.FormatInt(item.UsdcMicros, 10),
+			Kind:         string(item.Kind),
 			Status:       string(item.Status),
 			ProposerID:   item.ProposerID,
 			ProposerName: item.ProposerName,
 			CreatedAt:    item.CreatedAt.UTC().Format(time.RFC3339),
+		}
+		if item.Kind == "" {
+			row.Kind = string(app.ProposalKindBuy)
+		}
+		if item.UsdcMicros > 0 {
+			row.UsdcMicros = strconv.FormatInt(item.UsdcMicros, 10)
+		}
+		if item.TokenAmount > 0 {
+			row.TokenAmount = strconv.FormatInt(item.TokenAmount, 10)
 		}
 		if item.Status == app.ProposalOpen {
 			row.ExpiresAt = item.ExpiresAt.UTC().Format(time.RFC3339)
@@ -314,11 +343,15 @@ func (h *ProposalHandlers) GetProposalDetailHandler(w http.ResponseWriter, r *ht
 	if detail.Execution.FailureReason != "" {
 		execution.FailureReason = detail.Execution.FailureReason
 	}
-	_ = json.NewEncoder(w).Encode(proposalDetailResponse{
+	detailKind := string(detail.Kind)
+	if detailKind == "" {
+		detailKind = string(app.ProposalKindBuy)
+	}
+	detailResp := proposalDetailResponse{
 		ID:           detail.ID,
 		GroupID:      detail.GroupID,
 		Symbol:       detail.Symbol,
-		UsdcMicros:   strconv.FormatInt(detail.UsdcMicros, 10),
+		Kind:         detailKind,
 		Status:       string(detail.Status),
 		CreatedAt:    detail.CreatedAt.UTC().Format(time.RFC3339),
 		ExpiresAt:    detail.ExpiresAt.UTC().Format(time.RFC3339),
@@ -333,7 +366,14 @@ func (h *ProposalHandlers) GetProposalDetailHandler(w http.ResponseWriter, r *ht
 			Threshold:     detail.VoteSummary.Threshold,
 		},
 		Execution: execution,
-	})
+	}
+	if detail.UsdcMicros > 0 {
+		detailResp.UsdcMicros = strconv.FormatInt(detail.UsdcMicros, 10)
+	}
+	if detail.TokenAmount > 0 {
+		detailResp.TokenAmount = strconv.FormatInt(detail.TokenAmount, 10)
+	}
+	_ = json.NewEncoder(w).Encode(detailResp)
 	logJSONOK(ctx, log, "ok", "proposal_id", proposalID, "status", detail.Status)
 }
 
@@ -384,6 +424,8 @@ func writeProposalCreateError(ctx context.Context, log *requestLog, w http.Respo
 		logJSONError(ctx, log, "quote_not_routable", w, http.StatusBadRequest, "quote not routable", attrs...)
 	case errors.Is(err, app.ErrExceedsTreasuryUSDC):
 		logJSONError(ctx, log, "exceeds_treasury_usdc", w, http.StatusBadRequest, "amount exceeds treasury total available", attrs...)
+	case errors.Is(err, app.ErrExceedsTreasuryHolding):
+		logJSONError(ctx, log, "exceeds_treasury_holding", w, http.StatusBadRequest, "amount exceeds treasury holding", attrs...)
 	default:
 		all := append(attrs, "err", err.Error())
 		logJSONError(ctx, log, "create_proposal_failed", w, http.StatusInternalServerError, "internal server error", all...)

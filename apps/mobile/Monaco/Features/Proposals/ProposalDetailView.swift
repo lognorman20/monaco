@@ -74,9 +74,9 @@ struct ProposalDetailView: View {
                 Text(proposal.symbol)
                     .font(.title2.bold())
                 Spacer()
-                ProposalStatusChip(status: proposal.status)
+                ProposalStatusChip(status: proposal.status, kind: proposal.resolvedKind)
             }
-            Text("Cabal buy proposal for \(formattedUsdc(proposal)) USDC")
+            Text(proposalHeadline(proposal))
                 .font(.subheadline)
                 .foregroundStyle(MonacoTheme.secondaryText)
 
@@ -157,8 +157,23 @@ struct ProposalDetailView: View {
 
     }
 
+    private func proposalHeadline(_ proposal: ProposalDTO) -> String {
+        if proposal.resolvedKind == "sell" {
+            return "Cabal sell proposal for \(formattedTokenAmount(proposal)) \(proposal.symbol)"
+        }
+        return "Cabal buy proposal for \(formattedUsdc(proposal)) USDC"
+    }
+
+    private func formattedTokenAmount(_ proposal: ProposalDTO) -> String {
+        guard let raw = proposal.tokenAmount, let atomics = Decimal(string: raw) else {
+            return proposal.tokenAmount ?? "0"
+        }
+        let shares = atomics / Decimal(sign: .plus, exponent: 8, significand: 1)
+        return NSDecimalNumber(decimal: shares).stringValue
+    }
+
     private func formattedUsdc(_ proposal: ProposalDTO) -> String {
-        guard let micro = Int64(proposal.usdcMicros) else { return proposal.usdcMicros }
+        guard let raw = proposal.usdcMicros, let micro = Int64(raw) else { return proposal.usdcMicros ?? "0" }
         let dollars = Double(micro) / 1_000_000.0
         return String(format: "%.2f", dollars)
     }
