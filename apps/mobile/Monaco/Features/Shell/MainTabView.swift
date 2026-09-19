@@ -49,6 +49,8 @@ struct MainTabView: View {
             .tag(MainTab.profile)
         }
         .tint(MonacoTheme.ink)
-        // TODO(phase B, after WP1 merge): Haptics.selection() in .onChange(of: selectedTab).
+        .onChange(of: selectedTab) { _, _ in
+            Haptics.selection()
+        }
     }
 }

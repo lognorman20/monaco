@@ -9,60 +9,44 @@ struct HomePositionsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            Text("Your cabals")
-                .font(MonacoTheme.TypeRole.title)
-                .foregroundStyle(MonacoTheme.ink)
+            MonacoSectionHeader("Your cabals")
 
             if rows.isEmpty {
-                HomeCabalsEmptyState(onBrowseCabals: onBrowseCabals)
+                EmptyState(
+                    title: "No cabals yet",
+                    message: "Start one with friends or join an open one.",
+                    actionTitle: "Browse cabals",
+                    action: onBrowseCabals
+                )
+                .accessibilityIdentifier("home-cabals-empty")
             } else {
-                ForEach(rows) { row in
-                    NavigationLink {
-                        GroupDetailView(
-                            auth: auth,
-                            groupId: row.groupId,
-                            groupName: row.name,
-                            onLeft: onLeft
-                        )
-                    } label: {
-                        MonacoRowCard(
-                            systemImage: "person.3.fill",
-                            title: row.name,
-                            subtitle: "Your slice \(UsdAmountFormatter.format(decimalString: row.equityUsd)) · \(SlicePercentFormatter.format(row.slicePercent))",
-                            trailing: row.dollarPnl,
-                            trailingCaption: PercentReturnFormatter.format(row.percentReturn),
-                            trailingColor: MonacoTheme.signed(row.dollarPnl)
-                        )
+                MonacoGroupedList {
+                    ForEach(rows) { row in
+                        NavigationLink {
+                            GroupDetailView(
+                                auth: auth,
+                                groupId: row.groupId,
+                                groupName: row.name,
+                                onLeft: onLeft
+                            )
+                        } label: {
+                            MonacoRow(
+                                title: row.name,
+                                subtitle: "Your slice \(UsdAmountFormatter.format(decimalString: row.equityUsd)) · \(SlicePercentFormatter.format(row.slicePercent))",
+                                chevron: true,
+                                isLast: row.groupId == rows.last?.groupId,
+                                leading: { CabalMark(groupId: row.groupId, name: row.name) },
+                                trailing: {
+                                    PnLText(dollarPnl: row.dollarPnl, style: .row)
+                                    PercentText(percentReturn: row.percentReturn, style: .caption)
+                                }
+                            )
+                        }
+                        .buttonStyle(.monacoRow)
+                        .accessibilityIdentifier("home-my-group-\(row.groupId)")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("home-my-group-\(row.groupId)")
                 }
             }
         }
-    }
-}
-
-/// Interim empty state. Phase B swaps this for the shared `EmptyState` primitive once
-/// WP1 lands it — same copy, same "Browse cabals" action.
-private struct HomeCabalsEmptyState: View {
-    let onBrowseCabals: () -> Void
-
-    var body: some View {
-        VStack(spacing: MonacoTheme.Space.s) {
-            Text("No cabals yet")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(MonacoTheme.ink)
-            Text("Start one with friends or join an open one.")
-                .font(MonacoTheme.TypeRole.body)
-                .foregroundStyle(MonacoTheme.muted)
-                .multilineTextAlignment(.center)
-            Button("Browse cabals", action: onBrowseCabals)
-                .buttonStyle(.monacoSecondary)
-                .accessibilityIdentifier("home-cabals-empty-browse")
-        }
-        .frame(maxWidth: .infinity)
-        .padding(MonacoTheme.Space.l)
-        .monacoSurfaceCard()
-        .accessibilityIdentifier("home-cabals-empty")
     }
 }

@@ -107,36 +107,26 @@ struct HomeView: View {
     }
 }
 
-/// Interim loading placeholder: a hero-sized block plus a few row-sized blocks. Phase B
-/// swaps this for `SkeletonBlock` / `.skeleton(_:)` once WP1 lands them.
+/// Skeleton hero + three rows, per the plan's Home loading spec.
 private struct HomeSkeletonView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
                 VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(MonacoTheme.surface)
-                        .frame(width: 140, height: 14)
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(MonacoTheme.surface)
-                        .frame(width: 180, height: 44)
+                    SkeletonBlock(width: 140, height: 14)
+                    SkeletonBlock(width: 180, height: 44)
                 }
 
-                RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
-                    .fill(MonacoTheme.surface)
-                    .frame(height: 64)
+                SkeletonBlock(height: 64, radius: MonacoTheme.Radius.card)
 
                 VStack(spacing: MonacoTheme.Space.s) {
                     ForEach(0..<3, id: \.self) { _ in
-                        RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
-                            .fill(MonacoTheme.surface)
-                            .frame(height: 60)
+                        SkeletonBlock(height: 60, radius: MonacoTheme.Radius.card)
                     }
                 }
             }
             .padding(.horizontal, MonacoTheme.Space.m)
             .padding(.top, MonacoTheme.Space.m)
-            .redacted(reason: .placeholder)
         }
         .accessibilityIdentifier("home-loading")
     }

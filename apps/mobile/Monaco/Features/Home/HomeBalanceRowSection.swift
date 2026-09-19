@@ -13,21 +13,17 @@ struct HomeBalanceRowSection: View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Account balance")
-                    .font(MonacoTheme.TypeRole.caption)
+                    .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(MonacoTheme.muted)
                 if let balance {
-                    Text(UsdAmountFormatter.format(micros: balance.availableUsdcMicros))
-                        .font(.body.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(MonacoTheme.ink)
+                    MoneyText(micros: balance.availableUsdcMicros, style: .row)
                         .accessibilityIdentifier("platform-balance-value")
                 } else if isBalanceLoading {
                     ProgressView()
                         .tint(MonacoTheme.accent)
                         .accessibilityIdentifier("platform-balance-loading")
                 } else {
-                    Text("$0.00")
-                        .font(.body.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(MonacoTheme.ink)
+                    MoneyText(0, style: .row)
                         .accessibilityIdentifier("platform-balance-value")
                 }
             }

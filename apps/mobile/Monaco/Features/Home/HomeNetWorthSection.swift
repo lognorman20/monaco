@@ -8,31 +8,23 @@ struct HomeNetWorthSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            MonacoHeroHeader(
-                title: UsdAmountFormatter.format(decimalString: dashboard.netWorthUsd),
-                caption: "Your money in cabals"
-            )
-            .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+            Text("Your money in cabals")
+                .font(MonacoTheme.Typo.caption)
+                .foregroundStyle(MonacoTheme.muted)
+
+            MoneyText(decimalString: dashboard.netWorthUsd, style: .hero)
 
             HStack(spacing: MonacoTheme.Space.s) {
-                Text(dashboard.netWorthDollarPnl)
-                    .font(.subheadline.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(MonacoTheme.signed(dashboard.netWorthDollarPnl))
-                Text(PercentReturnFormatter.format(dashboard.netWorthPercentReturn))
-                    .font(.subheadline.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(MonacoTheme.signed(dashboard.netWorthPercentReturn))
+                PnLBadge(
+                    dollarPnl: dashboard.netWorthDollarPnl,
+                    percentReturn: dashboard.netWorthPercentReturn
+                )
                 Text("all time")
-                    .font(MonacoTheme.TypeRole.caption)
+                    .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(MonacoTheme.muted)
             }
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("home-net-worth")
-    }
-}
-
-enum HomePnLTint {
-    static func color(_ raw: String) -> Color {
-        MonacoTheme.signed(raw)
     }
 }

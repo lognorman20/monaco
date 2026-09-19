@@ -10,31 +10,31 @@ struct HomeMissedVotesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            Text("Needs your vote")
-                .font(MonacoTheme.TypeRole.title)
-                .foregroundStyle(MonacoTheme.ink)
+            MonacoSectionHeader("Needs your vote")
 
-            VStack(spacing: 1) {
+            MonacoGroupedList {
                 ForEach(rows, id: \.proposalId) { (row: HomeMissedProposalRowDTO) in
                     NavigationLink {
                         ProposalDetailView(auth: auth, proposalId: row.proposalId)
                     } label: {
-                        HomeMissedVoteRow(
-                            title: AssetSymbolFormatter.format(row.symbol),
+                        MonacoRow(
+                            title: AssetDisplayNames.name(forSymbol: row.symbol) ?? AssetSymbolFormatter.display(row.symbol),
                             subtitle: "\(row.groupName) · \(closesInLabel(row.expiresAt))",
+                            chevron: true,
                             isLast: row.proposalId == rows.last?.proposalId
-                        )
+                        ) {
+                            StockMark(symbol: row.symbol)
+                        }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.monacoRow)
                     .accessibilityIdentifier("home-missed-\(row.proposalId)")
                 }
             }
-            .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
         }
     }
 
-    /// Interim countdown copy. Phase B may fold this into a shared formatter once WP1
-    /// lands `RelativeTimeFormatter` (which handles past timestamps, not this "closes in").
+    /// Interim countdown copy — the frozen `RelativeTimeFormatter` handles past timestamps,
+    /// not this future "closes in" countdown, so it stays local to Home.
     private func closesInLabel(_ expiresAt: Date, now: Date = Date()) -> String {
         let remaining = expiresAt.timeIntervalSince(now)
         guard remaining > 0 else { return "closing" }
@@ -42,42 +42,5 @@ struct HomeMissedVotesSection: View {
         if hours >= 1 { return "closes in \(hours)h" }
         let minutes = max(1, Int(remaining / 60))
         return "closes in \(minutes)m"
-    }
-}
-
-private struct HomeMissedVoteRow: View {
-    let title: String
-    let subtitle: String
-    let isLast: Bool
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: MonacoTheme.Space.m) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(MonacoTheme.ink)
-                        .lineLimit(1)
-                    Text(subtitle)
-                        .font(MonacoTheme.TypeRole.caption)
-                        .foregroundStyle(MonacoTheme.muted)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: MonacoTheme.Space.s)
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(MonacoTheme.muted)
-            }
-            .padding(.horizontal, MonacoTheme.Space.m)
-            .frame(minHeight: 60)
-            .contentShape(Rectangle())
-
-            if !isLast {
-                Rectangle()
-                    .fill(MonacoTheme.hairline)
-                    .frame(height: 1)
-                    .padding(.leading, MonacoTheme.Space.m)
-            }
-        }
     }
 }
