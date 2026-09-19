@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+
+	"github.com/monaco/monaco/packages/domain"
 )
 
 // CreditUncreditedTreasuryUSDC mints share_units and amount_deposited for USDC-only pots
@@ -128,7 +130,10 @@ func (d *DepositService) surplusCredits(
 		if position.ShareUnits <= 0 {
 			continue
 		}
-		credit := surplus * position.ShareUnits / totalSharesMicro
+		credit, err := domain.MulDivFloor(surplus, position.ShareUnits, totalSharesMicro)
+		if err != nil {
+			return nil, fmt.Errorf("surplus credit: %w", err)
+		}
 		if credit <= 0 {
 			continue
 		}

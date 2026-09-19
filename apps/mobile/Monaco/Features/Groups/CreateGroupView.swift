@@ -62,6 +62,8 @@ enum VoteExpiryOption: Int64, CaseIterable, Identifiable {
 /// Product create-group flow: join policy, voter set, threshold, and vote expiry.
 struct CreateGroupView: View {
     @ObservedObject var auth: PrivyAuthService
+    /// Present inside the signed-in shell; refreshed after create so every tab shows the new cabal.
+    @Environment(AppSessionStore.self) private var session: AppSessionStore?
 
     private let apiClient = MonacoAPIClient()
 
@@ -219,6 +221,7 @@ struct CreateGroupView: View {
                 voteExpirySeconds: voteExpiry.rawValue
             )
             createdGroup = created
+            await session?.refresh(auth: auth)
         } catch MonacoAPIError.httpStatus(let status) {
             errorMessage = "Could not create cabal (HTTP \(status))."
         } catch {

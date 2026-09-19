@@ -110,8 +110,11 @@ func IncludeInGroupBoard(shareUnits ShareUnits, netIn USDCMicros) bool {
 }
 
 // IncludeOnBoard reports whether a row should appear on group or people boards.
+// Product rule: only rows with net USDC in greater than zero are ranked. A zero
+// or negative net (members already took out more than they put in) has no
+// meaningful percent return, so it never earns a rank.
 func IncludeOnBoard(netIn USDCMicros) bool {
-	return netIn != 0
+	return netIn > 0
 }
 
 // ComputeMemberPnL derives equity and percent return for one member.
@@ -198,6 +201,8 @@ func RankMemberPnLByPercentReturn(rows []MemberPnL) {
 }
 
 // BuildGroupBoard assembles the app-wide group board ranked by pot percent return.
+// Ties break on dollar P&L (desc), then pot value (desc), then group id (asc) so
+// the order is total and deterministic across requests.
 func BuildGroupBoard(groups []GroupBoardInput) []GroupBoardRow {
 	rows := make([]GroupBoardRow, 0, len(groups))
 	for _, group := range groups {
@@ -218,12 +223,22 @@ func BuildGroupBoard(groups []GroupBoardInput) []GroupBoardRow {
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].PercentReturn != rows[j].PercentReturn {
-			return rows[i].PercentReturn > rows[j].PercentReturn
-		}
-		return rows[i].GroupID < rows[j].GroupID
+		return groupBoardRowLess(rows[i], rows[j])
 	})
 	return rows
+}
+
+func groupBoardRowLess(a, b GroupBoardRow) bool {
+	if a.PercentReturn != b.PercentReturn {
+		return a.PercentReturn > b.PercentReturn
+	}
+	if a.DollarPnL != b.DollarPnL {
+		return a.DollarPnL > b.DollarPnL
+	}
+	if a.PotNav != b.PotNav {
+		return a.PotNav > b.PotNav
+	}
+	return a.GroupID < b.GroupID
 }
 
 // AggregatePersonPnL sums equity and net USDC in across groups for one user.

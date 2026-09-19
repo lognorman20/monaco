@@ -44,9 +44,32 @@ func TestMemberEquityAtSnapshot_usesShareFraction(t *testing.T) {
 		PotNavMicros: 1_000_000,
 		TotalShares:  1_000_000,
 	}
-	got := memberEquityAtSnapshot(500_000, snap)
+	got, err := memberEquityAtSnapshot(500_000, snap)
+	if err != nil {
+		t.Fatalf("memberEquityAtSnapshot: %v", err)
+	}
 	if got != 500_000 {
 		t.Fatalf("equity = %d, want 500000", got)
+	}
+}
+
+func TestMemberEquityAtSnapshot_largePotDoesNotWrap(t *testing.T) {
+	t.Parallel()
+	// Arrange: a $50k pot with 50k shares; half the shares. shares × pot = 1.25e21 > int64.
+	snap := postgres.NavSnapshotRow{
+		PotNavMicros: 50_000_000_000,
+		TotalShares:  50_000_000_000,
+	}
+
+	// Act
+	got, err := memberEquityAtSnapshot(25_000_000_000, snap)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("memberEquityAtSnapshot: %v", err)
+	}
+	if got != 25_000_000_000 {
+		t.Fatalf("equity = %d, want 25_000_000_000", got)
 	}
 }
 

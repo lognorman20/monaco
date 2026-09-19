@@ -492,6 +492,69 @@ public final class MonacoAPIClient: @unchecked Sendable {
         return try JSONDecoder().decode(GroupViewDTO.self, from: data)
     }
 
+    // MARK: Groups tab (#148)
+
+    /// Case-insensitive name search. `query` must be 2...64 characters after
+    /// trimming (see `GroupSearchQuery`); pass the previous page's
+    /// `nextCursor` to continue.
+    public func searchGroups(query: String, limit: Int = 20, cursor: String? = nil) async throws -> GroupSearchResponseDTO {
+        var items = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        if let cursor {
+            items.append(URLQueryItem(name: "cursor", value: cursor))
+        }
+        return try await getJSON(path: "v1/groups/search", queryItems: items, as: GroupSearchResponseDTO.self)
+    }
+
+    /// Platform-wide cabals ranked by percent return (server caps limit at 50).
+    public func groupLeaderboard(limit: Int = 20) async throws -> GroupLeaderboardResponseDTO {
+        try await getJSON(
+            path: "v1/groups/leaderboard",
+            queryItems: [URLQueryItem(name: "limit", value: String(limit))],
+            as: GroupLeaderboardResponseDTO.self
+        )
+    }
+
+    /// One P&L series per cabal the viewer belongs to, in a single request.
+    public func myGroupsPnLHistory(range: GroupPnLRange = .oneMonth) async throws -> MyGroupsPnLHistoryDTO {
+        try await getJSON(
+            path: "v1/groups/pnl-history",
+            queryItems: [URLQueryItem(name: "range", value: range.rawValue)],
+            as: MyGroupsPnLHistoryDTO.self
+        )
+    }
+
+    /// P&L series for one cabal; readable by any signed-in user.
+    public func groupPnLHistory(groupId: String, range: GroupPnLRange = .oneMonth) async throws -> GroupPnLSeriesDTO {
+        try await getJSON(
+            path: "v1/groups/\(groupId)/pnl-history",
+            queryItems: [URLQueryItem(name: "range", value: range.rawValue)],
+            as: GroupPnLSeriesDTO.self
+        )
+    }
+
+    private func getJSON<T: Decodable>(path: String, queryItems: [URLQueryItem], as type: T.Type) async throws -> T {
+        var components = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)!
+        components.queryItems = queryItems
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try monacoISO8601JSONDecoder().decode(T.self, from: data)
+    }
+
     public func postRedeem(
         groupId: String,
         shareUnits: String,

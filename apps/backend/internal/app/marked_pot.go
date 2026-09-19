@@ -35,7 +35,10 @@ func costBasisMarkPerUnitMicros(totalUSDCMicros, tokenAtomics int64) (int64, err
 	if tokenAtomics <= 0 {
 		return 0, fmt.Errorf("cost basis token amount must be positive")
 	}
-	mark := (totalUSDCMicros * jupiter.XStockAtomicScale) / tokenAtomics
+	mark, err := domain.MulDivFloor(totalUSDCMicros, jupiter.XStockAtomicScale, tokenAtomics)
+	if err != nil {
+		return 0, fmt.Errorf("derive mark per unit: %w", err)
+	}
 	if mark <= 0 {
 		return 0, fmt.Errorf("derived mark per unit must be positive")
 	}
@@ -273,7 +276,10 @@ func potRowsFromPythInput(input pyth.NavInput) ([]GroupViewPotRow, error) {
 		if err != nil {
 			return nil, err
 		}
-		valueMicros := holding.Units * holding.MarkUsdc / jupiter.XStockAtomicScale
+		valueMicros, err := domain.MulDivFloor(holding.Units, holding.MarkUsdc, jupiter.XStockAtomicScale)
+		if err != nil {
+			return nil, fmt.Errorf("value %s holding: %w", holding.Symbol, err)
+		}
 		var afterHours *bool
 		if holding.AfterHours {
 			afterHours = boolPtr(true)
@@ -282,8 +288,8 @@ func potRowsFromPythInput(input pyth.NavInput) ([]GroupViewPotRow, error) {
 			Symbol:      holding.Symbol,
 			Units:       string(units),
 			MarkUsd:     formatMicrosAsUsdDecimal(holding.MarkUsdc),
-			ValueUsd:    formatMicrosAsUsdDecimal(int64(valueMicros)),
-			DollarPnL:   formatSignedDollarPnL(int64(valueMicros) - holding.CostBasis),
+			ValueUsd:    formatMicrosAsUsdDecimal(valueMicros),
+			DollarPnL:   formatSignedDollarPnL(valueMicros - holding.CostBasis),
 			AfterHours:  afterHours,
 			TokenAmount: strconv.FormatInt(holding.Units, 10),
 		})

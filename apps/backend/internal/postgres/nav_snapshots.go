@@ -35,8 +35,43 @@ type NavSnapshotRow struct {
 	PotNavMicros      int64
 	NavPerShareMicros int64
 	TotalShares       int64
-	Reason            NavSnapshotReason
-	CreatedAt         time.Time
+	// NetContributedMicros is the group's net USDC in (deposits credited minus
+	// payouts) as of this snapshot, recorded in the same transaction. Nil for
+	// rows written before migration 000016.
+	NetContributedMicros *int64
+	Reason               NavSnapshotReason
+	CreatedAt            time.Time
+}
+
+const navSnapshotColumns = `id, group_id, pot_nav_micros, nav_per_share_micros, total_shares, net_contributed_micros, reason, created_at`
+
+type navSnapshotScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanNavSnapshot(row navSnapshotScanner) (NavSnapshotRow, error) {
+	var out NavSnapshotRow
+	var reason string
+	var netContributed sql.NullInt64
+	if err := row.Scan(
+		&out.ID,
+		&out.GroupID,
+		&out.PotNavMicros,
+		&out.NavPerShareMicros,
+		&out.TotalShares,
+		&netContributed,
+		&reason,
+		&out.CreatedAt,
+	); err != nil {
+		return NavSnapshotRow{}, err
+	}
+	if netContributed.Valid {
+		v := netContributed.Int64
+		out.NetContributedMicros = &v
+	}
+	out.Reason = NavSnapshotReason(reason)
+	out.CreatedAt = out.CreatedAt.UTC()
+	return out, nil
 }
 
 // NavSnapshotValues is the computed NAV state persisted to nav_snapshots.
@@ -60,21 +95,19 @@ func (s *Store) InsertNavSnapshotTx(ctx context.Context, tx *sql.Tx, groupID str
 		return NavSnapshotRow{}, fmt.Errorf("invalid nav snapshot reason %q", reason)
 	}
 
+	// net_contributed_micros is read inside the same transaction as the
+	// position change that triggered this snapshot, so it pairs exactly with
+	// pot_nav_micros: group P&L at this instant = pot - net contributed.
 	const insertSQL = `
-INSERT INTO nav_snapshots (group_id, pot_nav_micros, nav_per_share_micros, total_shares, reason)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, group_id, pot_nav_micros, nav_per_share_micros, total_shares, reason, created_at`
+INSERT INTO nav_snapshots (group_id, pot_nav_micros, nav_per_share_micros, total_shares, reason, net_contributed_micros)
+VALUES ($1, $2, $3, $4, $5, (
+  SELECT COALESCE(SUM(amount_deposited - amount_withdrawn), 0)
+  FROM positions
+  WHERE group_id = $1
+))
+RETURNING ` + navSnapshotColumns
 
-	var row NavSnapshotRow
-	err := tx.QueryRowContext(ctx, insertSQL, groupID, vals.PotNavMicros, vals.NavPerShareMicros, vals.TotalShares, string(reason)).Scan(
-		&row.ID,
-		&row.GroupID,
-		&row.PotNavMicros,
-		&row.NavPerShareMicros,
-		&row.TotalShares,
-		&row.Reason,
-		&row.CreatedAt,
-	)
+	row, err := scanNavSnapshot(tx.QueryRowContext(ctx, insertSQL, groupID, vals.PotNavMicros, vals.NavPerShareMicros, vals.TotalShares, string(reason)))
 	if err != nil {
 		return NavSnapshotRow{}, fmt.Errorf("insert nav snapshot: %w", err)
 	}
@@ -354,7 +387,10 @@ SELECT buys.usdc, buys.tokens, sells.tokens FROM buys, sells`
 	if remaining <= 0 {
 		return 0, 0, false, nil
 	}
-	remainingBasis := buyUSDC * remaining / buyTokens
+	remainingBasis, err := domain.MulDivFloor(buyUSDC, remaining, buyTokens)
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("remaining cost basis: %w", err)
+	}
 	return remainingBasis, remaining, true, nil
 }
 
@@ -373,8 +409,8 @@ func (s *Store) ListNavSnapshotsForGroupsSince(ctx context.Context, groupIDs []s
 		return []NavSnapshotRow{}, nil
 	}
 
-	const selectSQL = `
-SELECT id, group_id, pot_nav_micros, nav_per_share_micros, total_shares, reason, created_at
+	selectSQL := `
+SELECT ` + navSnapshotColumns + `
 FROM nav_snapshots
 WHERE group_id = ANY($1::uuid[]) AND created_at >= $2
 ORDER BY created_at ASC, id ASC`
@@ -387,20 +423,10 @@ ORDER BY created_at ASC, id ASC`
 
 	var out []NavSnapshotRow
 	for rows.Next() {
-		var row NavSnapshotRow
-		var reason string
-		if err := rows.Scan(
-			&row.ID,
-			&row.GroupID,
-			&row.PotNavMicros,
-			&row.NavPerShareMicros,
-			&row.TotalShares,
-			&reason,
-			&row.CreatedAt,
-		); err != nil {
+		row, err := scanNavSnapshot(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan nav snapshot: %w", err)
 		}
-		row.Reason = NavSnapshotReason(reason)
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
@@ -415,31 +441,20 @@ func (s *Store) GetNavSnapshotAtOrBefore(ctx context.Context, groupID string, at
 		return NavSnapshotRow{}, false, fmt.Errorf("group_id is required")
 	}
 
-	const selectSQL = `
-SELECT id, group_id, pot_nav_micros, nav_per_share_micros, total_shares, reason, created_at
+	selectSQL := `
+SELECT ` + navSnapshotColumns + `
 FROM nav_snapshots
 WHERE group_id = $1 AND created_at <= $2
 ORDER BY created_at DESC, id DESC
 LIMIT 1`
 
-	var row NavSnapshotRow
-	var reason string
-	err := s.db.QueryRowContext(ctx, selectSQL, groupID, at.UTC()).Scan(
-		&row.ID,
-		&row.GroupID,
-		&row.PotNavMicros,
-		&row.NavPerShareMicros,
-		&row.TotalShares,
-		&reason,
-		&row.CreatedAt,
-	)
+	row, err := scanNavSnapshot(s.db.QueryRowContext(ctx, selectSQL, groupID, at.UTC()))
 	if errors.Is(err, sql.ErrNoRows) {
 		return NavSnapshotRow{}, false, nil
 	}
 	if err != nil {
 		return NavSnapshotRow{}, false, fmt.Errorf("get nav snapshot at or before: %w", err)
 	}
-	row.Reason = NavSnapshotReason(reason)
 	return row, true, nil
 }
 
@@ -449,8 +464,8 @@ func (s *Store) ListNavSnapshotsByGroup(ctx context.Context, groupID string) ([]
 		return nil, fmt.Errorf("group_id is required")
 	}
 
-	const selectSQL = `
-SELECT id, group_id, pot_nav_micros, nav_per_share_micros, total_shares, reason, created_at
+	selectSQL := `
+SELECT ` + navSnapshotColumns + `
 FROM nav_snapshots
 WHERE group_id = $1
 ORDER BY created_at DESC, id DESC`
@@ -463,20 +478,10 @@ ORDER BY created_at DESC, id DESC`
 
 	var out []NavSnapshotRow
 	for rows.Next() {
-		var row NavSnapshotRow
-		var reason string
-		if err := rows.Scan(
-			&row.ID,
-			&row.GroupID,
-			&row.PotNavMicros,
-			&row.NavPerShareMicros,
-			&row.TotalShares,
-			&reason,
-			&row.CreatedAt,
-		); err != nil {
+		row, err := scanNavSnapshot(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan nav snapshot: %w", err)
 		}
-		row.Reason = NavSnapshotReason(reason)
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
@@ -529,7 +534,10 @@ func costBasisMarkPerUnitMicros(totalUSDCMicros, tokenAtomics int64) (int64, err
 	if tokenAtomics <= 0 {
 		return 0, fmt.Errorf("cost basis token amount must be positive")
 	}
-	mark := (totalUSDCMicros * jupiter.XStockAtomicScale) / tokenAtomics
+	mark, err := domain.MulDivFloor(totalUSDCMicros, jupiter.XStockAtomicScale, tokenAtomics)
+	if err != nil {
+		return 0, fmt.Errorf("derive mark per unit: %w", err)
+	}
 	if mark <= 0 {
 		return 0, fmt.Errorf("derived mark per unit must be positive")
 	}

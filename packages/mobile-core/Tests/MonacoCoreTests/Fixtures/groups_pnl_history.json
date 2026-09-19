@@ -1,0 +1,42 @@
+{
+  "range": "1M",
+  "series": [
+    {
+      "groupId": "3f9a1b2c-4d5e-4f6a-8b7c-9d0e1f2a3b4c",
+      "name": "Weekend investors",
+      "range": "1M",
+      "points": [
+        {
+          "at": "2026-09-01T15:00:00Z",
+          "potValueUsd": "100.00",
+          "netInUsd": "100.00",
+          "dollarPnl": "+0.00"
+        },
+        {
+          "at": "2026-09-08T15:00:00Z",
+          "potValueUsd": "96.90",
+          "netInUsd": "100.00",
+          "dollarPnl": "-3.10"
+        },
+        {
+          "at": "2026-09-15T15:00:00Z",
+          "potValueUsd": "132.50",
+          "netInUsd": "100.00",
+          "dollarPnl": "+32.50"
+        },
+        {
+          "at": "2026-09-19T15:00:00Z",
+          "potValueUsd": "148.20",
+          "netInUsd": "100.00",
+          "dollarPnl": "+48.20"
+        }
+      ]
+    },
+    {
+      "groupId": "7c6b5a49-3827-4f10-9e8d-7c6b5a493827",
+      "name": "Rent money",
+      "range": "1M",
+      "points": []
+    }
+  ]
+}

@@ -50,6 +50,10 @@ var apiRoutes = []string{
 	"GET /v1/home/pnl-series",
 	"GET /v1/home/missed-proposals",
 	"POST /v1/groups",
+	"GET /v1/groups/search",
+	"GET /v1/groups/leaderboard",
+	"GET /v1/groups/pnl-history",
+	"GET /v1/groups/{id}/pnl-history",
 	"POST /v1/groups/{id}/join",
 	"POST /v1/groups/{id}/leave",
 	"POST /v1/groups/{id}/withdraw-to-balance",
@@ -160,6 +164,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	me := &httpapi.MeHandlers{Sessions: sessions, ProfilePhoto: profilePhotos}
 	homeHandlers := &httpapi.HomeHandlers{Home: home}
 	groupHandlers := &httpapi.GroupHandlers{Groups: groups, Governance: governance, Home: home, Redeem: redeem}
+	groupsTabHandlers := &httpapi.GroupsTabHandlers{GroupsTab: app.NewGroupsTabService(home, store)}
 	executeOnPass := app.NewExecuteOnPassService(swap, store)
 	governance.SetBuyService(buy)
 	governance.SetHomeService(home)
@@ -221,6 +226,10 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/home/missed-proposals", homeHandlers.HomeMissedProposalsHandler)
 	mux.HandleFunc("GET /v1/users/{id}/groups", homeHandlers.UserSharedGroupsHandler)
 	mux.HandleFunc("POST /v1/groups", groupHandlers.CreateGroupHandler)
+	mux.HandleFunc("GET /v1/groups/search", groupsTabHandlers.SearchGroupsHandler)
+	mux.HandleFunc("GET /v1/groups/leaderboard", groupsTabHandlers.GroupLeaderboardHandler)
+	mux.HandleFunc("GET /v1/groups/pnl-history", groupsTabHandlers.MyGroupsPnLHistoryHandler)
+	mux.HandleFunc("GET /v1/groups/{id}/pnl-history", groupsTabHandlers.GroupPnLHistoryHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/join", groupHandlers.JoinGroupHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/leave", groupHandlers.LeaveGroupHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/withdraw-to-balance", groupHandlers.WithdrawToBalanceHandler)

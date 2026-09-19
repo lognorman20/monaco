@@ -67,3 +67,21 @@ func divideMicrosByShares(numerator USDCMicros, shares ShareUnits) (USDCMicros, 
 	quotient := new(big.Rat).Quo(big.NewRat(int64(numerator), 1), den)
 	return USDCMicros(ratRoundToInt64(quotient)), nil
 }
+
+// MulDivFloor returns floor(a*b/c) for non-negative a and b and positive c,
+// computed in arbitrary precision so micros × atomics products cannot wrap.
+// It errors when the inputs are out of range or the result exceeds int64.
+func MulDivFloor(a, b, c int64) (int64, error) {
+	if a < 0 || b < 0 {
+		return 0, fmt.Errorf("mul-div operands must be non-negative")
+	}
+	if c <= 0 {
+		return 0, fmt.Errorf("mul-div divisor must be positive")
+	}
+	product := new(big.Int).Mul(big.NewInt(a), big.NewInt(b))
+	product.Quo(product, big.NewInt(c))
+	if !product.IsInt64() {
+		return 0, fmt.Errorf("mul-div result overflows int64")
+	}
+	return product.Int64(), nil
+}

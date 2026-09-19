@@ -215,9 +215,9 @@ func (h *HomeService) viewerGroupPositions(ctx context.Context, userID string, j
 			withdrawn = positionRow.AmountWithdrawn
 		}
 
-		equityMicro := int64(0)
-		if totalSharesMicro > 0 && shareUnitsMicro > 0 {
-			equityMicro = (shareUnitsMicro * potNav) / totalSharesMicro
+		equityMicro, err := shareOfPotMicros(shareUnitsMicro, potNav, totalSharesMicro)
+		if err != nil {
+			return nil, err
 		}
 
 		rows = append(rows, viewerGroupPosition{
@@ -339,7 +339,11 @@ func (h *HomeService) buildViewerPnLSeries(ctx context.Context, positions []view
 			if !ok {
 				continue
 			}
-			equity += memberEquityAtSnapshot(pos.ShareUnitsMicro, snap)
+			snapEquity, err := memberEquityAtSnapshot(pos.ShareUnitsMicro, snap)
+			if err != nil {
+				return nil, err
+			}
+			equity += snapEquity
 		}
 		points = append(points, HomePnLSeriesPoint{
 			TS:        ts,
@@ -419,9 +423,13 @@ func (h *HomeService) buildRangedLeaderboard(ctx context.Context, joinedGroupIDs
 				continue
 			}
 
-			endEquity := int64(0)
-			if totalSharesMicro > 0 && position.ShareUnits > 0 {
-				endEquity = (position.ShareUnits * potNav) / totalSharesMicro
+			endEquity, err := shareOfPotMicros(position.ShareUnits, potNav, totalSharesMicro)
+			if err != nil {
+				return HomeLeaderboardSection{}, err
+			}
+			startEquity, err := memberEquityAtSnapshot(position.ShareUnits, startSnap)
+			if err != nil {
+				return HomeLeaderboardSection{}, err
 			}
 
 			person, ok := ranged[userID]
@@ -429,7 +437,7 @@ func (h *HomeService) buildRangedLeaderboard(ctx context.Context, joinedGroupIDs
 				person = &rangedPerson{userID: userID}
 				ranged[userID] = person
 			}
-			person.startEquity += memberEquityAtSnapshot(position.ShareUnits, startSnap)
+			person.startEquity += startEquity
 			person.endEquity += endEquity
 			person.endNetUsdcIn += netIn
 		}
@@ -597,11 +605,21 @@ func leaderboardRangeStart(r HomeLeaderboardRange, now time.Time) (time.Time, er
 	}
 }
 
-func memberEquityAtSnapshot(shareUnitsMicro int64, snap postgres.NavSnapshotRow) int64 {
-	if shareUnitsMicro <= 0 || snap.TotalShares <= 0 {
-		return 0
+func memberEquityAtSnapshot(shareUnitsMicro int64, snap postgres.NavSnapshotRow) (int64, error) {
+	return shareOfPotMicros(shareUnitsMicro, snap.PotNavMicros, snap.TotalShares)
+}
+
+// shareOfPotMicros is floor(shares × pot / totalShares) without int64 wraparound:
+// share micros × pot micros overflows int64 once a pot passes roughly $3,000.
+func shareOfPotMicros(shareUnitsMicro, potNavMicros, totalSharesMicro int64) (int64, error) {
+	if shareUnitsMicro <= 0 || totalSharesMicro <= 0 || potNavMicros <= 0 {
+		return 0, nil
 	}
-	return (shareUnitsMicro * snap.PotNavMicros) / snap.TotalShares
+	equity, err := domain.MulDivFloor(shareUnitsMicro, potNavMicros, totalSharesMicro)
+	if err != nil {
+		return 0, fmt.Errorf("member share of pot: %w", err)
+	}
+	return equity, nil
 }
 
 func latestSnapshotAtOrBefore(snapshots []postgres.NavSnapshotRow, at time.Time) (postgres.NavSnapshotRow, bool) {
