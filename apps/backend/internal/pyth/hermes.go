@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	defaultHermesBaseURL = "https://hermes.pyth.network"
+	// Post–Pyth Core upgrade Hermes host (drop-in for hermes.pyth.network).
+	defaultHermesBaseURL = "https://pyth.dourolabs.app/hermes"
 	defaultTimeout       = 15 * time.Second
 )
 
@@ -27,18 +28,24 @@ type HermesClient struct {
 
 // NewHermesClient returns a production Hermes client authenticated with a Pyth API key.
 func NewHermesClient(apiKey string) *HermesClient {
-	return &HermesClient{
-		baseURL: defaultHermesBaseURL,
-		httpClient: &http.Client{
-			Timeout: defaultTimeout,
-		},
-		apiKey:     strings.TrimSpace(apiKey),
-		chartCache: NewChartSeriesCache(DefaultChartSeriesCacheTTL),
-	}
+	return NewHermesClientWithBaseURL(defaultHermesBaseURL, apiKey)
+}
+
+// NewHermesClientWithBaseURL returns a Hermes client using an explicit API host.
+func NewHermesClientWithBaseURL(baseURL, apiKey string) *HermesClient {
+	return newHermesClient(baseURL, nil, apiKey)
 }
 
 // NewHermesClientWithHTTP is used in tests to inject an httptest server transport.
 func NewHermesClientWithHTTP(baseURL string, httpClient *http.Client, apiKey string) *HermesClient {
+	return newHermesClient(baseURL, httpClient, apiKey)
+}
+
+func newHermesClient(baseURL string, httpClient *http.Client, apiKey string) *HermesClient {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		baseURL = defaultHermesBaseURL
+	}
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: defaultTimeout}
 	}
@@ -161,6 +168,9 @@ func (c *HermesClient) fetchPriceFeedBySymbol(ctx context.Context, symbol string
 	if err != nil {
 		return priceFeedResponse{}, err
 	}
+	if err := c.setHermesAuth(req); err != nil {
+		return priceFeedResponse{}, err
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -176,7 +186,7 @@ func (c *HermesClient) fetchPriceFeedBySymbol(ctx context.Context, symbol string
 		return priceFeedResponse{}, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		lookupErr := fmt.Errorf("pyth feed lookup %s: status %d", symbol, resp.StatusCode)
+		lookupErr := hermesRequestError(fmt.Sprintf("pyth feed lookup %s", symbol), resp.StatusCode, body)
 		logFeedLookup(symbol, "", lookupErr)
 		return priceFeedResponse{}, lookupErr
 	}
@@ -220,7 +230,7 @@ func (c *HermesClient) fetchLatestPrice(ctx context.Context, feedID string) (par
 		return parsedPriceUpdate{}, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		priceErr := fmt.Errorf("pyth latest price: status %d", resp.StatusCode)
+		priceErr := hermesRequestError("pyth latest price", resp.StatusCode, body)
 		logLatestPrice(feedID, priceErr)
 		return parsedPriceUpdate{}, priceErr
 	}
@@ -295,4 +305,19 @@ func scaleInt64(value int64, shift int64) (int64, error) {
 // isFrozenEquityMark reports whether Hermes is serving a stale equity mark.
 func isFrozenEquityMark(publishTime, prevPublishTime int64) bool {
 	return publishTime > 0 && prevPublishTime > 0 && publishTime == prevPublishTime
+}
+
+func hermesRequestError(prefix string, status int, body []byte) error {
+	detail := strings.TrimSpace(string(body))
+	if detail == "" {
+		return fmt.Errorf("%s: status %d", prefix, status)
+	}
+	const maxDetailLen = 240
+	if len(detail) > maxDetailLen {
+		detail = detail[:maxDetailLen]
+	}
+	if status == http.StatusForbidden && strings.Contains(strings.ToLower(detail), "not entitled") {
+		return fmt.Errorf("%s: status %d: %s (accept equity feed grants in Pyth Terminal)", prefix, status, detail)
+	}
+	return fmt.Errorf("%s: status %d: %s", prefix, status, detail)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -111,5 +112,67 @@ func TestIsFrozenEquityMark_detectsUnchangedPublishTime(t *testing.T) {
 	}
 	if isFrozenEquityMark(1714746101, 1714746100) {
 		t.Fatal("expected live mark")
+	}
+}
+
+func TestNewHermesClient_defaultBaseURL_usesUpgradedHost(t *testing.T) {
+	client := NewHermesClient("test-pyth-key")
+	if client.baseURL != defaultHermesBaseURL {
+		t.Fatalf("baseURL = %q, want %q", client.baseURL, defaultHermesBaseURL)
+	}
+}
+
+func TestHermesClient_fetchLatestPrice_notEntitled403_includesHermesBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/updates/price/latest" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-pyth-key" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		http.Error(w, "Not entitled: feed feed-aapl (no grant accepted)", http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	client := NewHermesClientWithHTTP(server.URL, server.Client(), "test-pyth-key")
+	_, err := client.fetchLatestPrice(context.Background(), "feed-aapl")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "status 403") {
+		t.Fatalf("error = %q, want status 403", msg)
+	}
+	if !strings.Contains(msg, "Not entitled") {
+		t.Fatalf("error = %q, want Hermes body", msg)
+	}
+	if !strings.Contains(msg, "Pyth Terminal") {
+		t.Fatalf("error = %q, want entitlement hint", msg)
+	}
+}
+
+func TestHermesClient_fetchPriceFeedBySymbol_sendsBearerAuth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/price_feeds" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-pyth-key" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"id":"feed-aapl","market_hours":{"is_open":true}}]`))
+	}))
+	defer server.Close()
+
+	client := NewHermesClientWithHTTP(server.URL, server.Client(), "test-pyth-key")
+	feed, err := client.fetchPriceFeedBySymbol(context.Background(), "AAPLx")
+	if err != nil {
+		t.Fatalf("fetchPriceFeedBySymbol: %v", err)
+	}
+	if feed.ID != "feed-aapl" {
+		t.Fatalf("feed ID = %q", feed.ID)
 	}
 }
