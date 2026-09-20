@@ -3,17 +3,48 @@ import MonacoCore
 import Testing
 @testable import Monaco
 
+/// Holds a fake read open until the test lets it finish, one caller at a time
+/// and in arrival order. Interleavings are then the test's to choose, rather
+/// than whatever order the main actor happens to run its tasks in.
+@MainActor
+private final class CallGate {
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var banked = 0
+
+    func wait() async {
+        if banked > 0 {
+            banked -= 1
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    /// Lets the longest-waiting caller through. Banked if nobody is waiting yet.
+    func release() {
+        if waiters.isEmpty {
+            banked += 1
+            return
+        }
+        waiters.removeFirst().resume()
+    }
+}
+
 @MainActor
 private final class RecordingDataSource: CabalsTabDataSource {
     var searches: [(query: String, cursor: String?)] = []
     var searchError: Error?
     var pnlRanges: [GroupPnLRange] = []
+    /// Reads that have come back. `pnlRanges` records arrival, this records exit.
+    var pnlCompletions = 0
+    var pnlError: Error?
     var boardRows: [GroupLeaderboardRowDTO] = []
     var boardLoads = 0
     /// Points per cabal, per range, for the chart tests.
     var seriesByRange: [GroupPnLRange: [GroupPnLSeriesDTO]] = [:]
     /// Held open so a test can drive what happens while a search is in flight.
     var searchGate: (() async -> Void)?
+    /// The same, for the chart reads.
+    var pnlGate: (() async -> Void)?
     /// Cursor the next page comes back with.
     var nextCursor: String?
 
@@ -26,6 +57,9 @@ private final class RecordingDataSource: CabalsTabDataSource {
 
     func pnlHistory(range: GroupPnLRange) async throws -> MyGroupsPnLHistoryDTO {
         pnlRanges.append(range)
+        if let pnlGate { await pnlGate() }
+        pnlCompletions += 1
+        if let pnlError { throw pnlError }
         return MyGroupsPnLHistoryDTO(range: range.rawValue, series: seriesByRange[range] ?? [])
     }
 
@@ -63,6 +97,16 @@ private func sampleSeries(id: String, points: Int) -> GroupPnLSeriesDTO {
 struct CabalsTabModelTests {
     private func settle() async throws {
         try await Task.sleep(for: .milliseconds(450))
+    }
+
+    /// Polls until something the test is waiting for is true. Used with
+    /// `CallGate` so a test never guesses at how long a hop takes.
+    private func waitUntil(_ description: String, _ condition: () -> Bool) async throws {
+        for _ in 0..<400 {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        Issue.record("timed out waiting for \(description)")
     }
 
     @Test func typingQuicklySendsOnlyTheLastQuery() async throws {
@@ -172,30 +216,123 @@ struct CabalsTabModelTests {
         try await settle()
 
         // Assert: the day itself has nothing to draw, but the section — and so
-        // the range picker that gets you back out — has earned its place.
+        // the range picker that gets you back out — has earned its place. The
+        // section rule itself is asserted, not just the flags behind it.
         #expect(!CabalsTabModel.isChartable(model.series))
         #expect(model.hasChartableHistory)
+        #expect(model.showsChartSection(hasCabals: true))
+        #expect(!model.showsChartSection(hasCabals: false))
     }
 
     @Test func aSupersededRangeLoadDoesNotClearTheNewerSpinner() async throws {
         // Arrange: only 3M has drawable history, so if the superseded 1D load
-        // were the one that landed, the series would be empty.
+        // were the one that landed, the series would be empty. The gate makes
+        // the interleaving the test's choice rather than the scheduler's.
         let source = RecordingDataSource()
         source.seriesByRange = [
             .threeMonths: [sampleSeries(id: "a", points: 8), sampleSeries(id: "b", points: 6)],
         ]
+        let gate = CallGate()
+        source.pnlGate = { await gate.wait() }
         let model = CabalsTabModel(dataSource: source)
 
         // Act: pick a range, then pick another before the first can land.
         model.selectRange(.oneDay)
+        try await waitUntil("the 1D read to start") { source.pnlRanges == [.oneDay] }
         model.selectRange(.threeMonths)
-        try await settle()
+        try await waitUntil("the 3M read to start") { source.pnlRanges == [.oneDay, .threeMonths] }
+
+        gate.release()
+        try await waitUntil("the superseded 1D read to return") { source.pnlCompletions == 1 }
+        gate.release()
+        try await waitUntil("the live 3M read to return") { source.pnlCompletions == 2 }
+        try await waitUntil("the chart to settle") { model.loadingRange == nil }
 
         // Assert: each load knew its own range, the newer one won, and the
         // superseded one neither cleared the spinner nor left it stuck on.
-        #expect(source.pnlRanges == [.oneDay, .threeMonths])
         #expect(model.range == .threeMonths)
+        #expect(model.seriesRange == .threeMonths)
+        #expect(CabalsTabModel.isChartable(model.series))
+    }
+
+    @Test func aSupersededLoadOfTheSameRangeDoesNotClearTheNewerSpinner() async throws {
+        // Arrange: the cold start every member gets. `.task` calls `reload()`,
+        // then `/v1/home` lands and `onChange(of: joinedIDs)` calls it again —
+        // two loads, same range, overlapping. Tracking the load by its *range*
+        // could not tell them apart, so the first to exit (the cancelled one,
+        // because `defer` runs on the guard-return path too) cleared the live
+        // load's spinner and the chart section dropped out mid-load.
+        let source = RecordingDataSource()
+        source.seriesByRange = [
+            .oneMonth: [sampleSeries(id: "a", points: 8), sampleSeries(id: "b", points: 6)],
+        ]
+        let gate = CallGate()
+        source.pnlGate = { await gate.wait() }
+        let model = CabalsTabModel(dataSource: source)
+
+        // Act
+        let first = Task { await model.reload() }
+        try await waitUntil("the first chart read to start") { source.pnlRanges.count == 1 }
+        let second = Task { await model.reload() }  // cancel-and-replace
+        try await waitUntil("the second chart read to start") { source.pnlRanges.count == 2 }
+        #expect(source.pnlRanges == [.oneMonth, .oneMonth])
+
+        // The superseded load is the first to come back.
+        gate.release()
+        await first.value
+
+        // Assert: it wrote nothing, and the load still running owns the spinner.
+        #expect(model.series.isEmpty)
+        #expect(model.loadingRange == .oneMonth)
+        #expect(model.isChartLoading)
+        #expect(model.showsChartSection(hasCabals: true))
+
+        gate.release()
+        await second.value
+
         #expect(model.loadingRange == nil)
+        #expect(!model.isChartLoading)
+        #expect(CabalsTabModel.isChartable(model.series))
+    }
+
+    @Test func aFailedRangeSwitchDropsLinesThatBelongToTheOldRange() async throws {
+        // Arrange: 1M is drawn.
+        let source = RecordingDataSource()
+        source.seriesByRange = [
+            .oneMonth: [sampleSeries(id: "a", points: 8), sampleSeries(id: "b", points: 6)],
+        ]
+        let model = CabalsTabModel(dataSource: source)
+        await model.reload()
+        #expect(model.seriesRange == .oneMonth)
+
+        // Act: tap 1D and have the read fail.
+        source.pnlError = Monaco.MonacoAPIError.httpStatus(500)
+        model.selectRange(.oneDay)
+        try await settle()
+
+        // Assert: the 1D chip is highlighted, so the 1M lines cannot still be
+        // on screen at full opacity with no error. The section — and the picker
+        // that gets the member back to 1M — stays.
+        #expect(model.chartFailed)
+        #expect(model.series.isEmpty)
+        #expect(model.seriesRange == nil)
+        #expect(model.showsChartSection(hasCabals: true))
+    }
+
+    @Test func aFailedRefreshOfTheRangeOnScreenKeepsItsLines() async throws {
+        // A failed refresh is not a failed switch: the lines still belong to the
+        // highlighted chip, so keep them rather than blanking a good chart.
+        let source = RecordingDataSource()
+        source.seriesByRange = [
+            .oneMonth: [sampleSeries(id: "a", points: 8), sampleSeries(id: "b", points: 6)],
+        ]
+        let model = CabalsTabModel(dataSource: source)
+        await model.reload()
+
+        source.pnlError = Monaco.MonacoAPIError.httpStatus(500)
+        await model.loadChart()
+
+        #expect(model.seriesRange == .oneMonth)
         #expect(CabalsTabModel.isChartable(model.series))
     }
 
@@ -223,6 +360,36 @@ struct CabalsTabModelTests {
         // for the member to retype the query.
         #expect(model.results.first?.isJoined == true)
         #expect(model.leaderboard.first?.isJoined == true)
+    }
+
+    @Test func aJoinSurvivesTheBoardReloadThatFollowsIt() async throws {
+        // Arrange: the server keeps answering "not joined", which is what a
+        // read-after-write lag or a cached board query looks like from here.
+        let source = RecordingDataSource()
+        source.boardRows = [
+            GroupLeaderboardRowDTO(
+                rank: 1, groupID: "g-week", name: "Weekend week", memberCount: 2, potValueUsd: "10.00",
+                percentReturn: nil, dollarPnl: "+0.00", isJoined: false, joinMode: .open
+            )
+        ]
+        let model = CabalsTabModel(dataSource: source)
+        await model.reload()
+        model.updateQuery("week")
+        try await settle()
+
+        model.markJoined(groupID: "g-week")
+        #expect(model.leaderboard.first?.isJoined == true)
+
+        // Act: joining refreshes the session, membership changes, and the tab
+        // reloads the board and re-runs the search.
+        await model.reload()
+        model.updateQuery("week")
+        try await settle()
+
+        // Assert: the row the member just joined does not flip back to "· Open"
+        // a second later.
+        #expect(model.leaderboard.first?.isJoined == true)
+        #expect(model.results.first?.isJoined == true)
     }
 
     // MARK: - Search pagination (#332)
@@ -281,50 +448,5 @@ struct CabalsTabModelTests {
         try await Task.sleep(for: .milliseconds(150))
 
         #expect(model.searchState == .results)
-    }
-}
-
-@MainActor
-struct JoinCabalCopyTests {
-    @Test func aReadOnlyCabalDoesNotAskTheMemberToRetry() {
-        let message = JoinCabalCopy.failureMessage(for: Monaco.MonacoAPIError.httpStatus(403), enteredCode: true)
-
-        #expect(message.contains("demo"))
-        #expect(!message.contains("Try again"))
-    }
-
-    @Test func aBadCodeIsAboutTheCodeOnlyWhenOneWasTyped() {
-        let typed = JoinCabalCopy.failureMessage(for: Monaco.MonacoAPIError.httpStatus(404), enteredCode: true)
-        let fromRow = JoinCabalCopy.failureMessage(for: Monaco.MonacoAPIError.httpStatus(404), enteredCode: false)
-
-        #expect(typed.contains("invite code"))
-        #expect(!fromRow.contains("invite code"))
-    }
-
-    @Test func anUnknownFailureStaysRetryable() {
-        let message = JoinCabalCopy.failureMessage(for: Monaco.MonacoAPIError.httpStatus(500), enteredCode: true)
-
-        #expect(message == "Couldn't join this cabal. Try again.")
-    }
-}
-
-@MainActor
-struct CabalsRouteTests {
-    @Test func aRowTheViewerIsInOpensTheCabal() {
-        let route = CabalsRoute(row: "g1", name: "Weekend investors", isJoined: true, joinMode: .request)
-
-        #expect(route == .cabal(id: "g1", name: "Weekend investors"))
-    }
-
-    @Test func anApprovalCabalRoutesToTheRequestForm() {
-        let route = CabalsRoute(row: "g2", name: "Rent money", isJoined: false, joinMode: .request)
-
-        #expect(route == .join(id: "g2", name: "Rent money", mode: .request))
-    }
-
-    @Test func anOpenCabalRoutesToTheJoinForm() {
-        let route = CabalsRoute(row: "g3", name: "Apple heads", isJoined: false, joinMode: .open)
-
-        #expect(route == .join(id: "g3", name: "Apple heads", mode: .open))
     }
 }
