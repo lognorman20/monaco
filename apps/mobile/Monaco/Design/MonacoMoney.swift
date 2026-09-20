@@ -5,12 +5,30 @@ import SwiftUI
 enum MoneyStyle {
     case hero, large, row, caption
 
-    var font: Font {
+    /// Design size at the default text size.
+    var baseSize: CGFloat {
         switch self {
-        case .hero: return MonacoTheme.Typo.moneyHero
-        case .large: return MonacoTheme.Typo.moneyLarge
-        case .row: return MonacoTheme.Typo.moneyRow
-        case .caption: return MonacoTheme.Typo.moneyCaption
+        case .hero: return 44
+        case .large: return 28
+        case .row: return 17
+        case .caption: return 13
+        }
+    }
+
+    /// The text style the figure scales with.
+    var textStyle: Font.TextStyle {
+        switch self {
+        case .hero: return .largeTitle
+        case .large: return .title
+        case .row: return .body
+        case .caption: return .footnote
+        }
+    }
+
+    var weight: Font.Weight {
+        switch self {
+        case .hero, .large, .row: return .semibold
+        case .caption: return .medium
         }
     }
 
@@ -21,6 +39,39 @@ enum MoneyStyle {
         case .large: return 0.6
         case .row, .caption: return 0.8
         }
+    }
+}
+
+/// Scales a money figure inside the view tree, so a `.dynamicTypeSize` cap applies to it and a
+/// text-size change invalidates the view. `MonacoTheme.Typo.money*` cannot do either: it asks
+/// `UIFontMetrics` for a size once, outside the environment, and returns a fixed-size font.
+struct MoneyFont: ViewModifier {
+    let style: MoneyStyle
+    var weightOverride: Font.Weight?
+
+    @ScaledMetric(relativeTo: .largeTitle) private var hero: CGFloat = 44
+    @ScaledMetric(relativeTo: .title) private var large: CGFloat = 28
+    @ScaledMetric(relativeTo: .body) private var row: CGFloat = 17
+    @ScaledMetric(relativeTo: .footnote) private var caption: CGFloat = 13
+
+    private var size: CGFloat {
+        switch style {
+        case .hero: return hero
+        case .large: return large
+        case .row: return row
+        case .caption: return caption
+        }
+    }
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size, weight: weightOverride ?? style.weight).monospacedDigit())
+    }
+}
+
+extension View {
+    /// The one way to set a money figure's font.
+    func moneyFont(_ style: MoneyStyle, weight: Font.Weight? = nil) -> some View {
+        modifier(MoneyFont(style: style, weightOverride: weight))
     }
 }
 
@@ -144,8 +195,8 @@ struct PnLBadge: View {
 
     var body: some View {
         Text(label)
-            .font(style.font.weight(.semibold))
-            .foregroundStyle(onInk ? tone.inkCardColor : tone.color)
+            .moneyFont(style, weight: .semibold)
+            .foregroundStyle(onInk ? tone.inkCardColor : tone.washColor)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
             .padding(.horizontal, style == .caption ? 9 : 12)
@@ -169,7 +220,7 @@ private struct MoneyFigure: View {
 
     var body: some View {
         Text(text)
-            .font(style.font)
+            .moneyFont(style)
             .foregroundStyle(color)
             .lineLimit(1)
             .minimumScaleFactor(style.minimumScaleFactor)
@@ -220,11 +271,20 @@ enum PnLTone {
         }
     }
 
+    /// Text drawn on `wash`. Deeper than `color`, which is derived for bare paper.
+    var washColor: Color {
+        switch self {
+        case .profit: return MonacoTheme.profitOnWash
+        case .loss: return MonacoTheme.lossOnWash
+        case .flat: return MonacoTheme.muted
+        }
+    }
+
     /// Saturated pair for figures drawn on a deep ink hero card.
     var inkCardColor: Color {
         switch self {
-        case .profit: return MonacoTheme.profitVivid
-        case .loss: return MonacoTheme.lossVivid
+        case .profit: return MonacoTheme.profitOnHero
+        case .loss: return MonacoTheme.lossOnHero
         case .flat: return MonacoTheme.onHeroMuted
         }
     }
