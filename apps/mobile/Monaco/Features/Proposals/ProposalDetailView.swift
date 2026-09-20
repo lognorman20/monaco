@@ -23,6 +23,9 @@ struct ProposalDetailView: View {
     @State private var isPosting = false
     /// The comment this member just posted, so the thread can scroll to it.
     @State private var postedCommentId: String?
+    /// The comment to scroll to once the composer has dropped focus. Held back so the scroll is
+    /// not issued into a layout the keyboard is still about to resize.
+    @State private var pendingScrollCommentId: String?
     @State private var toast: MonacoToast?
 
     private let votes = ProposalVoteLedger.shared
@@ -99,7 +102,11 @@ struct ProposalDetailView: View {
                     replyTarget: replyTarget,
                     isPosting: isPosting,
                     onCancelReply: { replyTarget = nil },
-                    onPost: { body in await postComment(body) }
+                    onPost: { body in await postComment(body) },
+                    onDidStandDown: {
+                        postedCommentId = pendingScrollCommentId
+                        pendingScrollCommentId = nil
+                    }
                 )
             }
         }
@@ -308,7 +315,11 @@ struct ProposalDetailView: View {
                 isSuccess: true
             )
             setComments(comments + [posted])
-            postedCommentId = posted.id
+            // Not the scroll target yet. The composer still has focus at this point, so the
+            // keyboard — and with it the bottom safe-area inset the thread is laid out against —
+            // is about to change. Scrolling now aims at a layout that no longer exists a frame
+            // later. `onDidStandDown` publishes it once the composer has let go.
+            pendingScrollCommentId = posted.id
             Task {
                 await loadComments()
                 await loadProposal()
