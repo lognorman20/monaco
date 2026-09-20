@@ -452,10 +452,10 @@ final class MonacoAPIClient {
             return try await call(core)
         } catch let error as MonacoCore.MonacoAPIError {
             switch error {
-            case .httpStatus(let status): throw MonacoAPIError.httpStatus(status)
+            case .httpStatus(let status, _): throw MonacoAPIError.httpStatus(status)
             case .invalidResponse: throw MonacoAPIError.invalidResponse
             case .leaveBlocked: throw MonacoAPIError.invalidResponse
-            case .rejected(let status, let message): throw MonacoAPIError.apiError(status: status, message: message)
+            case .rejected(let status, let message, _): throw MonacoAPIError.apiError(status: status, message: message)
             case .rateLimited: throw MonacoAPIError.httpStatus(429)
             }
         }

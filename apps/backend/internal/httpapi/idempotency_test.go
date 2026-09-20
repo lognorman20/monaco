@@ -409,6 +409,46 @@ func TestIdempotency_onlyCoversUserMoneyPosts(t *testing.T) {
 	}
 }
 
+// A replay never reaches the mux, so it must still carry a request id and be counted under
+// its route pattern when the layer sits inside Metrics, as cmd/api wires it.
+func TestIdempotency_replayKeepsRequestIDAndIsMetered(t *testing.T) {
+	h := newIdempotencyHarness(t)
+	token := h.signIn("idem-metrics")
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/idemmetrics/{id}/fund", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	})
+	idempotency := NewIdempotency(postgres.NewStore(h.db), h.privy).WithRoutePattern(func(r *http.Request) string {
+		_, pattern := mux.Handler(r)
+		return pattern
+	})
+	h.handler = Chain(mux, RequestID(), Recover(), Metrics(), idempotency.Middleware())
+
+	first := h.post("/v1/idemmetrics/cabal-1/fund", token, testIdempotencyKey, `{"amount":1}`)
+	replay := h.post("/v1/idemmetrics/cabal-1/fund", token, testIdempotencyKey, `{"amount":1}`)
+	requireStatus(t, first, http.StatusCreated, "first fund")
+	requireStatus(t, replay, http.StatusCreated, "replayed fund")
+	if replay.Header().Get(IdempotencyStatusHeader) != idempotencyStatusReplayed {
+		t.Fatalf("second response was not a replay")
+	}
+	if replay.Header().Get(RequestIDHeader) == "" || replay.Header().Get(RequestIDHeader) == first.Header().Get(RequestIDHeader) {
+		t.Fatalf("replay request id = %q, want its own (first was %q)", replay.Header().Get(RequestIDHeader), first.Header().Get(RequestIDHeader))
+	}
+
+	mismatch := h.post("/v1/idemmetrics/cabal-1/fund", token, testIdempotencyKey, `{"amount":2}`)
+	requireStatus(t, mismatch, http.StatusUnprocessableEntity, "mismatched body")
+
+	body := scrapeMetrics(t)
+	for _, want := range []string{
+		`monaco_http_requests_total{method="POST",route="POST /v1/idemmetrics/{id}/fund",status="201"} 2`,
+		`monaco_http_requests_total{method="POST",route="POST /v1/idemmetrics/{id}/fund",status="422"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %s in:\n%s", want, grepLines(body, "idemmetrics"))
+		}
+	}
+}
+
 func TestIdempotency_storeFailureFailsClosed(t *testing.T) {
 	h := newIdempotencyHarness(t)
 	token := h.signIn("idem-dbdown")

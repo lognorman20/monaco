@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 const avatarsBucket = "avatars"
@@ -24,7 +26,7 @@ func NewSupabaseClient(baseURL, serviceRoleKey string) *SupabaseClient {
 	return &SupabaseClient{
 		baseURL:    strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		serviceKey: strings.TrimSpace(serviceRoleKey),
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: telemetry.InstrumentClient(telemetry.UpstreamSupabase, &http.Client{Timeout: 30 * time.Second}),
 	}
 }
 

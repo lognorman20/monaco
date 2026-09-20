@@ -3,11 +3,13 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 // DefaultRedeemRecoveryInterval is how often abandoned redeem jobs are looked for.
@@ -69,6 +71,7 @@ func RunRedeemRecoveryPoller(ctx context.Context, poller *RedeemRecoveryPoller, 
 	}
 
 	slog.Info("redeem recovery poller started", "interval", interval, "stale_after", poller.staleAfter)
+	telemetry.RegisterPoller(PollerRedeemRecovery, interval)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -80,7 +83,10 @@ func RunRedeemRecoveryPoller(ctx context.Context, poller *RedeemRecoveryPoller, 
 			return
 		case <-ticker.C:
 			tickCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			poller.tick(tickCtx)
+			telemetry.GuardTick(ctx, PollerRedeemRecovery, func() error {
+				poller.tick(tickCtx)
+				return nil
+			})
 			cancel()
 		}
 	}
@@ -125,14 +131,31 @@ func (p *RedeemRecoveryPoller) tick(ctx context.Context) {
 			// Nothing automatic is safe here; keep saying so until a person resolves it.
 			p.recordAttempt(job.ID, attempt, now)
 			slog.Error("redeem job wedged in paying: payout unverified, share units burnt, needs manual review", attrs...)
+			telemetry.MoneyEvent(telemetry.EventRedeemRescue, "wedged")
+			telemetry.Alert(ctx, telemetry.AlertEvent{
+				Kind:     "redeem_wedged",
+				Key:      "redeem_wedged:" + job.ID,
+				Severity: telemetry.SeverityCritical,
+				Title:    "Cash out wedged: payout unverified, needs manual review",
+				Detail:   "Share units are burnt but the USDC payout could not be verified on chain. Nothing automatic is safe.",
+				Fields: map[string]string{
+					"job_id":     job.ID,
+					"group_id":   job.GroupID,
+					"user_id":    job.UserID,
+					"slice_usdc": fmt.Sprint(job.SliceUsdc),
+					"stale_for":  now.Sub(job.UpdatedAt).Round(time.Second).String(),
+				},
+			})
 		case err != nil:
 			p.recordAttempt(job.ID, attempt, now)
 			slog.Error("redeem recovery failed", append(attrs, "err", err)...)
+			telemetry.MoneyEvent(telemetry.EventRedeemRescue, telemetry.OutcomeError)
 		case outcome == app.RedeemRecoveryBusy:
 			slog.Info("redeem recovery skipped", append(attrs, "reason", "member redeem lock held")...)
 		default:
 			p.clearAttempts(job.ID)
 			slog.Warn("redeem recovery resolved job", append(attrs, "outcome", string(outcome))...)
+			telemetry.MoneyEvent(telemetry.EventRedeemRescue, string(outcome))
 		}
 	}
 }

@@ -76,6 +76,11 @@ final class IdempotentSubmissionTests: XCTestCase {
 
         XCTAssertEqual(recorder.idempotencyKeys.count, 2)
         XCTAssertEqual(recorder.idempotencyKeys[0], recorder.idempotencyKeys[1])
+        // The request id names one attempt, the idempotency key names the submission.
+        let requestIDs = recorder.requests.map { $0.value(forHTTPHeaderField: monacoRequestIDHeader) }
+        XCTAssertNotNil(requestIDs[0])
+        XCTAssertNotNil(requestIDs[1])
+        XCTAssertNotEqual(requestIDs[0], requestIDs[1])
     }
 
     func testRetryAfterServerErrorReusesKey() async throws {
@@ -135,6 +140,30 @@ final class IdempotentSubmissionTests: XCTestCase {
         XCTAssertEqual(recorder.requests.count, 2)
         XCTAssertEqual(recorder.requests[1].value(forHTTPHeaderField: "Authorization"), "Bearer fresh-token")
         XCTAssertEqual(recorder.idempotencyKeys[0], recorder.idempotencyKeys[1])
+    }
+
+    /// The app target's client calls the transport directly; it must get both headers too.
+    func testTransportDataForSubmissionSendsRequestIDAndReusedKey() async throws {
+        let recorder = RequestRecorder()
+        MockURLProtocol.requestHandler = { request in
+            recorder.record(request)
+            let status = recorder.requests.count == 1 ? 503 : 200
+            return (Self.response(for: request, status: status), Data())
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let transport = MonacoHTTPTransport(session: URLSession(configuration: configuration))
+        let submission = IdempotentSubmission()
+        let request = Self.request(path: "/v1/transactions/t1/retry", body: "")
+
+        _ = try await transport.data(for: request, submission: submission)
+        _ = try await transport.data(for: request, submission: submission)
+
+        XCTAssertNotNil(recorder.idempotencyKeys[0])
+        XCTAssertEqual(recorder.idempotencyKeys[0], recorder.idempotencyKeys[1])
+        let requestIDs = recorder.requests.map { $0.value(forHTTPHeaderField: monacoRequestIDHeader) }
+        XCTAssertNotNil(requestIDs[0])
+        XCTAssertNotEqual(requestIDs[0], requestIDs[1])
     }
 
     // MARK: - New submission

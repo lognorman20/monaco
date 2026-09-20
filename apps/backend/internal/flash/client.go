@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 const (
@@ -46,7 +48,7 @@ func NewHTTPClientWithBaseURL(baseURL, apiKey string, httpClient *http.Client) *
 	return &HTTPClient{
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		apiKey:     strings.TrimSpace(apiKey),
-		httpClient: wrapHTTPClientForTests(httpClient),
+		httpClient: wrapHTTPClientForTests(telemetry.InstrumentClient(telemetry.UpstreamFlash, httpClient)),
 	}
 }
 

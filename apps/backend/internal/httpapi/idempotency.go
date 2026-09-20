@@ -73,6 +73,8 @@ type Idempotency struct {
 	store    IdempotencyStore
 	sessions SessionVerifier
 	now      func() time.Time
+	// routePattern resolves the mux pattern for a request. Optional; see WithRoutePattern.
+	routePattern func(*http.Request) string
 }
 
 // NewIdempotency wires the idempotency layer.
@@ -83,6 +85,14 @@ func NewIdempotency(store IdempotencyStore, sessions SessionVerifier) *Idempoten
 // WithClock replaces the time source. Intended for tests.
 func (i *Idempotency) WithClock(now func() time.Time) *Idempotency {
 	i.now = now
+	return i
+}
+
+// WithRoutePattern lets answers produced here (replays, 409, 422) be labelled with their mux
+// route pattern. Metrics reads r.Pattern, which only the mux sets, and those answers never
+// reach the mux.
+func (i *Idempotency) WithRoutePattern(resolve func(*http.Request) string) *Idempotency {
+	i.routePattern = resolve
 	return i
 }
 
@@ -103,6 +113,9 @@ func (i *Idempotency) Middleware() Middleware {
 			if !present {
 				next.ServeHTTP(w, r)
 				return
+			}
+			if i.routePattern != nil && r.Pattern == "" {
+				r.Pattern = i.routePattern(r)
 			}
 			ctx := r.Context()
 			key := strings.TrimSpace(strings.Join(rawKey, ","))

@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -42,6 +44,13 @@ type SubmitAgentIntentResult struct {
 
 // SubmitAgentIntent authenticates the agent key and runs a treasury swap when valid.
 func (s *AgentIntentService) SubmitAgentIntent(ctx context.Context, in SubmitAgentIntentInput) (SubmitAgentIntentResult, error) {
+	result, err := s.submitAgentIntent(ctx, in)
+	telemetry.MoneyEvent(telemetry.EventAgentIntent, moneyOutcome(err))
+	logAgentIntentOutcome(ctx, in, result, err)
+	return result, err
+}
+
+func (s *AgentIntentService) submitAgentIntent(ctx context.Context, in SubmitAgentIntentInput) (SubmitAgentIntentResult, error) {
 	if in.GroupID == "" {
 		return SubmitAgentIntentResult{}, fmt.Errorf("group id is required")
 	}
@@ -126,15 +135,29 @@ func (s *AgentIntentService) SubmitAgentIntent(ctx context.Context, in SubmitAge
 		if errors.Is(execErr, ErrAgentIntentRejected) {
 			status = "rejected"
 		}
-		_ = s.store.UpdateAgentIntentStatus(context.Background(), accepted.ID, status, execErr.Error(), execResult.TransactionID)
+		s.recordIntentStatus(accepted.ID, status, execErr.Error(), execResult.TransactionID)
 		return SubmitAgentIntentResult{
 			IntentID:     accepted.ID,
 			Status:       status,
 			RejectReason: execErr.Error(),
 		}, execErr
 	}
-	_ = s.store.UpdateAgentIntentStatus(context.Background(), accepted.ID, "executed", "", execResult.TransactionID)
+	s.recordIntentStatus(accepted.ID, "executed", "", execResult.TransactionID)
 	return execResult, nil
+}
+
+// recordIntentStatus writes the intent's final status. It uses a fresh context because the
+// swap has already happened: a caller that hung up must not leave the audit row "accepted".
+// A failed write is logged loudly, since that row is the cabal's record of what its bot did.
+func (s *AgentIntentService) recordIntentStatus(intentID, status, reason, transactionID string) {
+	if err := s.store.UpdateAgentIntentStatus(context.Background(), intentID, status, reason, transactionID); err != nil {
+		slog.Error("agent intent status write failed",
+			"intent_id", intentID,
+			"status", status,
+			"transaction_id", transactionID,
+			"err", err,
+		)
+	}
 }
 
 func (s *AgentIntentService) executeIntent(ctx context.Context, accepted postgres.AgentIntentRow, in SubmitAgentIntentInput) (SubmitAgentIntentResult, error) {

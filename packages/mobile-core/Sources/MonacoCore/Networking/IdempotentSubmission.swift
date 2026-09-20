@@ -82,14 +82,28 @@ public final class IdempotentSubmission: @unchecked Sendable {
 }
 
 extension MonacoHTTPTransport {
-    /// Sends a money POST under `submission`'s idempotency key.
-    public func data(for request: URLRequest, submission: IdempotentSubmission) async throws -> (Data, URLResponse) {
+    /// Sends `request`, under `submission`'s idempotency key when one is given. The key is
+    /// per submission and survives retries; the `X-Request-Id` stays per attempt.
+    public func send(
+        _ request: URLRequest,
+        route: String? = nil,
+        submission: IdempotentSubmission?
+    ) async throws -> MonacoHTTPResponse {
+        guard let submission else {
+            return try await send(request, route: route)
+        }
         var request = request
         let key = submission.key(for: request)
         request.setValue(key, forHTTPHeaderField: IdempotentSubmission.keyHeader)
-        let (data, response) = try await data(for: request)
-        submission.record(response: response, forKey: key)
-        return (data, response)
+        let result = try await send(request, route: route)
+        submission.record(response: result.response, forKey: key)
+        return result
+    }
+
+    /// `data(for:)` for a money POST: same request id and telemetry, plus the idempotency key.
+    public func data(for request: URLRequest, submission: IdempotentSubmission) async throws -> (Data, URLResponse) {
+        let result = try await send(request, submission: submission)
+        return (result.data, result.response)
     }
 
     /// JSON bodies of money POSTs are encoded with sorted keys: a retry must produce the
