@@ -115,21 +115,27 @@ func TestMetricsEndpoint_withToken_requiresExactBearer(t *testing.T) {
 func TestMetricsEndpoint_withoutToken_servesLoopbackOnly(t *testing.T) {
 	handler := MetricsEndpoint("  ", telemetry.Handler())
 	cases := []struct {
-		remote string
-		want   int
+		remote    string
+		forwarded string
+		want      int
 	}{
-		{"127.0.0.1:4000", http.StatusOK},
-		{"[::1]:4000", http.StatusOK},
-		{"203.0.113.9:4000", http.StatusNotFound},
-		{"10.0.0.5:4000", http.StatusNotFound},
-		{"garbage", http.StatusNotFound},
+		{"127.0.0.1:4000", "", http.StatusOK},
+		{"[::1]:4000", "", http.StatusOK},
+		// A spoofed forwarding header must not make a remote caller look local.
+		{"203.0.113.9:4000", "127.0.0.1", http.StatusNotFound},
+		{"10.0.0.5:4000", "127.0.0.1", http.StatusNotFound},
+		{"garbage", "", http.StatusNotFound},
+		// A same-host reverse proxy makes every internet caller arrive from loopback; the
+		// forwarding header is what tells them apart from a local scraper.
+		{"127.0.0.1:4000", "203.0.113.9", http.StatusNotFound},
 	}
 	for _, tc := range cases {
-		t.Run(tc.remote, func(t *testing.T) {
+		t.Run(tc.remote+" via "+tc.forwarded, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 			req.RemoteAddr = tc.remote
-			// A spoofed forwarding header must not make a remote caller look local.
-			req.Header.Set("X-Forwarded-For", "127.0.0.1")
+			if tc.forwarded != "" {
+				req.Header.Set("X-Forwarded-For", tc.forwarded)
+			}
 			rec := httptest.NewRecorder()
 
 			handler.ServeHTTP(rec, req)

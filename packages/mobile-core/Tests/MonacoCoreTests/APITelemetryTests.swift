@@ -65,7 +65,7 @@ final class APITelemetryTests: XCTestCase {
         }
         let (client, events) = makeClient()
 
-        _ = try? await client.fundGroup(groupId: groupID, amount: 5_000_000)
+        _ = try? await client.fundGroup(groupId: groupID, amount: 5_000_000, submission: IdempotentSubmission())
 
         let event = try XCTUnwrap(events.values.first)
         XCTAssertEqual(events.values.count, 1)
@@ -203,7 +203,7 @@ final class APITelemetryTests: XCTestCase {
 
         _ = try? await client.searchGroups(query: queryValue, cursor: cursor)
         _ = try? await client.searchAssets(groupId: groupID, query: queryValue)
-        _ = try? await client.fundGroup(groupId: groupID, amount: 123_456_789)
+        _ = try? await client.fundGroup(groupId: groupID, amount: 123_456_789, submission: IdempotentSubmission())
 
         XCTAssertEqual(events.values.count, 3)
         for event in events.values {

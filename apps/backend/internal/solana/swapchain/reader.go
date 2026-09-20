@@ -26,18 +26,11 @@ type HTTPReader struct {
 	httpClient *http.Client
 }
 
-// NewHTTPReader returns a reader for rpcURL. A blank rpcURL uses the public endpoint of cluster.
-func NewHTTPReader(rpcURL, cluster string) *HTTPReader {
-	rpcURL = strings.TrimSpace(rpcURL)
-	if rpcURL == "" {
-		cluster = strings.TrimSpace(cluster)
-		if cluster == "" {
-			cluster = "mainnet-beta"
-		}
-		rpcURL = fmt.Sprintf("https://api.%s.solana.com", cluster)
-	}
+// NewHTTPReader returns a reader for endpoint. Callers pass config.SolanaRPCEndpoint() so every
+// Solana RPC client in the process talks to the same node.
+func NewHTTPReader(endpoint string) *HTTPReader {
 	return &HTTPReader{
-		endpoint:   rpcURL,
+		endpoint:   strings.TrimSpace(endpoint),
 		httpClient: telemetry.InstrumentClient(telemetry.UpstreamSolanaRPC, &http.Client{Timeout: 15 * time.Second}),
 	}
 }

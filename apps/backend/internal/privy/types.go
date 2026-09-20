@@ -42,3 +42,14 @@ type SweepRequest struct {
 type SweepResult struct {
 	TxSignature string
 }
+
+// PreparedSweep is a sweep transaction that is built and fee-payer signed but not yet
+// broadcast. The fee payer's signature is the transaction id, so TxSignature is known (and
+// can be persisted) before anything reaches the chain.
+type PreparedSweep struct {
+	Request              SweepRequest
+	WalletID             string
+	TransactionBase64    string
+	TxSignature          string
+	LastValidBlockHeight uint64 // 0 when the RPC did not report it
+}

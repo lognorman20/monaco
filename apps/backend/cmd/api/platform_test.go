@@ -149,7 +149,7 @@ func TestCheckRelayerBalance(t *testing.T) {
 }
 
 func TestHealthChecks_includePollersAndRelayerBalance_asNonCritical(t *testing.T) {
-	checks := healthChecks(nil, stubBalanceReader{}, "pubkey", nil)
+	checks := healthChecks(nil, stubBalanceReader{}, "pubkey", nil, fakeVerifier{})
 
 	byName := map[string]bool{}
 	for _, check := range checks {

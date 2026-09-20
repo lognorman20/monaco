@@ -39,6 +39,31 @@ func integrationWorkerApp(t *testing.T) *workerTestApp {
 	}
 }
 
+// markOtherTreasuriesSurplusChecked stamps every treasury outside groupIDs as just checked, so
+// rows other tests left in the shared database do not take this tick's reconcile slots.
+func markOtherTreasuriesSurplusChecked(t *testing.T, db *sql.DB, now time.Time, groupIDs ...string) {
+	t.Helper()
+	if groupIDs == nil {
+		groupIDs = []string{}
+	}
+	if _, err := db.ExecContext(context.Background(), `
+UPDATE treasuries SET surplus_checked_at = $1 WHERE NOT (group_id = ANY($2::uuid[]))`,
+		now.UTC(), groupIDs,
+	); err != nil {
+		t.Fatalf("mark other treasuries surplus checked: %v", err)
+	}
+}
+
+// sweepClient narrows the fake Privy client to the sweep poller's view of it.
+func sweepClient(t *testing.T, client privy.Client) privy.SweepClient {
+	t.Helper()
+	sweeps, ok := client.(privy.SweepClient)
+	if !ok {
+		t.Fatalf("privy client %T does not implement privy.SweepClient", client)
+	}
+	return sweeps
+}
+
 func seedPendingDepositWithToken(t *testing.T, testApp *workerTestApp) (postgres.DepositRow, string, string) {
 	t.Helper()
 	return seedPendingDeposit(t, testApp)
@@ -46,9 +71,16 @@ func seedPendingDepositWithToken(t *testing.T, testApp *workerTestApp) (postgres
 
 func seedPendingDeposit(t *testing.T, testApp *workerTestApp) (postgres.DepositRow, string, string) {
 	t.Helper()
+	return seedPendingDepositAs(t, testApp, "member")
+}
+
+// seedPendingDepositAs seeds a pending deposit for the member named label in a new group.
+// Distinct labels give distinct users and member wallets.
+func seedPendingDepositAs(t *testing.T, testApp *workerTestApp, label string) (postgres.DepositRow, string, string) {
+	t.Helper()
 	ctx := context.Background()
-	privyUserID := testApp.ISO.UniquePrivyID("member")
-	token := privy.AccessToken(testApp.ISO.UniqueToken("member"))
+	privyUserID := testApp.ISO.UniquePrivyID(label)
+	token := privy.AccessToken(testApp.ISO.UniqueToken(label))
 	privy.RegisterToken(testApp.Privy, token, privy.Identity{PrivyUserID: privyUserID, DisplayName: "Worker"})
 	sessions := app.NewSessionService(testApp.Store, testApp.Privy)
 	session, err := sessions.OpenSession(ctx, string(token))

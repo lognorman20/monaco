@@ -30,7 +30,7 @@ func setupPoller(t *testing.T) (*SweepPoller, *workerTestApp, *fakeSolanaRPC) {
 	t.Helper()
 	testApp := integrationWorkerApp(t)
 	rpc := NewFakeSolanaRPC()
-	poller := NewSweepPoller(testApp.Store, testApp.Privy, rpc, testApp.Deposits, "relayer-key", NewStubClock(testApp.Now))
+	poller := NewSweepPoller(testApp.Store, sweepClient(t, testApp.Privy), rpc, testApp.Deposits, "relayer-key", NewStubClock(testApp.Now))
 	return poller, testApp, rpc
 }
 
@@ -40,7 +40,7 @@ func TestSweepPoller_submitSweepFailure_marksDepositFailed(t *testing.T) {
 	ctx := context.Background()
 	deposit, memberAddress, _ := seedPendingDeposit(t, testApp)
 	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
-	privy.SetRejectSubmitSweep(testApp.Privy, true, fmt.Errorf("%w: relayer key invalid", privy.ErrAPI))
+	privy.SetRejectSubmitSweep(testApp.Privy, true, fmt.Errorf("%w: %w: relayer key invalid", privy.ErrBroadcastRejected, privy.ErrAPI))
 
 	// Act
 	if err := poller.Tick(ctx); err != nil {
@@ -66,7 +66,7 @@ func TestSweepPoller_submitSweepFailure_surfacesInGroupActivity(t *testing.T) {
 	ctx := context.Background()
 	deposit, memberAddress, token := seedPendingDepositWithToken(t, testApp)
 	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
-	privy.SetRejectSubmitSweep(testApp.Privy, true, fmt.Errorf("%w: relayer key invalid", privy.ErrAPI))
+	privy.SetRejectSubmitSweep(testApp.Privy, true, fmt.Errorf("%w: %w: relayer key invalid", privy.ErrBroadcastRejected, privy.ErrAPI))
 	tx, err := testApp.Store.BeginTx(ctx)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)

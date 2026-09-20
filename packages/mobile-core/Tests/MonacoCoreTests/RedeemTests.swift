@@ -52,7 +52,8 @@ final class RedeemTests: XCTestCase {
             groupId: "grp-1",
             shareUnits: "500000",
             payoutAddress: "PayoutAddr1111111111111111111111111111",
-            payoutProof: "signed-proof-base64"
+            payoutProof: "signed-proof-base64",
+            submission: IdempotentSubmission()
         )
 
         // Assert
@@ -97,7 +98,8 @@ final class RedeemTests: XCTestCase {
             groupId: "g1",
             shareUnits: "1000000",
             payoutAddress: "addr",
-            payoutProof: "proof"
+            payoutProof: "proof",
+            submission: IdempotentSubmission()
         )
         if plan.refreshGroup {
             _ = try await client.getGroupView(groupId: "g1")

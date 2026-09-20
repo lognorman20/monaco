@@ -152,6 +152,11 @@ func (a *alerter) raise(ctx context.Context, event AlertEvent) {
 	if event.Severity == "" {
 		event.Severity = SeverityWarning
 	}
+	// Alerts leave the process three ways (log, Sentry, webhook) and their detail is often an
+	// upstream error, so credentials are redacted once, here.
+	event.Title = ScrubString(event.Title)
+	event.Detail = ScrubString(event.Detail)
+	event.Fields = ScrubTags(event.Fields)
 	if len(event.Detail) > maxAlertDetailSize {
 		event.Detail = event.Detail[:maxAlertDetailSize]
 	}

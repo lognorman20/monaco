@@ -33,7 +33,7 @@ func rpcServer(t *testing.T, status int, responses map[string]string) (*HTTPRead
 		_, _ = io.WriteString(w, responses[req.Method])
 	}))
 	t.Cleanup(server.Close)
-	return NewHTTPReader(server.URL, ""), seen
+	return NewHTTPReader(server.URL), seen
 }
 
 func TestHTTPReader_signatureStatus(t *testing.T) {
@@ -153,7 +153,7 @@ func TestHTTPReader_tokenBalanceChanges_refusesMissingOrFailedTransactions(t *te
 
 func TestHTTPReader_networkFailure(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
-	reader := NewHTTPReader(server.URL, "")
+	reader := NewHTTPReader(server.URL)
 	server.Close()
 
 	if _, err := reader.IsBlockhashValid(context.Background(), "hash-1"); err == nil {

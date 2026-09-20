@@ -1,0 +1,6 @@
+// Staging: PLACEHOLDER — no staging host is committed because none exists yet.
+// Set MONACO_STAGING_API_BASE_URL in .env.local (scripts/ensure-ios-privy-config.sh writes
+// it to the gitignored Config/Environment.local.xcconfig) or pass it to xcodebuild.
+// Must be https. Left empty, the app refuses to launch with this environment selected.
+MONACO_STAGING_API_BASE_URL =
+MONACO_API_BASE_URL_staging = $(MONACO_STAGING_API_BASE_URL)
