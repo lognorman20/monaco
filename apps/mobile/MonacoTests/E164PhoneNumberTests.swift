@@ -40,6 +40,30 @@ struct E164PhoneNumberTests {
         #expect(E164PhoneNumber("½") == nil)
     }
 
+    /// Characters that read as numbers but are not digits used to fall through as
+    /// "formatting" and be dropped in silence, so a number that was not the one on screen
+    /// went to Privy and looked like it had been accepted.
+    @Test func numericLookingCharactersAreRefusedRatherThanDropped() {
+        #expect(E164PhoneNumber("15551234567½") == nil)
+        #expect(E164PhoneNumber("①5551234567") == nil)
+        #expect(E164PhoneNumber("555123456７") == nil)
+        #expect(E164PhoneNumber("555*123*4567") == nil)
+        #expect(E164PhoneNumber("555,123,4567") == nil)
+    }
+
+    /// A 10-digit string starting "00" is not a US number — NANP area codes never start
+    /// with 0 — so it is the trunk-prefixed international reading that applies, whichever
+    /// branch is written first.
+    @Test func aTrunkPrefixIsNotConfusedWithAUSNumber() {
+        #expect(E164PhoneNumber("0012345678")?.value == "+12345678")
+        // Still a US number when it actually looks like one.
+        #expect(E164PhoneNumber("2125551234")?.value == "+12125551234")
+        #expect(E164PhoneNumber("5551234567")?.value == "+15551234567")
+        // An area code starting 0 or 1 is not US, and "01…" is not a trunk prefix either.
+        #expect(E164PhoneNumber("0125551234") == nil)
+        #expect(E164PhoneNumber("1125551234") == nil)
+    }
+
     @Test func usNumbersReadBackTheWayTheyWereTyped() {
         #expect(E164PhoneNumber("+15551234567")?.displayValue == "(555) 123-4567")
         #expect(E164PhoneNumber("+442079460958")?.displayValue == "+442079460958")
