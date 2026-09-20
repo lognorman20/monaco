@@ -35,6 +35,26 @@ final class AssetDetailSampleUITests: XCTestCase {
         add(attachment)
     }
 
+    /// The screen's identifiers sit on SwiftUI containers whose XCUIElement type is
+    /// not stable across states, so ask by identifier and let the type be whatever
+    /// it is.
+    private func anyElement(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
+    /// "The screen drew" is asked of the 1D chip rather than of the scroll view the
+    /// root identifier sits on: the chip is a real control, it is present in every
+    /// chart state — loading, series, empty and failed alike — and a SwiftUI
+    /// ScrollView does not reliably publish its identifier to the accessibility
+    /// tree, which is the sort of thing that makes a UI test lie.
+    @MainActor
+    private func waitForScreen(_ app: XCUIApplication, _ context: String) {
+        XCTAssertTrue(
+            anyElement(app, "asset-chart-range-1D").waitForExistence(timeout: 30),
+            "\(context) never drew the detail screen"
+        )
+    }
+
     /// Every scenario reaches a drawn screen. This is the screenshot sweep: one
     /// attachment per state the backend can put the screen in.
     @MainActor
@@ -45,10 +65,7 @@ final class AssetDetailSampleUITests: XCTestCase {
         ]
         for scenario in scenarios {
             let app = launch(scenario)
-            XCTAssertTrue(
-                app.otherElements["asset-detail-root"].waitForExistence(timeout: 20),
-                "\(scenario) never drew the detail screen"
-            )
+            waitForScreen(app, scenario)
             attachScreenshot(app, name: "asset-detail-\(scenario)")
             app.terminate()
         }
@@ -61,11 +78,10 @@ final class AssetDetailSampleUITests: XCTestCase {
     @MainActor
     func testEveryChartRangeIsReachableAtAnAccessibilityTextSize() throws {
         let app = launch("open", textSize: "UICTContentSizeCategoryAccessibilityL")
-        XCTAssertTrue(app.otherElements["asset-detail-root"].waitForExistence(timeout: 20))
+        waitForScreen(app, "accessibility text size")
 
         for range in ["1D", "1W", "1M", "3M", "1Y", "ALL"] {
-            let chip = app.descendants(matching: .any)
-                .matching(identifier: "asset-chart-range-\(range)").firstMatch
+            let chip = anyElement(app, "asset-chart-range-\(range)")
             XCTAssertTrue(chip.waitForExistence(timeout: 5), "\(range) chip is missing")
             // scrollIntoView is what makes this a real check: a chip clipped out of a
             // fixed row would never become hittable however far the row is scrolled.
@@ -82,11 +98,9 @@ final class AssetDetailSampleUITests: XCTestCase {
     @MainActor
     func testAFailedChartLeavesTheRestOfTheScreenStanding() throws {
         let app = launch("chartFailed")
-        XCTAssertTrue(app.otherElements["asset-detail-root"].waitForExistence(timeout: 20))
+        waitForScreen(app, "chartFailed")
         XCTAssertTrue(
-            app.descendants(matching: .any)
-                .matching(identifier: "asset-detail-chart-failed").firstMatch
-                .waitForExistence(timeout: 10)
+            anyElement(app, "asset-detail-chart-failed").waitForExistence(timeout: 10)
         )
         attachScreenshot(app, name: "asset-detail-chart-failed")
     }
