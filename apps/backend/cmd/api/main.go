@@ -357,7 +357,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}()
 
 	return &bootResult{
-		Server:            newHTTPServer(addr, platformHandler(mux, httpapi.NewIdempotency(store, privyClient))),
+		Server:            newHTTPServer(addr, platformHandler(mux, privyClient, httpapi.NewIdempotency(store, privyClient))),
 		Config:            cfg,
 		Relayer:           relayer,
 		DB:                db,

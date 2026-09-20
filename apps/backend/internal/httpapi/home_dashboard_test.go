@@ -245,6 +245,10 @@ func TestGET_homeDashboard_openProposal_listsUntilVoted(t *testing.T) {
 	if len(payload.MissedProposals) != 1 || payload.MissedProposals[0].ProposalID != proposal.ID {
 		t.Fatalf("missed = %+v, want proposal %s", payload.MissedProposals, proposal.ID)
 	}
+	wantExpiresAt := `"expiresAt":"` + proposal.ExpiresAt.UTC().Format(time.RFC3339) + `"`
+	if !strings.Contains(rec.Body.String(), wantExpiresAt) {
+		t.Fatalf("body = %s, want it to contain %s", rec.Body.String(), wantExpiresAt)
+	}
 
 	tx, err = store.BeginTx(ctx)
 	if err != nil {
@@ -267,5 +271,66 @@ func TestGET_homeDashboard_openProposal_listsUntilVoted(t *testing.T) {
 	}
 	if len(payload.MissedProposals) != 0 {
 		t.Fatalf("missed after vote = %d, want 0", len(payload.MissedProposals))
+	}
+}
+
+func TestMapHomePnLSeriesPoints_nonUTCSubSecondInput_emitsUTCRFC3339(t *testing.T) {
+	t.Parallel()
+	// Arrange: a New York wall-clock time with nanoseconds, as a store row could carry it.
+	newYork := time.FixedZone("EDT", -4*60*60)
+	points := []app.HomePnLSeriesPoint{{
+		TS:        time.Date(2026, 9, 17, 18, 30, 5, 123456789, newYork),
+		EquityUsd: "130.00",
+		DollarPnL: "+0.00",
+	}}
+
+	// Act
+	body, err := json.Marshal(homePnLSeriesResponse{Points: mapHomePnLSeriesPoints(points)})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"points":[{"ts":"2026-09-17T22:30:05Z","equityUsd":"130.00","dollarPnl":"+0.00"}]}`
+	if string(body) != want {
+		t.Fatalf("body = %s, want %s", body, want)
+	}
+}
+
+func TestMapHomeMissedProposals_nonUTCSubSecondInput_emitsUTCRFC3339(t *testing.T) {
+	t.Parallel()
+	// Arrange: the offset pushes both times onto the previous UTC date.
+	tokyo := time.FixedZone("JST", 9*60*60)
+	rows := []app.HomeMissedProposalRow{{
+		GroupID:    "g1",
+		GroupName:  "Vote cabal",
+		ProposalID: "p1",
+		Symbol:     "AAPL",
+		Status:     "open",
+		CreatedAt:  time.Date(2026, 9, 18, 5, 0, 0, 999999999, tokyo),
+		ExpiresAt:  time.Date(2026, 9, 19, 5, 0, 0, 1, tokyo),
+	}}
+
+	// Act
+	body, err := json.Marshal(homeMissedProposalsResponse{Proposals: mapHomeMissedProposals(rows)})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded struct {
+		Proposals []map[string]any `json:"proposals"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if len(decoded.Proposals) != 1 {
+		t.Fatalf("proposals len = %d, want 1", len(decoded.Proposals))
+	}
+	if got := decoded.Proposals[0]["createdAt"]; got != "2026-09-17T20:00:00Z" {
+		t.Fatalf("createdAt = %v, want 2026-09-17T20:00:00Z", got)
+	}
+	if got := decoded.Proposals[0]["expiresAt"]; got != "2026-09-18T20:00:00Z" {
+		t.Fatalf("expiresAt = %v, want 2026-09-18T20:00:00Z", got)
 	}
 }
