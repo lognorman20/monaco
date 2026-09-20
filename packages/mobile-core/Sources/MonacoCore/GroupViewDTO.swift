@@ -112,6 +112,13 @@ public struct GroupViewDTO: Codable, Equatable, Sendable {
     public let members: [LeaderboardRowDTO]
     public let proposals: [ProposalDTO]?
     public let agent: GroupAgentDTO?
+    /// The cabal's picture. Nil when it has none, and the mark falls back to
+    /// its tinted initials.
+    public let pictureUrl: String?
+    /// Whether this viewer created the cabal, and so may change its picture.
+    /// Optional because a server that predates the field sends nothing; treat a
+    /// missing value as false. The server checks again on every write.
+    public let isCreator: Bool?
 
     public init(
         id: String,
@@ -122,7 +129,9 @@ public struct GroupViewDTO: Codable, Equatable, Sendable {
         you: MemberSliceDTO,
         members: [LeaderboardRowDTO],
         proposals: [ProposalDTO]?,
-        agent: GroupAgentDTO? = nil
+        agent: GroupAgentDTO? = nil,
+        pictureUrl: String? = nil,
+        isCreator: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -133,7 +142,13 @@ public struct GroupViewDTO: Codable, Equatable, Sendable {
         self.members = members
         self.proposals = proposals
         self.agent = agent
+        self.pictureUrl = pictureUrl
+        self.isCreator = isCreator
     }
+
+    /// True only when the server said so. Used to decide what to offer; never
+    /// to decide what is allowed.
+    public var viewerIsCreator: Bool { isCreator == true }
 
     /// Marked pot NAV; falls back to summing row values when the server omits potTotalUsd.
     public var resolvedPotTotalUsd: String {

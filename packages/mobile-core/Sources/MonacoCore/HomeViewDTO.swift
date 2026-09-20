@@ -17,6 +17,9 @@ public struct HomeGroupBoardRowDTO: Codable, Equatable, Sendable {
     public let percentReturn: String?
     public let dollarPnl: String
     public let isJoined: Bool
+    /// The cabal's picture. Nil when it has none, and the mark falls back
+    /// to its tinted initials.
+    public let pictureUrl: String?
 
     public init(
         groupID: String,
@@ -24,7 +27,8 @@ public struct HomeGroupBoardRowDTO: Codable, Equatable, Sendable {
         potValueUsd: String,
         percentReturn: String?,
         dollarPnl: String,
-        isJoined: Bool
+        isJoined: Bool,
+        pictureUrl: String? = nil
     ) {
         self.groupID = groupID
         self.name = name
@@ -32,6 +36,7 @@ public struct HomeGroupBoardRowDTO: Codable, Equatable, Sendable {
         self.percentReturn = percentReturn
         self.dollarPnl = dollarPnl
         self.isJoined = isJoined
+        self.pictureUrl = pictureUrl
     }
 
     enum CodingKeys: String, CodingKey {
@@ -41,6 +46,7 @@ public struct HomeGroupBoardRowDTO: Codable, Equatable, Sendable {
         case percentReturn
         case dollarPnl
         case isJoined
+        case pictureUrl
     }
 }
 
