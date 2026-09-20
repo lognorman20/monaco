@@ -14,14 +14,18 @@ import (
 const (
 	defaultPriceBaseURL = "https://api.jup.ag/price/v3"
 	maxPriceIDsPerBatch = 50
+	maxUsdPrice         = 1e9
 )
 
 // TokenPrice is a mint's current USD mark and 24h change, converted for display.
 // Change24h is a decimal ratio string (e.g. "0.025000" for +2.5%), matching the
 // pyth.AssetMark contract so it drops into the same response shape.
+// LiquidityUsd is the pooled liquidity behind the mark; valuation callers use it to
+// refuse a price that a thin pool could be pushed around to produce.
 type TokenPrice struct {
 	PriceUsdcMicros int64
 	Change24h       *string
+	LiquidityUsd    float64
 }
 
 // PriceClient batches current USD marks by Solana mint via Jupiter's Price API.
@@ -87,6 +91,7 @@ func (c *HTTPPriceClient) Prices(ctx context.Context, mints []string) (map[strin
 type jupiterPriceEntry struct {
 	UsdPrice       float64 `json:"usdPrice"`
 	PriceChange24h float64 `json:"priceChange24h"`
+	Liquidity      float64 `json:"liquidity"`
 }
 
 func (c *HTTPPriceClient) fetchBatch(ctx context.Context, mints []string) (map[string]TokenPrice, error) {
@@ -134,7 +139,12 @@ func (c *HTTPPriceClient) fetchBatch(ctx context.Context, mints []string) (map[s
 }
 
 func (e jupiterPriceEntry) toTokenPrice() TokenPrice {
-	micros := int64(math.Round(e.UsdPrice * 1_000_000))
+	// An out-of-range usdPrice would overflow the int64 conversion into a plausible-looking
+	// number; report it as 0 (no usable price) instead.
+	var micros int64
+	if e.UsdPrice > 0 && e.UsdPrice < maxUsdPrice {
+		micros = int64(math.Round(e.UsdPrice * 1_000_000))
+	}
 	// Jupiter reports a percentage (e.g. -0.27 for -0.27%); the response contract
 	// here is a decimal ratio, matching pyth.AssetMark.Change24h.
 	ratio := e.PriceChange24h / 100
@@ -142,5 +152,6 @@ func (e jupiterPriceEntry) toTokenPrice() TokenPrice {
 	return TokenPrice{
 		PriceUsdcMicros: micros,
 		Change24h:       &change,
+		LiquidityUsd:    e.Liquidity,
 	}
 }

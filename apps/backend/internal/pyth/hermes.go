@@ -3,6 +3,7 @@ package pyth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -115,32 +116,52 @@ func (c *HermesClient) MarkedPot(ctx context.Context, treasury TreasuryRef, hold
 }
 
 func (c *HermesClient) markHolding(ctx context.Context, holding CostBasis) (MarkedHolding, error) {
-	feedID, isOpen, err := c.resolveFeedSession(ctx, holding.Symbol)
+	mark, err := c.EquityMark(ctx, holding.Symbol)
 	if err != nil {
 		return MarkedHolding{}, err
+	}
+	return MarkedHolding{
+		Symbol:     holding.Symbol,
+		Mint:       holding.Mint,
+		Units:      holding.Units,
+		MarkUsdc:   mark.PriceUsdcMicros,
+		CostBasis:  holding.Price,
+		AfterHours: mark.AfterHours,
+		Source:     MarkSourcePyth,
+	}, nil
+}
+
+// EquityMark fetches one symbol's latest Hermes mark with the metadata the price
+// chain needs to judge freshness.
+func (c *HermesClient) EquityMark(ctx context.Context, symbol string) (EquityMark, error) {
+	feedID, isOpen, err := c.resolveFeedSession(ctx, symbol)
+	if err != nil {
+		return EquityMark{}, err
 	}
 
 	latest, err := c.fetchLatestPrice(ctx, feedID)
 	if err != nil {
-		return MarkedHolding{}, err
+		return EquityMark{}, err
 	}
 
 	markUsdc, err := priceToUSDCMicros(latest.Price.Price, latest.Price.Expo)
 	if err != nil {
-		return MarkedHolding{}, err
+		return EquityMark{}, err
 	}
 
 	// After-hours when cash equity session closed (Hermes market_hours.is_open)
 	// or Hermes serves a frozen mark (publish_time == prev_publish_time).
 	afterHours := !isOpen || isFrozenEquityMark(latest.Price.PublishTime, latest.Metadata.PrevPublishTime)
 
-	return MarkedHolding{
-		Symbol:     holding.Symbol,
-		Mint:       holding.Mint,
-		Units:      holding.Units,
-		MarkUsdc:   markUsdc,
-		CostBasis:  holding.Price,
-		AfterHours: afterHours,
+	var publishedAt time.Time
+	if latest.Price.PublishTime > 0 {
+		publishedAt = time.Unix(latest.Price.PublishTime, 0).UTC()
+	}
+	return EquityMark{
+		PriceUsdcMicros: markUsdc,
+		PublishedAt:     publishedAt,
+		MarketOpen:      isOpen,
+		AfterHours:      afterHours,
 	}, nil
 }
 
@@ -305,17 +326,36 @@ func isFrozenEquityMark(publishTime, prevPublishTime int64) bool {
 	return publishTime > 0 && prevPublishTime > 0 && publishTime == prevPublishTime
 }
 
+// RequestError is a non-200 Hermes response. Callers inspect Status to tell an
+// entitlement denial (403) from an outage (5xx).
+type RequestError struct {
+	Status  int
+	message string
+}
+
+func (e *RequestError) Error() string { return e.message }
+
+// IsEntitlementError reports whether err is Hermes refusing the API key for a feed.
+// That does not heal on retry: someone has to accept grants in Pyth Terminal.
+func IsEntitlementError(err error) bool {
+	var reqErr *RequestError
+	if !errors.As(err, &reqErr) {
+		return false
+	}
+	return reqErr.Status == http.StatusForbidden || reqErr.Status == http.StatusUnauthorized
+}
+
 func hermesRequestError(prefix string, status int, body []byte) error {
 	detail := strings.TrimSpace(string(body))
 	if detail == "" {
-		return fmt.Errorf("%s: status %d", prefix, status)
+		return &RequestError{Status: status, message: fmt.Sprintf("%s: status %d", prefix, status)}
 	}
 	const maxDetailLen = 240
 	if len(detail) > maxDetailLen {
 		detail = detail[:maxDetailLen]
 	}
 	if status == http.StatusForbidden && strings.Contains(strings.ToLower(detail), "not entitled") {
-		return fmt.Errorf("%s: status %d: %s (accept equity feed grants in Pyth Terminal)", prefix, status, detail)
+		return &RequestError{Status: status, message: fmt.Sprintf("%s: status %d: %s (accept equity feed grants in Pyth Terminal)", prefix, status, detail)}
 	}
-	return fmt.Errorf("%s: status %d: %s", prefix, status, detail)
+	return &RequestError{Status: status, message: fmt.Sprintf("%s: status %d: %s", prefix, status, detail)}
 }
