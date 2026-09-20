@@ -73,3 +73,16 @@ func CryptoQuerySymbol(symbol string) string {
 func underlyingTicker(symbol string) string {
 	return strings.TrimSuffix(normalizeSymbol(symbol), "X")
 }
+
+// UnderlyingTicker is underlyingTicker for callers outside the package: AAPLx -> AAPL.
+func UnderlyingTicker(symbol string) string { return underlyingTicker(symbol) }
+
+// Which instrument a price or a derived figure is about. Pyth has two feeds behind
+// one xStock and they do not agree — AAPLx trades at a premium or discount to Apple
+// — so anything derived from candles has to say which of the two it came from.
+const (
+	// PriceBasisUnderlying is the equity on its home exchange (Equity.US.AAPL/USD).
+	PriceBasisUnderlying = "underlying"
+	// PriceBasisToken is the xStock itself (Crypto.AAPLX/USD, or the on-chain price).
+	PriceBasisToken = "token"
+)

@@ -445,11 +445,14 @@ func (c *Chain) ChartSeries(ctx context.Context, symbol string, chartRange pyth.
 		if err != nil {
 			return chartResult{err: err}
 		}
-		if len(series.Points) > 0 {
-			c.mu.Lock()
-			c.chartCache[cacheKey] = chartEntry{series: series, fetchedAt: c.cfg.Now()}
-			c.mu.Unlock()
-		}
+		// An empty series is cached too. It is an answer the chart client actually
+		// got, and leaving it uncached meant a symbol with no history went upstream
+		// on every request — on the detail route, which asks for two ranges and which
+		// the asset screen polls. ChartTTL is short enough that a symbol whose first
+		// bar has just appeared starts drawing within the minute.
+		c.mu.Lock()
+		c.chartCache[cacheKey] = chartEntry{series: series, fetchedAt: c.cfg.Now()}
+		c.mu.Unlock()
 		return chartResult{series: series}
 	}).(chartResult)
 	return result.series, result.err

@@ -242,8 +242,7 @@ func TestSelectFeed_prefersTheExactSymbolOverASubstringMatch(t *testing.T) {
 func TestJupiterFallbackQuote_isLabelledAsOnChainNotPyth(t *testing.T) {
 	t.Parallel()
 
-	at := time.Date(2026, time.September, 22, 20, 0, 0, 0, time.UTC)
-	quote := JupiterFallbackQuote(232_050_000, at)
+	quote := JupiterFallbackQuote(232_050_000)
 	if quote.Source != QuoteSourceJupiter {
 		t.Fatalf("source = %q, want jupiter", quote.Source)
 	}
@@ -253,7 +252,10 @@ func TestJupiterFallbackQuote_isLabelledAsOnChainNotPyth(t *testing.T) {
 	if quote.ConfUsdcMicros != 0 {
 		t.Fatal("Jupiter publishes no confidence interval; claiming one would be fiction")
 	}
-	if unpriced := JupiterFallbackQuote(0, at); unpriced.Status != QuoteStatusUnavailable {
+	if !quote.PublishedAt.IsZero() {
+		t.Fatal("Jupiter does not say when its price was struck; the server's own clock is not an answer")
+	}
+	if unpriced := JupiterFallbackQuote(0); unpriced.Status != QuoteStatusUnavailable {
 		t.Fatalf("status = %q, want unavailable for a missing price", unpriced.Status)
 	}
 }

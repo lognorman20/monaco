@@ -199,6 +199,88 @@ func nextTradingDay(local time.Time) (daySchedule, bool) {
 	return daySchedule{}, false
 }
 
+func previousTradingDay(local time.Time) (daySchedule, bool) {
+	cursor := local
+	for i := 0; i < maxForwardScanDays; i++ {
+		cursor = cursor.AddDate(0, 0, -1)
+		midnight := time.Date(cursor.Year(), cursor.Month(), cursor.Day(), 0, 0, 0, 0, exchangeLocation)
+		if day := scheduleFor(midnight); day.trading {
+			return day, true
+		}
+	}
+	return daySchedule{}, false
+}
+
+// TradingSession is one trading day's boundaries, in UTC. Callers that need to
+// bound a window on the exchange's own schedule — a 1D chart, or the open/high/low
+// the stats grid folds — take it from here rather than inferring a session from
+// whatever bars a vendor happened to publish. Pyth equity feeds keep republishing a
+// frozen last price after the bell, so "the data stopped" is not a reliable signal
+// that the session did.
+type TradingSession struct {
+	// Day is midnight at the exchange on this session's calendar date, in UTC.
+	Day time.Time
+	// PreMarketOpen is 04:00 ET, the first instant of the extended session.
+	PreMarketOpen time.Time
+	// RegularOpen is 09:30 ET: the print Robinhood's Open cell shows.
+	RegularOpen time.Time
+	// RegularClose is 16:00 ET, or 13:00 ET on a half day.
+	RegularClose time.Time
+	// PostCloseEnd is 20:00 ET (17:00 on a half day), the last instant of the
+	// extended session.
+	PostCloseEnd time.Time
+	EarlyClose   bool
+}
+
+func sessionFrom(day daySchedule) TradingSession {
+	midnight := time.Date(
+		day.regularOpen.Year(), day.regularOpen.Month(), day.regularOpen.Day(),
+		0, 0, 0, 0, exchangeLocation,
+	)
+	return TradingSession{
+		Day:           midnight.UTC(),
+		PreMarketOpen: day.preMarketOpen.UTC(),
+		RegularOpen:   day.regularOpen.UTC(),
+		RegularClose:  day.regularClose.UTC(),
+		PostCloseEnd:  day.postCloseEnd.UTC(),
+		EarlyClose:    day.earlyClose,
+	}
+}
+
+// SessionOn returns the session held on at's exchange-local calendar date. The
+// second result is false on a weekend or an exchange holiday.
+func SessionOn(at time.Time) (TradingSession, bool) {
+	day := scheduleFor(at.In(exchangeLocation))
+	if !day.trading {
+		return TradingSession{}, false
+	}
+	return sessionFrom(day), true
+}
+
+// LastTradingSession returns the most recent session at or before at: today's once
+// the exchange has reached pre-market, and otherwise the previous trading day's.
+// On a Saturday it is Friday's; on a holiday it is the session before the holiday.
+func LastTradingSession(at time.Time) (TradingSession, bool) {
+	local := at.In(exchangeLocation)
+	if day := scheduleFor(local); day.trading && !local.Before(day.preMarketOpen) {
+		return sessionFrom(day), true
+	}
+	if day, found := previousTradingDay(local); found {
+		return sessionFrom(day), true
+	}
+	return TradingSession{}, false
+}
+
+// PreviousTradingSession returns the last session strictly before at's
+// exchange-local calendar date — the one whose close is "previous close".
+func PreviousTradingSession(at time.Time) (TradingSession, bool) {
+	day, found := previousTradingDay(at.In(exchangeLocation))
+	if !found {
+		return TradingSession{}, false
+	}
+	return sessionFrom(day), true
+}
+
 // IsTradingDay reports whether the exchange holds a session on the day containing at.
 func IsTradingDay(at time.Time) bool {
 	return scheduleFor(at.In(exchangeLocation)).trading

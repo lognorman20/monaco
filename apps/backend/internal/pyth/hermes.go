@@ -161,11 +161,27 @@ func (c *HermesClient) markHolding(ctx context.Context, holding CostBasis) (Mark
 }
 
 // resolveFeedSession returns a cached feed id and a fresh market_hours.is_open value.
+// It always goes to the wire, because is_open is the part it is asked for.
 func (c *HermesClient) resolveFeedSession(ctx context.Context, symbol string) (feedID string, isOpen bool, err error) {
-	return c.resolveFeedByQuery(ctx, symbol, EquityQuerySymbol(symbol))
+	return c.fetchFeedSession(ctx, symbol, EquityQuerySymbol(symbol))
 }
 
-func (c *HermesClient) resolveFeedByQuery(ctx context.Context, symbol, query string) (feedID string, isOpen bool, err error) {
+// resolveFeedID answers from the registry when the feed id is already known. Feed
+// ids do not change, so a caller that only needs the id has nothing to learn from a
+// /v2/price_feeds round trip — and the reference-quote path has two legs, so paying
+// for one lookup per leg per poll doubled the cost of an asset screen for nothing.
+func (c *HermesClient) resolveFeedID(ctx context.Context, symbol, query string) (string, error) {
+	if cachedID, ok := lookupFeedID(query); ok && cachedID != "" {
+		return cachedID, nil
+	}
+	feedID, _, err := c.fetchFeedSession(ctx, symbol, query)
+	return feedID, err
+}
+
+// fetchFeedSession fetches the feed and its market_hours.is_open. The registry is
+// consulted for the id so a feed registered by a test or a previous lookup keeps
+// winning, but the request happens regardless: is_open is only fresh from upstream.
+func (c *HermesClient) fetchFeedSession(ctx context.Context, symbol, query string) (feedID string, isOpen bool, err error) {
 	feed, err := c.fetchPriceFeedByQuery(ctx, symbol, query)
 	if err != nil {
 		return "", false, err
@@ -328,7 +344,14 @@ func parseDecimalInt(value string) (int64, error) {
 		if ch < '0' || ch > '9' {
 			return 0, fmt.Errorf("invalid price %q", value)
 		}
-		n = n*10 + int64(ch-'0')
+		digit := int64(ch - '0')
+		// Untrusted upstream input: a long enough digit string wraps int64 silently
+		// and turns a nonsense payload into a plausible-looking price. This path
+		// parses both `price` and `conf` from Hermes, and the Jupiter out-amount.
+		if n > (math.MaxInt64-digit)/10 {
+			return 0, fmt.Errorf("price %q overflows", value)
+		}
+		n = n*10 + digit
 	}
 	return sign * n, nil
 }

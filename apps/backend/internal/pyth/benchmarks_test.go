@@ -2,12 +2,16 @@ package pyth
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/monaco/monaco/apps/backend/internal/marketcal"
 )
 
 func benchmarksServer(t *testing.T, handler http.HandlerFunc) *BenchmarksClient {
@@ -21,24 +25,35 @@ func benchmarksServer(t *testing.T, handler http.HandlerFunc) *BenchmarksClient 
 // in a test that would otherwise be time-of-run dependent.
 var tradingNoon = time.Date(2026, time.September, 22, 16, 0, 0, 0, time.UTC)
 
+// etUnix is a wall-clock instant at the exchange, as Benchmarks stamps its bars.
+// Written out rather than hardcoded: a UTC epoch is unreadable, and a 1D window is
+// now anchored on the exchange's bells, so a test fixture that lands in the wrong
+// session has to be obvious on the page.
+func etUnix(year int, month time.Month, day, hour, minute int) int64 {
+	return time.Date(year, month, day, hour, minute, 0, 0, marketcal.Location()).Unix()
+}
+
 func TestBenchmarks_Series_decodesOHLCAndPreviousClose(t *testing.T) {
 	t.Parallel()
 
 	var gotQuery string
 	client := benchmarksServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
-		_, _ = w.Write([]byte(`{
+		// Pre-market, then two regular-session bars, all on Tuesday 2026-09-22.
+		_, _ = w.Write([]byte(fmt.Sprintf(`{
 			"s":"ok",
-			"t":[1758542400,1758553200,1758556800],
+			"t":[%d,%d,%d],
 			"o":[229.0,230.0,231.0],
 			"h":[229.5,230.9,231.8],
 			"l":[228.2,229.7,230.4],
 			"c":[229.4,230.5,231.4]
-		}`))
+		}`,
+			etUnix(2026, time.September, 22, 8, 0),
+			etUnix(2026, time.September, 22, 10, 0),
+			etUnix(2026, time.September, 22, 11, 0),
+		)))
 	})
 
-	// 1758542400 is 2026-09-22 12:00 UTC (08:00 ET, pre-market); the other two are
-	// later the same ET day, so all three belong to one session.
 	series, err := client.Series(context.Background(), "AAPLx", ChartRange1D, tradingNoon)
 	if err != nil {
 		t.Fatalf("Series: %v", err)
@@ -64,21 +79,37 @@ func TestBenchmarks_Series_decodesOHLCAndPreviousClose(t *testing.T) {
 	if series.Source != ChartSourceBenchmarks || series.Range != ChartRange1D {
 		t.Fatalf("source/range = %q/%q", series.Source, series.Range)
 	}
+	// These are Equity.US.AAPL/USD candles, not AAPLx candles. The series has to say
+	// so, or the stats grid built from it ends up beside a token hero price with
+	// nothing to explain why the two disagree.
+	if series.Basis != PriceBasisUnderlying || series.BasisSymbol != "AAPL" {
+		t.Fatalf("basis = %q/%q, want underlying/AAPL", series.Basis, series.BasisSymbol)
+	}
+	wantOpen := time.Date(2026, time.September, 22, 9, 30, 0, 0, marketcal.Location())
+	if !series.RegularOpen.Equal(wantOpen) {
+		t.Fatalf("regular open = %s, want %s", series.RegularOpen, wantOpen)
+	}
 }
 
-func TestBenchmarks_Series_previousCloseComesFromTheBarBeforeTheWindow(t *testing.T) {
+func TestBenchmarks_Series_previousCloseIsThePriorRegularSessionClose(t *testing.T) {
 	t.Parallel()
 
 	client := benchmarksServer(t, func(w http.ResponseWriter, r *http.Request) {
-		// The first bar is 2026-09-21 (the prior ET session); the rest are 09-22.
-		_, _ = w.Write([]byte(`{
+		// Monday's last regular bar, then a Monday after-hours print, then Tuesday.
+		// The after-hours print must not become "previous close": it is not a close.
+		_, _ = w.Write([]byte(fmt.Sprintf(`{
 			"s":"ok",
-			"t":[1758470400,1758542400,1758556800],
-			"o":[225.0,229.0,231.0],
-			"h":[226.0,229.5,231.8],
-			"l":[224.0,228.2,230.4],
-			"c":[226.5,229.4,231.4]
-		}`))
+			"t":[%d,%d,%d,%d],
+			"o":[225.0,226.5,229.0,231.0],
+			"h":[226.0,227.9,229.5,231.8],
+			"l":[224.0,226.4,228.2,230.4],
+			"c":[226.5,227.8,229.4,231.4]
+		}`,
+			etUnix(2026, time.September, 21, 15, 55),
+			etUnix(2026, time.September, 21, 18, 0),
+			etUnix(2026, time.September, 22, 10, 0),
+			etUnix(2026, time.September, 22, 11, 0),
+		)))
 	})
 
 	series, err := client.Series(context.Background(), "AAPLx", ChartRange1D, tradingNoon)
@@ -89,10 +120,93 @@ func TestBenchmarks_Series_previousCloseComesFromTheBarBeforeTheWindow(t *testin
 		t.Fatalf("points = %d, want the 2 bars from the latest session", len(series.Points))
 	}
 	if series.PreviousCloseUsdcMicros == nil {
-		t.Fatal("expected a previous close from the prior session's last bar")
+		t.Fatal("expected a previous close from the prior session")
 	}
 	if *series.PreviousCloseUsdcMicros != 226_500_000 {
-		t.Fatalf("previous close = %d, want 226500000", *series.PreviousCloseUsdcMicros)
+		t.Fatalf("previous close = %d, want the 15:55 ET close 226500000, not the after-hours print", *series.PreviousCloseUsdcMicros)
+	}
+}
+
+func TestBenchmarks_Series_1DWindowIsTheLastTradingSessionNotTheLastBar(t *testing.T) {
+	t.Parallel()
+
+	// Saturday. Pyth equity feeds keep republishing a frozen last price after the
+	// bell and Benchmarks builds bars from published prices, so the payload really
+	// does carry weekend bars. Anchoring the window on the last bar made those the
+	// session: a run of identical closes drawn as a dead flat line, with Friday's
+	// close as its baseline. The calendar knows Saturday is not a session.
+	saturday := time.Date(2026, time.September, 26, 16, 0, 0, 0, time.UTC)
+
+	var gotQuery url.Values
+	client := benchmarksServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		_, _ = w.Write([]byte(fmt.Sprintf(`{
+			"s":"ok",
+			"t":[%d,%d,%d,%d,%d],
+			"c":[220.0,226.0,227.0,227.0,227.0]
+		}`,
+			etUnix(2026, time.September, 24, 15, 55), // Thursday's close
+			etUnix(2026, time.September, 25, 10, 0),  // Friday, in session
+			etUnix(2026, time.September, 25, 15, 0),  // Friday, in session
+			etUnix(2026, time.September, 26, 9, 0),   // Saturday: frozen republish
+			etUnix(2026, time.September, 26, 12, 0),  // Saturday: frozen republish
+		)))
+	})
+
+	series, err := client.Series(context.Background(), "AAPLx", ChartRange1D, saturday)
+	if err != nil {
+		t.Fatalf("Series: %v", err)
+	}
+	if len(series.Points) != 2 {
+		t.Fatalf("points = %d, want only Friday's two bars", len(series.Points))
+	}
+	for _, point := range series.Points {
+		if point.Timestamp >= etUnix(2026, time.September, 26, 0, 0) {
+			t.Fatalf("a Saturday bar at %d is in a 1D series", point.Timestamp)
+		}
+	}
+	if series.PreviousCloseUsdcMicros == nil || *series.PreviousCloseUsdcMicros != 220_000_000 {
+		t.Fatalf("previous close = %v, want Thursday's close", series.PreviousCloseUsdcMicros)
+	}
+	// The upstream window is bounded too, so the weekend bars are not even fetched
+	// when the feed is well behaved.
+	wantTo := etUnix(2026, time.September, 25, 20, 0)
+	if got := gotQuery.Get("to"); got != fmt.Sprint(wantTo) {
+		t.Fatalf("to = %s, want Friday's 20:00 ET post-close end %d", got, wantTo)
+	}
+}
+
+func TestBenchmarks_Series_1DWindowSkipsAHoliday(t *testing.T) {
+	t.Parallel()
+
+	// Thanksgiving 2026 is Thursday 26 November: the exchange is shut, so the
+	// session a 1D chart is about is Wednesday's.
+	thanksgiving := time.Date(2026, time.November, 26, 17, 0, 0, 0, time.UTC)
+
+	client := benchmarksServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(fmt.Sprintf(`{
+			"s":"ok",
+			"t":[%d,%d,%d],
+			"c":[240.0,243.0,244.0]
+		}`,
+			etUnix(2026, time.November, 24, 15, 55), // Tuesday's close
+			etUnix(2026, time.November, 25, 10, 0),  // Wednesday, in session
+			etUnix(2026, time.November, 26, 11, 0),  // Thanksgiving: frozen republish
+		)))
+	})
+
+	series, err := client.Series(context.Background(), "AAPLx", ChartRange1D, thanksgiving)
+	if err != nil {
+		t.Fatalf("Series: %v", err)
+	}
+	if len(series.Points) != 1 {
+		t.Fatalf("points = %d, want Wednesday's single bar", len(series.Points))
+	}
+	if series.Points[0].Timestamp != etUnix(2026, time.November, 25, 10, 0) {
+		t.Fatalf("timestamp = %d, want the Wednesday bar", series.Points[0].Timestamp)
+	}
+	if series.PreviousCloseUsdcMicros == nil || *series.PreviousCloseUsdcMicros != 240_000_000 {
+		t.Fatalf("previous close = %v, want Tuesday's close", series.PreviousCloseUsdcMicros)
 	}
 }
 
@@ -201,11 +315,15 @@ func TestBenchmarks_Series_partialPayloadKeepsUsableBars(t *testing.T) {
 	client := benchmarksServer(t, func(w http.ResponseWriter, r *http.Request) {
 		// Middle bar has no price; OHLC arrays are short, which the shim does for
 		// feeds that only publish a close.
-		_, _ = w.Write([]byte(`{
+		_, _ = w.Write([]byte(fmt.Sprintf(`{
 			"s":"ok",
-			"t":[1758542400,1758546000,1758556800],
+			"t":[%d,%d,%d],
 			"c":[229.4,0,231.4]
-		}`))
+		}`,
+			etUnix(2026, time.September, 22, 10, 0),
+			etUnix(2026, time.September, 22, 10, 30),
+			etUnix(2026, time.September, 22, 11, 0),
+		)))
 	})
 
 	series, err := client.Series(context.Background(), "AAPLx", ChartRange1D, tradingNoon)

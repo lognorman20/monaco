@@ -60,10 +60,16 @@ type chartRangeWindow struct {
 	to        time.Time
 	// resolution is the TradingView shim's bar size.
 	resolution string
-	// lastSessionOnly narrows the window to the most recent trading session once
-	// the bars come back. 1D means "today's session", and after the close, over a
-	// weekend or on a holiday that session is not the last 24 hours.
-	lastSessionOnly bool
+	// regularOpen and regularClose bound the regular cash session inside the
+	// window, for the ranges that have one (1D). The chart still draws the whole
+	// extended session; only the stats grid folds over these.
+	regularOpen  time.Time
+	regularClose time.Time
+	// previousCloseAt is the instant the previous close is taken at or before.
+	// Zero means "the last bar before from", which is what every range but 1D
+	// wants; 1D wants the previous regular session's closing bar, not whatever
+	// after-hours print happened to be last before 04:00 ET.
+	previousCloseAt time.Time
 }
 
 func chartWindow(chartRange ChartRange, now time.Time) chartRangeWindow {
@@ -105,21 +111,53 @@ func chartWindow(chartRange ChartRange, now time.Time) chartRangeWindow {
 			resolution: "W",
 		}
 	default:
-		// 1D. Reach back far enough to clear a long holiday weekend so the most
-		// recent session is always in the payload.
+		return dayWindow(now)
+	}
+}
+
+// dayWindow is the 1D window: the most recent trading session, taken from the
+// exchange calendar rather than from the bars that came back.
+//
+// Inferring it from the data was wrong at the root. Pyth equity feeds keep
+// republishing a frozen last price after the bell — `isFrozenEquityMark` and
+// QuoteStatusStale exist precisely to detect that — and Benchmarks builds bars
+// from published prices, so a Saturday request would get Saturday bars, anchor the
+// window on Saturday, and draw a flat line of identical closes with Friday's close
+// as its baseline. The calendar knows Saturday is not a session; the data does not.
+func dayWindow(now time.Time) chartRangeWindow {
+	session, found := marketcal.LastTradingSession(now)
+	if !found {
+		// No session inside the calendar's scan horizon. Degrade to a rolling day
+		// rather than to no chart at all.
 		return chartRangeWindow{
-			from:            now.AddDate(0, 0, -1),
-			fetchFrom:       now.AddDate(0, 0, -7),
-			to:              now,
-			resolution:      "5",
-			lastSessionOnly: true,
+			from:       now.AddDate(0, 0, -1),
+			fetchFrom:  now.AddDate(0, 0, -7),
+			to:         now,
+			resolution: "5",
 		}
 	}
+
+	to := session.PostCloseEnd
+	if now.Before(to) {
+		to = now
+	}
+	window := chartRangeWindow{
+		from: session.PreMarketOpen,
+		// Reach back far enough to clear a long holiday weekend, so the previous
+		// session's closing bar is always in the payload.
+		fetchFrom:    session.PreMarketOpen.AddDate(0, 0, -7),
+		to:           to,
+		resolution:   "5",
+		regularOpen:  session.RegularOpen,
+		regularClose: session.RegularClose,
+	}
+	if previous, ok := marketcal.PreviousTradingSession(session.Day); ok {
+		window.previousCloseAt = previous.RegularClose
+	}
+	return window
 }
 
 // allRangeYears bounds ALL. xStocks themselves are months old; five years of the
 // underlying equity is as much history as the chart can honestly claim to be about
 // the thing the user can buy.
 const allRangeYears = 5
-
-func exchangeLocation() *time.Location { return marketcal.Location() }

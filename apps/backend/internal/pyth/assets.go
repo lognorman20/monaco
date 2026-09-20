@@ -49,6 +49,19 @@ type AssetChartSeries struct {
 	Range ChartRange `json:"range,omitempty"`
 	// Source names which upstream produced the series.
 	Source string `json:"source,omitempty"`
+	// Basis names which instrument these prices are. Every Pyth history source we
+	// have serves the underlying equity, not the xStock, so a series sits next to a
+	// token hero price that is legitimately a few tens of bps away from it. Saying
+	// so is the difference between a labelled comparison and a silent mismatch.
+	Basis string `json:"-"`
+	// BasisSymbol is the instrument Basis refers to — "AAPL" for an underlying.
+	BasisSymbol string `json:"-"`
+	// RegularOpen and RegularClose bound the regular cash session this window
+	// covers, in UTC, and are zero for the ranges that do not have one. The series
+	// itself spans the extended session so the chart can draw pre- and post-market;
+	// the stats grid folds only between these two.
+	RegularOpen  time.Time `json:"-"`
+	RegularClose time.Time `json:"-"`
 	// Handler logging only; omitted from JSON responses.
 	RequestedSamples int `json:"-"`
 	FailedSamples    int `json:"-"`
@@ -138,12 +151,28 @@ func (c *HermesClient) seriesFromHermes(ctx context.Context, symbol string, char
 	series := buildChartSeries(points, len(samples), failed)
 	series.Range = chartRange
 	series.Source = ChartSourceHermes
+	// The sampler reads the same equity feed Benchmarks does, so the series is about
+	// the underlying, not the token.
+	series.Basis = PriceBasisUnderlying
+	series.BasisSymbol = UnderlyingTicker(symbol)
+	// The sampling grid spans the extended session, so the stats grid still needs
+	// the exchange's bells to fold between.
+	window := chartWindow(chartRange, now)
+	series.RegularOpen, series.RegularClose = window.regularOpen, window.regularClose
 	logChartSeries(symbol, chartRange, series.RequestedSamples, series.FailedSamples, len(series.Points))
 	return series
 }
 
+// cacheChartSeries stores a resolved series, including an empty one. An empty
+// series here means an upstream that answered and had nothing — Benchmarks
+// `no_data`, or a sampler that got no usable point — and re-asking on every
+// request made the symbols with no history the most expensive ones in the catalog.
+// The cache gives an empty answer a much shorter life than a real series.
+//
+// A one-point series is cached as well; it is a real answer, and leaving it
+// uncached meant a thinly traded symbol went upstream on every load too.
 func (c *HermesClient) cacheChartSeries(symbol string, chartRange ChartRange, series AssetChartSeries) {
-	if len(series.Points) >= 2 && c.chartCache != nil {
+	if c.chartCache != nil {
 		c.chartCache.Set(symbol, chartRange, series)
 	}
 }
@@ -159,26 +188,21 @@ func buildChartSeries(points []ChartPoint, requested, failed int) AssetChartSeri
 	sort.Slice(points, func(i, j int) bool {
 		return points[i].Timestamp < points[j].Timestamp
 	})
-	series := AssetChartSeries{
+	// No previous close. The sampler's grid starts inside the window, so its first
+	// point is drawn in the series itself — shipping it as PreviousCloseUsdcMicros
+	// put a fabricated number under the same field name as the genuine Benchmarks
+	// previous close, and the client drew the dashed baseline straight through the
+	// curve's first point with the day change reading 0% at t0. The honest answer
+	// from this source is that it does not know one.
+	return AssetChartSeries{
 		Points:           points,
 		RequestedSamples: requested,
 		FailedSamples:    failed,
 	}
-	// The fallback samples a fixed grid, so the first point is the closest thing it
-	// has to a previous close: it is the price at the instant the window opened.
-	if len(points) >= 2 {
-		previousClose := points[0].PriceUsdcMicros
-		series.PreviousCloseUsdcMicros = &previousClose
-	}
-	return series
 }
 
 func (c *HermesClient) resolveFeedIDForChart(ctx context.Context, symbol string) (string, error) {
-	if cachedID, ok := lookupFeedID(EquityQuerySymbol(symbol)); ok && cachedID != "" {
-		return cachedID, nil
-	}
-	feedID, _, err := c.resolveFeedSession(ctx, symbol)
-	return feedID, err
+	return c.resolveFeedID(ctx, symbol, EquityQuerySymbol(symbol))
 }
 
 type chartSampleResult struct {
@@ -290,7 +314,8 @@ func strideSamples(now time.Time, days, strideDays int) []time.Time {
 }
 
 func (c *HermesClient) change24h(ctx context.Context, symbol string, currentMicros int64) (string, bool, error) {
-	feedID, _, err := c.resolveFeedSession(ctx, symbol)
+	// The id alone; is_open says nothing about a price 24 hours ago.
+	feedID, err := c.resolveFeedID(ctx, symbol, EquityQuerySymbol(symbol))
 	if err != nil {
 		return "", false, err
 	}

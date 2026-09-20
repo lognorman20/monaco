@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -288,6 +289,8 @@ func TestGET_assets_symbol_stats_areBuiltFromCandlesAndTheYearSeries(t *testing.
 	previousClose := int64(226_500_000)
 	pyth.RegisterChartSeries(handlers.Pyth, "AAPLx", pyth.ChartRange1D, pyth.AssetChartSeries{
 		PreviousCloseUsdcMicros: &previousClose,
+		Basis:                   pyth.PriceBasisUnderlying,
+		BasisSymbol:             "AAPL",
 		Points: []pyth.ChartPoint{
 			{Timestamp: 1, PriceUsdcMicros: 229_400_000, OpenUsdcMicros: 229_000_000, HighUsdcMicros: 229_500_000, LowUsdcMicros: 228_200_000},
 			{Timestamp: 2, PriceUsdcMicros: 231_400_000, OpenUsdcMicros: 231_000_000, HighUsdcMicros: 231_800_000, LowUsdcMicros: 230_400_000},
@@ -328,6 +331,55 @@ func TestGET_assets_symbol_stats_areBuiltFromCandlesAndTheYearSeries(t *testing.
 	}
 	if stats.SpreadBps == nil {
 		t.Fatal("expected the trading cost from the Jupiter probe")
+	}
+	// The grid is NASDAQ dollars; the hero price is the xStock's on-chain price.
+	// They disagree by the premium the stock-vs-token card exists to show, so the
+	// response has to name the instrument the cells are about — otherwise a hero
+	// price above the day's high reads as a bug rather than as two instruments.
+	if stats.Basis != pyth.PriceBasisUnderlying || stats.BasisSymbol != "AAPL" {
+		t.Fatalf("basis = %q/%q, want underlying/AAPL", stats.Basis, stats.BasisSymbol)
+	}
+}
+
+func TestGET_assets_symbol_stats_labelTheUnderlyingEvenWhenTheSeriesDidNotSaySo(t *testing.T) {
+	t.Parallel()
+
+	// A series from a source that predates the label, or one assembled without it.
+	// Every Pyth history source reads the underlying's feed, so the honest answer is
+	// still "underlying" — the one thing that must never happen is shipping the
+	// cells unlabelled beside a token price.
+	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	seedApple(t, handlers)
+	pyth.RegisterChartSeries(handlers.Pyth, "AAPLx", pyth.ChartRange1D, pyth.AssetChartSeries{
+		Points: []pyth.ChartPoint{{Timestamp: 1, PriceUsdcMicros: 229_400_000}},
+	})
+
+	stats := getAssetDetail(t, handlers, token).Stats
+	if stats == nil {
+		t.Fatal("expected a stats grid")
+	}
+	if stats.Basis != pyth.PriceBasisUnderlying || stats.BasisSymbol != "AAPL" {
+		t.Fatalf("basis = %q/%q, want underlying/AAPL", stats.Basis, stats.BasisSymbol)
+	}
+}
+
+func TestGET_assets_symbol_stats_aLabelAloneDoesNotMakeAGrid(t *testing.T) {
+	t.Parallel()
+
+	// The grid is omitted when nothing could be sourced. Adding a basis label must
+	// not turn "nothing to show" into an object of nulls with a caption on it.
+	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	seedApple(t, handlers)
+	pyth.RegisterChartSeries(handlers.Pyth, "AAPLx", pyth.ChartRange1D, pyth.AssetChartSeries{
+		Basis:       pyth.PriceBasisUnderlying,
+		BasisSymbol: "AAPL",
+		EmptyReason: pyth.EmptyReasonNoHistory,
+	})
+
+	if stats := getAssetDetail(t, handlers, token).Stats; stats != nil {
+		t.Fatalf("stats = %+v, want the grid omitted", stats)
 	}
 }
 
@@ -372,6 +424,8 @@ func TestGET_assets_symbol_chart_servesEveryRangeWithItsPreviousClose(t *testing
 			PreviousCloseUsdcMicros: &previousClose,
 			Range:                   chartRange,
 			Source:                  pyth.ChartSourceBenchmarks,
+			Basis:                   pyth.PriceBasisUnderlying,
+			BasisSymbol:             "AAPL",
 			Points: []pyth.ChartPoint{
 				{Timestamp: 1, PriceUsdcMicros: 229_400_000, OpenUsdcMicros: 229_000_000},
 				{Timestamp: 2, PriceUsdcMicros: 231_400_000, OpenUsdcMicros: 231_000_000},
@@ -406,6 +460,51 @@ func TestGET_assets_symbol_chart_servesEveryRangeWithItsPreviousClose(t *testing
 		if payload.Market == nil {
 			t.Fatalf("%s: expected a market status alongside the series", chartRange)
 		}
+		// The curve is the underlying equity's, drawn under a token hero price.
+		if payload.Basis != pyth.PriceBasisUnderlying || payload.BasisSymbol != "AAPL" {
+			t.Fatalf("%s basis = %q/%q, want underlying/AAPL", chartRange, payload.Basis, payload.BasisSymbol)
+		}
+	}
+}
+
+func TestGET_assets_symbol_chart_sampledFallbackShipsNoPreviousClose(t *testing.T) {
+	t.Parallel()
+
+	// The Hermes sampler's grid starts inside the window, so its first point is
+	// drawn in the series itself. Shipping it as previousCloseUsdcMicros put a
+	// fabricated number under the same field name as the genuine Benchmarks
+	// previous close: the dashed baseline landed exactly on the curve's first
+	// point, and the day change read 0% at t0.
+	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	seedApple(t, handlers)
+	pyth.RegisterChartSeries(handlers.Pyth, "AAPLx", pyth.ChartRange1D, pyth.AssetChartSeries{
+		Range:  pyth.ChartRange1D,
+		Source: pyth.ChartSourceHermes,
+		Points: []pyth.ChartPoint{
+			{Timestamp: 1, PriceUsdcMicros: 229_400_000},
+			{Timestamp: 2, PriceUsdcMicros: 231_400_000},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLx/chart?range=1D", nil)
+	req.SetPathValue("symbol", "AAPLx")
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handlers.GetAssetChartHandler(rec, req)
+
+	var payload assetChartResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if payload.Source != pyth.ChartSourceHermes {
+		t.Fatalf("source = %q, want the sampled fallback", payload.Source)
+	}
+	if payload.PreviousCloseUsdcMicros != nil {
+		t.Fatalf("previous close = %d, want the field omitted: the sampler does not know one", *payload.PreviousCloseUsdcMicros)
+	}
+	if !strings.Contains(rec.Body.String(), `"points"`) || strings.Contains(rec.Body.String(), "previousCloseUsdcMicros") {
+		t.Fatalf("body = %s, want no previousCloseUsdcMicros key at all", rec.Body.String())
 	}
 }
 

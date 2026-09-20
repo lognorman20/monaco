@@ -97,6 +97,14 @@ type assetLiquidityResponse struct {
 // not source this" and "this is zero" are different answers, and the grid omits a
 // cell rather than showing a made-up one. Market cap, P/E and dividend yield have
 // no source behind xStocks and are deliberately absent.
+//
+// Basis is not decoration. Open/High/Low/PreviousClose and the 52-week range are
+// folded from Pyth Benchmarks candles for the underlying equity — Apple on NASDAQ —
+// while PriceUsdcMicros on the detail is the xStock's on-chain price. The two
+// differ by the premium the stock-vs-token card exists to show, so a hero price
+// above "the day's high" is two instruments, not a bug. The app labels the grid
+// with BasisSymbol; without that label it would be reading NASDAQ dollars as if
+// they were the token's.
 type assetStatsResponse struct {
 	OpenUsdcMicros          *int64 `json:"openUsdcMicros,omitempty"`
 	HighUsdcMicros          *int64 `json:"highUsdcMicros,omitempty"`
@@ -108,6 +116,9 @@ type assetStatsResponse struct {
 	SpreadBps *int `json:"spreadBps,omitempty"`
 	// ConfUsdcMicros is Pyth's own confidence interval on the latest equity mark.
 	ConfUsdcMicros *int64 `json:"confUsdcMicros,omitempty"`
+	// Basis is "underlying" or "token"; BasisSymbol names it ("AAPL").
+	Basis       string `json:"basis,omitempty"`
+	BasisSymbol string `json:"basisSymbol,omitempty"`
 }
 
 // referenceQuoteResponse is one leg of the stock-vs-token comparison. Status is
@@ -159,8 +170,13 @@ type assetChartResponse struct {
 	Range string `json:"range"`
 	// Source is "benchmarks" or "hermes" — a dense candle series or the sparse
 	// sampled fallback.
-	Source string                `json:"source,omitempty"`
-	Market *marketStatusResponse `json:"market,omitempty"`
+	Source string `json:"source,omitempty"`
+	// Basis is which instrument the curve is. Both Pyth history sources read the
+	// underlying equity's feed, so a 1D chart is Apple on NASDAQ drawn under an
+	// AAPLx hero price. BasisSymbol names it, and the app labels the chart with it.
+	Basis       string                `json:"basis,omitempty"`
+	BasisSymbol string                `json:"basisSymbol,omitempty"`
+	Market      *marketStatusResponse `json:"market,omitempty"`
 }
 
 // ListAssetsHandler handles GET /v1/assets.
@@ -313,7 +329,12 @@ func (h *AssetsHandlers) GetAssetChartHandler(w http.ResponseWriter, r *http.Req
 		PreviousCloseUsdcMicros: series.PreviousCloseUsdcMicros,
 		Range:                   string(chartRange),
 		Source:                  series.Source,
+		Basis:                   series.Basis,
+		BasisSymbol:             series.BasisSymbol,
 		Market:                  h.marketStatus(),
+	}
+	if resp.Basis == "" && len(series.Points) > 0 {
+		resp.Basis, resp.BasisSymbol = pyth.PriceBasisUnderlying, pyth.UnderlyingTicker(symbol)
 	}
 	if resp.Points == nil {
 		// An absent array and an empty one read the same to a Swift decoder, but a
@@ -491,7 +512,7 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset xstocks.Cat
 			confMicros = &conf
 		}
 	}
-	detail.Stats = assetStatsResponseFor(day, year, detail.Liquidity.SpreadBps, confMicros)
+	detail.Stats = assetStatsResponseFor(asset.Symbol, day, year, detail.Liquidity.SpreadBps, confMicros)
 	return detail
 }
 
@@ -507,7 +528,7 @@ func (h *AssetsHandlers) referenceQuotes(ctx context.Context, asset xstocks.Cata
 		return pyth.ReferenceQuotes{}, false
 	}
 	if quotes.Token.Status == pyth.QuoteStatusUnavailable && markMicros != nil {
-		quotes.Token = pyth.JupiterFallbackQuote(*markMicros, h.now())
+		quotes.Token = pyth.JupiterFallbackQuote(*markMicros)
 	}
 	// A card with nothing on either side is not a card.
 	if !quotes.Equity.Priced() && !quotes.Token.Priced() {
@@ -527,25 +548,35 @@ func (h *AssetsHandlers) chartSeries(ctx context.Context, symbol string, chartRa
 	return series
 }
 
-func assetStatsResponseFor(day, year pyth.AssetChartSeries, spreadBps *int, confMicros *int64) *assetStatsResponse {
+func assetStatsResponseFor(symbol string, day, year pyth.AssetChartSeries, spreadBps *int, confMicros *int64) *assetStatsResponse {
 	stats := pyth.SessionStats(day)
-	week52High, week52Low := pyth.Week52Range(year)
-	resp := &assetStatsResponse{
-		OpenUsdcMicros:          stats.OpenUsdcMicros,
-		HighUsdcMicros:          stats.HighUsdcMicros,
-		LowUsdcMicros:           stats.LowUsdcMicros,
-		PreviousCloseUsdcMicros: stats.PreviousCloseUsdcMicros,
-		Week52HighUsdcMicros:    week52High,
-		Week52LowUsdcMicros:     week52Low,
-		SpreadBps:               spreadBps,
-		ConfUsdcMicros:          confMicros,
-	}
-	if *resp == (assetStatsResponse{}) {
+	stats.Week52HighUsdcMicros, stats.Week52LowUsdcMicros = pyth.Week52Range(year)
+	stats.SpreadBps = spreadBps
+	stats.ConfUsdcMicros = confMicros
+	if !stats.HasFigures() {
 		// Nothing could be sourced. Omit the grid rather than ship an empty object
 		// the app would have to special-case.
 		return nil
 	}
-	return resp
+
+	basis, basisSymbol := stats.Basis, stats.BasisSymbol
+	if basis == "" {
+		// Every Pyth history source we have serves the underlying equity's feed, so
+		// a series that did not record its own basis is still the underlying's.
+		basis, basisSymbol = pyth.PriceBasisUnderlying, pyth.UnderlyingTicker(symbol)
+	}
+	return &assetStatsResponse{
+		OpenUsdcMicros:          stats.OpenUsdcMicros,
+		HighUsdcMicros:          stats.HighUsdcMicros,
+		LowUsdcMicros:           stats.LowUsdcMicros,
+		PreviousCloseUsdcMicros: stats.PreviousCloseUsdcMicros,
+		Week52HighUsdcMicros:    stats.Week52HighUsdcMicros,
+		Week52LowUsdcMicros:     stats.Week52LowUsdcMicros,
+		SpreadBps:               stats.SpreadBps,
+		ConfUsdcMicros:          stats.ConfUsdcMicros,
+		Basis:                   basis,
+		BasisSymbol:             basisSymbol,
+	}
 }
 
 func stockVsTokenResponseFor(quotes pyth.ReferenceQuotes) *stockVsTokenResponse {

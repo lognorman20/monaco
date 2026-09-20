@@ -162,7 +162,10 @@ func (c *HermesClient) storeReferenceQuotes(symbol string, quotes ReferenceQuote
 }
 
 func (c *HermesClient) quoteFromFeed(ctx context.Context, symbol, query string, source QuoteSource, now time.Time) ReferenceQuote {
-	feedID, _, err := c.resolveFeedByQuery(ctx, symbol, query)
+	// Only the id is needed here: staleness comes from the publish time on the price
+	// itself, not from market_hours.is_open, so a feed lookup for a known id would
+	// be a round trip whose whole answer gets discarded.
+	feedID, err := c.resolveFeedID(ctx, symbol, query)
 	if err != nil {
 		return unavailableQuote(source, quoteFailureReason(err))
 	}
@@ -224,7 +227,17 @@ func unavailableQuote(source QuoteSource, reason string) ReferenceQuote {
 // JupiterFallbackQuote wraps an on-chain price as the token leg for an xStock with
 // no Pyth crypto feed. The source is recorded as Jupiter so the app can label it
 // "on-chain price" instead of implying Pyth published it.
-func JupiterFallbackQuote(priceUsdcMicros int64, at time.Time) ReferenceQuote {
+//
+// It carries no publish time. Jupiter's Price API does not say when the price it
+// returns was struck, and stamping the server's own clock on it claimed a precision
+// nobody has — the app would have rendered "updated 2 seconds ago" about an instant
+// that means nothing. A nil publishedAt is the honest answer, and the app has copy
+// for a leg that does not know its own age.
+//
+// The premium against this leg stands: Jupiter prices the xStock mint, so it is
+// still the token against the underlying, just from a different venue than Pyth.
+// The card says which venue.
+func JupiterFallbackQuote(priceUsdcMicros int64) ReferenceQuote {
 	if priceUsdcMicros <= 0 {
 		return unavailableQuote(QuoteSourceJupiter, QuoteReasonUpstream)
 	}
@@ -232,6 +245,5 @@ func JupiterFallbackQuote(priceUsdcMicros int64, at time.Time) ReferenceQuote {
 		Source:          QuoteSourceJupiter,
 		Status:          QuoteStatusLive,
 		PriceUsdcMicros: priceUsdcMicros,
-		PublishedAt:     at.UTC(),
 	}
 }

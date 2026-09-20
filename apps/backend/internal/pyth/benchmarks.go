@@ -98,6 +98,11 @@ func (c *BenchmarksClient) Series(ctx context.Context, symbol string, chartRange
 	series := assembleSeries(bars, window)
 	series.Range = chartRange
 	series.Source = ChartSourceBenchmarks
+	// Benchmarks is queried for the underlying equity feed, so these candles are
+	// Apple on NASDAQ — not AAPLx on Solana. Record it rather than let a caller
+	// assume the series is about the thing the user can actually buy.
+	series.Basis = PriceBasisUnderlying
+	series.BasisSymbol = UnderlyingTicker(symbol)
 	return series, nil
 }
 
@@ -206,29 +211,35 @@ func usdToMicros(value float64) (int64, bool) {
 }
 
 // assembleSeries splits the fetched bars into the ones inside the window and the
-// one before it, which is the previous close.
+// one that supplies the previous close. Both boundaries come from the window — that
+// is, from the exchange calendar — never from the bars, which keep arriving after
+// the bell whether or not a session is running.
 func assembleSeries(bars []ohlcBar, window chartRangeWindow) AssetChartSeries {
 	if len(bars) == 0 {
 		return AssetChartSeries{EmptyReason: EmptyReasonNoHistory}
 	}
 
-	from := window.from
-	if window.lastSessionOnly {
-		// 1D means "the session you are looking at". After the close, over a weekend
-		// or on a holiday that is the last session that traded, not a rolling 24h
-		// window that would draw a flat line through the night.
-		from = sessionStart(bars[len(bars)-1].timestamp)
+	fromUnix := window.from.Unix()
+	var toUnix int64 = math.MaxInt64
+	if !window.to.IsZero() {
+		toUnix = window.to.Unix()
+	}
+	// Without an explicit instant, the previous close is the last bar before the
+	// window opens. 1D sets one: the previous regular session's close.
+	previousCloseUnix := fromUnix - 1
+	if !window.previousCloseAt.IsZero() {
+		previousCloseUnix = window.previousCloseAt.Unix()
 	}
 
-	fromUnix := from.Unix()
 	inWindow := make([]ohlcBar, 0, len(bars))
 	var previousClose int64
 	for _, bar := range bars {
-		if bar.timestamp < fromUnix {
+		if bar.timestamp <= previousCloseUnix {
 			previousClose = bar.close
-			continue
 		}
-		inWindow = append(inWindow, bar)
+		if bar.timestamp >= fromUnix && bar.timestamp <= toUnix {
+			inWindow = append(inWindow, bar)
+		}
 	}
 	if len(inWindow) == 0 {
 		return AssetChartSeries{EmptyReason: EmptyReasonNoHistory}
@@ -249,19 +260,13 @@ func assembleSeries(bars []ohlcBar, window chartRangeWindow) AssetChartSeries {
 	series := AssetChartSeries{
 		Points:           points,
 		RequestedSamples: len(inWindow),
+		RegularOpen:      window.regularOpen,
+		RegularClose:     window.regularClose,
 	}
 	if previousClose > 0 {
 		series.PreviousCloseUsdcMicros = &previousClose
 	}
 	return series
-}
-
-// sessionStart is midnight ET on the day of ts. Bars carry UTC seconds, and a US
-// session spans two UTC dates, so the day boundary has to be the exchange's.
-func sessionStart(ts int64) time.Time {
-	local := time.Unix(ts, 0).In(exchangeLocation())
-	year, month, day := local.Date()
-	return time.Date(year, month, day, 0, 0, 0, 0, exchangeLocation())
 }
 
 // downsample keeps the first and last bar and spreads the rest evenly, so the

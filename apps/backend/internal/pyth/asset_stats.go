@@ -19,22 +19,50 @@ type AssetStats struct {
 	ConfUsdcMicros *int64
 	// SpreadBps is the round-trip cost implied by the Jupiter probes.
 	SpreadBps *int
+	// Basis names the instrument the candle-derived cells describe, and BasisSymbol
+	// names it in full. Every history source we have serves the underlying equity,
+	// so these cells are Apple on NASDAQ while the hero price is AAPLx on Solana.
+	// The two disagree by design — that is what the stock-vs-token card is for — and
+	// without this label a current price above the day's high reads as a bug rather
+	// than as two instruments.
+	Basis       string
+	BasisSymbol string
 }
 
-// SessionStats folds a day series into open/high/low/previous close. The series is
-// expected to be the 1D range: its first bar opens the session, and its previous
-// close is the baseline the day's change is measured against.
+// HasFigures reports whether any cell was sourced. A grid with nothing in it is
+// omitted whole rather than shipped as an object of nulls.
+func (s AssetStats) HasFigures() bool {
+	return s.OpenUsdcMicros != nil ||
+		s.HighUsdcMicros != nil ||
+		s.LowUsdcMicros != nil ||
+		s.PreviousCloseUsdcMicros != nil ||
+		s.Week52HighUsdcMicros != nil ||
+		s.Week52LowUsdcMicros != nil ||
+		s.ConfUsdcMicros != nil ||
+		s.SpreadBps != nil
+}
+
+// SessionStats folds a day series into open/high/low/previous close.
 //
-// A Hermes fallback series carries no candles, so only close prices are available;
-// high and low are then the extremes of those closes, which is the most the source
-// can honestly support.
+// It folds only the regular cash session. The 1D window deliberately spans the
+// extended session so the chart can draw pre- and post-market, but Robinhood's Open
+// cell is the 09:30 print, not the 04:00 one, and its High/Low are the regular
+// session's — a pre-market spike is not the day's high. RegularOpen/RegularClose on
+// the series carry the exchange's own boundaries; a series without them (a range
+// that has no session, or a source that did not record one) folds whole, which is
+// the most that series can support.
 func SessionStats(series AssetChartSeries) AssetStats {
-	stats := AssetStats{PreviousCloseUsdcMicros: series.PreviousCloseUsdcMicros}
-	if len(series.Points) == 0 {
+	stats := AssetStats{
+		PreviousCloseUsdcMicros: series.PreviousCloseUsdcMicros,
+		Basis:                   series.Basis,
+		BasisSymbol:             series.BasisSymbol,
+	}
+	points := regularSessionPoints(series)
+	if len(points) == 0 {
 		return stats
 	}
 
-	first := series.Points[0]
+	first := points[0]
 	open := first.OpenUsdcMicros
 	if open <= 0 {
 		open = first.PriceUsdcMicros
@@ -43,7 +71,7 @@ func SessionStats(series AssetChartSeries) AssetStats {
 		stats.OpenUsdcMicros = &open
 	}
 
-	high, low := seriesExtremes(series)
+	high, low := pointExtremes(points)
 	if high > 0 {
 		stats.HighUsdcMicros = &high
 	}
@@ -53,21 +81,40 @@ func SessionStats(series AssetChartSeries) AssetStats {
 	return stats
 }
 
+// regularSessionPoints narrows a series to the bars inside the regular cash
+// session. A bar is kept when it opens at or after the bell and before the close,
+// so the 16:00 bar itself — which belongs to the after-hours window — is excluded.
+func regularSessionPoints(series AssetChartSeries) []ChartPoint {
+	if series.RegularOpen.IsZero() || series.RegularClose.IsZero() {
+		return series.Points
+	}
+	from := series.RegularOpen.Unix()
+	to := series.RegularClose.Unix()
+	out := make([]ChartPoint, 0, len(series.Points))
+	for _, point := range series.Points {
+		if point.Timestamp < from || point.Timestamp >= to {
+			continue
+		}
+		out = append(out, point)
+	}
+	return out
+}
+
 // Week52Range folds a year series into its high and low. Both are nil when the
 // series is empty, which is what a symbol listed last month honestly looks like.
 func Week52Range(series AssetChartSeries) (high, low *int64) {
 	if len(series.Points) == 0 {
 		return nil, nil
 	}
-	maxima, minima := seriesExtremes(series)
+	maxima, minima := pointExtremes(series.Points)
 	if maxima <= 0 || minima <= 0 {
 		return nil, nil
 	}
 	return &maxima, &minima
 }
 
-func seriesExtremes(series AssetChartSeries) (high, low int64) {
-	for _, point := range series.Points {
+func pointExtremes(points []ChartPoint) (high, low int64) {
+	for _, point := range points {
 		for _, candidate := range []int64{point.PriceUsdcMicros, point.HighUsdcMicros, point.LowUsdcMicros} {
 			if candidate <= 0 {
 				continue

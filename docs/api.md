@@ -27,6 +27,25 @@ unentitled or down comes back as `status: "unavailable"` with a `reason`, not as
 number borrowed from somewhere else. A feed that has stopped publishing is
 `status: "stale"` with the `publishedAt` it froze at.
 
+**Two prices per symbol.** An xStock has an underlying equity and a token, and they
+do not agree — the premium is what `stockVsToken` is for. `priceUsdcMicros` on the
+asset routes is the **token's** on-chain price. Everything folded from price
+history — the `stats` grid and the `chart` series — comes from Pyth's history for
+the **underlying equity**, and says so in `basis` (`underlying | token`) and
+`basisSymbol` (`"AAPL"`). A `priceUsdcMicros` above `stats.highUsdcMicros` is
+therefore two instruments, not an error; render the grid and the chart under their
+`basisSymbol`.
+
+**`previousCloseUsdcMicros`** is the close of the regular session before the window,
+for the dashed day-change baseline. It is **omitted when the source does not know
+one**: the sampled fallback (`source: "hermes"`) starts its grid inside the window,
+so any value it could offer is a point already in `points`. Draw no baseline rather
+than one lying on the curve's first point.
+
+**`stats` open/high/low** are the **regular cash session's** (09:30–16:00 ET, 13:00
+on a half day), not the extended session's. The 1D chart still spans pre- and
+post-market — the curve and the grid deliberately cover different windows.
+
 **Rate limits.** Per process, non-GET only. Over budget is `429` with `Retry-After`.
 "Per user" is the verified Privy user, so refreshing a token does not reset it (agent
 callers: per agent key). A bearer token that fails verification is limited per IP only.
