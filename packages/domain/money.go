@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 )
@@ -37,17 +38,23 @@ func (s ShareUnits) IsZero() bool {
 	return ok && r.Sign() == 0
 }
 
-func ratRoundToInt64(r *big.Rat) int64 {
+// ErrAmountOverflow means a money computation does not fit in int64 micros.
+// It is returned instead of a silently wrapped (often negative) amount.
+var ErrAmountOverflow = errors.New("amount overflows int64 micros")
+
+// ratFloorToInt64 truncates a rational toward zero (floor for non-negative values).
+// Every money amount derived from a ratio is floored rather than rounded to the
+// nearest unit: the fraction of a micro always stays in the pot, so a payout can
+// never exceed what the member actually owns.
+func ratFloorToInt64(r *big.Rat) (int64, error) {
 	if r == nil || r.Sign() == 0 {
-		return 0
+		return 0, nil
 	}
-	num := r.Num()
-	den := r.Denom()
-	twiceNum := new(big.Int).Lsh(num, 1)
-	twiceNum.Add(twiceNum, den)
-	twiceDen := new(big.Int).Lsh(den, 1)
-	rounded := twiceNum.Div(twiceNum, twiceDen)
-	return rounded.Int64()
+	floored := new(big.Int).Quo(r.Num(), r.Denom())
+	if !floored.IsInt64() {
+		return 0, ErrAmountOverflow
+	}
+	return floored.Int64(), nil
 }
 
 func multiplyDecimalByMicros(units string, markPerUnit USDCMicros) (USDCMicros, error) {
@@ -56,7 +63,11 @@ func multiplyDecimalByMicros(units string, markPerUnit USDCMicros) (USDCMicros, 
 		return 0, fmt.Errorf("invalid units: %q", units)
 	}
 	product := new(big.Rat).Mul(u, big.NewRat(int64(markPerUnit), 1))
-	return USDCMicros(ratRoundToInt64(product)), nil
+	micros, err := ratFloorToInt64(product)
+	if err != nil {
+		return 0, fmt.Errorf("mark value for %q units: %w", units, err)
+	}
+	return USDCMicros(micros), nil
 }
 
 func divideMicrosByShares(numerator USDCMicros, shares ShareUnits) (USDCMicros, error) {
@@ -65,7 +76,20 @@ func divideMicrosByShares(numerator USDCMicros, shares ShareUnits) (USDCMicros, 
 		return 0, fmt.Errorf("invalid share units: %q", shares)
 	}
 	quotient := new(big.Rat).Quo(big.NewRat(int64(numerator), 1), den)
-	return USDCMicros(ratRoundToInt64(quotient)), nil
+	micros, err := ratFloorToInt64(quotient)
+	if err != nil {
+		return 0, fmt.Errorf("per-share price: %w", err)
+	}
+	return USDCMicros(micros), nil
+}
+
+// AddMicros returns a+b and errors when the sum overflows int64 micros.
+func AddMicros(a, b USDCMicros) (USDCMicros, error) {
+	sum := new(big.Int).Add(big.NewInt(int64(a)), big.NewInt(int64(b)))
+	if !sum.IsInt64() {
+		return 0, ErrAmountOverflow
+	}
+	return USDCMicros(sum.Int64()), nil
 }
 
 // MulDivFloor returns floor(a*b/c) for non-negative a and b and positive c,

@@ -84,7 +84,12 @@ func MemberEquity(memberShares, totalShares ShareUnits, potNav USDCMicros) (USDC
 
 	fraction := new(big.Rat).Quo(member, total)
 	product := new(big.Rat).Mul(fraction, big.NewRat(int64(potNav), 1))
-	return USDCMicros(ratRoundToInt64(product)), nil
+	// Floor, so the sum of every member's equity can never exceed pot NAV.
+	micros, err := ratFloorToInt64(product)
+	if err != nil {
+		return 0, fmt.Errorf("member equity: %w", err)
+	}
+	return USDCMicros(micros), nil
 }
 
 // PercentReturn computes equity/netIn - 1. Returns nil when netIn is zero.

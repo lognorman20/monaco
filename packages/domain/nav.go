@@ -53,7 +53,15 @@ func ComputePotNAV(in NavInput) (PotNAV, error) {
 			if err != nil {
 				return PotNAV{}, err
 			}
-			total += value
+			if holding.MarkUsdc < 0 {
+				return PotNAV{}, fmt.Errorf("mark for %s must be non-negative", holding.Symbol)
+			}
+			// Checked add: a wrapped total would turn a large pot negative and
+			// then price every share off a negative NAV.
+			total, err = AddMicros(total, value)
+			if err != nil {
+				return PotNAV{}, fmt.Errorf("pot nav for %s: %w", holding.Symbol, err)
+			}
 		}
 	}
 

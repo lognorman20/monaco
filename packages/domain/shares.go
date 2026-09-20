@@ -29,7 +29,13 @@ func ShareUnitsMicrosForDeposit(deposited USDCMicros, nav PotNAV) (int64, error)
 		big.NewRat(1_000_000, 1),
 	)
 	quotient := new(big.Rat).Quo(product, big.NewRat(int64(nav.PerShareUsdc), 1))
-	return ratRoundToInt64(quotient), nil
+	// Floor: a depositor never gets a fraction of a share unit rounded up, which
+	// would mint claim on money nobody paid in and dilute the existing members.
+	micros, err := ratFloorToInt64(quotient)
+	if err != nil {
+		return 0, fmt.Errorf("share units for deposit: %w", err)
+	}
+	return micros, nil
 }
 
 func shareUnitsFromMicros(micros int64) (ShareUnits, error) {
