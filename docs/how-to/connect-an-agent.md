@@ -16,7 +16,7 @@ walkthrough — use `--dry-run` or point `--api` at a local/staging backend only
 6. To manage the bot later, use the same **Propose** sheet: **Pause the trading bot**,
    **Turn the trading bot back on**, or **Remove the trading bot** — each is a cabal vote.
 
-## From the terminal
+## One intent from the terminal
 
 ```bash
 export MONACO_AGENT_KEY=<the key from step 4>
@@ -32,6 +32,61 @@ scripts/demo/agent-intent.sh sell AAPLx 0.5 --group <group-id>
 `buy` amounts are USD; `sell` amounts are shares. The script converts both to the API's
 integer units, prints the request with the key redacted, and pretty-prints the response.
 Run `scripts/demo/agent-intent.sh --help` for all flags.
+
+## Run the reference bot
+
+`agents/momentum-bot` is a small Go program (standard library only) that trades a cabal's bot
+budget with one rule: compare each price to where it was one lookback ago, buy what is up
+past a threshold, sell what the bot bought once it is down past one. It is meant to be read
+and forked.
+
+```bash
+export MONACO_API=http://127.0.0.1:8080
+export MONACO_GROUP_ID=<group-id>
+export MONACO_AGENT_KEY=<the key from step 4>   # env only; there is no flag for it
+
+cd agents/momentum-bot
+
+# Dry run is the default: real catalog, real prices, nothing sent
+go run . --symbols GOOGLx,NVDAx
+
+# One decision, then exit. Short lookback so a recording does not wait five minutes
+go run . --symbols GOOGLx --once --interval 10s --lookback 1m --buy-pct 0.05
+
+# Real intents. Asks y/N first; --yes skips the question
+go run . --symbols GOOGLx --live --trade-usd 1 --max-spend-usd 5
+```
+
+What it prints:
+
+```
+14:07:10  GOOGLx  $ 352.10  +0.80% over 5m  buy signal
+14:07:10  NVDAx   $ 222.02  +0.02% over 5m  hold
+14:07:10  → buy $1.00 of GOOGLx
+14:07:13  ✓ filled  tx 5b0c…  intent 91ab…  ($1.00 of $5.00 spent)
+```
+
+How it behaves:
+
+- **Symbols come from the cabal.** It reads `GET /v1/groups/{id}/assets` with the agent key
+  and only watches routable assets. Without `--symbols` it takes the first five.
+- **Prices are public.** Jupiter's Price API v3, keyed by each asset's Solana mint — the same
+  API the backend prices the asset list with. Override with `JUPITER_PRICE_URL`.
+- **Two caps of its own**, `--trade-usd` per buy and `--max-spend-usd` per run. Set the total
+  below the budget the cabal voted; the server enforces that budget either way. The total is
+  per process: it resets on restart, the server's count does not.
+- **One trade per tick, one per symbol per lookback.** Sells go before buys, then the biggest move wins.
+- **Sells are sized from its own buys.** The API has no holdings endpoint for agents, so the
+  bot estimates what each buy returned (less 2%) and sells that. It never sells what members bought.
+- **`401` stops it.** Retrying a bad key only trips the wrong-key throttle. **`403`** (paused
+  by vote) and **`429`** (honours `Retry-After`) make it stand down and keep watching.
+  **`422`** prints the server's reason; "exceeds agent allocation" ends buying for the run.
+- **An intent is never resent.** On a timeout or `5xx` the swap may have gone through, so the
+  bot counts the buy against its cap and points you at the activity feed.
+- **The key is never printed**, in the banner, the log, or an error.
+
+Tests: `cd agents/momentum-bot && go test ./...` (strategy, caps, and every HTTP status above
+against `httptest` servers).
 
 ## What judges see
 
