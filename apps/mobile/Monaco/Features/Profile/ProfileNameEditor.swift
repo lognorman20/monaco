@@ -1,6 +1,13 @@
 import MonacoCore
 import SwiftUI
 
+/// A stand-in for `AppSessionStore.updateDisplayName`, so the debug harnesses can drive this
+/// screen against a store that answers. An existential rather than an `async` closure on
+/// purpose: a closure handed down through two view layers is reabstracted at every hop.
+protocol DisplayNameSaving {
+    func saveDisplayName(_ draft: String) async -> ProfileSaveOutcome
+}
+
 /// Inline display-name editor: validates as you type with the server's rules and saves
 /// through `AppSessionStore.updateDisplayName` (optimistic, rolled back on failure).
 ///
@@ -14,14 +21,23 @@ struct ProfileNameEditor: View {
 
     /// Called once the server has stored the new name. The host closes the sheet.
     var onSaved: () -> Void
+    /// Stands in for the store call. Nil in the app; the debug harnesses use it to exercise
+    /// this screen against a backend that answers.
+    var saveName: (any DisplayNameSaving)?
 
     @State private var draft: String
     @State private var isSaving = false
     @State private var saveError: String?
     @FocusState private var isFocused: Bool
 
-    init(auth: DynamicAuthService, initialDraft: String? = nil, onSaved: @escaping () -> Void) {
+    init(
+        auth: DynamicAuthService,
+        initialDraft: String? = nil,
+        saveName: (any DisplayNameSaving)? = nil,
+        onSaved: @escaping () -> Void
+    ) {
         self.auth = auth
+        self.saveName = saveName
         self.onSaved = onSaved
         _draft = State(initialValue: initialDraft ?? "")
     }
@@ -88,7 +104,12 @@ struct ProfileNameEditor: View {
         isSaving = true
         isFocused = false
         saveError = nil
-        let outcome = await session.updateDisplayName(draft, auth: auth)
+        let outcome: ProfileSaveOutcome
+        if let saveName {
+            outcome = await saveName.saveDisplayName(draft)
+        } else {
+            outcome = await session.updateDisplayName(draft, auth: auth)
+        }
         isSaving = false
         switch outcome {
         case .saved:

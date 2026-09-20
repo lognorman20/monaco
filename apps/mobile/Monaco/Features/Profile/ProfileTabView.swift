@@ -12,6 +12,9 @@ struct ProfileTabView: View {
     var initialNameDraft: String?
     /// Debug sample harness only: open the edit sheet immediately (to screenshot validation).
     var initiallyShowEditProfile = false
+    /// Debug sample harness only: stand in for the store's save so the *success* path — sheet
+    /// closes, toast lands on the uncovered screen — can be exercised without a backend.
+    var saveName: (any DisplayNameSaving)?
 
     @State private var toast: MonacoToast?
     @State private var showEditProfile = false
@@ -57,7 +60,7 @@ struct ProfileTabView: View {
         .sheet(isPresented: $showEditProfile) {
             NavigationStack {
                 Form {
-                    ProfileNameEditor(auth: auth, initialDraft: initialNameDraft) {
+                    ProfileNameEditor(auth: auth, initialDraft: initialNameDraft, saveName: saveName) {
                         // Close first: the toast is an overlay on this screen, so it is
                         // only readable once the sheet is out of the way.
                         showEditProfile = false
@@ -77,6 +80,10 @@ struct ProfileTabView: View {
             }
             .presentationDetents([.medium])
         }
+        // `.contain` for the same reason as `profile-header` below and the chat root: a bare
+        // identifier is handed to every descendant, so the whole profile tree reported itself
+        // as "profile-root" and nothing inside it could be addressed.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("profile-root")
         .onAppear {
             if initiallyShowEditProfile { showEditProfile = true }
