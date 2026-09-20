@@ -15,6 +15,8 @@ struct ProposeBuyView: View {
     @Environment(AppSessionStore.self) private var session: AppSessionStore?
 
     @State private var pot: ProposePot?
+    @State private var potLoadFailed = false
+    @State private var isLoadingPot = false
     @State private var query = ""
     @State private var popular: [ProposeStock] = []
     @State private var popularLoadFailed = false
@@ -75,12 +77,23 @@ struct ProposeBuyView: View {
         .navigationTitle(ProposeFlowCopy.buyTitle)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $picked) { stock in
-            ProposeAmountView(service: service, groupId: groupId, stock: stock, pot: pot, onProposed: finish)
+            if let pot {
+                ProposeAmountView(service: service, groupId: groupId, stock: stock, pot: pot, onProposed: finish)
+            } else {
+                ProposePotUnavailable(failed: potLoadFailed) { Task { await loadPot() } }
+            }
         }
         .monacoToast($toast)
         .task {
+            // A stock the member already chose is honoured on the first frame, before anything is
+            // awaited: the list below is live while the pot and the popular stocks load, so a tap
+            // on it during those round trips would otherwise be overwritten by this. The amount
+            // step still waits for the pot — `ProposePotUnavailable` stands in until it lands.
             applyInitialSymbolIfNeeded()
-            await loadPopular()
+            // The pot is the buy ceiling, so this screen loads it once for the whole flow.
+            async let stocks: Void = loadPopular()
+            await loadPot()
+            await stocks
         }
         .task(id: trimmedQuery) {
             guard !trimmedQuery.isEmpty else {
@@ -207,6 +220,19 @@ struct ProposeBuyView: View {
         )
     }
 
+    private func loadPot() async {
+        // Two quick taps on the retry used to fire two group-view reads.
+        guard pot == nil, !isLoadingPot else { return }
+        isLoadingPot = true
+        potLoadFailed = false
+        defer { isLoadingPot = false }
+        do {
+            pot = try await service.pot(groupId: groupId)
+        } catch {
+            if !error.isRequestCancellation { potLoadFailed = true }
+        }
+    }
+
     private func loadPopular(force: Bool = false) async {
         if !force, let cached = session?.popularAssets, !cached.isEmpty {
             popular = cached.map(ProposeStock.init(market:))
@@ -250,6 +276,31 @@ struct ProposeBuyView: View {
             if reset { searchFailed = true; results = [] }
             hasMore = false
         }
+    }
+}
+
+/// Stands in for the amount step until the pot is known: it is the buy ceiling, so without it
+/// "how much" has nothing to check the answer against. A failed load gets a real retry here
+/// instead of a dead screen with a Review button that can never be tapped.
+private struct ProposePotUnavailable: View {
+    let failed: Bool
+    let onRetry: () -> Void
+
+    var body: some View {
+        VStack {
+            if failed {
+                EmptyState(title: ProposeFlowCopy.potLoadFailed, actionTitle: ProposalFeedCopy.tryAgain, action: onRetry)
+                    .accessibilityIdentifier("propose-pot-error")
+            } else {
+                ProgressView()
+                    .tint(MonacoTheme.muted)
+                    .accessibilityLabel("Loading")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(MonacoTheme.canvas.ignoresSafeArea())
+        .navigationTitle(ProposeFlowCopy.amountTitle)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

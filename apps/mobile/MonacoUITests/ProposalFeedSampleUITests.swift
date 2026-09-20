@@ -28,6 +28,12 @@ final class ProposalFeedSampleUITests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
 
+    /// On screen and not behind the keyboard or the pinned composer.
+    private func waitUntilHittable(_ element: XCUIElement, timeout: TimeInterval = 5) -> Bool {
+        let hittable = expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: element)
+        return XCTWaiter().wait(for: [hittable], timeout: timeout) == .completed
+    }
+
     func testFeed_voteFromCard_thenCommentAndReplyInThread() throws {
         // Feed renders cards with vote summary and inline voting.
         let yes = element("proposal-card-vote-yes-sample-0")
@@ -74,13 +80,29 @@ final class ProposalFeedSampleUITests: XCTestCase {
         let field = element("comment-composer-field")
         field.tap()
         field.typeText("Count me in if we cap it at $25.")
+        // A simulator with Connect Hardware Keyboard on never shows the software keyboard, so
+        // asserting it went away would pass there without proving anything. Only hold it to
+        // standing down when it was actually up; the hittability checks below are the real test
+        // either way, since they fail whether the keyboard or the composer is covering the thread.
+        let keyboardWasUp = app.keyboards.firstMatch.exists
         element("comment-composer-send").tap()
         XCTAssertTrue(app.staticTexts["Comment posted"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Count me in if we cap it at $25."].waitForExistence(timeout: 5))
+        // The keyboard stands down once the comment lands and the thread scrolls to it, so the
+        // member sees what they posted and Reply can be reached without dismissing anything first.
+        if keyboardWasUp {
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the keyboard stayed up over the thread")
+        }
+        XCTAssertTrue(
+            waitUntilHittable(app.staticTexts["Count me in if we cap it at $25."]),
+            "the posted comment is off screen or behind the composer"
+        )
         capture("05-comment-posted")
 
         // Reply to Ben's comment.
-        element("comment-reply-c-1").tap()
+        let reply = element("comment-reply-c-1")
+        XCTAssertTrue(waitUntilHittable(reply), "Reply is not reachable after posting")
+        reply.tap()
         XCTAssertTrue(app.staticTexts["Replying to Ben Ortiz"].waitForExistence(timeout: 5))
         field.tap()
         field.typeText("Agreed, Nvidia next.")
@@ -88,11 +110,10 @@ final class ProposalFeedSampleUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Reply posted"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Agreed, Nvidia next."].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["4 comments"].waitForExistence(timeout: 5))
-        var threadSwipes = 0
-        while !app.staticTexts["Agreed, Nvidia next."].isHittable && threadSwipes < 6 {
-            app.swipeUp()
-            threadSwipes += 1
-        }
+        XCTAssertTrue(
+            waitUntilHittable(app.staticTexts["Agreed, Nvidia next."]),
+            "the posted reply is off screen or behind the composer"
+        )
         capture("06-reply-posted")
     }
 
@@ -274,5 +295,52 @@ final class ProposeFlowSampleUITests: XCTestCase {
         capture("22-sell-review")
         send.tap()
         XCTAssertTrue(app.staticTexts["Proposal sent to Weekend investors"].waitForExistence(timeout: 5))
+    }
+}
+
+/// The Stock detail entry into the buy flow, where no pot is handed down and the stock is already
+/// picked (`-MonacoProposeSampleStock`). `-MonacoProposePotFails` fails the first pot read.
+final class ProposeFromStockSampleUITests: XCTestCase {
+    private var app: XCUIApplication!
+
+    private func launch(_ extraArguments: [String]) {
+        continueAfterFailure = false
+        app = XCUIApplication()
+        app.launchArguments = ["-MonacoProposalFeedSample", "-MonacoProposeSampleStock"] + extraArguments
+        app.launch()
+    }
+
+    private func element(_ id: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+
+    func testStockEntry_reachesTheAmountStepWithThePot() throws {
+        launch([])
+        XCTAssertTrue(element("amount-entry-field").waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["The pot has $548.20"].exists)
+    }
+
+    /// A failed pot read used to leave a dead amount step: Review disabled for good, and helper
+    /// text saying "Try again" that was not a button. Now it is a real retry.
+    func testStockEntry_potFails_retryReachesTheAmountStep() throws {
+        launch(["-MonacoProposePotFails"])
+
+        let retry = element("propose-pot-error")
+        XCTAssertTrue(retry.waitForExistence(timeout: 10), "no retry offered after the pot failed to load")
+        XCTAssertFalse(element("amount-entry-field").exists, "the amount step opened without a pot")
+
+        // Scoped to this error state: "Try again" is also the popular-stocks retry on the picker
+        // underneath, so a bare `app.buttons["Try again"]` matches two elements and errors out
+        // instead of failing usefully the day the sample popular load breaks.
+        let retryButton = app.buttons.matching(identifier: "propose-pot-error").firstMatch
+        XCTAssertTrue(retryButton.waitForExistence(timeout: 5), "the pot retry is not a button")
+        retryButton.tap()
+
+        let amount = element("amount-entry-field")
+        XCTAssertTrue(amount.waitForExistence(timeout: 5))
+        let preset = app.buttons["$50"]
+        XCTAssertTrue(preset.waitForExistence(timeout: 5))
+        preset.tap()
+        XCTAssertTrue(app.buttons["Review"].isEnabled, "Review stayed disabled after the pot loaded")
     }
 }
