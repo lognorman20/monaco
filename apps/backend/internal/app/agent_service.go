@@ -177,12 +177,17 @@ func (g *GovernanceService) GetGroupAgentView(ctx context.Context, groupID strin
 	}, nil
 }
 
-// ConsumeAgentKeyForProposer returns the one-time minted key for the add-agent proposer.
-func (g *GovernanceService) ConsumeAgentKeyForProposer(ctx context.Context, proposalID, proposerID, viewerID string, status ProposalStatus) (string, bool, error) {
+// AgentKeyRevealWindow is how long after the add-agent vote passes the proposer can still
+// read the bot's plaintext key from the proposal detail.
+const AgentKeyRevealWindow = 15 * time.Minute
+
+// RevealAgentKeyForProposer returns the minted key to the proposer of a passed add-agent
+// proposal while the reveal window is open. Nobody else ever sees it.
+func (g *GovernanceService) RevealAgentKeyForProposer(ctx context.Context, proposalID, proposerID, viewerID string, status ProposalStatus) (string, bool, error) {
 	if status != ProposalPassed || viewerID != proposerID {
 		return "", false, nil
 	}
-	return g.store.ConsumeAgentKeyReveal(ctx, proposalID)
+	return g.store.ReadAgentKeyReveal(ctx, proposalID, AgentKeyRevealWindow)
 }
 
 func groupAgentFromRow(row postgres.GroupAgentRow) domain.GroupAgent {

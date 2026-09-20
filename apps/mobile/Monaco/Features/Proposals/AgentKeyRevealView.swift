@@ -1,7 +1,7 @@
 import MonacoCore
 import SwiftUI
 
-/// The bot key, shown once to the proposer after the vote passes.
+/// The bot key, readable by the proposer for 15 minutes after the vote passes.
 struct AgentKeyRevealView: View {
     let apiKey: String
     var onCopied: () -> Void = {}

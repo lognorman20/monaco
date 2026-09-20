@@ -68,9 +68,9 @@ func addAgentAndReveal(t *testing.T, h governanceHarness, groupID, proposerID st
 	if passed.Status != ProposalPassed {
 		t.Fatalf("add agent proposal status = %s, want passed", passed.Status)
 	}
-	key, ok, err := h.Governance.ConsumeAgentKeyForProposer(context.Background(), proposal.ID, proposerID, proposerID, passed.Status)
+	key, ok, err := h.Governance.RevealAgentKeyForProposer(context.Background(), proposal.ID, proposerID, proposerID, passed.Status)
 	if err != nil {
-		t.Fatalf("ConsumeAgentKeyForProposer: %v", err)
+		t.Fatalf("RevealAgentKeyForProposer: %v", err)
 	}
 	if !ok || key == "" {
 		t.Fatalf("expected key reveal, got ok=%v key=%q", ok, key)
@@ -110,30 +110,47 @@ func TestAgentKeyReveal_shownOnceToProposerOnly(t *testing.T) {
 	}
 
 	// A bystander viewing the same passed proposal never sees the key, and their look does not
-	// burn the one-time reveal for the real proposer.
-	bystanderKey, ok, err := h.Governance.ConsumeAgentKeyForProposer(context.Background(), proposal.ID, proposer.UserID, other.UserID, passed.Status)
+	// close the reveal window for the real proposer.
+	bystanderKey, ok, err := h.Governance.RevealAgentKeyForProposer(context.Background(), proposal.ID, proposer.UserID, other.UserID, passed.Status)
 	if err != nil {
-		t.Fatalf("ConsumeAgentKeyForProposer(bystander): %v", err)
+		t.Fatalf("RevealAgentKeyForProposer(bystander): %v", err)
 	}
 	if ok || bystanderKey != "" {
 		t.Fatalf("bystander got key ok=%v key=%q, want none", ok, bystanderKey)
 	}
 
-	key, ok, err := h.Governance.ConsumeAgentKeyForProposer(context.Background(), proposal.ID, proposer.UserID, proposer.UserID, passed.Status)
+	key, ok, err := h.Governance.RevealAgentKeyForProposer(context.Background(), proposal.ID, proposer.UserID, proposer.UserID, passed.Status)
 	if err != nil {
-		t.Fatalf("ConsumeAgentKeyForProposer(proposer): %v", err)
+		t.Fatalf("RevealAgentKeyForProposer(proposer): %v", err)
 	}
 	if !ok || len(key) != 5 {
 		t.Fatalf("expected a 5-char key on first reveal, got ok=%v key=%q", ok, key)
 	}
 
-	// Second look, even by the proposer, comes back empty: the app can only show it once.
-	again, ok, err := h.Governance.ConsumeAgentKeyForProposer(context.Background(), proposal.ID, proposer.UserID, proposer.UserID, passed.Status)
+	// The detail screen refetches (after a vote, on every poll), so a second read inside the
+	// window must return the same key rather than lose it.
+	again, ok, err := h.Governance.RevealAgentKeyForProposer(context.Background(), proposal.ID, proposer.UserID, proposer.UserID, passed.Status)
 	if err != nil {
-		t.Fatalf("ConsumeAgentKeyForProposer(second read): %v", err)
+		t.Fatalf("RevealAgentKeyForProposer(second read): %v", err)
 	}
-	if ok || again != "" {
-		t.Fatalf("expected key consumed after first reveal, got ok=%v key=%q", ok, again)
+	if !ok || again != key {
+		t.Fatalf("second read inside the window = ok=%v key=%q, want the same key %q", ok, again, key)
+	}
+
+	// Once the window has passed the plaintext is purged, for the proposer too.
+	expired, ok, err := h.Store.ReadAgentKeyReveal(context.Background(), proposal.ID, 0)
+	if err != nil {
+		t.Fatalf("ReadAgentKeyReveal(expired window): %v", err)
+	}
+	if ok || expired != "" {
+		t.Fatalf("expired window returned ok=%v key=%q, want none", ok, expired)
+	}
+	gone, ok, err := h.Governance.RevealAgentKeyForProposer(context.Background(), proposal.ID, proposer.UserID, proposer.UserID, passed.Status)
+	if err != nil {
+		t.Fatalf("RevealAgentKeyForProposer(after purge): %v", err)
+	}
+	if ok || gone != "" {
+		t.Fatalf("key still readable after purge: ok=%v key=%q", ok, gone)
 	}
 }
 

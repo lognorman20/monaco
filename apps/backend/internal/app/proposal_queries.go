@@ -342,7 +342,7 @@ func (g *GovernanceService) GetProposalDetail(ctx context.Context, accessToken, 
 
 	mintedKey := ""
 	if row.Kind == domain.ProposalKindAddAgent {
-		if key, ok, err := g.ConsumeAgentKeyForProposer(ctx, proposalID, row.ProposerID, user.ID, proposal.Status); err != nil {
+		if key, ok, err := g.RevealAgentKeyForProposer(ctx, proposalID, row.ProposerID, user.ID, proposal.Status); err != nil {
 			return ProposalDetailResult{}, err
 		} else if ok {
 			mintedKey = key
