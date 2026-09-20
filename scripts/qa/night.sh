@@ -32,6 +32,7 @@ only_ui=""
 sim="${MONACO_QA_SIM:-}"
 class_timeout="${MONACO_QA_CLASS_TIMEOUT:-1500}"
 min_free_swap_mb="${MONACO_QA_MIN_FREE_SWAP_MB:-256}"
+boot_timeout="${MONACO_QA_BOOT_TIMEOUT:-180}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -107,9 +108,26 @@ resolve_sim() {
   [[ -n "$sim" ]]
 }
 
+# `simctl bootstatus` can wait forever on a slimmed simulator whose disabled services never
+# report in, so the wait is bounded: past the limit the run carries on and the first Xcode
+# step decides whether the simulator is usable.
+wait_for_boot() {
+  xcrun simctl bootstatus "$sim" -b >/dev/null 2>&1 </dev/null &
+  local pid=$! waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if (( waited >= boot_timeout )); then
+      kill "$pid" 2>/dev/null
+      log "warning: $sim did not report booted within ${boot_timeout}s; continuing"
+      break
+    fi
+    sleep 2; waited=$((waited + 2))
+  done
+  wait "$pid" 2>/dev/null || true
+}
+
 prepare_sim() {
   xcrun simctl boot "$sim" >/dev/null 2>&1 || true
-  xcrun simctl bootstatus "$sim" -b >/dev/null 2>&1 || true
+  wait_for_boot
   if [[ -n "$simslim_bin" ]]; then
     "$simslim_bin" verify "$sim" --profile "$root/scripts/simslim-profile.json" >/dev/null 2>&1 \
       || "$simslim_bin" on "$sim" --no-reboot --profile "$root/scripts/simslim-profile.json" >> "$out/night.log" 2>&1 \

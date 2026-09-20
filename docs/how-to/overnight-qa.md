@@ -26,6 +26,8 @@ fails and then passes on retry is reported as flaky, not failing.
 ## Simulator
 
 The runner uses the simulator named **Monaco Night QA** (or `--sim <udid>` / `MONACO_QA_SIM`).
+It waits at most `MONACO_QA_BOOT_TIMEOUT` seconds (default 180) for the simulator to report booted,
+because a slimmed simulator can leave `simctl bootstatus` waiting forever.
 Create it once on an iOS 18.5+ runtime so SimSlim's settings persist across reboots:
 
 ```sh
