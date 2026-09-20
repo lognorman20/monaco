@@ -324,6 +324,31 @@ relayer target:
         ;;
     esac
 
+# Backfill local Postgres with demo cabals (txn history, proposals, nav snapshots).
+# Sign in once via the app (OTP) so a users row exists, then:
+#   just reset db && just run backend   # other terminal
+#   just seed demo
+# Optional: --user-id UUID | --privy-user-id DID | --if-empty=false (after reset db)
+seed target *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{target}}" in
+      demo)
+        if [[ "${MONACO_DOTENVX:-}" != "1" ]]; then
+          exec {{_dotenvx}} env MONACO_DOTENVX=1 just seed demo {{args}}
+        fi
+        ./scripts/require-docker.sh
+        source ./scripts/assert-local-database-url.sh
+        docker compose up -d --wait
+        ./scripts/apply-migrations.sh
+        go run -C apps/backend ./cmd/seed-demo {{args}}
+        ;;
+      *)
+        echo "error: unknown target '{{target}}' (use demo)"
+        exit 1
+        ;;
+    esac
+
 killports:
     #!/usr/bin/env bash
     set -euo pipefail
