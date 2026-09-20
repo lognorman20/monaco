@@ -8,14 +8,24 @@ loopback).
 
 | Env | What it does | Unset |
 | --- | --- | --- |
-| `LOG_FILE` | Appends every log line as JSON to this path. | Text on stderr only. |
+| `LOG_FILE` | Appends every log line as JSON to this path (stderr then logs JSON too). | stderr only. |
+| `LOG_FORMAT` | `text` or `json` on stderr. | `text` when `APP_ENV` is unset, `dev` or `local`; `json` otherwise. |
 | `SENTRY_DSN` | Reports handler panics, poller panics and alerts to Sentry. One DSN per environment. | Off. |
-| `APP_ENV`, `RELEASE` | Environment name and build id (git sha) on Sentry events. | Blank. |
+| `APP_ENV`, `RELEASE` | Environment name and build id (git sha) on Sentry events. `APP_ENV` also picks the log format. | Blank. |
 | `ALERT_WEBHOOK_URL` | Slack- or Discord-compatible incoming webhook that receives alerts. | Alerts stay in the log and Sentry. |
-| `METRICS_TOKEN` | Bearer token a Prometheus scraper presents to `GET /metrics`. | `/metrics` answers loopback only, 404 to everyone else. |
+| `METRICS_TOKEN` | Bearer token a Prometheus scraper presents to `GET /metrics`. | `/metrics` answers direct loopback callers only, 404 to everyone else, including anything that arrives with a forwarding header (a same-host reverse proxy makes every caller look like loopback). |
+| `DB_MAX_OPEN_CONNS`, `DB_MAX_IDLE_CONNS` | Postgres pool caps. | `20`, `10`. |
+| `DB_CONN_MAX_LIFETIME`, `DB_CONN_MAX_IDLE_TIME` | Connection recycling. | `30m`, `5m`. |
 
 A malformed `SENTRY_DSN` or `ALERT_WEBHOOK_URL` fails boot. A typo should not silently turn
 reporting off.
+
+Before an alert or a Sentry event leaves the process it is scrubbed. A panic value or an alert
+detail is often an upstream error, and those quote what was sent. Redacted: `Authorization`,
+`Cookie` and `X-Monaco-Agent-Key` values, bearer tokens and Privy JWTs, `wallet-auth:` keys,
+base58 or byte-array Solana secret keys, PEM private keys, URL passwords and `?api-key=` style
+query values. A transaction signature has the same shape as a secret key, so it survives only
+under a `tx_signature` / `signature` field.
 
 ## Alerts
 
@@ -32,12 +42,13 @@ async with a bounded queue, so a slow or dead webhook never blocks a money path.
 
 ## `GET /health`
 
-`200` with `ok` or `degraded`, `503` with `down`. Only `database` is critical. A restart does not
+`200` with `ok` or `degraded`, `503` with `down`. `database` and `auth_verifier` are critical. A restart does not
 refill a wallet or fix an upstream, and restarting mid-payout is worse than running degraded.
 
 | Check | Fails when |
 | --- | --- |
 | `database` (critical) | Postgres does not answer a ping. |
+| `auth_verifier` (critical) | The Privy verification key is not loaded, so no access token can be checked. Boot already refuses to start without a valid `PRIVY_VERIFICATION_KEY`; this catches a client wired without it. |
 | `solana_rpc` | The RPC does not answer a balance read. |
 | `relayer_balance` | The relayer holds 0.001 SOL or less. Also raises `relayer_low_balance`. |
 | `pollers` | A poller has not finished a tick in 3 intervals (2 minutes minimum). |
@@ -64,11 +75,20 @@ never raw paths, so ids do not become time series.
 | `monaco_poller_last_tick_timestamp_seconds` | `poller` | Alert when `time() - value` keeps growing. |
 | `monaco_poller_tick_duration_seconds` | `poller` | Tick cost. |
 | `monaco_relayer_balance_lamports` | | Updated on each `/health` probe round. |
+| `monaco_pending_deposits`, `monaco_pending_deposit_oldest_age_seconds` | | Deposits waiting for their sweep to confirm, and the age of the oldest. |
+| `monaco_pending_swaps`, `monaco_pending_swap_oldest_age_seconds` | | Treasury swaps still `pending`. |
+| `monaco_redeem_jobs`, `monaco_redeem_job_oldest_age_seconds` | `status` | Unsettled cash out jobs by `debited`, `selling`, `paying`; time since the longest-waiting one last changed status. |
+| `monaco_backlog_up` | | 0 when the backlog query failed on this scrape. The gauges above are then omitted, not zeroed. |
+| `go_sql_*` | `db_name` | `database/sql` pool stats: `go_sql_in_use_connections`, `go_sql_wait_count_total`. |
 | `monaco_price_breaker_opens_total` | `source` | One per outage, not per failed probe. |
 | `monaco_price_fallbacks_total` | `tier` | Holdings valued at cost basis because no live source answered. |
 | `monaco_alerts_total` | `kind`, `delivery` | `delivery`: `sent`, `failed`, `dropped`, `suppressed`, `log_only`. |
 
 Plus the standard Go runtime and process collectors.
+
+The backlog gauges are read from Postgres at scrape time and cached 10 s. Faker users and cabals
+are excluded: their rows never move. They cover what the event counters cannot: a deposit whose
+sweep never confirms or a cash out sitting in `paying` raises no error, it only gets older.
 
 Starter alert rules:
 
@@ -85,11 +105,36 @@ time() - monaco_poller_last_tick_timestamp_seconds > 300
 # Relayer under 0.005 SOL: top up before the hard floor
 monaco_relayer_balance_lamports < 5000000
 
+# A member funded a cabal 10 minutes ago and the sweep has not confirmed
+monaco_pending_deposit_oldest_age_seconds > 600
+
+# A cash out burnt share units and has not paid: the recovery poller retries from 10 minutes
+monaco_redeem_job_oldest_age_seconds{status="paying"} > 900
+
+# A treasury trade was recorded and never confirmed or failed
+monaco_pending_swap_oldest_age_seconds > 600
+
+# Members are seeing 5xx
+sum(rate(monaco_http_requests_total{status=~"5.."}[5m])) / sum(rate(monaco_http_requests_total[5m])) > 0.02
+
+# The backlog gauges are blind, so the three rules above cannot fire
+monaco_backlog_up == 0
+
+# Requests are queueing for a database connection
+rate(go_sql_wait_count_total[5m]) > 0
+
 # Alerts are being raised but not delivered
 sum(rate(monaco_alerts_total{delivery=~"failed|dropped"}[15m])) > 0
 ```
 
 ## Logs
+
+The API writes every line to stderr: slog text on a developer machine, one JSON object per line
+(`time` in UTC, `level`, `msg`, `request_id`, ids) once `APP_ENV` names a deployment. stderr is not
+durable by itself: the host keeps it (journald, Docker's log driver, the platform's log drain),
+so check a line arrives in the log store before the first production deploy. `LOG_FILE` adds an
+appended JSON copy on disk (mode 0600, rotate with logrotate `copytruncate`). Locally
+`just run` tees stderr to `.logs/<timestamp>/backend.log` as before.
 
 Every request gets an `X-Request-Id` (the client's, or one the API mints). It is echoed on the
 response, returned as `requestId` in every error body, and stamped as `request_id` on log lines

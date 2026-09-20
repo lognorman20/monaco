@@ -27,6 +27,10 @@ struct GroupDetailView: View {
     @State private var showLeaveConfirmation = false
     @State private var showWithdrawLeaveConfirmation = false
     @State private var isLeaving = false
+    /// Idempotency key for the leave request in flight; a retry after a lost response reuses it.
+    @State private var leaveSubmission = IdempotentSubmission()
+    /// One idempotency key holder per transaction being retried; retries of different rows overlap.
+    @State private var retrySubmissions: [String: IdempotentSubmission] = [:]
     @State private var activityItems: [GroupActivityItemDTO] = []
     @State private var activityLoading = true
     @State private var activityError: String?
@@ -388,7 +392,7 @@ struct GroupDetailView: View {
         isLeaving = true
         defer { isLeaving = false }
         do {
-            try await apiClient.leaveGroup(accessToken: token, groupId: groupId, withdrawStake: withdrawStake)
+            try await apiClient.leaveGroup(accessToken: token, groupId: groupId, withdrawStake: withdrawStake, submission: leaveSubmission)
             if withdrawStake {
                 toast = MonacoToast(message: "Cash moved to your account balance", isSuccess: true)
             }
@@ -424,8 +428,11 @@ struct GroupDetailView: View {
         retryingTransactionIDs.insert(item.id)
         defer { retryingTransactionIDs.remove(item.id) }
 
+        let submission = retrySubmissions[item.id] ?? IdempotentSubmission()
+        retrySubmissions[item.id] = submission
+
         do {
-            let result = try await apiClient.retryTransaction(accessToken: token, transactionId: item.id)
+            let result = try await apiClient.retryTransaction(accessToken: token, transactionId: item.id, submission: submission)
             await loadActivity(showLoadingIndicator: false)
             if result.status.lowercased() == "confirmed" {
                 let done = item.kind.lowercased() == "sell" ? "Sold" : "Bought"

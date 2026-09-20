@@ -156,7 +156,8 @@ final class ProposalsAPITests: XCTestCase {
             groupId: "grp-1",
             symbol: "AAPLx",
             usdc: 5_000_000,
-            thesis: "Strong earnings beat, raising guidance."
+            thesis: "Strong earnings beat, raising guidance.",
+            submission: IdempotentSubmission()
         )
 
         // Assert

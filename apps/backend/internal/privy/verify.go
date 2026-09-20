@@ -3,7 +3,6 @@ package privy
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -22,18 +21,13 @@ func (c *HTTPClient) VerifySession(ctx context.Context, token AccessToken) (Iden
 		return Identity{}, ErrInvalidToken
 	}
 
-	verificationKeyPEM, err := c.verificationKeyPEM()
-	if err != nil {
+	if err := c.VerifierReady(); err != nil {
 		return Identity{}, fmt.Errorf("%w: %v", ErrAPI, err)
 	}
-
-	publicKey, err := jwt.ParseECPublicKeyFromPEM([]byte(verificationKeyPEM))
-	if err != nil {
-		return Identity{}, fmt.Errorf("%w: invalid verification key: %v", ErrAPI, err)
-	}
+	publicKey := c.verificationKey
 
 	claims := &privyClaims{}
-	_, err = jwt.ParseWithClaims(
+	_, err := jwt.ParseWithClaims(
 		string(token),
 		claims,
 		func(t *jwt.Token) (any, error) {
@@ -62,10 +56,11 @@ func (c *HTTPClient) VerifySession(ctx context.Context, token AccessToken) (Iden
 	}, nil
 }
 
-func (c *HTTPClient) verificationKeyPEM() (string, error) {
-	key := strings.TrimSpace(os.Getenv("PRIVY_VERIFICATION_KEY"))
-	if key == "" {
-		return "", fmt.Errorf("PRIVY_VERIFICATION_KEY is required")
+// VerifierReady reports whether access tokens can be verified. The key is parsed once by
+// config.Load, so this only fails for a client built without it; GET /health surfaces it.
+func (c *HTTPClient) VerifierReady() error {
+	if c == nil || c.verificationKey == nil {
+		return fmt.Errorf("privy verification key is not loaded")
 	}
-	return key, nil
+	return nil
 }

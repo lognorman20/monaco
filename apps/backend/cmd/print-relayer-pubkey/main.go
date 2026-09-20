@@ -27,7 +27,7 @@ func main() {
 	}
 
 	pubkey := relayer.PublicKey()
-	solanaRPC := worker.NewHTTPSolanaRPC(cfg.SolanaCluster)
+	solanaRPC := worker.NewHTTPSolanaRPC(cfg.SolanaRPCEndpoint())
 	lamports, err := solanaRPC.GetBalance(ctx, pubkey)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "balance: %v\n", err)

@@ -93,8 +93,9 @@ protocol ProposeService: AnyObject {
     func priceMicros(symbol: String) async throws -> Int64?
     func buyQuote(groupId: String, symbol: String, usdcMicros: Int64) async throws -> BuyQuoteDTO
     func sellQuote(groupId: String, symbol: String, tokenAmount: Int64) async throws -> BuyQuoteDTO
-    /// Creates the proposal and returns its id.
-    func propose(groupId: String, draft: ProposalDraft) async throws -> String
+    /// Creates the proposal and returns its id. `submission` belongs to the screen so a retry
+    /// of the same draft is sent under the same idempotency key.
+    func propose(groupId: String, draft: ProposalDraft, submission: IdempotentSubmission) async throws -> String
 }
 
 @MainActor
@@ -140,25 +141,28 @@ final class LiveProposeService: ProposeService {
         )
     }
 
-    func propose(groupId: String, draft: ProposalDraft) async throws -> String {
+    func propose(groupId: String, draft: ProposalDraft, submission: IdempotentSubmission) async throws -> String {
         let token = try token()
         let response: CreateProposalResponse
         switch draft {
         case let .buy(symbol, usdcMicros, thesis):
             response = try await client.createProposal(
-                accessToken: token, groupId: groupId, kind: "buy", symbol: symbol, usdcMicros: usdcMicros, thesis: thesis.isEmpty ? nil : thesis
+                accessToken: token, groupId: groupId, kind: "buy", symbol: symbol, usdcMicros: usdcMicros, thesis: thesis.isEmpty ? nil : thesis,
+                submission: submission
             )
         case let .sell(symbol, tokenAmount, thesis):
             response = try await client.createProposal(
-                accessToken: token, groupId: groupId, kind: "sell", symbol: symbol, tokenAmount: tokenAmount, thesis: thesis.isEmpty ? nil : thesis
+                accessToken: token, groupId: groupId, kind: "sell", symbol: symbol, tokenAmount: tokenAmount, thesis: thesis.isEmpty ? nil : thesis,
+                submission: submission
             )
         case let .addAgent(name, allocationMicros):
             response = try await client.createProposal(
                 accessToken: token, groupId: groupId, kind: "add_agent",
-                agentDisplayName: name, allocationUsdcMicros: allocationMicros
+                agentDisplayName: name, allocationUsdcMicros: allocationMicros,
+                submission: submission
             )
         case let .agentLifecycle(kind):
-            response = try await client.createProposal(accessToken: token, groupId: groupId, kind: kind)
+            response = try await client.createProposal(accessToken: token, groupId: groupId, kind: kind, submission: submission)
         }
         return response.proposalId
     }

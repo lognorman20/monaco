@@ -1,0 +1,4 @@
+// Local: Go API from `just run backend` on this Mac. Debug builds only — a Release
+// build refuses this environment at launch.
+// `$()` keeps xcconfig from reading `//` as the start of a comment.
+MONACO_API_BASE_URL_local = http:/$()/localhost:8080
