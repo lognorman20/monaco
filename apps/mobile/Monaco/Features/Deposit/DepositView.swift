@@ -15,6 +15,9 @@ struct DepositView: View {
     @State private var depositAddress: String?
     @State private var errorMessage: String?
     @State private var isLoading = true
+    /// The balance this screen last announced, so the arrival toast does not depend on a shared
+    /// store that other screens also write.
+    @State private var lastAnnouncedBalanceMicros: Int64?
     @State private var toast: MonacoToast?
 
     var body: some View {
@@ -130,19 +133,21 @@ struct DepositView: View {
     }
 
     private func loadDepositAddress() async {
+        // Signed out first: `session.me` outlives the token, so reading the store before checking
+        // for one would show a signed-out member a deposit address from a stale profile.
+        guard let accessToken = auth.accessToken else {
+            depositAddress = nil
+            errorMessage = "Sign in to view your deposit address."
+            isLoading = false
+            return
+        }
+
         // The shell opened the backend session and read the profile before this screen existed,
         // so the address is already in hand. Two more round trips to fetch it again only kept the
         // member on a spinner.
         if let known = DepositAddress.usable(session.me?.memberWalletAddress) {
             depositAddress = known
             errorMessage = nil
-            isLoading = false
-            return
-        }
-
-        guard let accessToken = auth.accessToken else {
-            depositAddress = nil
-            errorMessage = "Sign in to view your deposit address."
             isLoading = false
             return
         }
@@ -168,6 +173,13 @@ struct DepositView: View {
             // The Try again button in this section is the way back, so the copy does not send the
             // member pulling on a screen that has no pull-to-refresh.
             errorMessage = "Couldn't load your deposit address."
+        } catch where error.isRequestCancellation {
+            // The hourly token rotation restarts `.task(id: auth.accessToken)` and cancels this
+            // request. Nothing went wrong, so nothing is claimed about the connection — but the
+            // spinner is not left running either: a cancellation is not proof that a replacement
+            // is on its way (URLSession reports -999 for more than a cancelled task), and the
+            // section's Try again button is the member's way out of any state but the spinner.
+            errorMessage = nil
         } catch {
             errorMessage = "No connection. Check your internet and try again."
         }
@@ -181,12 +193,18 @@ struct DepositView: View {
     private func refreshPlatformBalance() async throws {
         guard let token = auth.accessToken else { return }
         let fresh = try await apiClient.getPlatformBalance(accessToken: token)
-        let previous = session.platformBalance
-        guard fresh != previous else { return }
-        session.platformBalance = fresh
-        if let previous, fresh.availableUsdcMicros > previous.availableUsdcMicros {
-            toast = MonacoToast(message: "USDC arrived in your account balance.", isSuccess: true)
+        if session.platformBalance != fresh {
+            session.platformBalance = fresh
         }
+
+        // What this screen has announced, kept locally. The shared store is written by the shell
+        // and by Home as well, so comparing against it meant a refresh of theirs landing first
+        // made the number "unchanged" here and swallowed the arrival toast entirely. The first
+        // tick only seeds: arriving on a screen is not money arriving.
+        let previous = lastAnnouncedBalanceMicros
+        lastAnnouncedBalanceMicros = fresh.availableUsdcMicros
+        guard let previous, fresh.availableUsdcMicros > previous else { return }
+        toast = MonacoToast(message: "USDC arrived in your account balance.", isSuccess: true)
     }
 }
 
