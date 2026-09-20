@@ -14,12 +14,14 @@ private final class StubStocksDataSource: StocksTabDataSource {
     var popularCalls = 0
     /// Per-query latency, so a slow page for an old query can land after a fast new one.
     var delays: [String: Duration] = [:]
+    /// Per-offset latency, so page two can be held while page one answers at once.
+    var offsetDelays: [Int: Duration] = [:]
     var errors: [String: Error] = [:]
     var popularError: Error?
 
     func search(query: String, offset: Int, limit: Int) async throws -> ListMarketAssetsResponse {
         searches.append((query, offset))
-        if let delay = delays[query] {
+        if let delay = offsetDelays[offset] ?? delays[query] {
             try? await Task.sleep(for: delay)
         }
         if let error = errors[query] { throw error }
@@ -220,5 +222,107 @@ struct StocksTabModelTests {
         await model.refreshPopularIfStale()
         #expect(source.popularCalls == 1)
         #expect(model.popular.map(\.symbol) == ["AAPLx"])
+    }
+
+    /// The review finding: the stale-page guard compared the query *text*, which is an ABA check.
+    /// Typing an L and taking it off again leaves the same text on screen under a different
+    /// search, and page two of the first one passed the guard and appended itself into the list
+    /// the second one had just cleared.
+    @Test func aPageForARetypedQueryNeverLandsInTheListThatReplacedIt() async throws {
+        let source = StubStocksDataSource()
+        let model = StocksTabModel(dataSource: source)
+
+        model.updateQuery("aap")
+        try await settle()
+        #expect(model.results.map(\.symbol) == ["AAP-0", "AAP-1"])
+        #expect(model.hasMore)
+
+        // Page two of the "aap" on screen goes out, and is held in flight.
+        source.offsetDelays[2] = .milliseconds(500)
+        async let pageTwo: Void = model.loadMore()
+        try await Task.sleep(for: .milliseconds(50))
+
+        // The member types an L and deletes it: same text, a different search.
+        model.updateQuery("aapl")
+        model.updateQuery("aap")
+        #expect(model.results.isEmpty)
+        #expect(!model.isLoadingMore, "the new query's Load more must not be stuck on the old page")
+
+        await pageTwo
+        #expect(
+            !model.results.contains { $0.symbol == "AAP-2" },
+            "page two of the retyped query must not land in the list that replaced it"
+        )
+        try await settle()
+        #expect(model.results.map(\.symbol) == ["AAP-0", "AAP-1"])
+        #expect(model.hasMore)
+    }
+
+    /// The same orphaned page must not report *its* failure against the query that replaced it.
+    @Test func aFailedPageForARetypedQueryDoesNotShowItsErrorOnTheNewOne() async throws {
+        let source = StubStocksDataSource()
+        let model = StocksTabModel(dataSource: source)
+
+        model.updateQuery("aap")
+        try await settle()
+
+        source.offsetDelays[2] = .milliseconds(400)
+        source.errors["aap"] = Monaco.MonacoAPIError.httpStatus(500)
+        async let pageTwo: Void = model.loadMore()
+        try await Task.sleep(for: .milliseconds(50))
+
+        source.errors["aap"] = nil
+        model.updateQuery("aapl")
+        model.updateQuery("aap")
+        await pageTwo
+
+        #expect(!model.loadMoreFailed, "the old page's failure belongs to a query nobody is reading")
+        try await settle()
+        #expect(model.searchState == .results)
+    }
+
+    /// `loadMoreFailed` drives the "Could not load more stocks." caption and nothing exercised it.
+    @Test func aFailedLoadMoreKeepsTheRowsAndSaysSo() async throws {
+        let source = StubStocksDataSource()
+        let model = StocksTabModel(dataSource: source)
+
+        model.updateQuery("aap")
+        try await settle()
+        #expect(model.results.count == 2)
+
+        source.errors["aap"] = Monaco.MonacoAPIError.httpStatus(500)
+        await model.loadMore()
+
+        #expect(model.loadMoreFailed)
+        #expect(model.results.count == 2, "the rows already read stay on screen")
+        #expect(model.searchState == .results)
+        #expect(!model.isLoadingMore)
+
+        // Trying again clears the caption.
+        source.errors["aap"] = nil
+        await model.loadMore()
+        #expect(!model.loadMoreFailed)
+        #expect(model.results.map(\.symbol) == ["AAP-0", "AAP-1", "AAP-2", "AAP-3"])
+    }
+
+    /// A failed pull-to-refresh kept the rows but retracted the spinner in silence, so stale
+    /// prices read as fresh ones.
+    @Test func aFailedRefreshKeepsTheRowsAndAdmitsItFailed() async throws {
+        let source = StubStocksDataSource()
+        let model = StocksTabModel(dataSource: source)
+
+        model.updateQuery("aap")
+        try await settle()
+
+        source.errors["aap"] = Monaco.MonacoAPIError.httpStatus(500)
+        await model.refreshSearch()
+
+        #expect(model.refreshFailed)
+        #expect(model.results.map(\.symbol) == ["AAP-0", "AAP-1"])
+        #expect(model.searchState == .results, "rows beat an error message")
+
+        source.errors["aap"] = nil
+        await model.refreshSearch()
+        #expect(!model.refreshFailed)
     }
 }

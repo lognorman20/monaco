@@ -34,8 +34,11 @@ struct LiveStocksTabDataSource: StocksTabDataSource {
 
 /// State for the Stocks tab: the popular strip and debounced, paged catalog search.
 ///
-/// Every page request carries the query it was issued for and is dropped when that query is no
-/// longer the one on screen, so a slow page cannot land in a later query's list.
+/// Every page request is stamped with the search generation it was issued under and is dropped
+/// when that generation has moved on, so a slow page cannot land in a later query's list. The
+/// generation — rather than the query text — is what decides, because the text can come back:
+/// typing "AAPL" and deleting the L leaves "AAP" on screen again while page two of the *first*
+/// "AAP" is still in flight.
 @Observable
 @MainActor
 final class StocksTabModel {
@@ -63,6 +66,9 @@ final class StocksTabModel {
     private(set) var hasMore = false
     private(set) var isLoadingMore = false
     private(set) var loadMoreFailed = false
+    /// A pull-to-refresh that failed while rows were on screen: the rows stay, but silently
+    /// retracting the spinner would let the member read stale prices as fresh ones.
+    private(set) var refreshFailed = false
 
     private(set) var popular: [MarketAssetDTO] = []
     private(set) var popularState: PopularState = .loading
@@ -77,6 +83,9 @@ final class StocksTabModel {
     private var searchTask: Task<Void, Never>?
     private var popularLoadedAt: Date?
     private var isLoadingPopular = false
+    /// Bumped every time the query on screen changes. Pages carry the value they were issued
+    /// under; anything older than this is a response nobody is waiting for any more.
+    private var generation = 0
 
     init(
         dataSource: StocksTabDataSource,
@@ -140,20 +149,22 @@ final class StocksTabModel {
         let wasSearching = isSearching
         query = raw
         searchTask?.cancel()
+        // Cancelling the search task does not reach a page already in flight from `loadMore`,
+        // `refreshSearch` or `retrySearch`. Retiring the generation does: whatever they were
+        // fetching now belongs to a query nobody is reading.
+        let gen = nextGeneration()
         guard isSearching else {
             if wasSearching { resetResults() }
             searchState = .idle
             return
         }
-        results = []
-        hasMore = false
-        loadMoreFailed = false
+        resetResults()
         searchState = .loading
         let term = trimmedQuery
         searchTask = Task { [weak self] in
             try? await Task.sleep(for: Self.searchDebounce)
             guard !Task.isCancelled else { return }
-            await self?.runSearch(term)
+            await self?.runSearch(term, generation: gen)
         }
     }
 
@@ -162,60 +173,75 @@ final class StocksTabModel {
         guard !term.isEmpty else { return }
         searchTask?.cancel()
         searchState = .loading
-        await runSearch(term)
+        await runSearch(term, generation: generation)
     }
 
     /// Pull-to-refresh: re-reads page one of the query on screen.
     func refreshSearch() async {
         let term = trimmedQuery
         guard !term.isEmpty else { return }
-        await runSearch(term)
+        await runSearch(term, generation: generation)
     }
 
     func loadMore() async {
         let term = trimmedQuery
         guard !term.isEmpty, hasMore, !isLoadingMore else { return }
+        let gen = generation
         isLoadingMore = true
         loadMoreFailed = false
-        defer { isLoadingMore = false }
+        // Only this page's generation may clear the flag: a later query has its own Load more.
+        defer { if gen == generation { isLoadingMore = false } }
         let offset = results.count
         do {
             let page = try await dataSource.search(query: term, offset: offset, limit: pageSize)
             // The query moved on while this page was in flight: it belongs to nobody now.
-            guard term == trimmedQuery else { return }
+            guard gen == generation else { return }
             let known = Set(results.map(\.symbol))
             results += page.assets.filter { !known.contains($0.symbol) }
             hasMore = page.hasMore
             searchState = results.isEmpty ? .empty : .results
         } catch {
+            guard gen == generation else { return }
             handle(error) { loadMoreFailed = true }
         }
     }
 
-    private func runSearch(_ term: String) async {
+    private func runSearch(_ term: String, generation gen: Int) async {
         do {
             let page = try await dataSource.search(query: term, offset: 0, limit: pageSize)
-            guard term == trimmedQuery else { return }
+            guard gen == generation else { return }
             results = page.assets
             hasMore = page.hasMore
             loadMoreFailed = false
+            refreshFailed = false
             searchState = page.assets.isEmpty ? .empty : .results
         } catch {
-            guard term == trimmedQuery else { return }
+            guard gen == generation else { return }
             handle(error) {
                 // A failed refresh keeps the rows already on screen; only an empty list
                 // has nothing better to show than the error.
-                guard results.isEmpty else { return }
+                guard results.isEmpty else {
+                    refreshFailed = true
+                    return
+                }
                 hasMore = false
                 searchState = .failed
             }
         }
     }
 
+    /// Retires every page currently in flight and returns the generation to stamp the next one.
+    private func nextGeneration() -> Int {
+        generation &+= 1
+        isLoadingMore = false
+        return generation
+    }
+
     private func resetResults() {
         results = []
         hasMore = false
         loadMoreFailed = false
+        refreshFailed = false
     }
 
     private func handle(_ error: Error, otherwise: () -> Void) {
