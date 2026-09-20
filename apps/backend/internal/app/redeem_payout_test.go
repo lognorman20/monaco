@@ -10,6 +10,7 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -501,6 +502,84 @@ func TestWithdrawToBalance_legacyPayingJobWithoutSignature_isNeverPaidAgain(t *t
 	}
 	if job, found := f.activeJob(t); !found || job.ID != jobID || job.Status != string(domain.RedeemJobPaying) {
 		t.Fatalf("job found=%v id=%s status=%q, want it untouched", found, job.ID, job.Status)
+	}
+}
+
+// The live mark can vanish after the shares are debited: the job is re-priced before it pays.
+// That refusal has to land before anything is signed, so it leaves no payout on record and
+// no `paying` job behind, only the member's shares back where they were.
+func TestWithdrawToBalance_liveMarkLostAfterDebit_signsNothingAndReturnsShares(t *testing.T) {
+	t.Parallel()
+
+	h := integrationApp(t)
+	ctx := context.Background()
+	governance := NewGovernanceService(h.Store, h.Privy)
+	governance.SetRedeemService(h.Redeem)
+	token := h.ISO.UniqueToken("payout-mark-lost")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "payout-mark-lost", "Mark Lost User")
+	group, err := governance.CreateGroupWithRules(ctx, token, testGroupName(h.ISO, "payout-mark-lost"), DefaultGroupRules())
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	h.ISO.TrackGroup(group.GroupID)
+	const totalShares = int64(2_000_000)
+	const redeemShares = int64(500_000)
+	seedStakeAndHoldings(t, h, session.UserID, group.GroupID, "payout-mark-lost", totalShares, 1_000_000)
+	seedTestTreasuryUSDC(t, h.Privy, group.TreasuryAddress, 1_000_000)
+	wallet, found, err := h.Store.GetMemberWalletByUserID(ctx, session.UserID)
+	if err != nil || !found {
+		t.Fatalf("GetMemberWalletByUserID: found=%v err=%v", found, err)
+	}
+	jobID := wedgeRedeemJobInSelling(t, h, session.UserID, group.GroupID, wallet.SolanaAddress, redeemShares, 500_000)
+	pyth.RegisterMarkedPotError(h.Pyth, pyth.TreasuryRef{GroupID: group.GroupID}, errors.New("hermes down"))
+
+	_, err = h.Redeem.WithdrawToBalance(ctx, WithdrawToBalanceRequest{AccessToken: token, GroupID: group.GroupID})
+
+	if !errors.Is(err, ErrPotMarkUnavailable) {
+		t.Fatalf("err = %v, want ErrPotMarkUnavailable", err)
+	}
+	if got := privy.PreparedPayoutCount(h.Privy); got != 0 {
+		t.Fatalf("payouts signed = %d, want 0", got)
+	}
+	if _, found, err := h.Store.GetRedeemPayoutByJobID(ctx, jobID); err != nil || found {
+		t.Fatalf("redeem payout found=%v err=%v, want none on record", found, err)
+	}
+	if active, err := h.Store.HasActiveRedeemJobForUser(ctx, session.UserID, group.GroupID); err != nil || active {
+		t.Fatalf("active redeem job = %v err = %v, want none left behind", active, err)
+	}
+	position, _, err := h.Store.GetPosition(ctx, session.UserID, group.GroupID)
+	if err != nil || position.ShareUnits != totalShares {
+		t.Fatalf("share_units = %d err = %v, want %d (returned)", position.ShareUnits, err, totalShares)
+	}
+}
+
+// A block height that does not fit the bigint column is refused, never wrapped: a wrapped
+// height would make a transfer look expired (or alive) when it is not.
+func TestRecordRedeemPayoutIntent_blockHeightOutOfRange_isRefused(t *testing.T) {
+	t.Parallel()
+
+	f := newPayoutFixture(t, "payout-height-range")
+	ctx := context.Background()
+	const redeemShares = int64(500_000)
+	jobID := wedgeRedeemJobInSelling(t, f.h, f.userID, f.groupID, f.payoutAddr, redeemShares, redeemShares)
+
+	for _, height := range []uint64{0, 1 << 63, ^uint64(0)} {
+		_, err := f.h.Store.RecordRedeemPayoutIntent(ctx, postgres.RedeemPayoutIntent{
+			RedeemJobID:          jobID,
+			UserID:               f.userID,
+			GroupID:              f.groupID,
+			Amount:               redeemShares,
+			ToAddress:            f.payoutAddr,
+			TxSignature:          "sig-height-range",
+			SignedTx:             "SIGNED:sig-height-range",
+			LastValidBlockHeight: height,
+		})
+		if err == nil {
+			t.Fatalf("height %d: want the intent refused", height)
+		}
+	}
+	if job, found := f.activeJob(t); !found || job.Status != string(domain.RedeemJobSelling) {
+		t.Fatalf("job found=%v status=%q, want it still selling", found, job.Status)
 	}
 }
 

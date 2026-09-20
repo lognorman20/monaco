@@ -230,7 +230,7 @@ func (f *fakePrivyClient) PrepareUSDCPayout(ctx context.Context, req PayUSDCRequ
 	return PreparedPayout{
 		TxSignature:          sig,
 		SignedTransaction:    "SIGNED:" + sig,
-		LastValidBlockHeight: int64(1000 + f.preparedPayoutCount),
+		LastValidBlockHeight: uint64(1000 + f.preparedPayoutCount),
 	}, nil
 }
 
@@ -483,6 +483,17 @@ func ExpirePendingPayouts(client Client) {
 			payout.expired = true
 		}
 	}
+}
+
+// PreparedPayoutCount returns how many treasury payouts the fake client has signed.
+func PreparedPayoutCount(client Client) int {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		return 0
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	return fake.preparedPayoutCount
 }
 
 // LandedPayoutCount returns how many treasury payouts moved USDC on the fake chain.

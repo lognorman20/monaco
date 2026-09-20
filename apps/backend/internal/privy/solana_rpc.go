@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 )
 
 type solanaRPCEnvelope struct {
@@ -72,36 +71,13 @@ func (c *HTTPClient) callSolanaRPC(ctx context.Context, method string, params []
 	return nil
 }
 
-// getLatestBlockhashWithExpiry returns a recent blockhash and the last block height at which
-// a transaction carrying it can still land.
-func (c *HTTPClient) getLatestBlockhashWithExpiry(ctx context.Context) ([]byte, int64, error) {
-	var result struct {
-		Value struct {
-			Blockhash            string `json:"blockhash"`
-			LastValidBlockHeight int64  `json:"lastValidBlockHeight"`
-		} `json:"value"`
-	}
-	if err := c.callSolanaRPC(ctx, "getLatestBlockhash", []any{map[string]string{"commitment": "finalized"}}, &result); err != nil {
-		return nil, 0, err
-	}
-	blockhash := strings.TrimSpace(result.Value.Blockhash)
-	if blockhash == "" || result.Value.LastValidBlockHeight <= 0 {
-		return nil, 0, fmt.Errorf("%w: solana rpc missing blockhash or last valid block height", ErrAPI)
-	}
-	decoded, err := decodeBase58Pubkey(blockhash)
-	if err != nil {
-		return nil, 0, err
-	}
-	return decoded, result.Value.LastValidBlockHeight, nil
-}
-
-func (c *HTTPClient) getFinalizedBlockHeight(ctx context.Context) (int64, error) {
-	var height int64
+func (c *HTTPClient) getFinalizedBlockHeight(ctx context.Context) (uint64, error) {
+	var height uint64
 	if err := c.callSolanaRPC(ctx, "getBlockHeight", []any{map[string]string{"commitment": "finalized"}}, &height); err != nil {
 		return 0, err
 	}
-	if height <= 0 {
-		return 0, fmt.Errorf("%w: solana rpc returned block height %d", ErrAPI, height)
+	if height == 0 {
+		return 0, fmt.Errorf("%w: solana rpc returned block height 0", ErrAPI)
 	}
 	return height, nil
 }

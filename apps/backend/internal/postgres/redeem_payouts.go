@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -18,7 +19,7 @@ type RedeemPayoutRow struct {
 	ToAddress            string
 	TxSignature          string
 	SignedTx             string
-	LastValidBlockHeight int64
+	LastValidBlockHeight uint64
 	ProofMessage         sql.NullString
 	ProofSignature       sql.NullString
 	Status               string
@@ -46,7 +47,7 @@ type RedeemPayoutIntent struct {
 	ToAddress            string
 	TxSignature          string
 	SignedTx             string
-	LastValidBlockHeight int64
+	LastValidBlockHeight uint64
 	ProofMessage         string
 	ProofSignature       string
 }
@@ -54,8 +55,18 @@ type RedeemPayoutIntent struct {
 const redeemPayoutColumns = `id, redeem_job_id, user_id, group_id, amount, to_address, tx_signature, signed_tx,
   last_valid_block_height, proof_message, proof_signature, status, failure_reason, created_at, updated_at`
 
+// A block height is a uint64 on chain and a bigint in Postgres. Both directions are checked:
+// a wrapped height would make a live transfer look expired, or an expired one look live.
+func blockHeightToBigint(height uint64) (int64, error) {
+	if height == 0 || height > math.MaxInt64 {
+		return 0, fmt.Errorf("last valid block height %d is out of range", height)
+	}
+	return int64(height), nil
+}
+
 func scanRedeemPayout(scan func(dest ...any) error) (RedeemPayoutRow, error) {
 	var row RedeemPayoutRow
+	var lastValidBlockHeight int64
 	err := scan(
 		&row.ID,
 		&row.RedeemJobID,
@@ -65,7 +76,7 @@ func scanRedeemPayout(scan func(dest ...any) error) (RedeemPayoutRow, error) {
 		&row.ToAddress,
 		&row.TxSignature,
 		&row.SignedTx,
-		&row.LastValidBlockHeight,
+		&lastValidBlockHeight,
 		&row.ProofMessage,
 		&row.ProofSignature,
 		&row.Status,
@@ -73,7 +84,14 @@ func scanRedeemPayout(scan func(dest ...any) error) (RedeemPayoutRow, error) {
 		&row.CreatedAt,
 		&row.UpdatedAt,
 	)
-	return row, err
+	if err != nil {
+		return RedeemPayoutRow{}, err
+	}
+	if lastValidBlockHeight <= 0 {
+		return RedeemPayoutRow{}, fmt.Errorf("redeem payout %s: stored last valid block height %d is out of range", row.ID, lastValidBlockHeight)
+	}
+	row.LastValidBlockHeight = uint64(lastValidBlockHeight)
+	return row, nil
 }
 
 // RecordRedeemPayoutIntent writes the signed transfer and moves the job to `paying` in one
@@ -87,8 +105,12 @@ func (s *Store) RecordRedeemPayoutIntent(ctx context.Context, intent RedeemPayou
 	if intent.TxSignature == "" || intent.SignedTx == "" {
 		return RedeemPayoutRow{}, fmt.Errorf("tx signature and signed tx are required")
 	}
-	if intent.Amount <= 0 || intent.LastValidBlockHeight <= 0 {
-		return RedeemPayoutRow{}, fmt.Errorf("amount and last valid block height must be positive")
+	if intent.Amount <= 0 {
+		return RedeemPayoutRow{}, fmt.Errorf("amount must be positive")
+	}
+	lastValidBlockHeight, err := blockHeightToBigint(intent.LastValidBlockHeight)
+	if err != nil {
+		return RedeemPayoutRow{}, err
 	}
 
 	tx, err := s.BeginTx(ctx)
@@ -127,7 +149,7 @@ RETURNING ` + redeemPayoutColumns
 
 	row, err := scanRedeemPayout(tx.QueryRowContext(ctx, insertSQL,
 		intent.RedeemJobID, intent.UserID, intent.GroupID, intent.Amount, intent.ToAddress,
-		intent.TxSignature, intent.SignedTx, intent.LastValidBlockHeight,
+		intent.TxSignature, intent.SignedTx, lastValidBlockHeight,
 		intent.ProofMessage, intent.ProofSignature,
 	).Scan)
 	if err != nil {

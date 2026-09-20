@@ -1,9 +1,7 @@
 package privy
 
 import (
-	"bytes"
 	"context"
-	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -34,7 +32,7 @@ type PayUSDCRequest struct {
 type PreparedPayout struct {
 	TxSignature          string
 	SignedTransaction    string
-	LastValidBlockHeight int64
+	LastValidBlockHeight uint64
 }
 
 // PayoutState is where a payout transaction stands on chain.
@@ -95,6 +93,11 @@ func (c *HTTPClient) PrepareUSDCPayout(ctx context.Context, req PayUSDCRequest) 
 	if err != nil {
 		return PreparedPayout{}, err
 	}
+	// Without it a transfer that never lands could never be told apart from one still in
+	// flight, so nothing is signed.
+	if lastValidBlockHeight == 0 {
+		return PreparedPayout{}, fmt.Errorf("%w: solana rpc did not report a last valid block height", ErrAPI)
+	}
 
 	txBase64, err := buildUSDCPayoutTransaction(usdcPayoutRequest{
 		RelayerKey:      c.relayerPrivateKey,
@@ -106,7 +109,7 @@ func (c *HTTPClient) PrepareUSDCPayout(ctx context.Context, req PayUSDCRequest) 
 		return PreparedPayout{}, err
 	}
 	// The relayer is the fee payer, so its signature is the transaction id.
-	relayerSignature, err := firstTransactionSignature(txBase64)
+	relayerSignature, err := feePayerSignature(txBase64)
 	if err != nil {
 		return PreparedPayout{}, err
 	}
@@ -115,7 +118,7 @@ func (c *HTTPClient) PrepareUSDCPayout(ctx context.Context, req PayUSDCRequest) 
 	if err != nil {
 		return PreparedPayout{}, err
 	}
-	signature, err := firstTransactionSignature(signed)
+	signature, err := feePayerSignature(signed)
 	if err != nil {
 		return PreparedPayout{}, err
 	}
@@ -147,7 +150,7 @@ func (c *HTTPClient) BroadcastUSDCPayout(ctx context.Context, payout PreparedPay
 // USDCPayoutStatus reports whether a payout landed, failed, is still in flight, or can no
 // longer land because its blockhash expired.
 func (c *HTTPClient) USDCPayoutStatus(ctx context.Context, payout PreparedPayout) (PayoutStatus, error) {
-	if payout.TxSignature == "" || payout.LastValidBlockHeight <= 0 {
+	if payout.TxSignature == "" || payout.LastValidBlockHeight == 0 {
 		return PayoutStatus{}, fmt.Errorf("%w: payout signature and last valid block height required", ErrAPI)
 	}
 
@@ -177,26 +180,6 @@ func (c *HTTPClient) USDCPayoutStatus(ctx context.Context, payout PreparedPayout
 		return status, nil
 	}
 	return PayoutStatus{State: PayoutStateDropped}, nil
-}
-
-// firstTransactionSignature returns the base58 transaction id of a base64 wire transaction.
-func firstTransactionSignature(txBase64 string) (string, error) {
-	raw, err := base64.StdEncoding.DecodeString(txBase64)
-	if err != nil {
-		return "", fmt.Errorf("%w: decode transaction: %v", ErrAPI, err)
-	}
-	sigCount, offset, err := decodeCompactU16(raw)
-	if err != nil {
-		return "", fmt.Errorf("%w: decode transaction: %v", ErrAPI, err)
-	}
-	if sigCount == 0 || len(raw) < offset+ed25519.SignatureSize {
-		return "", fmt.Errorf("%w: transaction has no signature", ErrAPI)
-	}
-	signature := raw[offset : offset+ed25519.SignatureSize]
-	if bytes.Equal(signature, make([]byte, ed25519.SignatureSize)) {
-		return "", fmt.Errorf("%w: transaction fee payer signature is empty", ErrAPI)
-	}
-	return encodeBase58(signature), nil
 }
 
 type usdcPayoutRequest struct {

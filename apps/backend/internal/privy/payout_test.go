@@ -144,6 +144,24 @@ func TestHTTPClient_PrepareUSDCPayout_signsWithoutBroadcasting(t *testing.T) {
 	}
 }
 
+// Without a last valid block height a dropped transfer could never be detected.
+func TestHTTPClient_PrepareUSDCPayout_noLastValidBlockHeight_signsNothing(t *testing.T) {
+	// Arrange
+	stub := &payoutRPCStub{solana: map[string][]any{"getLatestBlockhash": {latestBlockhashResult(0)}}}
+	client, req := newPayoutTestClient(t, stub)
+
+	// Act
+	_, err := client.PrepareUSDCPayout(context.Background(), req)
+
+	// Assert
+	if !errors.Is(err, ErrAPI) {
+		t.Fatalf("err = %v, want ErrAPI", err)
+	}
+	if got := strings.Join(stub.methods, ","); got != "getLatestBlockhash" {
+		t.Fatalf("calls = %s, want no signing without an expiry height", got)
+	}
+}
+
 func TestHTTPClient_PrepareUSDCPayout_blockhashRPCError_signsNothing(t *testing.T) {
 	// Arrange
 	stub := &payoutRPCStub{solanaErr: map[string]string{"getLatestBlockhash": "node is behind"}}

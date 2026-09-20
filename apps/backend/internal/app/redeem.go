@@ -731,6 +731,10 @@ func (r *RedeemService) settleRedeemPayout(ctx context.Context, view RedeemJobVi
 	if err != nil {
 		return view, fmt.Errorf("treasury usdc balance: %w", err)
 	}
+	navAfterPayout, err := r.navSnapshotAfterPayout(ctx, view, treasury.SolanaAddress, treasuryUsdc)
+	if err != nil {
+		return view, err
+	}
 
 	tx, err := r.store.BeginTx(ctx)
 	if err != nil {
@@ -758,10 +762,6 @@ func (r *RedeemService) settleRedeemPayout(ctx context.Context, view RedeemJobVi
 		}
 	}
 
-	navAfterPayout, err := r.navSnapshotAfterPayout(ctx, view, treasury.SolanaAddress, treasuryUsdc)
-	if err != nil {
-		return view, err
-	}
 	confirmed, newlyPaid, err := r.store.ConfirmWithdrawalPayoutTx(ctx, tx, withdrawal.ID, payout.TxSignature, navAfterPayout)
 	if err != nil {
 		return view, err
