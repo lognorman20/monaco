@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/monaco/monaco/apps/backend/internal/postgres"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 	"github.com/monaco/monaco/apps/backend/internal/telemetry/telemetrytest"
 	"github.com/monaco/monaco/packages/domain"
 )
@@ -108,6 +110,85 @@ func TestAgentIntent_metricsAndAuditLog_coverExecutedRejectedAndBadKey(t *testin
 	}
 	if strings.Contains(out, key) || strings.Contains(out, "WRONG") {
 		t.Fatal("an agent API key appeared in the logs")
+	}
+}
+
+// The replay of a failed intent answers the bot without an error (200, status "failed").
+// It used to count as outcome "ok" and log "agent intent executed".
+func TestAgentIntent_replayOfFailedIntent_countsAndLogsAsFailure(t *testing.T) {
+	// Arrange: an intent under an idempotency key whose swap failed.
+	f := newAgentLimitsFixture(t, "replay-failed", 10_000_000, 5_000_000)
+	var agentID string
+	if err := f.DB.QueryRowContext(context.Background(),
+		`SELECT id FROM group_agents WHERE group_id = $1`, f.GroupID).Scan(&agentID); err != nil {
+		t.Fatalf("agent id: %v", err)
+	}
+	failed, err := f.Store.InsertAgentIntent(context.Background(), postgres.AgentIntentRow{
+		GroupAgentID:   agentID,
+		GroupID:        f.GroupID,
+		Side:           domain.AgentIntentBuy,
+		Symbol:         "AAPLx",
+		UsdcMicros:     nullInt64(1_000_000),
+		Status:         "failed",
+		RejectReason:   nullString("jupiter execute: upstream 502"),
+		IdempotencyKey: nullString("tick-failed"),
+	})
+	if err != nil {
+		t.Fatalf("insert failed intent: %v", err)
+	}
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	okBefore := telemetrytest.Value(t, seriesIntentOK)
+	errorBefore := telemetrytest.Value(t, seriesIntentError)
+
+	// Act
+	replay, err := f.submit(domain.AgentIntentBuy, "AAPLx", 1_000_000, "tick-failed")
+
+	// Assert: the bot's answer is unchanged...
+	if err != nil || replay.IntentID != failed.ID || replay.Status != "failed" {
+		t.Fatalf("replay = %+v, err = %v; want the failed intent %s and no error", replay, err, failed.ID)
+	}
+	// ...and the books say failure.
+	if got := telemetrytest.Value(t, seriesIntentOK) - okBefore; got != 0 {
+		t.Errorf("outcome=ok moved by %v for a replayed failed intent, want 0", got)
+	}
+	if got := telemetrytest.Value(t, seriesIntentError) - errorBefore; got != 1 {
+		t.Errorf("outcome=error moved by %v, want 1", got)
+	}
+	out := logs.String()
+	if strings.Contains(out, `"msg":"agent intent executed"`) {
+		t.Errorf("replayed failed intent logged as executed: %s", out)
+	}
+	if !strings.Contains(out, `"msg":"agent intent failed"`) || !strings.Contains(out, `"outcome":"error"`) {
+		t.Errorf("log output missing the failed line with outcome=error: %s", out)
+	}
+	if strings.Contains(out, "upstream 502") {
+		t.Errorf("the stored internal error leaked into the replay log: %s", out)
+	}
+}
+
+func TestAgentIntentOutcome_classification(t *testing.T) {
+	cases := []struct {
+		name   string
+		result SubmitAgentIntentResult
+		err    error
+		want   string
+	}{
+		{name: "fill", result: SubmitAgentIntentResult{Status: "executed"}, want: telemetry.OutcomeOK},
+		{name: "replayed failed intent", result: SubmitAgentIntentResult{Status: "failed"}, want: telemetry.OutcomeError},
+		{name: "failed with its error", result: SubmitAgentIntentResult{Status: "failed"}, err: errors.New("boom"), want: telemetry.OutcomeError},
+		{name: "rejected", result: SubmitAgentIntentResult{Status: "rejected"}, err: ErrAgentIntentRejected, want: telemetry.OutcomeRejected},
+		{name: "replay still executing", result: SubmitAgentIntentResult{Status: "accepted"}, err: ErrAgentIntentInFlight, want: telemetry.OutcomeRejected},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := agentIntentOutcome(tc.result, tc.err); got != tc.want {
+				t.Fatalf("outcome = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

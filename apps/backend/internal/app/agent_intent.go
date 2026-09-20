@@ -63,7 +63,7 @@ type SubmitAgentIntentResult struct {
 // SubmitAgentIntent authenticates the agent key and runs a treasury swap when valid.
 func (s *AgentIntentService) SubmitAgentIntent(ctx context.Context, in SubmitAgentIntentInput) (SubmitAgentIntentResult, error) {
 	result, err := s.submitAgentIntent(ctx, in)
-	telemetry.MoneyEvent(telemetry.EventAgentIntent, moneyOutcome(err))
+	telemetry.MoneyEvent(telemetry.EventAgentIntent, agentIntentOutcome(result, err))
 	logAgentIntentOutcome(ctx, in, result, err)
 	return result, err
 }

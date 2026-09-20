@@ -32,6 +32,17 @@ func moneyOutcome(err error) string {
 	}
 }
 
+// agentIntentOutcome classifies one SubmitAgentIntent call. The error alone is not enough:
+// the replay of an intent whose swap failed answers without an error, so the bot gets the
+// stored outcome, but it is still a failed trade and must not count or log as a fill. The
+// first attempt ended in an error too, so the replay lands in the same class.
+func agentIntentOutcome(result SubmitAgentIntentResult, err error) string {
+	if err == nil && result.Status == "failed" {
+		return telemetry.OutcomeError
+	}
+	return moneyOutcome(err)
+}
+
 // recordSwap counts one treasury swap. created is false on an idempotent replay of a swap
 // that already landed, which must not count its volume twice.
 func recordSwap(event string, usdcMicros int64, created bool, err error) {
@@ -58,14 +69,19 @@ func logAgentIntentOutcome(ctx context.Context, in SubmitAgentIntentInput, resul
 		"intent_id", result.IntentID,
 		"status", result.Status,
 		"transaction_id", result.TransactionID,
-		"outcome", moneyOutcome(err),
+		"outcome", agentIntentOutcome(result, err),
 	}
-	switch moneyOutcome(err) {
+	switch agentIntentOutcome(result, err) {
 	case telemetry.OutcomeOK:
 		slog.InfoContext(ctx, "agent intent executed", attrs...)
 	case telemetry.OutcomeRejected, "canceled":
 		slog.WarnContext(ctx, "agent intent rejected", append(attrs, "reason", err.Error())...)
 	default:
+		if err == nil {
+			// Replay of an intent that already failed: there is no new error, only the stored one.
+			slog.ErrorContext(ctx, "agent intent failed", append(attrs, "replayed", true, "reason", result.RejectReason)...)
+			return
+		}
 		slog.ErrorContext(ctx, "agent intent failed", append(attrs, "err", err)...)
 	}
 }
