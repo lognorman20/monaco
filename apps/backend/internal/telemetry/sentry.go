@@ -36,12 +36,34 @@ func InitSentry(opts SentryOptions) (func(), error) {
 		// by hand below from values that are safe to leave the process.
 		SendDefaultPII:   false,
 		AttachStacktrace: true,
+		BeforeSend:       scrubSentryEvent,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("init sentry: %w", err)
 	}
 	sentryEnabled.Store(true)
 	return func() { sentry.Flush(sentryFlushTimeout) }, nil
+}
+
+// scrubSentryEvent is the last gate before the network. A panic value or an alert detail is
+// often an upstream error, and those quote what was sent: an RPC URL with its api-key, a
+// bearer token, a database URL. SendDefaultPII does not cover any of that.
+func scrubSentryEvent(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
+	event.Request = nil
+	event.User = sentry.User{}
+	event.Message = ScrubString(event.Message)
+	for i := range event.Exception {
+		event.Exception[i].Value = ScrubString(event.Exception[i].Value)
+	}
+	event.Tags = ScrubTags(event.Tags)
+	for name, fields := range event.Contexts {
+		event.Contexts[name] = ScrubMap(fields)
+	}
+	for _, crumb := range event.Breadcrumbs {
+		crumb.Message = ScrubString(crumb.Message)
+		crumb.Data = ScrubMap(crumb.Data)
+	}
+	return event
 }
 
 // CapturePanic reports a recovered panic with the stack captured at the recover site.

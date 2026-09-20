@@ -5,8 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/x509"
-	"encoding/pem"
+	"errors"
 	"testing"
 	"time"
 
@@ -67,6 +66,23 @@ func TestSession_expiredPrivyToken_returns401(t *testing.T) {
 	}
 }
 
+func TestVerifySession_clientWithoutVerificationKey_reportsNotReady(t *testing.T) {
+	// Arrange
+	client := NewHTTPClient(testConfig())
+
+	// Act
+	readyErr := client.VerifierReady()
+	_, err := client.VerifySession(context.Background(), AccessToken("any-token"))
+
+	// Assert
+	if readyErr == nil {
+		t.Fatal("VerifierReady = nil, want an error so /health reports the verifier down")
+	}
+	if !errors.Is(err, ErrAPI) {
+		t.Fatalf("err = %v, want ErrAPI", err)
+	}
+}
+
 type privyTokenOptions struct {
 	userID    string
 	sessionID string
@@ -81,17 +97,9 @@ func testVerifyClient(t *testing.T) (*HTTPClient, *ecdsa.PrivateKey) {
 		t.Fatalf("generate key: %v", err)
 	}
 
-	publicKeyDER, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
-	if err != nil {
-		t.Fatalf("marshal public key: %v", err)
-	}
-	publicKeyPEM := string(pem.EncodeToMemory(&pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: publicKeyDER,
-	}))
-	t.Setenv("PRIVY_VERIFICATION_KEY", publicKeyPEM)
-
-	client := NewHTTPClient(testConfig())
+	cfg := testConfig()
+	cfg.PrivyVerificationKey = &privateKey.PublicKey
+	client := NewHTTPClient(cfg)
 	return client, privateKey
 }
 

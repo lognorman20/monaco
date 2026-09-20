@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/monaco/monaco/apps/backend/internal/config"
 )
 
 type additionalSigner struct {
@@ -282,14 +284,7 @@ func (c *HTTPClient) getWalletUSDCBalance(ctx context.Context, walletID string) 
 }
 
 func (c *HTTPClient) solanaRPCEndpoint() string {
-	if c.solanaRPCURL != "" {
-		return c.solanaRPCURL
-	}
-	cluster := c.solanaCluster
-	if cluster == "" {
-		cluster = "mainnet-beta"
-	}
-	return fmt.Sprintf("https://api.%s.solana.com", cluster)
+	return config.SolanaRPCEndpoint(c.solanaCluster, c.solanaRPCURL)
 }
 
 func (c *HTTPClient) getLatestBlockhash(ctx context.Context) ([]byte, error) {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/solana/balance"
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
@@ -30,8 +31,11 @@ const (
 	envTrustProxyHeaders = "TRUST_PROXY_HEADERS"
 	// envSentryDSN turns on error reporting for panics and alerts. Unset = off.
 	envSentryDSN = "SENTRY_DSN"
-	// envAppEnv names the deployment (dev, staging, prod) on Sentry events.
+	// envAppEnv names the deployment (dev, staging, prod) on Sentry events. Anything other
+	// than unset, dev or local also switches stderr logs to JSON.
 	envAppEnv = "APP_ENV"
+	// envLogFormat overrides the stderr log format: text or json. See logFormat.
+	envLogFormat = "LOG_FORMAT"
 	// envRelease identifies the build on Sentry events, usually the git sha.
 	envRelease = "RELEASE"
 	// envAlertWebhookURL is a Slack- or Discord-compatible incoming webhook that receives
@@ -42,6 +46,9 @@ const (
 	envMetricsToken = "METRICS_TOKEN"
 
 	privyAPIBaseURL = "https://api.privy.io"
+
+	logFormatText = "text"
+	logFormatJSON = "json"
 )
 
 // Server timeouts. WriteTimeout is long because cash out and trade routes sign and confirm
@@ -60,14 +67,42 @@ const (
 	workerStopTimeout = 10 * time.Second
 )
 
+// logFormat picks the stderr format. On a developer machine (APP_ENV unset, dev or local)
+// it is slog text, which is what `just run` tees to .logs/. Anywhere else stderr is what the
+// host's log collector stores, so it is JSON unless LOG_FORMAT says otherwise. An unknown
+// LOG_FORMAT fails boot: a typo should not silently change what the log pipeline parses.
+func logFormat() (string, error) {
+	switch format := strings.ToLower(strings.TrimSpace(os.Getenv(envLogFormat))); format {
+	case logFormatText, logFormatJSON:
+		return format, nil
+	case "":
+	default:
+		return "", fmt.Errorf("%s must be %s or %s, got %q", envLogFormat, logFormatText, logFormatJSON, format)
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envAppEnv))) {
+	case "", "dev", "development", "local":
+		return logFormatText, nil
+	default:
+		return logFormatJSON, nil
+	}
+}
+
 // setupLogging installs the process logger and returns a func that flushes and closes the
-// log file. Without LOG_FILE it logs text to stderr as before; with it, JSON lines go to
-// both stderr and the file so one format serves the terminal and the durable copy.
+// log file. Without LOG_FILE it logs to stderr in the format logFormat picks; with it, JSON
+// lines go to both stderr and the file so one format serves the terminal and the durable copy.
 func setupLogging() (func(), error) {
 	opts := &slog.HandlerOptions{Level: slog.LevelInfo}
+	format, err := logFormat()
+	if err != nil {
+		return nil, err
+	}
 	path := strings.TrimSpace(os.Getenv(envLogFile))
 	if path == "" {
-		slog.SetDefault(slog.New(httpapi.NewRequestIDLogHandler(slog.NewTextHandler(os.Stderr, opts))))
+		var handler slog.Handler = slog.NewTextHandler(os.Stderr, opts)
+		if format == logFormatJSON {
+			handler = slog.NewJSONHandler(os.Stderr, opts)
+		}
+		slog.SetDefault(slog.New(httpapi.NewRequestIDLogHandler(handler)))
 		return func() {}, nil
 	}
 
@@ -178,13 +213,36 @@ type solanaBalanceReader interface {
 	GetBalance(ctx context.Context, address string) (uint64, error)
 }
 
-// healthChecks lists the dependencies GET /health reports. Only Postgres is critical: the
-// API cannot serve anything without it, while an outage at Solana RPC, Privy or the price
-// API degrades money routes but still leaves reads working.
-func healthChecks(db *sql.DB, solanaRPC solanaBalanceReader, relayerPubkey string, prices jupiter.PriceClient) []httpapi.HealthCheck {
+// authVerifier is the slice of the Privy client the health probe needs.
+type authVerifier interface {
+	VerifierReady() error
+}
+
+// registerDatabaseMetrics exports the pool statistics and the money-path backlog.
+func registerDatabaseMetrics(db *sql.DB, store *postgres.Store) error {
+	if err := telemetry.RegisterDBStats(db, "monaco"); err != nil {
+		return fmt.Errorf("register db pool metrics: %w", err)
+	}
+	err := telemetry.RegisterBacklog(func(ctx context.Context) (telemetry.Backlog, error) {
+		backlog, err := store.GetOpsBacklog(ctx)
+		return telemetry.Backlog(backlog), err
+	})
+	if err != nil {
+		return fmt.Errorf("register backlog metrics: %w", err)
+	}
+	return nil
+}
+
+// healthChecks lists the dependencies GET /health reports. Postgres and the access-token
+// verifier are critical: without either no authenticated route can answer. An outage at
+// Solana RPC, Privy or the price API degrades money routes but still leaves reads working.
+func healthChecks(db *sql.DB, solanaRPC solanaBalanceReader, relayerPubkey string, prices jupiter.PriceClient, verifier authVerifier) []httpapi.HealthCheck {
 	probeClient := &http.Client{Timeout: httpapi.DefaultHealthCheckTimeout}
 	return []httpapi.HealthCheck{
 		{Name: "database", Critical: true, Check: db.PingContext},
+		{Name: "auth_verifier", Critical: true, Check: func(context.Context) error {
+			return verifier.VerifierReady()
+		}},
 		{Name: "solana_rpc", Check: func(ctx context.Context) error {
 			_, err := solanaRPC.GetBalance(ctx, relayerPubkey)
 			return err

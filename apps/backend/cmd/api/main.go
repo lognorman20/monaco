@@ -109,7 +109,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}
 	slog.Info("relayer loaded", "pubkey", relayer.PublicKey())
 
-	solanaRPC := worker.NewHTTPSolanaRPC(cfg.SolanaCluster)
+	solanaRPC := worker.NewHTTPSolanaRPC(cfg.SolanaRPCEndpoint())
 	if err := balance.MustHaveSOL(ctx, solanaRPC, relayer.PublicKey(), balance.FeePayerMinLamports); err != nil {
 		return nil, err
 	}
@@ -127,9 +127,14 @@ func boot(ctx context.Context) (*bootResult, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping db: %w", err)
 	}
+	cfg.DBPool.Apply(db)
 	slog.Info("database connected")
 
 	store := postgres.NewStore(db)
+	if err := registerDatabaseMetrics(db, store); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	privyClient := privy.NewHTTPClient(cfg)
 	var hermes *pyth.HermesClient
 	if cfg.PythAPIKey != "" {
@@ -265,7 +270,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}
 
 	mux := http.NewServeMux()
-	health := &httpapi.HealthHandlers{Checks: healthChecks(db, solanaRPC, relayer.PublicKey(), jupiterPriceClient)}
+	health := &httpapi.HealthHandlers{Checks: healthChecks(db, solanaRPC, relayer.PublicKey(), jupiterPriceClient, privyClient)}
 	mux.HandleFunc("GET /health", health.HealthHandler)
 	mux.Handle("GET /metrics", metricsHandler())
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
