@@ -9,9 +9,9 @@ private final class StubDataSource: AppSessionDataSource {
     var dashboardRequests: [HomeLeaderboardRange] = []
     var meRequests = 0
     var openSessionRequests = 0
-    /// Range -> the leaderboard range the server answers with, defaults to what was asked.
-    var pendingDashboards: [HomeLeaderboardRange: CheckedContinuation<Void, Never>] = [:]
+    /// Ranges whose response is held until the test releases it.
     var holdRanges: Set<HomeLeaderboardRange> = []
+    private var pendingDashboards: [HomeLeaderboardRange: CheckedContinuation<Void, Never>] = [:]
 
     func openSession(accessToken: String) async throws -> MeResponse {
         openSessionRequests += 1
