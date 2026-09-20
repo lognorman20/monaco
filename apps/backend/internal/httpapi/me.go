@@ -86,12 +86,7 @@ func (h *MeHandlers) PatchMeHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			logJSONError(ctx, log, "body_too_large", w, http.StatusRequestEntityTooLarge, "request body too large")
-			return
-		}
-		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
+		writeBodyDecodeError(ctx, log, w, err)
 		return
 	}
 	if req.DisplayName == nil {
@@ -135,9 +130,8 @@ func (h *MeHandlers) UploadProfilePhotoHandler(w http.ResponseWriter, r *http.Re
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 
 	if err := r.ParseMultipartForm(maxBodyBytes); err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			logJSONError(ctx, log, "photo_too_large", w, http.StatusBadRequest, "photo must be at most 2MB")
+		if isBodyTooLarge(err) {
+			logJSONError(ctx, log, "photo_too_large", w, http.StatusRequestEntityTooLarge, "photo must be at most 2MB")
 			return
 		}
 		logJSONError(ctx, log, "invalid_multipart", w, http.StatusBadRequest, "invalid multipart form", "err", err.Error())
@@ -229,7 +223,7 @@ func writeProfilePhotoUploadError(ctx context.Context, log *requestLog, w http.R
 	case errors.Is(err, app.ErrRateLimited):
 		writeRateLimited(ctx, log, w, err)
 	case errors.Is(err, app.ErrProfilePhotoTooLarge):
-		logJSONError(ctx, log, "photo_too_large", w, http.StatusBadRequest, "photo must be at most 2MB")
+		logJSONError(ctx, log, "photo_too_large", w, http.StatusRequestEntityTooLarge, "photo must be at most 2MB")
 	case errors.Is(err, app.ErrProfilePhotoInvalid):
 		logJSONError(ctx, log, "invalid_photo", w, http.StatusBadRequest, "photo must be jpeg, png, or webp")
 	case errors.Is(err, app.ErrProfilePhotoNotConfigured):

@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -27,8 +26,7 @@ func (h *AuthHandlers) SessionHandler(w http.ResponseWriter, r *http.Request) {
 	log := newRequestLog(r, "POST /v1/auth/session")
 
 	var req authSessionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
+	if !decodeJSONBody(ctx, log, w, r, &req) {
 		return
 	}
 
