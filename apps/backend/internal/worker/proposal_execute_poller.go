@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -13,16 +14,18 @@ import (
 // DefaultProposalExecuteInterval is how often passed proposals are executed.
 const DefaultProposalExecuteInterval = 15 * time.Second
 
-const maxProposalExecuteBackoff = 15 * time.Minute
+// ProposalExecuteLease is how long a claimed proposal is withheld from every other executor.
+// It outlasts the longest inline execute (onchain setup plus fill polling); a crashed executor's
+// proposal comes back after it, and any swap it submitted still holds the execution slot.
+const ProposalExecuteLease = 5 * time.Minute
 
-// ProposalExecutePoller runs Jupiter buys for passed proposals without confirmed swaps.
+// ProposalExecutePoller runs swaps for passed proposals that have no pending or confirmed swap.
+// Claims and retry backoff live in Postgres, so any number of API instances share them.
 type ProposalExecutePoller struct {
-	store    *postgres.Store
-	exec     *app.ExecuteOnPassService
-	clock    Clock
-	limit    int
-	backoff  map[string]time.Time
-	failures map[string]int
+	store *postgres.Store
+	exec  *app.ExecuteOnPassService
+	clock Clock
+	limit int
 }
 
 // NewProposalExecutePoller wires execute-on-pass polling dependencies.
@@ -31,12 +34,10 @@ func NewProposalExecutePoller(store *postgres.Store, exec *app.ExecuteOnPassServ
 		clock = systemClock{}
 	}
 	return &ProposalExecutePoller{
-		store:    store,
-		exec:     exec,
-		clock:    clock,
-		limit:    20,
-		backoff:  make(map[string]time.Time),
-		failures: make(map[string]int),
+		store: store,
+		exec:  exec,
+		clock: clock,
+		limit: 20,
 	}
 }
 
@@ -74,7 +75,8 @@ func (p *ProposalExecutePoller) tick(ctx context.Context) {
 		return
 	}
 
-	rows, err := p.store.ListPassedProposalsPendingExecute(ctx, p.limit)
+	now := p.clock.Now()
+	rows, err := p.store.ClaimPassedProposalsForExecute(ctx, now, ProposalExecuteLease, p.limit)
 	if err != nil {
 		logProposalExecutePollerListFailed(err)
 		return
@@ -82,11 +84,8 @@ func (p *ProposalExecutePoller) tick(ctx context.Context) {
 
 	logProposalExecutePollerTickStart(len(rows))
 	var tickErr error
-	now := p.clock.Now()
-	for _, row := range rows {
-		if p.shouldSkipExecute(row.ID, now) {
-			continue
-		}
+	for _, claimed := range rows {
+		row := claimed.Proposal
 		proposal := app.Proposal{
 			ID:          row.ID,
 			GroupID:     row.GroupID,
@@ -99,13 +98,17 @@ func (p *ProposalExecutePoller) tick(ctx context.Context) {
 			ExpiresAt:   row.ExpiresAt.UTC().Unix(),
 		}
 		result, err := p.exec.ExecuteOnPass(ctx, proposal)
+		if errors.Is(err, app.ErrSwapOutcomeUnknown) || errors.Is(err, app.ErrSwapInFlight) {
+			// The pending swap holds the proposal's slot; the swap reconciler decides what happens next.
+			logProposalExecuteLeftPending(proposal.ID, proposal.GroupID, proposal.Symbol, err)
+			continue
+		}
 		if err != nil {
 			tickErr = err
-			p.recordExecuteFailure(proposal.ID, now)
+			p.recordExecuteFailure(ctx, proposal.ID, claimed.ExecuteAttempts, err)
 			logProposalExecuteFailed(proposal.ID, proposal.GroupID, proposal.Symbol, proposal.UsdcMicros, "execute_on_pass", err)
 			continue
 		}
-		p.clearExecuteFailure(proposal.ID)
 		txID := result.Transaction.ID
 		sig := ""
 		if result.Transaction.TxSignature.Valid {
@@ -116,33 +119,12 @@ func (p *ProposalExecutePoller) tick(ctx context.Context) {
 	logProposalExecutePollerTickEnd(len(rows), tickErr)
 }
 
-func (p *ProposalExecutePoller) shouldSkipExecute(proposalID string, now time.Time) bool {
-	if p == nil {
-		return false
+func (p *ProposalExecutePoller) recordExecuteFailure(ctx context.Context, proposalID string, attempts int, cause error) {
+	next := p.clock.Now().Add(app.ProposalExecuteBackoff(attempts))
+	if err := p.store.RecordProposalExecuteFailure(ctx, proposalID, next, cause.Error()); err != nil {
+		// The claim lease still withholds the proposal, so a lost write only lengthens the wait.
+		slog.Error("proposal execute backoff record failed", "proposal_id", proposalID, "err", err)
 	}
-	next, ok := p.backoff[proposalID]
-	return ok && now.Before(next)
-}
-
-func (p *ProposalExecutePoller) recordExecuteFailure(proposalID string, now time.Time) {
-	if p == nil {
-		return
-	}
-	count := p.failures[proposalID] + 1
-	p.failures[proposalID] = count
-	delay := DefaultProposalExecuteInterval
-	for i := 1; i < count && delay < maxProposalExecuteBackoff; i++ {
-		delay *= 2
-	}
-	p.backoff[proposalID] = now.Add(delay)
-}
-
-func (p *ProposalExecutePoller) clearExecuteFailure(proposalID string) {
-	if p == nil {
-		return
-	}
-	delete(p.backoff, proposalID)
-	delete(p.failures, proposalID)
 }
 
 func logProposalExecutePollerStarted(interval time.Duration) {
@@ -178,6 +160,15 @@ func logProposalExecuteFailed(proposalID, groupID, symbol string, usdcMicros int
 		"symbol", symbol,
 		"usdc_amount", usdcMicros,
 		"stage", stage,
+		"err", err,
+	)
+}
+
+func logProposalExecuteLeftPending(proposalID, groupID, symbol string, err error) {
+	slog.Warn("proposal execute left pending for reconcile",
+		"proposal_id", proposalID,
+		"group_id", groupID,
+		"symbol", symbol,
 		"err", err,
 	)
 }

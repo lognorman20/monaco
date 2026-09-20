@@ -25,6 +25,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/solana/balance"
+	"github.com/monaco/monaco/apps/backend/internal/solana/swapchain"
 	"github.com/monaco/monaco/apps/backend/internal/storage"
 	"github.com/monaco/monaco/apps/backend/internal/swapprovider"
 	"github.com/monaco/monaco/apps/backend/internal/worker"
@@ -40,6 +41,7 @@ type bootResult struct {
 	stopPoller        context.CancelFunc
 	stopExecutePoller context.CancelFunc
 	stopRedeemPoller  context.CancelFunc
+	stopSwapReconcile context.CancelFunc
 	// workers tracks the poller goroutines so shutdown can wait for an in-flight tick.
 	workers *sync.WaitGroup
 }
@@ -186,6 +188,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	signer := app.NewPrivyTreasurySigner(privyClient)
 	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, relayer.PrivateKey(), symbols)
+	swap.SetChainReader(swapchain.NewHTTPReader(cfg.SolanaRPCURL, cfg.SolanaCluster))
 	if cfg.SwapProvider == swapprovider.NameFlash {
 		swap.SetSwapProvider(flash.NewSwapProvider(
 			flash.NewHTTPClient(cfg.FlashAPIKey),
@@ -324,7 +327,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	poller := worker.NewSweepPoller(store, privyClient, solanaRPC, deposits, relayer.PrivateKey(), nil)
 	pollerCtx, stopPoller := context.WithCancel(context.Background())
 	workers := &sync.WaitGroup{}
-	workers.Add(3)
+	workers.Add(4)
 	go func() {
 		defer workers.Done()
 		worker.Run(pollerCtx, poller, worker.DefaultPollInterval, sweepWake)
@@ -346,6 +349,13 @@ func boot(ctx context.Context) (*bootResult, error) {
 		worker.RunRedeemRecoveryPoller(redeemCtx, redeemPoller, worker.DefaultRedeemRecoveryInterval)
 	}()
 
+	swapReconcilePoller := worker.NewSwapReconcilePoller(swap, nil)
+	swapReconcileCtx, stopSwapReconcile := context.WithCancel(context.Background())
+	go func() {
+		defer workers.Done()
+		worker.RunSwapReconcilePoller(swapReconcileCtx, swapReconcilePoller, worker.DefaultSwapReconcileInterval)
+	}()
+
 	return &bootResult{
 		Server:            newHTTPServer(addr, platformHandler(mux)),
 		Config:            cfg,
@@ -354,6 +364,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 		stopPoller:        stopPoller,
 		stopExecutePoller: stopExecutePoller,
 		stopRedeemPoller:  stopRedeemPoller,
+		stopSwapReconcile: stopSwapReconcile,
 		workers:           workers,
 	}, nil
 }
@@ -422,6 +433,7 @@ func main() {
 	result.stopPoller()
 	result.stopExecutePoller()
 	result.stopRedeemPoller()
+	result.stopSwapReconcile()
 	if waitWorkers(result.workers, workerStopTimeout) {
 		slog.Info("pollers stopped")
 	} else {
