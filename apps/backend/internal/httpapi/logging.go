@@ -64,20 +64,44 @@ func logJSONError(ctx context.Context, log *requestLog, branch string, w http.Re
 	writeJSONError(ctx, w, status, message)
 }
 
+// logJSONIntentError is logJSONError for a refusal that has an agent intent outcome to report.
+func logJSONIntentError(ctx context.Context, log *requestLog, branch string, w http.ResponseWriter, status int, message string, intent *intentErrorDetail, attrs ...any) {
+	if intent != nil {
+		attrs = append(attrs, "intent_id", intent.IntentID, "intent_status", intent.Status)
+	}
+	log.done(ctx, branch, status, attrs...)
+	writeJSONErrorBody(ctx, w, status, errorResponse{Error: message, intentErrorDetail: intent})
+}
+
 // errorResponse is the single error shape every API route returns: a human
-// message plus the correlation id a client can quote in a bug report.
+// message plus the correlation id a client can quote in a bug report. The agent
+// intent route adds the intent's outcome as extra top-level fields; every other
+// route leaves it nil and its body is unchanged.
 type errorResponse struct {
 	Error     string `json:"error"`
 	RequestID string `json:"requestId,omitempty"`
+	*intentErrorDetail
+}
+
+// intentErrorDetail is what a refused agent intent adds to the error shape, under the names
+// the 200 answer uses, so a bot reads one set of fields whatever the HTTP status. IntentID
+// is empty when the intent was refused before it was recorded.
+type intentErrorDetail struct {
+	IntentID     string `json:"intentId,omitempty"`
+	Status       string `json:"status,omitempty"`
+	RejectReason string `json:"rejectReason,omitempty"`
 }
 
 func writeJSONError(ctx context.Context, w http.ResponseWriter, status int, message string) {
+	writeJSONErrorBody(ctx, w, status, errorResponse{Error: message})
+}
+
+// writeJSONErrorBody is the one place an error body is encoded; it stamps the request id.
+func writeJSONErrorBody(ctx context.Context, w http.ResponseWriter, status int, body errorResponse) {
+	body.RequestID = RequestIDFromContext(ctx)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(errorResponse{
-		Error:     message,
-		RequestID: RequestIDFromContext(ctx),
-	})
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 func logNoContent(ctx context.Context, log *requestLog, branch string, attrs ...any) {
