@@ -131,8 +131,8 @@ struct DepositView: View {
 
     private func loadDepositAddress() async {
         // The shell opened the backend session and read the profile before this screen existed,
-        // so the address is already in hand. Opening a second session and asking for the profile
-        // again only kept the member on a spinner.
+        // so the address is already in hand. Two more round trips to fetch it again only kept the
+        // member on a spinner.
         if let known = DepositAddress.usable(session.me?.memberWalletAddress) {
             depositAddress = known
             errorMessage = nil
@@ -152,7 +152,11 @@ struct DepositView: View {
         depositAddress = nil
 
         do {
-            let profile = try await apiClient.me(accessToken: accessToken)
+            // Only on this path. `POST /v1/auth/session` is what upserts the user row and ensures
+            // the member wallet exists (backend SessionService.OpenSession); `GET /v1/me` answers
+            // 404 without it. The store being empty means the shell has not got that far, so this
+            // screen has to do it rather than show "not ready yet" to a brand-new member.
+            let profile = try await apiClient.openSession(accessToken: accessToken)
             guard let address = DepositAddress.usable(profile.memberWalletAddress) else {
                 errorMessage = "Deposit address not ready yet."
                 isLoading = false
