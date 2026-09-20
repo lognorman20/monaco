@@ -593,6 +593,25 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(PopularAssetsResponse.self, from: data)
     }
 
+    /// What the caller's cabals hold and what they are voting on. One aggregate
+    /// rather than a group-view call per cabal, so the Stocks tab's two social
+    /// sections cost one request between them.
+    func getHeldAssets(accessToken: String) async throws -> HeldAssetsResponse {
+        let url = baseURL.appending(path: "v1/assets/held")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(HeldAssetsResponse.self, from: data)
+    }
+
     func getMarketAsset(
         accessToken: String,
         symbol: String

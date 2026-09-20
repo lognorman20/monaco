@@ -255,6 +255,150 @@ public enum MarketSampleData {
         )
     }
 
+    // MARK: - List rows
+
+    /// A day of closes for a row's sparkline, shaped like the backend's downsample
+    /// of the 1D series. Deterministic, so a screenshot diff means a real change:
+    /// `drift` is the whole-day move and `wobble` how noisy the path to it is.
+    public static func spark(
+        startUsdcMicros: Int64 = 226_500_000,
+        driftUsdcMicros: Int64 = 5_500_000,
+        wobbleUsdcMicros: Int64 = 900_000,
+        points: Int = 24
+    ) -> [Int64] {
+        guard points > 1 else { return [] }
+        return (0..<points).map { index in
+            let progress = Double(index) / Double(points - 1)
+            let wobble = sin(Double(index) / 2.6) * Double(wobbleUsdcMicros)
+            return startUsdcMicros + Int64((Double(driftUsdcMicros) * progress + wobble).rounded())
+        }
+    }
+
+    public static func listAsset(
+        symbol: String,
+        name: String,
+        priceUsdcMicros: Int64,
+        change24h: String?,
+        spark: [Int64]? = nil,
+        logoUrl: String? = nil
+    ) -> MarketAssetDTO {
+        MarketAssetDTO(
+            symbol: symbol,
+            name: name,
+            solanaMint: "Xs" + String(symbol.uppercased().prefix(4)) + "1111111111111111111111111111",
+            routable: true,
+            priceUsdcMicros: priceUsdcMicros,
+            change24h: change24h,
+            sparkUsdcMicros: spark ?? Self.spark(
+                startUsdcMicros: priceUsdcMicros,
+                driftUsdcMicros: Int64(Double(priceUsdcMicros) * 0.018),
+                wobbleUsdcMicros: Int64(Double(priceUsdcMicros) * 0.004)
+            ),
+            logoUrl: logoUrl
+        )
+    }
+
+    /// A popular list with the awkward rows in it on purpose: a faller, a stock
+    /// that did not move, one with no day change at all, and one with no series —
+    /// the row has to stay readable in every one of those.
+    public static let popularAssets: [MarketAssetDTO] = [
+        listAsset(symbol: "AAPLx", name: "Apple", priceUsdcMicros: 232_050_000, change24h: "0.012400"),
+        listAsset(symbol: "NVDAx", name: "NVIDIA", priceUsdcMicros: 178_200_000, change24h: "0.038600"),
+        listAsset(symbol: "TSLAx", name: "Tesla", priceUsdcMicros: 412_700_000, change24h: "-0.024100"),
+        listAsset(symbol: "MSFTx", name: "Microsoft", priceUsdcMicros: 501_300_000, change24h: "0.000000"),
+        listAsset(symbol: "AMZNx", name: "Amazon", priceUsdcMicros: 189_400_000, change24h: "-0.008300"),
+        // No day change: the pill shows "—" and the row still lays out.
+        listAsset(symbol: "BRK.Bx", name: "Berkshire Hathaway", priceUsdcMicros: 468_900_000, change24h: nil),
+        // No series: the row draws no sparkline rather than a flat line.
+        listAsset(symbol: "NEWx", name: "Newly listed", priceUsdcMicros: 41_250_000, change24h: "0.004500", spark: []),
+    ]
+
+    // MARK: - In your cabals / up for vote
+
+    public static let heldAssets: [HeldAssetDTO] = [
+        HeldAssetDTO(
+            asset: popularAssets[0],
+            cabals: [
+                HeldAssetCabalDTO(
+                    groupId: "grp_weekend",
+                    name: "Weekend investors",
+                    units: "4.20",
+                    valueUsd: "974.61",
+                    dollarPnl: "112.40",
+                    mySliceUsd: "243.65"
+                ),
+                HeldAssetCabalDTO(
+                    groupId: "grp_semis",
+                    name: "Semis or bust",
+                    units: "1.10",
+                    valueUsd: "255.26",
+                    dollarPnl: "-18.90",
+                    mySliceUsd: "51.05"
+                ),
+            ],
+            totalValueUsd: "1229.87",
+            totalDollarPnl: "93.50",
+            mySliceUsd: "294.70"
+        ),
+        HeldAssetDTO(
+            asset: popularAssets[2],
+            cabals: [
+                HeldAssetCabalDTO(
+                    groupId: "grp_weekend",
+                    name: "Weekend investors",
+                    units: "0.75",
+                    valueUsd: "309.53",
+                    dollarPnl: "-42.10",
+                    mySliceUsd: "77.38"
+                ),
+            ],
+            totalValueUsd: "309.53",
+            totalDollarPnl: "-42.10",
+            mySliceUsd: "77.38"
+        ),
+        // A position so small the slice rounds to nothing: the line drops the slice
+        // rather than reading "your slice $0.00".
+        HeldAssetDTO(
+            asset: popularAssets[4],
+            cabals: [
+                HeldAssetCabalDTO(
+                    groupId: "grp_semis",
+                    name: "Semis or bust",
+                    units: "0.01",
+                    valueUsd: "1.89",
+                    dollarPnl: "0.04",
+                    mySliceUsd: "0.00"
+                ),
+            ],
+            totalValueUsd: "1.89",
+            totalDollarPnl: "0.04",
+            mySliceUsd: "0.00"
+        ),
+    ]
+
+    public static let votableAssets: [VotableAssetDTO] = [
+        VotableAssetDTO(
+            asset: popularAssets[1],
+            openProposals: 1,
+            cabalNames: ["Semis or bust"],
+            soonestExpiresAt: tradingTuesday.addingTimeInterval(4 * 3600)
+        ),
+        VotableAssetDTO(
+            asset: popularAssets[3],
+            openProposals: 3,
+            cabalNames: ["Weekend investors", "Semis or bust", "Rent"],
+            soonestExpiresAt: tradingTuesday.addingTimeInterval(35 * 60)
+        ),
+    ]
+
+    public static func heldAssetsResponse(
+        held: [HeldAssetDTO] = heldAssets,
+        upForVote: [VotableAssetDTO] = votableAssets,
+        market: MarketStatusDTO = sessionOpen
+    ) -> HeldAssetsResponseDTO {
+        HeldAssetsResponseDTO(held: held, upForVote: upForVote, market: market)
+    }
+
     // MARK: - Detail
 
     public static let liquidity = AssetLiquidityDTO(

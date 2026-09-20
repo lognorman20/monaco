@@ -7,8 +7,25 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
     public let routable: Bool
     public let priceUsdcMicros: Int64?
     public let change24h: String?
+    /// The day's closes in USDC micros, downsampled to about two dozen points, for
+    /// the row's sparkline. The list routes batch this from their own chart cache:
+    /// a row must never fetch its own history, or a screen of twenty rows is twenty
+    /// requests that all arrive after the user has scrolled past.
+    ///
+    /// Empty when the backend could not source a day series. An empty series draws
+    /// no sparkline rather than a flat line, which would read as "this stock did not
+    /// move" instead of "we do not know how it moved".
+    public let sparkUsdcMicros: [Int64]
+    /// The company's logo. Nil — or a URL that fails to load — falls back to the
+    /// ticker tile, so a row never waits on an image to be readable.
+    public let logoUrl: String?
 
     public var id: String { symbol }
+
+    public var logoURL: URL? {
+        guard let logoUrl, !logoUrl.isEmpty else { return nil }
+        return URL(string: logoUrl)
+    }
 
     public init(
         symbol: String,
@@ -16,7 +33,9 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         solanaMint: String,
         routable: Bool,
         priceUsdcMicros: Int64? = nil,
-        change24h: String? = nil
+        change24h: String? = nil,
+        sparkUsdcMicros: [Int64] = [],
+        logoUrl: String? = nil
     ) {
         self.symbol = symbol
         self.name = name
@@ -24,6 +43,27 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         self.routable = routable
         self.priceUsdcMicros = priceUsdcMicros
         self.change24h = change24h
+        self.sparkUsdcMicros = sparkUsdcMicros
+        self.logoUrl = logoUrl
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case symbol, name, solanaMint, routable, priceUsdcMicros, change24h
+        case sparkUsdcMicros = "spark"
+        case logoUrl
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        symbol = try container.decode(String.self, forKey: .symbol)
+        name = try container.decode(String.self, forKey: .name)
+        solanaMint = try container.decode(String.self, forKey: .solanaMint)
+        routable = try container.decodeIfPresent(Bool.self, forKey: .routable) ?? false
+        priceUsdcMicros = try container.decodeIfPresent(Int64.self, forKey: .priceUsdcMicros)
+        change24h = try container.decodeIfPresent(String.self, forKey: .change24h)
+        // An absent array, a null and an empty one all mean "no series to draw".
+        sparkUsdcMicros = try container.decodeIfPresent([Int64].self, forKey: .sparkUsdcMicros) ?? []
+        logoUrl = try container.decodeIfPresent(String.self, forKey: .logoUrl)
     }
 }
 
