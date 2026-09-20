@@ -60,8 +60,12 @@ report="$out/report.md"
 results="$out/results.tsv"
 : > "$results"
 lock="$root/scripts/qa/xcode-lock.sh"
-simslim_bin="${SIMSLIM_BIN:-$root/.tools/bin/simslim}"
-command -v "$simslim_bin" >/dev/null 2>&1 || simslim_bin="$(command -v simslim || true)"
+# .tools/ is untracked, so inside a git worktree it lives in the main checkout.
+main_root="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
+simslim_bin="${SIMSLIM_BIN:-}"
+for candidate in "$root/.tools/bin/simslim" "$main_root/.tools/bin/simslim" "$(command -v simslim || true)"; do
+  [[ -z "$simslim_bin" && -x "$candidate" ]] && simslim_bin="$candidate"
+done
 derived="${MONACO_QA_DERIVED_DATA:-$HOME/Library/Caches/monaco-qa/DerivedData}"
 
 log() { printf '%s %s\n' "$(date -u +%H:%M:%SZ)" "$*" | tee -a "$out/night.log"; }
@@ -79,7 +83,8 @@ free_swap_mb() {
 run_step() {
   local round="$1" name="$2" limit="$3"; shift 3
   local logf="$out/r${round}-${name}.log" start=$SECONDS status
-  ( "$@" ) > "$logf" 2>&1 &
+  # stdin from /dev/null: xcodebuild would otherwise swallow the class list the caller loops over.
+  ( "$@" ) > "$logf" 2>&1 </dev/null &
   local pid=$!
   # The watchdog must not inherit our stdout, or a caller piping this script waits on its sleep.
   ( sleep "$limit"; kill -TERM "$pid" 2>/dev/null; sleep 10; kill -KILL "$pid" 2>/dev/null ) >/dev/null 2>&1 </dev/null &
