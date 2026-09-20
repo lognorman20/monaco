@@ -33,20 +33,10 @@ struct ProfileCabalRow: Identifiable, Equatable {
             }
     }
 
-    var subtitle: String {
-        let pot = "Pot \(UsdAmountFormatter.format(decimalString: potValueUsd))"
-        guard let equityUsd else { return pot }
-        return "\(pot) · You \(UsdAmountFormatter.format(decimalString: equityUsd))"
-    }
-
-    /// Dollar P&L on the viewer's position; nil when the viewer holds no stake.
-    var trailing: String? {
-        dollarPnl
-    }
-
-    var trailingCaption: String? {
-        guard dollarPnl != nil else { return nil }
-        return PercentReturnFormatter.format(percentReturn)
+    /// Nil when the dashboard has no position for this cabal yet.
+    var figures: CabalPositionRowFigures? {
+        guard let equityUsd, let dollarPnl else { return nil }
+        return CabalPositionRowFigures(equityUsd: equityUsd, dollarPnl: dollarPnl, percentReturn: percentReturn)
     }
 }
 
@@ -57,37 +47,36 @@ struct ProfileCabalsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            Text("Your cabals")
-                .font(MonacoTheme.TypeRole.title)
-                .foregroundStyle(MonacoTheme.ink)
+            MonacoSectionHeader("Your cabals")
 
             if rows.isEmpty {
-                MonacoEmptyStateCard(
-                    message: "Join or create a cabal from Home to see it here.",
-                    systemImage: "person.3"
+                EmptyState(
+                    title: "No cabals yet",
+                    message: "Start a cabal or join one from the Cabals tab."
                 )
                 .accessibilityIdentifier("profile-cabals-empty")
             } else {
-                ForEach(rows) { row in
-                    NavigationLink {
-                        GroupDetailView(
-                            auth: auth,
-                            groupId: row.groupId,
-                            groupName: row.name,
-                            onLeft: onLeft
-                        )
-                    } label: {
-                        MonacoRowCard(
-                            systemImage: "person.3.fill",
-                            title: row.name,
-                            subtitle: row.subtitle,
-                            trailing: row.trailing,
-                            trailingCaption: row.trailingCaption,
-                            trailingColor: MonacoTheme.signed(row.dollarPnl)
-                        )
+                MonacoGroupedList {
+                    ForEach(rows) { row in
+                        NavigationLink {
+                            GroupDetailView(
+                                auth: auth,
+                                groupId: row.groupId,
+                                groupName: row.name,
+                                onLeft: onLeft
+                            )
+                        } label: {
+                            CabalPositionRow(
+                                groupId: row.groupId,
+                                name: row.name,
+                                potValueUsd: row.potValueUsd,
+                                figures: row.figures,
+                                isLast: row.groupId == rows.last?.groupId
+                            )
+                        }
+                        .buttonStyle(.monacoRow)
+                        .accessibilityIdentifier("profile-cabal-\(row.groupId)")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("profile-cabal-\(row.groupId)")
                 }
             }
         }

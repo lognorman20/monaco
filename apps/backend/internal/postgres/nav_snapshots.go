@@ -37,7 +37,7 @@ type NavSnapshotRow struct {
 	TotalShares       int64
 	// NetContributedMicros is the group's net USDC in (deposits credited minus
 	// payouts) as of this snapshot, recorded in the same transaction. Nil for
-	// rows written before migration 000016.
+	// rows written before migration 000012.
 	NetContributedMicros *int64
 	Reason               NavSnapshotReason
 	CreatedAt            time.Time
@@ -98,12 +98,16 @@ func (s *Store) InsertNavSnapshotTx(ctx context.Context, tx *sql.Tx, groupID str
 	// net_contributed_micros is read inside the same transaction as the
 	// position change that triggered this snapshot, so it pairs exactly with
 	// pot_nav_micros: group P&L at this instant = pot - net contributed.
+	// Only pot-backed positions count (ghost faker positions in a real group
+	// never funded the pot), matching the live net-in the P&L series ends on.
 	const insertSQL = `
 INSERT INTO nav_snapshots (group_id, pot_nav_micros, nav_per_share_micros, total_shares, reason, net_contributed_micros)
 VALUES ($1, $2, $3, $4, $5, (
-  SELECT COALESCE(SUM(amount_deposited - amount_withdrawn), 0)
-  FROM positions
-  WHERE group_id = $1
+  SELECT COALESCE(SUM(p.amount_deposited - p.amount_withdrawn), 0)
+  FROM positions p
+  JOIN users u ON u.id = p.user_id
+  JOIN groups g ON g.id = p.group_id
+  WHERE p.group_id = $1 AND ` + potPositionPredicate + `
 ))
 RETURNING ` + navSnapshotColumns
 
@@ -210,6 +214,13 @@ func (s *Store) ComputeNavSnapshotValues(ctx context.Context, groupID string, tr
 	return s.computeNavSnapshotValues(ctx, s.db, groupID, treasuryUSDC)
 }
 
+// ComputeNavSnapshotValuesWithShareBase derives pot NAV as if extraShareUnitsMicros additional
+// share units were still outstanding. Redeem uses it to re-price an in-flight job: those shares
+// are already debited, but the pot they are a claim on has not been paid out yet.
+func (s *Store) ComputeNavSnapshotValuesWithShareBase(ctx context.Context, groupID string, treasuryUSDC, extraShareUnitsMicros int64) (NavSnapshotValues, error) {
+	return s.computeNavSnapshotValuesWithShareBase(ctx, s.db, groupID, treasuryUSDC, extraShareUnitsMicros)
+}
+
 // SumShareUnitsByGroupTx returns total share_units within tx.
 func (s *Store) SumShareUnitsByGroupTx(ctx context.Context, tx *sql.Tx, groupID string) (int64, error) {
 	return sumShareUnitsByGroupQuery(ctx, tx, groupID)
@@ -226,17 +237,25 @@ func (s *Store) GetFillDerivedCostBasisByOutputMintTx(ctx context.Context, tx *s
 }
 
 func (s *Store) computeNavSnapshotValues(ctx context.Context, q navSnapshotQuerier, groupID string, treasuryUSDC int64) (NavSnapshotValues, error) {
+	return s.computeNavSnapshotValuesWithShareBase(ctx, q, groupID, treasuryUSDC, 0)
+}
+
+func (s *Store) computeNavSnapshotValuesWithShareBase(ctx context.Context, q navSnapshotQuerier, groupID string, treasuryUSDC, extraShareUnitsMicros int64) (NavSnapshotValues, error) {
 	if groupID == "" {
 		return NavSnapshotValues{}, fmt.Errorf("group_id is required")
 	}
 	if treasuryUSDC < 0 {
 		return NavSnapshotValues{}, fmt.Errorf("treasury usdc must be non-negative")
 	}
+	if extraShareUnitsMicros < 0 {
+		return NavSnapshotValues{}, fmt.Errorf("extra share units must be non-negative")
+	}
 
 	totalSharesMicro, err := sumShareUnitsByGroupQuery(ctx, q, groupID)
 	if err != nil {
 		return NavSnapshotValues{}, err
 	}
+	totalSharesMicro += extraShareUnitsMicros
 
 	holdings, err := listNetTokenHoldingsByGroupQuery(ctx, q, groupID)
 	if err != nil {
@@ -306,7 +325,12 @@ func (s *Store) computeNavSnapshotValues(ctx context.Context, q navSnapshotQueri
 }
 
 func sumShareUnitsByGroupQuery(ctx context.Context, q navSnapshotQuerier, groupID string) (int64, error) {
-	const selectSQL = `SELECT COALESCE(SUM(share_units), 0) FROM positions WHERE group_id = $1`
+	const selectSQL = `
+SELECT COALESCE(SUM(p.share_units), 0)
+FROM positions p
+JOIN users u ON u.id = p.user_id
+JOIN groups g ON g.id = p.group_id
+WHERE p.group_id = $1 AND ` + potPositionPredicate
 	var total int64
 	if err := q.QueryRowContext(ctx, selectSQL, groupID).Scan(&total); err != nil {
 		return 0, fmt.Errorf("sum share units: %w", err)

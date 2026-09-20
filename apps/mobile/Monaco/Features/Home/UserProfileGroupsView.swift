@@ -5,6 +5,7 @@ struct UserProfileGroupsView: View {
     @ObservedObject var auth: PrivyAuthService
     let userId: String
     let displayName: String
+    var profilePhotoUrl: String? = nil
 
     private let apiClient = MonacoAPIClient()
 
@@ -14,6 +15,14 @@ struct UserProfileGroupsView: View {
 
     var body: some View {
         List {
+            Section {
+                HStack(spacing: 12) {
+                    MonacoAvatar(photoURL: profilePhotoUrl, displayName: displayName, size: 44)
+                    Text(displayName)
+                        .font(.body.bold())
+                        .foregroundStyle(MonacoTheme.primaryText)
+                }
+            }
             Section("\(displayName)'s cabals") {
                 if isLoading {
                     ProgressView("Loading cabals…")
@@ -65,12 +74,9 @@ struct UserProfileGroupsView: View {
 
         do {
             groups = try await apiClient.getUserSharedGroups(accessToken: accessToken, userId: userId)
-        } catch MonacoAPIError.httpStatus(let status) {
-            groups = []
-            errorMessage = "Could not load clubs (HTTP \(status))."
         } catch {
             groups = []
-            errorMessage = "Could not load shared clubs."
+            errorMessage = "Couldn't load this. Pull down to try again"
         }
     }
 }

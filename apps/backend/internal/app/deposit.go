@@ -173,6 +173,12 @@ func (d *DepositService) FundGroup(ctx context.Context, accessToken string, grou
 		return CreateDepositResult{}, ErrUserNotFound
 	}
 
+	// Faker scale clubs (#153) are read-only: never create a fund intent against a dummy treasury.
+	if err := rejectFakerGroup(ctx, d.store, groupID); err != nil {
+		logDepositBranchWarn("fund group rejected", "faker group", "group_id", groupID, "user_id", user.ID)
+		return CreateDepositResult{}, err
+	}
+
 	member, err := d.store.IsGroupMember(ctx, groupID, user.ID)
 	if err != nil {
 		logDepositBranchError("fund group membership check failed", err, "group_id", groupID, "user_id", user.ID)
@@ -287,7 +293,16 @@ func (d *DepositService) CreateDeposit(ctx context.Context, accessToken string, 
 		logDepositBranchWarn("deposit create rejected", "group not found", "group_id", groupID, "user_id", user.ID)
 		return CreateDepositResult{}, ErrGroupNotFound
 	}
-	if group.CreatorUserID != user.ID {
+	if group.IsFaker {
+		logDepositBranchWarn("deposit create rejected", "faker group", "group_id", groupID, "user_id", user.ID)
+		return CreateDepositResult{}, ErrFakerGroupReadOnly
+	}
+	member, err := d.store.IsGroupMember(ctx, group.ID, user.ID)
+	if err != nil {
+		logDepositBranchError("deposit create membership check failed", err, "group_id", groupID, "user_id", user.ID)
+		return CreateDepositResult{}, err
+	}
+	if !member {
 		logDepositBranchWarn("deposit create rejected", "not group member", "group_id", groupID, "user_id", user.ID)
 		return CreateDepositResult{}, ErrNotGroupMember
 	}
@@ -327,6 +342,11 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 	if sweep.Amount <= 0 {
 		logDepositBranchWarn("deposit observe sweep rejected", "amount not positive", "deposit_id", sweep.DepositID)
 		return ObserveSweepResult{}, fmt.Errorf("amount must be positive")
+	}
+
+	if err := rejectFakerGroup(ctx, d.store, sweep.GroupID); err != nil {
+		logDepositBranchWarn("deposit observe sweep rejected", "faker group", "deposit_id", sweep.DepositID, "group_id", sweep.GroupID)
+		return ObserveSweepResult{}, err
 	}
 
 	treasury, found, err := d.store.GetTreasuryByGroupID(ctx, sweep.GroupID)
@@ -520,11 +540,12 @@ func (d *DepositService) GetDeposit(ctx context.Context, accessToken, depositID 
 		return Deposit{}, Position{}, ErrDepositNotFound
 	}
 	if row.UserID != user.ID {
-		member, err := d.store.IsGroupMember(ctx, row.GroupID, user.ID)
+		// Members read group deposits; any authed user may read faker scale club deposits (#153).
+		readable, err := d.store.CanReadGroup(ctx, row.GroupID, user.ID)
 		if err != nil {
 			return Deposit{}, Position{}, err
 		}
-		if !member {
+		if !readable {
 			return Deposit{}, Position{}, ErrDepositNotFound
 		}
 	}
@@ -593,7 +614,15 @@ func (d *DepositService) GetTreasuryUSDCBalance(ctx context.Context, accessToken
 	if err != nil {
 		return 0, "", err
 	}
-	if !found || group.CreatorUserID != user.ID {
+	// Faker treasuries are dummy rows (#153): never read them through Privy.
+	if !found || group.IsFaker {
+		return 0, "", ErrGroupNotFound
+	}
+	member, err := d.store.IsGroupMember(ctx, group.ID, user.ID)
+	if err != nil {
+		return 0, "", err
+	}
+	if !member {
 		return 0, "", ErrGroupNotFound
 	}
 

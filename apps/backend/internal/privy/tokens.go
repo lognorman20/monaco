@@ -46,6 +46,42 @@ func (c *HTTPClient) ListSPLTokenBalances(ctx context.Context, ownerAddress stri
 	return merged, nil
 }
 
+// walletUSDCBalanceOnChain reads the owner's USDC from Solana RPC at "confirmed" commitment.
+// Privy's indexed /v1/wallets/{id}/balance endpoint lags chain state by seconds after a swap,
+// so money-critical reads (payout sizing, pot NAV) must not use it.
+func (c *HTTPClient) walletUSDCBalanceOnChain(ctx context.Context, ownerAddress string) (int64, error) {
+	ownerAddress = strings.TrimSpace(ownerAddress)
+	if ownerAddress == "" {
+		return 0, fmt.Errorf("%w: missing wallet address", ErrAPI)
+	}
+
+	respBody, status, err := c.postSolanaRPCWithRetry(ctx, "getTokenAccountsByOwner", []any{
+		ownerAddress,
+		map[string]string{"mint": usdcMintAddress},
+		map[string]string{"encoding": "jsonParsed", "commitment": "confirmed"},
+	})
+	if err != nil {
+		logSolanaRPC("getTokenAccountsByOwner", status, respBody, err)
+		return 0, err
+	}
+
+	balances, err := parseSPLTokenBalances(respBody)
+	if err != nil {
+		logSolanaRPC("getTokenAccountsByOwner", status, respBody, err)
+		return 0, err
+	}
+	logSolanaRPC("getTokenAccountsByOwner", status, nil, nil)
+
+	var total int64
+	for _, balance := range balances {
+		if balance.Mint != usdcMintAddress {
+			continue
+		}
+		total += balance.Amount
+	}
+	return total, nil
+}
+
 func (c *HTTPClient) listSPLTokenBalancesForProgram(ctx context.Context, ownerAddress, programID string) ([]SPLTokenBalance, error) {
 	respBody, status, err := c.postSolanaRPCWithRetry(ctx, "getTokenAccountsByOwner", []any{
 		ownerAddress,

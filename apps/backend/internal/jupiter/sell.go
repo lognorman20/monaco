@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strings"
 )
 
@@ -115,10 +116,35 @@ func (c *HTTPClient) SellToUSDC(ctx context.Context, params SellToUSDCParams) (E
 	return c.postExecute(ctx, params.GroupID, params.UserID, params.Symbol, params.RequestID, params.SignedTransaction)
 }
 
-// RedeemSliceSellAmount returns proportional xStock atomics to sell for a redeem slice.
-func RedeemSliceSellAmount(holdingAtomics, sharesRedeemedMicros, totalSharesMicros int64) int64 {
-	if holdingAtomics <= 0 || sharesRedeemedMicros <= 0 || totalSharesMicros <= 0 {
+// RedeemSellSlippageBufferBps is the extra size added to a redeem sell so Jupiter slippage and
+// fees do not leave the payout a few micros short of what the member is owed.
+const RedeemSellSlippageBufferBps = 100
+
+// RedeemShortfallSellAmount returns the xStock atomics to sell so a redeem payout can be funded
+// in USDC. It sizes the sale to the treasury's cash shortfall against the marked value of the
+// holdings, not to the member's whole slice: a job that already sold once then raises only what
+// is still missing instead of selling the slice twice. The result is capped at the whole holding.
+func RedeemShortfallSellAmount(holdingAtomics, shortfallUsdc, stockValueUsdc int64) int64 {
+	if holdingAtomics <= 0 || shortfallUsdc <= 0 || stockValueUsdc <= 0 {
 		return 0
 	}
-	return (holdingAtomics * sharesRedeemedMicros) / totalSharesMicros
+
+	target := new(big.Int).SetInt64(shortfallUsdc)
+	buffer := new(big.Int).Mul(target, big.NewInt(RedeemSellSlippageBufferBps))
+	buffer.Div(buffer, big.NewInt(10_000))
+	target.Add(target, buffer)
+	target.Add(target, big.NewInt(1))
+
+	if target.Cmp(big.NewInt(stockValueUsdc)) >= 0 {
+		return holdingAtomics
+	}
+
+	// Round up so rounding never leaves the payout short.
+	amount := new(big.Int).Mul(big.NewInt(holdingAtomics), target)
+	amount.Add(amount, big.NewInt(stockValueUsdc-1))
+	amount.Div(amount, big.NewInt(stockValueUsdc))
+	if !amount.IsInt64() || amount.Int64() > holdingAtomics {
+		return holdingAtomics
+	}
+	return amount.Int64()
 }

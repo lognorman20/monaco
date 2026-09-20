@@ -6,58 +6,90 @@ struct MonacoToast: Equatable, Identifiable {
     var isSuccess = false
 }
 
+/// Ink capsule with paper text. Short sentence, no trailing period.
 struct MonacoToastBanner: View {
     let message: String
     var isSuccess = false
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: isSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .foregroundStyle(isSuccess ? MonacoTheme.success : MonacoTheme.warning)
+        HStack(spacing: 10) {
+            Image(systemName: isSuccess ? "checkmark" : "exclamationmark")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(isSuccess ? MonacoToastPalette.successGlyph : MonacoTheme.primaryButtonLabel)
+                .frame(width: 20)
+                .accessibilityHidden(true)
             Text(message)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(MonacoTheme.primaryText)
+                .foregroundStyle(MonacoTheme.primaryButtonLabel)
                 .multilineTextAlignment(.leading)
-            Spacer(minLength: 0)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(
-                    isSuccess ? MonacoTheme.success.opacity(0.35) : MonacoTheme.warning.opacity(0.35),
-                    lineWidth: 1
-                )
-        }
-        .shadow(color: .black.opacity(0.12), radius: 8, y: 4)
-        .padding(.horizontal, 16)
+        .padding(.leading, 16)
+        .padding(.trailing, 20)
+        .padding(.vertical, 14)
+        .frame(minHeight: 48)
+        .background(Capsule().fill(MonacoTheme.primaryButtonFill))
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0 : 0.08), radius: 16, y: 6)
+        .padding(.horizontal, MonacoTheme.Space.gutter)
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("monaco-toast-banner")
     }
 }
 
+private enum MonacoToastPalette {
+    /// Profit green that stays legible on the ink capsule in both modes.
+    static let successGlyph = MonacoTheme.profit
+}
+
 private struct MonacoToastModifier: ViewModifier {
     @Binding var toast: MonacoToast?
+    let bottomInset: CGFloat
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dragOffset: CGFloat = 0
 
     func body(content: Content) -> some View {
         content
-            .overlay(alignment: .top) {
+            .overlay(alignment: .bottom) {
                 if let toast {
                     MonacoToastBanner(message: toast.message, isSuccess: toast.isSuccess)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                        .padding(.top, 8)
+                        .id(toast.id)
+                        .offset(y: max(dragOffset, 0))
+                        .gesture(
+                            DragGesture(minimumDistance: 8)
+                                .onChanged { dragOffset = $0.translation.height }
+                                .onEnded { value in
+                                    if value.translation.height > 24 || value.predictedEndTranslation.height > 60 {
+                                        self.toast = nil
+                                    }
+                                    withAnimation(.snappy) { dragOffset = 0 }
+                                }
+                        )
+                        .onTapGesture { self.toast = nil }
+                        .transition(
+                            reduceMotion
+                                ? .opacity
+                                : .move(edge: .bottom).combined(with: .opacity)
+                        )
+                        .padding(.bottom, bottomInset)
                         .zIndex(1)
                 }
             }
-            .animation(.easeInOut(duration: 0.25), value: toast?.id)
+            .animation(reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.35, dampingFraction: 0.85), value: toast?.id)
             .onChange(of: toast?.id) { _, newID in
-                guard let newID else { return }
-                Task {
-                    try? await Task.sleep(for: .seconds(4))
-                    await MainActor.run {
-                        if toast?.id == newID {
-                            toast = nil
-                        }
+                guard let newID, let current = toast else { return }
+                dragOffset = 0
+                if !current.isSuccess {
+                    Haptics.warning()
+                }
+                AccessibilityNotification.Announcement(current.message).post()
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(2.5))
+                    if toast?.id == newID {
+                        toast = nil
                     }
                 }
             }
@@ -65,7 +97,8 @@ private struct MonacoToastModifier: ViewModifier {
 }
 
 extension View {
-    func monacoToast(_ toast: Binding<MonacoToast?>) -> some View {
-        modifier(MonacoToastModifier(toast: toast))
+    /// Bottom toast, 2.5s, swipe down or tap to dismiss. Screens with a `BottomCTA` pass `bottomInset: 72`.
+    func monacoToast(_ toast: Binding<MonacoToast?>, bottomInset: CGFloat = 12) -> some View {
+        modifier(MonacoToastModifier(toast: toast, bottomInset: bottomInset))
     }
 }

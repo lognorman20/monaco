@@ -12,6 +12,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/packages/domain"
 )
 
 func integrationGroupApp(t *testing.T) (*GroupHandlers, *AuthHandlers, privy.Client, *sql.DB, *postgres.TestIsolation) {
@@ -687,5 +688,68 @@ func TestGET_group_missingAuth_returns401(t *testing.T) {
 	// Assert
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestGET_groupView_includesAgentAPIKeyForMembers(t *testing.T) {
+	t.Parallel()
+	groupHandlers, authHandlers, privyClient, _, iso := integrationGroupApp(t)
+	_, creatorToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "agent-view-key-creator", "Creator")
+	createRec := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Agent Key Club"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	groupHandlers.CreateGroupHandler(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create group status = %d, want 200; body = %s", createRec.Code, createRec.Body.String())
+	}
+	var created createGroupResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create group: %v", err)
+	}
+	trackCreatedGroup(iso, created.GroupID)
+	privy.SetTreasuryUSDCBalance(privyClient, created.TreasuryAddress, 5_000_000)
+
+	creatorSession, err := authHandlers.Sessions.OpenSession(context.Background(), string(creatorToken))
+	if err != nil {
+		t.Fatalf("open creator session: %v", err)
+	}
+	governance := groupHandlers.Governance
+	proposal, err := governance.CreateProposal(context.Background(), app.CreateProposalInput{
+		GroupID:              created.GroupID,
+		ProposerID:           creatorSession.UserID,
+		Kind:                 domain.ProposalKindAddAgent,
+		AgentDisplayName:     "Scout",
+		AllocationUsdcMicros: 1_000_000,
+	})
+	if err != nil {
+		t.Fatalf("create add agent proposal: %v", err)
+	}
+	if _, err := governance.CastVote(context.Background(), app.CastVoteInput{
+		ProposalID: proposal.ID,
+		VoterID:    creatorSession.UserID,
+		Choice:     domain.VoteYes,
+	}); err != nil {
+		t.Fatalf("cast vote: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/groups/"+created.GroupID+"/view", nil)
+	req.SetPathValue("id", created.GroupID)
+	req.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	groupHandlers.GetGroupViewHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("view status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Agent *struct {
+			APIKey string `json:"apiKey"`
+		} `json:"agent"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode view: %v", err)
+	}
+	if payload.Agent == nil || payload.Agent.APIKey == "" {
+		t.Fatalf("expected apiKey for member, got %+v", payload.Agent)
 	}
 }

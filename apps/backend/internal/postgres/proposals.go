@@ -21,6 +21,7 @@ type ProposalRow struct {
 	TokenAmount          int64
 	AgentDisplayName     string
 	AllocationUsdcMicros int64
+	Thesis               string
 	Status               domain.ProposalStatus
 	ExpiresAt            time.Time
 	CreatedAt            time.Time
@@ -36,17 +37,18 @@ type InsertProposalParams struct {
 	TokenAmount          int64
 	AgentDisplayName     string
 	AllocationUsdcMicros int64
+	Thesis               string
 	ExpiresAt            time.Time
 }
 
 const proposalSelectColumns = `id, group_id, proposer_id, symbol, kind, usdc_micros, token_amount,
-  agent_display_name, allocation_usdc_micros, status, expires_at, created_at`
+  agent_display_name, allocation_usdc_micros, thesis, status, expires_at, created_at`
 
 func scanProposalRow(scanner interface{ Scan(dest ...any) error }) (ProposalRow, error) {
 	var row ProposalRow
 	var kindRaw, statusRaw string
 	var usdc, token, allocation sql.NullInt64
-	var agentName sql.NullString
+	var agentName, thesis sql.NullString
 	if err := scanner.Scan(
 		&row.ID,
 		&row.GroupID,
@@ -57,6 +59,7 @@ func scanProposalRow(scanner interface{ Scan(dest ...any) error }) (ProposalRow,
 		&token,
 		&agentName,
 		&allocation,
+		&thesis,
 		&statusRaw,
 		&row.ExpiresAt,
 		&row.CreatedAt,
@@ -84,6 +87,9 @@ func scanProposalRow(scanner interface{ Scan(dest ...any) error }) (ProposalRow,
 	}
 	if allocation.Valid {
 		row.AllocationUsdcMicros = allocation.Int64
+	}
+	if thesis.Valid {
+		row.Thesis = thesis.String
 	}
 	return row, nil
 }
@@ -168,11 +174,15 @@ func (s *Store) InsertProposalTx(ctx context.Context, tx *sql.Tx, params InsertP
 	if params.AllocationUsdcMicros > 0 {
 		allocation = params.AllocationUsdcMicros
 	}
+	var thesis any
+	if params.Thesis != "" {
+		thesis = params.Thesis
+	}
 	insertSQL := `
 INSERT INTO proposals (
   group_id, proposer_id, symbol, kind, usdc_micros, token_amount,
-  agent_display_name, allocation_usdc_micros, status, expires_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'open', $9)
+  agent_display_name, allocation_usdc_micros, thesis, status, expires_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'open', $10)
 RETURNING ` + proposalSelectColumns
 
 	row, err := scanProposalRow(tx.QueryRowContext(ctx, insertSQL,
@@ -184,6 +194,7 @@ RETURNING ` + proposalSelectColumns
 		token,
 		agentName,
 		allocation,
+		thesis,
 		params.ExpiresAt,
 	))
 	if err != nil {
@@ -426,6 +437,7 @@ LIMIT 100`
 }
 
 // ListPassedProposalsPendingExecute returns passed proposals without a confirmed buy row.
+// Faker proposers and faker groups (#153) are excluded so seeded proposals never reach Jupiter.
 func (s *Store) ListPassedProposalsPendingExecute(ctx context.Context, limit int) ([]ProposalRow, error) {
 	if limit <= 0 {
 		limit = 20
@@ -435,6 +447,8 @@ func (s *Store) ListPassedProposalsPendingExecute(ctx context.Context, limit int
 SELECT ` + proposalSelectColumns + `
 FROM proposals p
 WHERE p.status = 'passed'
+  AND NOT EXISTS (SELECT 1 FROM users fu WHERE fu.id = p.proposer_id AND fu.is_faker)
+  AND NOT EXISTS (SELECT 1 FROM groups fg WHERE fg.id = p.group_id AND fg.is_faker)
   AND (
     (
       p.kind = 'buy'
@@ -477,6 +491,8 @@ SELECT ` + proposalSelectColumns + `
 FROM proposals p
 WHERE p.group_id = $1
   AND p.status = 'passed'
+  AND NOT EXISTS (SELECT 1 FROM users fu WHERE fu.id = p.proposer_id AND fu.is_faker)
+  AND NOT EXISTS (SELECT 1 FROM groups fg WHERE fg.id = p.group_id AND fg.is_faker)
   AND NOT EXISTS (
     SELECT 1
     FROM transactions t
@@ -520,9 +536,12 @@ func (s *Store) ListMissedOpenProposalsForUser(ctx context.Context, userID strin
 SELECT p.id, p.group_id, g.name, p.symbol, p.status, p.created_at, p.expires_at
 FROM proposals p
 JOIN groups g ON g.id = p.group_id
+JOIN users pu ON pu.id = p.proposer_id
 WHERE p.group_id = ANY($1::uuid[])
   AND p.status = 'open'
   AND p.expires_at > NOW()
+  AND NOT pu.is_faker
+  AND NOT g.is_faker
   AND NOT EXISTS (
     SELECT 1 FROM votes v WHERE v.proposal_id = p.id AND v.voter_id = $2
   )

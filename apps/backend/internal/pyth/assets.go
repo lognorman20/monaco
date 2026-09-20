@@ -154,7 +154,7 @@ func (c *HermesClient) fetchHistoricalPrice(ctx context.Context, feedID string, 
 		return 0, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("pyth historical price: status %d", resp.StatusCode)
+		return 0, hermesRequestError("pyth historical price", resp.StatusCode, body)
 	}
 
 	var payload latestPriceResponse

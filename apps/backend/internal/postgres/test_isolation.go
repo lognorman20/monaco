@@ -131,11 +131,15 @@ func sanitizeTestLabel(label string) string {
 
 func deleteTrackedGroups(ctx context.Context, db *sql.DB, groupIDs []string) error {
 	steps := []string{
+		`DELETE FROM proposal_comments WHERE proposal_id IN (SELECT id FROM proposals WHERE group_id = ANY($1::uuid[]))`,
 		`DELETE FROM votes WHERE proposal_id IN (SELECT id FROM proposals WHERE group_id = ANY($1::uuid[]))`,
+		// transactions and agent_intents reference each other (transactions.agent_intent_id and
+		// agent_intents.transaction_id), so null one side of the cycle before either can be deleted.
+		`UPDATE agent_intents SET transaction_id = NULL WHERE group_id = ANY($1::uuid[])`,
+		`DELETE FROM transactions WHERE group_id = ANY($1::uuid[])`,
 		`DELETE FROM agent_intents WHERE group_id = ANY($1::uuid[])`,
 		`DELETE FROM group_agent_key_reveals WHERE proposal_id IN (SELECT id FROM proposals WHERE group_id = ANY($1::uuid[]))`,
 		`DELETE FROM group_agents WHERE group_id = ANY($1::uuid[])`,
-		`DELETE FROM transactions WHERE group_id = ANY($1::uuid[])`,
 		`DELETE FROM proposals WHERE group_id = ANY($1::uuid[])`,
 		`DELETE FROM redeem_jobs WHERE group_id = ANY($1::uuid[])`,
 		`DELETE FROM payout_proofs WHERE group_id = ANY($1::uuid[])`,

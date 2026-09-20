@@ -81,21 +81,21 @@ struct JoinGroupView: View {
             case .joined, .alreadyMember:
                 didJoin = true
                 toast = MonacoToast(
-                    message: "You're in! Your cabal is on the Cabals tab now.",
+                    message: "You're in. Add money to start voting.",
                     isSuccess: true
                 )
                 await session?.refresh(auth: auth)
             case .pending:
                 requestPending = true
                 toast = MonacoToast(
-                    message: "Request sent. The cabal admin will approve your join.",
+                    message: "Request sent. You'll be in once an admin approves.",
                     isSuccess: true
                 )
             }
         } catch MonacoAPIError.httpStatus(404) {
             toast = MonacoToast(message: "Cabal not found. Check the ID and try again.")
         } catch {
-            toast = MonacoToast(message: "Could not join cabal. Try again.")
+            toast = MonacoToast(message: "Couldn't join this cabal. Try again.")
         }
     }
 }

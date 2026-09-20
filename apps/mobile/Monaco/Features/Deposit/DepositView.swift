@@ -8,18 +8,28 @@ struct DepositView: View {
     var joinedCabals: [HomeGroupBoardRowDTO] = []
     var preselectedGroupId: String?
 
+    @Environment(AppSessionStore.self) private var session
+
     private let apiClient = MonacoAPIClient()
 
     @State private var depositAddress: String?
     @State private var errorMessage: String?
     @State private var isLoading = true
+    @State private var lastSeenBalanceMicros: Int64?
     @State private var toast: MonacoToast?
 
     var body: some View {
         Form {
             Section {
-                Text("Send USDC on Solana to your deposit address. It stays in your account balance until you fund a cabal.")
+                Text("Send USDC on the Solana network only. Your account balance updates within a few seconds after it lands on chain.")
                     .monacoSecondaryCaption()
+            }
+
+            if let balance = session.platformBalance {
+                Section("Account balance") {
+                    MoneyText(micros: balance.availableUsdcMicros, style: .row)
+                        .accessibilityIdentifier("deposit-screen-balance-value")
+                }
             }
 
             Section("Your deposit address") {
@@ -54,7 +64,7 @@ struct DepositView: View {
             Section("How it works") {
                 stepRow(number: 1, text: "Send USDC on Solana to the address above.")
                 stepRow(number: 2, text: "Your account balance updates when USDC arrives.")
-                stepRow(number: 3, text: "Fund a cabal to move USDC into its treasury and credit your share.")
+                stepRow(number: 3, text: "Fund a cabal to move USDC into the pot and credit your share.")
             }
 
             if !joinedCabals.isEmpty {
@@ -73,11 +83,15 @@ struct DepositView: View {
             }
         }
         .monacoFormScreen()
-        .navigationTitle("Deposit")
+        .navigationTitle("Add money")
         .navigationBarTitleDisplayMode(.inline)
         .monacoToast($toast)
         .task(id: auth.accessToken) {
             await loadDepositAddress()
+        }
+        .task(id: depositAddress) {
+            guard depositAddress != nil else { return }
+            await pollPlatformBalanceWhileVisible()
         }
     }
 
@@ -139,13 +153,30 @@ struct DepositView: View {
                 return
             }
             depositAddress = address
-        } catch MonacoAPIError.httpStatus(let status) {
-            errorMessage = "Could not load address (HTTP \(status))."
+        } catch MonacoAPIError.httpStatus {
+            errorMessage = "Couldn't load your deposit address. Pull down to try again."
         } catch {
-            errorMessage = "Could not load deposit address."
+            errorMessage = "No connection. Check your internet and try again."
         }
 
         isLoading = false
+    }
+
+    /// Refreshes platform balance while the deposit screen is open so inbound USDC shows quickly.
+    private func pollPlatformBalanceWhileVisible() async {
+        lastSeenBalanceMicros = session.platformBalance?.availableUsdcMicros
+        while !Task.isCancelled {
+            guard let token = auth.accessToken else { return }
+            if let balance = try? await apiClient.getPlatformBalance(accessToken: token) {
+                let previous = lastSeenBalanceMicros
+                session.platformBalance = balance
+                if let previous, balance.availableUsdcMicros > previous {
+                    toast = MonacoToast(message: "USDC arrived in your account balance.", isSuccess: true)
+                }
+                lastSeenBalanceMicros = balance.availableUsdcMicros
+            }
+            try? await Task.sleep(for: DepositPolling.balanceInterval)
+        }
     }
 }
 

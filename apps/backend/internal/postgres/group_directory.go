@@ -40,14 +40,17 @@ type GroupSearchCursor struct {
 
 // directorySelect projects public group fields. Member count and net USDC in
 // are correlated subqueries against indexed primary keys (group_members and
-// positions are both keyed by group_id first).
+// positions are both keyed by group_id first). Net USDC in counts pot-backed
+// positions only (ghost faker positions in a real group are excluded), the
+// same basis groupValuation uses.
 const directorySelect = `
 SELECT g.id,
        g.name,
        g.join_mode,
        (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id) AS member_count,
        (SELECT COALESCE(SUM(p.amount_deposited - p.amount_withdrawn), 0)
-          FROM positions p WHERE p.group_id = g.id) AS net_usdc_in,
+          FROM positions p JOIN users u ON u.id = p.user_id
+         WHERE p.group_id = g.id AND ` + potPositionPredicate + `) AS net_usdc_in,
        g.created_at`
 
 // ListGroupDirectory returns every group's public projection, oldest first.
@@ -237,20 +240,27 @@ type ContributionEvent struct {
 }
 
 // ListContributionEventsAfter returns confirmed deposits and withdrawals for
-// groupIDs created strictly after after, oldest first.
+// groupIDs created strictly after after, oldest first. Ghost faker rows in a
+// real group are skipped: they never moved money through the pot.
 func (s *Store) ListContributionEventsAfter(ctx context.Context, groupIDs []string, after time.Time) ([]ContributionEvent, error) {
 	if len(groupIDs) == 0 {
 		return []ContributionEvent{}, nil
 	}
 	const selectSQL = `
 SELECT group_id, created_at, amount FROM (
-  SELECT group_id, created_at, amount, id
-    FROM deposits
-   WHERE group_id = ANY($1::uuid[]) AND status = 'confirmed' AND created_at > $2
+  SELECT d.group_id, d.created_at, d.amount, d.id
+    FROM deposits d
+    JOIN users u ON u.id = d.user_id
+    JOIN groups g ON g.id = d.group_id
+   WHERE d.group_id = ANY($1::uuid[]) AND d.status = 'confirmed' AND d.created_at > $2
+     AND ` + potPositionPredicate + `
   UNION ALL
-  SELECT group_id, created_at, -amount, id
-    FROM withdrawals
-   WHERE group_id = ANY($1::uuid[]) AND status = 'confirmed' AND created_at > $2
+  SELECT w.group_id, w.created_at, -w.amount, w.id
+    FROM withdrawals w
+    JOIN users u ON u.id = w.user_id
+    JOIN groups g ON g.id = w.group_id
+   WHERE w.group_id = ANY($1::uuid[]) AND w.status = 'confirmed' AND w.created_at > $2
+     AND ` + potPositionPredicate + `
 ) events
 ORDER BY created_at ASC, id ASC`
 

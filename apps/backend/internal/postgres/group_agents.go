@@ -23,12 +23,13 @@ type GroupAgentRow struct {
 	AllocationUsdcMicros int64
 	APIKeyHash           sql.NullString
 	APIKeyPrefix         sql.NullString
+	APIKey               sql.NullString
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
 }
 
 const groupAgentSelectColumns = `id, group_id, status, install_proposal_id, pause_proposal_id, resume_proposal_id,
-  revoke_proposal_id, agent_display_name, allocation_usdc_micros, api_key_hash, api_key_prefix, created_at, updated_at`
+  revoke_proposal_id, agent_display_name, allocation_usdc_micros, api_key_hash, api_key_prefix, api_key, created_at, updated_at`
 
 func scanGroupAgentRow(scanner interface{ Scan(dest ...any) error }) (GroupAgentRow, error) {
 	var row GroupAgentRow
@@ -45,6 +46,7 @@ func scanGroupAgentRow(scanner interface{ Scan(dest ...any) error }) (GroupAgent
 		&row.AllocationUsdcMicros,
 		&row.APIKeyHash,
 		&row.APIKeyPrefix,
+		&row.APIKey,
 		&row.CreatedAt,
 		&row.UpdatedAt,
 	); err != nil {
@@ -63,8 +65,8 @@ func (s *Store) InsertGroupAgentTx(ctx context.Context, tx *sql.Tx, row GroupAge
 	const insertSQL = `
 INSERT INTO group_agents (
   group_id, status, install_proposal_id, agent_display_name, allocation_usdc_micros,
-  api_key_hash, api_key_prefix
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+  api_key_hash, api_key_prefix, api_key
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING ` + groupAgentSelectColumns
 
 	var installID any
@@ -79,6 +81,10 @@ RETURNING ` + groupAgentSelectColumns
 	if row.APIKeyPrefix.Valid {
 		keyPrefix = row.APIKeyPrefix.String
 	}
+	var apiKey any
+	if row.APIKey.Valid {
+		apiKey = row.APIKey.String
+	}
 
 	out, err := scanGroupAgentRow(tx.QueryRowContext(ctx, insertSQL,
 		row.GroupID,
@@ -88,6 +94,7 @@ RETURNING ` + groupAgentSelectColumns
 		row.AllocationUsdcMicros,
 		keyHash,
 		keyPrefix,
+		apiKey,
 	))
 	if err != nil {
 		return GroupAgentRow{}, fmt.Errorf("insert group agent: %w", err)
@@ -157,11 +164,18 @@ WHERE id = $1`
 	return nil
 }
 
-// RevokeGroupAgentKeyTx clears api_key_hash when an agent is revoked.
+// RevokeGroupAgentKeyTx clears the key hash and every stored plaintext copy (the member-readable
+// api_key and any still-open proposer reveal) when an agent is revoked.
 func (s *Store) RevokeGroupAgentKeyTx(ctx context.Context, tx *sql.Tx, agentID string) error {
+	const deleteRevealSQL = `
+DELETE FROM group_agent_key_reveals
+WHERE proposal_id = (SELECT install_proposal_id FROM group_agents WHERE id = $1)`
+	if _, err := tx.ExecContext(ctx, deleteRevealSQL, agentID); err != nil {
+		return fmt.Errorf("delete revoked agent key reveal: %w", err)
+	}
 	const updateSQL = `
 UPDATE group_agents
-SET api_key_hash = NULL, api_key_prefix = NULL, status = 'revoked', updated_at = now()
+SET api_key_hash = NULL, api_key_prefix = NULL, api_key = NULL, status = 'revoked', updated_at = now()
 WHERE id = $1`
 	if _, err := tx.ExecContext(ctx, updateSQL, agentID); err != nil {
 		return fmt.Errorf("revoke group agent key: %w", err)
@@ -169,7 +183,7 @@ WHERE id = $1`
 	return nil
 }
 
-// InsertAgentKeyRevealTx stores a one-time plaintext key for the proposer.
+// InsertAgentKeyRevealTx stores the plaintext key for the proposer to read during the reveal window.
 func (s *Store) InsertAgentKeyRevealTx(ctx context.Context, tx *sql.Tx, proposalID, plaintextKey string) error {
 	const insertSQL = `
 INSERT INTO group_agent_key_reveals (proposal_id, plaintext_key)
@@ -181,28 +195,28 @@ ON CONFLICT (proposal_id) DO NOTHING`
 	return nil
 }
 
-// ConsumeAgentKeyReveal returns and deletes the one-time key for proposalID.
-func (s *Store) ConsumeAgentKeyReveal(ctx context.Context, proposalID string) (string, bool, error) {
-	tx, err := s.BeginTx(ctx)
-	if err != nil {
-		return "", false, err
+// ReadAgentKeyReveal returns the plaintext key for proposalID while it is younger than
+// window, and purges it (and any other expired key) once it is not. Reading does not
+// consume the key, so a refetch or a lost response cannot lose it.
+func (s *Store) ReadAgentKeyReveal(ctx context.Context, proposalID string, window time.Duration) (string, bool, error) {
+	const purgeSQL = `
+DELETE FROM group_agent_key_reveals
+WHERE created_at <= now() - make_interval(secs => $1)`
+	if _, err := s.db.ExecContext(ctx, purgeSQL, window.Seconds()); err != nil {
+		return "", false, fmt.Errorf("purge expired agent key reveals: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
 
 	const selectSQL = `
-DELETE FROM group_agent_key_reveals
-WHERE proposal_id = $1
-RETURNING plaintext_key`
+SELECT plaintext_key
+FROM group_agent_key_reveals
+WHERE proposal_id = $1`
 	var key string
-	err = tx.QueryRowContext(ctx, selectSQL, proposalID).Scan(&key)
+	err := s.db.QueryRowContext(ctx, selectSQL, proposalID).Scan(&key)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
 	if err != nil {
-		return "", false, fmt.Errorf("consume agent key reveal: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return "", false, fmt.Errorf("commit consume agent key reveal: %w", err)
+		return "", false, fmt.Errorf("read agent key reveal: %w", err)
 	}
 	return key, true, nil
 }

@@ -2,14 +2,11 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 	"strconv"
 	"strings"
 
-	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -60,28 +57,10 @@ func (h *HomeService) GetGroupView(ctx context.Context, accessToken, groupID str
 		return GroupViewResult{}, fmt.Errorf("group id is required")
 	}
 
-	identity, err := h.privy.VerifySession(ctx, privy.AccessToken(accessToken))
-	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return GroupViewResult{}, privy.ErrInvalidToken
-		}
-		return GroupViewResult{}, fmt.Errorf("verify session: %w", err)
-	}
-
-	user, found, err := h.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	// Members read their club; any authed user may spectate a faker scale club (#153).
+	viewerID, err := authorizeGroupReader(ctx, h.store, h.privy, accessToken, groupID)
 	if err != nil {
 		return GroupViewResult{}, err
-	}
-	if !found {
-		return GroupViewResult{}, ErrUserNotFound
-	}
-
-	member, err := h.store.IsGroupMember(ctx, groupID, user.ID)
-	if err != nil {
-		return GroupViewResult{}, err
-	}
-	if !member {
-		return GroupViewResult{}, ErrGroupNotFound
 	}
 
 	if err := h.creditUncreditedForGroups(ctx, []string{groupID}); err != nil {
@@ -131,7 +110,7 @@ func (h *HomeService) GetGroupView(ctx context.Context, accessToken, groupID str
 		return GroupViewResult{}, err
 	}
 
-	you, err := h.buildGroupViewYouSlice(ctx, user.ID, groupID, totalShares, domain.USDCMicros(potNavMicros))
+	you, err := h.buildGroupViewYouSlice(ctx, viewerID, groupID, totalShares, domain.USDCMicros(potNavMicros))
 	if err != nil {
 		return GroupViewResult{}, err
 	}
@@ -141,10 +120,16 @@ func (h *HomeService) GetGroupView(ctx context.Context, accessToken, groupID str
 		return GroupViewResult{}, err
 	}
 
+	treasuryAddress := treasury.SolanaAddress
+	if group.IsFaker {
+		// Dummy treasury (#153): never surface an address anyone could send real USDC to.
+		treasuryAddress = ""
+	}
+
 	return GroupViewResult{
 		ID:              group.ID,
 		Name:            group.Name,
-		TreasuryAddress: treasury.SolanaAddress,
+		TreasuryAddress: treasuryAddress,
 		PotTotalUsd:     formatMicrosAsUsdDecimal(potNavMicros),
 		Pot:             potRows,
 		You:             you,
@@ -228,46 +213,12 @@ func (h *HomeService) buildGroupViewMemberRows(
 		return []GroupViewMemberRow{}, nil
 	}
 
-	positions, err := h.store.ListPositionsByGroup(ctx, groupID)
+	members, totalShares, boardPot, err := h.memberBoardInputs(ctx, groupID, memberIDs, potNavMicros, totalSharesMicro)
 	if err != nil {
 		return nil, err
 	}
-	positionByUser := make(map[string]postgres.PositionRow, len(positions))
-	for _, position := range positions {
-		positionByUser[position.UserID] = position
-	}
 
-	totalShares, err := domain.ShareUnitsMicrosToDomain(totalSharesMicro)
-	if err != nil {
-		return nil, err
-	}
-	if totalShares.IsZero() {
-		totalSharesMicro, err = h.store.SumShareUnitsByGroup(ctx, groupID)
-		if err != nil {
-			return nil, err
-		}
-		totalShares, err = domain.ShareUnitsMicrosToDomain(totalSharesMicro)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	members := make([]domain.MemberPosition, 0, len(memberIDs))
-	for _, userID := range memberIDs {
-		position := positionByUser[userID]
-		shareUnits, err := domain.ShareUnitsMicrosToDomain(position.ShareUnits)
-		if err != nil {
-			return nil, err
-		}
-		members = append(members, domain.MemberPosition{
-			UserID:          userID,
-			ShareUnits:      shareUnits,
-			AmountDeposited: domain.USDCMicros(position.AmountDeposited),
-			AmountWithdrawn: domain.USDCMicros(position.AmountWithdrawn),
-		})
-	}
-
-	board, err := BuildInGroupViewMemberBoard(members, totalShares, domain.PotNAV{TotalUsdc: domain.USDCMicros(potNavMicros)})
+	board, err := BuildInGroupViewMemberBoard(members, totalShares, domain.PotNAV{TotalUsdc: domain.USDCMicros(boardPot)})
 	if err != nil {
 		return nil, err
 	}

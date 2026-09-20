@@ -87,12 +87,15 @@ WHERE group_id = $1`
 	return treasury, true, nil
 }
 
-// ListTreasuries returns all group treasury wallet rows.
+// ListTreasuries returns chain-backed group treasury wallet rows. Faker scale club (#153)
+// dummy treasuries are excluded: they are not Privy wallets and must never be swept or read.
 func (s *Store) ListTreasuries(ctx context.Context) ([]Treasury, error) {
 	const selectSQL = `
-SELECT id, group_id, privy_wallet_id, solana_address, created_at
-FROM treasuries
-ORDER BY created_at ASC`
+SELECT t.id, t.group_id, t.privy_wallet_id, t.solana_address, t.created_at
+FROM treasuries t
+JOIN groups g ON g.id = t.group_id
+WHERE NOT g.is_faker
+ORDER BY t.created_at ASC`
 
 	rows, err := s.db.QueryContext(ctx, selectSQL)
 	if err != nil {

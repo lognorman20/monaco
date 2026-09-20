@@ -21,7 +21,7 @@ struct EmailLoginView: View {
             TextField(
                 "",
                 text: $emailAddress,
-                prompt: Text("Email address").foregroundStyle(MonacoTheme.disabled)
+                prompt: Text("Email address").foregroundStyle(MonacoTheme.tertiaryText)
             )
                 .keyboardType(.emailAddress)
                 .textContentType(.emailAddress)
@@ -29,13 +29,14 @@ struct EmailLoginView: View {
                 .autocorrectionDisabled()
                 .focused($focusedField, equals: .email)
                 .authTextFieldStyle()
+                .disabled(showsOTPField)
                 .accessibilityIdentifier("emailAddressField")
 
             if showsOTPField {
                 TextField(
                     "",
                     text: $otpCode,
-                    prompt: Text("6-digit code").foregroundStyle(MonacoTheme.disabled)
+                    prompt: Text("6-digit code").foregroundStyle(MonacoTheme.tertiaryText)
                 )
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
@@ -74,6 +75,39 @@ struct EmailLoginView: View {
                     .accessibilityIdentifier("emailSendCodeButton")
                 }
             }
+
+            if showsOTPField {
+                HStack {
+                    Button("Send a new code") {
+                        otpCode = ""
+                        Task {
+                            await auth.sendEmailCode(to: normalizedEmail)
+                            if case .awaitingCode = auth.phase {
+                                focusedField = .code
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .foregroundStyle(MonacoTheme.accent)
+                    .disabled(auth.phase == .verifyingCode)
+                    .accessibilityIdentifier("emailResendCodeButton")
+
+                    Spacer()
+
+                    Button("Change email") {
+                        otpCode = ""
+                        auth.resetLoginFlow()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .disabled(auth.phase == .verifyingCode)
+                    .accessibilityIdentifier("emailChangeAddressButton")
+                }
+            }
         }
     }
 
@@ -83,9 +117,9 @@ struct EmailLoginView: View {
 
     private var showsOTPField: Bool {
         switch auth.phase {
-        case .awaitingCode, .verifyingCode, .authenticated:
+        case .awaitingCode, .verifyingCode, .codeRejected, .authenticated:
             true
-        case .idle, .sendingCode, .failed:
+        case .idle, .sendingCode, .failed, .restoring, .restoreFailed:
             false
         }
     }
@@ -100,24 +134,24 @@ struct EmailLoginView: View {
 
     private var statusMessage: String? {
         switch auth.phase {
-        case .idle:
+        case .idle, .restoring, .restoreFailed:
             return nil
         case .sendingCode:
             return "Sending code…"
         case .awaitingCode:
-            return "Enter the code from your email."
+            return "Enter the 6-digit code we sent to \(normalizedEmail)."
         case .verifyingCode:
             return "Signing you in…"
         case .authenticated:
-            return "Signed in."
-        case .failed(let message):
+            return nil
+        case .failed(let message), .codeRejected(let message):
             return message
         }
     }
 
     private var statusColor: Color {
         switch auth.phase {
-        case .failed:
+        case .failed, .codeRejected:
             return MonacoTheme.destructive
         case .authenticated:
             return MonacoTheme.success

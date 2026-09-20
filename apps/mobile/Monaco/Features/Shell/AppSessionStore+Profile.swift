@@ -12,7 +12,15 @@ enum ProfileSaveOutcome: Equatable {
 /// refetched so the new name and photo show up on the people and member boards.
 extension AppSessionStore {
     /// Optimistically renames the signed-in user, rolling back if the server rejects it.
-    func updateDisplayName(_ draft: String, auth: PrivyAuthService) async -> ProfileSaveOutcome {
+    ///
+    /// First run passes `optimistic: false`. `FirstRunGate` routes on `me.displayName`,
+    /// so writing the name before the server confirms it would drop the user into the
+    /// tabs mid-request and bounce them back out on a rejection.
+    func updateDisplayName(
+        _ draft: String,
+        auth: PrivyAuthService,
+        optimistic: Bool = true
+    ) async -> ProfileSaveOutcome {
         guard let current = me else {
             return .failed("Your profile is still loading.")
         }
@@ -30,12 +38,15 @@ extension AppSessionStore {
             return .failed("Sign in again to edit your profile.")
         }
 
-        let optimistic = current.withDisplayName(normalized)
-        me = optimistic
+        let pending = current.withDisplayName(normalized)
+        if optimistic {
+            me = pending
+        }
         do {
             me = try await client.updateProfile(displayName: normalized)
         } catch {
-            if me == optimistic {
+            // Only ever rolls back our own optimistic write, never a fresher one.
+            if me == pending {
                 me = current
             }
             return await failure(for: error, auth: auth, fallback: "Could not save your name. Try again.")
@@ -65,8 +76,8 @@ extension AppSessionStore {
 
     private func failure(for error: Error, auth: PrivyAuthService, fallback: String) async -> ProfileSaveOutcome {
         if case MonacoCore.MonacoAPIError.httpStatus(401) = error {
-            await auth.logout()
-            return .failed("Your session expired. Sign in again.")
+            await auth.signOutAfterRejectedSession()
+            return .failed(LoginFailureCopy.sessionExpired)
         }
         return .failed(Self.profileErrorMessage(for: error, fallback: fallback))
     }

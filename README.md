@@ -2,7 +2,7 @@
 
 iOS app: friends pool USDC and buy tokenized US stocks on Solana. Product rules: [`docs/product.md`](docs/product.md). Milestone backlog: [`docs/index.md`](docs/index.md).
 
-This file is how to clone, run, and operate the repo.
+Monaco lets you create a hedge fund with friends by pooling money to buy stocks together. Members propose and vote on trades, and approved trades execute for the group; as the pool profits, each member’s stake increases in value through NAV. You can even add an agent to your cabal to trade on your behalf. Built as a social trading app, Monaco turns investing into an easy group game anyone can join simply by depositing money.
 
 ## Prereqs
 
@@ -120,6 +120,85 @@ address  EpeyGQXFY9vhkxPUZbz1wVRhs5vphRQt8SeJN2Gx1DrX
 sol      0.003044217
 usdc     0.00
 ```
+
+## Swap provider (Jupiter or Definitive Flash)
+
+Treasury buys and sells go through `swapprovider.Provider` (`apps/backend/internal/swapprovider`). `SWAP_PROVIDER` picks the venue at API boot; the choice is logged as `swap provider ready`.
+
+| `SWAP_PROVIDER`     | Venue                                                                 | Needs                                  |
+| ------------------- | --------------------------------------------------------------------- | -------------------------------------- |
+| `jupiter` (default) | Jupiter Swap API v2: order → treasury + relayer sign → execute → poll | nothing new                            |
+| `flash`             | [Definitive Flash](https://flash.definitive.fi/docs): quote → sign → order → poll | `FLASH_API_KEY`, Privy authorization key |
+
+Flash on Solana, per trade: `POST /quote` with the treasury as `funderAddress`, the treasury wallet signs the quote's plaintext `svm.orderMessage` (Privy `signMessage`, Ed25519), `POST /order`, then poll `GET /orders/{orderId}` until `ORDER_STATUS_FILLED`. The backend refuses to sign unless the message commits to the mint and atomic amount it asked for, and unless the quote deadline is still ahead.
+
+First Flash trade of a token per treasury also needs an onchain setup: create the token account and `Approve` the Flash program as SPL delegate. The backend sends both in one transaction with the **relayer as fee payer and rent payer** and the treasury as co-signer, then re-quotes until Flash sees it. That costs the relayer about 0.002 SOL per new token account.
+
+Get a key at [app.definitive.fi](https://app.definitive.fi) → More → Flash → Create Flash Key, then set `SWAP_PROVIDER=flash` and `FLASH_API_KEY` in `.env.local`. `FLASH_MAX_SLIPPAGE` (default `0.01`) bounds executed vs quoted output. Unset `SWAP_PROVIDER` to go back to Jupiter; no data migration either way.
+
+Every treasury swap follows the flag, including the sells a cash-out triggers (`RedeemService` calls `SwapService.SellToUSDC`). Still on Jupiter regardless: the price quotes shown in the app, catalog routability probes, and `cmd/sweep-member-to-address`.
+
+## Demo data (faker seed)
+
+Seeds fake-but-realistic data so Home, Groups, proposals, and activity look alive without a
+full Privy setup. Local Postgres only. It never calls Privy, Solana RPC, or Jupiter.
+
+Two profiles:
+
+- **scale**: six fake clubs (Ridgewood Value Club, Night Shift Traders, Harbor Street Fund, plus the
+  smaller Dorm 4B fund, Rent money and Index huggers).
+  Each has a fake creator, five depositors, deposits spread over the last week, a confirmed
+  AAPLx/TSLAx buy, a governed sell (Ridgewood and Night Shift), failed and open proposals, votes,
+  and NAV history for charts. Any signed-in user sees them on Home (group board and people
+  leaderboard) and the Cabals tab (search, leaderboard, P&L history) and can open them read-only. You are never added as a member. Join, fund/deposit,
+  quote, propose (buy, sell, or agent), vote, agent intents, and leave/withdraw return
+  `403 faker_group_read_only`.
+- **mixed**: adds ghost members Maya Chen, Jordan Hale, and Priya Shah to **your own real club**
+  (you must be its creator). They show up on the member board with P&L, deposits, and ghost-only
+  proposals. They never count toward the pot, surplus credits, or the voter set, and they have no
+  wallets or swaps. You can still deposit and propose for real.
+- **demo**: the recording variant of **mixed**. Same ghosts, plus six chat messages from the last
+  90 minutes, a thesis on the ghost Tesla proposal and one ghost comment on it. It skips the
+  pending and failed ghost deposits and the failed and expired ghost proposals, so no "Failed"
+  rows show on screen. Pass a second id, a real member's open proposal in the same club, to add
+  two ghost comments to it (Maya asks, Jordan replies).
+
+```bash
+just reset db                        # optional: start from an empty DB
+just faker scale                     # six fake clubs
+just faker mixed <your_group_id>     # ghosts on your real club
+just faker all <your_group_id>       # both
+just faker demo <your_group_id> [<real_proposal_id>]   # recording setup
+```
+
+Ghost votes cannot make a proposal votable (ghosts are outside the voter set), so the live vote
+in a demo is on a proposal a second real account creates in the app. Seed `demo` first, then
+re-run it with that proposal's id to add the comments. Re-running is safe.
+
+Photos: set `FAKER_PHOTO_BASE_URL` (for example
+`https://<project>.supabase.co/storage/v1/object/public/avatars/faker`) and upload `maya.jpg`,
+`jordan.jpg` and `priya.jpg` (square, 200 KB or less) there; see `docs/ops-profile-photos.md`.
+Without it the ghosts show initials.
+
+Re-running is safe: users are keyed by `faker:user:<name>` and clubs by `groups.faker_key`, so
+a re-run replaces the fake rows and moves the timestamps up to now, with no duplicates.
+`just reset db` wipes the seed data too.
+
+The API can also seed over HTTP when `FAKER_ENABLED=1` (off by default: the route returns 404). It
+only accepts loopback callers with no proxy headers and a local `DATABASE_URL`:
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/v1/dev/faker \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"profile":"all","group_id":"<your_group_id>"}'   # profile: mixed | scale | all | demo
+# demo also takes "proposal_id": a real member's proposal in that club
+```
+
+Safety: faker rows are flagged (`users.is_faker`, `groups.is_faker`, migration 000016). The
+sweep poller, surplus reconcile, execute poller (buys and sells), swap, redeem/withdraw, and
+`sweep-wallets` treasury sources skip them whether or not
+`FAKER_ENABLED` is set, so leftover seed rows stay inert. A DB trigger rejects member wallets
+for faker users.
 
 ## Simulator
 
@@ -307,6 +386,40 @@ Learned prefs and durable facts live in [`AGENTS.md`](AGENTS.md). Skills are the
 
 Do not copy these skills into another machine's home path. Clone the repo; Cursor sees `.cursor/skills/` from the workspace.
 
+## Tests and CI
+
+| Suite | Command |
+| --- | --- |
+| Backend (needs Docker Postgres) | `just test backend` |
+| Domain math, no database | `cd packages/domain && go test ./...` |
+| Reference trading bot | `cd agents/momentum-bot && go test ./...` |
+| Shared Swift logic | `just test mobile` |
+
+Backend tests never touch the app database: they derive `{dbname}_test` from `DATABASE_URL`, create it if missing, and migrate it (`apps/backend/internal/postgres/testdb.go`).
+
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`: a Go job (Postgres 16 service container, migrations on a clean database, `go vet`, `go test` for `apps/backend`, `packages/domain` and `agents/momentum-bot`) and a macOS job (`swift test` in `packages/mobile-core`). The iOS app target is not built in CI.
+
+## Deploy
+
+There is no deploy pipeline in this repo yet; the demo runs the API on a laptop. What a host needs:
+
+**API.** One Go binary.
+
+```bash
+just build backend          # bin/monaco-api
+API_ADDR=0.0.0.0:8080 MIGRATIONS_DIR=/path/to/supabase/migrations ./bin/monaco-api
+```
+
+- Migrations in `supabase/migrations` are applied at boot, in filename order, before the server listens. `go run ./cmd/migrate` (from `apps/backend`) applies them without starting the API.
+- Required env: `DATABASE_URL`, `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `RELAYER_PRIVATE_KEY`. The full list with comments is in `.env.example`. Use separate Privy apps, relayer keys and databases per environment; production values go in `.env.production` (dotenvx-encrypted), never in the image.
+- The relayer address must hold more than 0.001 SOL or the API exits at boot. See [Relayer](#relayer-fee-payer).
+- The API listens on `API_ADDR` (default `127.0.0.1:8080`). `GET /health` returns `{"status":"ok"}` once it is up; it does not probe Postgres or upstream APIs.
+- The deposit sweep poller and the execute-on-pass poller run inside the API process. Running more than one instance has not been tested.
+
+**iOS.** Archive and upload steps are in [`apps/mobile/TestFlight.md`](apps/mobile/TestFlight.md).
+
+**Trading agent.** `agents/momentum-bot` runs anywhere Go runs; see [`docs/how-to/connect-an-agent.md`](docs/how-to/connect-an-agent.md).
+
 ## Layout
 
 ```
@@ -317,10 +430,12 @@ monaco/
 ├── AGENTS.md
 ├── README.md                 this file
 ├── apps/backend/             Go API
+├── agents/momentum-bot/      reference trading agent
 ├── apps/mobile/              SwiftUI
 ├── packages/mobile-core/     host Swift tests
 ├── docs/product.md           product + architecture
 ├── docs/index.md             milestone backlog
+├── docs/submission/          hackathon submission notes
 └── scripts/
 ```
 

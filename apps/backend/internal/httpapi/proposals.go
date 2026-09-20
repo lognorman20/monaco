@@ -24,12 +24,13 @@ type ProposalHandlers struct {
 }
 
 type createProposalRequest struct {
-	Kind                 string   `json:"kind"`
-	Symbol               string   `json:"symbol"`
-	USDC                 int64    `json:"usdc"`
-	TokenAmount          int64    `json:"tokenAmount"`
+	Kind                 string `json:"kind"`
+	Symbol               string `json:"symbol"`
+	USDC                 int64  `json:"usdc"`
+	TokenAmount          int64  `json:"tokenAmount"`
 	AgentDisplayName     string `json:"agentDisplayName"`
 	AllocationUsdcMicros int64  `json:"allocationUsdcMicros"`
+	Thesis               string `json:"thesis"`
 }
 
 type createProposalResponse struct {
@@ -96,6 +97,10 @@ func (h *ProposalHandlers) CreateProposalHandler(w http.ResponseWriter, r *http.
 			return
 		}
 	}
+	if len(strings.TrimSpace(req.Thesis)) > app.MaxProposalThesisLength {
+		logJSONError(ctx, log, "thesis_too_long", w, http.StatusBadRequest, "thesis exceeds maximum length", "group_id", groupID)
+		return
+	}
 
 	userID, err := h.authorizeUser(ctx, token)
 	if err != nil {
@@ -112,6 +117,7 @@ func (h *ProposalHandlers) CreateProposalHandler(w http.ResponseWriter, r *http.
 		TokenAmount:          req.TokenAmount,
 		AgentDisplayName:     strings.TrimSpace(req.AgentDisplayName),
 		AllocationUsdcMicros: req.AllocationUsdcMicros,
+		Thesis:               strings.TrimSpace(req.Thesis),
 	})
 	if err != nil {
 		writeProposalCreateError(ctx, log, w, err, "group_id", groupID, "user_id", userID, "symbol", req.Symbol)
@@ -174,16 +180,22 @@ func (h *ProposalHandlers) CastVoteHandler(w http.ResponseWriter, r *http.Reques
 }
 
 type proposalListItemResponse struct {
-	ID           string `json:"id"`
-	Symbol       string `json:"symbol"`
-	Kind         string `json:"kind"`
-	UsdcMicros   string `json:"usdcMicros,omitempty"`
-	TokenAmount  string `json:"tokenAmount,omitempty"`
-	Status       string `json:"status"`
-	ProposerID   string `json:"proposerId"`
-	ProposerName string `json:"proposerName"`
-	CreatedAt    string `json:"createdAt"`
-	ExpiresAt    string `json:"expiresAt,omitempty"`
+	ID                   string                      `json:"id"`
+	Symbol               string                      `json:"symbol"`
+	Kind                 string                      `json:"kind"`
+	UsdcMicros           string                      `json:"usdcMicros,omitempty"`
+	TokenAmount          string                      `json:"tokenAmount,omitempty"`
+	AgentDisplayName     string                      `json:"agentDisplayName,omitempty"`
+	AllocationUsdcMicros string                      `json:"allocationUsdcMicros,omitempty"`
+	Thesis               string                      `json:"thesis,omitempty"`
+	Status               string                      `json:"status"`
+	ProposerID           string                      `json:"proposerId"`
+	ProposerName         string                      `json:"proposerName"`
+	CreatedAt            string                      `json:"createdAt"`
+	ExpiresAt            string                      `json:"expiresAt,omitempty"`
+	CanVote              bool                        `json:"canVote"`
+	VoteSummary          proposalVoteSummaryResponse `json:"voteSummary"`
+	CommentCount         int                         `json:"commentCount"`
 }
 
 type listGroupProposalsResponse struct {
@@ -223,6 +235,7 @@ type proposalDetailResponse struct {
 	AgentDisplayName     string                      `json:"agentDisplayName,omitempty"`
 	AllocationUsdcMicros string                      `json:"allocationUsdcMicros,omitempty"`
 	MintedAgentKey       string                      `json:"mintedAgentKey,omitempty"`
+	Thesis               string                      `json:"thesis,omitempty"`
 	Status               string                      `json:"status"`
 	CreatedAt            string                      `json:"createdAt"`
 	ExpiresAt            string                      `json:"expiresAt"`
@@ -232,6 +245,7 @@ type proposalDetailResponse struct {
 	Votes                []proposalVoteResponse      `json:"votes"`
 	VoteSummary          proposalVoteSummaryResponse `json:"voteSummary"`
 	Execution            proposalExecutionResponse   `json:"execution"`
+	CommentCount         int                         `json:"commentCount"`
 }
 
 // ListGroupProposalsHandler handles GET /v1/groups/{id}/proposals.
@@ -276,10 +290,19 @@ func (h *ProposalHandlers) ListGroupProposalsHandler(w http.ResponseWriter, r *h
 			ID:           item.ID,
 			Symbol:       item.Symbol,
 			Kind:         string(item.Kind),
+			Thesis:       item.Thesis,
 			Status:       string(item.Status),
 			ProposerID:   item.ProposerID,
 			ProposerName: item.ProposerName,
 			CreatedAt:    item.CreatedAt.UTC().Format(time.RFC3339),
+			CanVote:      item.CanVote,
+			VoteSummary: proposalVoteSummaryResponse{
+				YesCount:      item.VoteSummary.YesCount,
+				NoCount:       item.VoteSummary.NoCount,
+				EligibleCount: item.VoteSummary.EligibleCount,
+				Threshold:     item.VoteSummary.Threshold,
+			},
+			CommentCount: item.CommentCount,
 		}
 		if item.Kind == "" {
 			row.Kind = string(app.ProposalKindBuy)
@@ -289,6 +312,10 @@ func (h *ProposalHandlers) ListGroupProposalsHandler(w http.ResponseWriter, r *h
 		}
 		if item.TokenAmount > 0 {
 			row.TokenAmount = strconv.FormatInt(item.TokenAmount, 10)
+		}
+		row.AgentDisplayName = item.AgentDisplayName
+		if item.AllocationUsdcMicros > 0 {
+			row.AllocationUsdcMicros = strconv.FormatInt(item.AllocationUsdcMicros, 10)
 		}
 		if item.Status == app.ProposalOpen {
 			row.ExpiresAt = item.ExpiresAt.UTC().Format(time.RFC3339)
@@ -373,6 +400,7 @@ func (h *ProposalHandlers) GetProposalDetailHandler(w http.ResponseWriter, r *ht
 		GroupID:      detail.GroupID,
 		Symbol:       detail.Symbol,
 		Kind:         detailKind,
+		Thesis:       detail.Thesis,
 		Status:       string(detail.Status),
 		CreatedAt:    detail.CreatedAt.UTC().Format(time.RFC3339),
 		ExpiresAt:    detail.ExpiresAt.UTC().Format(time.RFC3339),
@@ -386,7 +414,8 @@ func (h *ProposalHandlers) GetProposalDetailHandler(w http.ResponseWriter, r *ht
 			EligibleCount: detail.VoteSummary.EligibleCount,
 			Threshold:     detail.VoteSummary.Threshold,
 		},
-		Execution: execution,
+		Execution:    execution,
+		CommentCount: detail.CommentCount,
 	}
 	if detail.UsdcMicros > 0 {
 		detailResp.UsdcMicros = strconv.FormatInt(detail.UsdcMicros, 10)
@@ -439,6 +468,9 @@ func writeProposalError(ctx context.Context, log *requestLog, w http.ResponseWri
 }
 
 func writeProposalCreateError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, attrs ...any) {
+	if writeFakerReadOnly(ctx, log, w, err, attrs...) {
+		return
+	}
 	switch {
 	case errors.Is(err, privy.ErrInvalidToken):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)
@@ -467,6 +499,9 @@ func writeProposalCreateError(ctx context.Context, log *requestLog, w http.Respo
 }
 
 func writeProposalVoteError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, attrs ...any) {
+	if writeFakerReadOnly(ctx, log, w, err, attrs...) {
+		return
+	}
 	switch {
 	case errors.Is(err, privy.ErrInvalidToken):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)

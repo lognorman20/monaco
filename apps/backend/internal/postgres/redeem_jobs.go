@@ -224,6 +224,35 @@ WHERE id = $1`
 	return nil
 }
 
+// UpdateRedeemJobSliceUsdc re-prices an in-flight job's payout so the persisted job, the
+// withdrawal row and the broadcast transfer all agree on what the member is actually owed.
+func (s *Store) UpdateRedeemJobSliceUsdc(ctx context.Context, jobID string, sliceUsdc int64) error {
+	if jobID == "" {
+		return fmt.Errorf("job id is required")
+	}
+	if sliceUsdc <= 0 {
+		return fmt.Errorf("slice usdc must be positive")
+	}
+
+	const updateSQL = `
+UPDATE redeem_jobs
+SET slice_usdc = $2, updated_at = now()
+WHERE id = $1`
+
+	result, err := s.db.ExecContext(ctx, updateSQL, jobID, sliceUsdc)
+	if err != nil {
+		return fmt.Errorf("update redeem job slice usdc: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update redeem job slice usdc rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("redeem job not found")
+	}
+	return nil
+}
+
 // AttachWithdrawalToRedeemJobTx links a withdrawal row after payout insert.
 func (s *Store) AttachWithdrawalToRedeemJobTx(ctx context.Context, tx *sql.Tx, jobID, withdrawalID string) error {
 	if jobID == "" || withdrawalID == "" {
@@ -247,4 +276,50 @@ WHERE id = $1`
 		return fmt.Errorf("redeem job not found")
 	}
 	return nil
+}
+
+// ListStaleActiveRedeemJobs returns unsettled jobs with no recorded payout that have not
+// moved since before cutoff, oldest first. These are the jobs a live request abandoned.
+func (s *Store) ListStaleActiveRedeemJobs(ctx context.Context, cutoff time.Time, limit int) ([]RedeemJobRow, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("limit must be positive")
+	}
+	const selectSQL = `
+SELECT id, group_id, user_id, share_units, slice_usdc, payout_address, status, withdrawal_id, created_at, updated_at
+FROM redeem_jobs
+WHERE status IN ('debited', 'selling', 'paying')
+  AND withdrawal_id IS NULL
+  AND updated_at < $1
+ORDER BY updated_at ASC
+LIMIT $2`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, cutoff.UTC(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list stale redeem jobs: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []RedeemJobRow
+	for rows.Next() {
+		var row RedeemJobRow
+		if err := rows.Scan(
+			&row.ID,
+			&row.GroupID,
+			&row.UserID,
+			&row.ShareUnits,
+			&row.SliceUsdc,
+			&row.PayoutAddress,
+			&row.Status,
+			&row.WithdrawalID,
+			&row.CreatedAt,
+			&row.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan stale redeem job: %w", err)
+		}
+		jobs = append(jobs, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list stale redeem jobs: %w", err)
+	}
+	return jobs, nil
 }

@@ -9,21 +9,20 @@ struct CabalsLeaderboardSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            Text("Top cabals")
-                .font(MonacoTheme.TypeRole.title)
-                .foregroundStyle(MonacoTheme.ink)
+            MonacoSectionHeader("Top cabals")
             Text("Ranked by return across everyone on Monaco")
-                .monacoSecondaryCaption()
+                .font(MonacoTheme.Typo.caption)
+                .foregroundStyle(MonacoTheme.muted)
 
             if model.isLeaderboardLoading {
                 ProgressView()
-                    .tint(MonacoTheme.accent)
+                    .tint(MonacoTheme.ink)
                     .frame(maxWidth: .infinity, minHeight: 80)
                     .accessibilityIdentifier("cabals-leaderboard-loading")
             } else if model.leaderboardFailed, model.leaderboard.isEmpty {
                 VStack(spacing: MonacoTheme.Space.s) {
                     Text("Couldn't load the board.")
-                        .font(MonacoTheme.TypeRole.body)
+                        .font(MonacoTheme.Typo.body)
                         .foregroundStyle(MonacoTheme.muted)
                     Button("Try again") {
                         Task { await model.loadLeaderboard() }
@@ -35,14 +34,14 @@ struct CabalsLeaderboardSection: View {
                 .monacoSurfaceCard()
                 .accessibilityIdentifier("cabals-leaderboard-error")
             } else if model.leaderboard.isEmpty {
-                MonacoEmptyStateCard(
-                    message: "No cabal has put money in yet. The first one to fund takes the top spot.",
-                    systemImage: "trophy"
+                EmptyState(
+                    title: "No cabal has put money in yet",
+                    message: "The first one to fund takes the top spot."
                 )
                 .accessibilityIdentifier("cabals-leaderboard-empty")
             } else {
-                LazyVStack(spacing: MonacoTheme.Space.s) {
-                    ForEach(model.leaderboard) { row in
+                MonacoGroupedList {
+                    ForEach(Array(model.leaderboard.enumerated()), id: \.element.id) { index, row in
                         NavigationLink {
                             CabalDiscoveryDestinationView(
                                 auth: auth,
@@ -52,16 +51,17 @@ struct CabalsLeaderboardSection: View {
                                 onChanged: onChanged
                             )
                         } label: {
-                            CabalBoardRow(
-                                leading: "\(row.rank)",
+                            CabalDiscoveryRowContent(
+                                rank: row.rank,
+                                groupId: row.groupID,
                                 name: row.name,
                                 detail: cabalRowDetail(memberCount: row.memberCount, isJoined: row.isJoined, joinMode: row.joinMode),
                                 potValueUsd: row.potValueUsd,
-                                dollarPnl: row.dollarPnl,
-                                percentReturn: row.percentReturn
+                                percentReturn: row.percentReturn,
+                                isLast: index == model.leaderboard.count - 1
                             )
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.monacoRow)
                         .accessibilityIdentifier("cabals-leaderboard-row-\(row.groupID)")
                     }
                 }
@@ -74,63 +74,61 @@ struct CabalsLeaderboardSection: View {
 
 func cabalRowDetail(memberCount: Int, isJoined: Bool, joinMode: GroupJoinMode) -> String {
     let members = memberCount == 1 ? "1 member" : "\(memberCount) members"
-    if isJoined { return "\(members) · Joined" }
+    if isJoined { return "\(members) · You're in" }
     switch joinMode {
     case .open: return "\(members) · Open"
-    case .request: return "\(members) · Approval"
+    case .request: return "\(members) · Ask to join"
     }
 }
 
-/// Shared row for the board and search results.
-struct CabalBoardRow: View {
-    let leading: String?
+/// Shared row content for the board and search results: rank (when known) on
+/// the cabal's tinted mark, name / member summary, percent over pot value.
+struct CabalDiscoveryRowContent: View {
+    let rank: Int?
+    let groupId: String
     let name: String
     let detail: String
     let potValueUsd: String
-    let dollarPnl: String
     let percentReturn: String?
+    let isLast: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            if let leading {
-                Text(leading)
-                    .font(MonacoTheme.TypeRole.title.monospacedDigit())
-                    .foregroundStyle(MonacoTheme.accent)
-                    .frame(minWidth: 22, alignment: .leading)
+        MonacoRow(
+            title: name,
+            subtitle: detail,
+            isLast: isLast,
+            leading: {
+                if let rank {
+                    RankedCabalMark(rank: rank, groupId: groupId, name: name)
+                } else {
+                    CabalMark(groupId: groupId, name: name, size: 40)
+                }
+            },
+            trailing: {
+                PercentText(percentReturn: percentReturn, style: .row)
+                MoneyText(decimalString: potValueUsd, style: .caption, color: MonacoTheme.muted)
             }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(MonacoTheme.TypeRole.body.weight(.semibold))
-                    .foregroundStyle(MonacoTheme.ink)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(detail)
-                    .font(MonacoTheme.TypeRole.caption)
-                    .foregroundStyle(MonacoTheme.muted)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-            }
-            .layoutPriority(1)
-            Spacer(minLength: MonacoTheme.Space.s)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(UsdAmountFormatter.format(decimalString: potValueUsd))
-                    .font(.subheadline.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(MonacoTheme.ink)
-                CabalPnLLabel(dollarPnl: dollarPnl, percentReturn: percentReturn)
-            }
-            .fixedSize()
-        }
-        .padding(MonacoTheme.Space.m)
-        .frame(minHeight: 44)
-        .background(
-            MonacoTheme.surface,
-            in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
         )
-        .overlay {
-            RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
-                .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+    }
+}
+
+/// A cabal's mark with its platform rank badged at the corner.
+private struct RankedCabalMark: View {
+    let rank: Int
+    let groupId: String
+    let name: String
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            CabalMark(groupId: groupId, name: name, size: 40)
+            Text("\(rank)")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(MonacoTheme.primaryButtonLabel)
+                .frame(minWidth: 16, minHeight: 16)
+                .background(Circle().fill(MonacoTheme.ink))
+                .offset(x: 4, y: 4)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityHidden(true)
     }
 }
 

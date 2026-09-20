@@ -73,7 +73,11 @@ func (p *JupiterCatalogRoutabilityProber) IsRoutable(ctx context.Context, asset 
 		USDCAmount: CatalogRoutabilityProbeMicros,
 	})
 	if err != nil {
-		return false
+		// Catalog probes are advisory. A Jupiter rate limit, timeout, or
+		// below-minimum probe must not make a buyable stock look disabled.
+		// Keep only an explicit no-route response as a definitive negative;
+		// the real buy amount is checked again by StartBuy.
+		return !errors.Is(err, jupiter.ErrNoRoute)
 	}
 	return quote.Routable
 }
@@ -163,6 +167,13 @@ func (s *ExecuteOnPassService) ExecuteOnPass(ctx context.Context, proposal Propo
 	if proposal.Symbol == "" {
 		logExecuteOnPassBranchWarn("execute on pass rejected", "symbol required", "proposal_id", proposal.ID)
 		return ExecuteOnPassResult{}, fmt.Errorf("symbol is required")
+	}
+
+	// Faker groups and faker proposers (#153) never execute (buy or sell): seeded passed proposals must
+	// not trigger live Jupiter swaps from a real (mixed club) treasury.
+	if err := s.rejectFakerProposal(ctx, proposal); err != nil {
+		logExecuteOnPassBranchWarn("execute on pass rejected", "faker proposal", "proposal_id", proposal.ID, "group_id", proposal.GroupID)
+		return ExecuteOnPassResult{}, err
 	}
 
 	switch kind {
@@ -256,6 +267,23 @@ func (s *ExecuteOnPassService) executeSellOnPass(ctx context.Context, proposal P
 	}
 	logExecuteOnPassSuccess(proposal.ID, result.Transaction.ID, result.Created)
 	return ExecuteOnPassResult{Transaction: result.Transaction, Created: result.Created}, nil
+}
+
+func (s *ExecuteOnPassService) rejectFakerProposal(ctx context.Context, proposal Proposal) error {
+	if err := rejectFakerGroup(ctx, s.store, proposal.GroupID); err != nil {
+		return err
+	}
+	if proposal.ProposerID == "" {
+		return nil
+	}
+	isFaker, err := s.store.IsFakerUser(ctx, proposal.ProposerID)
+	if err != nil {
+		return err
+	}
+	if isFaker {
+		return ErrFakerGroupReadOnly
+	}
+	return nil
 }
 
 func (s *ExecuteOnPassService) existingBuyForProposal(ctx context.Context, proposalID string) (postgres.TransactionRow, bool, error) {

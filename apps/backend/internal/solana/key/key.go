@@ -221,3 +221,13 @@ func encodeBase58(input []byte) string {
 	}
 	return string(out)
 }
+
+// EncodeBase58 encodes bytes with the Solana (Bitcoin) base58 alphabet.
+func EncodeBase58(input []byte) string {
+	return encodeBase58(input)
+}
+
+// DecodeBase58 decodes a Solana (Bitcoin alphabet) base58 string.
+func DecodeBase58(input string) ([]byte, error) {
+	return decodeBase58(input)
+}

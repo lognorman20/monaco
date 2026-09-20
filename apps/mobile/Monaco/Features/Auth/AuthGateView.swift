@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AuthGateView: View {
     @ObservedObject var auth: PrivyAuthService
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -9,6 +10,10 @@ struct AuthGateView: View {
                 if hasLoginMethod {
                     if isAuthenticated {
                         SessionGateView(auth: auth)
+                    } else if auth.phase == .restoring {
+                        restoringView
+                    } else if case .restoreFailed(let message) = auth.phase {
+                        restoreFailedView(message: message)
                     } else {
                         LoginView(auth: auth)
                     }
@@ -25,6 +30,42 @@ struct AuthGateView: View {
         .task {
             await auth.restoreSessionIfNeeded()
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            // Coming back to the app (e.g. after turning Wi-Fi on) retries a restore
+            // that failed offline. A no-op in every other phase.
+            guard newPhase == .active else { return }
+            Task { await auth.restoreSessionIfNeeded() }
+        }
+    }
+
+    /// Shown while a saved sign-in is being restored, so a returning user never
+    /// sees the login form flash before the app opens.
+    private var restoringView: some View {
+        VStack(spacing: MonacoTheme.Space.l) {
+            MonacoMark(size: 88)
+            ProgressView()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Signing you in")
+        .accessibilityIdentifier("sessionRestoringView")
+    }
+
+    private func restoreFailedView(message: String) -> some View {
+        VStack(spacing: MonacoTheme.Space.m) {
+            EmptyState(title: "Can't sign you in yet", message: message)
+            Button("Try again") {
+                Task { await auth.restoreSessionIfNeeded() }
+            }
+            .buttonStyle(.monacoPrimary)
+            Button("Sign out") {
+                Task { await auth.logout() }
+            }
+            .buttonStyle(.monacoSecondary)
+        }
+        .padding(.horizontal, MonacoTheme.Space.gutter)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("sessionRestoreFailedView")
     }
 
     private var isAuthenticated: Bool {
