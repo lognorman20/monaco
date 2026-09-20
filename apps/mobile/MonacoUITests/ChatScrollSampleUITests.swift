@@ -109,6 +109,114 @@ final class ChatScrollSampleUITests: XCTestCase {
         attachScreenshot(app, name: "03-back-at-the-bottom")
     }
 
+    /// A drag that never leaves the end of the thread is not the reader leaving it.
+    ///
+    /// The regression: `readerControlsScroll` latched on *any* drag and was only cleared by the
+    /// bottom-ness of the thread changing from false to true. A drag that stayed inside the
+    /// 40pt pinned window — swiping down to dismiss the keyboard, a flick to check for new
+    /// messages — never produces that transition, so the latch stayed set for the life of the
+    /// view: every arrival was counted unread, the pill was drawn over the message that had
+    /// just landed, and the correction that keeps a LazyVStack at its end was switched off.
+    @MainActor
+    func testASmallDragAtTheEndLeavesTheThreadFollowing() throws {
+        let app = launchBusyChat()
+
+        let newest = anyElement(app, newestSampleMessage)
+        if !newest.waitForExistence(timeout: 40) {
+            XCTFail("the sample thread should open at its newest message. On screen:\n\(app.debugDescription.suffix(9000))")
+            return
+        }
+
+        // Twenty points, inside the 40pt window that counts as the end of the thread. Dragged
+        // slowly and *held* before lifting, because a flick carries momentum and would coast
+        // right out of the window — which would be the reader genuinely leaving, not the case
+        // under test.
+        let thread = anyElement(app, "group-chat-thread")
+        let start = thread.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(
+            forDuration: 0.1,
+            thenDragTo: start.withOffset(CGVector(dx: 0, dy: 20)),
+            withVelocity: .slow,
+            thenHoldForDuration: 0.5
+        )
+
+        // The busy sample posts one of these on every poll.
+        let arrivals = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "Still thinking about Thursday")
+        )
+        let firstArrival = arrivals.element(boundBy: 0)
+        if !firstArrival.waitForExistence(timeout: 40) {
+            XCTFail("the busy sample should post a message on each poll. On screen:\n\(app.debugDescription.suffix(9000))")
+            return
+        }
+
+        // The reader never went anywhere, so the arrival belongs on screen, not behind a pill.
+        XCTAssertFalse(
+            newMessagesPill(app).exists,
+            "a drag inside the pinned window is not the reader taking the thread over. On screen:\n\(app.debugDescription.suffix(6000))"
+        )
+        let latest = try XCTUnwrap(arrivals.allElementsBoundByIndex.last)
+        XCTAssertTrue(
+            latest.isHittable,
+            "the newest message should be on screen, not stranded above the fold"
+        )
+        attachScreenshot(app, name: "05-small-drag-still-following")
+    }
+
+    /// "Load earlier" prepends a page above the reader and has to leave them where they were.
+    ///
+    /// Until the sample harness paged, it always answered with `nextCursor` nil, so `hasOlder`
+    /// was never true, the button never appeared and none of the place-keeping had any
+    /// coverage at all. The failure it guards: the content-size correction that keeps a
+    /// LazyVStack at its end fires on the prepend and races the place-keeping scroll, dropping
+    /// the reader at the newest message — the opposite of what they asked for.
+    @MainActor
+    func testLoadingEarlierMessagesKeepsTheReadersRow() throws {
+        let app = launchBusyChat()
+
+        let newest = anyElement(app, newestSampleMessage)
+        XCTAssertTrue(newest.waitForExistence(timeout: 40), "the sample thread should open at its newest message")
+
+        // Walk up to the top of the loaded page, where the button lives.
+        let loadEarlier = app.buttons["group-chat-load-earlier"]
+        for _ in 0..<12 where !loadEarlier.exists {
+            app.swipeDown()
+        }
+        if !loadEarlier.waitForExistence(timeout: 10) {
+            XCTFail("a paged sample should offer earlier messages. On screen:\n\(app.debugDescription.suffix(9000))")
+            return
+        }
+        attachScreenshot(app, name: "06-at-the-top-of-the-page")
+
+        // Whichever row is topmost right now is the one the reader is sitting on; ask the
+        // thread rather than working it out from the sample's arithmetic.
+        let messageRows = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "group-chat-message-")
+        )
+        let readersRowID = try XCTUnwrap(
+            messageRows.allElementsBoundByIndex.first?.identifier,
+            "the thread should have rows on screen"
+        )
+
+        loadEarlier.tap()
+
+        // The older page landed, so there is now a row above the one they were on…
+        let prepended = expectation(
+            for: NSPredicate(format: "identifier != %@", readersRowID),
+            evaluatedWith: messageRows.element(boundBy: 0)
+        )
+        wait(for: [prepended], timeout: 20)
+
+        // …and they are still looking at their row, not at the bottom of the thread.
+        let readersRow = anyElement(app, readersRowID)
+        XCTAssertTrue(readersRow.isHittable, "the row the reader was on should still be on screen")
+        XCTAssertFalse(
+            newest.isHittable,
+            "asking for history must not drop the reader at the newest message"
+        )
+        attachScreenshot(app, name: "07-history-loaded-in-place")
+    }
+
     /// Sending still takes the sender to their own message, and the composer is cleared
     /// rather than having the submitted text subtracted from it afterwards.
     @MainActor
