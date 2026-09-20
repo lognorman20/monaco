@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/swapprovider"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 const (
@@ -117,6 +119,9 @@ func (s *SwapService) reconcilePendingSwap(ctx context.Context, row postgres.Pen
 			return swapprovider.OutcomeUnknown, err
 		}
 		slog.Info("swap reconcile confirmed", append(logAttrs, "tx_signature", confirmed.TxSignature.String, "created", created)...)
+		if created {
+			recordReconciledSwap(confirmed, nil)
+		}
 		return swapprovider.OutcomeFilled, nil
 	case swapprovider.OutcomeFailed:
 		if err := s.failReconciledSwap(ctx, tx, resolution.Reason, now); err != nil {
@@ -124,15 +129,42 @@ func (s *SwapService) reconcilePendingSwap(ctx context.Context, row postgres.Pen
 			return swapprovider.OutcomeUnknown, err
 		}
 		slog.Warn("swap reconcile failed swap", append(logAttrs, "reason", resolution.Reason)...)
+		recordReconciledSwap(tx, errors.New(resolution.Reason))
 		return swapprovider.OutcomeFailed, nil
 	default:
 		if now.Sub(tx.CreatedAt) >= swapUnresolvedAlertAge {
 			slog.Error("swap unresolved", append(logAttrs, "reason", resolution.Reason)...)
+			telemetry.Alert(ctx, telemetry.AlertEvent{
+				Kind:     "swap_unresolved",
+				Key:      "swap_unresolved:" + tx.ID,
+				Severity: telemetry.SeverityCritical,
+				Title:    "Treasury swap unresolved: outcome unknown, needs manual review",
+				Detail:   "The swap was handed to the venue and neither the venue nor the chain can say whether it landed. It stays pending and its proposal is not retried.",
+				Fields: map[string]string{
+					"transaction_id": tx.ID,
+					"group_id":       tx.GroupID,
+					"action":         tx.Action,
+					"provider":       row.Provider.String,
+					"request_id":     tx.ExecuteRequestID.String,
+					"tx_signature":   row.SignedTxSignature.String,
+					"reason":         resolution.Reason,
+					"age":            now.Sub(tx.CreatedAt).Round(time.Second).String(),
+				},
+			})
 		} else {
 			slog.Info("swap reconcile still pending", append(logAttrs, "reason", resolution.Reason)...)
 		}
 		return swapprovider.OutcomeUnknown, nil
 	}
+}
+
+// recordReconciledSwap counts a swap the inline path reported as pending, now that it settled.
+func recordReconciledSwap(tx postgres.TransactionRow, err error) {
+	if tx.Action == postgres.TransactionActionSell {
+		recordSwap(telemetry.EventSwapSell, tx.CostBasisAmount.Int64, true, err)
+		return
+	}
+	recordSwap(telemetry.EventSwapBuy, tx.Amount, true, err)
 }
 
 // failReconciledSwap frees the proposal's execution slot and persists the retry backoff.

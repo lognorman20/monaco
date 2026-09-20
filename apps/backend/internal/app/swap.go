@@ -248,7 +248,8 @@ func (s *SwapService) executeSell(ctx context.Context, req SellToUSDCRequest) (S
 	}
 
 	logSwapSellSuccess(req.GroupID, req.UserID, req.Symbol, row.ID, created)
-	return SellToUSDCResult{Transaction: row, Created: created, ProceedsUSDC: proceeds}, nil
+	// A confirmed sell row stores its USDC proceeds in cost_basis_amount.
+	return SellToUSDCResult{Transaction: row, Created: created, ProceedsUSDC: row.CostBasisAmount.Int64}, nil
 }
 
 // swapExecution is one treasury swap plus the ledger links its transaction row carries.

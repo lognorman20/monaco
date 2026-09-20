@@ -26,6 +26,7 @@ async with a bounded queue, so a slow or dead webhook never blocks a money path.
 | Kind | Severity | Means | Do |
 | --- | --- | --- | --- |
 | `redeem_wedged` | critical | A cash out burnt share units but the USDC payout could not be verified on chain. Nothing automatic is safe. | Look up `job_id` in `redeem_jobs`, check the treasury's transfers on an explorer, then settle or roll back by hand. |
+| `swap_unresolved` | critical | A treasury swap was handed to the venue 30+ minutes ago and neither the venue nor the chain can say whether it landed. The row stays `pending` and its proposal is not retried, so nothing is bought or sold twice. | Look up `tx_signature` on an explorer (Jupiter) or the order in the Flash dashboard (`request_id`). Landed: set the row `confirmed` with the fill amounts. Never landed: set it `failed`; the execute poller retries the proposal. |
 | `relayer_low_balance` | critical | The fee-paying relayer is at or under 0.001 SOL. At zero, every sweep, trade and cash out fails, and the API will not boot. | Send SOL to `relayer_pubkey`. |
 | `poller_panic` | critical | A background poller tick panicked. The loop survives and keeps ticking; the stack is in the log and Sentry. | Read the stack. A repeat every tick means one poisoned row. |
 | `price_source_down` | warning | The Jupiter price breaker opened. Pots fall back to cost basis, so P&L stops moving until it recovers. | Check Jupiter status and `JUPITER_API_KEY` rate limits. |
@@ -56,7 +57,7 @@ never raw paths, so ids do not become time series.
 | --- | --- | --- |
 | `monaco_http_requests_total` | `route`, `method`, `status` | Error rate per route. |
 | `monaco_http_request_duration_seconds` | `route`, `method` | Latency. Trade and cash out routes confirm on chain inside the request, so tens of seconds is normal there. |
-| `monaco_money_events_total` | `event`, `outcome` | `event`: `deposit_sweep`, `swap_buy`, `swap_sell`, `redeem`, `redeem_recovery`, `agent_intent`. `outcome`: `ok`, `rejected` (caller's fault: bad input, over budget, paused bot), `error` (ours or an upstream's), `canceled`, `replayed` (idempotent retry of a swap that already landed). |
+| `monaco_money_events_total` | `event`, `outcome` | `event`: `deposit_sweep`, `swap_buy`, `swap_sell`, `redeem`, `redeem_recovery`, `agent_intent`. `outcome`: `ok`, `rejected` (caller's fault: bad input, over budget, paused bot), `error` (ours or an upstream's), `canceled`, `replayed` (idempotent retry of a swap that already landed), `pending` (swap submitted but not observed; the swap reconcile poller counts it as `ok` or `error` when it settles). |
 | `monaco_money_volume_usdc_micros_total` | `event` | USDC moved by successful events. Replays are not counted. |
 | `monaco_upstream_requests_total` | `service`, `outcome` | `service`: `jupiter`, `pyth`, `privy`, `solana_rpc`, `xstocks`, `flash`, `supabase_storage`. `outcome`: `ok`, `client_error`, `rate_limited` (429), `server_error`, `transport_error`. |
 | `monaco_upstream_request_duration_seconds` | `service` | Upstream latency. |

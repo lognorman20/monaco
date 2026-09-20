@@ -2,10 +2,12 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 // DefaultSwapReconcileInterval is how often pending swaps are resolved.
@@ -43,9 +45,10 @@ func RunSwapReconcilePoller(ctx context.Context, poller *SwapReconcilePoller, in
 	}
 
 	slog.Info("swap reconcile poller started", "interval", interval)
+	telemetry.RegisterPoller(PollerSwapReconcile, interval)
 	defer slog.Info("swap reconcile poller stopped")
 
-	poller.tick(ctx)
+	telemetry.GuardTick(ctx, PollerSwapReconcile, func() error { return poller.tick(ctx) })
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -54,22 +57,22 @@ func RunSwapReconcilePoller(ctx context.Context, poller *SwapReconcilePoller, in
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			poller.tick(ctx)
+			telemetry.GuardTick(ctx, PollerSwapReconcile, func() error { return poller.tick(ctx) })
 		}
 	}
 }
 
-func (p *SwapReconcilePoller) tick(ctx context.Context) {
+func (p *SwapReconcilePoller) tick(ctx context.Context) error {
 	if p == nil || p.swaps == nil {
-		return
+		return nil
 	}
 	summary, err := p.swaps.ReconcilePendingSwaps(ctx, p.clock.Now())
 	if err != nil {
 		slog.Error("swap reconcile poller tick failed", "err", err)
-		return
+		return err
 	}
 	if summary == (app.SwapReconcileSummary{}) {
-		return
+		return nil
 	}
 	args := []any{
 		"confirmed", summary.Confirmed,
@@ -79,7 +82,9 @@ func (p *SwapReconcilePoller) tick(ctx context.Context) {
 	}
 	if summary.Errors > 0 {
 		slog.Error("swap reconcile poller tick end", args...)
-		return
+		return fmt.Errorf("swap reconcile: %d of %d pending swaps could not be checked",
+			summary.Errors, summary.Errors+summary.Confirmed+summary.Failed+summary.Unknown)
 	}
 	slog.Info("swap reconcile poller tick end", args...)
+	return nil
 }

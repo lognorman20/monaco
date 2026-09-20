@@ -299,8 +299,10 @@ func TestSwapReconcilePoller_nilSafeAndSurvivesErrors(t *testing.T) {
 
 	reconciler := &failingReconciler{}
 	poller := NewSwapReconcilePoller(reconciler, nil)
-	poller.tick(context.Background())
-	poller.tick(context.Background())
+	if err := poller.tick(context.Background()); err == nil {
+		t.Fatal("tick error = nil, want the reconcile error so the tick is counted as failed")
+	}
+	_ = poller.tick(context.Background())
 	if reconciler.calls != 2 {
 		t.Fatalf("reconcile calls = %d, want 2: an error must not stop later ticks", reconciler.calls)
 	}

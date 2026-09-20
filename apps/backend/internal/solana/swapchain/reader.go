@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/swapprovider"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 const commitmentFinalized = "finalized"
@@ -37,7 +38,7 @@ func NewHTTPReader(rpcURL, cluster string) *HTTPReader {
 	}
 	return &HTTPReader{
 		endpoint:   rpcURL,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		httpClient: telemetry.InstrumentClient(telemetry.UpstreamSolanaRPC, &http.Client{Timeout: 15 * time.Second}),
 	}
 }
 
