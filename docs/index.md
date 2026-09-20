@@ -12,7 +12,7 @@ Each milestone is one shippable slice. It names the paths it owns, the tickets t
 
 M0 is scaffold. Your five product steps are M1 through M5.
 
-1. Auth with SMS and email and password for testing, member wallets, and group treasury wallets via Privy.
+1. Auth with SMS and email OTP, member wallets, and group treasury wallets via Privy.
 2. User deposits and treasury sweeps.
 3. Buy and sell tokenized stocks via Jupiter.
 4. Domain logic for groups, votes, NAV, redeem, and boards.
@@ -146,6 +146,22 @@ Never `simctl erase` for QA. Agent-driven QA must export `SIMSLIM_UDID` and pass
 - [Product and architecture](product.md)
 - [Sweep USDC out of Privy wallets](ops-sweep-wallets.md) (`./scripts/sweep-wallets.sh`)
 - [Observability: logs, metrics, alerts, health](ops-observability.md)
+- [HTTP API reference](api.md)
+- [Agent trading: intents, budgets, safety model](agent-trading.md)
+- [Profile photo storage](ops-profile-photos.md)
+- [Multi-user verification: what the authz and flow tests cover](multi-user-verification.md)
+- [Hackathon submission notes](submission/README.md)
+
+## How-to
+
+- [Connect a trading agent](how-to/connect-an-agent.md)
+- [Run on the local simulator](how-to/local-simulator.md)
+- [Debug login](how-to/debug-login.md)
+- TestFlight: [`apps/mobile/TestFlight.md`](../apps/mobile/TestFlight.md)
+
+## Historical records
+
+`milestones/`, `architect/`, `superpowers/`, `qa/` and the `m3`–`m5` handoff files are kept for context and not maintained.
 
 ## Milestone files
 

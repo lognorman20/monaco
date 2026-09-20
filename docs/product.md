@@ -63,7 +63,7 @@ Solana transaction fees are paid by an **app relayer**. Treasuries may hold no S
 The backend can sign the treasury. That custodial fact is accepted for the hackathon. Demo the buy. Do not spend UX on a trust explainer.
 
 ```
-SwiftUI (iOS 17+)
+SwiftUI (iOS 18+)
   → Privy Swift (auth, member wallets)
   → Go API (groups, invites, votes, share ledger, sweeps, swaps, P&L)
   → Supabase Postgres DB
@@ -145,7 +145,7 @@ Worked numbers (ignore Jupiter slippage for the story):
 - Anything that mints shares or pays USDC needs a live mark (Pyth, then Jupiter). With none, the deposit stays pending and is retried, and the redeem fails with the shares returned. Cost basis is never used as a price for money movement; screens and NAV snapshots may fall back to it so they keep rendering.
 - The surplus reconcile only credits USDC the ledger cannot explain (a transfer straight to the treasury address). Realized gains stay P&L, and USDC owed to an in-flight redeem stays owed.
 
-Marks: Jupiter fill price is cost basis. Ongoing P&L may use Pyth equity feeds. If the token still trades on-chain after the cash equity market closes, show an after-hours label.
+Marks: Jupiter fill price is cost basis. A live mark comes from Pyth Hermes first, then Jupiter's price for the mint (rejected under $10,000 of pool liquidity, more than 25% from the last accepted mark, or more than 5× from cost basis). A failing source is skipped by a circuit breaker until its cooldown ends (`apps/backend/internal/pricechain`). If the token still trades on-chain after the cash equity market closes, show an after-hours label.
 
 **UI copy.** Do not say "NAV" to users. Say the pot value, their slice, and gain or loss in dollars.
 
@@ -212,7 +212,7 @@ They receive USDC equal to their redeemed fraction of the pot at that moment, no
 | Execution        | [Jupiter Swap API v2](https://dev.jup.ag/docs/swap) on mainnet                                               |
 | Fees             | App relayer (SOL)                                                                                            |
 | Asset metadata   | [xStocks public API](https://api.xstocks.fi/api/v2/public/assets) (mints only)                               |
-| Marks            | Jupiter fill + [Pyth Hermes](https://docs.pyth.network/price-feeds/core/api-instances-and-providers/hermes)  |
+| Marks            | [Pyth Hermes](https://docs.pyth.network/price-feeds/core/api-instances-and-providers/hermes), then Jupiter Price API; cost basis for display only |
 
 ## Hackathon demo checklist
 
