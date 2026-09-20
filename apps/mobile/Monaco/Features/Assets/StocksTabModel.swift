@@ -203,7 +203,9 @@ final class StocksTabModel {
         } catch {
             guard term == trimmedQuery else { return }
             handle(error) {
-                results = []
+                // A failed refresh keeps the rows already on screen; only an empty list
+                // has nothing better to show than the error.
+                guard results.isEmpty else { return }
                 hasMore = false
                 searchState = .failed
             }

@@ -122,6 +122,19 @@ struct StocksTabModelTests {
         #expect(source.searches.map(\.offset) == [0, 2])
     }
 
+    @Test func aFailedRefreshKeepsTheRowsOnScreen() async throws {
+        let source = StubStocksDataSource()
+        let model = StocksTabModel(dataSource: source)
+
+        model.updateQuery("tesla")
+        try await settle()
+        source.errors["tesla"] = Monaco.MonacoAPIError.httpStatus(500)
+        await model.refreshSearch()
+
+        #expect(model.searchState == .results)
+        #expect(model.results.count == 2)
+    }
+
     @Test func noMatchesShowsEmptyState() async throws {
         let source = StubStocksDataSource()
         let model = StocksTabModel(dataSource: source)
