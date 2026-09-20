@@ -24,41 +24,91 @@ const (
 
 // SubmitSweep submits a server-signed USDC sweep with the relayer as SOL fee payer.
 func (c *HTTPClient) SubmitSweep(ctx context.Context, req SweepRequest) (SweepResult, error) {
+	prepared, err := c.PrepareSweep(ctx, req)
+	if err != nil {
+		return SweepResult{}, err
+	}
+	return c.BroadcastSweep(ctx, prepared)
+}
+
+// PrepareSweep builds the sweep and signs it as fee payer without broadcasting.
+// Invalid inputs wrap ErrBroadcastRejected: retrying them can never succeed.
+func (c *HTTPClient) PrepareSweep(ctx context.Context, req SweepRequest) (PreparedSweep, error) {
 	if req.RelayerKey == "" {
-		return SweepResult{}, fmt.Errorf("%w: relayer key required", ErrAPI)
+		return PreparedSweep{}, fmt.Errorf("%w: %w: relayer key required", ErrBroadcastRejected, ErrAPI)
 	}
 	if req.MemberAddress == "" || req.TreasuryAddress == "" {
-		return SweepResult{}, fmt.Errorf("%w: missing addresses", ErrAPI)
+		return PreparedSweep{}, fmt.Errorf("%w: %w: missing addresses", ErrBroadcastRejected, ErrAPI)
 	}
 	if req.Amount <= 0 {
-		return SweepResult{}, fmt.Errorf("%w: invalid amount", ErrAPI)
+		return PreparedSweep{}, fmt.Errorf("%w: %w: invalid amount", ErrBroadcastRejected, ErrAPI)
 	}
 
 	wallet, err := c.getWalletByAddress(ctx, req.MemberAddress)
 	if err != nil {
 		logSweepFailed("wallet_lookup", req.MemberAddress, req.TreasuryAddress, req.Amount, err)
-		return SweepResult{}, err
+		return PreparedSweep{}, err
 	}
 
-	blockhash, err := c.getLatestBlockhash(ctx)
+	blockhash, lastValidBlockHeight, err := c.getLatestBlockhashWithExpiry(ctx)
 	if err != nil {
 		logSweepFailed("blockhash", req.MemberAddress, req.TreasuryAddress, req.Amount, err)
-		return SweepResult{}, err
+		return PreparedSweep{}, err
 	}
 
 	txBase64, err := buildUSDCSweepTransaction(req, blockhash)
 	if err != nil {
 		logSweepFailed("build_transaction", req.MemberAddress, req.TreasuryAddress, req.Amount, err)
-		return SweepResult{}, err
+		return PreparedSweep{}, fmt.Errorf("%w: %w", ErrBroadcastRejected, err)
 	}
 
-	hash, err := c.signAndSendSolanaTransaction(ctx, wallet.ID, txBase64)
+	txSignature, err := feePayerSignature(txBase64)
+	if err != nil {
+		logSweepFailed("fee_payer_signature", req.MemberAddress, req.TreasuryAddress, req.Amount, err)
+		return PreparedSweep{}, err
+	}
+
+	return PreparedSweep{
+		Request:              req,
+		WalletID:             wallet.ID,
+		TransactionBase64:    txBase64,
+		TxSignature:          txSignature,
+		LastValidBlockHeight: lastValidBlockHeight,
+	}, nil
+}
+
+// BroadcastSweep has Privy add the member signature and send a prepared sweep.
+// An error that does not wrap ErrBroadcastRejected is ambiguous: the sweep may still land.
+func (c *HTTPClient) BroadcastSweep(ctx context.Context, prepared PreparedSweep) (SweepResult, error) {
+	if prepared.WalletID == "" || prepared.TransactionBase64 == "" {
+		return SweepResult{}, fmt.Errorf("%w: %w: sweep is not prepared", ErrBroadcastRejected, ErrAPI)
+	}
+
+	req := prepared.Request
+	hash, err := c.signAndSendSolanaTransaction(ctx, prepared.WalletID, prepared.TransactionBase64)
 	if err != nil {
 		logSweepFailed("sign_and_send", req.MemberAddress, req.TreasuryAddress, req.Amount, err)
 		return SweepResult{}, err
 	}
 
 	return SweepResult{TxSignature: hash}, nil
+}
+
+// feePayerSignature returns the base58 transaction id of a fee-payer signed transaction:
+// the first signature slot, which buildUSDCSweepTransaction fills with the relayer signature.
+func feePayerSignature(txBase64 string) (string, error) {
+	raw, err := base64.StdEncoding.DecodeString(txBase64)
+	if err != nil {
+		return "", fmt.Errorf("%w: decode sweep transaction: %v", ErrAPI, err)
+	}
+	sigCount, offset, err := decodeCompactU16(raw)
+	if err != nil {
+		return "", fmt.Errorf("%w: sweep transaction signatures: %v", ErrAPI, err)
+	}
+	if sigCount == 0 || offset+ed25519.SignatureSize > len(raw) {
+		return "", fmt.Errorf("%w: sweep transaction has no fee payer signature", ErrAPI)
+	}
+	return encodeBase58(raw[offset : offset+ed25519.SignatureSize]), nil
 }
 
 // MemberUSDCBalance returns member wallet USDC balance via Privy + RPC.

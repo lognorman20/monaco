@@ -200,6 +200,24 @@ sweep poller, surplus reconcile, execute poller (buys and sells), swap, redeem/w
 `FAKER_ENABLED` is set, so leftover seed rows stay inert. A DB trigger rejects member wallets
 for faker users.
 
+## iOS API environments
+
+The app's API base URL comes from the build, not from source: `apps/mobile/Config/Monaco.xcconfig` → Info.plist (`MONACO_ENVIRONMENT`, `MONACO_API_BASE_URL`) → `MonacoConfig.api` in `packages/mobile-core`, which both API clients use.
+
+| Environment  | Default for | Base URL                                                                 |
+| ------------ | ----------- | ------------------------------------------------------------------------ |
+| `local`      | Debug       | `http://localhost:8080` (`Config/Environments/Local.xcconfig`)           |
+| `staging`    | —           | `MONACO_STAGING_API_BASE_URL` — **placeholder, empty until you set it**   |
+| `production` | Release     | `MONACO_PRODUCTION_API_BASE_URL` — **placeholder, empty until you set it** |
+
+- `just run` / `just run mobile` need nothing extra: Debug is `local`.
+- Set the remote URLs once (not secrets, `https://` only): `dotenvx set MONACO_STAGING_API_BASE_URL https://… -f .env.local --plain` (same for `MONACO_PRODUCTION_API_BASE_URL`). `scripts/ensure-ios-privy-config.sh` writes them to the gitignored `Config/Environment.local.xcconfig` and rejects a non-https value.
+- Build for another environment: `xcodebuild … MONACO_ENVIRONMENT=staging` (or pass `MONACO_STAGING_API_BASE_URL=https://…` on the same command line).
+- Point an already-built Debug sim at staging or a tunnel without rebuilding: `MONACO_API_BASE_URL=https://<tunnel-host> just run mobile` (exported as `SIMCTL_CHILD_MONACO_API_BASE_URL`; add `MONACO_ENVIRONMENT=staging` to label it). Debug builds only.
+- Release builds ignore the process environment and refuse to launch (`fatalError` naming the setting to fix) when the URL is empty, malformed, not `https`, a local host, or the environment is `local`. The rules live in `MonacoAPIConfiguration` and are covered by `just test mobile`.
+- ATS stays strict. Only the Debug Info.plist carries `NSAllowsLocalNetworking`; there is no `NSAllowsArbitraryLoads`, so a Debug tunnel/staging URL must be `https` too.
+- The active environment is logged at launch (`API environment: …`); Debug builds also show it under the session error on the sign-in gate.
+
 ## Simulator
 
 Slim is **not** required. `just run`, `just run mobile`, and `./scripts/ios-sim` warn and use a stock Xcode simulator when SimSlim is missing or `SIMSLIM_UDID` is unset. Privy xcconfig and `SIMCTL_CHILD_*` still apply.
@@ -411,11 +429,11 @@ API_ADDR=0.0.0.0:8080 MIGRATIONS_DIR=/path/to/supabase/migrations ./bin/monaco-a
 ```
 
 - Migrations in `supabase/migrations` are applied at boot, in filename order, before the server listens. `go run ./cmd/migrate` (from `apps/backend`) applies them without starting the API.
-- Required env: `DATABASE_URL`, `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `RELAYER_PRIVATE_KEY`. The full list with comments is in `.env.example`. Use separate Privy apps, relayer keys and databases per environment; production values go in `.env.production` (dotenvx-encrypted), never in the image.
+- Required env: `DATABASE_URL`, `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `PRIVY_VERIFICATION_KEY`, `RELAYER_PRIVATE_KEY`. The API exits at boot if any is missing or malformed. Outside local dev also set `SOLANA_RPC_URL` to a paid RPC (unset falls back to the public mainnet endpoint, which has no SLA and is what confirms sweeps) and `APP_ENV` (`staging`, `prod`), which also switches stderr logs to JSON lines for the host's log collector. The Postgres pool is capped at `DB_MAX_OPEN_CONNS` (default 20); keep it under the database role's connection limit. The full list with comments is in `.env.example`. Use separate Privy apps, relayer keys and databases per environment; production values go in `.env.production` (dotenvx-encrypted), never in the image.
 - The relayer address must hold more than 0.001 SOL or the API exits at boot. See [Relayer](#relayer-fee-payer).
-- The API listens on `API_ADDR` (default `127.0.0.1:8080`). `GET /health` probes Postgres (critical, `503` when down), Solana RPC, the relayer's SOL balance, poller liveness, Privy and the price API, and reports `ok`, `degraded` or `down`.
+- The API listens on `API_ADDR` (default `127.0.0.1:8080`). `GET /health` probes Postgres and the access-token verifier (critical, `503` when down), Solana RPC, the relayer's SOL balance, poller liveness, Privy and the price API, and reports `ok`, `degraded` or `down`.
 - Metrics are at `GET /metrics` (Prometheus; bearer `METRICS_TOKEN`, or loopback only when unset). Set `SENTRY_DSN` and `ALERT_WEBHOOK_URL` so panics and money alerts reach a person. What is recorded and what to alert on: [`docs/ops-observability.md`](docs/ops-observability.md).
-- The deposit sweep, execute-on-pass and redeem recovery pollers run inside the API process. A panic in a tick is recovered, alerted and counted; the loop keeps running. Running more than one instance has not been tested.
+- The deposit sweep, execute-on-pass and redeem recovery pollers run inside the API process. A panic in a tick is recovered, alerted and counted; the loop keeps running. The deposit sweep poller is safe to run in several instances: it leases each deposit (`FOR UPDATE SKIP LOCKED`) and records the sweep signature before broadcasting, so a crash or a second instance never sweeps a deposit twice. The other two pollers have not been tested with more than one instance.
 
 **iOS.** Archive and upload steps are in [`apps/mobile/TestFlight.md`](apps/mobile/TestFlight.md).
 

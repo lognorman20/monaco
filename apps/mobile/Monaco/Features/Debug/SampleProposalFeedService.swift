@@ -287,7 +287,7 @@ final class SampleProposeService: ProposeService {
         )
     }
 
-    func propose(groupId: String, draft: ProposalDraft) async throws -> String {
+    func propose(groupId: String, draft: ProposalDraft, submission: IdempotentSubmission) async throws -> String {
         try await Task.sleep(for: .milliseconds(600))
         return UUID().uuidString
     }

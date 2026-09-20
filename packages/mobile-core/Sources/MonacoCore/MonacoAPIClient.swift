@@ -63,7 +63,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
     /// - Parameter telemetry: receives one event per request; defaults to whatever is
     ///   registered in `APITelemetryRegistry.shared`.
     public convenience init(
-        baseURL: URL = MonacoConfig.defaultAPIBaseURL,
+        baseURL: URL = MonacoConfig.apiBaseURL,
         session: URLSession = .shared,
         accessTokenProvider: AccessTokenProvider? = nil,
         telemetry: APITelemetry? = nil
@@ -76,7 +76,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
     }
 
     public init(
-        baseURL: URL = MonacoConfig.defaultAPIBaseURL,
+        baseURL: URL = MonacoConfig.apiBaseURL,
         transport: MonacoHTTPTransport,
         accessTokenProvider: AccessTokenProvider? = nil
     ) {
@@ -95,32 +95,33 @@ public final class MonacoAPIClient: @unchecked Sendable {
         return try JSONDecoder().decode(PlatformBalanceDTO.self, from: response.data)
     }
 
-    public func fundGroup(groupId: String, amount: Int64) async throws -> FundGroupResponseDTO {
+    public func fundGroup(groupId: String, amount: Int64, submission: IdempotentSubmission) async throws -> FundGroupResponseDTO {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/fund")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await applyAuthorizationHeader(to: &request)
-        request.httpBody = try JSONEncoder().encode(FundGroupRequestDTO(amount: amount))
+        request.httpBody = try MonacoHTTPTransport.idempotentBodyEncoder().encode(FundGroupRequestDTO(amount: amount))
 
-        let response = try await send(request, route: "/v1/groups/{id}/fund")
+        let response = try await send(request, route: "/v1/groups/{id}/fund", submission: submission)
         return try JSONDecoder().decode(FundGroupResponseDTO.self, from: response.data)
     }
 
     public func createPlatformWithdrawal(
         amount: Int64,
-        toAddress: String
+        toAddress: String,
+        submission: IdempotentSubmission
     ) async throws -> PlatformWithdrawalResponseDTO {
         let url = baseURL.appending(path: "v1/me/withdrawals")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await applyAuthorizationHeader(to: &request)
-        request.httpBody = try JSONEncoder().encode(
+        request.httpBody = try MonacoHTTPTransport.idempotentBodyEncoder().encode(
             CreatePlatformWithdrawalRequestDTO(amount: amount, toAddress: toAddress)
         )
 
-        let response = try await send(request, route: "/v1/me/withdrawals")
+        let response = try await send(request, route: "/v1/me/withdrawals", submission: submission)
         return try JSONDecoder().decode(PlatformWithdrawalResponseDTO.self, from: response.data)
     }
 
@@ -184,12 +185,14 @@ public final class MonacoAPIClient: @unchecked Sendable {
 
     /// Sends `request` under its route template and returns the response when the status
     /// is in `accepting`. Any other status throws `.httpStatus` carrying the request id.
+    /// Money POSTs pass their `submission` so the idempotency key rides along.
     private func send(
         _ request: URLRequest,
         route: String,
-        accepting: Set<Int> = [200]
+        accepting: Set<Int> = [200],
+        submission: IdempotentSubmission? = nil
     ) async throws -> MonacoHTTPResponse {
-        let response = try await session.send(request, route: route)
+        let response = try await session.send(request, route: route, submission: submission)
         guard let status = response.statusCode else {
             throw MonacoAPIError.invalidResponse
         }
@@ -393,18 +396,19 @@ public final class MonacoAPIClient: @unchecked Sendable {
         usdc: Int64? = nil,
         kind: String = "buy",
         tokenAmount: Int64? = nil,
-        thesis: String? = nil
+        thesis: String? = nil,
+        submission: IdempotentSubmission
     ) async throws -> CreateProposalResponseDTO {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/proposals")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await applyAuthorizationHeader(to: &request)
-        request.httpBody = try JSONEncoder().encode(
+        request.httpBody = try MonacoHTTPTransport.idempotentBodyEncoder().encode(
             ProposalRequestDTO(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount, thesis: thesis)
         )
 
-        let response = try await send(request, route: "/v1/groups/{id}/proposals")
+        let response = try await send(request, route: "/v1/groups/{id}/proposals", submission: submission)
         return try JSONDecoder().decode(CreateProposalResponseDTO.self, from: response.data)
     }
 
@@ -470,27 +474,27 @@ public final class MonacoAPIClient: @unchecked Sendable {
         return try JSONDecoder().decode(ProposalCommentDTO.self, from: response.data)
     }
 
-    public func leaveGroup(groupId: String, withdrawStake: Bool = false) async throws {
+    public func leaveGroup(groupId: String, withdrawStake: Bool = false, submission: IdempotentSubmission) async throws {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/leave")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await applyAuthorizationHeader(to: &request)
-        request.httpBody = try JSONEncoder().encode(LeaveGroupRequestDTO(withdrawStake: withdrawStake))
-        let response = try await send(request, route: "/v1/groups/{id}/leave", accepting: [204, 409])
+        request.httpBody = try MonacoHTTPTransport.idempotentBodyEncoder().encode(LeaveGroupRequestDTO(withdrawStake: withdrawStake))
+        let response = try await send(request, route: "/v1/groups/{id}/leave", accepting: [204, 409], submission: submission)
         if response.statusCode == 409 {
             throw MonacoAPIError.leaveBlocked(parseLeaveConflict(from: response.data))
         }
     }
 
-    public func withdrawToBalance(groupId: String, shareAmountMicros: Int64? = nil) async throws -> WithdrawToBalanceJobDTO {
+    public func withdrawToBalance(groupId: String, shareAmountMicros: Int64? = nil, submission: IdempotentSubmission) async throws -> WithdrawToBalanceJobDTO {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/withdraw-to-balance")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await applyAuthorizationHeader(to: &request)
-        request.httpBody = try JSONEncoder().encode(WithdrawToBalanceRequestDTO(shareAmountMicros: shareAmountMicros))
-        let response = try await send(request, route: "/v1/groups/{id}/withdraw-to-balance")
+        request.httpBody = try MonacoHTTPTransport.idempotentBodyEncoder().encode(WithdrawToBalanceRequestDTO(shareAmountMicros: shareAmountMicros))
+        let response = try await send(request, route: "/v1/groups/{id}/withdraw-to-balance", submission: submission)
         return try JSONDecoder().decode(WithdrawToBalanceJobDTO.self, from: response.data)
     }
 
@@ -573,14 +577,15 @@ public final class MonacoAPIClient: @unchecked Sendable {
         groupId: String,
         shareUnits: String,
         payoutAddress: String,
-        payoutProof: String
+        payoutProof: String,
+        submission: IdempotentSubmission
     ) async throws -> RedeemJobDTO {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/redeems")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await applyAuthorizationHeader(to: &request)
-        request.httpBody = try JSONEncoder().encode(
+        request.httpBody = try MonacoHTTPTransport.idempotentBodyEncoder().encode(
             RedeemRequestDTO(
                 shareUnits: shareUnits,
                 payoutAddress: payoutAddress,
@@ -588,7 +593,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
             )
         )
 
-        let response = try await send(request, route: "/v1/groups/{id}/redeems")
+        let response = try await send(request, route: "/v1/groups/{id}/redeems", submission: submission)
         return try JSONDecoder().decode(RedeemJobDTO.self, from: response.data)
     }
 

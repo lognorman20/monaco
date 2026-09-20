@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"crypto/subtle"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -37,7 +36,12 @@ func Metrics() Middleware {
 
 // MetricsEndpoint guards the Prometheus scrape endpoint. Metrics describe money flow and
 // upstream health, so they are not public: with a token set, the scraper must present it as
-// a bearer token; without one, only loopback callers are served.
+// a bearer token; without one, only direct loopback callers are served.
+//
+// "Direct" matters: behind a reverse proxy on the same host every internet request arrives
+// from 127.0.0.1, so the socket address alone would open /metrics to the world. A request
+// that carries a forwarding header came through a proxy and is refused, the same rule the
+// faker seed endpoint uses. A scraper that sits behind a proxy must use METRICS_TOKEN.
 func MetricsEndpoint(token string, handler http.Handler) http.Handler {
 	token = strings.TrimSpace(token)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,19 +51,10 @@ func MetricsEndpoint(token string, handler http.Handler) http.Handler {
 				writeJSONError(r.Context(), w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
-		} else if !isLoopback(r.RemoteAddr) {
+		} else if !isLoopbackRequest(r) {
 			writeJSONError(r.Context(), w, http.StatusNotFound, "not found")
 			return
 		}
 		handler.ServeHTTP(w, r)
 	})
-}
-
-func isLoopback(remoteAddr string) bool {
-	host, _, err := net.SplitHostPort(remoteAddr)
-	if err != nil {
-		host = remoteAddr
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
