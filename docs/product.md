@@ -74,7 +74,7 @@ SwiftUI (iOS 17+)
 
 ### Retrying money requests
 
-The app sends an `Idempotency-Key` header (one UUID per confirmed action, reused when the same submission is retried) on every user money POST: fund, withdraw, cash out, leave, propose, and transaction retry. The API scopes the key to the signed-in user and keeps it for 24 hours. Same key and same body replays the stored response (`Idempotent-Replayed: true`). Same key with a different body or route returns 422. A duplicate that arrives while the first is still running returns 409. 5xx responses are never stored, so a retry runs again. The header is optional; requests without it behave as before.
+The app sends an `Idempotency-Key` header (one UUID per confirmed action, reused when the same submission is retried) on every user money POST: fund, withdraw, cash out, leave, propose, and transaction retry. The API scopes the key to the signed-in user and keeps it for 24 hours. Same key and same body replays the stored response (`Idempotency-Status: replayed`). Same key with a different body or route returns 422. A duplicate that arrives while the first is still running returns 409 with `Idempotency-Status: in_progress`, which tells the app to keep the key. 5xx responses are never stored, so a retry runs again. The header is optional; requests without it behave as before.
 
 ### Wallets
 

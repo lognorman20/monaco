@@ -74,7 +74,7 @@ func TestIdempotency_sameKeySameBodyReplaysStoredResponse(t *testing.T) {
 
 	first := h.post("/v1/groups/g1/fund", token, testIdempotencyKey, `{"amount":5000000}`)
 	requireStatus(t, first, http.StatusOK, "first fund")
-	if first.Header().Get(IdempotencyReplayedHeader) != "" {
+	if first.Header().Get(IdempotencyStatusHeader) != "" {
 		t.Fatalf("first response must not be marked replayed")
 	}
 
@@ -90,8 +90,8 @@ func TestIdempotency_sameKeySameBodyReplaysStoredResponse(t *testing.T) {
 	if retry.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("replayed content type = %q", retry.Header().Get("Content-Type"))
 	}
-	if retry.Header().Get(IdempotencyReplayedHeader) != "true" {
-		t.Fatalf("replay must set %s", IdempotencyReplayedHeader)
+	if retry.Header().Get(IdempotencyStatusHeader) != idempotencyStatusReplayed {
+		t.Fatalf("replay must set %s", IdempotencyStatusHeader)
 	}
 }
 
@@ -153,6 +153,11 @@ func TestIdempotency_concurrentDuplicatesRunOnce(t *testing.T) {
 		codes <- h.post("/v1/me/withdrawals", token, testIdempotencyKey, `{"amount":1}`).Code
 	}()
 	<-started
+	duplicate := h.post("/v1/me/withdrawals", token, testIdempotencyKey, `{"amount":1}`)
+	requireStatus(t, duplicate, http.StatusConflict, "duplicate while in progress")
+	if got := duplicate.Header().Get(IdempotencyStatusHeader); got != idempotencyStatusInProgress {
+		t.Fatalf("%s = %q, want %q", IdempotencyStatusHeader, got, idempotencyStatusInProgress)
+	}
 	// The first request holds the claim: every duplicate must be refused, not queued or run.
 	for i := 1; i < callers; i++ {
 		wg.Add(1)
@@ -227,7 +232,7 @@ func TestIdempotency_keyIsScopedToUser(t *testing.T) {
 	if a.Body.String() == b.Body.String() {
 		t.Fatalf("bob received alice's stored response: %s", b.Body.String())
 	}
-	if b.Header().Get(IdempotencyReplayedHeader) != "" {
+	if b.Header().Get(IdempotencyStatusHeader) != "" {
 		t.Fatalf("bob's first request must not be a replay")
 	}
 }
@@ -248,7 +253,7 @@ func TestIdempotency_keyExpiresAfterTTL(t *testing.T) {
 	h.backdate(testIdempotencyKey, idempotencyKeyTTL+time.Minute)
 	expired := h.post("/v1/groups/g1/fund", token, testIdempotencyKey, `{"amount":9000000}`)
 	requireStatus(t, expired, http.StatusOK, "reuse after ttl")
-	if expired.Header().Get(IdempotencyReplayedHeader) != "" {
+	if expired.Header().Get(IdempotencyStatusHeader) != "" {
 		t.Fatalf("expired key must not replay")
 	}
 	if got := h.runs.Load(); got != 2 {

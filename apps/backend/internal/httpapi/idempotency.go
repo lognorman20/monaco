@@ -20,8 +20,12 @@ import (
 const (
 	// IdempotencyKeyHeader carries the client's per-submission key on money POSTs.
 	IdempotencyKeyHeader = "Idempotency-Key"
-	// IdempotencyReplayedHeader marks a response served from a stored key, not a fresh run.
-	IdempotencyReplayedHeader = "Idempotent-Replayed"
+	// IdempotencyStatusHeader marks a response this layer produced instead of the handler:
+	// a stored response served again, or the 409 for a duplicate of a running request. The
+	// app uses the latter to tell "still running, keep the key" from a business 409.
+	IdempotencyStatusHeader     = "Idempotency-Status"
+	idempotencyStatusReplayed   = "replayed"
+	idempotencyStatusInProgress = "in_progress"
 
 	idempotencyKeyMinLength = 8
 	idempotencyKeyMaxLength = 128
@@ -188,6 +192,7 @@ func (i *Idempotency) answerExisting(ctx context.Context, w http.ResponseWriter,
 	}
 	if row.State != postgres.IdempotencyStateCompleted {
 		slog.InfoContext(ctx, "idempotency duplicate while in progress", "path", r.URL.Path)
+		w.Header().Set(IdempotencyStatusHeader, idempotencyStatusInProgress)
 		writeJSONError(ctx, w, http.StatusConflict, "a request with this Idempotency-Key is still in progress")
 		return
 	}
@@ -196,7 +201,7 @@ func (i *Idempotency) answerExisting(ctx context.Context, w http.ResponseWriter,
 	if row.ResponseContentType != "" {
 		w.Header().Set("Content-Type", row.ResponseContentType)
 	}
-	w.Header().Set(IdempotencyReplayedHeader, "true")
+	w.Header().Set(IdempotencyStatusHeader, idempotencyStatusReplayed)
 	w.WriteHeader(row.ResponseStatus)
 	_, _ = w.Write(row.ResponseBody)
 }
