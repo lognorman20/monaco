@@ -20,6 +20,14 @@ func clearConfigEnv(t *testing.T) {
 	t.Setenv("SWAP_PROVIDER", "")
 	t.Setenv("FLASH_API_KEY", "")
 	t.Setenv("FLASH_MAX_SLIPPAGE", "")
+	t.Setenv("PRIVY_VERIFICATION_KEY", "")
+	t.Setenv("SOLANA_RPC_URL", "")
+	for _, name := range []string{
+		"DB_MAX_OPEN_CONNS", "DB_MAX_IDLE_CONNS", "DB_CONN_MAX_LIFETIME", "DB_CONN_MAX_IDLE_TIME",
+		"APP_ENV", "APP_RELEASE", "SENTRY_DSN", "LOG_FORMAT", "METRICS_ADDR", "METRICS_TOKEN",
+	} {
+		t.Setenv(name, "")
+	}
 }
 
 func setValidConfigEnv(t *testing.T) {
@@ -29,6 +37,7 @@ func setValidConfigEnv(t *testing.T) {
 	t.Setenv("RELAYER_PRIVATE_KEY", solanakey.TestPrivateKeyBase58())
 	t.Setenv("PRIVY_AUTHORIZATION_PRIVATE_KEY", "wallet-auth:test-authorization-key")
 	t.Setenv("PRIVY_AUTHORIZATION_KEY_ID", "test-authorization-key-id")
+	t.Setenv("PRIVY_VERIFICATION_KEY", TestPrivyVerificationKeyPEM())
 }
 
 func TestLoad_returnsConfigWhenAllRequiredEnvVarsSet(t *testing.T) {
@@ -238,6 +247,7 @@ func TestLoad_trimsWhitespaceFromEnvValues(t *testing.T) {
 	t.Setenv("PRIVY_APP_ID", "  app-id  ")
 	t.Setenv("PRIVY_APP_SECRET", "  app-secret  ")
 	t.Setenv("RELAYER_PRIVATE_KEY", "  "+solanakey.TestPrivateKeyBase58()+"  ")
+	t.Setenv("PRIVY_VERIFICATION_KEY", "  "+TestPrivyVerificationKeyPEM()+"  ")
 
 	// Act
 	cfg, err := Load()

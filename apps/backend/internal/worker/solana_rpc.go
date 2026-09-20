@@ -23,14 +23,12 @@ type HTTPSolanaRPC struct {
 	httpClient *http.Client
 }
 
-// NewHTTPSolanaRPC returns a mainnet RPC client for the given cluster name.
-func NewHTTPSolanaRPC(cluster string) *HTTPSolanaRPC {
-	cluster = strings.TrimSpace(cluster)
-	if cluster == "" {
-		cluster = "mainnet-beta"
-	}
+// NewHTTPSolanaRPC returns an RPC client for endpoint; pass config.Config.SolanaRPCEndpoint()
+// so SOLANA_RPC_URL is honoured. This client confirms sweeps and payouts, so it must not
+// silently fall back to the rate-limited public endpoint when a paid one is configured.
+func NewHTTPSolanaRPC(endpoint string) *HTTPSolanaRPC {
 	return &HTTPSolanaRPC{
-		endpoint: fmt.Sprintf("https://api.%s.solana.com", cluster),
+		endpoint: strings.TrimSpace(endpoint),
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},

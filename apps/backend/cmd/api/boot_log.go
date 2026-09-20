@@ -14,6 +14,11 @@ func logConfigLoaded(cfg *config.Config) {
 		"privy_app_id", cfg.PrivyAppID,
 		"privy_authorization_configured", cfg.PrivyAuthorizationPrivateKey != "",
 		"pyth_configured", cfg.PythAPIKey != "",
+		"app_env", cfg.Observability.AppEnv,
+		"error_reporting", cfg.Observability.SentryDSN != "",
+		// The RPC URL embeds its API key, so only whether one is configured is logged.
+		"solana_rpc_configured", cfg.SolanaRPCURL != "",
+		"db_max_open_conns", cfg.DBPool.MaxOpenConns,
 	}
 	attrs = append(attrs, databaseLogAttrs(cfg.DatabaseURL)...)
 	slog.Info("config loaded", attrs...)

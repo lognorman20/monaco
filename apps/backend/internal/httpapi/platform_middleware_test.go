@@ -15,7 +15,7 @@ func TestRecover_panicBeforeWrite_returnsJSON500WithRequestID(t *testing.T) {
 	// Arrange
 	handler := Chain(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic("boom")
-	}), RequestID(), Recover())
+	}), RequestID(), Recover(nil))
 	rec := httptest.NewRecorder()
 
 	// Act
@@ -43,7 +43,7 @@ func TestRecover_panicAfterWrite_doesNotAppendSecondResponse(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"ok":`))
 		panic("boom")
-	}), Recover())
+	}), Recover(nil))
 	rec := httptest.NewRecorder()
 
 	// Act
@@ -59,7 +59,7 @@ func TestRecover_abortHandler_isRepanicked(t *testing.T) {
 	// Arrange
 	handler := Chain(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic(http.ErrAbortHandler)
-	}), Recover())
+	}), Recover(nil))
 	defer func() {
 		// Assert
 		if rec := recover(); rec != http.ErrAbortHandler {

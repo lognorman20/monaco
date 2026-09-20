@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/config"
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
 )
 
@@ -24,7 +25,7 @@ func TestSetupLogging_logFileSet_appendsJSONLinesWithRequestID(t *testing.T) {
 	t.Setenv(envLogFile, path)
 
 	// Act
-	closeLog, err := setupLogging()
+	closeLog, err := setupLogging(config.Observability{LogFormat: config.LogFormatText}, nil)
 	if err != nil {
 		t.Fatalf("setupLogging: %v", err)
 	}
@@ -52,7 +53,7 @@ func TestSetupLogging_unwritableLogFile_failsBoot(t *testing.T) {
 	t.Setenv(envLogFile, filepath.Join(t.TempDir(), "missing-dir", "api.log"))
 
 	// Act
-	_, err := setupLogging()
+	_, err := setupLogging(config.Observability{LogFormat: config.LogFormatText}, nil)
 
 	// Assert
 	if err == nil {

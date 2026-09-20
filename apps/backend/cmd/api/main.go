@@ -16,6 +16,7 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/config"
+	"github.com/monaco/monaco/apps/backend/internal/errreport"
 	"github.com/monaco/monaco/apps/backend/internal/faker"
 	"github.com/monaco/monaco/apps/backend/internal/flash"
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
@@ -35,6 +36,7 @@ import (
 type bootResult struct {
 	Server            *http.Server
 	Config            *config.Config
+	MetricsServer     *http.Server // own listener for GET /metrics; nil when METRICS_ADDR=off
 	Relayer           *config.Relayer
 	DB                *sql.DB
 	stopPoller        context.CancelFunc
@@ -94,8 +96,9 @@ var apiRoutes = []string{
 	"POST /v1/proposals/{id}/comments",
 }
 
-// boot loads config, registers the relayer fee payer, applies migrations, and builds the HTTP server.
-func boot(ctx context.Context) (*bootResult, error) {
+// boot loads config, registers the relayer fee payer, applies migrations, and builds the HTTP
+// server. reporter receives handler and worker panics; nil disables reporting.
+func boot(ctx context.Context, reporter errreport.Reporter) (*bootResult, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
@@ -108,7 +111,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}
 	slog.Info("relayer loaded", "pubkey", relayer.PublicKey())
 
-	solanaRPC := worker.NewHTTPSolanaRPC(cfg.SolanaCluster)
+	solanaRPC := worker.NewHTTPSolanaRPC(cfg.SolanaRPCEndpoint())
 	if err := balance.MustHaveSOL(ctx, solanaRPC, relayer.PublicKey(), balance.FeePayerMinLamports); err != nil {
 		return nil, err
 	}
@@ -126,9 +129,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping db: %w", err)
 	}
+	cfg.DBPool.Apply(db)
 	slog.Info("database connected")
 
 	store := postgres.NewStore(db)
+	opsMetrics := newOpsMetrics(db, store, solanaRPC, relayer.PublicKey())
 	privyClient := privy.NewHTTPClient(cfg)
 	var hermes *pyth.HermesClient
 	if cfg.PythAPIKey != "" {
@@ -264,7 +269,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}
 
 	mux := http.NewServeMux()
-	health := &httpapi.HealthHandlers{Checks: healthChecks(db, solanaRPC, relayer.PublicKey(), jupiterPriceClient)}
+	health := &httpapi.HealthHandlers{Checks: healthChecks(db, solanaRPC, relayer.PublicKey(), jupiterPriceClient, privyClient)}
 	mux.HandleFunc("GET /health", health.HealthHandler)
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
@@ -322,30 +327,36 @@ func boot(ctx context.Context) (*bootResult, error) {
 	poller := worker.NewSweepPoller(store, privyClient, solanaRPC, deposits, relayer.PrivateKey(), nil)
 	pollerCtx, stopPoller := context.WithCancel(context.Background())
 	workers := &sync.WaitGroup{}
-	workers.Add(3)
-	go func() {
-		defer workers.Done()
-		worker.Run(pollerCtx, poller, worker.DefaultPollInterval, sweepWake)
-	}()
+	supervise := func(ctx context.Context, name string, run func(ctx context.Context)) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			worker.Supervisor{Name: name, Reporter: reporter, Observer: opsMetrics}.Run(ctx, run)
+		}()
+	}
+	supervise(pollerCtx, worker.NameSweep, func(ctx context.Context) {
+		worker.RunObserved(ctx, poller, worker.DefaultPollInterval, sweepWake, opsMetrics)
+	})
 	slog.Info("sweep poller started")
 
 	executePoller := worker.NewProposalExecutePoller(store, executeOnPass, nil)
+	executePoller.SetTickObserver(opsMetrics)
 	executeCtx, stopExecutePoller := context.WithCancel(context.Background())
-	go func() {
-		defer workers.Done()
-		worker.RunProposalExecutePoller(executeCtx, executePoller, worker.DefaultProposalExecuteInterval)
-	}()
+	supervise(executeCtx, worker.NameProposalExecute, func(ctx context.Context) {
+		worker.RunProposalExecutePoller(ctx, executePoller, worker.DefaultProposalExecuteInterval)
+	})
 	slog.Info("proposal execute poller started")
 
 	redeemPoller := worker.NewRedeemRecoveryPoller(store, redeem, nil)
+	redeemPoller.SetTickObserver(opsMetrics)
 	redeemCtx, stopRedeemPoller := context.WithCancel(context.Background())
-	go func() {
-		defer workers.Done()
-		worker.RunRedeemRecoveryPoller(redeemCtx, redeemPoller, worker.DefaultRedeemRecoveryInterval)
-	}()
+	supervise(redeemCtx, worker.NameRedeemRecovery, func(ctx context.Context) {
+		worker.RunRedeemRecoveryPoller(ctx, redeemPoller, worker.DefaultRedeemRecoveryInterval)
+	})
 
 	return &bootResult{
-		Server:            newHTTPServer(addr, platformHandler(mux)),
+		Server:            newHTTPServer(addr, platformHandler(mux, reporter, opsMetrics)),
+		MetricsServer:     newMetricsServer(cfg.Observability, opsMetrics),
 		Config:            cfg,
 		Relayer:           relayer,
 		DB:                db,
@@ -357,17 +368,37 @@ func boot(ctx context.Context) (*bootResult, error) {
 }
 
 func main() {
-	closeLog, err := setupLogging()
+	// Logging and crash reporting come up before the rest of the config so that a boot
+	// failure is itself logged and reported.
+	observability, err := config.LoadObservability()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "observability config invalid:", err)
+		os.Exit(1)
+	}
+	reporter, err := newErrorReporter(observability)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error reporting setup failed:", err)
+		os.Exit(1)
+	}
+	closeLogFile, err := setupLogging(observability, reporter)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "logging setup failed:", err)
 		os.Exit(1)
+	}
+	// os.Exit skips defers, so every exit path below calls closeLog: queued crash reports
+	// are flushed before the log file closes.
+	closeLog := func() {
+		if !reporter.Flush(errorReportFlushTimeout) {
+			slog.Warn("error reports not fully flushed", "timeout", errorReportFlushTimeout)
+		}
+		closeLogFile()
 	}
 	defer closeLog()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result, err := boot(ctx)
+	result, err := boot(ctx, reporter)
 	if err != nil {
 		slog.Error("boot failed", "err", err)
 		closeLog()
@@ -383,6 +414,7 @@ func main() {
 		}
 		close(serverErr)
 	}()
+	serveMetrics(result.MetricsServer)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -415,6 +447,7 @@ func main() {
 	} else {
 		slog.Error("pollers did not stop in time", "timeout", workerStopTimeout)
 	}
+	shutdownMetrics(shutdownCtx, result.MetricsServer)
 	if err := result.DB.Close(); err != nil {
 		slog.Warn("database close failed", "err", err)
 	}

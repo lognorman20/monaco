@@ -2,7 +2,9 @@
 package config
 
 import (
+	"crypto/ecdsa"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -30,6 +32,7 @@ const (
 	envSwapProvider                 = "SWAP_PROVIDER"
 	envFlashAPIKey                  = "FLASH_API_KEY"
 	envFlashMaxSlippage             = "FLASH_MAX_SLIPPAGE"
+	envPrivyVerificationKey         = "PRIVY_VERIFICATION_KEY"
 )
 
 // maxFlashSlippage caps FLASH_MAX_SLIPPAGE so a typo cannot open a treasury swap to a bad fill.
@@ -42,6 +45,9 @@ const maxFlashSlippage = 0.05
 //     postgres://monaco:monaco@localhost:54322/monaco?sslmode=disable
 //   - PRIVY_APP_ID: Privy application ID from the dashboard.
 //   - PRIVY_APP_SECRET: Privy application secret from the dashboard.
+//   - PRIVY_VERIFICATION_KEY: the app's ES256 verification key (PEM public key) from the Privy
+//     dashboard. Every access token is checked against it, so it is parsed once here and a
+//     missing or malformed key stops boot instead of failing each authenticated request.
 //   - RELAYER_PRIVATE_KEY: Base58-encoded Solana secret key for the app fee payer (mainnet).
 //     JSON [1,2,...] arrays from solana-keygen are auto-converted at startup; base58 is preferred.
 //
@@ -65,6 +71,11 @@ const maxFlashSlippage = 0.05
 //     when SWAP_PROVIDER=flash. Create one at app.definitive.fi > More > Flash.
 //   - FLASH_MAX_SLIPPAGE: decimal slippage bound for Flash market orders (default 0.01 = 1%,
 //     max 0.05).
+//   - SOLANA_RPC_URL: Solana JSON-RPC endpoint for every chain read and confirmation. Unset
+//     falls back to the public cluster endpoint, which has no SLA: set a paid RPC outside
+//     local dev.
+//   - DB_MAX_OPEN_CONNS, DB_MAX_IDLE_CONNS, DB_CONN_MAX_LIFETIME, DB_CONN_MAX_IDLE_TIME: see DBPool.
+//   - APP_ENV, APP_RELEASE, SENTRY_DSN, LOG_FORMAT, METRICS_ADDR, METRICS_TOKEN: see Observability.
 type Config struct {
 	DatabaseURL                  string
 	PrivyAppID                   string
@@ -82,6 +93,10 @@ type Config struct {
 	SwapProvider                 string
 	FlashAPIKey                  string
 	FlashMaxSlippage             string
+	// PrivyVerificationKey is the parsed PRIVY_VERIFICATION_KEY.
+	PrivyVerificationKey *ecdsa.PublicKey
+	DBPool               DBPool
+	Observability        Observability
 }
 
 // Load reads required settings from the process environment.
@@ -114,6 +129,11 @@ func Load() (*Config, error) {
 	if cfg.PrivyAppSecret == "" {
 		return nil, fmt.Errorf("%s is required", envPrivyAppSecret)
 	}
+	verificationKey, err := ParsePrivyVerificationKey(os.Getenv(envPrivyVerificationKey))
+	if err != nil {
+		return nil, err
+	}
+	cfg.PrivyVerificationKey = verificationKey
 	if cfg.RelayerPrivateKey == "" {
 		return nil, fmt.Errorf("%s is required", envRelayerPrivateKey)
 	}
@@ -141,5 +161,48 @@ func Load() (*Config, error) {
 		}
 	}
 
+	if err := validateSolanaRPCURL(cfg.SolanaRPCURL); err != nil {
+		return nil, err
+	}
+	pool, err := loadDBPool()
+	if err != nil {
+		return nil, err
+	}
+	cfg.DBPool = pool
+	observability, err := LoadObservability()
+	if err != nil {
+		return nil, err
+	}
+	cfg.Observability = observability
+
 	return cfg, nil
+}
+
+// SolanaRPCEndpoint is the JSON-RPC endpoint every Solana client uses: SOLANA_RPC_URL when
+// set, else the public endpoint of the cluster.
+func (c *Config) SolanaRPCEndpoint() string {
+	return SolanaRPCEndpoint(c.SolanaCluster, c.SolanaRPCURL)
+}
+
+// SolanaRPCEndpoint resolves an RPC endpoint from a cluster name and an optional override.
+func SolanaRPCEndpoint(cluster, rpcURL string) string {
+	if rpcURL = strings.TrimSpace(rpcURL); rpcURL != "" {
+		return rpcURL
+	}
+	if cluster = strings.TrimSpace(cluster); cluster == "" {
+		cluster = SolanaCluster
+	}
+	return fmt.Sprintf("https://api.%s.solana.com", cluster)
+}
+
+func validateSolanaRPCURL(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	// The URL usually embeds an API key, so the error never echoes it.
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return fmt.Errorf("%s must be an http(s) URL", envSolanaRPCURL)
+	}
+	return nil
 }

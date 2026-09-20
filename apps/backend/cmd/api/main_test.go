@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/config"
 	solanakey "github.com/monaco/monaco/apps/backend/internal/solana/key"
 )
 
@@ -14,6 +15,7 @@ func clearAPIEnv(t *testing.T) {
 	t.Setenv("PRIVY_APP_ID", "")
 	t.Setenv("PRIVY_APP_SECRET", "")
 	t.Setenv("RELAYER_PRIVATE_KEY", "")
+	t.Setenv("PRIVY_VERIFICATION_KEY", "")
 }
 
 func setValidAPIEnv(t *testing.T) {
@@ -21,6 +23,7 @@ func setValidAPIEnv(t *testing.T) {
 	t.Setenv("PRIVY_APP_ID", "test-privy-app-id")
 	t.Setenv("PRIVY_APP_SECRET", "test-privy-app-secret")
 	t.Setenv("RELAYER_PRIVATE_KEY", solanakey.TestPrivateKeyBase58())
+	t.Setenv("PRIVY_VERIFICATION_KEY", config.TestPrivyVerificationKeyPEM())
 }
 
 func TestAPIServer_missingRelayerKey_failsStartup(t *testing.T) {
@@ -32,7 +35,7 @@ func TestAPIServer_missingRelayerKey_failsStartup(t *testing.T) {
 	defer cancel()
 
 	// Act
-	_, err := boot(ctx)
+	_, err := boot(ctx, nil)
 
 	// Assert
 	if err == nil {

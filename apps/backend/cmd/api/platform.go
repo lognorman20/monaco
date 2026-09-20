@@ -12,8 +12,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/config"
+	"github.com/monaco/monaco/apps/backend/internal/errreport"
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/metrics"
 )
 
 const (
@@ -47,13 +50,22 @@ const (
 )
 
 // setupLogging installs the process logger and returns a func that flushes and closes the
-// log file. Without LOG_FILE it logs text to stderr as before; with it, JSON lines go to
-// both stderr and the file so one format serves the terminal and the durable copy.
-func setupLogging() (func(), error) {
+// log file. stderr gets JSON lines everywhere except APP_ENV=local (LOG_FORMAT overrides),
+// because outside a terminal stderr is what the host's log collector stores and ships. With
+// LOG_FILE, JSON lines go to both stderr and the file so one format serves both copies.
+// Error records are also handed to reporter; the request id is added first so reports carry it.
+func setupLogging(observability config.Observability, reporter errreport.Reporter) (func(), error) {
 	opts := &slog.HandlerOptions{Level: slog.LevelInfo}
+	install := func(handler slog.Handler) {
+		slog.SetDefault(slog.New(httpapi.NewRequestIDLogHandler(errreport.NewSlogHandler(handler, reporter))))
+	}
 	path := strings.TrimSpace(os.Getenv(envLogFile))
 	if path == "" {
-		slog.SetDefault(slog.New(httpapi.NewRequestIDLogHandler(slog.NewTextHandler(os.Stderr, opts))))
+		if observability.LogFormat == config.LogFormatJSON {
+			install(slog.NewJSONHandler(os.Stderr, opts))
+		} else {
+			install(slog.NewTextHandler(os.Stderr, opts))
+		}
 		return func() {}, nil
 	}
 
@@ -61,8 +73,7 @@ func setupLogging() (func(), error) {
 	if err != nil {
 		return nil, fmt.Errorf("open %s %q: %w", envLogFile, path, err)
 	}
-	handler := slog.NewJSONHandler(io.MultiWriter(os.Stderr, file), opts)
-	slog.SetDefault(slog.New(httpapi.NewRequestIDLogHandler(handler)))
+	install(slog.NewJSONHandler(io.MultiWriter(os.Stderr, file), opts))
 	return func() {
 		_ = file.Sync()
 		_ = file.Close()
@@ -71,13 +82,16 @@ func setupLogging() (func(), error) {
 
 // platformHandler wraps the route mux with the cross-cutting middleware. Order matters:
 // the request id is set first so every later log line and error body carries it, and
-// Recover sits outside everything that can panic.
-func platformHandler(mux http.Handler) http.Handler {
+// Recover sits outside everything that can panic. The metrics middleware wraps Recover so a
+// panic is counted as the 500 it becomes; nothing inside it may copy the request, or the
+// route pattern the mux records is lost to it.
+func platformHandler(mux http.Handler, reporter errreport.Reporter, opsMetrics *metrics.Metrics) http.Handler {
 	trustProxy := strings.EqualFold(strings.TrimSpace(os.Getenv(envTrustProxyHeaders)), "true")
 	origins := strings.Split(os.Getenv(envCORSAllowedOrigins), ",")
 	return httpapi.Chain(mux,
 		httpapi.RequestID(),
-		httpapi.Recover(),
+		opsMetrics.HTTPMiddleware(),
+		httpapi.Recover(reporter),
 		httpapi.CORS(origins),
 		httpapi.NewRateLimiter(trustProxy).Middleware(),
 		httpapi.LimitRequestBody(httpapi.DefaultMaxRequestBytes),
@@ -118,13 +132,21 @@ type solanaBalanceReader interface {
 	GetBalance(ctx context.Context, address string) (uint64, error)
 }
 
-// healthChecks lists the dependencies GET /health reports. Only Postgres is critical: the
-// API cannot serve anything without it, while an outage at Solana RPC, Privy or the price
-// API degrades money routes but still leaves reads working.
-func healthChecks(db *sql.DB, solanaRPC solanaBalanceReader, relayerPubkey string, prices jupiter.PriceClient) []httpapi.HealthCheck {
+// authVerifier is the slice of the Privy client the health probe needs.
+type authVerifier interface {
+	VerifierReady() error
+}
+
+// healthChecks lists the dependencies GET /health reports. Postgres and the access-token
+// verifier are critical: without either no authenticated route can answer. An outage at
+// Solana RPC, Privy or the price API degrades money routes but still leaves reads working.
+func healthChecks(db *sql.DB, solanaRPC solanaBalanceReader, relayerPubkey string, prices jupiter.PriceClient, verifier authVerifier) []httpapi.HealthCheck {
 	probeClient := &http.Client{Timeout: httpapi.DefaultHealthCheckTimeout}
 	return []httpapi.HealthCheck{
 		{Name: "database", Critical: true, Check: db.PingContext},
+		{Name: "auth_verifier", Critical: true, Check: func(context.Context) error {
+			return verifier.VerifierReady()
+		}},
 		{Name: "solana_rpc", Check: func(ctx context.Context) error {
 			_, err := solanaRPC.GetBalance(ctx, relayerPubkey)
 			return err

@@ -2,6 +2,7 @@ package privy
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"net/http"
 	"time"
 
@@ -32,7 +33,8 @@ type HTTPClient struct {
 	relayerPrivateKey            string
 	baseURL                      string
 	solanaCluster                string
-	solanaRPCURL                 string // test override; empty uses cluster default
+	solanaRPCURL                 string // SOLANA_RPC_URL; empty uses the public cluster endpoint
+	verificationKey              *ecdsa.PublicKey
 	httpClient                   *http.Client
 }
 
@@ -47,6 +49,7 @@ func NewHTTPClient(cfg *config.Config) *HTTPClient {
 		baseURL:                      defaultBaseURL,
 		solanaCluster:                cfg.SolanaCluster,
 		solanaRPCURL:                 cfg.SolanaRPCURL,
+		verificationKey:              cfg.PrivyVerificationKey,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
