@@ -14,15 +14,18 @@ struct ProposalDetailView: View {
     @State private var proposal: ProposalDTO?
     @State private var loadFailed = false
     @State private var isVoting = false
-    /// Ballot cast from this screen, so the header flips to "You voted yes" before the reload lands.
-    @State private var localChoice: String?
     @State private var comments: [ProposalCommentDTO] = []
+    /// The thread in display order, built once per change of `comments` rather than per render.
+    @State private var commentRows: [ProposalCommentThreadRow] = []
     @State private var commentsLoading = true
     @State private var commentsError: String?
-    @State private var draft = ""
     @State private var replyTarget: ProposalCommentDTO?
     @State private var isPosting = false
+    /// The comment this member just posted, so the thread can scroll to it.
+    @State private var postedCommentId: String?
     @State private var toast: MonacoToast?
+
+    private let votes = ProposalVoteLedger.shared
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -38,10 +41,22 @@ struct ProposalDetailView: View {
     }
 
     private var viewerChoice: String? {
-        localChoice ?? proposal?.viewerChoice(viewerId: service.viewerId)
+        proposal.flatMap { votes.choice(for: $0, viewerId: service.viewerId) }
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
+            detail
+                // A posted comment lands at the bottom of a thread that is usually below the fold,
+                // behind the pinned composer. Bring it into view so the member sees what they said.
+                .onChange(of: postedCommentId) { _, id in
+                    guard let id else { return }
+                    withAnimation(reduceMotion ? nil : .snappy) { proxy.scrollTo(id, anchor: .bottom) }
+                }
+        }
+    }
+
+    private var detail: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.xl) {
                 if let proposal {
@@ -57,7 +72,7 @@ struct ProposalDetailView: View {
                     ballotsSection(proposal)
                     agentSection(proposal)
                     CommentThreadView(
-                        comments: comments,
+                        rows: commentRows,
                         isLoading: commentsLoading,
                         errorMessage: commentsError,
                         onRetry: { Task { await loadComments() } },
@@ -81,11 +96,10 @@ struct ProposalDetailView: View {
         .safeAreaInset(edge: .bottom) {
             if proposal != nil {
                 CommentComposer(
-                    text: $draft,
                     replyTarget: replyTarget,
                     isPosting: isPosting,
                     onCancelReply: { replyTarget = nil },
-                    onPost: { body in Task { await postComment(body) } }
+                    onPost: { body in await postComment(body) }
                 )
             }
         }
@@ -234,7 +248,7 @@ struct ProposalDetailView: View {
             withAnimation(reduceMotion ? nil : .snappy) { proposal = value }
         }
         if let loadedComments {
-            QuietUpdate.apply(loadedComments, over: comments) { comments = $0 }
+            QuietUpdate.apply(loadedComments, over: comments) { setComments($0) }
             if commentsError != nil { commentsError = nil }
         }
     }
@@ -244,13 +258,19 @@ struct ProposalDetailView: View {
         commentsError = nil
         defer { commentsLoading = false }
         do {
-            comments = try await service.comments(proposalId: proposalId)
+            setComments(try await service.comments(proposalId: proposalId))
         } catch is CancellationError {
             return
         } catch {
             if error.isRequestCancellation { return }
             commentsError = ProposalFeedCopy.commentsLoadFailed
         }
+    }
+
+    /// The one place comments are stored, so the thread is threaded exactly once per change.
+    private func setComments(_ loaded: [ProposalCommentDTO]) {
+        comments = loaded
+        commentRows = ProposalCommentThread.rows(from: loaded)
     }
 
     private func vote(_ choice: ProposalVoteChoice) async {
@@ -262,20 +282,20 @@ struct ProposalDetailView: View {
         if result.succeeded {
             Haptics.success()
             withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.7)) {
-                localChoice = choice.rawValue
+                votes.record(choice, for: proposalId)
             }
         }
         await loadProposal()
     }
 
-    private func postComment(_ body: String) async {
-        guard !isPosting else { return }
+    /// True when the comment was accepted, which is the composer's cue to clear and stand down.
+    private func postComment(_ body: String) async -> Bool {
+        guard !isPosting else { return false }
         isPosting = true
         defer { isPosting = false }
         let parent = replyTarget
         do {
-            _ = try await service.postComment(proposalId: proposalId, body: body, parentId: parent?.id)
-            draft = ""
+            let posted = try await service.postComment(proposalId: proposalId, body: body, parentId: parent?.id)
             replyTarget = nil
             Haptics.success()
             toast = MonacoToast(
@@ -284,8 +304,11 @@ struct ProposalDetailView: View {
             )
             await loadComments()
             await loadProposal()
+            postedCommentId = posted.id
+            return true
         } catch {
             toast = MonacoToast(message: ProposalFeedErrorCopy.comment(error))
+            return false
         }
     }
 }
