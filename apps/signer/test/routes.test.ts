@@ -1,7 +1,7 @@
 import { createServer, request as httpRequest, type IncomingMessage } from "node:http"
 import { describe, expect, it } from "vitest"
 import { handle } from "../src/routes.js"
-import { createRelayer } from "../src/relayer.js"
+import { createTestRelayer } from "../src/relayer.js"
 import type { DynamicClient } from "../src/dynamic.js"
 
 function fakeDynamic(): DynamicClient {
@@ -47,7 +47,7 @@ describe("signer routes", () => {
       void handle(req, res, {
         secret: "s3cret",
         dynamic: fakeDynamic(),
-        relayer: createRelayer("0x00"),
+        relayer: createTestRelayer(),
         relayerAddress: "0xrelayer",
       })
     })
@@ -64,7 +64,7 @@ describe("signer routes", () => {
       void handle(req, res, {
         secret: "s3cret",
         dynamic: fakeDynamic(),
-        relayer: createRelayer("0x00"),
+        relayer: createTestRelayer(),
         relayerAddress: "0xrelayer",
       })
     })
@@ -84,7 +84,7 @@ describe("signer routes", () => {
       void handle(req, res, {
         secret: "s3cret",
         dynamic: fakeDynamic(),
-        relayer: createRelayer("0x00"),
+        relayer: createTestRelayer(),
         relayerAddress: "0xrelayer",
       })
     })
@@ -98,7 +98,7 @@ describe("signer routes", () => {
   })
 
   it("serialises relayer sends", async () => {
-    const relayer = createRelayer("0x00")
+    const relayer = createTestRelayer()
     const hashes = await Promise.all([relayer.send({ to: "0xa" }), relayer.send({ to: "0xb" })])
     expect(hashes[0]).not.toEqual(hashes[1])
     expect(hashes[0].startsWith("0x")).toBe(true)

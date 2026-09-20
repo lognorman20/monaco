@@ -2,7 +2,9 @@
   "name": "monaco-signer",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/server.ts",
@@ -10,6 +12,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@dynamic-labs-wallet/core": "1.1.14",
+    "@dynamic-labs-wallet/node": "^1.1.14",
+    "@dynamic-labs-wallet/node-evm": "^1.1.14",
     "viem": "^2.21.0"
   },
   "devDependencies": {
