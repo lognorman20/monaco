@@ -20,15 +20,20 @@ final class PrivyAuthService: ObservableObject {
     private var sessionStore = MonacoSessionStore()
     private let tokenRefresh = SingleFlight<String?>()
     private var isRestoreInFlight = false
-    /// Every access token this sign-in has used. A 401 for a token that is not in here
+    /// The access tokens this sign-in has used. A 401 for a token that is not in here
     /// belongs to a session that has already ended, so it must neither mint a token nor
     /// sign out whoever is signed in now.
-    private var sessionTokens: Set<String> = []
+    private var sessionTokens = SessionTokenLedger()
     /// Set the moment a sign-out starts, so a late 401 cannot stamp "session expired"
     /// over a sign-out the member asked for, and a second tap cannot start a second one.
     private var isSigningOut = false
     /// Best-effort revoke of the Privy session, running after local state is already gone.
-    private var revokeTask: Task<Void, Never>?
+    private let pendingRevoke = PendingRevoke()
+    /// Bumped by every successful sign-in, so a revoke started for an earlier session can
+    /// tell that the session it was told to end is no longer the one that is open.
+    private var signInEpoch = 0
+    /// How long a new sign-in will wait out a revoke before going ahead anyway.
+    private static let revokeWait = Duration.seconds(2)
 
     /// What just happened to the login form. `flow.step` says which field is on screen.
     var phase: Phase { flow.phase }
@@ -137,7 +142,7 @@ final class PrivyAuthService: ObservableObject {
 
     private func adoptAccessToken(_ token: String) {
         accessToken = token
-        sessionTokens.insert(token)
+        sessionTokens.adopt(token)
     }
 
     // MARK: One-time codes
@@ -159,11 +164,13 @@ final class PrivyAuthService: ObservableObject {
     }
 
     private func sendCode(to destination: String, _ send: () async throws -> Void) async {
+        // A sign-out whose Privy revoke is still running would tear this session down again.
+        // Waited out *before* the form is marked busy: this can give up after a couple of
+        // seconds, and a disabled form with no cancel is not somewhere to leave a member.
+        await awaitPendingRevoke()
         // A second tap while the first request is in flight must not send a second code.
         guard flow.beginSend() else { return }
         lastSignOutReason = nil
-        // A sign-out whose Privy revoke is still running would tear this session down again.
-        await awaitPendingRevoke()
 
         do {
             try await send()
@@ -178,8 +185,8 @@ final class PrivyAuthService: ObservableObject {
     }
 
     private func verifyCode(_ verify: () async throws -> PrivyUser) async {
-        guard flow.beginVerify() else { return }
         await awaitPendingRevoke()
+        guard flow.beginVerify() else { return }
 
         do {
             let user = try await verify()
@@ -205,12 +212,29 @@ final class PrivyAuthService: ObservableObject {
 
     /// Same as `logout()`, but records why so LoginView can explain it instead of
     /// silently bouncing the user back with no context.
-    func signOut(reason: String) async {
+    ///
+    /// Private on purpose: a sign-out driven by a server reply must name the token that
+    /// reply rejected, so it goes through `signOut(reason:rejectedToken:)`. The member's own
+    /// sign-out goes through `logout()`. Leaving this reachable is what let a stale 401 end
+    /// the wrong session.
+    private func signOut(reason: String) async {
         performLogout(reason: reason)
     }
 
+    /// A 401 answering a request made with `rejectedToken`, ending the session with a
+    /// reason for the login screen to show. Guarded exactly like
+    /// `signOutAfterRejectedSession(rejectedToken:)`: a reply that outlived its sign-in must
+    /// not sign out the account signed in now, nor stamp its login screen with a reason
+    /// meant for the previous one.
+    func signOut(reason: String, rejectedToken: String) async {
+        guard sessionTokens.contains(rejectedToken) else { return }
+        await signOut(reason: reason)
+    }
+
     /// The backend still answered 401 after a token refresh: the session is over.
-    func signOutAfterRejectedSession() async {
+    /// Private on purpose — every caller must come through a `rejectedToken` overload so
+    /// the unguarded path cannot be reintroduced from another area.
+    private func signOutAfterRejectedSession() async {
         await signOut(reason: LoginFailureCopy.sessionExpired)
     }
 
@@ -231,23 +255,26 @@ final class PrivyAuthService: ObservableObject {
         endSession(reason: reason)
 
         let privy = self.privy
-        revokeTask = Task {
-            if let user = await privy.getUser() {
-                await user.logout()
-            }
+        let epoch = signInEpoch
+        pendingRevoke.start { [self] in
+            // Someone has signed in since this revoke was scheduled: the session it was told
+            // to end is no longer the one Privy holds, and revoking now would tear down the
+            // session that replaced it. This is what makes giving up on the wait safe.
+            guard let user = await privy.getUser(), signInEpoch == epoch else { return }
+            await user.logout()
         }
     }
 
     /// Lets a new sign-in wait out a revoke that is still in flight, so a late
-    /// `user.logout()` cannot tear down the session it is about to create.
+    /// `user.logout()` cannot tear down the session it is about to create — but only
+    /// briefly. See `PendingRevoke` for why the bound matters.
     private func awaitPendingRevoke() async {
-        await revokeTask?.value
-        revokeTask = nil
+        await pendingRevoke.wait(atMost: Self.revokeWait)
     }
 
     private func endSession(reason: String?) {
         accessToken = nil
-        sessionTokens.removeAll()
+        sessionTokens.clear()
         lastSignOutReason = reason
         flow.signedOut()
         sessionStore.clear()
@@ -308,6 +335,9 @@ final class PrivyAuthService: ObservableObject {
         do {
             let token = try await user.getAccessToken()
             isSigningOut = false
+            // From here a revoke scheduled by the previous sign-out is stale: this is the
+            // session Privy holds now, and ending it would sign the member straight out.
+            signInEpoch += 1
             adoptAccessToken(token)
             lastSignOutReason = nil
             flow.authenticated(userID: user.id)
