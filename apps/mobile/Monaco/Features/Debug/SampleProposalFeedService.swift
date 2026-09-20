@@ -276,7 +276,9 @@ final class SampleProposeService: ProposeService {
     func pot(groupId: String) async throws -> ProposePot {
         potReads += 1
         if potReads == 1, ProcessInfo.processInfo.arguments.contains("-MonacoProposePotFails") {
-            throw MonacoCore.MonacoAPIError.httpStatus(503)
+            // The same error type `LiveProposeService` throws, so the sample harness exercises the
+            // real `ProposeErrorCopy` mapping rather than only its type-agnostic fallbacks.
+            throw Monaco.MonacoAPIError.httpStatus(503)
         }
         return ProposePot(view: Self.groupView)
     }

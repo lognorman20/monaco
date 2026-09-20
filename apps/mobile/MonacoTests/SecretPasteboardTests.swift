@@ -24,4 +24,14 @@ struct SecretPasteboardTests {
         SecretPasteboard.copy("mk_live_abc123", to: pasteboard)
         #expect(pasteboard.string == "mk_live_abc123")
     }
+
+    @Test func aSecretCopiedLongEnoughAgoIsGone() {
+        // Through `copy`, the entry point the bot screens call: the two tests above check the
+        // options in isolation, so a `pasteboard.string = secret` that ignored them would leave
+        // all of them green and the key back on Universal Clipboard for good.
+        let pasteboard = UIPasteboard.withUniqueName()
+        defer { UIPasteboard.remove(withName: pasteboard.name) }
+        SecretPasteboard.copy("mk_live_abc123", to: pasteboard, now: Date(timeIntervalSinceNow: -300))
+        #expect(pasteboard.string == nil)
+    }
 }
