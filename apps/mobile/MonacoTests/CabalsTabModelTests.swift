@@ -178,15 +178,25 @@ struct CabalsTabModelTests {
     }
 
     @Test func aSupersededRangeLoadDoesNotClearTheNewerSpinner() async throws {
+        // Arrange: only 3M has drawable history, so if the superseded 1D load
+        // were the one that landed, the series would be empty.
         let source = RecordingDataSource()
+        source.seriesByRange = [
+            .threeMonths: [sampleSeries(id: "a", points: 8), sampleSeries(id: "b", points: 6)],
+        ]
         let model = CabalsTabModel(dataSource: source)
 
+        // Act: pick a range, then pick another before the first can land.
         model.selectRange(.oneDay)
         model.selectRange(.threeMonths)
         try await settle()
 
+        // Assert: each load knew its own range, the newer one won, and the
+        // superseded one neither cleared the spinner nor left it stuck on.
+        #expect(source.pnlRanges == [.oneDay, .threeMonths])
         #expect(model.range == .threeMonths)
         #expect(model.loadingRange == nil)
+        #expect(CabalsTabModel.isChartable(model.series))
     }
 
     // MARK: - Membership (#293)

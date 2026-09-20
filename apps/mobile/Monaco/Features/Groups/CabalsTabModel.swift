@@ -143,11 +143,14 @@ final class CabalsTabModel {
         guard newRange != range else { return }
         range = newRange
         chartTask?.cancel()
-        chartTask = Task { await loadChart() }
+        chartTask = Task { await loadChart(newRange) }
     }
 
-    func loadChart() async {
-        let requested = range
+    /// `requested` is captured by the caller rather than read here, so a task
+    /// that starts after a newer range was picked still knows which range it is
+    /// the load for.
+    func loadChart(_ requested: GroupPnLRange? = nil) async {
+        let requested = requested ?? range
         loadingRange = requested
         defer {
             // Only the newest load clears the flag; a superseded one leaves it be.
