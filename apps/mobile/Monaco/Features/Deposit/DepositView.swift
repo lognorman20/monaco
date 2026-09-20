@@ -15,7 +15,6 @@ struct DepositView: View {
     @State private var depositAddress: String?
     @State private var errorMessage: String?
     @State private var isLoading = true
-    @State private var lastSeenBalanceMicros: Int64?
     @State private var toast: MonacoToast?
 
     var body: some View {
@@ -89,9 +88,8 @@ struct DepositView: View {
         .task(id: auth.accessToken) {
             await loadDepositAddress()
         }
-        .task(id: depositAddress) {
-            guard depositAddress != nil else { return }
-            await pollPlatformBalanceWhileVisible()
+        .pollWhileVisible(every: DepositPolling.balanceInterval, isActive: depositAddress != nil) {
+            try await refreshPlatformBalance()
         }
     }
 
@@ -132,6 +130,16 @@ struct DepositView: View {
     }
 
     private func loadDepositAddress() async {
+        // The shell opened the backend session and read the profile before this screen existed,
+        // so the address is already in hand. Two more round trips to fetch it again only kept the
+        // member on a spinner.
+        if let known = DepositAddress.usable(session.me?.memberWalletAddress) {
+            depositAddress = known
+            errorMessage = nil
+            isLoading = false
+            return
+        }
+
         guard let accessToken = auth.accessToken else {
             depositAddress = nil
             errorMessage = "Sign in to view your deposit address."
@@ -144,17 +152,22 @@ struct DepositView: View {
         depositAddress = nil
 
         do {
-            _ = try await apiClient.openSession(accessToken: accessToken)
-            let profile = try await apiClient.me(accessToken: accessToken)
-            let address = profile.memberWalletAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !address.isEmpty, !address.hasPrefix("FAKE") else {
+            // Only on this path. `POST /v1/auth/session` is what upserts the user row and ensures
+            // the member wallet exists (backend SessionService.OpenSession); `GET /v1/me` answers
+            // 404 without it. The store being empty means the shell has not got that far, so this
+            // screen has to do it rather than show "not ready yet" to a brand-new member.
+            let profile = try await apiClient.openSession(accessToken: accessToken)
+            guard let address = DepositAddress.usable(profile.memberWalletAddress) else {
                 errorMessage = "Deposit address not ready yet."
                 isLoading = false
                 return
             }
+            session.me = profile
             depositAddress = address
         } catch MonacoAPIError.httpStatus {
-            errorMessage = "Couldn't load your deposit address. Pull down to try again."
+            // The Try again button in this section is the way back, so the copy does not send the
+            // member pulling on a screen that has no pull-to-refresh.
+            errorMessage = "Couldn't load your deposit address."
         } catch {
             errorMessage = "No connection. Check your internet and try again."
         }
@@ -162,20 +175,17 @@ struct DepositView: View {
         isLoading = false
     }
 
-    /// Refreshes platform balance while the deposit screen is open so inbound USDC shows quickly.
-    private func pollPlatformBalanceWhileVisible() async {
-        lastSeenBalanceMicros = session.platformBalance?.availableUsdcMicros
-        while !Task.isCancelled {
-            guard let token = auth.accessToken else { return }
-            if let balance = try? await apiClient.getPlatformBalance(accessToken: token) {
-                let previous = lastSeenBalanceMicros
-                session.platformBalance = balance
-                if let previous, balance.availableUsdcMicros > previous {
-                    toast = MonacoToast(message: "USDC arrived in your account balance.", isSuccess: true)
-                }
-                lastSeenBalanceMicros = balance.availableUsdcMicros
-            }
-            try? await Task.sleep(for: DepositPolling.balanceInterval)
+    /// Refreshes the account balance while the deposit screen is open so inbound USDC shows
+    /// quickly. Writes the shared store only when the number actually moved, so the tabs reading
+    /// it are not re-rendered every three seconds for nothing.
+    private func refreshPlatformBalance() async throws {
+        guard let token = auth.accessToken else { return }
+        let fresh = try await apiClient.getPlatformBalance(accessToken: token)
+        let previous = session.platformBalance
+        guard fresh != previous else { return }
+        session.platformBalance = fresh
+        if let previous, fresh.availableUsdcMicros > previous.availableUsdcMicros {
+            toast = MonacoToast(message: "USDC arrived in your account balance.", isSuccess: true)
         }
     }
 }
