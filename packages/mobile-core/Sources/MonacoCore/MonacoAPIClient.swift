@@ -64,7 +64,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
     ///   registered in `APITelemetryRegistry.shared`.
     public convenience init(
         baseURL: URL = MonacoConfig.apiBaseURL,
-        session: URLSession = .shared,
+        session: URLSession = .monaco,
         accessTokenProvider: AccessTokenProvider? = nil,
         telemetry: APITelemetry? = nil
     ) {
@@ -159,7 +159,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = ProfilePhotoMultipart.body(imageData: imageData, mimeType: mimeType, boundary: boundary)
 
-        let response = try await session.send(request, route: "/v1/me/profile-photo")
+        let response = try await session.send(request, route: "/v1/me/profile-photo", timeout: MonacoRequestTimeout.upload)
         try Self.requireOK(response)
         return try JSONDecoder().decode(MeDTO.self, from: response.data)
     }

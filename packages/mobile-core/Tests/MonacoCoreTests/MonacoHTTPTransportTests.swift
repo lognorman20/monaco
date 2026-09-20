@@ -111,6 +111,34 @@ final class MonacoHTTPTransportTests: XCTestCase {
         }
     }
 
+    func testTimeouts_readsGetTheShortBudget_writesWithAKeyGetTheMoneyBudget() async throws {
+        let timeouts = Recorder<TimeInterval>()
+        MockURLProtocol.requestHandler = { [self] request in
+            timeouts.append(request.timeoutInterval)
+            return respond(request, status: 200)
+        }
+        let transport = MonacoHTTPTransport(session: makeMockURLSession())
+
+        _ = try await transport.data(for: request(token: "t"))
+        _ = try await transport.send(
+            request(token: "t", method: "POST", body: Data(#"{"amount":1}"#.utf8)),
+            submission: IdempotentSubmission { "key-1" }
+        )
+        _ = try await transport.send(request(token: "t"), timeout: MonacoRequestTimeout.upload)
+
+        XCTAssertEqual(
+            timeouts.values,
+            [MonacoRequestTimeout.standard, MonacoRequestTimeout.moneyWrite, MonacoRequestTimeout.upload]
+        )
+    }
+
+    func testTimeoutBudget_isNeverTheSharedSessionDefault() {
+        XCTAssertLessThan(MonacoRequestTimeout.standard, 60)
+        XCTAssertEqual(URLSession.monaco.configuration.timeoutIntervalForRequest, MonacoRequestTimeout.standard)
+        XCTAssertEqual(URLSession.monaco.configuration.timeoutIntervalForResource, MonacoRequestTimeout.resource)
+        XCTAssertFalse(URLSession.monaco.configuration.waitsForConnectivity)
+    }
+
     func test401_withoutBearerToken_isNotRetried() async throws {
         let refreshes = Recorder<String>()
         MockURLProtocol.requestHandler = { [self] request in respond(request, status: 401) }

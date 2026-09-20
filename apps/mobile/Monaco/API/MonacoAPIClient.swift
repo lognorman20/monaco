@@ -42,7 +42,7 @@ final class MonacoAPIClient {
     /// refreshed and the request retried once instead of signing the user out.
     private let session: MonacoHTTPTransport
 
-    init(baseURL: URL = Config.apiBaseURL, session: URLSession = .shared) {
+    init(baseURL: URL = Config.apiBaseURL, session: URLSession = .monaco) {
         self.baseURL = baseURL
         self.session = MonacoHTTPTransport(session: session)
     }
@@ -801,7 +801,8 @@ final class MonacoAPIClient {
         try applyAuthorizationHeader(accessToken: accessToken, to: &request)
         request.httpBody = try JSONEncoder().encode(DevBuyRequest(symbol: symbol, usdc: usdc))
 
-        let (data, response) = try await session.data(for: request)
+        // Buys the stock inside the request, so it gets the money budget, not the read one.
+        let (data, response) = try await session.data(for: request, timeout: MonacoRequestTimeout.moneyWrite)
         guard let http = response as? HTTPURLResponse else {
             throw MonacoAPIError.invalidResponse
         }

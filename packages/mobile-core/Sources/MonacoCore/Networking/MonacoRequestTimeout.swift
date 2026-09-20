@@ -1,0 +1,48 @@
+import Foundation
+
+/// How long one Monaco request may take before the app gives up on it.
+///
+/// `URLSession.shared` gives every request the same 60s, which is wrong at both ends: a
+/// poll that hangs for a minute blocks a screen's refresh for a minute, and a money POST
+/// that the backend is still confirming is cut off with no answer. The budgets below are
+/// picked per kind of request and are the only place the numbers live.
+public enum MonacoRequestTimeout {
+    /// Reads, polls and light writes (vote, chat, comment). Short on purpose: the feed
+    /// refreshes every 5-15s, so a request that is still open after this is already stale.
+    public static let standard: TimeInterval = 15
+
+    /// Writes that carry an `Idempotency-Key`: fund, cash out, withdraw to balance, leave
+    /// with stake. The backend confirms these on chain inside the request, so they need
+    /// room. A retry after this deadline is safe — it goes out under the same key, and the
+    /// backend replays the first answer instead of moving the money again.
+    public static let moneyWrite: TimeInterval = 60
+
+    /// Uploads (profile photo): megabytes on a phone network.
+    public static let upload: TimeInterval = 60
+
+    /// Ceiling for one request including its 401 refresh-and-retry, set on the session.
+    static let resource: TimeInterval = 180
+
+    /// The budget for `request`: `override` when the caller named one, otherwise the money
+    /// budget for a request carrying an idempotency key and `standard` for everything else.
+    static func seconds(for request: URLRequest, override: TimeInterval?) -> TimeInterval {
+        if let override { return override }
+        let isIdempotentWrite = request.value(forHTTPHeaderField: IdempotentSubmission.keyHeader) != nil
+        return isIdempotentWrite ? moneyWrite : standard
+    }
+}
+
+extension URLSession {
+    /// The session every Monaco request goes through: own configuration, explicit timeouts,
+    /// no shared cookie or cache state with anything else in the process.
+    public static let monaco: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = MonacoRequestTimeout.standard
+        configuration.timeoutIntervalForResource = MonacoRequestTimeout.resource
+        // A money POST must fail fast and be retried under its key, not sit queued until
+        // the network comes back and land long after the member gave up on the screen.
+        configuration.waitsForConnectivity = false
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration)
+    }()
+}
