@@ -164,9 +164,64 @@ final class MonacoHTTPTransportTests: XCTestCase {
 
     func testTimeoutBudget_isNeverTheSharedSessionDefault() {
         XCTAssertLessThan(MonacoRequestTimeout.standard, 60)
-        XCTAssertEqual(URLSession.monaco.configuration.timeoutIntervalForRequest, MonacoRequestTimeout.standard)
+        // The session carries the *longest* budget, not the shortest: URLSession does not
+        // promise that a request's own timeoutInterval outranks the session's, so the
+        // session value has to be a ceiling the per-request stamp can only shorten.
+        // Configuring it with `standard` would cap every money write at 15s.
+        XCTAssertEqual(URLSession.monaco.configuration.timeoutIntervalForRequest, MonacoRequestTimeout.sessionCeiling)
+        XCTAssertGreaterThanOrEqual(MonacoRequestTimeout.sessionCeiling, MonacoRequestTimeout.moneyWrite)
+        XCTAssertGreaterThanOrEqual(MonacoRequestTimeout.sessionCeiling, MonacoRequestTimeout.upload)
         XCTAssertEqual(URLSession.monaco.configuration.timeoutIntervalForResource, MonacoRequestTimeout.resource)
         XCTAssertFalse(URLSession.monaco.configuration.waitsForConnectivity)
+    }
+
+    /// The budgets are only worth anything if URLSession enforces the per-request one. The
+    /// recording test above cannot show that: `MockURLProtocol` answers at once and never
+    /// runs a timer, so it passes whichever deadline the session actually applies. This one
+    /// stalls every request past the read budget and under the money budget, against the
+    /// real `MonacoRequestTimeout.sessionConfiguration()`, and asserts the two outcomes
+    /// that matter: the read gives up, the keyed money write survives.
+    ///
+    /// It costs about `stall` seconds of wall clock, with both requests running concurrently.
+    ///
+    /// Measured on this runtime, the money write survives even when the session is
+    /// configured at `standard`: here a request's own longer `timeoutInterval` does outrank
+    /// the session's. That precedence is undocumented and not guaranteed on device, which is
+    /// why the session is configured with the ceiling anyway — see
+    /// `testTimeoutBudget_isNeverTheSharedSessionDefault`, which is the assertion that pins
+    /// it. What this test pins is that the stamp is applied and enforced at all: drop it, or
+    /// stamp the wrong budget, and the read stops timing out on time.
+    func testTimeoutBudget_isEnforced_moneyWriteOutlivesTheReadBudget() async throws {
+        let stall = MonacoRequestTimeout.standard + 5
+        try XCTSkipUnless(stall < MonacoRequestTimeout.moneyWrite, "budgets no longer straddle the stall")
+        StallingURLProtocol.stall = stall
+        defer { StallingURLProtocol.stall = 0 }
+
+        let configuration = MonacoRequestTimeout.sessionConfiguration()
+        configuration.protocolClasses = [StallingURLProtocol.self]
+        let transport = MonacoHTTPTransport(session: URLSession(configuration: configuration))
+
+        async let read: Void = {
+            do {
+                _ = try await transport.data(for: request(token: "t"))
+                XCTFail("a read should give up after \(MonacoRequestTimeout.standard)s")
+            } catch {
+                XCTAssertEqual((error as? URLError)?.code, .timedOut)
+            }
+        }()
+
+        async let write: Void = {
+            do {
+                _ = try await transport.send(
+                    request(token: "t", method: "POST", body: Data(#"{"amount":1}"#.utf8)),
+                    submission: IdempotentSubmission { "key-1" }
+                )
+            } catch {
+                XCTFail("a money write must outlive a \(stall)s confirm, but failed: \(error)")
+            }
+        }()
+
+        _ = await (read, write)
     }
 
     func test401_withoutBearerToken_isNotRetried() async throws {

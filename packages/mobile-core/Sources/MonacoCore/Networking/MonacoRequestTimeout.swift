@@ -23,6 +23,15 @@ public enum MonacoRequestTimeout {
     /// Ceiling for one request including its 401 refresh-and-retry, set on the session.
     static let resource: TimeInterval = 180
 
+    /// The longest budget any single request may ask for. The session is configured with
+    /// this rather than with `standard`, because `URLSession` does not promise that a
+    /// request's own `timeoutInterval` outranks the session's `timeoutIntervalForRequest` —
+    /// on Darwin the effective deadline is commonly the session's, or the stricter of the
+    /// two. Configuring the session with the longest budget makes the per-request stamp
+    /// able only to *shorten* a request: reads still get `standard` under either rule, and
+    /// a money write can never be cut below `moneyWrite` by the session default.
+    static var sessionCeiling: TimeInterval { max(moneyWrite, upload) }
+
     /// The budget for `request`: `override` when the caller named one, otherwise the money
     /// budget for a request carrying an idempotency key and `standard` for everything else.
     static func seconds(for request: URLRequest, override: TimeInterval?) -> TimeInterval {
@@ -32,17 +41,22 @@ public enum MonacoRequestTimeout {
     }
 }
 
-extension URLSession {
-    /// The session every Monaco request goes through: own configuration, explicit timeouts,
-    /// no shared cookie or cache state with anything else in the process.
-    public static let monaco: URLSession = {
+extension MonacoRequestTimeout {
+    /// The configuration behind `URLSession.monaco`, built here so a test can exercise the
+    /// real timeout values against a stub protocol.
+    static func sessionConfiguration() -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = MonacoRequestTimeout.standard
-        configuration.timeoutIntervalForResource = MonacoRequestTimeout.resource
+        configuration.timeoutIntervalForRequest = sessionCeiling
+        configuration.timeoutIntervalForResource = resource
         // A money POST must fail fast and be retried under its key, not sit queued until
         // the network comes back and land long after the member gave up on the screen.
         configuration.waitsForConnectivity = false
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        return URLSession(configuration: configuration)
-    }()
+        return configuration
+    }
+}
+
+extension URLSession {
+    /// The session every Monaco request goes through: own configuration, explicit timeouts,
+    /// no shared cookie or cache state with anything else in the process.
+    public static let monaco = URLSession(configuration: MonacoRequestTimeout.sessionConfiguration())
 }
