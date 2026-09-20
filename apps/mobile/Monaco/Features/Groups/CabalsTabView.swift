@@ -14,10 +14,21 @@ struct CabalsTabView: View {
     /// Chosen in the "New cabal" sheet, pushed once the sheet is gone. Pushing
     /// in the same turn as the dismissal makes the stack change mid-transition.
     @State private var routeAfterSheet: CabalsRoute?
-    @State private var isLoadingCabals = false
+    /// Starts true: the tab asks for the cabals list in `.task`, so on the very
+    /// first body evaluation a load is about to happen. Starting at false made
+    /// `stripState` compute `.unavailable` and render the hard error for a frame
+    /// before anything had even been attempted.
+    @State private var isLoadingCabals = true
 
-    init(auth: DynamicAuthService, dataSource: CabalsTabDataSource? = nil) {
+    private let actions: CabalsActionSource
+
+    init(
+        auth: DynamicAuthService,
+        dataSource: CabalsTabDataSource? = nil,
+        actions: CabalsActionSource? = nil
+    ) {
         self.auth = auth
+        self.actions = actions ?? LiveCabalsActionSource(auth: auth)
         _model = State(initialValue: CabalsTabModel(dataSource: dataSource ?? LiveCabalsTabDataSource(auth: auth)))
     }
 
@@ -27,10 +38,12 @@ struct CabalsTabView: View {
     }
 
     /// "No cabals yet" is only true once we have actually heard from the server.
-    /// Until then the strip says it is loading, or offers a retry.
+    /// Until then the strip says it is loading, or offers a retry. The shell's
+    /// own load counts: the state machine must never be able to claim a failure
+    /// before an attempt has finished.
     private var stripState: CabalsStripState {
         if session.home != nil { return .loaded }
-        return isLoadingCabals ? .loading : .unavailable
+        return isLoadingCabals || session.isLoading ? .loading : .unavailable
     }
 
     var body: some View {
@@ -95,6 +108,7 @@ struct CabalsTabView: View {
             CabalsRouteDestination(
                 auth: auth,
                 route: route,
+                actions: actions,
                 onChanged: refreshAll,
                 onCreated: { created in
                     // Replace the form with the new cabal. Back then lands on the

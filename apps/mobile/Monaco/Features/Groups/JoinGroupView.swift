@@ -12,6 +12,9 @@ enum JoinCabalCopy {
     static let malformedCode = "That doesn't look like an invite code. Ask your friend to send it again."
 
     static func failureMessage(for error: Error, enteredCode: Bool) -> String {
+        if case MonacoAPIError.missingAccessToken = error {
+            return "Sign in again to join a cabal."
+        }
         switch status(of: error) {
         case 403:
             // Demo cabals on the board are read-only; retrying never works.
@@ -42,7 +45,7 @@ struct JoinGroupView: View {
     @ObservedObject var auth: DynamicAuthService
     /// Present inside the signed-in shell; refreshed after a join so every tab updates.
     @Environment(AppSessionStore.self) private var session: AppSessionStore?
-    private let apiClient = MonacoAPIClient()
+    private let actions: CabalsActionSource
     private let groupName: String?
     private let joinMode: GroupJoinMode?
     /// The viewer is a member now. The owner of the stack takes it from here —
@@ -59,9 +62,11 @@ struct JoinGroupView: View {
         groupId: String = "",
         groupName: String? = nil,
         joinMode: GroupJoinMode? = nil,
+        actions: CabalsActionSource? = nil,
         onJoined: @escaping (_ groupId: String, _ groupName: String?) -> Void = { _, _ in }
     ) {
         self.auth = auth
+        self.actions = actions ?? LiveCabalsActionSource(auth: auth)
         self.groupName = groupName
         self.joinMode = joinMode
         self.onJoined = onJoined
@@ -146,16 +151,12 @@ struct JoinGroupView: View {
     }
 
     private func joinGroup() async {
-        guard let accessToken = auth.accessToken else {
-            toast = MonacoToast(message: "Sign in to join a cabal.")
-            return
-        }
         guard !isJoining, canSubmit else { return }
         let id = trimmedId
         isJoining = true
         defer { isJoining = false }
         do {
-            let outcome = try await apiClient.joinGroup(accessToken: accessToken, groupId: id)
+            let outcome = try await actions.joinGroup(groupId: id)
             switch outcome {
             case .joined, .alreadyMember:
                 // Hand over before refreshing: the member lands in the cabal

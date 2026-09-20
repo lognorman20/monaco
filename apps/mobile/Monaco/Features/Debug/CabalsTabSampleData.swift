@@ -15,9 +15,12 @@ enum CabalsTabSampleData {
     enum Scenario: String {
         /// Signed in, cabals loaded. The default.
         case normal
-        /// The cabals list never lands, the way a cold start on a slow network
-        /// or a failing `GET /v1/home` leaves it.
+        /// The cabals list came back empty-handed and nothing is in flight: the
+        /// read failed. The strip offers a retry.
         case cabalsUnavailable
+        /// The shell's first load is still running, so the cabals list is not
+        /// late — it has not arrived yet. The strip shows placeholder cards.
+        case cabalsLoading
     }
 
     static var isEnabled: Bool {
@@ -64,6 +67,42 @@ enum CabalsTabSampleData {
             },
             people: []
         )
+    }
+
+    /// The cabal the sample create flow produces. Fixed, like everything else
+    /// here, so the test can name the screen it expects to land on.
+    static let createdCabal = CreateGroupResponse(
+        groupId: "5b1f0c9e-0007-4c55-9a51-000000000007",
+        name: "Lunch money",
+        treasuryAddress: "SampleTreasury1111111111111111111111111111"
+    )
+
+    /// Stubbed writes. Create always succeeds; join answers the way the sample
+    /// cabal's own join policy would, so an approval cabal still ends on
+    /// "Request sent" rather than pretending the member is in.
+    @MainActor
+    struct Actions: CabalsActionSource {
+        func createGroup(
+            name: String,
+            joinPolicyMode: String,
+            voterSetMode: String,
+            voterMemberIds: [String],
+            threshold: String,
+            voteExpirySeconds: Int64
+        ) async throws -> CreateGroupResponse {
+            try await Task.sleep(for: .milliseconds(120))
+            return CreateGroupResponse(
+                groupId: createdCabal.groupId,
+                name: name,
+                treasuryAddress: createdCabal.treasuryAddress
+            )
+        }
+
+        func joinGroup(groupId: String) async throws -> JoinGroupOutcome {
+            try await Task.sleep(for: .milliseconds(120))
+            let mode = cabals.first { $0.id == groupId }?.mode ?? .open
+            return mode == .request ? .pending : .joined
+        }
     }
 
     @MainActor
@@ -131,19 +170,24 @@ struct CabalsTabSampleHarness: View {
     @ObservedObject var auth: DynamicAuthService
     @State private var session: AppSessionStore = {
         let session = AppSessionStore()
-        // `home` stays nil in the unavailable scenario, which is exactly what the
-        // tab sees before the cabals list lands.
+        // `home` stays nil in both unhappy scenarios; what separates them is
+        // whether the shell still has a load running, which is what tells
+        // "not here yet" from "did not arrive".
         if CabalsTabSampleData.scenario == .normal {
             session.home = CabalsTabSampleData.home
         }
-        session.isLoading = false
+        session.isLoading = CabalsTabSampleData.scenario == .cabalsLoading
         return session
     }()
 
     var body: some View {
         TabView {
             NavigationStack {
-                CabalsTabView(auth: auth, dataSource: CabalsTabSampleData.DataSource())
+                CabalsTabView(
+                    auth: auth,
+                    dataSource: CabalsTabSampleData.DataSource(),
+                    actions: CabalsTabSampleData.Actions()
+                )
             }
             .tabItem {
                 Label("Cabals", systemImage: "person.3")

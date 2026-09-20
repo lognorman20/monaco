@@ -44,6 +44,35 @@ final class CabalsTabSampleUITests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
+    /// Brings `element` somewhere it can actually be tapped, and reports whether
+    /// it got there. A `Form` is lazy: a row below the fold is not in the
+    /// accessibility tree at all, so existence has to be re-checked after each
+    /// scroll rather than waited on up front. The keyboard counts as fold.
+    @MainActor
+    @discardableResult
+    private func scrollUntilHittable(_ app: XCUIApplication, _ element: XCUIElement, attempts: Int = 8) -> Bool {
+        for _ in 0..<attempts {
+            if element.exists && element.isHittable { return true }
+            app.swipeUp()
+        }
+        return element.exists && element.isHittable
+    }
+
+    /// The "New cabal" card sits after every joined cabal in a horizontal strip,
+    /// so on a phone it always starts off-screen.
+    @MainActor
+    private func newCabalStripCard(_ app: XCUIApplication) -> XCUIElement {
+        let strip = anyElement(app, "cabals-strip")
+        XCTAssertTrue(strip.waitForExistence(timeout: 10), "cabals strip should exist")
+        let newCard = anyElement(app, "cabals-strip-new")
+        var tries = 0
+        while !newCard.isHittable && tries < 6 {
+            strip.swipeLeft()
+            tries += 1
+        }
+        return newCard
+    }
+
     /// The search field is `cabals-search-field` on its container HStack; the
     /// actual text field inside carries `monaco-search-field`. Try several
     /// ways to find it so the test tolerates either identifier resolving.
@@ -248,8 +277,9 @@ final class CabalsTabSampleUITests: XCTestCase {
         let root = anyElement(app, "cabals-root")
         XCTAssertTrue(root.waitForExistence(timeout: 10), "cabals-root should exist after launch")
 
-        // The list never lands. The strip must offer a retry, not tell a funded
-        // member they have no cabals and nudge them to create one.
+        // The read finished without a list and nothing else is in flight: the
+        // failed branch. The strip must offer a retry, not tell a funded member
+        // they have no cabals and nudge them to create one.
         XCTAssertTrue(
             anyElement(app, "cabals-strip-error").waitForExistence(timeout: 10),
             "an unloaded cabals list should offer a retry"
@@ -281,7 +311,133 @@ final class CabalsTabSampleUITests: XCTestCase {
         )
     }
 
-    // MARK: - (j) Strip card pushes detail
+    // MARK: - (j) A list still loading is not a list that failed (#295)
+
+    @MainActor
+    func testACabalsListStillLoadingShowsPlaceholdersNotAnError() throws {
+        let app = launchApp(scenario: "cabalsLoading")
+
+        let root = anyElement(app, "cabals-root")
+        XCTAssertTrue(root.waitForExistence(timeout: 10), "cabals-root should exist after launch")
+
+        // The shell's first load is still running, so the strip has nothing to
+        // say yet. It must not claim a failure before an attempt has finished.
+        XCTAssertTrue(
+            anyElement(app, "cabals-strip-loading").waitForExistence(timeout: 10),
+            "a cabals list that has not arrived yet should show placeholder cards"
+        )
+        XCTAssertFalse(anyElement(app, "cabals-strip-error").exists, "nothing has failed yet")
+        XCTAssertFalse(anyElement(app, "cabals-strip-empty").exists, "the list is unknown, not empty")
+
+        attachScreenshot(app, name: "08-cabals-loading")
+    }
+
+    // MARK: - (k) Creating replaces the form with the new cabal (#292, #317)
+
+    @MainActor
+    func testCreatingACabalReplacesTheFormWithTheNewCabal() throws {
+        let app = launchApp()
+
+        let newCard = newCabalStripCard(app)
+        XCTAssertTrue(newCard.isHittable, "the New cabal strip card should be reachable")
+        newCard.tap()
+
+        let nameField = app.textFields["create-group-name"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 8), "the New cabal form should be pushed")
+        nameField.tap()
+        // The trailing newline resigns the keyboard so the button below is free.
+        nameField.typeText("Lunch money\n")
+
+        // The submit button sits below four sections of inline pickers.
+        let submit = app.buttons["create-group-submit"]
+        XCTAssertTrue(
+            scrollUntilHittable(app, submit),
+            "Create cabal button should be reachable on the New cabal form"
+        )
+        submit.tap()
+
+        // The whole point of #292: the form is *replaced*, not covered. A second
+        // tap on a form still sitting underneath is a second cabal and a second
+        // treasury.
+        XCTAssertTrue(
+            app.navigationBars["Lunch money"].waitForExistence(timeout: 10),
+            "the new cabal should be the top screen"
+        )
+        XCTAssertFalse(
+            app.textFields["create-group-name"].exists,
+            "the New cabal form must be gone, not underneath the cabal"
+        )
+
+        attachScreenshot(app, name: "09-created-cabal")
+
+        // Back lands on the tab, not on a filled-in form.
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(
+            anyElement(app, "cabals-root").waitForExistence(timeout: 8),
+            "Back from a new cabal should land on the Cabals tab"
+        )
+        XCTAssertFalse(
+            app.textFields["create-group-name"].exists,
+            "Back must not land on an armed New cabal form"
+        )
+    }
+
+    // MARK: - (l) Joining replaces the join form with the cabal (#293)
+
+    @MainActor
+    func testJoiningFromSearchReplacesTheJoinFormWithTheCabal() throws {
+        let app = launchApp()
+
+        let field = searchField(app)
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "search field should exist")
+        field.tap()
+        field.typeText("dorm")
+
+        // Dorm 4B fund is open and the viewer is not in it, so this is a real join.
+        let dormRow = anyElement(app, "cabals-search-result-5b1f0c9e-0004-4c55-9a51-000000000004")
+        XCTAssertTrue(dormRow.waitForExistence(timeout: 5), "Dorm 4B fund should be a search result")
+        dormRow.tap()
+
+        let joinName = anyElement(app, "join-group-name")
+        XCTAssertTrue(joinName.waitForExistence(timeout: 8), "the join form should be pushed")
+        XCTAssertEqual(joinName.label, "Dorm 4B fund")
+
+        let submit = app.buttons["join-group-submit"]
+        XCTAssertTrue(scrollUntilHittable(app, submit), "Join cabal button should be reachable")
+        submit.tap()
+
+        XCTAssertTrue(
+            app.navigationBars["Dorm 4B fund"].waitForExistence(timeout: 10),
+            "a member who joined should land inside the cabal"
+        )
+        XCTAssertFalse(
+            app.buttons["join-group-submit"].exists,
+            "the join form must be gone, not underneath the cabal"
+        )
+
+        attachScreenshot(app, name: "10-joined-cabal")
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(
+            anyElement(app, "cabals-root").waitForExistence(timeout: 8),
+            "Back from a joined cabal should land on the Cabals tab"
+        )
+        XCTAssertFalse(
+            app.buttons["join-group-submit"].exists,
+            "Back must not land on a join form for a cabal the member is already in"
+        )
+
+        // And the row the member came from says so, rather than still offering
+        // to join a cabal they are in.
+        let joinedRow = anyElement(app, "cabals-search-result-5b1f0c9e-0004-4c55-9a51-000000000004")
+        XCTAssertTrue(joinedRow.waitForExistence(timeout: 5), "the search row should still be there")
+        XCTAssertTrue(
+            joinedRow.label.contains("You're in"),
+            "the row should read as joined, got: \(joinedRow.label)"
+        )
+    }
+
+    // MARK: - (m) Strip card pushes detail
 
     @MainActor
     func testWeekendInvestorsStripCardPushesDetail() throws {

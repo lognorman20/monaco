@@ -66,9 +66,19 @@ struct CreateGroupView: View {
     @Environment(AppSessionStore.self) private var session: AppSessionStore?
     /// The cabal exists. The owner of the stack replaces this form with it, so
     /// Back lands on the Cabals tab instead of on a form that is still armed.
-    var onCreated: (CreateGroupResponse) -> Void = { _ in }
+    let onCreated: (CreateGroupResponse) -> Void
 
-    private let apiClient = MonacoAPIClient()
+    private let actions: CabalsActionSource
+
+    init(
+        auth: DynamicAuthService,
+        actions: CabalsActionSource? = nil,
+        onCreated: @escaping (CreateGroupResponse) -> Void = { _ in }
+    ) {
+        self.auth = auth
+        self.actions = actions ?? LiveCabalsActionSource(auth: auth)
+        self.onCreated = onCreated
+    }
 
     @State private var groupName = ""
     @State private var joinPolicy: JoinPolicyMode = .open
@@ -162,10 +172,6 @@ struct CreateGroupView: View {
         // The disabled state only lands on the next render, so a fast double tap
         // gets through it. Same guard the money screens use.
         guard !isCreating else { return }
-        guard let accessToken = auth.accessToken else {
-            errorMessage = "Sign in to create a cabal."
-            return
-        }
 
         let trimmedName = groupName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
@@ -173,23 +179,31 @@ struct CreateGroupView: View {
             return
         }
 
+        // Held for the whole run, including the profile read below, so there is
+        // no window where a second tap can start a second cabal.
+        isCreating = true
+        errorMessage = nil
+        defer { isCreating = false }
+
         var memberIds: [String] = []
         if voterSet == .namedSubset {
-            // The signed-in profile is already in the shell; the form used to
-            // re-open a backend session and re-read /v1/me on every appearance.
+            // "Just me" needs the creator's id. The signed-in profile is already
+            // in the shell; the form used to re-open a backend session and
+            // re-read /v1/me on every appearance.
+            if session?.me?.userId == nil {
+                // Recover here rather than sending them away: this form is
+                // pushed, so "pull down on Cabals" costs them what they typed.
+                await session?.refresh(auth: auth)
+            }
             guard let creatorUserId = session?.me?.userId else {
-                errorMessage = "We couldn't confirm your profile. Pull down on Cabals, then try again."
+                errorMessage = "We couldn't confirm your profile. Check your connection, then tap Create cabal again."
                 return
             }
             memberIds = [creatorUserId]
         }
 
-        isCreating = true
-        errorMessage = nil
-
         do {
-            let created = try await apiClient.createGroup(
-                accessToken: accessToken,
+            let created = try await actions.createGroup(
                 name: trimmedName,
                 joinPolicyMode: joinPolicy.rawValue,
                 voterSetMode: voterSet.rawValue,
@@ -200,11 +214,11 @@ struct CreateGroupView: View {
             // #215: patch the session locally and refresh in the background; no full reload.
             session?.refreshAfterCreate(auth: auth, created: created)
             onCreated(created)
+        } catch MonacoAPIError.missingAccessToken {
+            errorMessage = "Sign in to create a cabal."
         } catch {
             errorMessage = "Couldn't create this cabal. Try again."
         }
-
-        isCreating = false
     }
 }
 
