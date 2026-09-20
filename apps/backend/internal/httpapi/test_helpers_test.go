@@ -13,8 +13,8 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 )
 
-func newTestHealthHandler() http.HandlerFunc {
-	return HealthHandler
+func newTestHealthHandler(checks ...HealthCheck) http.HandlerFunc {
+	return (&HealthHandlers{Checks: checks}).HealthHandler
 }
 
 func testHTTPRequest(method, path string) *http.Request {

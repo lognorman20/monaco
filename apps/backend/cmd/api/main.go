@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -37,6 +38,8 @@ type bootResult struct {
 	stopPoller        context.CancelFunc
 	stopExecutePoller context.CancelFunc
 	stopRedeemPoller  context.CancelFunc
+	// workers tracks the poller goroutines so shutdown can wait for an in-flight tick.
+	workers *sync.WaitGroup
 }
 
 var apiRoutes = []string{
@@ -250,7 +253,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", httpapi.HealthHandler)
+	health := &httpapi.HealthHandlers{Checks: healthChecks(db, solanaRPC, relayer.PublicKey(), jupiterPriceClient)}
+	mux.HandleFunc("GET /health", health.HealthHandler)
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
 	mux.HandleFunc("PATCH /v1/me", me.PatchMeHandler)
@@ -306,36 +310,48 @@ func boot(ctx context.Context) (*bootResult, error) {
 
 	poller := worker.NewSweepPoller(store, privyClient, solanaRPC, deposits, relayer.PrivateKey(), nil)
 	pollerCtx, stopPoller := context.WithCancel(context.Background())
-	go worker.Run(pollerCtx, poller, worker.DefaultPollInterval, sweepWake)
+	workers := &sync.WaitGroup{}
+	workers.Add(3)
+	go func() {
+		defer workers.Done()
+		worker.Run(pollerCtx, poller, worker.DefaultPollInterval, sweepWake)
+	}()
 	slog.Info("sweep poller started")
 
 	executePoller := worker.NewProposalExecutePoller(store, executeOnPass, nil)
 	executeCtx, stopExecutePoller := context.WithCancel(context.Background())
-	go worker.RunProposalExecutePoller(executeCtx, executePoller, worker.DefaultProposalExecuteInterval)
+	go func() {
+		defer workers.Done()
+		worker.RunProposalExecutePoller(executeCtx, executePoller, worker.DefaultProposalExecuteInterval)
+	}()
 	slog.Info("proposal execute poller started")
 
 	redeemPoller := worker.NewRedeemRecoveryPoller(store, redeem, nil)
 	redeemCtx, stopRedeemPoller := context.WithCancel(context.Background())
-	go worker.RunRedeemRecoveryPoller(redeemCtx, redeemPoller, worker.DefaultRedeemRecoveryInterval)
+	go func() {
+		defer workers.Done()
+		worker.RunRedeemRecoveryPoller(redeemCtx, redeemPoller, worker.DefaultRedeemRecoveryInterval)
+	}()
 
 	return &bootResult{
-		Server: &http.Server{
-			Addr:    addr,
-			Handler: mux,
-		},
+		Server:            newHTTPServer(addr, platformHandler(mux)),
 		Config:            cfg,
 		Relayer:           relayer,
 		DB:                db,
 		stopPoller:        stopPoller,
 		stopExecutePoller: stopExecutePoller,
 		stopRedeemPoller:  stopRedeemPoller,
+		workers:           workers,
 	}, nil
 }
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})))
+	closeLog, err := setupLogging()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "logging setup failed:", err)
+		os.Exit(1)
+	}
+	defer closeLog()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -343,6 +359,7 @@ func main() {
 	result, err := boot(ctx)
 	if err != nil {
 		slog.Error("boot failed", "err", err)
+		closeLog()
 		os.Exit(1)
 	}
 
@@ -363,23 +380,29 @@ func main() {
 	case err := <-serverErr:
 		if err != nil {
 			slog.Error("server error", "err", err)
+			closeLog()
 			os.Exit(1)
 		}
 	case sig := <-stop:
 		slog.Info("shutdown signal received", "signal", sig.String())
 	}
 
-	result.stopPoller()
-	slog.Info("sweep poller stopped")
-	result.stopExecutePoller()
-	slog.Info("proposal execute poller stopped")
-	result.stopRedeemPoller()
-
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Drain HTTP first: in-flight cash outs and trades finish against live pollers and a
+	// live database. Only then stop the pollers and wait for them before closing the pool.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownGracePeriod)
 	defer shutdownCancel()
 
 	if err := result.Server.Shutdown(shutdownCtx); err != nil {
 		slog.Error("http shutdown failed", "err", err)
+	}
+
+	result.stopPoller()
+	result.stopExecutePoller()
+	result.stopRedeemPoller()
+	if waitWorkers(result.workers, workerStopTimeout) {
+		slog.Info("pollers stopped")
+	} else {
+		slog.Error("pollers did not stop in time", "timeout", workerStopTimeout)
 	}
 	if err := result.DB.Close(); err != nil {
 		slog.Warn("database close failed", "err", err)
