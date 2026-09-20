@@ -44,16 +44,26 @@ struct MonacoSectionHeader: View {
 }
 
 /// One surface container for a run of `MonacoRow`s. No stroke; children are clipped to the radius.
+///
+/// `isLazy` is for lists with no fixed length (every member, every activity row) inside a
+/// `ScrollView`: rows are built as they scroll into view instead of all up front. The content
+/// must be a `ForEach` over stable ids. Short, capped lists stay eager.
 struct MonacoGroupedList<Content: View>: View {
+    private let isLazy: Bool
     private let content: Content
 
-    init(@ViewBuilder content: () -> Content) {
+    init(isLazy: Bool = false, @ViewBuilder content: () -> Content) {
+        self.isLazy = isLazy
         self.content = content()
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            content
+        Group {
+            if isLazy {
+                LazyVStack(spacing: 0) { content }
+            } else {
+                VStack(spacing: 0) { content }
+            }
         }
         .frame(maxWidth: .infinity)
         .background(MonacoTheme.surface)

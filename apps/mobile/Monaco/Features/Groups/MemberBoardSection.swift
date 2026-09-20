@@ -15,7 +15,8 @@ struct MemberBoardSection: View {
                     .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(MonacoTheme.muted)
             } else {
-                MonacoGroupedList {
+                // A cabal has no member cap: build rows as they scroll in, not all at once.
+                MonacoGroupedList(isLazy: true) {
                     ForEach(members) { row in
                         memberRow(row, isLast: row.id == members.last?.id)
                     }

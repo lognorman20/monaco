@@ -13,7 +13,8 @@ struct GroupActivityListView: View {
                 auth: auth,
                 items: items,
                 retryingTransactionIDs: retryingTransactionIDs,
-                onRetry: onRetry
+                onRetry: onRetry,
+                isLazy: true
             )
             .padding(.horizontal, 20)
             .padding(.vertical, 16)

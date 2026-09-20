@@ -60,9 +60,11 @@ struct GroupActivityList: View {
     let items: [GroupActivityItemDTO]
     let retryingTransactionIDs: Set<String>
     let onRetry: (GroupActivityItemDTO) -> Void
+    /// True for the full "See all" list, whose rows are built as they scroll into view.
+    var isLazy = false
 
     var body: some View {
-        MonacoGroupedList {
+        MonacoGroupedList(isLazy: isLazy) {
             ForEach(items) { item in
                 HStack(spacing: 0) {
                     NavigationLink {
