@@ -263,6 +263,10 @@ public enum GroupChatCopy {
         case MonacoAPIError.rejected(let status, let message, _):
             if let memberFacing = MoneyFlowCopy.memberFacingMessage(message) { return memberFacing }
             return sendFailure(MonacoAPIError.httpStatus(status))
+        // The API answered with something we can't read, which is no evidence it didn't store
+        // the message first.
+        case MonacoAPIError.invalidResponse:
+            return sendUnconfirmed
         case MonacoAPIError.httpStatus(let code, _):
             switch code {
             case 401: return "Your session expired. Sign in again to chat."
@@ -270,15 +274,30 @@ public enum GroupChatCopy {
             case 404: return "This cabal no longer exists."
             case 429: return "You're sending messages fast. Wait a moment and try again."
             case 400: return "That message couldn't be sent. Check the text and try again."
+            // The request reached the API and it broke on its own side of the line. That says
+            // nothing about whether it wrote the message down before it did.
+            case 500...599: return sendUnconfirmed
             default: return "Message not sent. Try again."
             }
         default:
-            if let urlError = error as? URLError, urlError.code == .notConnectedToInternet {
-                return "You're offline. Message not sent."
-            }
-            return "Message not sent. Check your connection and try again."
+            // Not a URL error at all: it got as far as a reply we couldn't read. A 201 whose
+            // body fails to decode is still a message the API stored.
+            guard let urlError = error as? URLError else { return sendUnconfirmed }
+            if urlError.code == .notConnectedToInternet { return "You're offline. Message not sent." }
+            return FlowErrorInput.neverSentURLErrorCodes.contains(urlError.code)
+                ? "Message not sent. Check your connection and try again."
+                : sendUnconfirmed
         }
     }
+
+    /// Sending posts a bare body — no idempotency key, unlike the money routes — so a second
+    /// attempt at a message that did land posts it twice, and chat has no delete. When the
+    /// failure could only have happened after the request went out, say we don't know instead
+    /// of promising it didn't arrive; the next poll answers the question.
+    ///
+    /// Same judgement the money flows make in `MoneyFlowCopy.unconfirmed`, and the same list of
+    /// URL errors raised before any byte leaves the device.
+    public static let sendUnconfirmed = "We couldn't confirm that went through. Check above before sending it again."
 
     /// The chat screen is titled with the cabal's own name; "Cabal chat" only when it's missing.
     public static func title(groupName: String?) -> String {
