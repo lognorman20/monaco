@@ -175,31 +175,24 @@ enum ProposeErrorCopy {
         isOffline(error) ? ProposeFlowCopy.noConnection : ProposeFlowCopy.priceCheckFailed
     }
 
-    static func propose(_ error: Error, stockName: String? = nil) -> String {
+    /// One mapping for every propose refusal — buy, sell and bot. The server answers each refusal
+    /// with a fixed sentence, so each one gets copy that says what actually happened; anything it
+    /// does not recognise falls back to "try again".
+    ///
+    /// A sell is not read as "the cabal doesn't hold that much" unless the server said so. Before,
+    /// every 400 on the sell path said that, including a route that vanished between the price
+    /// check and the send.
+    static func propose(_ error: Error, stockName: String? = nil, isSell: Bool = false) -> String {
         if isOffline(error) { return ProposeFlowCopy.noConnection }
-        switch error {
-        case MonacoAPIError.apiError(_, let message):
-            switch message {
-            case "amount exceeds treasury total available": return ProposeFlowCopy.overPot
-            case "thesis exceeds maximum length": return ProposeFlowCopy.reasonTooLong
-            case "quote not routable":
-                return stockName.map(ProposeFlowCopy.cantBuyStock) ?? ProposeFlowCopy.sendFailed
-            default: return ProposeFlowCopy.sendFailed
-            }
-        default:
-            return ProposeFlowCopy.sendFailed
-        }
-    }
-
-    static func sell(_ error: Error) -> String {
-        if isOffline(error) { return ProposeFlowCopy.noConnection }
-        switch error {
-        case MonacoAPIError.apiError(_, "thesis exceeds maximum length"):
-            return ProposeFlowCopy.reasonTooLong
-        case MonacoAPIError.httpStatus(400), MonacoAPIError.apiError(400, _):
-            return ProposeFlowCopy.sellNoLongerAvailable
-        default:
-            return ProposeFlowCopy.sendFailed
+        guard case MonacoAPIError.apiError(_, let message) = error else { return ProposeFlowCopy.sendFailed }
+        switch message {
+        case "amount exceeds treasury holding": return ProposeFlowCopy.sellNoLongerAvailable
+        case "amount exceeds treasury total available": return isSell ? ProposeFlowCopy.overHoldings : ProposeFlowCopy.overPot
+        case "thesis exceeds maximum length": return ProposeFlowCopy.reasonTooLong
+        case "quote not routable":
+            if isSell { return ProposeFlowCopy.sellTooSmall }
+            return stockName.map(ProposeFlowCopy.cantBuyStock) ?? ProposeFlowCopy.sendFailed
+        default: return ProposeFlowCopy.sendFailed
         }
     }
 
