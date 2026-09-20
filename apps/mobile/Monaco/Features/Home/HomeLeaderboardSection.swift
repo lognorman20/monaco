@@ -134,9 +134,12 @@ struct HomeLeaderboardSection: View {
         .opacity(model.isLoading ? 0.4 : 1)
         .overlay {
             if model.isLoading {
+                // Its own identifier: a refresh over rows already on screen is not the same
+                // thing as an empty board loading, and a UI test matching one identifier for
+                // both could not tell them apart.
                 ProgressView()
                     .tint(MonacoTheme.ink)
-                    .accessibilityIdentifier("home-leaderboard-loading")
+                    .accessibilityIdentifier("home-leaderboard-refreshing")
             }
         }
         .animation(.easeInOut(duration: 0.15), value: model.isLoading)
