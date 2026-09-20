@@ -89,7 +89,7 @@ struct OTPLoginForm: View {
             HStack {
                 if showsCodeField {
                     Button("Continue") {
-                        Task { await submitCode() }
+                        Task { await submitCode(otpCode) }
                     }
                     .buttonStyle(.monacoPrimary)
                     .disabled(isVerifyDisabled)
@@ -161,12 +161,12 @@ struct OTPLoginForm: View {
         }
         // Autofill drops all six digits in at once: don't make them tap Continue too.
         guard sanitized.count == Self.codeLength, !auth.flow.isBusy else { return }
-        Task { await submitCode() }
+        Task { await submitCode(sanitized) }
     }
 
-    private func submitCode() async {
-        guard !isVerifyDisabled, let sentTo = sentDestination else { return }
-        await verify(otpCode, sentTo)
+    private func submitCode(_ code: String) async {
+        guard code.count == Self.codeLength, !auth.flow.isBusy, let sentTo = sentDestination else { return }
+        await verify(code, sentTo)
     }
 
     // MARK: Derived state
@@ -223,7 +223,7 @@ struct OTPLoginForm: View {
     }
 }
 
-extension Character {
+private extension Character {
     /// `isNumber` also matches "½" and non-Latin digits, which no OTP field wants.
     var isASCIIDigit: Bool {
         isASCII && isNumber
