@@ -112,7 +112,7 @@ private struct CabalStripCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
-            CabalMark(groupId: row.groupId, name: row.name, size: 36)
+            CabalMark(groupId: row.groupId, name: row.name, size: 36, pictureUrl: row.pictureUrl)
             Text(row.name)
                 .font(MonacoTheme.Typo.rowTitle)
                 .foregroundStyle(MonacoTheme.ink)
