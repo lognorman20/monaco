@@ -29,7 +29,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
     private let accessTokenProvider: AccessTokenProvider?
 
     public convenience init(
-        baseURL: URL = MonacoConfig.defaultAPIBaseURL,
+        baseURL: URL = MonacoConfig.apiBaseURL,
         session: URLSession = .shared,
         accessTokenProvider: AccessTokenProvider? = nil
     ) {
@@ -41,7 +41,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
     }
 
     public init(
-        baseURL: URL = MonacoConfig.defaultAPIBaseURL,
+        baseURL: URL = MonacoConfig.apiBaseURL,
         transport: MonacoHTTPTransport,
         accessTokenProvider: AccessTokenProvider? = nil
     ) {
