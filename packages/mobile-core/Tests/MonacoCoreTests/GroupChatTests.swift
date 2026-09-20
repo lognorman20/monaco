@@ -88,7 +88,7 @@ final class GroupChatTimelineTests: XCTestCase {
         // Assert
         XCTAssertTrue(timeline.hasLoadedNewest)
         XCTAssertEqual(timeline.messages.map(\.id), ["m2", "m3"])
-        XCTAssertEqual(Set(added), ["m2", "m3"])
+        XCTAssertEqual(added.map(\.id), ["m2", "m3"])
         XCTAssertEqual(timeline.olderCursor, "older")
     }
 
@@ -107,8 +107,8 @@ final class GroupChatTimelineTests: XCTestCase {
         ]))
 
         // Assert
-        XCTAssertEqual(added, ["m2"])
-        XCTAssertEqual(again, [])
+        XCTAssertEqual(added.map(\.id), ["m2"])
+        XCTAssertTrue(again.isEmpty)
         XCTAssertEqual(timeline.messages.map(\.id), ["m1", "m2"])
     }
 
@@ -197,7 +197,7 @@ final class GroupChatTimelineTests: XCTestCase {
         let added = timeline.mergeNewest(GroupMessagesPageDTO(messages: [sent]))
 
         // Assert
-        XCTAssertEqual(added, [])
+        XCTAssertTrue(added.isEmpty)
         XCTAssertEqual(timeline.messages, [sent])
     }
 }
@@ -431,6 +431,178 @@ final class GroupChatAPITests: XCTestCase {
             data.append(buffer, count: read)
         }
         return data
+    }
+}
+
+final class GroupChatRowTests: XCTestCase {
+    /// The thread used to work all of this out per visible row on every body pass, parsing
+    /// each ISO stamp up to four times. It is computed once, at merge, and must still be right.
+    func testRows_markSeparatorsAndRunsFromOnePass() {
+        // Arrange: Ana twice, then Leo twice with a 19-minute gap before his second.
+        var timeline = GroupChatTimeline()
+
+        // Act
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [
+            authored("m4", by: "leo", at: "2026-09-18T15:20:00.000000Z"),
+            authored("m3", by: "leo", at: "2026-09-18T15:01:00.000000Z"),
+            authored("m2", by: "ana", at: "2026-09-18T15:00:30.000000Z"),
+            authored("m1", by: "ana", at: "2026-09-18T15:00:00.000000Z"),
+        ]))
+
+        // Assert
+        XCTAssertEqual(timeline.rows.map(\.id), ["m1", "m2", "m3", "m4"])
+        XCTAssertEqual(timeline.rows.map(\.showsTimeSeparator), [true, false, false, true])
+        XCTAssertEqual(timeline.rows.map(\.startsRun), [true, false, true, true])
+        XCTAssertEqual(timeline.rows.map(\.endsRun), [false, true, true, true])
+        XCTAssertEqual(
+            timeline.rows.map(\.date),
+            timeline.messages.map(\.createdAtDate),
+            "each row must carry the stamp the view would otherwise re-parse"
+        )
+    }
+
+    func testRow_separatorLabelIsOnlyOfferedWhereOneBelongs() {
+        // Arrange
+        var timeline = GroupChatTimeline()
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [
+            authored("m2", by: "ana", at: "2026-09-18T15:00:30.000000Z"),
+            authored("m1", by: "ana", at: "2026-09-18T15:00:00.000000Z"),
+        ]))
+        let now = ISO8601DateFormatter().date(from: "2026-09-18T15:30:00Z")!
+
+        // Act + Assert
+        XCTAssertNotNil(timeline.rows[0].timeSeparatorLabel(now: now))
+        XCTAssertNil(timeline.rows[1].timeSeparatorLabel(now: now))
+    }
+
+    func testRows_unparseableStampGetsNoSeparator() {
+        // Arrange
+        var timeline = GroupChatTimeline()
+
+        // Act
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [authored("m1", by: "ana", at: "yesterday")]))
+
+        // Assert
+        XCTAssertNil(timeline.rows[0].date)
+        XCTAssertFalse(timeline.rows[0].showsTimeSeparator)
+        XCTAssertNil(timeline.rows[0].timeSeparatorLabel())
+    }
+
+    /// A poll that brings nothing new must not re-sort or rebuild anything: on an idle thread
+    /// that is a tick every four seconds that would otherwise invalidate the whole list.
+    func testQuietTick_changesNothing() {
+        // Arrange
+        var timeline = GroupChatTimeline()
+        let page = GroupMessagesPageDTO(messages: [authored("m1", by: "ana", at: "2026-09-18T15:00:00.000000Z")])
+        timeline.mergeNewest(page)
+        let before = timeline
+
+        // Act
+        let added = timeline.mergeNewest(page)
+
+        // Assert
+        XCTAssertTrue(added.isEmpty)
+        XCTAssertEqual(timeline, before)
+    }
+
+    private func authored(_ id: String, by author: String, at createdAt: String) -> GroupMessageDTO {
+        GroupMessageDTO(
+            id: id,
+            groupId: "g1",
+            authorId: author,
+            authorName: author.capitalized,
+            body: "text \(id)",
+            createdAt: createdAt,
+            mine: false
+        )
+    }
+}
+
+final class GroupChatAutoScrollTests: XCTestCase {
+    func testOwnMessage_alwaysScrolls() {
+        XCTAssertTrue(GroupChatTimeline.shouldAutoScroll(added: [mine("m1")], isPinnedToBottom: false))
+        XCTAssertTrue(GroupChatTimeline.shouldAutoScroll(added: [mine("m1")], isPinnedToBottom: true))
+    }
+
+    /// The bug: someone else posting yanked a member reading backlog down to the newest
+    /// message, once per arrival, on a four-second poll.
+    func testSomeoneElsesMessage_onlyScrollsWhenAlreadyAtTheBottom() {
+        let arrival = [notMine("m1")]
+        XCTAssertFalse(GroupChatTimeline.shouldAutoScroll(added: arrival, isPinnedToBottom: false))
+        XCTAssertTrue(GroupChatTimeline.shouldAutoScroll(added: arrival, isPinnedToBottom: true))
+    }
+
+    func testMixedBatchContainingMine_scrollsEvenWhenScrolledUp() {
+        XCTAssertTrue(
+            GroupChatTimeline.shouldAutoScroll(added: [notMine("m1"), mine("m2")], isPinnedToBottom: false)
+        )
+    }
+
+    func testNothingAdded_neverScrolls() {
+        XCTAssertFalse(GroupChatTimeline.shouldAutoScroll(added: [], isPinnedToBottom: true))
+    }
+
+    private func mine(_ id: String) -> GroupMessageDTO { message(id, at: "2026-09-18T15:00:00.000000Z", mine: true) }
+    private func notMine(_ id: String) -> GroupMessageDTO { message(id, at: "2026-09-18T15:00:00.000000Z") }
+}
+
+final class GroupChatFailureCopyTests: XCTestCase {
+    /// The first-load state has no scroll view, so it must not tell anyone to pull it.
+    func testLoadFailure_doesNotAskForAGestureThatIsNotThere() {
+        let copy = GroupChatCopy.loadFailure(URLError(.notConnectedToInternet))
+        XCTAssertEqual(copy, "Couldn't load messages.")
+        XCTAssertFalse(copy.lowercased().contains("pull"))
+    }
+
+    func testRefreshFailure_canAskForAPullBecauseTheThreadIsOnScreen() {
+        XCTAssertEqual(
+            GroupChatCopy.refreshFailure(URLError(.timedOut)),
+            "Couldn't refresh messages. Pull down to try again."
+        )
+    }
+
+    func testEarlierFailure_namesTheButtonItCameFrom() {
+        XCTAssertEqual(
+            GroupChatCopy.earlierFailure(URLError(.timedOut)),
+            "Couldn't load earlier messages. Try again."
+        )
+    }
+
+    func testChatClosed_onlyForRemovedMemberOrMissingCabal() {
+        XCTAssertEqual(
+            GroupChatCopy.chatClosed(MonacoAPIError.httpStatus(403)),
+            "You're no longer in this cabal, so its chat is closed to you."
+        )
+        XCTAssertEqual(
+            GroupChatCopy.chatClosed(MonacoAPIError.rejected(status: 404, message: "group not found")),
+            "This cabal no longer exists."
+        )
+        XCTAssertNil(GroupChatCopy.chatClosed(MonacoAPIError.httpStatus(500)))
+        XCTAssertNil(GroupChatCopy.chatClosed(MonacoAPIError.httpStatus(401)))
+        XCTAssertNil(GroupChatCopy.chatClosed(URLError(.notConnectedToInternet)))
+    }
+
+    func testClosedCopy_reachesEveryFailureSurface() {
+        let closed = "This cabal no longer exists."
+        XCTAssertEqual(GroupChatCopy.loadFailure(MonacoAPIError.httpStatus(404)), closed)
+        XCTAssertEqual(GroupChatCopy.refreshFailure(MonacoAPIError.httpStatus(404)), closed)
+        XCTAssertEqual(GroupChatCopy.earlierFailure(MonacoAPIError.httpStatus(404)), closed)
+    }
+
+    func testNewMessagesPill_singularAndPlural() {
+        XCTAssertEqual(GroupChatCopy.newMessagesPill(count: 1), "1 new message")
+        XCTAssertEqual(GroupChatCopy.newMessagesPill(count: 4), "4 new messages")
+    }
+
+    func testFailureCopy_passesMainFlowAudit() {
+        XCTAssertTrue(MainFlowCopyAudit.stringsAreClean([
+            GroupChatCopy.loadFailure(URLError(.timedOut)),
+            GroupChatCopy.refreshFailure(URLError(.timedOut)),
+            GroupChatCopy.earlierFailure(URLError(.timedOut)),
+            GroupChatCopy.chatClosed(MonacoAPIError.httpStatus(403)) ?? "",
+            GroupChatCopy.chatClosed(MonacoAPIError.httpStatus(404)) ?? "",
+            GroupChatCopy.newMessagesPill(count: 3),
+        ]))
     }
 }
 

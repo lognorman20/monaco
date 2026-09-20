@@ -90,9 +90,53 @@ public enum GroupChatDraft {
     }
 }
 
+/// One rendered line of the thread: the message plus everything the view would otherwise
+/// work out again on every body pass.
+///
+/// Parsing a chat timestamp is not cheap — the API's microsecond stamp misses the
+/// whole-seconds formatter, gets truncated into a fresh string, then parsed a second time —
+/// and the thread needed up to four of those per visible row, on a body that a single
+/// composer keystroke invalidates. Rows are built once, when a page is merged.
+public struct GroupChatRow: Identifiable, Equatable, Sendable {
+    public let message: GroupMessageDTO
+    /// When it was sent, parsed once. Nil for a stamp that will not parse.
+    public let date: Date?
+    /// True when a centred time label belongs above this bubble.
+    public let showsTimeSeparator: Bool
+    /// First bubble of a run by this author: the author's name goes above it.
+    public let startsRun: Bool
+    /// Last bubble of a run: the corner on the author's side is tightened.
+    public let endsRun: Bool
+
+    public var id: String { message.id }
+
+    public init(
+        message: GroupMessageDTO,
+        date: Date?,
+        showsTimeSeparator: Bool,
+        startsRun: Bool,
+        endsRun: Bool
+    ) {
+        self.message = message
+        self.date = date
+        self.showsTimeSeparator = showsTimeSeparator
+        self.startsRun = startsRun
+        self.endsRun = endsRun
+    }
+
+    /// "Today 12:40" for the rows that carry one. Formatted on demand rather than stored, so a
+    /// thread left open past midnight stops calling yesterday's messages "Today".
+    public func timeSeparatorLabel(now: Date = Date()) -> String? {
+        guard showsTimeSeparator, let date else { return nil }
+        return GroupChatCopy.timeSeparatorLabel(date, now: now)
+    }
+}
+
 /// Chat history held oldest-to-newest for display, merged from newest-first API pages.
 public struct GroupChatTimeline: Equatable, Sendable {
     public private(set) var messages: [GroupMessageDTO] = []
+    /// The thread as the view draws it: dates parsed, runs and separators already decided.
+    public private(set) var rows: [GroupChatRow] = []
     /// Cursor for the next older page; nil once the oldest page has loaded.
     public private(set) var olderCursor: String?
     /// False until the first page arrives, so the UI can tell "loading" from "empty".
@@ -102,13 +146,25 @@ public struct GroupChatTimeline: Equatable, Sendable {
 
     public var hasOlder: Bool { olderCursor != nil }
 
-    /// Applies a poll or first load of the newest page. Returns ids that were not already present.
+    /// Whether an arrival should pull the thread down to the newest message.
+    ///
+    /// Two things earn a scroll: a message the viewer just sent, and one landing while they
+    /// were already reading the bottom. A member scrolled up in the history keeps their place
+    /// and is told about the new messages instead of being thrown at them.
+    public static func shouldAutoScroll(added: [GroupMessageDTO], isPinnedToBottom: Bool) -> Bool {
+        guard !added.isEmpty else { return false }
+        if added.contains(where: \.mine) { return true }
+        return isPinnedToBottom
+    }
+
+    /// Applies a poll or first load of the newest page. Returns the messages that were not
+    /// already present, oldest first.
     ///
     /// If a poll page shares no message with what is on screen and older messages exist, more
     /// arrived than one page holds. The older cursor then moves to that page so "Load earlier"
     /// walks through the gap; already-seen messages are de-duplicated by id on the way.
     @discardableResult
-    public mutating func mergeNewest(_ page: GroupMessagesPageDTO) -> [String] {
+    public mutating func mergeNewest(_ page: GroupMessagesPageDTO) -> [GroupMessageDTO] {
         let isFirstLoad = !hasLoadedNewest
         hasLoadedNewest = true
         if isFirstLoad {
@@ -134,16 +190,45 @@ public struct GroupChatTimeline: Equatable, Sendable {
     }
 
     @discardableResult
-    private mutating func merge(_ incoming: [GroupMessageDTO]) -> [String] {
+    private mutating func merge(_ incoming: [GroupMessageDTO]) -> [GroupMessageDTO] {
         var byID = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
-        var added: [String] = []
+        var addedIDs: Set<String> = []
         for message in incoming where byID[message.id] == nil {
             byID[message.id] = message
-            added.append(message.id)
+            addedIDs.insert(message.id)
         }
-        guard !added.isEmpty else { return [] }
+        // A quiet tick adds nothing: leave `messages` and `rows` untouched so the thread is
+        // not re-sorted, not rebuilt, and — this is the point — not invalidated.
+        guard !addedIDs.isEmpty else { return [] }
         messages = byID.values.sorted(by: Self.chronological)
-        return added
+        rows = Self.rows(for: messages)
+        return messages.filter { addedIDs.contains($0.id) }
+    }
+
+    /// Two passes because a bubble's tail depends on the row *after* it.
+    private static func rows(for messages: [GroupMessageDTO]) -> [GroupChatRow] {
+        let dates = messages.map(\.createdAtDate)
+        var separators = [Bool](repeating: false, count: messages.count)
+        for index in messages.indices {
+            guard let date = dates[index] else { continue }
+            let previous = index > 0 ? dates[index - 1] : nil
+            separators[index] = GroupChatCopy.showsTimeSeparator(previous: previous, current: date)
+        }
+        return messages.indices.map { index in
+            let message = messages[index]
+            let previousAuthor = index > 0 ? messages[index - 1].authorId : nil
+            let next = index + 1
+            let endsRun = next >= messages.count
+                || messages[next].authorId != message.authorId
+                || separators[next]
+            return GroupChatRow(
+                message: message,
+                date: dates[index],
+                showsTimeSeparator: separators[index],
+                startsRun: separators[index] || previousAuthor != message.authorId,
+                endsRun: endsRun
+            )
+        }
     }
 
     /// The API sends fixed-width microsecond UTC timestamps (`2026-09-18T15:04:05.123456Z`),
@@ -235,10 +320,44 @@ public enum GroupChatCopy {
         return "\(day), \(clock)"
     }
 
+    /// Shown in place of the thread when the first page never arrived. A Try again button
+    /// sits right under it, so this must not send the member looking for a gesture: there is
+    /// nothing to pull on an empty screen.
     public static func loadFailure(_ error: Error) -> String {
-        if case MonacoAPIError.httpStatus(403, _) = error {
-            return "Only members of this cabal can read the chat."
+        if let closed = chatClosed(error) { return closed }
+        return "Couldn't load messages."
+    }
+
+    /// Toast for a refresh of a thread already on screen, where pulling down does work.
+    public static func refreshFailure(_ error: Error) -> String {
+        if let closed = chatClosed(error) { return closed }
+        return "Couldn't refresh messages. Pull down to try again."
+    }
+
+    /// Toast for the "Load earlier messages" button.
+    public static func earlierFailure(_ error: Error) -> String {
+        if let closed = chatClosed(error) { return closed }
+        return "Couldn't load earlier messages. Try again."
+    }
+
+    /// Why this thread is no longer readable, or nil for a failure worth retrying. Chat stops
+    /// polling on one of these instead of asking a cabal it was thrown out of every 4 seconds.
+    public static func chatClosed(_ error: Error) -> String? {
+        let status: Int
+        switch error {
+        case MonacoAPIError.httpStatus(let code, _): status = code
+        case MonacoAPIError.rejected(let code, _, _): status = code
+        default: return nil
         }
-        return "Couldn't load messages. Pull to try again."
+        switch status {
+        case 403: return "You're no longer in this cabal, so its chat is closed to you."
+        case 404: return "This cabal no longer exists."
+        default: return nil
+        }
+    }
+
+    /// The pill offered to a member reading history when messages land below them.
+    public static func newMessagesPill(count: Int) -> String {
+        count == 1 ? "1 new message" : "\(count) new messages"
     }
 }
