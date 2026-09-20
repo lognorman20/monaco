@@ -246,6 +246,27 @@ final class PrivyAuthService: ObservableObject {
         await signOutAfterRejectedSession()
     }
 
+    /// Runs `call` with the session's access token and, when the server answers 401, ends the
+    /// session naming that token. The layer that holds the token reports the rejection, so a
+    /// screen never has to guess which sign-in a late 401 belonged to.
+    func withAccessToken<T>(_ call: (String) async throws -> T) async throws -> T {
+        guard let token = accessToken else { throw Monaco.MonacoAPIError.missingAccessToken }
+        do {
+            return try await call(token)
+        } catch {
+            if Self.isUnauthorized(error) {
+                await signOutAfterRejectedSession(rejectedToken: token)
+            }
+            throw error
+        }
+    }
+
+    private static func isUnauthorized(_ error: Error) -> Bool {
+        if case Monaco.MonacoAPIError.httpStatus(401) = error { return true }
+        if case Monaco.MonacoAPIError.apiError(status: 401, _) = error { return true }
+        return (error as? MonacoCore.MonacoAPIError)?.statusCode == 401
+    }
+
     /// Sign-out is local-first: the session is gone before Privy is told, so the login
     /// screen comes back immediately even offline, polling loops lose their token at once,
     /// and a second tap has nothing left to do.

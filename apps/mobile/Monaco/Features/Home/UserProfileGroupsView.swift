@@ -140,7 +140,7 @@ struct UserProfileGroupsView: View {
             // Leaving the screen cancels the read; that is not a failure to report.
             if error.isRequestCancellation { return }
             if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
-                await auth.signOutAfterRejectedSession()
+                await auth.signOutAfterRejectedSession(rejectedToken: accessToken)
                 return
             }
             groups = []

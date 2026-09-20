@@ -18,17 +18,12 @@ struct LiveStocksTabDataSource: StocksTabDataSource {
         self.auth = auth
     }
 
-    private func token() throws -> String {
-        guard let token = auth.accessToken else { throw MonacoAPIError.missingAccessToken }
-        return token
-    }
-
     func search(query: String, offset: Int, limit: Int) async throws -> ListMarketAssetsResponse {
-        try await apiClient.listMarketAssets(accessToken: try token(), query: query, limit: limit, offset: offset)
+        try await auth.withAccessToken { try await apiClient.listMarketAssets(accessToken: $0, query: query, limit: limit, offset: offset) }
     }
 
     func popular(limit: Int) async throws -> PopularAssetsResponse {
-        try await apiClient.getPopularAssets(accessToken: try token(), limit: limit)
+        try await auth.withAccessToken { try await apiClient.getPopularAssets(accessToken: $0, limit: limit) }
     }
 }
 
@@ -73,7 +68,7 @@ final class StocksTabModel {
     private(set) var popular: [MarketAssetDTO] = []
     private(set) var popularState: PopularState = .loading
 
-    /// Set when the server rejects the session; the view signs out.
+    /// Set when the server rejects the session. The data source has already ended it.
     private(set) var sessionExpired = false
 
     private let dataSource: StocksTabDataSource

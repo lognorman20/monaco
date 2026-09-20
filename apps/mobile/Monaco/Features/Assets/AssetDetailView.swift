@@ -59,10 +59,6 @@ struct AssetDetailView: View {
         // Two independent loads: the curve does not wait on the (slow) detail call.
         .task { await model.loadDetail() }
         .task(id: model.range) { await model.loadChart(range: model.range) }
-        .onChange(of: model.sessionExpired) { _, expired in
-            guard expired else { return }
-            Task { await auth.signOutAfterRejectedSession() }
-        }
         .navigationDestination(item: $pickerKind) { kind in
             GroupPickerForProposalView(
                 auth: auth,

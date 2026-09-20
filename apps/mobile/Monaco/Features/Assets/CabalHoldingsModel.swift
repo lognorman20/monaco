@@ -18,8 +18,7 @@ struct LiveCabalHoldingsDataSource: CabalHoldingsDataSource {
     }
 
     func groupView(groupId: String) async throws -> GroupViewDTO {
-        guard let token = auth.accessToken else { throw MonacoAPIError.missingAccessToken }
-        return try await apiClient.getGroupView(accessToken: token, groupId: groupId)
+        try await auth.withAccessToken { try await apiClient.getGroupView(accessToken: $0, groupId: groupId) }
     }
 }
 
@@ -59,7 +58,7 @@ final class CabalHoldingsModel {
     let symbol: String
     private(set) var state: State = .loading
 
-    /// Set when the server rejects the session; the view signs out.
+    /// Set when the server rejects the session. The data source has already ended it.
     private(set) var sessionExpired = false
 
     private let dataSource: CabalHoldingsDataSource

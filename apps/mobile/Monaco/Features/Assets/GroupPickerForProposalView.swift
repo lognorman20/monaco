@@ -79,10 +79,6 @@ struct GroupPickerForProposalView: View {
             guard !cabals.isEmpty else { return }
             await holdings.load(cabals: cabals)
         }
-        .onChange(of: holdings.sessionExpired) { _, expired in
-            guard expired else { return }
-            Task { await auth.signOutAfterRejectedSession() }
-        }
     }
 
     @ViewBuilder

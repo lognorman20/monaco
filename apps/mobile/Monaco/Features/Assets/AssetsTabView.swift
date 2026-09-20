@@ -68,10 +68,6 @@ struct AssetsTabView: View {
             guard let hostMainTab, tab == hostMainTab else { return }
             Task { await refreshPopular() }
         }
-        .onChange(of: model.sessionExpired) { _, expired in
-            guard expired else { return }
-            Task { await auth.signOutAfterRejectedSession() }
-        }
         .monacoFrameStats("Stocks")
     }
 
