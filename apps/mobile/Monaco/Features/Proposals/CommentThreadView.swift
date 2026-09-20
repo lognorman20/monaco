@@ -128,6 +128,9 @@ struct CommentComposer: View {
     /// Answers whether the comment was accepted. Only then is the draft cleared and the keyboard
     /// dropped, so the thread the comment landed in is readable again and Reply is reachable.
     let onPost: (String) async -> Bool
+    /// Called once the composer has cleared its draft and given up focus, so the thread can scroll
+    /// to what was just posted without racing the keyboard's safe-area inset.
+    var onDidStandDown: () -> Void = {}
 
     @State private var text = ""
     @FocusState private var focused: Bool
@@ -187,6 +190,7 @@ struct CommentComposer: View {
                         guard await onPost(body) else { return }
                         text = ""
                         focused = false
+                        onDidStandDown()
                     }
                 } label: {
                     ZStack {
