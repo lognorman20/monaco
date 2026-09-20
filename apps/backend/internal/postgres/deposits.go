@@ -301,32 +301,6 @@ RETURNING id, user_id, group_id, amount, from_address, status, tx_signature, cre
 	return row, true, nil
 }
 
-// SetDepositBroadcastSignature records a broadcast sweep signature on a pending deposit.
-// Status stays pending until ObserveSweep confirms on-chain arrival and credits shares.
-func (s *Store) SetDepositBroadcastSignature(ctx context.Context, depositID, txSignature string) error {
-	if depositID == "" || txSignature == "" {
-		return fmt.Errorf("deposit id and tx signature are required")
-	}
-
-	const updateSQL = `
-UPDATE deposits
-SET tx_signature = $2
-WHERE id = $1 AND status = 'pending'`
-
-	result, err := s.db.ExecContext(ctx, updateSQL, depositID, txSignature)
-	if err != nil {
-		return fmt.Errorf("set deposit broadcast signature: %w", err)
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("set deposit broadcast signature rows affected: %w", err)
-	}
-	if rows == 0 {
-		return fmt.Errorf("deposit %s not found or not pending", depositID)
-	}
-	return nil
-}
-
 // ConfirmDepositTx marks a pending deposit confirmed with a treasury sweep signature.
 // Returns newlyConfirmed=false when another caller already confirmed the same deposit.
 func (s *Store) ConfirmDepositTx(ctx context.Context, tx *sql.Tx, depositID, txSignature string) (DepositRow, bool, error) {

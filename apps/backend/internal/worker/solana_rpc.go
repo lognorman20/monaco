@@ -9,14 +9,37 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
-// SolanaRPC confirms on-chain transactions for sweep credit.
+// SignatureState is what the chain knows about a transaction signature.
+type SignatureState string
+
+const (
+	// SignatureNotFound: no status, even in transaction history. The transaction has not
+	// landed; whether it still can depends on its blockhash expiry.
+	SignatureNotFound SignatureState = "not_found"
+	// SignaturePending: seen but below confirmed commitment.
+	SignaturePending SignatureState = "pending"
+	// SignatureConfirmed: landed successfully at confirmed or finalized commitment.
+	SignatureConfirmed SignatureState = "confirmed"
+	// SignatureFailed: landed and failed. It is final and moved no funds.
+	SignatureFailed SignatureState = "failed"
+)
+
+// SignatureStatus is the chain outcome of one transaction. Err is set for SignatureFailed.
+type SignatureStatus struct {
+	State SignatureState
+	Err   string
+}
+
+// SolanaRPC resolves on-chain sweep outcomes for the sweep poller.
 type SolanaRPC interface {
-	IsConfirmed(ctx context.Context, txSignature string) (bool, error)
+	SignatureStatus(ctx context.Context, txSignature string) (SignatureStatus, error)
+	FinalizedBlockHeight(ctx context.Context) (uint64, error)
 }
 
 // HTTPSolanaRPC confirms transactions via Solana JSON-RPC.
@@ -56,6 +79,13 @@ type solanaSignatureStatusesResponse struct {
 		Value []*solanaSignatureStatus `json:"value"`
 	} `json:"result"`
 	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+type solanaBlockHeightResponse struct {
+	Result uint64 `json:"result"`
+	Error  *struct {
 		Message string `json:"message"`
 	} `json:"error"`
 }
@@ -206,12 +236,27 @@ func (r *HTTPSolanaRPC) GetSPLTokenBalance(ctx context.Context, ownerAddress, mi
 	return total, nil
 }
 
+// IsConfirmed reports whether txSignature landed successfully. An on-chain failure is an error.
 func (r *HTTPSolanaRPC) IsConfirmed(ctx context.Context, txSignature string) (bool, error) {
+	status, err := r.SignatureStatus(ctx, txSignature)
+	if err != nil {
+		return false, err
+	}
+	if status.State == SignatureFailed {
+		return false, fmt.Errorf("transaction failed on chain: %s", status.Err)
+	}
+	return status.State == SignatureConfirmed, nil
+}
+
+// SignatureStatus returns the chain outcome of txSignature via getSignatureStatuses.
+// A transaction that failed on chain is a status, not an error: errors mean the RPC call
+// itself did not produce an answer.
+func (r *HTTPSolanaRPC) SignatureStatus(ctx context.Context, txSignature string) (SignatureStatus, error) {
 	txSignature = strings.TrimSpace(txSignature)
 	if txSignature == "" {
 		err := fmt.Errorf("transaction signature is required")
 		logSolanaRPCConfirmationCheck(txSignature, false, "", err)
-		return false, err
+		return SignatureStatus{}, err
 	}
 
 	payload, err := json.Marshal(solanaRPCRequest{
@@ -224,78 +269,163 @@ func (r *HTTPSolanaRPC) IsConfirmed(ctx context.Context, txSignature string) (bo
 		},
 	})
 	if err != nil {
-		return false, err
+		return SignatureStatus{}, err
 	}
 
+	respBody, err := r.post(ctx, payload)
+	if err != nil {
+		logSolanaRPCConfirmationCheck(txSignature, false, "", err)
+		return SignatureStatus{}, err
+	}
+
+	var rpcResp solanaSignatureStatusesResponse
+	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
+		return SignatureStatus{}, err
+	}
+	if rpcResp.Error != nil {
+		err := fmt.Errorf("solana rpc error: %s", rpcResp.Error.Message)
+		logSolanaRPCConfirmationCheck(txSignature, false, "", err)
+		return SignatureStatus{}, err
+	}
+	if len(rpcResp.Result.Value) == 0 || rpcResp.Result.Value[0] == nil {
+		logSolanaRPCConfirmationCheck(txSignature, false, "", nil)
+		return SignatureStatus{State: SignatureNotFound}, nil
+	}
+
+	// Below confirmed commitment the block can still be forked away, so neither success nor
+	// failure is an outcome yet.
+	status := rpcResp.Result.Value[0]
+	switch status.ConfirmationStatus {
+	case "confirmed", "finalized":
+	default:
+		logSolanaRPCConfirmationCheck(txSignature, false, status.ConfirmationStatus, nil)
+		return SignatureStatus{State: SignaturePending}, nil
+	}
+	if status.Err != nil {
+		chainErr := fmt.Sprintf("%v", status.Err)
+		logSolanaRPCConfirmationCheck(txSignature, false, status.ConfirmationStatus, fmt.Errorf("transaction failed on chain: %s", chainErr))
+		return SignatureStatus{State: SignatureFailed, Err: chainErr}, nil
+	}
+	logSolanaRPCConfirmationCheck(txSignature, true, status.ConfirmationStatus, nil)
+	return SignatureStatus{State: SignatureConfirmed}, nil
+}
+
+// FinalizedBlockHeight returns the finalized block height via getBlockHeight. A transaction
+// whose last valid block height is below it can no longer land.
+func (r *HTTPSolanaRPC) FinalizedBlockHeight(ctx context.Context) (uint64, error) {
+	payload, err := json.Marshal(solanaRPCRequest{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "getBlockHeight",
+		Params:  []any{map[string]string{"commitment": "finalized"}},
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	respBody, err := r.post(ctx, payload)
+	if err != nil {
+		return 0, err
+	}
+
+	var rpcResp solanaBlockHeightResponse
+	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
+		return 0, err
+	}
+	if rpcResp.Error != nil {
+		return 0, fmt.Errorf("solana rpc error: %s", rpcResp.Error.Message)
+	}
+	return rpcResp.Result, nil
+}
+
+func (r *HTTPSolanaRPC) post(ctx context.Context, payload []byte) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
-		logSolanaRPCConfirmationCheck(txSignature, false, "", err)
-		return false, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		err := fmt.Errorf("solana rpc status %d: %s", resp.StatusCode, string(respBody))
-		logSolanaRPCConfirmationCheck(txSignature, false, "", err)
-		return false, err
+		return nil, fmt.Errorf("solana rpc status %d: %s", resp.StatusCode, string(respBody))
 	}
-
-	var rpcResp solanaSignatureStatusesResponse
-	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
-		return false, err
-	}
-	if rpcResp.Error != nil {
-		err := fmt.Errorf("solana rpc error: %s", rpcResp.Error.Message)
-		logSolanaRPCConfirmationCheck(txSignature, false, "", err)
-		return false, err
-	}
-	if len(rpcResp.Result.Value) == 0 || rpcResp.Result.Value[0] == nil {
-		logSolanaRPCConfirmationCheck(txSignature, false, "", nil)
-		return false, nil
-	}
-
-	status := rpcResp.Result.Value[0]
-	if status.Err != nil {
-		err := fmt.Errorf("transaction failed on chain: %v", status.Err)
-		logSolanaRPCConfirmationCheck(txSignature, false, status.ConfirmationStatus, err)
-		return false, err
-	}
-	switch status.ConfirmationStatus {
-	case "confirmed", "finalized":
-		logSolanaRPCConfirmationCheck(txSignature, true, status.ConfirmationStatus, nil)
-		return true, nil
-	default:
-		logSolanaRPCConfirmationCheck(txSignature, false, status.ConfirmationStatus, nil)
-		return false, nil
-	}
+	return respBody, nil
 }
 
 // fakeSolanaRPC is the locked test double for sweep confirmation.
 type fakeSolanaRPC struct {
-	confirmed map[string]bool
+	mu          sync.Mutex
+	statuses    map[string]SignatureStatus
+	blockHeight uint64
+	statusErr   error
+	heightErr   error
 }
 
 // NewFakeSolanaRPC returns an in-memory RPC client for tests.
 func NewFakeSolanaRPC() *fakeSolanaRPC {
-	return &fakeSolanaRPC{confirmed: make(map[string]bool)}
+	return &fakeSolanaRPC{statuses: make(map[string]SignatureStatus)}
 }
 
 // Confirm marks a signature confirmed for tests.
 func (f *fakeSolanaRPC) Confirm(txSignature string) {
-	f.confirmed[txSignature] = true
+	f.setStatus(txSignature, SignatureStatus{State: SignatureConfirmed})
 }
 
-func (f *fakeSolanaRPC) IsConfirmed(ctx context.Context, txSignature string) (bool, error) {
+// FailOnChain marks a signature landed-and-failed for tests.
+func (f *fakeSolanaRPC) FailOnChain(txSignature, chainErr string) {
+	f.setStatus(txSignature, SignatureStatus{State: SignatureFailed, Err: chainErr})
+}
+
+// SetBlockHeight sets the finalized block height for tests.
+func (f *fakeSolanaRPC) SetBlockHeight(height uint64) {
+	f.mu.Lock()
+	f.blockHeight = height
+	f.mu.Unlock()
+}
+
+// SetErrors forces SignatureStatus and FinalizedBlockHeight to fail for tests.
+func (f *fakeSolanaRPC) SetErrors(statusErr, heightErr error) {
+	f.mu.Lock()
+	f.statusErr = statusErr
+	f.heightErr = heightErr
+	f.mu.Unlock()
+}
+
+func (f *fakeSolanaRPC) setStatus(txSignature string, status SignatureStatus) {
+	f.mu.Lock()
+	f.statuses[txSignature] = status
+	f.mu.Unlock()
+}
+
+func (f *fakeSolanaRPC) SignatureStatus(ctx context.Context, txSignature string) (SignatureStatus, error) {
 	_ = ctx
-	return f.confirmed[txSignature], nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.statusErr != nil {
+		return SignatureStatus{}, f.statusErr
+	}
+	status, ok := f.statuses[txSignature]
+	if !ok {
+		return SignatureStatus{State: SignatureNotFound}, nil
+	}
+	return status, nil
+}
+
+func (f *fakeSolanaRPC) FinalizedBlockHeight(ctx context.Context) (uint64, error) {
+	_ = ctx
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.heightErr != nil {
+		return 0, f.heightErr
+	}
+	return f.blockHeight, nil
 }
