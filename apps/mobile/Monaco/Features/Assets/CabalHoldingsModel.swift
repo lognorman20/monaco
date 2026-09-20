@@ -23,26 +23,36 @@ struct LiveCabalHoldingsDataSource: CabalHoldingsDataSource {
     }
 }
 
-/// Which joined cabals hold a given stock, resolved before the user picks one.
+/// Each joined cabal's pot, resolved before the member picks one.
 ///
-/// Asking after the pick is what produced the "This cabal does not hold this stock." dead end:
-/// the answer is known from the same pot payload, so it is read for every cabal up front.
-/// A partial answer is treated as no answer — telling someone none of their cabals hold a stock
-/// when one fetch failed would be a lie about their money.
+/// One `getGroupView` per cabal answers both questions the picker has, so neither is asked after
+/// the pick: *does this cabal hold the stock* — asking later is what produced the "This cabal does
+/// not hold this stock." dead end — and *what is the pot*, which the amount step needs and must
+/// not have to load for itself.
+///
+/// A cabal that does not answer is counted, not hidden behind the ones that did: the picker lists
+/// the cabals it has and says how many it could not check. Only when nothing answers at all is
+/// there nothing to show. Never claim no cabal holds a stock on a partial answer — that would be a
+/// lie about someone's money — but do not withhold the cabal that demonstrably holds it either
+/// because an unrelated cabal timed out.
 @Observable
 @MainActor
 final class CabalHoldingsModel {
-    struct Holding: Identifiable, Equatable {
+    /// One cabal that answered: its pot, and its row for this model's symbol when it holds any.
+    struct Resolved: Identifiable, Equatable {
         let groupId: String
         let name: String
-        let row: PotRowDTO
+        let pot: ProposePot
+        let holding: PotRowDTO?
 
         var id: String { groupId }
     }
 
     enum State: Equatable {
         case loading
-        case loaded([Holding])
+        /// The cabals that answered, and how many did not.
+        case resolved(cabals: [Resolved], unreachable: Int)
+        /// Nothing answered.
         case failed
     }
 
@@ -59,21 +69,37 @@ final class CabalHoldingsModel {
         self.dataSource = dataSource
     }
 
+    /// The cabals that answered, whichever way.
+    var cabals: [Resolved] {
+        if case .resolved(let cabals, _) = state { return cabals }
+        return []
+    }
+
+    /// The cabals that answered *and* hold the stock — the only ones a sell can be proposed from.
+    var holders: [Resolved] {
+        cabals.filter { $0.holding != nil }
+    }
+
+    /// How many cabals could not be checked on the last pass.
+    var unreachableCount: Int {
+        if case .resolved(_, let unreachable) = state { return unreachable }
+        return 0
+    }
+
     private enum Outcome: Sendable {
-        case holds(Holding)
-        case doesNotHold
+        case answered(Resolved)
+        case unreachable
         case unauthorized
-        case failed
         case cancelled
     }
 
     func load(cabals: [HomeGroupBoardRowDTO]) async {
         guard !cabals.isEmpty else {
-            state = .loaded([])
+            state = .resolved(cabals: [], unreachable: 0)
             return
         }
         switch state {
-        case .loaded: break // Keep the rows on screen while they are re-read.
+        case .resolved: break // Keep the rows on screen while they are re-read.
         case .loading, .failed: state = .loading
         }
 
@@ -93,30 +119,37 @@ final class CabalHoldingsModel {
             sessionExpired = true
             return
         }
-        if outcomes.contains(where: { if case .failed = $0 { return true } else { return false } }) {
+
+        let answered = outcomes.compactMap { outcome -> Resolved? in
+            if case .answered(let resolved) = outcome { return resolved }
+            return nil
+        }
+        let unreachable = outcomes.reduce(into: 0) { count, outcome in
+            if case .unreachable = outcome { count += 1 }
+        }
+        guard !answered.isEmpty else {
+            // Every cabal failed: there is no partial answer to show, only the failure.
             state = .failed
             return
         }
-        let holdings = outcomes.compactMap { outcome -> Holding? in
-            if case .holds(let holding) = outcome { return holding }
-            return nil
-        }
         // Keep the order the cabals were listed in rather than whichever fetch finished first.
-        let byId = Dictionary(holdings.map { ($0.groupId, $0) }, uniquingKeysWith: { first, _ in first })
-        state = .loaded(cabals.compactMap { byId[$0.groupId] })
+        let byId = Dictionary(answered.map { ($0.groupId, $0) }, uniquingKeysWith: { first, _ in first })
+        state = .resolved(cabals: cabals.compactMap { byId[$0.groupId] }, unreachable: unreachable)
     }
 
     private func fetch(cabal: HomeGroupBoardRowDTO) async -> Outcome {
         do {
             let view = try await dataSource.groupView(groupId: cabal.groupId)
-            guard let row = view.pot.first(where: { Self.holds($0, symbol: symbol) }) else {
-                return .doesNotHold
-            }
-            return .holds(Holding(groupId: cabal.groupId, name: cabal.name, row: row))
+            return .answered(Resolved(
+                groupId: cabal.groupId,
+                name: cabal.name,
+                pot: ProposePot(view: view),
+                holding: view.pot.first(where: { Self.holds($0, symbol: symbol) })
+            ))
         } catch {
             if error.isRequestCancellation { return .cancelled }
             if case MonacoAPIError.httpStatus(401) = error { return .unauthorized }
-            return .failed
+            return .unreachable
         }
     }
 

@@ -8,10 +8,12 @@ enum ProposalPickKind: String, Hashable, Identifiable {
     var id: String { rawValue }
 }
 
-/// Choose a cabal, then go straight to the amount step with the stock already set.
+/// Choose a cabal, then go straight to the amount step with the stock and the pot already set.
 ///
-/// Sell lists only the cabals that hold the stock, so picking one can never dead-end on
-/// "this cabal does not hold this stock".
+/// This screen owns the pot load and its retry: the amount step is only ever reached with a pot
+/// in hand, so it never has to fetch one and never renders a ceiling it does not know yet. The
+/// same fan-out answers "who holds this?", so Sell lists only the cabals that hold the stock and
+/// picking one can never dead-end on "this cabal does not hold this stock".
 struct GroupPickerForProposalView: View {
     @ObservedObject var auth: PrivyAuthService
     @Environment(AppSessionStore.self) private var session
@@ -54,9 +56,10 @@ struct GroupPickerForProposalView: View {
         AssetSymbolFormatter.display(symbol)
     }
 
-    /// Re-runs the holdings fan-out when the cabal list arrives, and when Sell is chosen.
+    /// Re-runs the fan-out when the cabal list arrives or changes. Not keyed on `kind`: buy and
+    /// sell read the same pots, so switching between them must not refetch.
     private var holdingsTaskID: String {
-        kind.rawValue + "|" + cabals.map(\.groupId).joined(separator: ",")
+        cabals.map(\.groupId).joined(separator: ",")
     }
 
     var body: some View {
@@ -73,7 +76,7 @@ struct GroupPickerForProposalView: View {
         .accessibilityIdentifier("group-picker-root")
         .task { await loadCabals() }
         .task(id: holdingsTaskID) {
-            guard kind == .sell, !cabals.isEmpty else { return }
+            guard !cabals.isEmpty else { return }
             await holdings.load(cabals: cabals)
         }
         .onChange(of: holdings.sessionExpired) { _, expired in
@@ -100,6 +103,24 @@ struct GroupPickerForProposalView: View {
             )
             .accessibilityIdentifier("group-picker-no-cabals")
         } else {
+            pickerRows
+        }
+    }
+
+    /// Both kinds wait on the same fan-out: the amount step is only reached with a pot.
+    @ViewBuilder
+    private var pickerRows: some View {
+        switch holdings.state {
+        case .loading:
+            skeletonRows
+        case .failed:
+            EmptyState(
+                title: "Could not load your cabals",
+                actionTitle: "Retry",
+                action: reloadHoldings
+            )
+            .accessibilityIdentifier("group-picker-holdings-failed")
+        case .resolved:
             switch kind {
             case .buy:
                 buyRows
@@ -109,48 +130,53 @@ struct GroupPickerForProposalView: View {
         }
     }
 
+    @ViewBuilder
     private var buyRows: some View {
-        MonacoGroupedList {
-            ForEach(Array(cabals.enumerated()), id: \.element.id) { index, cabal in
-                NavigationLink {
-                    ProposeAmountView(
-                        service: service,
-                        groupId: cabal.groupId,
-                        stock: stock,
-                        pot: nil,
-                        onProposed: { _ in onProposed?(cabal.name) }
-                    )
-                } label: {
-                    MonacoRow(
-                        title: cabal.name,
-                        subtitle: "Pot",
-                        chevron: true,
-                        isLast: index == cabals.count - 1
-                    ) {
-                        CabalMark(groupId: cabal.groupId, name: cabal.name)
-                    } trailing: {
-                        MoneyText(decimalString: cabal.potValueUsd, style: .row)
+        let rows = holdings.cabals
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            MonacoGroupedList {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, cabal in
+                    NavigationLink {
+                        ProposeAmountView(
+                            service: service,
+                            groupId: cabal.groupId,
+                            stock: stock,
+                            pot: cabal.pot,
+                            onProposed: { _ in onProposed?(cabal.name) }
+                        )
+                    } label: {
+                        MonacoRow(
+                            title: cabal.name,
+                            subtitle: "Pot",
+                            chevron: true,
+                            isLast: index == rows.count - 1
+                        ) {
+                            CabalMark(groupId: cabal.groupId, name: cabal.name)
+                        } trailing: {
+                            MoneyText(micros: cabal.pot.totalMicros, style: .row)
+                        }
                     }
+                    .buttonStyle(.monacoRow)
+                    .accessibilityIdentifier("pick-cabal-\(cabal.groupId)")
                 }
-                .buttonStyle(.monacoRow)
-                .accessibilityIdentifier("pick-cabal-\(cabal.groupId)")
             }
+            unreachableFooter
         }
     }
 
     @ViewBuilder
     private var sellRows: some View {
-        switch holdings.state {
-        case .loading:
-            skeletonRows
-        case .failed:
+        let rows = holdings.holders
+        if rows.isEmpty, holdings.unreachableCount > 0 {
+            // Some cabals did not answer, so "none of them hold it" is not ours to say.
             EmptyState(
                 title: "Could not check who holds \(ticker)",
+                message: "Some of your cabals did not answer.",
                 actionTitle: "Retry",
-                action: { Task { await holdings.load(cabals: cabals) } }
+                action: reloadHoldings
             )
             .accessibilityIdentifier("group-picker-holdings-failed")
-        case .loaded(let rows) where rows.isEmpty:
+        } else if rows.isEmpty {
             EmptyState(
                 title: "None of your cabals hold \(ticker)",
                 message: "You can propose a buy instead.",
@@ -158,34 +184,63 @@ struct GroupPickerForProposalView: View {
                 action: { kind = .buy }
             )
             .accessibilityIdentifier("group-picker-no-holders")
-        case .loaded(let rows):
-            MonacoGroupedList {
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, holding in
-                    NavigationLink {
-                        ProposeSellAmountView(
-                            service: service,
-                            groupId: holding.groupId,
-                            holding: holding.row,
-                            pot: nil,
-                            onProposed: { _ in onProposed?(holding.name) }
-                        )
-                    } label: {
-                        MonacoRow(
-                            title: holding.name,
-                            subtitle: ProposalShareFormatter.sharesLabel(fromAtomics: holding.row.tokenAmount ?? "0"),
-                            chevron: true,
-                            isLast: index == rows.count - 1
-                        ) {
-                            CabalMark(groupId: holding.groupId, name: holding.name)
-                        } trailing: {
-                            MoneyText(decimalString: holding.row.valueUsd, style: .row)
+        } else {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                MonacoGroupedList {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, cabal in
+                        if let holding = cabal.holding {
+                            NavigationLink {
+                                ProposeSellAmountView(
+                                    service: service,
+                                    groupId: cabal.groupId,
+                                    holding: holding,
+                                    pot: cabal.pot,
+                                    onProposed: { _ in onProposed?(cabal.name) }
+                                )
+                            } label: {
+                                MonacoRow(
+                                    title: cabal.name,
+                                    subtitle: ProposalShareFormatter.sharesLabel(fromAtomics: holding.tokenAmount ?? "0"),
+                                    chevron: true,
+                                    isLast: index == rows.count - 1
+                                ) {
+                                    CabalMark(groupId: cabal.groupId, name: cabal.name)
+                                } trailing: {
+                                    MoneyText(decimalString: holding.valueUsd, style: .row)
+                                }
+                            }
+                            .buttonStyle(.monacoRow)
+                            .accessibilityIdentifier("pick-cabal-\(cabal.groupId)")
                         }
                     }
-                    .buttonStyle(.monacoRow)
-                    .accessibilityIdentifier("pick-cabal-\(holding.groupId)")
                 }
+                unreachableFooter
             }
         }
+    }
+
+    /// Says how many cabals are missing from the list above rather than hiding the whole list.
+    @ViewBuilder
+    private var unreachableFooter: some View {
+        let missing = holdings.unreachableCount
+        if missing > 0 {
+            HStack(spacing: MonacoTheme.Space.xs) {
+                Text(missing == 1 ? "Couldn't check 1 cabal." : "Couldn't check \(missing) cabals.")
+                    .font(MonacoTheme.Typo.caption)
+                    .foregroundStyle(MonacoTheme.muted)
+                Button("Retry", action: reloadHoldings)
+                    .font(MonacoTheme.Typo.caption)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(MonacoTheme.accent)
+            }
+            .padding(.horizontal, MonacoTheme.Space.m)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("group-picker-unreachable")
+        }
+    }
+
+    private func reloadHoldings() {
+        Task { await holdings.load(cabals: cabals) }
     }
 
     private var skeletonRows: some View {

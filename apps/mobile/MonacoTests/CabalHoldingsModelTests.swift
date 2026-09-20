@@ -11,6 +11,7 @@ private typealias HomeGroupBoardRowDTO = Monaco.HomeGroupBoardRowDTO
 @MainActor
 private final class StubCabalHoldingsDataSource: CabalHoldingsDataSource {
     var potsByGroup: [String: [PotRowDTO]] = [:]
+    var potTotalsByGroup: [String: String] = [:]
     var errorsByGroup: [String: Error] = [:]
     var fetched: [String] = []
 
@@ -21,7 +22,7 @@ private final class StubCabalHoldingsDataSource: CabalHoldingsDataSource {
             id: groupId,
             name: groupId,
             treasuryAddress: nil,
-            potTotalUsd: "100.00",
+            potTotalUsd: potTotalsByGroup[groupId] ?? "100.00",
             pot: potsByGroup[groupId] ?? [],
             you: MemberSliceDTO(
                 shareUnits: "1", equityUsd: "1.00", slicePercent: "1", dollarPnl: "+0.00", percentReturn: nil
@@ -62,10 +63,27 @@ struct CabalHoldingsModelTests {
 
         await model.load(cabals: [cabal("a"), cabal("b"), cabal("c")])
 
-        #expect(model.state == .loaded([
-            CabalHoldingsModel.Holding(groupId: "a", name: "Cabal a", row: holding("AAPLx")),
-            CabalHoldingsModel.Holding(groupId: "c", name: "Cabal c", row: holding("AAPLx")),
-        ]))
+        #expect(model.holders.map(\.groupId) == ["a", "c"])
+        #expect(model.holders.map { $0.holding } == [holding("AAPLx"), holding("AAPLx")])
+        // Buy is offered every cabal, in the order they were listed.
+        #expect(model.cabals.map(\.groupId) == ["a", "b", "c"])
+        #expect(model.unreachableCount == 0)
+    }
+
+    /// The blocking review finding: Buy passed `pot: nil` and let the amount step fetch its own.
+    /// The picker owns that load, so every row it offers already carries its cabal's pot.
+    @Test func everyOfferedCabalCarriesThePotTheAmountStepNeeds() async throws {
+        let source = StubCabalHoldingsDataSource()
+        source.potsByGroup = ["a": [holding("AAPLx")], "b": []]
+        source.potTotalsByGroup = ["a": "250.00", "b": "1000.50"]
+        let model = CabalHoldingsModel(symbol: "AAPLx", dataSource: source)
+
+        await model.load(cabals: [cabal("a"), cabal("b")])
+
+        #expect(model.cabals.map(\.pot.totalMicros) == [250_000_000, 1_000_500_000])
+        #expect(model.cabals.map(\.pot.groupId) == ["a", "b"])
+        // The sell row's pot is the same one, so it does not have to be fetched again either.
+        #expect(model.holders.first?.pot.totalMicros == 250_000_000)
     }
 
     @Test func aZeroBalanceRowDoesNotCountAsHolding() async throws {
@@ -75,14 +93,46 @@ struct CabalHoldingsModelTests {
 
         await model.load(cabals: [cabal("a")])
 
-        #expect(model.state == .loaded([]))
+        #expect(model.holders.isEmpty)
+        #expect(model.unreachableCount == 0)
     }
 
-    /// Telling someone none of their cabals hold a stock when a fetch failed would be a lie.
-    @Test func oneFailedFetchIsReportedRatherThanShownAsNoHolders() async throws {
+    /// The other half of the review finding: collapsing the whole picker on one failed fetch
+    /// stopped a member selling from the cabal that demonstrably holds the stock.
+    @Test func aCabalThatAnsweredIsStillOfferedWhenAnotherDidNot() async throws {
         let source = StubCabalHoldingsDataSource()
-        source.potsByGroup = ["a": [holding("AAPLx")]]
+        source.potsByGroup = ["a": [holding("AAPLx")], "c": [holding("AAPLx")]]
         source.errorsByGroup = ["b": Monaco.MonacoAPIError.httpStatus(500)]
+        let model = CabalHoldingsModel(symbol: "AAPLx", dataSource: source)
+
+        await model.load(cabals: [cabal("a"), cabal("b"), cabal("c")])
+
+        #expect(model.holders.map(\.groupId) == ["a", "c"])
+        #expect(model.unreachableCount == 1)
+        #expect(model.state != .failed)
+    }
+
+    /// Telling someone none of their cabals hold a stock when a fetch failed would be a lie:
+    /// the count is what lets the picker say "couldn't check" instead of "nobody holds it".
+    @Test func aCabalThatDidNotAnswerIsCountedRatherThanCountedOut() async throws {
+        let source = StubCabalHoldingsDataSource()
+        source.potsByGroup = ["a": [holding("TSLAx")]]
+        source.errorsByGroup = ["b": Monaco.MonacoAPIError.httpStatus(500)]
+        let model = CabalHoldingsModel(symbol: "AAPLx", dataSource: source)
+
+        await model.load(cabals: [cabal("a"), cabal("b")])
+
+        #expect(model.holders.isEmpty)
+        #expect(model.unreachableCount == 1, "the picker must not claim nobody holds it")
+    }
+
+    /// Nothing answered: there is no partial answer to show, only the failure.
+    @Test func everyCabalFailingIsAFailure() async throws {
+        let source = StubCabalHoldingsDataSource()
+        source.errorsByGroup = [
+            "a": Monaco.MonacoAPIError.httpStatus(500),
+            "b": Monaco.MonacoAPIError.httpStatus(500),
+        ]
         let model = CabalHoldingsModel(symbol: "AAPLx", dataSource: source)
 
         await model.load(cabals: [cabal("a"), cabal("b")])
@@ -107,7 +157,7 @@ struct CabalHoldingsModelTests {
 
         await model.load(cabals: [])
 
-        #expect(model.state == .loaded([]))
+        #expect(model.state == .resolved(cabals: [], unreachable: 0))
         #expect(source.fetched.isEmpty)
     }
 }
