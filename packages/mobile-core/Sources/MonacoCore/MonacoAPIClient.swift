@@ -228,9 +228,10 @@ public final class MonacoAPIClient: @unchecked Sendable {
         route: String,
         accepting: Set<Int> = [200],
         submission: IdempotentSubmission? = nil,
-        mapping: ErrorMapping = .statusOnly
+        mapping: ErrorMapping = .statusOnly,
+        timeout: TimeInterval? = nil
     ) async throws -> MonacoHTTPResponse {
-        let response = try await session.send(request, route: route, submission: submission)
+        let response = try await session.send(request, route: route, timeout: timeout, submission: submission)
         if let error = Self.error(for: response, accepting: accepting, mapping: mapping) {
             throw error
         }
@@ -640,7 +641,12 @@ public final class MonacoAPIClient: @unchecked Sendable {
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = try JSONEncoder().encode(DevBuyRequestDTO(symbol: symbol, usdc: usdc))
 
-        let response = try await send(request, route: "/v1/dev/groups/{id}/buy")
+        // Buys the stock inside the request, so it gets the money budget, not the read one.
+        let response = try await send(
+            request,
+            route: "/v1/dev/groups/{id}/buy",
+            timeout: MonacoRequestTimeout.moneyWrite
+        )
         return try JSONDecoder().decode(DevBuyResponseDTO.self, from: response.data)
     }
 

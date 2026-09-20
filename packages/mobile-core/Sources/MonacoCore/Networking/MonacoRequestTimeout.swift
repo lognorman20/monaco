@@ -13,12 +13,24 @@ public enum MonacoRequestTimeout {
 
     /// Writes that carry an `Idempotency-Key`: fund, cash out, withdraw to balance, leave
     /// with stake. The backend confirms these on chain inside the request, so they need
-    /// room. A retry after this deadline is safe — it goes out under the same key, and the
-    /// backend replays the first answer instead of moving the money again.
+    /// room. A retry after this deadline goes out under the same key, and a backend still
+    /// holding that key replays the first answer instead of moving the money again.
+    ///
+    /// The rule keys off the header, but the dedupe it assumes is per route: only the
+    /// suffixes in `idempotentPathSuffixes` (httpapi/idempotency.go) run the middleware.
+    /// `postRedeem` sends a key to `/redeems`, which is not on that list, so its key is
+    /// inert and the 60s it earns here buys no replay protection. Harmless while the
+    /// endpoint has no callers; adding one means adding the route server-side first.
     public static let moneyWrite: TimeInterval = 60
 
     /// Uploads (profile photo): megabytes on a phone network.
     public static let upload: TimeInterval = 60
+
+    /// Opening a session (`POST /v1/auth/session`). The app's cold-start gate: the handler
+    /// verifies with Privy and provisions a wallet on first sign-in, so it is slow and it
+    /// is not a read. Budgets are enumerated by hand, which means every route that does not
+    /// name one inherits `standard` — a slow non-idempotent route has to name its own.
+    public static let signIn: TimeInterval = 60
 
     /// Ceiling for one request including its 401 refresh-and-retry, set on the session.
     static let resource: TimeInterval = 180

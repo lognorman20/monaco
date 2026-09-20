@@ -66,7 +66,9 @@ final class MonacoAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(SessionRequest(accessToken: accessToken))
 
-        let (data, response) = try await session.data(for: request)
+        // Cold-start gate: a Privy verify plus wallet provisioning on first sign-in, so it
+        // names its own budget rather than inheriting the short read default.
+        let (data, response) = try await session.data(for: request, timeout: MonacoRequestTimeout.signIn)
         guard let http = response as? HTTPURLResponse else {
             throw MonacoAPIError.invalidResponse
         }
