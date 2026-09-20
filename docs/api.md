@@ -75,6 +75,8 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/groups/{id}/view` | The cabal screen in one call: pot, holdings, members, agent. |
 | `GET /v1/groups/{id}/pnl-history` | P&L series for one cabal. |
 | `GET /v1/groups/{id}/activity` | Trade and money activity, agent trades marked. |
+| `POST /v1/groups/{id}/picture` | Set or replace the cabal picture (`multipart/form-data`, field `picture`). Creator only. |
+| `DELETE /v1/groups/{id}/picture` | Remove the cabal picture, falling back to its initials. Creator only. |
 | `POST /v1/groups/{id}/join` | Join, or ask to join when the cabal is by request. |
 | `POST /v1/groups/{id}/leave` ● | Leave a cabal. |
 | `GET /v1/groups/{id}/join-requests` | Pending join requests. |
