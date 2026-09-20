@@ -11,16 +11,30 @@ import SwiftUI
 enum HomeHeroChart: Equatable {
     /// No cabals: there is no curve to wait for.
     case hidden
-    /// The slot, held at the curve's height, with a baseline where the curve will be. It says
-    /// the same thing whether the series is still loading, failed, or came back too short, so
-    /// nothing moves as it resolves.
-    case reserved
+    /// The slot, held at the curve's height, with a baseline where the curve will be.
+    ///
+    /// `hasResolved` is whether a series has actually come back. Until it has, the slot holds
+    /// the height silently — the curve is on its way and saying anything about it would be a
+    /// guess. Only a series that landed and turned out too short to draw is labelled.
+    case reserved(hasResolved: Bool)
     case curve([HomePnLSeriesPointDTO])
 
     /// A flat two-point line reads as broken, so the curve needs three points to earn the slot.
-    static func resolve(points: [HomePnLSeriesPointDTO], hasCabals: Bool) -> HomeHeroChart {
+    ///
+    /// `loaded` is the separate 1H read (#217), nil until it lands or while it is failing.
+    /// `embedded` is the copy the dashboard carries, which the backend currently hard-codes to
+    /// an empty array — so it only counts as an answer when it actually has points. Without
+    /// that distinction every cold start resolves "not read yet" as "read, and empty".
+    static func resolve(
+        loaded: [HomePnLSeriesPointDTO]?,
+        embedded: [HomePnLSeriesPointDTO],
+        hasCabals: Bool
+    ) -> HomeHeroChart {
         guard hasCabals else { return .hidden }
-        return points.count >= 3 ? .curve(points) : .reserved
+        guard let series = loaded ?? (embedded.isEmpty ? nil : embedded) else {
+            return .reserved(hasResolved: false)
+        }
+        return series.count >= 3 ? .curve(series) : .reserved(hasResolved: true)
     }
 }
 
@@ -76,20 +90,26 @@ struct HomeNetWorthSection: View {
                     // The curve bleeds to the card's edges; the caption keeps its inset.
                     .padding(.horizontal, -MonacoTheme.Space.m)
             }
-        case .reserved:
+        case .reserved(let hasResolved):
             slot {
                 ZStack {
                     Rectangle()
                         .fill(MonacoTheme.onHeroMuted.opacity(0.25))
                         .frame(height: 1)
-                    Text("No curve yet")
-                        .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.onHeroMuted)
-                        .padding(.bottom, MonacoTheme.Space.s)
+                    // Silent until a series has actually come back: on a cold start the curve
+                    // lands about a second later, and "No curve yet" in the meantime is a
+                    // sentence the member watches appear and then be taken away.
+                    if hasResolved {
+                        Text("No curve yet")
+                            .font(MonacoTheme.Typo.caption)
+                            .foregroundStyle(MonacoTheme.onHeroMuted)
+                            .padding(.bottom, MonacoTheme.Space.s)
+                    }
                 }
                 .frame(height: Self.chartHeight)
                 .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("home-pnl-chart-empty")
+                .accessibilityHidden(!hasResolved)
+                .accessibilityIdentifier(hasResolved ? "home-pnl-chart-empty" : "home-pnl-chart-pending")
             }
         }
     }

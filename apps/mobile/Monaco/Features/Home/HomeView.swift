@@ -1,4 +1,5 @@
 import MonacoCore
+import os
 import SwiftUI
 
 /// What Home is showing right now. One value instead of a ladder of optionals, so the
@@ -29,6 +30,12 @@ struct HomeView: View {
     @State private var leaderboard = HomeLeaderboardModel()
     @State private var isRetrying = false
     @State private var toast: MonacoToast?
+    /// Advanced only when a vote actually closes, so "Needs your vote" can drop an expired row
+    /// between dashboard polls without putting the whole screen on a 60-second timer.
+    @State private var votesClock = Date()
+    /// The proposal pushed from "Needs your vote". Held here, at the tab root, so the pushed
+    /// screen outlives both the countdown's tick and the row's own expiry.
+    @State private var openProposalId: String?
 
     private var joinedCabals: [HomeGroupBoardRowDTO] {
         session.joinedCabals
@@ -45,6 +52,22 @@ struct HomeView: View {
     /// The range the board on screen was built with, straight from the payload.
     private var loadedLeaderboardRange: String? {
         session.dashboard?.leaderboard.range
+    }
+
+    private var missedProposals: [HomeMissedProposalRowDTO] {
+        session.dashboard?.missedProposals ?? []
+    }
+
+    /// Restarts the expiry wait whenever the dashboard brings a different set of closing times.
+    private var missedVoteExpiries: [Date] {
+        missedProposals.map(\.expiresAt)
+    }
+
+    private var balanceIsUnavailable: Bool {
+        HomeBalanceDisplay.resolve(
+            balance: session.platformBalance,
+            isLoading: session.isBalanceLoading
+        ) == .unavailable
     }
 
     var body: some View {
@@ -67,11 +90,22 @@ struct HomeView: View {
                 profileButton
             }
         }
+        .navigationDestination(item: $openProposalId) { proposalId in
+            ProposalDetailView(auth: auth, proposalId: proposalId)
+        }
         .refreshable {
             await pullToRefresh()
         }
         .onChange(of: loadedLeaderboardRange) { _, _ in
             leaderboard.reconcile(from: leaderboardSource)
+        }
+        .onChange(of: balanceIsUnavailable) { _, unavailable in
+            if unavailable {
+                AppLogger.session.error("Home: account balance unavailable — the balance read left it unset")
+            }
+        }
+        .task(id: missedVoteExpiries) {
+            await advanceVotesClock()
         }
         .pollWhileVisible(every: LiveRefreshCadence.resting) {
             try await session.pollLive(auth: auth)
@@ -103,11 +137,16 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
                 // The 1H series loads after first paint (#217); the slot is sized from the
-                // dashboard so the layout does not move when it lands.
-                let pnlPoints = session.homePnLSeries ?? dashboard.pnlSeries1H
+                // dashboard so the layout does not move when it lands. `homePnLSeries` is nil
+                // until that read finishes, which is what tells the slot to stay silent
+                // instead of announcing an empty curve it has not asked about yet.
                 HomeNetWorthSection(
                     dashboard: dashboard,
-                    chart: HomeHeroChart.resolve(points: pnlPoints, hasCabals: !dashboard.myGroups.isEmpty)
+                    chart: HomeHeroChart.resolve(
+                        loaded: session.homePnLSeries,
+                        embedded: dashboard.pnlSeries1H,
+                        hasCabals: !dashboard.myGroups.isEmpty
+                    )
                 )
 
                 HomeBalanceRowSection(
@@ -115,14 +154,18 @@ struct HomeView: View {
                     balance: session.platformBalance,
                     isBalanceLoading: session.isBalanceLoading,
                     joinedCabals: joinedCabals,
-                    onRetryBalance: { Task { await refreshHome() } }
+                    isRetryingBalance: isRetrying,
+                    // Shares `retryLoad`'s in-flight guard: retrying the balance is the same
+                    // three-request refresh, so it cannot be stacked by tapping repeatedly.
+                    onRetryBalance: { Task { await retryLoad() } }
                 )
 
-                if !dashboard.missedProposals.isEmpty {
-                    HomeMissedVotesSection(
-                        auth: auth,
-                        rows: dashboard.missedProposals
-                    )
+                // Gated on the rows still open rather than on the payload: a section that
+                // renders nothing still takes a `VStack` spacing on each side, which would
+                // leave a doubled gap here until the next dashboard write.
+                let openVotes = HomeMissedVotes.open(dashboard.missedProposals, now: votesClock)
+                if !openVotes.isEmpty {
+                    HomeMissedVotesSection(rows: openVotes, onOpen: { openProposalId = $0 })
                 }
 
                 HomePositionsSection(
@@ -152,8 +195,12 @@ struct HomeView: View {
     private func failedScroll(_ message: String) -> some View {
         ScrollView {
             VStack(spacing: MonacoTheme.Space.s) {
+                // The store's sentence is the explanation, not the heading: as a title it read
+                // "Couldn't load this. Pull down to try again." in bold, trailing period and
+                // all, directly above a "Try again" button saying the same thing again.
                 EmptyState(
-                    title: message,
+                    title: "Couldn't load Home",
+                    message: message,
                     actionTitle: "Try again",
                     action: { Task { await retryLoad() } }
                 )
@@ -181,6 +228,11 @@ struct HomeView: View {
 
     private func pullToRefresh() async {
         await refreshHome()
+        // A refresh the member let go of early is cancelled, and the store returns on
+        // `isRequestCancellation` without touching `errorMessage` — so a message left over
+        // from an earlier read would raise this toast for a read that merely stopped.
+        // See "Needs from other areas": a per-refresh outcome would settle it properly.
+        guard !Task.isCancelled else { return }
         // `refresh` clears the message when it succeeds, so anything left is this read failing.
         // With the board already on screen nothing else would say so.
         if session.dashboard != nil, session.errorMessage != nil {
@@ -190,6 +242,24 @@ struct HomeView: View {
 
     private func refreshHome() async {
         await session.refresh(auth: auth, leaderboardRange: leaderboard.selectedRange)
+    }
+
+    /// Sleeps until the next vote closes, then advances the clock the section is gated on.
+    /// Waking on the expiry itself keeps an expired row from lingering until the next poll
+    /// without re-evaluating Home every minute to check.
+    private func advanceVotesClock() async {
+        while !Task.isCancelled {
+            guard let next = HomeMissedVotes.nextExpiry(missedProposals, after: votesClock) else { return }
+            let wait = next.timeIntervalSinceNow
+            if wait > 0 {
+                do {
+                    try await Task.sleep(for: .seconds(wait))
+                } catch {
+                    return
+                }
+            }
+            votesClock = Date()
+        }
     }
 }
 

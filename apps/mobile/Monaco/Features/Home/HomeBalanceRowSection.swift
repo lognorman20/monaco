@@ -24,6 +24,9 @@ struct HomeBalanceRowSection: View {
     let balance: PlatformBalanceDTO?
     let isBalanceLoading: Bool
     let joinedCabals: [HomeGroupBoardRowDTO]
+    /// Whether the retry this row offers is already running. Retrying the balance is the whole
+    /// Home refresh, so without this the member can stack three of them by tapping.
+    var isRetryingBalance = false
     var onRetryBalance: () -> Void = {}
 
     private var display: HomeBalanceDisplay {
@@ -88,9 +91,10 @@ struct HomeBalanceRowSection: View {
                 .accessibilityIdentifier("platform-balance-unavailable")
             Button("Try again", action: onRetryBalance)
                 .font(MonacoTheme.Typo.callout.weight(.semibold))
-                .foregroundStyle(MonacoTheme.brand)
+                .foregroundStyle(isRetryingBalance ? MonacoTheme.muted : MonacoTheme.brand)
                 .buttonStyle(.plain)
                 .frame(minHeight: 44)
+                .disabled(isRetryingBalance)
                 .accessibilityIdentifier("home-balance-retry")
         }
     }
