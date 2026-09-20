@@ -5,7 +5,7 @@ import UIKit
 
 /// Debug-only: renders Profile from canned `AppSessionStore` data so QA can screenshot
 /// each state without Privy or a backend. Launch with
-/// `-MonacoProfileSample <placeholder|photo|validation|saveFailure|cabals|empty|loading|error>`.
+/// `-MonacoProfileSample <placeholder|photo|validation|saveFailure|saveSuccess|cabals|empty|loading|error>`.
 /// `cabals` and `empty` open scrolled to the bottom so the cabal list is on screen.
 enum ProfileSampleScenario: String, CaseIterable {
     case placeholder
@@ -14,6 +14,9 @@ enum ProfileSampleScenario: String, CaseIterable {
     /// Edit profile open on a valid new name. There is no session here, so tapping Save is
     /// a rejected save — which is how the failure is meant to be readable inside the sheet.
     case saveFailure
+    /// The same sheet with a store that accepts the save, so the other half of the fix — the
+    /// sheet closing first and the toast landing on the uncovered screen — can be seen.
+    case saveSuccess
     case cabals
     case empty
     case loading
@@ -44,11 +47,18 @@ struct ProfileSampleHarness: View {
             ProfileTabView(
                 auth: auth,
                 initialNameDraft: Self.nameDraft(for: scenario),
-                initiallyShowEditProfile: scenario == .validation || scenario == .saveFailure
+                initiallyShowEditProfile: scenario == .validation
+                    || scenario == .saveFailure
+                    || scenario == .saveSuccess,
+                saveName: saveNameOverride
             )
         }
         .defaultScrollAnchor(scenario == .cabals || scenario == .empty ? .bottom : .top)
         .environment(session)
+    }
+
+    private var saveNameOverride: (any DisplayNameSaving)? {
+        scenario == .saveSuccess ? AcceptingNameStore(session: session) : nil
     }
 
     private static func nameDraft(for scenario: ProfileSampleScenario) -> String? {
@@ -57,6 +67,8 @@ struct ProfileSampleHarness: View {
         case .validation: return "Logan Norman of the Weekend Investors"
         // Valid and different from the saved name, so Save is live and can be rejected.
         case .saveFailure: return "Logan N"
+        // Valid and different, and this scenario's store accepts it.
+        case .saveSuccess: return "Logan N"
         default: return nil
         }
     }
@@ -142,6 +154,22 @@ struct ProfileSampleHarness: View {
         } catch {
             return nil
         }
+    }
+}
+
+/// A store that accepts the save, standing in for the profile endpoint. Writes the name back
+/// to the session, so the screen behind the sheet really does show it afterwards.
+private struct AcceptingNameStore: DisplayNameSaving {
+    let session: AppSessionStore
+
+    func saveDisplayName(_ draft: String) async -> ProfileSaveOutcome {
+        guard case .success(let normalized) = DisplayNameRules.normalize(draft) else {
+            return .failed("That name can't be used.")
+        }
+        guard let current = session.me else { return .failed("Your profile is still loading.") }
+        guard normalized != current.displayName else { return .unchanged }
+        session.me = current.withDisplayName(normalized)
+        return .saved
     }
 }
 #endif

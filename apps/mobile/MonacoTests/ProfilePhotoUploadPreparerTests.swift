@@ -1,4 +1,5 @@
 import ImageIO
+import MonacoCore
 import UIKit
 import XCTest
 @testable import Monaco
@@ -52,9 +53,37 @@ final class ProfilePhotoUploadPreparerTests: XCTestCase {
         XCTAssertEqual(ProfilePhotoUploadPreparer.prepare(from: Data()), .failure(.unreadable))
     }
 
-    /// `prepared` must hop off the main actor: this decode/encode is the work that used to
-    /// freeze the picker, spinner and all.
-    func testPrepared_offMainActor_producesTheSameResult() async throws {
+    /// Bytes that were produced and measured over the cap are the only thing allowed to tell
+    /// the member their photo is too big. At the real 2MB cap a 1024px JPEG never gets there,
+    /// which is how this branch shipped untested — so the cap is a parameter.
+    func testPrepare_overTheCapIsTooLarge() throws {
+        let source = try XCTUnwrap(Self.jpeg(width: 2400, height: 1800))
+
+        XCTAssertEqual(
+            ProfilePhotoUploadPreparer.prepare(from: source, maxBytes: 64),
+            .failure(.tooLarge)
+        )
+    }
+
+    /// The decode/encode is what used to freeze the picker, spinner and all, so it must not be
+    /// able to run on the main actor.
+    ///
+    /// The assertion is in two halves. This helper is `nonisolated`, so if `prepare` stopped
+    /// being `nonisolated` — the target defaults every declaration to `@MainActor` — the call
+    /// below would not compile. And the work is checked at run time to have happened on a
+    /// thread that is not the main one, which the previous version of this test, asserting
+    /// only the output pixel size, would have passed without.
+    func testPrepare_runsOffTheMainThreadAndAgreesWithTheMainActorResult() async throws {
+        let source = try XCTUnwrap(Self.jpeg(width: 2400, height: 1800))
+
+        let (offMain, wasOnMainThread) = await Self.prepareOffTheMainActor(source)
+
+        XCTAssertFalse(wasOnMainThread, "the decode and encode must not happen on the main thread")
+        XCTAssertEqual(offMain, ProfilePhotoUploadPreparer.prepare(from: source))
+    }
+
+    /// And `prepared` is the entry point the picker calls, which has to do that hop for it.
+    func testPrepared_hopsOffTheMainActorForTheCaller() async throws {
         let source = try XCTUnwrap(Self.jpeg(width: 2400, height: 1800))
 
         let prepared = try Self.unwrap(await ProfilePhotoUploadPreparer.prepared(from: source))
@@ -63,7 +92,34 @@ final class ProfilePhotoUploadPreparerTests: XCTestCase {
         XCTAssertEqual(max(size.width, size.height), ProfilePhotoUploadPreparer.maxPixelSize)
     }
 
+    /// The member-facing half. Both sentences say what happened and what to do next, and
+    /// neither may reach for the vocabulary the product voice keeps out of the main flows.
+    func testFailureCopy_saysWhatToDoAndPassesTheMainFlowAudit() {
+        XCTAssertEqual(
+            ProfilePhotoUploadPreparer.Failure.unreadable.memberMessage,
+            "That photo could not be opened. Try another."
+        )
+        XCTAssertEqual(
+            ProfilePhotoUploadPreparer.Failure.tooLarge.memberMessage,
+            "That photo is too big to upload. Try another."
+        )
+        XCTAssertTrue(MainFlowCopyAudit.stringsAreClean([
+            ProfilePhotoUploadPreparer.Failure.unreadable.memberMessage,
+            ProfilePhotoUploadPreparer.Failure.tooLarge.memberMessage,
+        ]))
+    }
+
     // MARK: - Helpers
+
+    /// Deliberately `nonisolated`: it is what makes the `prepare` call below a compile-time
+    /// check that the preparer never drifts back onto the main actor.
+    private nonisolated static func prepareOffTheMainActor(
+        _ data: Data
+    ) async -> (Result<ProfilePhotoUploadPreparer.Prepared, ProfilePhotoUploadPreparer.Failure>, Bool) {
+        await Task.detached(priority: .userInitiated) {
+            (ProfilePhotoUploadPreparer.prepare(from: data), Thread.isMainThread)
+        }.value
+    }
 
     private static func unwrap(
         _ result: Result<ProfilePhotoUploadPreparer.Prepared, ProfilePhotoUploadPreparer.Failure>
