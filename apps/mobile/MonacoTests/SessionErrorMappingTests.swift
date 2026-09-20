@@ -7,14 +7,14 @@ struct SessionErrorMappingTests {
 
     @Test func urlErrorMapsToCantReachMonaco() {
         let described = SessionErrorMapping.describe(URLError(.notConnectedToInternet), apiBaseURL: baseURL)
-        #expect(described.message == "Can't reach Monaco. Is the server running?")
+        #expect(described.message == "Can't reach Monaco. Check your connection and try again.")
         #expect(described.debugDetail.contains("notConnectedToInternet"))
         #expect(described.debugDetail.contains(baseURL.absoluteString))
     }
 
     @Test func cannotConnectToHostAlsoMapsToCantReachMonaco() {
         let described = SessionErrorMapping.describe(URLError(.cannotConnectToHost), apiBaseURL: baseURL)
-        #expect(described.message == "Can't reach Monaco. Is the server running?")
+        #expect(described.message == "Can't reach Monaco. Check your connection and try again.")
         #expect(described.debugDetail.contains("cannotConnectToHost"))
     }
 
