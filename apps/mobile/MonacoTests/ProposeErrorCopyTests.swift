@@ -29,6 +29,19 @@ struct ProposeErrorCopyTests {
         )
     }
 
+    @Test func aBuyIsNeverToldTheCabalSoldDownItsHolding() {
+        // Only a sell is checked against the holding. If a buy ever comes back with this message
+        // the app cannot read it, and telling a member buying a stock that "the cabal doesn't hold
+        // that much anymore" is advice about a trade they are not making.
+        let buy = ProposeErrorCopy.propose(refusal(400, "amount exceeds treasury holding"))
+        #expect(buy == ProposeFlowCopy.sendFailed)
+        #expect(buy != ProposeFlowCopy.sellNoLongerAvailable)
+
+        let buyQuote = ProposeErrorCopy.quote(refusal(400, "amount exceeds treasury holding"))
+        #expect(buyQuote == ProposeFlowCopy.priceCheckFailed)
+        #expect(buyQuote != ProposeFlowCopy.sellNoLongerAvailable)
+    }
+
     @Test func aStockTheCabalCannotBuyNamesTheStock() {
         #expect(
             ProposeErrorCopy.propose(refusal(400, "quote not routable"), stockName: "Apple")
