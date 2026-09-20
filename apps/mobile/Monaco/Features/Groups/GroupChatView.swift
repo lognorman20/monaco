@@ -25,6 +25,10 @@ struct GroupChatView: View {
     @State private var unreadCount = 0
     /// Bumped to ask the thread to scroll to the newest message.
     @State private var scrollToBottomRequests = 0
+    /// Set to the row that must stay put after older messages are prepended above it.
+    @State private var keepInViewRowID: String?
+    /// False until the reader drags the thread themselves; until then it stays at the end.
+    @State private var readerControlsScroll = false
     @State private var refreshGate = RefreshGate()
     @FocusState private var composerFocused: Bool
 
@@ -69,6 +73,10 @@ struct GroupChatView: View {
             try await pollNewest()
         }
         .monacoToast($toast)
+        // `.contain`, not a bare identifier: an identifier on its own was being applied to
+        // every descendant, so the composer, the send button and the thread all reported
+        // themselves as "group-chat-view" and nothing on this screen could be addressed.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("group-chat-view")
     }
 
@@ -139,7 +147,11 @@ struct GroupChatView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12)
             }
-            .defaultScrollAnchor(.bottom)
+            // Only the opening position. A plain `.defaultScrollAnchor(.bottom)` also anchors
+            // *size changes* to the bottom, which drags the view down whenever a message is
+            // appended — the yank this screen is meant to stop, under the explicit scroll.
+            // Following the thread is a decision now, made in `apply`, not an anchor.
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
             .scrollDismissesKeyboard(.interactively)
             .refreshable {
                 await refreshGate.runNow { await loadNewest() }
@@ -151,17 +163,39 @@ struct GroupChatView: View {
                 isPinnedToBottom = isAtBottom
                 if isAtBottom { unreadCount = 0 }
             }
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, _ in
+                // A LazyVStack lays out from an estimated content size, so the opening
+                // anchor comes to rest short of the newest message and every realised row
+                // moves it again. Until the reader takes the thread over, keep them at the
+                // end — which is also the right behaviour for a message arriving while
+                // they sit there.
+                guard !readerControlsScroll else { return }
+                proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+            }
+            .onScrollPhaseChange { _, phase in
+                // A drag, not our own animated scroll: from here the position is theirs.
+                if phase == .interacting { readerControlsScroll = true }
+            }
             .onChange(of: scrollToBottomRequests) { _, _ in
                 withAnimation(.easeOut(duration: 0.2)) {
                     proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                 }
             }
+            .onChange(of: keepInViewRowID) { _, rowID in
+                // "Load earlier" prepended a page above the reader. Put the row they were
+                // on back where it was, with no animation, so nothing appears to move.
+                guard let rowID else { return }
+                proxy.scrollTo(rowID, anchor: .top)
+                keepInViewRowID = nil
+            }
+            // Identifier on the scroll view itself, before the overlay: applied after, it
+            // would be handed to the pill too and the pill could not be addressed.
+            .accessibilityIdentifier("group-chat-thread")
             .overlay(alignment: .bottom) {
                 if unreadCount > 0 {
                     newMessagesPill
                 }
             }
-            .accessibilityIdentifier("group-chat-thread")
         }
     }
 
@@ -287,9 +321,12 @@ struct GroupChatView: View {
         guard let cursor = timeline.olderCursor, !isLoadingOlder, let service = makeService() else { return }
         isLoadingOlder = true
         defer { isLoadingOlder = false }
+        // The row at the top right now is the one the reader is looking at.
+        let topRowID = timeline.rows.first?.id
         do {
             let page = try await service.listGroupMessages(groupId: groupId, before: cursor, limit: pageSize)
             timeline.mergeOlder(page)
+            keepInViewRowID = topRowID
         } catch is CancellationError {
             return
         } catch {

@@ -291,6 +291,7 @@ struct ProfileTabView: View {
                 }
                 .accessibilityIdentifier("profile-sign-out-confirm")
                 Button("Cancel", role: .cancel) {}
+                    .accessibilityIdentifier("profile-sign-out-cancel")
             } message: {
                 Text("Your money stays where it is. You'll need a new code by text to sign back in.")
             }
