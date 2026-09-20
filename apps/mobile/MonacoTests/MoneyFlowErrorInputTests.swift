@@ -46,6 +46,42 @@ final class MoneyFlowErrorInputTests: XCTestCase {
         XCTAssertTrue(failure.isRetryable)
     }
 
+    /// A failed refresh is rewritten into a URLError that keeps the underlying code, and the
+    /// commonest one is `.notConnectedToInternet` — which is also in `neverSentURLErrorCodes`.
+    /// Matched in the wrong order the offline branch swallows it and the sign-in branch is
+    /// dead for exactly the case it was added for.
+    func testRefreshFailure_takesTheSignInBranch_evenWhenItLooksOffline() {
+        let refreshFailedOffline = URLError(
+            .notConnectedToInternet,
+            userInfo: [monacoTokenRefreshFailedErrorKey: true]
+        )
+        let input = FlowErrorInput(refreshFailedOffline)
+        XCTAssertTrue(input.isSignInUnavailable)
+        XCTAssertFalse(input.isOffline)
+        XCTAssertEqual(
+            MoneyFlowCopy.cashOutFailure(input).message,
+            "We couldn't check your sign-in, so we didn't cash out."
+        )
+        // A plain offline error still takes the offline branch.
+        XCTAssertEqual(FlowErrorInput(URLError(.notConnectedToInternet)), .offline())
+    }
+
+    /// Neither is given a fabricated status: an unreadable reply is genuinely unconfirmed,
+    /// and a blocked leave never reaches money copy (GroupDetailView words it itself).
+    /// A status here would word either one as an in-flight money request.
+    func testCoreInvalidResponseAndLeaveBlocked_stayStatusless() {
+        for error in [
+            MonacoCore.MonacoAPIError.invalidResponse,
+            MonacoCore.MonacoAPIError.leaveBlocked(.pendingRedeem),
+        ] {
+            let input = FlowErrorInput(error)
+            XCTAssertNil(input.status, "\(error)")
+            XCTAssertFalse(input.isOffline, "\(error)")
+            XCTAssertFalse(input.isSignInUnavailable, "\(error)")
+            XCTAssertEqual(MoneyFlowCopy.fundCabalFailure(input), MoneyFlowCopy.unconfirmed, "\(error)")
+        }
+    }
+
     func testAmbiguousFailures_areUnconfirmed() {
         XCTAssertEqual(MoneyFlowCopy.cashOutFailure(FlowErrorInput(URLError(.timedOut))), MoneyFlowCopy.unconfirmed)
         XCTAssertEqual(MoneyFlowCopy.cashOutFailure(FlowErrorInput(URLError(.networkConnectionLost))), MoneyFlowCopy.unconfirmed)
