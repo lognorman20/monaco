@@ -224,6 +224,25 @@ final class MonacoHTTPTransportTests: XCTestCase {
         _ = await (read, write)
     }
 
+    /// The budgets only reach a real request if the default client is actually on Monaco's
+    /// session. Nothing pinned that, so a default argument slipping back to `.shared` would
+    /// have put every request on the 60s one-size-fits-all deadline with no test failing.
+    func testDefaultClient_runsOnMonacosOwnSession_notTheSharedOne() throws {
+        let transportSession = try XCTUnwrap(Self.session(in: MonacoHTTPTransport()))
+        XCTAssertTrue(transportSession === URLSession.monaco)
+        XCTAssertFalse(transportSession === URLSession.shared)
+
+        let transport = try XCTUnwrap(
+            Mirror(reflecting: MonacoAPIClient()).children
+                .first { $0.label == "session" }?.value as? MonacoHTTPTransport
+        )
+        XCTAssertTrue(try XCTUnwrap(Self.session(in: transport)) === URLSession.monaco)
+    }
+
+    private static func session(in transport: MonacoHTTPTransport) -> URLSession? {
+        Mirror(reflecting: transport).children.first { $0.label == "session" }?.value as? URLSession
+    }
+
     func test401_withoutBearerToken_isNotRetried() async throws {
         let refreshes = Recorder<String>()
         MockURLProtocol.requestHandler = { [self] request in respond(request, status: 401) }

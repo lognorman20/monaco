@@ -31,6 +31,12 @@ public final class IdempotentSubmission: @unchecked Sendable {
     /// True while a submission is waiting for a final answer. A retry of the same payload
     /// is a replay the backend has already seen; a changed payload is a second submission,
     /// so a screen should say so before it lets the member edit the amount.
+    ///
+    /// This is a snapshot taken under the lock, not a reservation. The key is minted inside
+    /// the send, so it reads false between the member's tap and the request being built: a
+    /// screen that gates an edit on it must read it on the same actor that owns the
+    /// submission (the `@MainActor` screen that drives the send), or it can observe the gap
+    /// and let the edit through while a send is starting.
     public var hasPendingKey: Bool {
         lock.lock()
         defer { lock.unlock() }
