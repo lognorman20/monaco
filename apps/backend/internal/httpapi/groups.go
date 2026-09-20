@@ -217,8 +217,7 @@ func (h *GroupHandlers) LeaveGroupHandler(w http.ResponseWriter, r *http.Request
 		}
 		var leaveErr *app.LeaveGroupError
 		if errors.As(err, &leaveErr) {
-			writeLeaveConflict(w, leaveErr.Reason, leaveConflictMessage(leaveErr.Reason))
-			log.done(ctx, "leave_blocked", http.StatusConflict, "group_id", groupID, "reason", string(leaveErr.Reason))
+			logJSONErrorWithReason(ctx, log, "leave_blocked", w, http.StatusConflict, leaveConflictMessage(leaveErr.Reason), string(leaveErr.Reason), "group_id", groupID)
 			return
 		}
 		logJSONError(ctx, log, "leave_group_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
@@ -226,12 +225,6 @@ func (h *GroupHandlers) LeaveGroupHandler(w http.ResponseWriter, r *http.Request
 	}
 	w.WriteHeader(http.StatusNoContent)
 	logNoContent(ctx, log, "left", "group_id", groupID)
-}
-
-func writeLeaveConflict(w http.ResponseWriter, reason app.LeaveBlockReason, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusConflict)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": message, "reason": string(reason)})
 }
 
 func leaveConflictMessage(reason app.LeaveBlockReason) string {

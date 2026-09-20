@@ -114,6 +114,10 @@ func (h *PlatformWithdrawHandlers) GetPlatformWithdrawalHandler(w http.ResponseW
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "withdrawal_id", withdrawalID)
 			return
 		}
+		if errors.Is(err, app.ErrUserNotFound) {
+			logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", "withdrawal_id", withdrawalID)
+			return
+		}
 		if errors.Is(err, app.ErrPlatformWithdrawalNotFound) {
 			logJSONError(ctx, log, "not_found", w, http.StatusNotFound, "withdrawal not found", "withdrawal_id", withdrawalID)
 			return
