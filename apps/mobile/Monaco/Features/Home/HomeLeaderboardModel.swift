@@ -1,5 +1,6 @@
 import MonacoCore
 import Observation
+import os
 import SwiftUI
 
 /// The dashboard read behind Home's "Top investors" board. `AppSessionStore` owns the
@@ -72,6 +73,8 @@ final class HomeLeaderboardModel {
     /// Nothing is re-requested while a read is in flight or after one failed, so a server that
     /// keeps answering with a different range cannot spin this into a loop.
     func reconcile(from source: HomeLeaderboardDashboardSource) {
+        // An echo this build cannot read says nothing about whether the board drifted, so the
+        // member's choice and any existing state stand.
         guard let loaded = source.loadedRange else { return }
         guard loaded != selectedRange else {
             failed = false
@@ -96,8 +99,23 @@ final class HomeLeaderboardModel {
         guard !Task.isCancelled, requested == selectedRange else { return }
         isLoading = false
         // The store swallows its own read failures, so the range echoed in the payload is the
-        // only proof the read landed.
-        failed = source.loadedRange != requested
+        // only proof the read landed. An echo this build cannot read is not that proof either
+        // way — a range added server-side, or an echo the backend starts normalising, would
+        // otherwise put every member on "Couldn't load the board" for a payload that arrived
+        // perfectly well. Unknown means leave the board alone, not show an error.
+        guard let loaded = source.loadedRange else {
+            failed = false
+            AppLogger.session.error(
+                "Home leaderboard: dashboard echoed a range this build cannot read; treating the \(requested.rawValue, privacy: .public) read as unknown"
+            )
+            return
+        }
+        failed = loaded != requested
+        if failed {
+            AppLogger.session.error(
+                "Home leaderboard: asked for \(requested.rawValue, privacy: .public), dashboard came back as \(loaded.rawValue, privacy: .public)"
+            )
+        }
     }
 }
 
