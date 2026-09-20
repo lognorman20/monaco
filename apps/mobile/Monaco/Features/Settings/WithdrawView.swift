@@ -68,7 +68,8 @@ struct WithdrawView: View {
                         amountText: $amountText,
                         max: maxDollars,
                         presets: [.fraction(1, label: "Max")],
-                        helper: balanceHelper
+                        helper: balanceHelper,
+                        showsKeyboardDoneButton: true
                     )
 
                     VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {

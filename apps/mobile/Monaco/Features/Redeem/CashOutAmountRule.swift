@@ -60,6 +60,40 @@ enum CashOutAmountRule {
         }
     }
 
+    /// What a sale puts on the wire.
+    enum Sale: Equatable {
+        /// Close the position outright: the request carries no share amount at all. Sending a
+        /// share amount for a full exit is what strands dust in the first place, because those
+        /// units are a rounded conversion of a dollar figure and land a hair short of the slice.
+        case wholeSlice
+        /// A partial sale of exactly this many share units.
+        case units(Int64)
+
+        /// `shareAmountMicros` on the withdraw request. `nil` is the full exit.
+        var shareAmountMicros: Int64? {
+            switch self {
+            case .wholeSlice: return nil
+            case .units(let units): return units
+            }
+        }
+    }
+
+    /// The sale a verdict and a unit count add up to, or `nil` when there is nothing to send.
+    ///
+    /// This is the one decision on the screen that can turn a member's typed partial sale into a
+    /// full position exit, so it lives here where it can be tested rather than inline in the
+    /// submit path.
+    static func sale(for verdict: Verdict, selectedShareUnits: Int64) -> Sale? {
+        switch verdict {
+        case .sellsWholeSlice:
+            return .wholeSlice
+        case .ok:
+            return selectedShareUnits > 0 ? .units(selectedShareUnits) : nil
+        case .noAmount, .belowMinimum, .overSlice:
+            return nil
+        }
+    }
+
     static func maySubmit(_ verdict: Verdict) -> Bool {
         switch verdict {
         case .ok, .sellsWholeSlice: return true
@@ -78,6 +112,19 @@ enum CashOutAmountRule {
         case .noAmount, .overSlice, .sellsWholeSlice, .ok:
             // Over the slice is the amount pad's own message.
             return nil
+        }
+    }
+
+    /// The line under the pad saying what this sale does.
+    ///
+    /// Once the dust rule promotes a sale to a full exit, "We sell this much of your slice" is the
+    /// wrong picture of what is about to happen — the whole slice goes, not the typed part of it.
+    static func explainer(for verdict: Verdict) -> String {
+        switch verdict {
+        case .sellsWholeSlice:
+            return "This cashes out your whole slice. The cash moves to your account balance, and you stay in the cabal with nothing in the pot."
+        case .noAmount, .belowMinimum, .overSlice, .ok:
+            return "We sell this much of your slice and move the cash to your account balance. You stay in the cabal."
         }
     }
 

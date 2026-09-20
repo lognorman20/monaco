@@ -15,36 +15,48 @@ import MonacoCore
 /// keep their previous status and come round on the next poll, so none are lost.
 enum DepositFailureToastTracker {
     private static let failed = "failed"
-    /// Deposit id → the state this screen last saw it in. Pruned to what is on screen, so it
-    /// cannot grow without bound as cabals are opened.
+
+    /// Deposit id → the state this screen last saw it in. Ids are unique across cabals, so one map
+    /// serves them all.
+    ///
+    /// It is deliberately *not* rebuilt from the batch in hand. Pruning to the items just passed
+    /// meant opening cabal B dropped everything known about cabal A: coming back to A, every
+    /// deposit looked first-seen, and a fund that failed while the member was away was read as
+    /// history and never announced. Entries are kept in the order they were first seen and the
+    /// oldest go once there are more than `capacity`, which is what bounds the map instead.
     private static var lastSeenState: [String: String] = [:]
+    private static var firstSeenOrder: [String] = []
+    private static let capacity = 500
 
     static func consumeNewFailures(from items: [GroupActivityItemDTO]) -> [GroupActivityItemDTO] {
         let deposits = items.filter { $0.kind.lowercased() == "deposit" }
-        var nextState: [String: String] = [:]
         var announced: GroupActivityItemDTO?
 
         for item in deposits {
             let state = state(of: item)
             let previous = lastSeenState[item.id]
             let justFailed = previous != nil && previous != failed && state == failed
-            if justFailed, announced == nil {
-                announced = item
-                nextState[item.id] = state
-            } else if justFailed {
-                // Hold the old state so the next poll still sees the change and announces it.
-                nextState[item.id] = previous
-            } else {
-                nextState[item.id] = state
+            if justFailed, announced != nil {
+                // Leave the old state in place so the next poll still sees the change and
+                // announces it. The caller only shows one toast at a time.
+                continue
             }
+            if justFailed { announced = item }
+            record(item.id, as: state)
         }
 
-        lastSeenState = nextState
         return announced.map { [$0] } ?? []
     }
 
+    private static func record(_ id: String, as state: String) {
+        guard lastSeenState.updateValue(state, forKey: id) == nil else { return }
+        firstSeenOrder.append(id)
+        guard firstSeenOrder.count > capacity else { return }
+        lastSeenState.removeValue(forKey: firstSeenOrder.removeFirst())
+    }
+
     static func message(for item: GroupActivityItemDTO) -> String {
-        "Fund failed. \(UsdAmountFormatter.format(micros: item.amountMicros)) didn't reach the cabal"
+        "Couldn't add \(UsdAmountFormatter.format(micros: item.amountMicros)) to the cabal"
     }
 
     /// The three states worth telling apart, from the many strings the backend sends
@@ -58,8 +70,11 @@ enum DepositFailureToastTracker {
         return status.lowercased()
     }
 
+    #if DEBUG
     /// Tests drive a fresh screen; the process-wide memory must not leak between them.
     static func resetForTesting() {
         lastSeenState = [:]
+        firstSeenOrder = []
     }
+    #endif
 }

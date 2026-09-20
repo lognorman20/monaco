@@ -34,11 +34,12 @@ struct SellCabalView: View {
                         ],
                         helper: helperLine,
                         overLimitHelper: "More than your slice",
-                        problem: CashOutAmountRule.problem(for: verdict)
+                        problem: CashOutAmountRule.problem(for: verdict),
+                        showsKeyboardDoneButton: true
                     )
                     .padding(.top, MonacoTheme.Space.xl)
                     .accessibilityIdentifier("sell-cabal-amount-display")
-                    Text("We sell this much of your slice and move the cash to your account balance. You stay in the cabal.")
+                    Text(CashOutAmountRule.explainer(for: verdict))
                         .font(MonacoTheme.Typo.caption)
                         .foregroundStyle(MonacoTheme.muted)
                         .multilineTextAlignment(.center)
@@ -157,19 +158,19 @@ struct SellCabalView: View {
         // The disabled state only lands on the next render; a second tap in the same frame
         // must not sell the slice twice.
         guard !isSubmitting, let token = auth.accessToken, canSubmit else { return }
+        // A full exit sends no share amount, so the backend closes the position outright. That is
+        // also how a sale that would have stranded a sub-floor remainder goes out.
+        guard let sale = CashOutAmountRule.sale(for: verdict, selectedShareUnits: selectedShareUnits) else { return }
         isSubmitting = true
         defer { isSubmitting = false }
 
         let soldMicros = selectedUsdMicros
-        // A full exit sends no share amount, so the backend closes the position outright. That is
-        // also how a sale that would have stranded a sub-floor remainder goes out.
-        let shareAmount = verdict == .sellsWholeSlice ? nil : selectedShareUnits
 
         do {
             _ = try await apiClient.withdrawToBalance(
                 accessToken: token,
                 groupId: groupId,
-                shareAmountMicros: shareAmount,
+                shareAmountMicros: sale.shareAmountMicros,
                 submission: sellSubmission
             )
             let success = MonacoToast(
