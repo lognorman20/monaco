@@ -110,11 +110,11 @@ func TestFlashProvider_buy_signsOrderMessageAndSubmits(t *testing.T) {
 	provider := newTestProvider(client, signer, setup)
 
 	// Act
-	sub, err := provider.SubmitBuy(context.Background(), testBuyRequest())
+	sub, err := submitBuy(provider, testBuyRequest())
 
 	// Assert
 	if err != nil {
-		t.Fatalf("SubmitBuy() error = %v", err)
+		t.Fatalf("submitBuy() error = %v", err)
 	}
 	if sub.RequestID != FakeOrderID("quote-1") || sub.Receipt != testFunder {
 		t.Fatalf("unexpected submission %+v", sub)
@@ -150,10 +150,10 @@ func TestFlashProvider_sell_quotesTargetUnits(t *testing.T) {
 	RegisterQuotes(client, "sell", testAAPLxMint, "0.01", readyQuote("quote-sell", testAAPLxMint, 1_000_000))
 	provider := newTestProvider(client, newRecordingSigner(), &recordingSetup{})
 
-	sub, err := provider.SubmitSell(context.Background(), testSellRequest())
+	sub, err := submitSell(provider, testSellRequest())
 
 	if err != nil {
-		t.Fatalf("SubmitSell() error = %v", err)
+		t.Fatalf("submitSell() error = %v", err)
 	}
 	got := Submissions(client)[0].Quote
 	if got.Side != "sell" || got.TargetAsset != testAAPLxMint || got.ContraAsset != testUSDCMint || got.Qty != "0.01" {
@@ -178,11 +178,11 @@ func TestFlashProvider_firstTrade_landsSponsoredSetupThenRequotes(t *testing.T) 
 	provider := newTestProvider(client, newRecordingSigner(), setup)
 
 	// Act
-	sub, err := provider.SubmitBuy(context.Background(), testBuyRequest())
+	sub, err := submitBuy(provider, testBuyRequest())
 
 	// Assert
 	if err != nil {
-		t.Fatalf("SubmitBuy() error = %v", err)
+		t.Fatalf("submitBuy() error = %v", err)
 	}
 	if sub.RequestID != FakeOrderID("quote-after-setup") {
 		t.Fatalf("order must use the post-setup quote, got %q", sub.RequestID)
@@ -213,10 +213,10 @@ func TestFlashProvider_setupNeverLands_returnsErrSetupNotConfirmed(t *testing.T)
 	RegisterQuotes(client, "buy", testAAPLxMint, "5", needsSetup)
 	provider := newTestProvider(client, newRecordingSigner(), &recordingSetup{})
 
-	_, err := provider.SubmitBuy(context.Background(), testBuyRequest())
+	_, err := submitBuy(provider, testBuyRequest())
 
 	if !errors.Is(err, ErrSetupNotConfirmed) {
-		t.Fatalf("SubmitBuy() error = %v, want ErrSetupNotConfirmed", err)
+		t.Fatalf("submitBuy() error = %v, want ErrSetupNotConfirmed", err)
 	}
 	if stage, _ := swapprovider.StageOf(err, ""); stage != "onchain_setup" {
 		t.Fatalf("stage = %q, want onchain_setup", stage)
@@ -235,7 +235,7 @@ func TestFlashProvider_setupSubmitFails_doesNotSignOrSubmit(t *testing.T) {
 	signer := newRecordingSigner()
 	provider := newTestProvider(client, signer, &recordingSetup{err: errors.New("privy: rpc down")})
 
-	_, err := provider.SubmitBuy(context.Background(), testBuyRequest())
+	_, err := submitBuy(provider, testBuyRequest())
 
 	if err == nil || len(signer.messages) != 0 || len(Submissions(client)) != 0 {
 		t.Fatalf("err = %v signed = %d submitted = %d", err, len(signer.messages), len(Submissions(client)))
@@ -254,11 +254,11 @@ func TestFlashProvider_quoteExpired_refusesToSign(t *testing.T) {
 	})
 
 	// Act
-	_, err := provider.SubmitBuy(context.Background(), testBuyRequest())
+	_, err := submitBuy(provider, testBuyRequest())
 
 	// Assert
 	if !errors.Is(err, ErrQuoteExpired) {
-		t.Fatalf("SubmitBuy() error = %v, want ErrQuoteExpired", err)
+		t.Fatalf("submitBuy() error = %v, want ErrQuoteExpired", err)
 	}
 	if len(signer.messages) != 0 || len(Submissions(client)) != 0 {
 		t.Fatal("an expired quote must not be signed or submitted")
@@ -280,7 +280,7 @@ func TestFlashProvider_orderMessageMismatch_refusesToSign(t *testing.T) {
 		signer := newRecordingSigner()
 		provider := newTestProvider(client, signer, &recordingSetup{})
 
-		_, err := provider.SubmitBuy(context.Background(), testBuyRequest())
+		_, err := submitBuy(provider, testBuyRequest())
 
 		if err == nil {
 			t.Fatalf("%s: expected error", name)
@@ -301,10 +301,10 @@ func TestFlashProvider_noRoute_mapsToErrNotRoutable(t *testing.T) {
 	RegisterQuoteError(client, "buy", testAAPLxMint, "5", fmt.Errorf("%w: asset not found", ErrNoRoute))
 	provider := newTestProvider(client, newRecordingSigner(), &recordingSetup{})
 
-	_, err := provider.SubmitBuy(context.Background(), testBuyRequest())
+	_, err := submitBuy(provider, testBuyRequest())
 
 	if !errors.Is(err, swapprovider.ErrNotRoutable) {
-		t.Fatalf("SubmitBuy() error = %v, want ErrNotRoutable", err)
+		t.Fatalf("submitBuy() error = %v, want ErrNotRoutable", err)
 	}
 }
 
@@ -315,10 +315,10 @@ func TestFlashProvider_quoteOutage_isNotReportedAsNotRoutable(t *testing.T) {
 	RegisterQuoteError(client, "buy", testAAPLxMint, "5", &APIError{Status: 503, Message: "unavailable"})
 	provider := newTestProvider(client, newRecordingSigner(), &recordingSetup{})
 
-	_, err := provider.SubmitBuy(context.Background(), testBuyRequest())
+	_, err := submitBuy(provider, testBuyRequest())
 
 	if err == nil || errors.Is(err, swapprovider.ErrNotRoutable) {
-		t.Fatalf("SubmitBuy() error = %v, want a non-routability error", err)
+		t.Fatalf("submitBuy() error = %v, want a non-routability error", err)
 	}
 	if stage, _ := swapprovider.StageOf(err, ""); stage != "quote" {
 		t.Fatalf("stage = %q, want quote", stage)
@@ -334,7 +334,7 @@ func TestFlashProvider_signFailsOrShortSignature_doesNotSubmit(t *testing.T) {
 	signer.messageErr = errors.New("privy: sign message status 401")
 	provider := newTestProvider(client, signer, &recordingSetup{})
 
-	_, err := provider.SubmitBuy(context.Background(), testBuyRequest())
+	_, err := submitBuy(provider, testBuyRequest())
 
 	if stage, _ := swapprovider.StageOf(err, ""); err == nil || stage != "sign_treasury" {
 		t.Fatalf("err = %v stage = %q, want sign_treasury failure", err, stage)
@@ -352,7 +352,7 @@ func TestFlashProvider_orderSubmitRejected_returnsStageError(t *testing.T) {
 	SetSubmitError(client, &APIError{Status: 422, Code: "FAILED_PRECONDITION", Message: "delegation does not cover order total"})
 	provider := newTestProvider(client, newRecordingSigner(), &recordingSetup{})
 
-	_, err := provider.SubmitBuy(context.Background(), testBuyRequest())
+	_, err := submitBuy(provider, testBuyRequest())
 
 	stage, requestID := swapprovider.StageOf(err, "")
 	if err == nil || stage != "order_submit" || requestID != "quote-1" {
@@ -370,10 +370,10 @@ func TestFlashProvider_sponsoredDelegate_signsAndEchoesTransaction(t *testing.T)
 	setup := &recordingSetup{}
 	provider := newTestProvider(client, newRecordingSigner(), setup)
 
-	_, err := provider.SubmitBuy(context.Background(), testBuyRequest())
+	_, err := submitBuy(provider, testBuyRequest())
 
 	if err != nil {
-		t.Fatalf("SubmitBuy() error = %v", err)
+		t.Fatalf("submitBuy() error = %v", err)
 	}
 	if got := Submissions(client)[0].SignedSponsoredDelegateTx; got != "signed:"+quote.SponsoredDelegateTx {
 		t.Fatalf("svmSponsoredDelegateTx = %q", got)
@@ -448,6 +448,9 @@ func TestFlashProvider_awaitFill_rejectedOrder_isUnconfirmed(t *testing.T) {
 		if fill.Confirmed {
 			t.Fatalf("%s: a closed unfilled order must not read as confirmed", status)
 		}
+		if !fill.Rejected {
+			t.Fatalf("%s: a closed order with no fills must read as rejected so it can be retried", status)
+		}
 	}
 }
 
@@ -463,6 +466,9 @@ func TestFlashProvider_awaitFill_neverFills_exhaustsUnconfirmed(t *testing.T) {
 
 	if err == nil || fill.Confirmed {
 		t.Fatalf("err = %v confirmed = %v, want exhausted and unconfirmed", err, fill.Confirmed)
+	}
+	if fill.Rejected {
+		t.Fatal("an order that may still fill must not read as rejected")
 	}
 }
 

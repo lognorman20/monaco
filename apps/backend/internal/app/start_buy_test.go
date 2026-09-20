@@ -83,7 +83,6 @@ func TestExecuteOnPass_onlyAfterTallyPassed_callsJupiter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
-	h.App.Swap.SetTreasuryBalances(treasury.SolanaAddress, TreasuryBalances{USDC: 5_000_000})
 	privy.SetTreasuryUSDCBalance(h.App.Privy, treasury.SolanaAddress, 5_000_000)
 
 	proposal, err := h.Governance.CreateProposal(ctx, CreateProposalInput{
@@ -221,6 +220,13 @@ func TestExecuteOnPass_duplicateProposalAndSignature_executesOnce(t *testing.T) 
 
 func seedPassedExecuteProposal(t *testing.T, h executeOnPassHarness, label string) Proposal {
 	t.Helper()
+	return seedPassedExecuteProposalForAmount(t, h, label, 2_000_000)
+}
+
+// seedPassedExecuteProposalForAmount lets one test seed several buys: the fake Jupiter keys
+// quotes (and so request ids) by mint and amount.
+func seedPassedExecuteProposalForAmount(t *testing.T, h executeOnPassHarness, label string, usdcAmount int64) Proposal {
+	t.Helper()
 	ctx := context.Background()
 	sessions := NewSessionService(h.App.Store, h.App.Privy)
 	userID := openTestSession(t, h.App.ISO, sessions, h.App.Privy, label, "Execute Pass")
@@ -230,7 +236,6 @@ func seedPassedExecuteProposal(t *testing.T, h executeOnPassHarness, label strin
 		t.Fatalf("create group: %v", err)
 	}
 	h.App.ISO.TrackGroup(created.GroupID)
-	const usdcAmount int64 = 2_000_000
 	requestID := testRequestID(h.App.ISO, label)
 	signature := testTxSignature(h.App.ISO, label)
 	registerHappyBuy(h.App.Jupiter, h.App.XStocks, jupiter.AAPLxMint, usdcAmount, requestID, signature)
@@ -238,7 +243,6 @@ func seedPassedExecuteProposal(t *testing.T, h executeOnPassHarness, label strin
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
-	h.App.Swap.SetTreasuryBalances(treasury.SolanaAddress, TreasuryBalances{USDC: 5_000_000})
 	privy.SetTreasuryUSDCBalance(h.App.Privy, treasury.SolanaAddress, 5_000_000)
 	proposal, err := h.Governance.CreateProposal(ctx, CreateProposalInput{
 		GroupID:    created.GroupID,
@@ -316,7 +320,7 @@ func TestExecuteOnPass_sellDoesNotChangeMemberShareUnits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
-	h.App.Swap.SetTreasuryBalances(treasury.SolanaAddress, TreasuryBalances{USDC: 1_000_000, XStock: held})
+	privy.SetTreasuryUSDCBalance(h.App.Privy, treasury.SolanaAddress, 1_000_000)
 
 	proposal, err := h.Governance.CreateProposal(ctx, CreateProposalInput{
 		GroupID:     created.GroupID,

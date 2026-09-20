@@ -164,6 +164,51 @@ func TransactionMessage(txBytes []byte) ([]byte, error) {
 	return txBytes[offset:], nil
 }
 
+// SignatureAndBlockhash returns the base58 transaction id (the first signature) and the
+// base58 recent blockhash of a fully signed transaction. The pair is what the chain needs
+// to say whether the transaction landed or can no longer land.
+func SignatureAndBlockhash(txBase64 string) (signature, blockhash string, err error) {
+	txBytes, err := base64.StdEncoding.DecodeString(txBase64)
+	if err != nil {
+		return "", "", fmt.Errorf("decode transaction: %w", err)
+	}
+	signed, err := AllRequiredSignaturesPresent(txBytes)
+	if err != nil {
+		return "", "", err
+	}
+	sigCount, sigOffset, err := decodeCompactU16(txBytes)
+	if err != nil {
+		return "", "", err
+	}
+	if sigCount == 0 || !signed {
+		return "", "", fmt.Errorf("transaction is not fully signed")
+	}
+
+	message, err := TransactionMessage(txBytes)
+	if err != nil {
+		return "", "", err
+	}
+	_, accountKeys, err := parseMessageAccountKeys(message)
+	if err != nil {
+		return "", "", err
+	}
+	headerLen := 3
+	if message[0] == 0x80 {
+		headerLen = 4
+	}
+	countLen, err := compactU16Size(len(accountKeys))
+	if err != nil {
+		return "", "", err
+	}
+	hashStart := headerLen + countLen + len(accountKeys)*ed25519.PublicKeySize
+	hashEnd := hashStart + 32
+	if hashEnd > len(message) {
+		return "", "", fmt.Errorf("transaction message truncated blockhash")
+	}
+	return solanakey.EncodeBase58(txBytes[sigOffset : sigOffset+ed25519.SignatureSize]),
+		solanakey.EncodeBase58(message[hashStart:hashEnd]), nil
+}
+
 func parseMessageAccountKeys(message []byte) (numRequired int, accountKeys [][]byte, err error) {
 	if len(message) < 3 {
 		return 0, nil, fmt.Errorf("transaction message too short")

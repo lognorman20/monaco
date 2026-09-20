@@ -2,6 +2,7 @@ package flash
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -74,25 +75,25 @@ func (p *SwapProvider) Name() string {
 	return swapprovider.NameFlash
 }
 
-// SubmitBuy spends treasury USDC for req.OutputMint.
-func (p *SwapProvider) SubmitBuy(ctx context.Context, req swapprovider.Request) (swapprovider.Submission, error) {
+// PrepareBuy quotes and signs an order spending treasury USDC for req.OutputMint. No order is sent.
+func (p *SwapProvider) PrepareBuy(ctx context.Context, req swapprovider.Request) (swapprovider.Prepared, error) {
 	req.Side = swapprovider.SideBuy
-	return p.submit(ctx, req, req.OutputMint, req.InputMint)
+	return p.prepare(ctx, req, req.OutputMint, req.InputMint)
 }
 
-// SubmitSell spends treasury req.InputMint for USDC.
-func (p *SwapProvider) SubmitSell(ctx context.Context, req swapprovider.Request) (swapprovider.Submission, error) {
+// PrepareSell quotes and signs an order spending treasury req.InputMint for USDC. No order is sent.
+func (p *SwapProvider) PrepareSell(ctx context.Context, req swapprovider.Request) (swapprovider.Prepared, error) {
 	req.Side = swapprovider.SideSell
-	return p.submit(ctx, req, req.InputMint, req.OutputMint)
+	return p.prepare(ctx, req, req.InputMint, req.OutputMint)
 }
 
-func (p *SwapProvider) submit(ctx context.Context, req swapprovider.Request, targetAsset, contraAsset string) (swapprovider.Submission, error) {
+func (p *SwapProvider) prepare(ctx context.Context, req swapprovider.Request, targetAsset, contraAsset string) (swapprovider.Prepared, error) {
 	if req.Wallet.PrivyWalletID == "" || req.Wallet.SolanaAddress == "" {
-		return swapprovider.Submission{}, swapprovider.AtStage("validate", "", fmt.Errorf("flash: treasury wallet is required"))
+		return swapprovider.Prepared{}, swapprovider.AtStage("validate", "", fmt.Errorf("flash: treasury wallet is required"))
 	}
 	qty, err := AtomicsToDecimal(req.Amount, req.InputDecimals)
 	if err != nil {
-		return swapprovider.Submission{}, swapprovider.AtStage("validate", "", err)
+		return swapprovider.Prepared{}, swapprovider.AtStage("validate", "", err)
 	}
 	params := QuoteParams{
 		GroupID:       req.GroupID,
@@ -109,40 +110,44 @@ func (p *SwapProvider) submit(ctx context.Context, req swapprovider.Request, tar
 	quote, err := p.client.Quote(ctx, params)
 	if err != nil {
 		if errors.Is(err, ErrNoRoute) {
-			return swapprovider.Submission{}, fmt.Errorf("%w: %w", swapprovider.ErrNotRoutable, err)
+			return swapprovider.Prepared{}, fmt.Errorf("%w: %w", swapprovider.ErrNotRoutable, err)
 		}
-		return swapprovider.Submission{}, swapprovider.AtStage("quote", "", err)
+		return swapprovider.Prepared{}, swapprovider.AtStage("quote", "", err)
 	}
 
 	if quote.NeedsOnchainSetup() {
 		quote, err = p.runOnchainSetup(ctx, req.Wallet, params, quote)
 		if err != nil {
-			return swapprovider.Submission{}, swapprovider.AtStage("onchain_setup", quote.QuoteID, err)
+			return swapprovider.Prepared{}, swapprovider.AtStage("onchain_setup", quote.QuoteID, err)
 		}
 	}
 
 	if err := p.checkSignable(quote, req); err != nil {
-		return swapprovider.Submission{}, swapprovider.AtStage("check_quote", quote.QuoteID, err)
+		return swapprovider.Prepared{}, swapprovider.AtStage("check_quote", quote.QuoteID, err)
 	}
 
 	signedDelegateTx := ""
 	if quote.SponsoredDelegateTx != "" {
 		signedDelegateTx, err = p.signer.SignTreasuryTransaction(ctx, req.Wallet.PrivyWalletID, quote.SponsoredDelegateTx)
 		if err != nil {
-			return swapprovider.Submission{}, swapprovider.AtStage("sign_delegate", quote.QuoteID, err)
+			return swapprovider.Prepared{}, swapprovider.AtStage("sign_delegate", quote.QuoteID, err)
 		}
 	}
 
 	signature, err := p.signer.SignTreasuryMessage(ctx, req.Wallet.PrivyWalletID, []byte(quote.OrderMessage))
 	if err != nil {
-		return swapprovider.Submission{}, swapprovider.AtStage("sign_treasury", quote.QuoteID, err)
+		return swapprovider.Prepared{}, swapprovider.AtStage("sign_treasury", quote.QuoteID, err)
 	}
 	if len(signature) != ed25519SignatureSize {
 		err := fmt.Errorf("flash: treasury signature is %d bytes, want %d", len(signature), ed25519SignatureSize)
-		return swapprovider.Submission{}, swapprovider.AtStage("sign_treasury", quote.QuoteID, err)
+		return swapprovider.Prepared{}, swapprovider.AtStage("sign_treasury", quote.QuoteID, err)
 	}
 
-	orderID, err := p.client.SubmitOrder(ctx, SubmitOrderParams{
+	deadline, err := strconv.ParseInt(quote.Deadline, 10, 64)
+	if err != nil {
+		return swapprovider.Prepared{}, swapprovider.AtStage("check_quote", quote.QuoteID, fmt.Errorf("flash: invalid quote deadline %q: %w", quote.Deadline, err))
+	}
+	payload, err := json.Marshal(SubmitOrderParams{
 		Quote:                     params,
 		QuoteID:                   quote.QuoteID,
 		UserSignature:             solanakey.EncodeBase58(signature),
@@ -151,9 +156,36 @@ func (p *SwapProvider) submit(ctx context.Context, req swapprovider.Request, tar
 		SignedSponsoredDelegateTx: signedDelegateTx,
 	})
 	if err != nil {
-		return swapprovider.Submission{}, swapprovider.AtStage("order_submit", quote.QuoteID, err)
+		return swapprovider.Prepared{}, swapprovider.AtStage("encode_order", quote.QuoteID, err)
 	}
-	return swapprovider.Submission{RequestID: orderID, Receipt: req.Wallet.SolanaAddress, Request: req}, nil
+	return swapprovider.Prepared{
+		RequestID: quote.QuoteID,
+		ExpiresAt: time.Unix(deadline, 0).UTC(),
+		Payload:   string(payload),
+		Request:   req,
+	}, nil
+}
+
+// Submit posts the signed order. Flash settles with its own transaction and only hands back
+// an order id here, so a Submit whose response is lost cannot be looked up again: only an
+// explicit refusal (auth or 4xx) is reported as ErrNotSubmitted.
+func (p *SwapProvider) Submit(ctx context.Context, prepared swapprovider.Prepared) (swapprovider.Submission, error) {
+	var params SubmitOrderParams
+	if err := json.Unmarshal([]byte(prepared.Payload), &params); err != nil {
+		err = fmt.Errorf("%w: flash: invalid prepared order: %w", swapprovider.ErrNotSubmitted, err)
+		return swapprovider.Submission{}, swapprovider.AtStage("order_submit", prepared.RequestID, err)
+	}
+	orderID, err := p.client.SubmitOrder(ctx, params)
+	if err != nil {
+		var apiErr *APIError
+		refused := errors.Is(err, ErrUnauthorized) ||
+			(errors.As(err, &apiErr) && apiErr.Status >= 400 && apiErr.Status < 500)
+		if refused {
+			err = fmt.Errorf("%w: %w", swapprovider.ErrNotSubmitted, err)
+		}
+		return swapprovider.Submission{}, swapprovider.AtStage("order_submit", prepared.RequestID, err)
+	}
+	return swapprovider.Submission{RequestID: orderID, Receipt: prepared.Request.Wallet.SolanaAddress, Request: prepared.Request}, nil
 }
 
 // runOnchainSetup lands token-account creation and delegation, then re-quotes until
@@ -192,7 +224,7 @@ func (p *SwapProvider) runOnchainSetup(ctx context.Context, wallet swapprovider.
 // checkSignable refuses to sign unless the quote is live and its order message commits
 // to the mint and atomic amount this swap spends.
 func (p *SwapProvider) checkSignable(quote Quote, req swapprovider.Request) error {
-	if quote.OrderMessage == "" || quote.Nonce == "" || quote.Deadline == "" {
+	if quote.QuoteID == "" || quote.OrderMessage == "" || quote.Nonce == "" || quote.Deadline == "" {
 		return fmt.Errorf("flash: quote missing signing payload")
 	}
 	deadline, err := strconv.ParseInt(quote.Deadline, 10, 64)
@@ -258,11 +290,65 @@ func (p *SwapProvider) AwaitFill(ctx context.Context, sub swapprovider.Submissio
 		OrderID:       sub.RequestID,
 		FunderAddress: sub.Receipt,
 	}, cfg)
-	fill := swapprovider.Fill{Confirmed: order.IsFilled(), Signature: order.TransactionID, Status: order.Status}
+	fill := swapprovider.Fill{
+		Confirmed: order.IsFilled(),
+		Rejected:  closedWithoutFill(order),
+		Signature: order.TransactionID,
+		Status:    order.Status,
+	}
 	if err != nil {
 		return fill, err
 	}
+	return fillAmounts(fill, order, req)
+}
 
+// Resolve asks Flash for the order's state. An order id that was never recorded (the process
+// died or the response was lost during Submit) cannot be looked up, so it stays unknown.
+func (p *SwapProvider) Resolve(ctx context.Context, pending swapprovider.PendingSwap) (swapprovider.Resolution, error) {
+	if !pending.Submitted {
+		reason := "flash order id was never recorded; needs manual review"
+		if !pending.ExpiresAt.IsZero() && p.cfg.Now().Before(pending.ExpiresAt) {
+			reason = "submit outcome unknown; quote still live"
+		}
+		return swapprovider.Resolution{Outcome: swapprovider.OutcomeUnknown, Reason: reason}, nil
+	}
+
+	req := pending.Request
+	order, err := p.client.GetOrder(ctx, GetOrderParams{
+		GroupID:       req.GroupID,
+		UserID:        req.UserID,
+		Symbol:        req.Symbol,
+		OrderID:       pending.RequestID,
+		FunderAddress: req.Wallet.SolanaAddress,
+	})
+	if err != nil {
+		return swapprovider.Resolution{}, err
+	}
+	if closedWithoutFill(order) {
+		return swapprovider.Resolution{Outcome: swapprovider.OutcomeFailed, Reason: "flash order " + order.Status + " " + order.CloseReason}, nil
+	}
+	if !order.IsFilled() || order.TransactionID == "" {
+		return swapprovider.Resolution{Outcome: swapprovider.OutcomeUnknown, Reason: "flash order " + order.Status}, nil
+	}
+	fill, err := fillAmounts(swapprovider.Fill{Confirmed: true, Signature: order.TransactionID, Status: order.Status}, order, req)
+	if err != nil {
+		return swapprovider.Resolution{}, err
+	}
+	return swapprovider.Resolution{Outcome: swapprovider.OutcomeFilled, Fill: fill}, nil
+}
+
+// closedWithoutFill reports whether Flash closed the order with nothing filled. A terminal
+// order that carries fill amounts moved funds and is never reported as rejected.
+func closedWithoutFill(order Order) bool {
+	if !order.IsTerminal() || order.IsFilled() {
+		return false
+	}
+	return strings.Trim(order.FilledTargetAmount, "0.") == "" && strings.Trim(order.FilledContraAmount, "0.") == ""
+}
+
+// fillAmounts converts the order's decimal fill totals to atomics on fill.
+func fillAmounts(fill swapprovider.Fill, order Order, req swapprovider.Request) (swapprovider.Fill, error) {
+	var err error
 	// Target is the xStock on both sides; contra is USDC.
 	spent, received := order.FilledContraAmount, order.FilledTargetAmount
 	if req.Side == swapprovider.SideSell {
