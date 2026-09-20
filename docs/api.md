@@ -39,7 +39,9 @@ Set `TRUST_PROXY_HEADERS=true` only behind a proxy that overwrites `X-Forwarded-
 Agent intents do not accept it. A bot must never resend an intent after a timeout or `5xx`
 ([agent trading](agent-trading.md)).
 
-**Limits.** JSON bodies are capped at 64 KiB (profile photo 2 MB). The server write timeout is
+**Limits.** JSON bodies are capped at 64 KiB (chat and comments 16 KiB, `PATCH /v1/me` 4 KiB,
+profile photo 2 MB). Over the cap is `413` on every route; a body that fits but cannot be parsed
+is `400`, as is a message or comment over its character limit. The server write timeout is
 3 minutes because cash out, withdraw, retry and agent intents confirm a Solana transaction
 inside the request; give clients the same patience. Browser origins are refused unless listed in
 `CORS_ALLOWED_ORIGINS`.

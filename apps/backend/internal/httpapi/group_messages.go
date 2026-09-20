@@ -108,13 +108,8 @@ func (h *GroupMessageHandlers) PostGroupMessageHandler(w http.ResponseWriter, r 
 	}
 
 	var req postGroupMessageRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxGroupMessageRequestBytes)).Decode(&req); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			logJSONError(ctx, log, "message_too_long", w, http.StatusBadRequest, "message is too long", "group_id", groupID)
-			return
-		}
-		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body", "group_id", groupID)
+	r.Body = http.MaxBytesReader(w, r.Body, maxGroupMessageRequestBytes)
+	if !decodeJSONBody(ctx, log, w, r, &req, "group_id", groupID) {
 		return
 	}
 

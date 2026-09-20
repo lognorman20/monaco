@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -139,9 +138,8 @@ func (i *Idempotency) Middleware() Middleware {
 
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
-				var tooLarge *http.MaxBytesError
-				if errors.As(err, &tooLarge) {
-					writeJSONError(ctx, w, http.StatusRequestEntityTooLarge, "request body too large")
+				if isBodyTooLarge(err) {
+					writeJSONError(ctx, w, http.StatusRequestEntityTooLarge, bodyTooLargeMessage)
 					return
 				}
 				writeJSONError(ctx, w, http.StatusBadRequest, "invalid request body")
