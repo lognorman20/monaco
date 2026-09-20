@@ -91,7 +91,8 @@ type solanaRPCRequest struct {
 type solanaBlockhashResponse struct {
 	Result struct {
 		Value struct {
-			Blockhash string `json:"blockhash"`
+			Blockhash            string `json:"blockhash"`
+			LastValidBlockHeight uint64 `json:"lastValidBlockHeight"`
 		} `json:"value"`
 	} `json:"result"`
 	Error *struct {
@@ -293,6 +294,13 @@ func (c *HTTPClient) solanaRPCEndpoint() string {
 }
 
 func (c *HTTPClient) getLatestBlockhash(ctx context.Context) ([]byte, error) {
+	blockhash, _, err := c.getLatestBlockhashWithExpiry(ctx)
+	return blockhash, err
+}
+
+// getLatestBlockhashWithExpiry also returns the last block height at which a transaction
+// built on the blockhash can land (0 when the RPC omits it).
+func (c *HTTPClient) getLatestBlockhashWithExpiry(ctx context.Context) ([]byte, uint64, error) {
 	payload, err := json.Marshal(solanaRPCRequest{
 		JSONRPC: "2.0",
 		ID:      1,
@@ -300,51 +308,55 @@ func (c *HTTPClient) getLatestBlockhash(ctx context.Context) ([]byte, error) {
 		Params:  []any{map[string]string{"commitment": "finalized"}},
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.solanaRPCEndpoint(), bytes.NewReader(payload))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		logSolanaRPC("getLatestBlockhash", 0, nil, err)
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		logSolanaRPC("getLatestBlockhash", resp.StatusCode, respBody, err)
-		return nil, err
+		return nil, 0, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		rpcErr := fmt.Errorf("%w: solana rpc status %d: %s", ErrAPI, resp.StatusCode, string(respBody))
 		logSolanaRPC("getLatestBlockhash", resp.StatusCode, respBody, rpcErr)
-		return nil, rpcErr
+		return nil, 0, rpcErr
 	}
 
 	var rpcResp solanaBlockhashResponse
 	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
 		logSolanaRPC("getLatestBlockhash", resp.StatusCode, respBody, err)
-		return nil, err
+		return nil, 0, err
 	}
 	if rpcResp.Error != nil {
 		rpcErr := fmt.Errorf("%w: solana rpc error: %s", ErrAPI, rpcResp.Error.Message)
 		logSolanaRPC("getLatestBlockhash", resp.StatusCode, respBody, rpcErr)
-		return nil, rpcErr
+		return nil, 0, rpcErr
 	}
 	blockhash := strings.TrimSpace(rpcResp.Result.Value.Blockhash)
 	if blockhash == "" {
 		rpcErr := fmt.Errorf("%w: solana rpc missing blockhash", ErrAPI)
 		logSolanaRPC("getLatestBlockhash", resp.StatusCode, respBody, rpcErr)
-		return nil, rpcErr
+		return nil, 0, rpcErr
 	}
 	logSolanaRPC("getLatestBlockhash", resp.StatusCode, nil, nil)
-	return decodeBase58Pubkey(blockhash)
+	decoded, err := decodeBase58Pubkey(blockhash)
+	if err != nil {
+		return nil, 0, err
+	}
+	return decoded, rpcResp.Result.Value.LastValidBlockHeight, nil
 }
 
 // SignSolanaTransaction signs a base64-encoded Solana transaction without broadcasting.
@@ -383,6 +395,15 @@ func (c *HTTPClient) signSolanaTransaction(ctx context.Context, walletID, txBase
 	return rpcResp.Data.SignedTransaction, nil
 }
 
+// isDefiniteRejectionStatus reports a 4xx that means Privy refused the request before
+// broadcasting. 408 and 429 are excluded: the request may be retried or still in flight.
+func isDefiniteRejectionStatus(status int) bool {
+	if status == http.StatusRequestTimeout || status == http.StatusTooManyRequests {
+		return false
+	}
+	return status >= 400 && status < 500
+}
+
 func (c *HTTPClient) signAndSendSolanaTransaction(ctx context.Context, walletID, txBase64 string) (string, error) {
 	payload, err := json.Marshal(walletRPCRequest{
 		Method: "signAndSendTransaction",
@@ -400,6 +421,9 @@ func (c *HTTPClient) signAndSendSolanaTransaction(ctx context.Context, walletID,
 	respBody, status, err := c.doPrivyRequestWithAuthorization(ctx, http.MethodPost, path, payload, "", true)
 	if err != nil {
 		return "", err
+	}
+	if isDefiniteRejectionStatus(status) {
+		return "", fmt.Errorf("%w: %w: sign and send status %d: %s", ErrBroadcastRejected, ErrAPI, status, string(respBody))
 	}
 	if status < 200 || status >= 300 {
 		return "", fmt.Errorf("%w: sign and send status %d: %s", ErrAPI, status, string(respBody))

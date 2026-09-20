@@ -25,6 +25,14 @@ type Client interface {
 	PayUSDC(ctx context.Context, req PayUSDCRequest) (PayUSDCResult, error)
 }
 
+// SweepClient is the sweep poller's view of Privy. Sweeps are split in two so the poller can
+// persist the transaction signature between PrepareSweep and BroadcastSweep.
+type SweepClient interface {
+	MemberUSDCBalance(ctx context.Context, memberAddress string) (int64, error)
+	PrepareSweep(ctx context.Context, req SweepRequest) (PreparedSweep, error)
+	BroadcastSweep(ctx context.Context, prepared PreparedSweep) (SweepResult, error)
+}
+
 // HTTPClient calls Privy REST APIs with app credentials.
 type HTTPClient struct {
 	appID                        string
