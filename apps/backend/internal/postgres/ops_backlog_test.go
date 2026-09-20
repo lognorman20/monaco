@@ -87,7 +87,7 @@ VALUES ($1, $2, 10, 250000, 'payout-wallet', 'paying', $3)`, group.ID, user.ID, 
 	}
 
 	// A settled or credited row is no longer backlog.
-	mustExec(t, db, `UPDATE deposits SET status = 'credited' WHERE id = $1`, deposit.ID)
+	mustExec(t, db, `UPDATE deposits SET status = 'confirmed' WHERE id = $1`, deposit.ID)
 	mustExec(t, db, `UPDATE transactions SET status = 'confirmed' WHERE group_id = $1`, group.ID)
 	mustExec(t, db, `UPDATE redeem_jobs SET status = 'settled' WHERE group_id = $1`, group.ID)
 	after, err := store.GetOpsBacklog(ctx)
