@@ -1,4 +1,5 @@
 import MonacoCore
+import os
 import SwiftUI
 
 /// Where a "Top investors" row leads: the cabals the viewer shares with that member.
@@ -144,6 +145,9 @@ struct UserProfileGroupsView: View {
             }
             groups = []
             failure = .couldNotLoad
+            AppLogger.session.error(
+                "Home: shared cabals read failed — \(String(describing: error), privacy: .public)"
+            )
         }
     }
 }

@@ -22,10 +22,10 @@ struct HomePnLChartSection: View {
 
     private var isUp: Bool { windowChange >= 0 }
 
-    /// What the line says, in one sentence, for VoiceOver.
+    /// What the line says, in one sentence, for VoiceOver — naming the same window the caption
+    /// above the curve names, so the two do not disagree.
     private var accessibilitySummary: String {
-        guard !points.isEmpty else { return "no data" }
-        return PnLSpeech.dollars(String(format: "%+.2f", windowChange)) + " over the window"
+        PnLSpeech.dollars(String(format: "%+.2f", windowChange)) + " over the past hour"
     }
 
     private var chartTint: Color {
@@ -44,7 +44,16 @@ struct HomePnLChartSection: View {
         )
     }
 
+    /// A flat two-point line reads as broken, so the strip draws nothing under three points
+    /// rather than rendering a chart VoiceOver would have to describe as "no data".
+    @ViewBuilder
     var body: some View {
+        if points.count >= 3 {
+            chart
+        }
+    }
+
+    private var chart: some View {
         Chart(points) { point in
             AreaMark(
                 x: .value("Time", point.ts),
