@@ -10,6 +10,8 @@ struct ProposeReviewView: View {
     private let service: ProposeService
 
     @State private var isSending = false
+    /// Idempotency key for the proposal being sent; a retry after a lost response reuses it.
+    @State private var proposeSubmission = IdempotentSubmission()
     @State private var errorMessage: String?
 
     init(service: ProposeService, groupId: String, review: ProposeBuyReview, onProposed: @escaping (_ proposalId: String) -> Void) {
@@ -99,7 +101,8 @@ struct ProposeReviewView: View {
         do {
             let id = try await service.propose(
                 groupId: groupId,
-                draft: .buy(symbol: review.stock.symbol, usdcMicros: review.usdcMicros, thesis: review.thesis)
+                draft: .buy(symbol: review.stock.symbol, usdcMicros: review.usdcMicros, thesis: review.thesis),
+                submission: proposeSubmission
             )
             onProposed(id)
         } catch {

@@ -17,6 +17,8 @@ struct SellCabalView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var amountText = ""
     @State private var isSubmitting = false
+    /// Idempotency key for the cash out in flight; a retry after a lost response reuses it.
+    @State private var sellSubmission = IdempotentSubmission()
     @State private var toast: MonacoToast?
 
     private static let posix = Locale(identifier: "en_US_POSIX")
@@ -147,7 +149,8 @@ struct SellCabalView: View {
             _ = try await apiClient.withdrawToBalance(
                 accessToken: token,
                 groupId: groupId,
-                shareAmountMicros: shareAmount
+                shareAmountMicros: shareAmount,
+                submission: sellSubmission
             )
             let success = MonacoToast(
                 message: "Cashing out \(UsdAmountFormatter.format(micros: soldMicros)). It lands in your balance in about a minute",

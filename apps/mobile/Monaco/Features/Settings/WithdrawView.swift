@@ -12,6 +12,8 @@ struct WithdrawView: View {
     @State private var amountText = ""
     @State private var isLoadingBalance = true
     @State private var isSubmitting = false
+    /// Idempotency key for the withdrawal in flight; a retry after a lost response reuses it.
+    @State private var withdrawalSubmission = IdempotentSubmission()
     @State private var showConfirm = false
     @State private var errorMessage: String?
     /// Shown on the confirm screen, which covers this screen's toast while it is pushed.
@@ -167,7 +169,8 @@ struct WithdrawView: View {
             _ = try await apiClient.createPlatformWithdrawal(
                 accessToken: token,
                 amount: micros,
-                toAddress: address
+                toAddress: address,
+                submission: withdrawalSubmission
             )
             Haptics.success()
             toast = MonacoToast(message: "Cashing out. It lands in about a minute.", isSuccess: true)
