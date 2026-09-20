@@ -1,6 +1,6 @@
 # Agent trading operator guide
 
-Monaco runs trades for a cabal agent. Your bot POSTs intents; Monaco validates and executes via the same Jupiter + Privy treasury path as member votes. Fills stay in the **cabal treasury**.
+Monaco runs trades for a cabal agent. Your bot POSTs intents; Monaco validates and executes through the same swap provider (Jupiter by default, Definitive Flash when `SWAP_PROVIDER=flash`) and Privy treasury path as member votes. Fills stay in the **cabal treasury**.
 
 ## Setup
 
@@ -74,6 +74,8 @@ Success: `{ "intentId", "status": "executed", "transactionId" }`. Swap goes pend
 | **403** | Agent **paused** |
 | **422** | Over allocation, bad symbol, insufficient treasury |
 | **429** | Too many wrong keys for this cabal or from this address; wait `Retry-After` seconds |
+
+**Never resend an intent.** Intents take no idempotency key, and the swap runs inside the request: after a timeout or `5xx` it may already have filled, and sending it again can trade twice. Check the cabal's holdings first.
 
 ## Pause / resume / revoke
 
