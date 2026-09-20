@@ -16,6 +16,8 @@ A valid token with no Monaco user yet gets `404 user not found`: call `POST /v1/
 **Money.** USDC is integer micros (1 USDC = 1,000,000). Timestamps are UTC RFC 3339.
 
 **Rate limits.** Per process, non-GET only. Over budget is `429` with `Retry-After`.
+"Per user" is the verified Privy user, so refreshing a token does not reset it (agent
+callers: per agent key). A bearer token that fails verification is limited per IP only.
 
 | Class | Routes | Per user | Per IP |
 | --- | --- | --- | --- |
@@ -57,7 +59,7 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/me/withdrawals/{id}` | One withdrawal. |
 | `GET /v1/home` | Group and people boards. |
 | `GET /v1/home/dashboard` | Net worth, the caller's cabals, a 1H series, leaderboard and missed proposals in one call. |
-| `GET /v1/home/pnl-series` | The caller's equity series. `range` = `1H`, `1D`, `1W`, `1M`. |
+| `GET /v1/home/pnl-series` | The caller's equity series. `range` = `1H`, `1D`, `1W`, `1M`. At most one point per second, so `ts` is unique at second precision. |
 | `GET /v1/home/missed-proposals` | Proposals the caller missed. |
 | `GET /v1/users/{id}/groups` | Cabals the caller shares with another user. |
 | `POST /v1/groups` | Create a cabal and its treasury. |
