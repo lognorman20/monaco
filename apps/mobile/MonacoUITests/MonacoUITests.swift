@@ -163,9 +163,8 @@ final class MonacoUITests: XCTestCase {
 
         XCTAssertTrue(
             app.buttons["asset-detail-buy"].waitForExistence(timeout: 25)
-                || app.staticTexts["Via Jupiter"].waitForExistence(timeout: 8)
                 || app.otherElements["asset-detail-root"].waitForExistence(timeout: 8)
-                || app.staticTexts["No route for this stock right now."].waitForExistence(timeout: 5),
+                || app.staticTexts["Can't be bought right now."].waitForExistence(timeout: 5),
             "asset detail"
         )
         XCTAssertTrue(
@@ -173,8 +172,6 @@ final class MonacoUITests: XCTestCase {
                 || app.otherElements["asset-detail-chart-loading"].waitForExistence(timeout: 8)
                 || app.staticTexts["No price history for this window yet"].waitForExistence(timeout: 8)
         )
-        XCTAssertTrue(app.otherElements["asset-detail-jupiter"].waitForExistence(timeout: 8)
-            || app.staticTexts["Via Jupiter"].waitForExistence(timeout: 8))
         attachScreenshot(app, name: "issue-156-asset-detail")
 
         let buy = app.buttons["asset-detail-buy"]
@@ -191,7 +188,9 @@ final class MonacoUITests: XCTestCase {
         let cabalRow = app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier BEGINSWITH %@", "pick-cabal-")
         ).firstMatch
-        if cabalRow.waitForExistence(timeout: 6) {
+        // The picker resolves every cabal's pot before it offers a row, so the amount step is
+        // reached with a pot in hand; that fan-out is a request per cabal.
+        if cabalRow.waitForExistence(timeout: 20) {
             cabalRow.tap()
             // Picking a cabal goes straight to the amount step, with no stock-search screen
             // in between and no second push during the transition.
