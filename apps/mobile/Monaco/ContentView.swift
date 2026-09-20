@@ -12,7 +12,9 @@ struct ContentView: View {
     @ViewBuilder
     private var root: some View {
         #if DEBUG
-        if let scenario = ProfileSampleScenario.requested {
+        if let scenario = OnboardingSampleScenario.requested {
+            OnboardingSampleHarness(scenario: scenario, auth: auth)
+        } else if let scenario = ProfileSampleScenario.requested {
             ProfileSampleHarness(scenario: scenario, auth: auth)
         } else if let scenario = HomeSampleScenario.requested {
             HomeSampleHarness(scenario: scenario, auth: auth)

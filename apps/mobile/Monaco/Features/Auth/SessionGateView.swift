@@ -1,22 +1,29 @@
+import MonacoCore
 import SwiftUI
 
-/// Opens the backend session, then the tab shell.
+/// Opens the backend session, then first run or the tab shell.
 struct SessionGateView: View {
     @ObservedObject var auth: PrivyAuthService
     @State private var session = AppSessionStore()
 
-    /// #158 first-login username + tour inserts here. Keep false until that ticket ships.
-    private var needsOnboarding: Bool { false }
+    private var destination: FirstRunDestination {
+        FirstRunGate.destination(for: session.me)
+    }
 
     var body: some View {
         Group {
             // #217: the tabs open as soon as the session exists; Home loads its own data.
-            if session.me != nil {
-                if needsOnboarding {
-                    Color.clear.accessibilityIdentifier("onboarding-hook")
-                } else {
-                    MainTabView(auth: auth)
-                }
+            if destination == .app {
+                MainTabView(auth: auth)
+            } else if destination == .nameSetup {
+                // #158: a new account has no name, and every social surface would call it
+                // "Member". Ask once, here, before anything is on screen under that name.
+                OnboardingNameView(
+                    auth: auth,
+                    save: { await session.updateDisplayName($0, auth: auth, optimistic: false) },
+                    signOut: { await auth.logout() }
+                )
+                .transition(.opacity)
             } else if session.isLoading {
                 SessionGateSkeleton()
             } else if let errorMessage = session.errorMessage {
@@ -49,6 +56,8 @@ struct SessionGateView: View {
             }
         }
         .environment(session)
+        // The name landing is a real step forward, not a flicker: cross-fade it.
+        .animation(.easeInOut(duration: 0.28), value: destination)
         .task(id: auth.accessToken) {
             await session.bootstrap(auth: auth)
         }

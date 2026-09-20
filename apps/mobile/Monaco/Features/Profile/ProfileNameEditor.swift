@@ -23,10 +23,6 @@ struct ProfileNameEditor: View {
         session.me?.displayName ?? ""
     }
 
-    private var validationMessage: String? {
-        DisplayNameRules.validationMessage(for: draft)
-    }
-
     private var normalizedDraft: String? {
         try? DisplayNameRules.normalize(draft).get()
     }
@@ -36,69 +32,31 @@ struct ProfileNameEditor: View {
         return normalizedDraft != savedName
     }
 
-    private var characterCount: Int {
-        draft.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.count
-    }
-
     var body: some View {
         MonacoCard {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-                HStack {
-                    Text("Display name")
-                        .font(MonacoTheme.TypeRole.caption)
-                        .foregroundStyle(MonacoTheme.muted)
-                    Spacer()
-                    Text("\(characterCount)/\(DisplayNameRules.maxLength)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(characterCount > DisplayNameRules.maxLength ? MonacoTheme.destructive : MonacoTheme.muted)
-                        .accessibilityIdentifier("profile-name-count")
-                }
-
-                HStack(spacing: MonacoTheme.Space.s) {
-                    TextField("Name shown on boards", text: $draft)
-                        .font(MonacoTheme.TypeRole.body)
-                        .foregroundStyle(MonacoTheme.ink)
-                        .textInputAutocapitalization(.words)
-                        .autocorrectionDisabled()
-                        .submitLabel(.done)
-                        .focused($isFocused)
-                        .onSubmit { Task { await save() } }
-                        .padding(.horizontal, MonacoTheme.Space.m)
-                        .padding(.vertical, 12)
-                        .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .strokeBorder(
-                                    validationMessage == nil ? MonacoTheme.hairline : MonacoTheme.destructive.opacity(0.6),
-                                    lineWidth: 1
-                                )
-                        }
-                        .accessibilityIdentifier("profile-name-field")
-
-                    Button {
-                        Task { await save() }
-                    } label: {
-                        if isSaving {
-                            ProgressView().tint(MonacoTheme.primaryButtonLabel)
-                        } else {
-                            Text("Save")
-                        }
+            DisplayNameField(
+                draft: $draft,
+                identifierPrefix: "profile-name",
+                label: "Display name",
+                hint: "Shown on leaderboards and in your cabals.",
+                // A name is already set, so emptying the field is a real error here.
+                showsValidationWhenEmpty: !savedName.isEmpty,
+                focus: $isFocused,
+                onSubmit: { Task { await save() } }
+            ) {
+                Button {
+                    Task { await save() }
+                } label: {
+                    if isSaving {
+                        ProgressView().tint(MonacoTheme.primaryButtonLabel)
+                    } else {
+                        Text("Save")
                     }
-                    .buttonStyle(.monacoPrimary)
-                    .fixedSize()
-                    .disabled(!canSave)
-                    .accessibilityIdentifier("profile-name-save")
                 }
-
-                if let validationMessage, !draft.isEmpty || !savedName.isEmpty {
-                    Text(validationMessage)
-                        .font(MonacoTheme.TypeRole.caption)
-                        .foregroundStyle(MonacoTheme.destructive)
-                        .accessibilityIdentifier("profile-name-error")
-                } else {
-                    Text("Shown on leaderboards and in your cabals.")
-                        .monacoSecondaryCaption()
-                }
+                .buttonStyle(.monacoPrimary)
+                .fixedSize()
+                .disabled(!canSave)
+                .accessibilityIdentifier("profile-name-save")
             }
         }
         .onAppear {
