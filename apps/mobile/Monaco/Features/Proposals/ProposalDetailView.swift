@@ -289,24 +289,33 @@ struct ProposalDetailView: View {
     }
 
     /// True when the comment was accepted, which is the composer's cue to clear and stand down.
+    ///
+    /// It answers as soon as the server has taken the comment. Re-reading the thread and the
+    /// proposal is how the server's copy of both catches up; none of it decides whether the post
+    /// was accepted, so the member does not watch a spinner with the keyboard over the thread for
+    /// two more round trips to find out. The comment is shown from the response in the meantime.
     private func postComment(_ body: String) async -> Bool {
         guard !isPosting else { return false }
         isPosting = true
-        defer { isPosting = false }
         let parent = replyTarget
         do {
             let posted = try await service.postComment(proposalId: proposalId, body: body, parentId: parent?.id)
+            isPosting = false
             replyTarget = nil
             Haptics.success()
             toast = MonacoToast(
                 message: parent == nil ? ProposalFeedCopy.commentPosted : ProposalFeedCopy.replyPosted,
                 isSuccess: true
             )
-            await loadComments()
-            await loadProposal()
+            setComments(comments + [posted])
             postedCommentId = posted.id
+            Task {
+                await loadComments()
+                await loadProposal()
+            }
             return true
         } catch {
+            isPosting = false
             toast = MonacoToast(message: ProposalFeedErrorCopy.comment(error))
             return false
         }
