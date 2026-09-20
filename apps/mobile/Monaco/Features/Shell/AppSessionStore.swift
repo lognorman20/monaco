@@ -25,6 +25,9 @@ final class AppSessionStore {
 
     private let apiClient = MonacoAPIClient()
     private var refreshGeneration = 0
+    /// The leaderboard range `dashboard` was last loaded with, so a background poll re-reads
+    /// what is on screen instead of resetting Home's picker.
+    private var dashboardLeaderboardRange: HomeLeaderboardRange = .all
 
     var joinedCabals: [HomeGroupBoardRowDTO] {
         (home?.groups ?? []).filter(\.isJoined)
@@ -50,7 +53,7 @@ final class AppSessionStore {
         do {
             let session = try await apiClient.openSession(accessToken: token)
             if auth.shouldInvalidateBackendSession(serverUserId: session.userId) {
-                await auth.logout()
+                await auth.signOutAfterRejectedSession()
                 return
             }
             auth.recordBackendSession(userId: session.userId)
@@ -59,21 +62,34 @@ final class AppSessionStore {
             await refresh(auth: auth, accessToken: token)
         } catch {
             if error.isRequestCancellation { return }
-            await handleSessionOpenFailure(error, auth: auth)
+            await handleSessionOpenFailure(error, rejectedToken: token, auth: auth)
         }
     }
 
-    /// A 401 here means the token Privy handed us didn't verify against this backend
-    /// — most often a Privy app-id / verification-key mismatch between the app build
-    /// and the backend env, which otherwise looks exactly like "can't log in" with no
-    /// explanation. We still sign out (the token is bad), but we surface *why* on the
-    /// login screen instead of bouncing the user back silently.
-    private func handleSessionOpenFailure(_ error: Error, auth: PrivyAuthService) async {
+    /// A 401 here means the backend would not accept the access token. Tokens last about
+    /// an hour, so first ask Privy for a fresh one: if that yields a different token the
+    /// gate re-runs `bootstrap` with it. Only when Privy has nothing newer is the token
+    /// really bad — most often a Privy app-id / verification-key mismatch between the app
+    /// build and the backend env — and we sign out, saying *why* on the login screen.
+    private func handleSessionOpenFailure(_ error: Error, rejectedToken: String, auth: PrivyAuthService) async {
+        var failure = error
+        if case MonacoAPIError.httpStatus(401) = error {
+            do {
+                if let fresh = try await auth.refreshedAccessToken(replacing: rejectedToken), fresh != rejectedToken {
+                    // `auth.accessToken` changed; SessionGateView's task re-runs bootstrap.
+                    return
+                }
+            } catch {
+                // Couldn't reach Privy to refresh. That's a connection problem, not a bad session.
+                failure = error
+            }
+        }
+
         isLoading = false
-        let mapped = SessionErrorMapping.describe(error, apiBaseURL: Config.apiBaseURL)
+        let mapped = SessionErrorMapping.describe(failure, apiBaseURL: Config.apiBaseURL)
         AppLogger.session.error("POST /v1/auth/session failed: \(mapped.debugDetail, privacy: .public)")
 
-        if case MonacoAPIError.httpStatus(401) = error {
+        if case MonacoAPIError.httpStatus(401) = failure {
             await auth.signOut(reason: mapped.message)
             return
         }
@@ -107,6 +123,7 @@ final class AppSessionStore {
             let loadedDashboard = try await dashboardLoad
             guard generation == refreshGeneration else { return }
             dashboard = loadedDashboard
+            dashboardLeaderboardRange = leaderboardRange
             if let profile = try? await meLoad {
                 me = profile
             }
@@ -122,7 +139,7 @@ final class AppSessionStore {
                 _ = await (deferred, pnlSeries)
             }
         } catch MonacoAPIError.httpStatus(let status) where status == 401 {
-            await auth.logout()
+            await auth.signOutAfterRejectedSession()
         } catch MonacoAPIError.httpStatus {
             guard generation == refreshGeneration else { return }
             errorMessage = "Couldn't load this. Pull down to try again."
@@ -135,6 +152,37 @@ final class AppSessionStore {
         if generation == refreshGeneration {
             isBalanceLoading = false
         }
+    }
+
+    /// One background poll of what Home and Profile show: dashboard, balance, joined cabals, and
+    /// the 1H curve. Unlike `refresh` it never touches `errorMessage` or a loading flag, and it
+    /// only writes values the server actually changed — a poll that fails, or that comes back
+    /// identical, leaves the screen exactly as the member last saw it.
+    ///
+    /// Throws when the dashboard read fails so the caller's poll loop can back off. That includes
+    /// a 401: signing the member out is for a request they made, not one they never saw.
+    func pollLive(auth: PrivyAuthService) async throws {
+        guard let token = auth.accessToken else { return }
+        let generation = refreshGeneration
+        let leaderboardRange = dashboardLeaderboardRange
+
+        async let dashboardLoad = apiClient.getHomeDashboard(accessToken: token, leaderboardRange: leaderboardRange)
+        async let balanceLoad = apiClient.getPlatformBalance(accessToken: token)
+        async let homeLoad = apiClient.getHome(accessToken: token)
+        async let seriesLoad = apiClient.getHomePnLSeries(accessToken: token, range: .oneHour)
+
+        let loadedDashboard = try await dashboardLoad
+        let balance = try? await balanceLoad
+        let boards = try? await homeLoad
+        let series = try? await seriesLoad
+
+        // A pull-to-refresh or a range change started while this was in flight: theirs is newer.
+        guard generation == refreshGeneration, leaderboardRange == dashboardLeaderboardRange,
+              !Task.isCancelled else { return }
+        QuietUpdate.apply(loadedDashboard, over: dashboard) { dashboard = $0 }
+        if let balance { QuietUpdate.apply(balance, over: platformBalance) { platformBalance = $0 } }
+        if let boards { QuietUpdate.apply(boards, over: home) { home = $0 } }
+        if let series { QuietUpdate.apply(series.points, over: homePnLSeries) { homePnLSeries = $0 } }
     }
 
     /// Legacy home boards + popular strip. Does not block Home first paint.
@@ -168,7 +216,7 @@ final class AppSessionStore {
         } catch {
             if error.isRequestCancellation { return }
             if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
-                await auth.logout()
+                await auth.signOutAfterRejectedSession()
             }
         }
     }
@@ -211,7 +259,7 @@ final class AppSessionStore {
         } catch {
             if error.isRequestCancellation { return }
             if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
-                await auth.logout()
+                await auth.signOutAfterRejectedSession()
             }
         }
     }
@@ -224,7 +272,7 @@ final class AppSessionStore {
         } catch {
             if error.isRequestCancellation { return }
             if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
-                await auth.logout()
+                await auth.signOutAfterRejectedSession()
             }
         }
     }
@@ -233,12 +281,13 @@ final class AppSessionStore {
         guard let token = auth.accessToken else { return }
         do {
             dashboard = try await apiClient.getHomeDashboard(accessToken: token, leaderboardRange: leaderboardRange)
+            dashboardLeaderboardRange = leaderboardRange
         } catch {
             if error.isRequestCancellation {
                 return
             }
             if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
-                await auth.logout()
+                await auth.signOutAfterRejectedSession()
             }
         }
     }

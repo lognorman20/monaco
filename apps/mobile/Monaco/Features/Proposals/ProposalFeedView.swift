@@ -18,8 +18,16 @@ struct ProposalFeedView: View {
     /// to say "You voted yes" after the server stops offering the buttons.
     @State private var viewerChoices: [String: String] = [:]
     @State private var toast: MonacoToast?
+    /// Bumped by every load the member caused, so a background poll that was already in flight
+    /// does not write its older answer over theirs.
+    @State private var loadGeneration = 0
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Votes and swaps move in seconds; a feed with nothing in play only needs to notice new proposals.
+    private var pollInterval: Duration {
+        LiveRefreshCadence.watching((proposals[.open] ?? []) + (proposals[.closed] ?? []))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -45,6 +53,9 @@ struct ProposalFeedView: View {
             async let open: Void = load(.open)
             async let closed: Void = load(.closed)
             _ = await (open, closed)
+        }
+        .pollWhileVisible(every: pollInterval) {
+            try await pollBothTabs()
         }
         .monacoToast($toast)
         .accessibilityElement(children: .contain)
@@ -99,7 +110,25 @@ struct ProposalFeedView: View {
         }
     }
 
+    /// Background re-read of both tabs. Writes only what changed, and never the failure state:
+    /// a poll that throws leaves the cards as they are and lets the loop back off.
+    private func pollBothTabs() async throws {
+        guard votingIDs.isEmpty else { return }
+        let generation = loadGeneration
+        async let open = service.listProposals(groupId: groupId, tab: .open)
+        async let closed = service.listProposals(groupId: groupId, tab: .closed)
+        let loaded: [ProposalFeedTab: [ProposalDTO]] = [.open: try await open, .closed: try await closed]
+        guard generation == loadGeneration, votingIDs.isEmpty, !Task.isCancelled else { return }
+        for (tab, fresh) in loaded {
+            QuietUpdate.apply(fresh, over: proposals[tab]) { value in
+                withAnimation(reduceMotion ? nil : .snappy) { proposals[tab] = value }
+            }
+            if failedTabs.contains(tab) { failedTabs.remove(tab) }
+        }
+    }
+
     private func load(_ tab: ProposalFeedTab) async {
+        loadGeneration += 1
         do {
             let loaded = try await service.listProposals(groupId: groupId, tab: tab)
             withAnimation(reduceMotion ? nil : .snappy) {

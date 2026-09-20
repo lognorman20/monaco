@@ -279,8 +279,6 @@ enum GroupActivityRules {
     }
 
     static func parseDate(_ raw: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
+        SharedFormatters.iso8601Date(from: raw)
     }
 }

@@ -38,11 +38,13 @@ private struct APIErrorBody: Decodable {
 
 final class MonacoAPIClient {
     private let baseURL: URL
-    private let session: URLSession
+    /// Every request goes through the transport so an expired access token is
+    /// refreshed and the request retried once instead of signing the user out.
+    private let session: MonacoHTTPTransport
 
     init(baseURL: URL = Config.apiBaseURL, session: URLSession = .shared) {
         self.baseURL = baseURL
-        self.session = session
+        self.session = MonacoHTTPTransport(session: session)
     }
 
     func health() async throws -> HealthResponse {
@@ -119,7 +121,7 @@ final class MonacoAPIClient {
             throw MonacoAPIError.invalidResponse
         }
         guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
+            throw apiFailure(status: http.statusCode, data: data)
         }
         return try JSONDecoder().decode(PlatformWithdrawalDTO.self, from: data)
     }
@@ -153,7 +155,7 @@ final class MonacoAPIClient {
             throw MonacoAPIError.invalidResponse
         }
         guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
+            throw apiFailure(status: http.statusCode, data: data)
         }
         return try JSONDecoder().decode(FundGroupResponse.self, from: data)
     }
@@ -330,11 +332,12 @@ final class MonacoAPIClient {
         guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
         // 4xx cash out refusals carry a message the member can act on (amount too small to
         // route, pot short on USDC); surface it instead of a generic failure.
-        guard http.statusCode == 200 else { throw withdrawToBalanceError(status: http.statusCode, data: data) }
+        guard http.statusCode == 200 else { throw apiFailure(status: http.statusCode, data: data) }
         return try JSONDecoder().decode(WithdrawToBalanceJobDTO.self, from: data)
     }
 
-    private func withdrawToBalanceError(status: Int, data: Data) -> MonacoAPIError {
+    /// Money endpoints explain a refusal in the body; keep it so the screen can say why.
+    private func apiFailure(status: Int, data: Data) -> MonacoAPIError {
         if let body = try? JSONDecoder().decode(APIErrorBody.self, from: data),
            !body.error.isEmpty {
             return .apiError(status: status, message: body.error)
@@ -444,7 +447,7 @@ final class MonacoAPIClient {
     ) async throws -> T {
         let token = accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else { throw MonacoAPIError.missingAccessToken }
-        let core = MonacoCore.MonacoAPIClient(baseURL: baseURL, session: session, accessTokenProvider: { token })
+        let core = MonacoCore.MonacoAPIClient(baseURL: baseURL, transport: session, accessTokenProvider: { token })
         do {
             return try await call(core)
         } catch let error as MonacoCore.MonacoAPIError {

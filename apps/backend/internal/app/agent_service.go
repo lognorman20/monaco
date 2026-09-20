@@ -124,8 +124,10 @@ func (g *GovernanceService) handleAgentProposalPassTx(ctx context.Context, tx *s
 			APIKeyPrefix:         sql.NullString{String: prefix, Valid: true},
 			APIKey:               sql.NullString{String: plaintext, Valid: true},
 		}
-		_, err = g.store.InsertGroupAgentTx(ctx, tx, agentRow)
-		return err
+		if _, err := g.store.InsertGroupAgentTx(ctx, tx, agentRow); err != nil {
+			return err
+		}
+		return g.store.InsertAgentKeyRevealTx(ctx, tx, proposal.ID, plaintext)
 	case domain.ProposalKindPauseAgent:
 		agent, found, err := g.store.GetActiveOrPausedGroupAgentByGroupID(ctx, proposal.GroupID)
 		if err != nil {
@@ -199,26 +201,17 @@ func (g *GovernanceService) GetGroupAgentViewForMember(ctx context.Context, grou
 	return view, nil
 }
 
-// AgentAPIKeyForMember returns the stored agent key when the viewer is a cabal member.
-func (g *GovernanceService) AgentAPIKeyForMember(ctx context.Context, groupID, viewerID string, kind domain.ProposalKind, status ProposalStatus) (string, error) {
-	if kind != domain.ProposalKindAddAgent || status != ProposalPassed {
-		return "", nil
+// AgentKeyRevealWindow is how long after the add-agent vote passes the proposer can still
+// read the bot's plaintext key from the proposal detail.
+const AgentKeyRevealWindow = 15 * time.Minute
+
+// RevealAgentKeyForProposer returns the minted key to the proposer of a passed add-agent
+// proposal while the reveal window is open. Other members read it from the agent view instead.
+func (g *GovernanceService) RevealAgentKeyForProposer(ctx context.Context, proposalID, proposerID, viewerID string, status ProposalStatus) (string, bool, error) {
+	if status != ProposalPassed || viewerID != proposerID {
+		return "", false, nil
 	}
-	member, err := g.store.IsGroupMember(ctx, groupID, viewerID)
-	if err != nil {
-		return "", err
-	}
-	if !member {
-		return "", nil
-	}
-	agent, found, err := g.store.GetActiveOrPausedGroupAgentByGroupID(ctx, groupID)
-	if err != nil {
-		return "", err
-	}
-	if !found || !agent.APIKey.Valid {
-		return "", nil
-	}
-	return agent.APIKey.String, nil
+	return g.store.ReadAgentKeyReveal(ctx, proposalID, AgentKeyRevealWindow)
 }
 
 func groupAgentFromRow(row postgres.GroupAgentRow) domain.GroupAgent {

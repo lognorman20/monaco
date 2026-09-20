@@ -4,13 +4,12 @@ import SwiftUI
 /// Proposal detail: the card as a header with voting, the reason, a Voting → Buying → Done tracker,
 /// ballots, and the discussion with a composer pinned to the bottom.
 ///
-/// While a passed proposal's swap is in flight, the screen re-reads the proposal every 5 seconds
-/// and stops once the swap is confirmed or failed.
+/// While the proposal is open for voting or its swap is in flight, the screen quietly re-reads
+/// the proposal and its discussion every 5 seconds, so another member's vote or comment shows up
+/// without a pull. It drops to the resting cadence once the proposal is settled.
 struct ProposalDetailView: View {
     let service: ProposalFeedService
     let proposalId: String
-
-    static let executionPollInterval: Duration = .seconds(5)
 
     @State private var proposal: ProposalDTO?
     @State private var loadFailed = false
@@ -99,8 +98,11 @@ struct ProposalDetailView: View {
             async let thread: Void = loadComments()
             _ = await (detail, thread)
         }
-        .task(id: proposal?.isAwaitingExecution == true) {
-            await pollExecution()
+        .pollWhileVisible(every: LiveRefreshCadence.watching(proposal.map { [$0] } ?? [])) {
+            try await pollProposalAndComments()
+        }
+        .onChange(of: proposal.flatMap(ProposalExecutionStage.of)) { old, new in
+            if old == .executing, new == .done { Haptics.success() }
         }
         .refreshable {
             await loadProposal()
@@ -218,23 +220,22 @@ struct ProposalDetailView: View {
         }
     }
 
-    /// Re-reads the proposal while the swap is pending. The task restarts when the pending flag flips,
-    /// so it stops by itself once the swap lands or fails, and when the screen goes away.
-    private func pollExecution() async {
-        guard proposal?.isAwaitingExecution == true else { return }
-        while !Task.isCancelled {
-            do {
-                try await Task.sleep(for: Self.executionPollInterval)
-            } catch {
-                return
-            }
-            await loadProposal()
-            guard proposal?.isAwaitingExecution == true else {
-                if ProposalExecutionStage.of(proposal ?? ProposalDTO(id: "", symbol: "", status: "")) == .done {
-                    Haptics.success()
-                }
-                return
-            }
+    /// Background re-read of the proposal and its thread. Writes only what changed and never a
+    /// loading or error state; a throw leaves the screen as it is and lets the loop back off.
+    private func pollProposalAndComments() async throws {
+        guard !isVoting, !isPosting else { return }
+        async let detail = service.proposal(id: proposalId)
+        async let thread = service.comments(proposalId: proposalId)
+        let loaded = try await detail
+        let loadedComments = try? await thread
+        // A vote or comment the member started while this was in flight reloads on its own.
+        guard !isVoting, !isPosting, !Task.isCancelled else { return }
+        QuietUpdate.apply(loaded, over: proposal) { value in
+            withAnimation(reduceMotion ? nil : .snappy) { proposal = value }
+        }
+        if let loadedComments {
+            QuietUpdate.apply(loadedComments, over: comments) { comments = $0 }
+            if commentsError != nil { commentsError = nil }
         }
     }
 

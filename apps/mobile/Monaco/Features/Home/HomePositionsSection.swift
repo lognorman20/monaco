@@ -4,6 +4,9 @@ import SwiftUI
 struct HomePositionsSection: View {
     @ObservedObject var auth: PrivyAuthService
     let rows: [HomeMyGroupRowDTO]
+    /// Pot value per cabal from `/v1/home`, which lands after the dashboard; rows show their
+    /// "Pot …" subtitle once it has.
+    var potValuesUsd: [String: String] = [:]
     var onLeft: () async -> Void = {}
     var onBrowseCabals: () -> Void = {}
 
@@ -30,16 +33,16 @@ struct HomePositionsSection: View {
                                 onLeft: onLeft
                             )
                         } label: {
-                            MonacoRow(
-                                title: row.name,
-                                subtitle: "Your slice \(UsdAmountFormatter.format(decimalString: row.equityUsd))",
-                                chevron: true,
-                                isLast: row.groupId == rows.last?.groupId,
-                                leading: { CabalMark(groupId: row.groupId, name: row.name) },
-                                trailing: {
-                                    PnLText(dollarPnl: row.dollarPnl, style: .row)
-                                    PercentText(percentReturn: row.percentReturn, style: .caption)
-                                }
+                            CabalPositionRow(
+                                groupId: row.groupId,
+                                name: row.name,
+                                potValueUsd: potValuesUsd[row.groupId],
+                                figures: CabalPositionRowFigures(
+                                    equityUsd: row.equityUsd,
+                                    dollarPnl: row.dollarPnl,
+                                    percentReturn: row.percentReturn
+                                ),
+                                isLast: row.groupId == rows.last?.groupId
                             )
                         }
                         .buttonStyle(.monacoRow)
@@ -48,5 +51,41 @@ struct HomePositionsSection: View {
                 }
             }
         }
+    }
+}
+
+/// One "Your cabals" row, shared by Home and Profile so the two lists cannot drift apart:
+/// the cabal and its pot on the left, the member's own money on the right with the change
+/// since they joined underneath.
+struct CabalPositionRow: View {
+    let groupId: String
+    let name: String
+    let potValueUsd: String?
+    /// Nil while the member's position has not loaded; the row then shows no figures.
+    let figures: CabalPositionRowFigures?
+    let isLast: Bool
+
+    var body: some View {
+        MonacoRow(
+            title: name,
+            subtitle: CabalPositionRowFigures.potSubtitle(potValueUsd: potValueUsd),
+            chevron: true,
+            isLast: isLast,
+            leading: { CabalMark(groupId: groupId, name: name) },
+            trailing: {
+                if let figures {
+                    MoneyText(decimalString: figures.equityUsd, style: .row)
+                        .accessibilityLabel("Your slice \(UsdAmountFormatter.format(decimalString: figures.equityUsd))")
+                    switch figures.change {
+                    case .percent(let percentReturn):
+                        PercentText(percentReturn: percentReturn, style: .caption)
+                    case .dollars(let dollarPnl):
+                        PnLText(dollarPnl: dollarPnl, style: .caption)
+                    case .unavailable:
+                        PercentText(percentReturn: nil, style: .caption)
+                    }
+                }
+            }
+        )
     }
 }

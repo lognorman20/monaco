@@ -48,6 +48,9 @@ struct ProfileTabView: View {
         .refreshable {
             await session.refresh(auth: auth)
         }
+        .pollWhileVisible(every: LiveRefreshCadence.resting) {
+            try await session.pollLive(auth: auth)
+        }
         .monacoToast($toast)
         .sheet(isPresented: $showEditProfile) {
             NavigationStack {
@@ -71,6 +74,7 @@ struct ProfileTabView: View {
         .onAppear {
             if initiallyShowEditProfile { showEditProfile = true }
         }
+        .monacoFrameStats("Profile")
     }
 
     private var loadError: some View {

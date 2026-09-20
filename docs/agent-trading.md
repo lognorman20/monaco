@@ -6,7 +6,7 @@ Monaco runs trades for a cabal agent. Your bot POSTs intents; Monaco validates a
 
 1. Member proposes **add agent** with name + USDC allocation.
 2. Cabal votes. On pass, Monaco mints a **5-character** API key (e.g. `k7m2p`).
-3. Proposer sees key **once** in proposal detail (mobile). Copy or type into bot env. **Never log the key.**
+3. Proposer sees the key in proposal detail (mobile) for 15 minutes after the vote passes. After that, any cabal member can read it on the bot's detail screen until the bot is removed; revoking the bot wipes the stored key. Copy or type into bot env. **Never log the key.**
 
 Existing keys minted before this format are invalid — re-add the agent to get a new key.
 
@@ -24,7 +24,7 @@ Every agent call:
 X-Monaco-Agent-Key: k7m2p
 ```
 
-No member JWT. Missing/invalid/revoked key → **401**. Wrong cabal in URL → **403**.
+No member JWT. Missing/invalid/revoked key → **401**. A key for a different cabal than the URL also gets **401**, same as an unknown key. After 10 wrong keys → **429** with `Retry-After`.
 
 ## List assets
 
@@ -71,8 +71,9 @@ Success: `{ "intentId", "status": "executed", "transactionId" }`. Swap goes pend
 | HTTP | Meaning |
 |------|---------|
 | **401** | Bad or revoked key |
-| **403** | Wrong group, or agent **paused** |
+| **403** | Agent **paused** |
 | **422** | Over allocation, bad symbol, insufficient treasury |
+| **429** | Too many wrong keys for this cabal or from this address; wait `Retry-After` seconds |
 
 ## Pause / resume / revoke
 

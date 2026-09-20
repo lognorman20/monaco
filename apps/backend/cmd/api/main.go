@@ -185,10 +185,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Swap:    swap,
 		Symbols: symbols,
 	}
+	agentKeyGuard := httpapi.NewAgentKeyGuard()
 	catalogHandlers := &httpapi.CatalogHandlers{
-		Store:   store,
-		Privy:   privyClient,
-		Catalog: catalogSearcher,
+		Store:    store,
+		Privy:    privyClient,
+		Catalog:  catalogSearcher,
+		KeyGuard: agentKeyGuard,
 	}
 	var assetPrices pyth.AssetPriceClient
 	if hermes, ok := pythClient.(*pyth.HermesClient); ok {
@@ -220,7 +222,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Governance: governance,
 	}
 	agentIntents := app.NewAgentIntentService(store, swap, symbols)
-	agentHandlers := &httpapi.AgentHandlers{Intents: agentIntents}
+	agentHandlers := &httpapi.AgentHandlers{Intents: agentIntents, KeyGuard: agentKeyGuard}
 
 	addr := "127.0.0.1:8080"
 	if v := os.Getenv("API_ADDR"); v != "" {

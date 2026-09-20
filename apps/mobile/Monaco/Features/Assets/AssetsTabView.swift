@@ -77,6 +77,7 @@ struct AssetsTabView: View {
         .onDisappear {
             searchTask?.cancel()
         }
+        .monacoFrameStats("Stocks")
     }
 
     @ViewBuilder

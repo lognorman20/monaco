@@ -1,14 +1,16 @@
 import MonacoCore
 import SwiftUI
 
-/// The bot key with copy affordance; also used on the agent detail screen.
+/// The bot key with copy affordance: on the passed proposal (proposer only, for 15 minutes) and
+/// on the agent detail screen (any cabal member, until the bot is removed).
 struct AgentKeyRevealView: View {
     let apiKey: String
+    var explainer: String = ProposeFlowCopy.botKeyExplainer
     var onCopied: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
-            Text(ProposeFlowCopy.botKeyExplainer)
+            Text(explainer)
                 .font(MonacoTheme.Typo.callout)
                 .foregroundStyle(MonacoTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)

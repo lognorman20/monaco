@@ -84,3 +84,39 @@ The session gate maps failures onto three user-facing messages (see
 In DEBUG builds only, a small monospaced line under the message on the session
 gate adds the exact status code / `URLError` code and the API base URL the app
 is hitting, so you don't have to guess.
+
+## Staying signed in
+
+Privy access tokens last about an hour. The app never signs a user out just
+because one expired:
+
+- **At launch** a returning user sees a splash (`sessionRestoringView`) while
+  Privy restores the saved session — not the login form. If Privy can't be
+  reached, they get "Can't sign you in yet" with **Try again** (it also retries
+  when the app comes back to the foreground). They stay signed in.
+- **While the app is open** every request goes through `MonacoHTTPTransport`
+  (`packages/mobile-core/Sources/MonacoCore/Networking`). On a 401 it asks
+  `PrivyAuthService.refreshedAccessToken(replacing:)` for a fresh token and
+  retries the request once. Concurrent 401s share one refresh.
+- **Only a real rejection signs out**: Privy reports no session, or the backend
+  still answers 401 with a freshly minted token. The login screen then says
+  "Your session expired. Sign in again." (or the verification message above for
+  `POST /v1/auth/session`). A refresh that fails because the device is offline
+  surfaces as a connection error instead.
+
+If a user reports being bounced to login, check the `session` log category for
+`Session restore:` / `getAccessToken failed` lines, and `backend.log` for
+`invalid_token` right before it.
+
+## One-time code errors
+
+| What happened | What the user sees | Code field |
+| --- | --- | --- |
+| Wrong or expired code | "That code didn't work. Check it, or send a new one." | stays, retry or **Send a new code** |
+| Offline | "No connection. Check your internet and try again." | stays |
+| Privy rate limit (429) | "Too many attempts. Wait a minute, then try again." | back to **Send code** |
+| Anything else | "Couldn't send the code…" / "Couldn't sign you in…" plus Privy's own detail | back to **Send code** |
+
+The mapping lives in `PrivyAuthService.loginFailure(from:step:)` and
+`LoginFailureCopy` (MonacoCore). The raw Privy error is logged under the
+`session` category.
