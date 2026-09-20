@@ -411,10 +411,13 @@ API_ADDR=0.0.0.0:8080 MIGRATIONS_DIR=/path/to/supabase/migrations ./bin/monaco-a
 ```
 
 - Migrations in `supabase/migrations` are applied at boot, in filename order, before the server listens. `go run ./cmd/migrate` (from `apps/backend`) applies them without starting the API.
-- Required env: `DATABASE_URL`, `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `RELAYER_PRIVATE_KEY`. The full list with comments is in `.env.example`. Use separate Privy apps, relayer keys and databases per environment; production values go in `.env.production` (dotenvx-encrypted), never in the image.
+- Required env: `DATABASE_URL`, `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `PRIVY_VERIFICATION_KEY`, `RELAYER_PRIVATE_KEY`. The API exits at boot if any is missing or malformed. Outside local dev also set `APP_ENV` (`staging` or `production`), `SENTRY_DSN` and `SOLANA_RPC_URL` (a paid RPC; unset falls back to the public mainnet endpoint, which has no SLA and is what confirms sweeps). The full list with comments is in `.env.example`. Use separate Privy apps, relayer keys and databases per environment; production values go in `.env.production` (dotenvx-encrypted), never in the image.
 - The relayer address must hold more than 0.001 SOL or the API exits at boot. See [Relayer](#relayer-fee-payer).
-- The API listens on `API_ADDR` (default `127.0.0.1:8080`). `GET /health` returns `{"status":"ok"}` once it is up; it does not probe Postgres or upstream APIs.
-- The deposit sweep poller and the execute-on-pass poller run inside the API process. Running more than one instance has not been tested.
+- The API listens on `API_ADDR` (default `127.0.0.1:8080`). `GET /health` probes Postgres and the access-token verifier (critical: 503 when down) plus Solana RPC, Privy and the price API (`degraded`, still 200).
+- The deposit sweep, execute-on-pass and cash-out recovery pollers run inside the API process under a supervisor: a panic is logged with its stack, reported, and the poller restarts with backoff. Running more than one instance has not been tested.
+- Logs go to stderr: text when `APP_ENV=local`, one JSON object per line otherwise, so the host's collector (journald, Docker, the platform's log drain) is the durable copy. `LOG_FILE` adds an appended JSON file. Locally `just run` tees stderr to `.logs/<timestamp>/backend.log`.
+- Crash reporting (Sentry), Prometheus metrics on `METRICS_ADDR` (loopback by default, never the API port) and the alerts that should page are in [`docs/how-to/observability.md`](docs/how-to/observability.md).
+- The Postgres pool is capped (`DB_MAX_OPEN_CONNS`, default 20); keep it under the database role's connection limit.
 
 **iOS.** Archive and upload steps are in [`apps/mobile/TestFlight.md`](apps/mobile/TestFlight.md).
 
