@@ -190,6 +190,43 @@ final class MoneyFlowCopyTests: XCTestCase {
         XCTAssertEqual(MoneyFlowCopy.memberFacingMessage("Cash out at least $0.10."), "Cash out at least $0.10.")
     }
 
+    /// `.retry` is the one answer that lets a screen mint a NEW idempotency key, so it is the
+    /// one that can move the money twice. It is now spelled out at every branch rather than
+    /// arriving by default from an `isRetryable: true`, and this pins the whole matrix so a
+    /// new branch cannot quietly widen it. Every case listed here is either provably never
+    /// sent (offline, sign-in, 429 rejected by the rate limiter) or a 5xx, where the backend
+    /// releases the key and the retry genuinely reaches the handler again.
+    func testRetry_isOnlyEverOfferedWhereAFreshKeyCannotDoubleSubmit() {
+        let freshSubmissionIsSafe: [FlowErrorInput] = [
+            FlowErrorInput(isOffline: true),
+            FlowErrorInput(isSignInUnavailable: true),
+            FlowErrorInput(status: 429),
+            FlowErrorInput(status: 500),
+            FlowErrorInput(status: 503),
+        ]
+        for input in freshSubmissionIsSafe {
+            for failure in [
+                MoneyFlowCopy.cashOutFailure(input),
+                MoneyFlowCopy.fundCabalFailure(input),
+                MoneyFlowCopy.sellStakeFailure(input),
+            ] {
+                XCTAssertEqual(failure.recovery, .retry, "expected a fresh retry for \(input)")
+            }
+        }
+
+        // Everything with an unknown or in-flight outcome must replay the pending key, and
+        // everything that would fail the same way must offer nothing at all.
+        XCTAssertEqual(MoneyFlowCopy.unconfirmed.recovery, .resendSame)
+        for flow in [MoneyFlowCopy.fundCabalFailure, MoneyFlowCopy.sellStakeFailure] {
+            XCTAssertEqual(flow(FlowErrorInput(status: 409)).recovery, .resendSame)
+            XCTAssertEqual(flow(FlowErrorInput()).recovery, .resendSame)
+        }
+        // The external cash out fails closed on 409: two backend conditions land there and
+        // the app cannot yet tell them apart, so it offers no resend rather than guessing.
+        XCTAssertEqual(MoneyFlowCopy.cashOutFailure(FlowErrorInput(status: 409)).recovery, .none)
+        XCTAssertEqual(MoneyFlowCopy.cashOutFailure(FlowErrorInput(status: 401)).recovery, .none)
+    }
+
     func testNeverSentCodes_excludeTimeoutsAndDroppedConnections() {
         XCTAssertTrue(FlowErrorInput.neverSentURLErrorCodes.contains(.notConnectedToInternet))
         XCTAssertFalse(FlowErrorInput.neverSentURLErrorCodes.contains(.timedOut))

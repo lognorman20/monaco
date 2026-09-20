@@ -29,21 +29,22 @@ public struct FlowFailure: Equatable, Sendable {
     /// One short line telling the member what to do next, when there is something to do.
     public let nextStep: String?
 
-    /// False only when there is nothing to send again. An unknown outcome is retryable:
-    /// the idempotency key makes resending the same submission safe.
+    /// False only when there is nothing worth sending again. True covers both a fresh
+    /// submission and a replay, so it says whether to offer a way on — never whether a new
+    /// idempotency key would be safe. Anything minting a key must read `recovery` itself.
     public var isRetryable: Bool { recovery != .none }
 
     /// True when the retry has to be the same payload, under the pending key.
     public var mustResendSameSubmission: Bool { recovery == .resendSame }
 
+    /// The only initialiser. There is deliberately no `isRetryable:` convenience: on a money
+    /// path "a fresh submission is safe" must never be something a call site gets by default,
+    /// because the compiler cannot tell a considered `.retry` from an unconsidered one. Every
+    /// failure states its own recovery, and a new branch does not compile until it does.
     public init(message: String, recovery: FlowRecovery, nextStep: String? = nil) {
         self.message = message
         self.recovery = recovery
         self.nextStep = nextStep
-    }
-
-    public init(message: String, isRetryable: Bool, nextStep: String? = nil) {
-        self.init(message: message, recovery: isRetryable ? .retry : .none, nextStep: nextStep)
     }
 
     /// Message and next step as one line, for a toast.
@@ -104,25 +105,32 @@ public enum MoneyFlowCopy {
         case 400 where matches(input, "amount exceeds available platform balance"):
             return FlowFailure(
                 message: "That's more than your account balance.",
-                isRetryable: false,
+                recovery: .none,
                 nextStep: "Cash out of a cabal to your balance first, or send a smaller amount."
             )
         case 400 where matches(input, "invalid destination address"):
             return FlowFailure(
                 message: "That destination isn't a Solana wallet address.",
-                isRetryable: false,
+                recovery: .none,
                 nextStep: "Paste the address again — it should be 32 to 44 characters."
             )
         case 400 where matches(input, "cannot withdraw to your deposit address"):
             return FlowFailure(
                 message: "That's your own Monaco deposit address.",
-                isRetryable: false,
+                recovery: .none,
                 nextStep: "Paste the outside wallet you want the USDC sent to."
             )
+        // Two different conditions answer 409 here: the handler's own "a platform withdrawal
+        // is already in progress" (`platform_withdrawals.go`), and the idempotency middleware
+        // when the key the app just sent is still claimed. Telling them apart needs the
+        // `Idempotency-Status: in_progress` header, which the transport does not surface yet.
+        // Until it does this stays `.none`, which fails closed: the screen offers no resend at
+        // all, so neither condition can turn into a second withdrawal. The copy is true of
+        // both, and both clear on their own.
         case 409:
             return FlowFailure(
                 message: "A cash out is already on its way.",
-                isRetryable: false,
+                recovery: .none,
                 nextStep: "Wait for it to land — about a minute — then start another."
             )
         default:
@@ -148,17 +156,17 @@ public enum MoneyFlowCopy {
         case 400 where matches(input, "amount exceeds available platform balance"):
             return FlowFailure(
                 message: "That's more than your account balance.",
-                isRetryable: false,
+                recovery: .none,
                 nextStep: "Add USDC to your balance, or use the Max button."
             )
         case 403:
             return FlowFailure(
                 message: "You have to be a member of this cabal to add money to it.",
-                isRetryable: false,
+                recovery: .none,
                 nextStep: "Join the cabal first."
             )
         case 404:
-            return FlowFailure(message: "That cabal no longer exists.", isRetryable: false)
+            return FlowFailure(message: "That cabal no longer exists.", recovery: .none)
         default:
             return generic(input, action: "add that money")
         }
@@ -178,10 +186,10 @@ public enum MoneyFlowCopy {
                 nextStep: "Give it a minute, then check your balance."
             )
         case 404:
-            return FlowFailure(message: "You're not a member of this cabal.", isRetryable: false)
+            return FlowFailure(message: "You're not a member of this cabal.", recovery: .none)
         // The only bodiless 400 this endpoint sends is the dust floor.
         case 400 where memberFacingMessage(input.serverMessage) == nil:
-            return FlowFailure(message: "Cash out at least $0.10.", isRetryable: false)
+            return FlowFailure(message: "Cash out at least $0.10.", recovery: .none)
         default:
             return generic(input, action: "cash out")
         }
@@ -202,7 +210,7 @@ public enum MoneyFlowCopy {
     public static func offlineFailure(action: String) -> FlowFailure {
         FlowFailure(
             message: "No connection, so we didn't \(action).",
-            isRetryable: true,
+            recovery: .retry,
             nextStep: "Check your internet and try again — nothing was sent."
         )
     }
@@ -220,14 +228,14 @@ public enum MoneyFlowCopy {
         if input.status == 429 {
             return FlowFailure(
                 message: "Too many tries in a row.",
-                isRetryable: true,
+                recovery: .retry,
                 nextStep: "Wait a moment and try again."
             )
         }
         if input.status == 401 {
             return FlowFailure(
                 message: "Your session expired.",
-                isRetryable: false,
+                recovery: .none,
                 nextStep: "Sign in again to \(action)."
             )
         }
@@ -243,7 +251,7 @@ public enum MoneyFlowCopy {
         }
         if let status = input.status, (400..<500).contains(status),
            let message = memberFacingMessage(input.serverMessage) {
-            return FlowFailure(message: message, isRetryable: false)
+            return FlowFailure(message: message, recovery: .none)
         }
         guard input.status != nil else { return unconfirmed }
         // A 5xx is not an unknown outcome held under the key: the backend deliberately
