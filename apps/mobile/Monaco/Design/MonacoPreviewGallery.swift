@@ -317,36 +317,49 @@ private struct GalleryControlsPage: View {
 
 private struct GalleryToastPage: View {
     @State private var toast: MonacoToast?
-    @State private var cycle = 0
+    @State private var isLoadingBalance = false
+
+    private let failure = "We couldn't confirm that went through. Check your balance before trying again."
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
                 MonacoSectionHeader("Toasts")
-                Text("Success and error alternate every three seconds. Swipe down or tap to dismiss.")
+                Text("A toast stays up for as long as its message takes to read. Swipe down or tap to dismiss.")
                     .font(MonacoTheme.Typo.callout)
                     .foregroundStyle(MonacoTheme.muted)
                 Button("Show success") {
                     toast = MonacoToast(message: "Added $50 to Weekend investors", isSuccess: true)
                 }
                 .buttonStyle(.monacoSecondary)
-                Button("Show error") {
-                    toast = MonacoToast(message: "No connection. Check your internet and try again")
+                Button("Show a money failure") {
+                    toast = MonacoToast(message: failure)
                 }
                 .buttonStyle(.monacoSecondary)
+                // The money screens set a toast and reload a balance in the same update. Only the
+                // toast should animate; the block below must swap without springing.
+                Button("Show error while the balance reloads") {
+                    toast = MonacoToast(message: "Couldn't load this. Pull down to try again")
+                    isLoadingBalance.toggle()
+                }
+                .buttonStyle(.monacoSecondary)
+                if isLoadingBalance {
+                    ProgressView()
+                        .tint(MonacoTheme.accent)
+                        .frame(maxWidth: .infinity, minHeight: 96)
+                } else {
+                    MoneyText(Decimal(1248.5), style: .hero)
+                        .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
+                }
             }
             .padding(.horizontal, MonacoTheme.Space.gutter)
         }
         .monacoCanvas()
         .navigationTitle("Toast")
-        .monacoToast($toast)
-        .task {
-            while !Task.isCancelled {
-                toast = cycle.isMultiple(of: 2)
-                    ? MonacoToast(message: "Added $50 to Weekend investors", isSuccess: true)
-                    : MonacoToast(message: "Couldn't load this. Pull down to try again")
-                cycle += 1
-                try? await Task.sleep(for: .seconds(3))
+        .monacoToast($toast, placement: .aboveBottomCTA)
+        .safeAreaInset(edge: .bottom) {
+            BottomCTA {
+                Button("Add money") {}.buttonStyle(.monacoPrimary)
             }
         }
     }
