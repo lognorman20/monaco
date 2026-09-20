@@ -446,10 +446,15 @@ struct GroupDetailView: View {
         isLeaving = true
         do {
             try await apiClient.leaveGroup(accessToken: token, groupId: groupId, withdrawStake: withdrawStake, submission: leaveSubmission)
-            isLeaving = false
             if withdrawStake {
                 toast = MonacoToast(message: "Cash moved to your account balance", isSuccess: true)
             }
+            // The cover stays up until the screen is on its way out. `onLeft()` is a network
+            // round trip at every call site, and clearing `isLeaving` here would hand back the
+            // action row, the back button and the details item for the length of it — on a cabal
+            // the member has just left, still showing the slice they left with, because nothing
+            // has re-read it yet. Only the failure paths below put the screen back in the
+            // member's hands, which is also all `refreshQuietly()` needs to run.
             await onLeft()
             hasLeft = true
             return
@@ -605,6 +610,10 @@ extension View {
     /// looking screen invites a second tap, or a second money flow on a cabal being left.
     func groupLeaveProgress(isLeaving: Bool, isSellingSlice: Bool) -> some View {
         disabled(isLeaving)
+            // `disabled()` stops taps but leaves the rows reachable by VoiceOver swipe, so the
+            // member can still walk an action row that does nothing. Hide the content behind
+            // the cover the same way the cover hides it visually.
+            .accessibilityHidden(isLeaving)
             .overlay {
                 if isLeaving {
                     GroupLeaveProgressCover(isSellingSlice: isSellingSlice)
