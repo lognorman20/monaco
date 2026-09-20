@@ -1,5 +1,7 @@
 package pyth
 
+import "time"
+
 // TreasuryRef identifies a group treasury for pot valuation.
 type TreasuryRef struct {
 	GroupID      string
@@ -16,7 +18,26 @@ type CostBasis struct {
 	Amount int64
 }
 
-// MarkedHolding is a treasury xStock position with a live Pyth mark.
+// MarkSource names the price source a mark came from, so a valuation is auditable.
+type MarkSource string
+
+const (
+	MarkSourcePyth      MarkSource = "pyth"
+	MarkSourceJupiter   MarkSource = "jupiter"
+	MarkSourceCostBasis MarkSource = "cost_basis"
+)
+
+// EquityMark is one Hermes equity mark plus the freshness metadata around it.
+type EquityMark struct {
+	PriceUsdcMicros int64
+	// PublishedAt is Hermes publish_time in UTC; zero when Hermes omits it.
+	PublishedAt time.Time
+	MarketOpen  bool
+	AfterHours  bool
+}
+
+// MarkedHolding is a treasury xStock position with a live mark. Source records
+// which price source produced MarkUsdc; empty means the producer did not say.
 type MarkedHolding struct {
 	Symbol     string
 	Mint       string
@@ -24,6 +45,7 @@ type MarkedHolding struct {
 	MarkUsdc   int64
 	CostBasis  int64
 	AfterHours bool
+	Source     MarkSource
 }
 
 // NavInput is the marked-pot valuation input for domain NAV callers (M4-T5).

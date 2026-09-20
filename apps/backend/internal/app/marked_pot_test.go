@@ -147,3 +147,31 @@ func TestPotRowsFromPythInput_largeHoldingValueDoesNotWrap(t *testing.T) {
 		t.Fatalf("pnl = %q, want +50000.00", rows[1].DollarPnL)
 	}
 }
+
+func TestCostBasisMarkedPotInput_recordsCostBasisSource(t *testing.T) {
+	// Arrange
+	costBasis := []pyth.CostBasis{{
+		Symbol: "AAPLx",
+		Mint:   jupiter.AAPLxMint,
+		Units:  50_000_000,
+		Price:  100_000_000,
+		Amount: 50_000_000,
+	}}
+
+	// Act
+	input, err := costBasisMarkedPotInput(7_000_000, costBasis)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("costBasisMarkedPotInput: %v", err)
+	}
+	if len(input.Holdings) != 1 {
+		t.Fatalf("expected one holding, got %d", len(input.Holdings))
+	}
+	if got := input.Holdings[0].Source; got != pyth.MarkSourceCostBasis {
+		t.Fatalf("source = %q, want %q", got, pyth.MarkSourceCostBasis)
+	}
+	if got := input.Holdings[0].MarkUsdc; got != 200_000_000 {
+		t.Fatalf("mark = %d, want 200000000", got)
+	}
+}

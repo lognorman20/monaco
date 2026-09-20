@@ -168,3 +168,33 @@ func TestHTTPPriceClient_Prices_non200_returnsError(t *testing.T) {
 		t.Fatal("expected an error for a non-200 response")
 	}
 }
+
+func TestHTTPPriceClient_Prices_liveShape_parsesLiquidityAndRejectsUnusablePrices(t *testing.T) {
+	t.Parallel()
+
+	// Shape captured from the live Price API v3 response for AAPLx, trimmed.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp": {"createdAt":"2025-06-10T11:06:56Z","liquidity":591403.86,"usdPrice":334.09396874701275,"blockId":448565164,"decimals":8,"priceChange24h":-0.92,"stockData":{"id":"xstocks","price":334.875}},
+			"XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB": {"usdPrice":1e300,"liquidity":10},
+			"negative": {"usdPrice":-4.2,"liquidity":10}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewHTTPPriceClientWithBaseURL(server.URL, server.Client(), "")
+	prices, err := client.Prices(context.Background(), []string{AAPLxMint, TSLAxMint, "negative"})
+
+	if err != nil {
+		t.Fatalf("Prices: %v", err)
+	}
+	if got := prices[AAPLxMint]; got.PriceUsdcMicros != 334_093_969 || got.LiquidityUsd != 591403.86 {
+		t.Fatalf("AAPLx = %+v, want 334093969 micros with liquidity 591403.86", got)
+	}
+	if got := prices[TSLAxMint].PriceUsdcMicros; got != 0 {
+		t.Fatalf("overflowing usdPrice became %d micros, want 0", got)
+	}
+	if got := prices["negative"].PriceUsdcMicros; got != 0 {
+		t.Fatalf("negative usdPrice became %d micros, want 0", got)
+	}
+}

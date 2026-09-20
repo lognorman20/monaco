@@ -115,32 +115,18 @@ func (c *HermesClient) MarkedPot(ctx context.Context, treasury TreasuryRef, hold
 }
 
 func (c *HermesClient) markHolding(ctx context.Context, holding CostBasis) (MarkedHolding, error) {
-	feedID, isOpen, err := c.resolveFeedSession(ctx, holding.Symbol)
+	mark, err := c.EquityMark(ctx, holding.Symbol)
 	if err != nil {
 		return MarkedHolding{}, err
 	}
-
-	latest, err := c.fetchLatestPrice(ctx, feedID)
-	if err != nil {
-		return MarkedHolding{}, err
-	}
-
-	markUsdc, err := priceToUSDCMicros(latest.Price.Price, latest.Price.Expo)
-	if err != nil {
-		return MarkedHolding{}, err
-	}
-
-	// After-hours when cash equity session closed (Hermes market_hours.is_open)
-	// or Hermes serves a frozen mark (publish_time == prev_publish_time).
-	afterHours := !isOpen || isFrozenEquityMark(latest.Price.PublishTime, latest.Metadata.PrevPublishTime)
-
 	return MarkedHolding{
 		Symbol:     holding.Symbol,
 		Mint:       holding.Mint,
 		Units:      holding.Units,
-		MarkUsdc:   markUsdc,
+		MarkUsdc:   mark.PriceUsdcMicros,
 		CostBasis:  holding.Price,
-		AfterHours: afterHours,
+		AfterHours: mark.AfterHours,
+		Source:     MarkSourcePyth,
 	}, nil
 }
 
@@ -308,14 +294,14 @@ func isFrozenEquityMark(publishTime, prevPublishTime int64) bool {
 func hermesRequestError(prefix string, status int, body []byte) error {
 	detail := strings.TrimSpace(string(body))
 	if detail == "" {
-		return fmt.Errorf("%s: status %d", prefix, status)
+		return &RequestError{Status: status, message: fmt.Sprintf("%s: status %d", prefix, status)}
 	}
 	const maxDetailLen = 240
 	if len(detail) > maxDetailLen {
 		detail = detail[:maxDetailLen]
 	}
 	if status == http.StatusForbidden && strings.Contains(strings.ToLower(detail), "not entitled") {
-		return fmt.Errorf("%s: status %d: %s (accept equity feed grants in Pyth Terminal)", prefix, status, detail)
+		return &RequestError{Status: status, message: fmt.Sprintf("%s: status %d: %s (accept equity feed grants in Pyth Terminal)", prefix, status, detail)}
 	}
-	return fmt.Errorf("%s: status %d: %s", prefix, status, detail)
+	return &RequestError{Status: status, message: fmt.Sprintf("%s: status %d: %s", prefix, status, detail)}
 }

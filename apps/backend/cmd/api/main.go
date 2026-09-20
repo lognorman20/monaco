@@ -19,6 +19,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
+	"github.com/monaco/monaco/apps/backend/internal/pricechain"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/solana/balance"
@@ -123,16 +124,27 @@ func boot(ctx context.Context) (*bootResult, error) {
 
 	store := postgres.NewStore(db)
 	privyClient := privy.NewHTTPClient(cfg)
-	var pythClient pyth.Client
+	var hermes *pyth.HermesClient
 	if cfg.PythAPIKey != "" {
-		pythClient, err = pyth.NewHermesClientFromConfig(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("pyth client: %w", err)
-		}
+		hermes = pyth.NewHermesClientWithBaseURL(cfg.PythHermesBaseURL, cfg.PythAPIKey)
 		slog.Info("pyth client ready")
 	} else {
 		slog.Info("pyth client skipped", "reason", "PYTH_API_KEY unset")
 	}
+	jupiterPriceClient := jupiter.NewHTTPPriceClient(cfg.JupiterAPIKey)
+	if cfg.JupiterAPIKey != "" {
+		slog.Info("jupiter price client ready")
+	} else {
+		slog.Info("jupiter price client ready", "reason", "JUPITER_API_KEY unset, using unauthenticated rate limit")
+	}
+	// Pot valuation and charts price through one chain: Pyth, then Jupiter, then cost basis.
+	var pythSource pricechain.PythSource
+	var pythCharts pyth.AssetPriceClient
+	if hermes != nil {
+		pythSource, pythCharts = hermes, hermes
+	}
+	priceChain := pricechain.New(pythSource, jupiterPriceClient, pythCharts, pricechain.DefaultConfig())
+	var pythClient pyth.Client = priceChain
 	catalogSearcher := xstocks.NewHTTPCatalogSearcher()
 	jupiterClient := jupiter.NewHTTPClientWithPayer(relayer.PublicKey())
 	catalogRoutability := xstocks.NewCachedRoutabilityProber(
@@ -192,21 +204,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Catalog:  catalogSearcher,
 		KeyGuard: agentKeyGuard,
 	}
-	var assetPrices pyth.AssetPriceClient
-	if hermes, ok := pythClient.(*pyth.HermesClient); ok {
-		assetPrices = hermes
-	}
-	jupiterPriceClient := jupiter.NewHTTPPriceClient(cfg.JupiterAPIKey)
-	if cfg.JupiterAPIKey != "" {
-		slog.Info("jupiter price client ready")
-	} else {
-		slog.Info("jupiter price client ready", "reason", "JUPITER_API_KEY unset, using unauthenticated rate limit")
-	}
 	assetsHandlers := &httpapi.AssetsHandlers{
 		Store:   store,
 		Privy:   privyClient,
 		Catalog: catalogSearcher,
-		Pyth:    assetPrices,
+		Pyth:    priceChain,
 		Jupiter: jupiterClient,
 		Price:   jupiterPriceClient,
 	}
