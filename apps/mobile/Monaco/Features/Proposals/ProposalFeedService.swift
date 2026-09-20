@@ -92,7 +92,7 @@ enum ProposalFeedErrorCopy {
     }
 
     private static func httpStatus(_ error: Error) -> Int? {
-        if case MonacoCore.MonacoAPIError.httpStatus(let code) = error {
+        if case MonacoCore.MonacoAPIError.httpStatus(let code, _) = error {
             return code
         }
         return nil

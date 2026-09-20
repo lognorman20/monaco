@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/config"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 const defaultBaseURL = "https://api.privy.io"
@@ -40,7 +42,7 @@ type HTTPClient struct {
 
 // NewHTTPClient builds a Privy client from API config.
 func NewHTTPClient(cfg *config.Config) *HTTPClient {
-	return &HTTPClient{
+	client := &HTTPClient{
 		appID:                        cfg.PrivyAppID,
 		appSecret:                    cfg.PrivyAppSecret,
 		privyAuthorizationPrivateKey: cfg.PrivyAuthorizationPrivateKey,
@@ -54,6 +56,19 @@ func NewHTTPClient(cfg *config.Config) *HTTPClient {
 			Timeout: 30 * time.Second,
 		},
 	}
+	client.httpClient.Transport = client.instrumentedTransport(nil)
+	return client
+}
+
+// instrumentedTransport labels each outbound call for metrics. This client talks to two
+// upstreams through one http.Client: Privy's API, and Solana RPC for balances and sends.
+func (c *HTTPClient) instrumentedTransport(inner http.RoundTripper) http.RoundTripper {
+	return telemetry.TransportFunc(func(req *http.Request) string {
+		if rpc, err := url.Parse(c.solanaRPCEndpoint()); err == nil && req.URL.Host == rpc.Host {
+			return telemetry.UpstreamSolanaRPC
+		}
+		return telemetry.UpstreamPrivy
+	}, inner)
 }
 
 // NewHTTPClientWithTransport is used in tests to inject an httptest server transport.
@@ -62,7 +77,7 @@ func NewHTTPClientWithTransport(cfg *config.Config, baseURL string, transport ht
 	client.baseURL = baseURL
 	client.httpClient = &http.Client{
 		Timeout:   30 * time.Second,
-		Transport: transport,
+		Transport: client.instrumentedTransport(transport),
 	}
 	return client
 }

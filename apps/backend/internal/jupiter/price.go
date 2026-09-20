@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 const (
@@ -59,7 +61,7 @@ func NewHTTPPriceClientWithBaseURL(baseURL string, httpClient *http.Client, apiK
 	}
 	return &HTTPPriceClient{
 		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: httpClient,
+		httpClient: telemetry.InstrumentClient(telemetry.UpstreamJupiter, httpClient),
 		apiKey:     strings.TrimSpace(apiKey),
 	}
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 // DefaultProposalExecuteInterval is how often passed proposals are executed.
@@ -22,7 +23,6 @@ type ProposalExecutePoller struct {
 	limit    int
 	backoff  map[string]time.Time
 	failures map[string]int
-	observer TickObserver
 }
 
 // NewProposalExecutePoller wires execute-on-pass polling dependencies.
@@ -40,11 +40,6 @@ func NewProposalExecutePoller(store *postgres.Store, exec *app.ExecuteOnPassServ
 	}
 }
 
-// SetTickObserver reports every tick to observer. Call it before the poller runs.
-func (p *ProposalExecutePoller) SetTickObserver(observer TickObserver) {
-	p.observer = observer
-}
-
 // RunProposalExecutePoller ticks until ctx is cancelled.
 func RunProposalExecutePoller(ctx context.Context, poller *ProposalExecutePoller, interval time.Duration) {
 	if poller == nil {
@@ -55,6 +50,7 @@ func RunProposalExecutePoller(ctx context.Context, poller *ProposalExecutePoller
 	}
 
 	logProposalExecutePollerStarted(interval)
+	telemetry.RegisterPoller(PollerProposalExecute, interval)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -65,20 +61,23 @@ func RunProposalExecutePoller(ctx context.Context, poller *ProposalExecutePoller
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			observeTick(poller.observer, NameProposalExecute, func() error { return poller.tick(ctx) })
+			telemetry.GuardTick(ctx, PollerProposalExecute, func() error {
+				poller.tick(ctx)
+				return nil
+			})
 		}
 	}
 }
 
-func (p *ProposalExecutePoller) tick(ctx context.Context) error {
+func (p *ProposalExecutePoller) tick(ctx context.Context) {
 	if p == nil || p.store == nil || p.exec == nil {
-		return nil
+		return
 	}
 
 	rows, err := p.store.ListPassedProposalsPendingExecute(ctx, p.limit)
 	if err != nil {
 		logProposalExecutePollerListFailed(err)
-		return err
+		return
 	}
 
 	logProposalExecutePollerTickStart(len(rows))
@@ -115,7 +114,6 @@ func (p *ProposalExecutePoller) tick(ctx context.Context) error {
 		logProposalExecuteSuccess(proposal.ID, txID, sig, result.Created)
 	}
 	logProposalExecutePollerTickEnd(len(rows), tickErr)
-	return tickErr
 }
 
 func (p *ProposalExecutePoller) shouldSkipExecute(proposalID string, now time.Time) bool {

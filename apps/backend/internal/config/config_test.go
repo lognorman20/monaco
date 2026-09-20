@@ -22,10 +22,7 @@ func clearConfigEnv(t *testing.T) {
 	t.Setenv("FLASH_MAX_SLIPPAGE", "")
 	t.Setenv("PRIVY_VERIFICATION_KEY", "")
 	t.Setenv("SOLANA_RPC_URL", "")
-	for _, name := range []string{
-		"DB_MAX_OPEN_CONNS", "DB_MAX_IDLE_CONNS", "DB_CONN_MAX_LIFETIME", "DB_CONN_MAX_IDLE_TIME",
-		"APP_ENV", "APP_RELEASE", "SENTRY_DSN", "LOG_FORMAT", "METRICS_ADDR", "METRICS_TOKEN",
-	} {
+	for _, name := range []string{"DB_MAX_OPEN_CONNS", "DB_MAX_IDLE_CONNS", "DB_CONN_MAX_LIFETIME", "DB_CONN_MAX_IDLE_TIME"} {
 		t.Setenv(name, "")
 	}
 }

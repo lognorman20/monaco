@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/monaco/monaco/apps/backend/internal/config"
-	"github.com/monaco/monaco/apps/backend/internal/errreport"
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
-	"github.com/monaco/monaco/apps/backend/internal/metrics"
+	"github.com/monaco/monaco/apps/backend/internal/postgres"
+	"github.com/monaco/monaco/apps/backend/internal/solana/balance"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 const (
@@ -29,8 +29,26 @@ const (
 	// envTrustProxyHeaders makes rate limiting key on X-Forwarded-For. Only set it behind a
 	// proxy that overwrites the header.
 	envTrustProxyHeaders = "TRUST_PROXY_HEADERS"
+	// envSentryDSN turns on error reporting for panics and alerts. Unset = off.
+	envSentryDSN = "SENTRY_DSN"
+	// envAppEnv names the deployment (dev, staging, prod) on Sentry events. Anything other
+	// than unset, dev or local also switches stderr logs to JSON.
+	envAppEnv = "APP_ENV"
+	// envLogFormat overrides the stderr log format: text or json. See logFormat.
+	envLogFormat = "LOG_FORMAT"
+	// envRelease identifies the build on Sentry events, usually the git sha.
+	envRelease = "RELEASE"
+	// envAlertWebhookURL is a Slack- or Discord-compatible incoming webhook that receives
+	// alerts. Unset = alerts stay in the log (and Sentry).
+	envAlertWebhookURL = "ALERT_WEBHOOK_URL"
+	// envMetricsToken is the bearer token a Prometheus scraper presents to GET /metrics.
+	// Unset = /metrics answers loopback callers only.
+	envMetricsToken = "METRICS_TOKEN"
 
 	privyAPIBaseURL = "https://api.privy.io"
+
+	logFormatText = "text"
+	logFormatJSON = "json"
 )
 
 // Server timeouts. WriteTimeout is long because cash out and trade routes sign and confirm
@@ -49,23 +67,42 @@ const (
 	workerStopTimeout = 10 * time.Second
 )
 
+// logFormat picks the stderr format. On a developer machine (APP_ENV unset, dev or local)
+// it is slog text, which is what `just run` tees to .logs/. Anywhere else stderr is what the
+// host's log collector stores, so it is JSON unless LOG_FORMAT says otherwise. An unknown
+// LOG_FORMAT fails boot: a typo should not silently change what the log pipeline parses.
+func logFormat() (string, error) {
+	switch format := strings.ToLower(strings.TrimSpace(os.Getenv(envLogFormat))); format {
+	case logFormatText, logFormatJSON:
+		return format, nil
+	case "":
+	default:
+		return "", fmt.Errorf("%s must be %s or %s, got %q", envLogFormat, logFormatText, logFormatJSON, format)
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envAppEnv))) {
+	case "", "dev", "development", "local":
+		return logFormatText, nil
+	default:
+		return logFormatJSON, nil
+	}
+}
+
 // setupLogging installs the process logger and returns a func that flushes and closes the
-// log file. stderr gets JSON lines everywhere except APP_ENV=local (LOG_FORMAT overrides),
-// because outside a terminal stderr is what the host's log collector stores and ships. With
-// LOG_FILE, JSON lines go to both stderr and the file so one format serves both copies.
-// Error records are also handed to reporter; the request id is added first so reports carry it.
-func setupLogging(observability config.Observability, reporter errreport.Reporter) (func(), error) {
+// log file. Without LOG_FILE it logs to stderr in the format logFormat picks; with it, JSON
+// lines go to both stderr and the file so one format serves the terminal and the durable copy.
+func setupLogging() (func(), error) {
 	opts := &slog.HandlerOptions{Level: slog.LevelInfo}
-	install := func(handler slog.Handler) {
-		slog.SetDefault(slog.New(httpapi.NewRequestIDLogHandler(errreport.NewSlogHandler(handler, reporter))))
+	format, err := logFormat()
+	if err != nil {
+		return nil, err
 	}
 	path := strings.TrimSpace(os.Getenv(envLogFile))
 	if path == "" {
-		if observability.LogFormat == config.LogFormatJSON {
-			install(slog.NewJSONHandler(os.Stderr, opts))
-		} else {
-			install(slog.NewTextHandler(os.Stderr, opts))
+		var handler slog.Handler = slog.NewTextHandler(os.Stderr, opts)
+		if format == logFormatJSON {
+			handler = slog.NewJSONHandler(os.Stderr, opts)
 		}
+		slog.SetDefault(slog.New(httpapi.NewRequestIDLogHandler(handler)))
 		return func() {}, nil
 	}
 
@@ -73,28 +110,59 @@ func setupLogging(observability config.Observability, reporter errreport.Reporte
 	if err != nil {
 		return nil, fmt.Errorf("open %s %q: %w", envLogFile, path, err)
 	}
-	install(slog.NewJSONHandler(io.MultiWriter(os.Stderr, file), opts))
+	handler := slog.NewJSONHandler(io.MultiWriter(os.Stderr, file), opts)
+	slog.SetDefault(slog.New(httpapi.NewRequestIDLogHandler(handler)))
 	return func() {
 		_ = file.Sync()
 		_ = file.Close()
 	}, nil
 }
 
+// setupTelemetry starts error reporting and alert delivery. The returned func flushes both;
+// call it on shutdown and before a fatal exit.
+func setupTelemetry() (func(), error) {
+	flushSentry, err := telemetry.InitSentry(telemetry.SentryOptions{
+		DSN:         os.Getenv(envSentryDSN),
+		Environment: os.Getenv(envAppEnv),
+		Release:     os.Getenv(envRelease),
+	})
+	if err != nil {
+		return nil, err
+	}
+	stopAlerts, err := telemetry.InitAlerts(os.Getenv(envAlertWebhookURL))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", envAlertWebhookURL, err)
+	}
+	slog.Info("telemetry ready",
+		"sentry", strings.TrimSpace(os.Getenv(envSentryDSN)) != "",
+		"alert_webhook", strings.TrimSpace(os.Getenv(envAlertWebhookURL)) != "",
+		"metrics_token", strings.TrimSpace(os.Getenv(envMetricsToken)) != "",
+	)
+	return func() {
+		stopAlerts()
+		flushSentry()
+	}, nil
+}
+
+// metricsHandler serves GET /metrics behind the scrape token.
+func metricsHandler() http.Handler {
+	return httpapi.MetricsEndpoint(os.Getenv(envMetricsToken), telemetry.Handler())
+}
+
 // platformHandler wraps the route mux with the cross-cutting middleware. Order matters:
-// the request id is set first so every later log line and error body carries it, and
-// Recover sits outside everything that can panic. The metrics middleware wraps Recover so a
-// panic is counted as the 500 it becomes; nothing inside it may copy the request, or the
-// route pattern the mux records is lost to it.
-func platformHandler(mux http.Handler, reporter errreport.Reporter, opsMetrics *metrics.Metrics) http.Handler {
+// the request id is set first so every later log line and error body carries it,
+// Recover sits outside everything that can panic, and Metrics sits directly on the mux so
+// it can read the matched route pattern.
+func platformHandler(mux http.Handler) http.Handler {
 	trustProxy := strings.EqualFold(strings.TrimSpace(os.Getenv(envTrustProxyHeaders)), "true")
 	origins := strings.Split(os.Getenv(envCORSAllowedOrigins), ",")
 	return httpapi.Chain(mux,
 		httpapi.RequestID(),
-		opsMetrics.HTTPMiddleware(),
-		httpapi.Recover(reporter),
+		httpapi.Recover(),
 		httpapi.CORS(origins),
 		httpapi.NewRateLimiter(trustProxy).Middleware(),
 		httpapi.LimitRequestBody(httpapi.DefaultMaxRequestBytes),
+		httpapi.Metrics(),
 	)
 }
 
@@ -137,6 +205,21 @@ type authVerifier interface {
 	VerifierReady() error
 }
 
+// registerDatabaseMetrics exports the pool statistics and the money-path backlog.
+func registerDatabaseMetrics(db *sql.DB, store *postgres.Store) error {
+	if err := telemetry.RegisterDBStats(db, "monaco"); err != nil {
+		return fmt.Errorf("register db pool metrics: %w", err)
+	}
+	err := telemetry.RegisterBacklog(func(ctx context.Context) (telemetry.Backlog, error) {
+		backlog, err := store.GetOpsBacklog(ctx)
+		return telemetry.Backlog(backlog), err
+	})
+	if err != nil {
+		return fmt.Errorf("register backlog metrics: %w", err)
+	}
+	return nil
+}
+
 // healthChecks lists the dependencies GET /health reports. Postgres and the access-token
 // verifier are critical: without either no authenticated route can answer. An outage at
 // Solana RPC, Privy or the price API degrades money routes but still leaves reads working.
@@ -151,6 +234,10 @@ func healthChecks(db *sql.DB, solanaRPC solanaBalanceReader, relayerPubkey strin
 			_, err := solanaRPC.GetBalance(ctx, relayerPubkey)
 			return err
 		}},
+		{Name: "relayer_balance", Check: func(ctx context.Context) error {
+			return checkRelayerBalance(ctx, solanaRPC, relayerPubkey)
+		}},
+		{Name: "pollers", Check: telemetry.CheckPollers},
 		{Name: "privy", Check: func(ctx context.Context) error {
 			return probeReachable(ctx, probeClient, privyAPIBaseURL)
 		}},
@@ -159,6 +246,33 @@ func healthChecks(db *sql.DB, solanaRPC solanaBalanceReader, relayerPubkey strin
 			return err
 		}},
 	}
+}
+
+// checkRelayerBalance publishes the relayer's SOL balance and fails below the boot minimum.
+// Boot refuses to start under that floor, but a running API drains the relayer one fee at a
+// time, and once it is empty every sweep, trade and cash out fails. An RPC error is not a
+// balance problem: solana_rpc reports it.
+func checkRelayerBalance(ctx context.Context, solanaRPC solanaBalanceReader, relayerPubkey string) error {
+	lamports, err := solanaRPC.GetBalance(ctx, relayerPubkey)
+	if err != nil {
+		return nil
+	}
+	telemetry.SetRelayerBalance(lamports)
+	if lamports > balance.FeePayerMinLamports {
+		return nil
+	}
+	telemetry.Alert(ctx, telemetry.AlertEvent{
+		Kind:     "relayer_low_balance",
+		Severity: telemetry.SeverityCritical,
+		Title:    "Relayer SOL balance is below the minimum",
+		Detail:   "Top up the relayer: every sweep, trade and cash out pays its fee from this wallet.",
+		Fields: map[string]string{
+			"relayer_pubkey": relayerPubkey,
+			"lamports":       fmt.Sprint(lamports),
+			"min_lamports":   fmt.Sprint(balance.FeePayerMinLamports),
+		},
+	})
+	return fmt.Errorf("relayer balance %d lamports is at or below the %d minimum", lamports, balance.FeePayerMinLamports)
 }
 
 // probeReachable reports whether url answers at all. Any status below 500 counts: the

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 // SolanaRPC confirms on-chain transactions for sweep credit.
@@ -29,9 +31,9 @@ type HTTPSolanaRPC struct {
 func NewHTTPSolanaRPC(endpoint string) *HTTPSolanaRPC {
 	return &HTTPSolanaRPC{
 		endpoint: strings.TrimSpace(endpoint),
-		httpClient: &http.Client{
+		httpClient: telemetry.InstrumentClient(telemetry.UpstreamSolanaRPC, &http.Client{
 			Timeout: 15 * time.Second,
-		},
+		}),
 	}
 }
 

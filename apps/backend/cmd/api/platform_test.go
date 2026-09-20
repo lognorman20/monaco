@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/monaco/monaco/apps/backend/internal/config"
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
+	"github.com/monaco/monaco/apps/backend/internal/solana/balance"
 )
 
 func TestSetupLogging_logFileSet_appendsJSONLinesWithRequestID(t *testing.T) {
@@ -25,7 +26,7 @@ func TestSetupLogging_logFileSet_appendsJSONLinesWithRequestID(t *testing.T) {
 	t.Setenv(envLogFile, path)
 
 	// Act
-	closeLog, err := setupLogging(config.Observability{LogFormat: config.LogFormatText}, nil)
+	closeLog, err := setupLogging()
 	if err != nil {
 		t.Fatalf("setupLogging: %v", err)
 	}
@@ -53,7 +54,7 @@ func TestSetupLogging_unwritableLogFile_failsBoot(t *testing.T) {
 	t.Setenv(envLogFile, filepath.Join(t.TempDir(), "missing-dir", "api.log"))
 
 	// Act
-	_, err := setupLogging(config.Observability{LogFormat: config.LogFormatText}, nil)
+	_, err := setupLogging()
 
 	// Assert
 	if err == nil {
@@ -113,4 +114,77 @@ func TestWaitWorkers_reportsTimeout(t *testing.T) {
 	if waitWorkers(workers, 10*time.Millisecond) {
 		t.Fatal("waitWorkers = true while a worker is still running")
 	}
+}
+
+type stubBalanceReader struct {
+	lamports uint64
+	err      error
+}
+
+func (s stubBalanceReader) GetBalance(context.Context, string) (uint64, error) {
+	return s.lamports, s.err
+}
+
+func TestCheckRelayerBalance(t *testing.T) {
+	cases := []struct {
+		name    string
+		reader  stubBalanceReader
+		wantErr bool
+	}{
+		{"funded", stubBalanceReader{lamports: balance.FeePayerMinLamports + 1}, false},
+		{"exactly at the floor is too low, same as boot", stubBalanceReader{lamports: balance.FeePayerMinLamports}, true},
+		{"drained", stubBalanceReader{lamports: 0}, true},
+		// An RPC outage is solana_rpc's failure to report, not a balance problem.
+		{"rpc down", stubBalanceReader{err: errors.New("rpc timeout")}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkRelayerBalance(context.Background(), tc.reader, "Relayer11111111111111111111111111111111111")
+
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr = %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestHealthChecks_includePollersAndRelayerBalance_asNonCritical(t *testing.T) {
+	checks := healthChecks(nil, stubBalanceReader{}, "pubkey", nil, fakeVerifier{})
+
+	byName := map[string]bool{}
+	for _, check := range checks {
+		byName[check.Name] = check.Critical
+	}
+	for _, name := range []string{"pollers", "relayer_balance"} {
+		critical, ok := byName[name]
+		if !ok {
+			t.Fatalf("health check %q is missing", name)
+		}
+		// Restarting the API does not refill a wallet, and a restart mid-payout is worse
+		// than a stale poller: both degrade, neither takes the API out of rotation.
+		if critical {
+			t.Fatalf("health check %q must not be critical", name)
+		}
+	}
+}
+
+func TestSetupTelemetry_malformedWebhook_failsBoot(t *testing.T) {
+	t.Setenv(envSentryDSN, "")
+	t.Setenv(envAlertWebhookURL, "not a url")
+
+	if _, err := setupTelemetry(); err == nil {
+		t.Fatal("a malformed ALERT_WEBHOOK_URL must fail boot rather than silently drop alerts")
+	}
+}
+
+func TestSetupTelemetry_unset_isANoOp(t *testing.T) {
+	t.Setenv(envSentryDSN, "")
+	t.Setenv(envAlertWebhookURL, "")
+
+	flush, err := setupTelemetry()
+	if err != nil {
+		t.Fatalf("setupTelemetry: %v", err)
+	}
+	flush()
+	flush() // main calls it on the fatal path and again via defer
 }

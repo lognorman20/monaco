@@ -1,10 +1,8 @@
-package errreport
+package telemetry
 
 import (
-	"errors"
 	"fmt"
 	"regexp"
-	"strings"
 )
 
 // Redacted replaces every credential the scrubber finds.
@@ -134,25 +132,6 @@ func ScrubTags(tags map[string]string) map[string]string {
 			continue
 		}
 		out[k] = scrubString(v, signatureKey.MatchString(k))
-	}
-	return out
-}
-
-// Scrub returns a copy of event with every credential redacted. Err and Panic are reduced
-// to their scrubbed text: the original values may hold references to live secrets.
-func Scrub(event Event) Event {
-	out := Event{
-		Level:   event.Level,
-		Message: ScrubString(event.Message),
-		Stack:   ScrubString(event.Stack),
-		Tags:    ScrubTags(event.Tags),
-		Extra:   ScrubMap(event.Extra),
-	}
-	if event.Err != nil {
-		out.Err = errors.New(ScrubString(event.Err.Error()))
-	}
-	if event.Panic != nil {
-		out.Panic = ScrubString(strings.TrimSpace(fmt.Sprint(event.Panic)))
 	}
 	return out
 }

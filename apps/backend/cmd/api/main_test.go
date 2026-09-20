@@ -35,7 +35,7 @@ func TestAPIServer_missingRelayerKey_failsStartup(t *testing.T) {
 	defer cancel()
 
 	// Act
-	_, err := boot(ctx, nil)
+	_, err := boot(ctx)
 
 	// Assert
 	if err == nil {

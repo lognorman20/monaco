@@ -145,6 +145,7 @@ Never `simctl erase` for QA. Agent-driven QA must export `SIMSLIM_UDID` and pass
 
 - [Product and architecture](product.md)
 - [Sweep USDC out of Privy wallets](ops-sweep-wallets.md) (`./scripts/sweep-wallets.sh`)
+- [Observability: logs, metrics, alerts, health](ops-observability.md)
 
 ## Milestone files
 

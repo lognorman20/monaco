@@ -1,18 +1,25 @@
-package errreport
+package telemetry
 
 import (
-	"errors"
+	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
-	solanakey "github.com/monaco/monaco/apps/backend/internal/solana/key"
+	"github.com/getsentry/sentry-go"
 )
+
+// testSecretKeyBase58 has the shape of a 64-byte Solana secret key (and of a signature).
+const testSecretKeyBase58 = "5Kd3NBUAdUnhyzenEwVLy9pBKxSwXvE9FMPyR4UKZvpe6E3ZcrYyFZ8sPq2mW7hTgJ4nXb1LcD9uRfAa3Vt6QeHk"
 
 const testJWT = "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJkaWQ6cHJpdnk6YWxmcmVkIn0.c2lnbmF0dXJlLWJ5dGVz"
 
 func TestScrubString_redactsCredentialsInFreeText(t *testing.T) {
-	relayerKey := solanakey.TestPrivateKeyBase58()
+	relayerKey := testSecretKeyBase58
 	cases := map[string]struct {
 		input  string
 		secret string
@@ -86,7 +93,7 @@ func TestScrubValue_tradeFieldsNamedToken_areKept(t *testing.T) {
 
 func TestScrubValue_transactionSignature_isKeptOnlyUnderSignatureKeys(t *testing.T) {
 	// Arrange: a signature is 64 bytes of base58, indistinguishable from a secret key.
-	signature := solanakey.TestPrivateKeyBase58()
+	signature := testSecretKeyBase58
 
 	// Act
 	underSignatureKey := ScrubValue("tx_signature", signature)
@@ -101,41 +108,66 @@ func TestScrubValue_transactionSignature_isKeptOnlyUnderSignatureKeys(t *testing
 	}
 }
 
-func TestScrub_event_redactsEveryField(t *testing.T) {
+func TestScrubSentryEvent_redactsWhatTheSDKWouldSend(t *testing.T) {
 	// Arrange
-	event := Event{
-		Level:   LevelFatal,
-		Message: "privy call failed with Bearer msg-token",
-		Err:     fmt.Errorf("wrap: %w", errors.New("token "+testJWT)),
-		Panic:   "bad header Authorization: Bearer panic-token",
-		Stack:   "goroutine 1 [running]:\nmain.pay(wallet-auth:STACKSECRET)",
-		Tags:    map[string]string{"route": "POST /v1/groups/{id}/fund", "agent_key": "tag-secret"},
-		Extra: map[string]any{
-			"headers": map[string]any{"Authorization": "Bearer nested-token", "X-Monaco-Agent-Key": "nested-agent-key", "Accept": "*/*"},
-			"nested":  []any{map[string]any{"private_key": "deep-secret"}},
-			"err":     errors.New("dial postgres://monaco:dbpass@host/db"),
-			"amount":  int64(2_500_000),
-		},
+	event := sentry.NewEvent()
+	event.Message = "Poller deposit_sweep panicked: Bearer msg-token"
+	event.Exception = []sentry.Exception{{Type: "panic", Value: `Post "https://rpc.example.com/?api-key=rpc-key-value": EOF`}}
+	event.Tags = map[string]string{"route": "POST /v1/groups/{id}/fund", "agent_key": "tag-secret"}
+	event.Contexts = map[string]sentry.Context{
+		"panic": {"stack": "main.pay(wallet-auth:STACKSECRET)"},
+		"alert": {"detail": "dial postgres://monaco:dbpass@host/db", "job_id": "job-1"},
 	}
+	event.Request = &sentry.Request{Headers: map[string]string{"Authorization": "Bearer header-token"}}
+	event.User = sentry.User{IPAddress: "203.0.113.9"}
 
 	// Act
-	got := Scrub(event)
-	flat := fmt.Sprintf("%v|%v|%v|%v|%v|%v", got.Message, got.Err, got.Panic, got.Stack, got.Tags, got.Extra)
+	got := scrubSentryEvent(event, nil)
+	flat := fmt.Sprintf("%v|%v|%v|%v|%v|%v", got.Message, got.Exception, got.Tags, got.Contexts, got.Request, got.User)
 
 	// Assert
-	for _, secret := range []string{"msg-token", testJWT, "panic-token", "STACKSECRET", "tag-secret", "nested-token", "nested-agent-key", "deep-secret", "dbpass"} {
+	for _, secret := range []string{"msg-token", "rpc-key-value", "tag-secret", "STACKSECRET", "dbpass", "header-token", "203.0.113.9"} {
 		if strings.Contains(flat, secret) {
 			t.Errorf("secret %q survived: %s", secret, flat)
 		}
 	}
-	if got.Tags["route"] != "POST /v1/groups/{id}/fund" || got.Extra["amount"] != int64(2_500_000) {
-		t.Fatalf("non-secret fields were damaged: %+v", got)
+	if got.Tags["route"] != "POST /v1/groups/{id}/fund" || got.Contexts["alert"]["job_id"] != "job-1" {
+		t.Fatalf("non-secret fields were damaged: tags=%v contexts=%v", got.Tags, got.Contexts)
 	}
-	headers := got.Extra["headers"].(map[string]any)
-	if headers["Accept"] != "*/*" {
-		t.Fatalf("headers = %v", headers)
-	}
-	if event.Extra["headers"].(map[string]any)["Authorization"] != "Bearer nested-token" {
-		t.Fatal("Scrub mutated the caller's event")
+}
+
+func TestAlert_upstreamErrorInDetail_isScrubbedBeforeTheWebhook(t *testing.T) {
+	// Arrange
+	received := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		received <- string(body)
+	}))
+	defer server.Close()
+	a := newAlerter(server.URL, time.Minute, server.Client())
+	a.start()
+	defer a.stop()
+
+	// Act
+	a.raise(context.Background(), AlertEvent{
+		Kind:   "test_poller_panic",
+		Title:  "Poller panicked",
+		Detail: `Post "https://rpc.example.com/?api-key=rpc-key-value": Authorization: Bearer live-token`,
+		Fields: map[string]string{"job_id": "job-1", "access_token": "field-token"},
+	})
+
+	// Assert
+	select {
+	case body := <-received:
+		for _, secret := range []string{"rpc-key-value", "live-token", "field-token"} {
+			if strings.Contains(body, secret) {
+				t.Errorf("secret %q reached the webhook: %s", secret, body)
+			}
+		}
+		if !strings.Contains(body, "job_id: job-1") || !strings.Contains(body, "rpc.example.com") {
+			t.Errorf("webhook body lost its operational detail: %s", body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("webhook was never called")
 	}
 }

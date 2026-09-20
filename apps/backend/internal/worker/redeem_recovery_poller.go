@@ -3,11 +3,13 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 // DefaultRedeemRecoveryInterval is how often abandoned redeem jobs are looked for.
@@ -41,7 +43,6 @@ type RedeemRecoveryPoller struct {
 	staleAfter time.Duration
 	backoff    map[string]time.Time
 	attempts   map[string]int
-	observer   TickObserver
 }
 
 // NewRedeemRecoveryPoller wires redeem recovery dependencies.
@@ -60,11 +61,6 @@ func NewRedeemRecoveryPoller(store StaleRedeemJobLister, redeem RedeemJobRecover
 	}
 }
 
-// SetTickObserver reports every tick to observer. Call it before the poller runs.
-func (p *RedeemRecoveryPoller) SetTickObserver(observer TickObserver) {
-	p.observer = observer
-}
-
 // RunRedeemRecoveryPoller ticks until ctx is cancelled.
 func RunRedeemRecoveryPoller(ctx context.Context, poller *RedeemRecoveryPoller, interval time.Duration) {
 	if poller == nil {
@@ -75,6 +71,7 @@ func RunRedeemRecoveryPoller(ctx context.Context, poller *RedeemRecoveryPoller, 
 	}
 
 	slog.Info("redeem recovery poller started", "interval", interval, "stale_after", poller.staleAfter)
+	telemetry.RegisterPoller(PollerRedeemRecovery, interval)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -85,35 +82,33 @@ func RunRedeemRecoveryPoller(ctx context.Context, poller *RedeemRecoveryPoller, 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			observeTick(poller.observer, NameRedeemRecovery, func() error {
-				tickCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-				defer cancel()
-				return poller.tick(tickCtx)
+			tickCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			telemetry.GuardTick(ctx, PollerRedeemRecovery, func() error {
+				poller.tick(tickCtx)
+				return nil
 			})
+			cancel()
 		}
 	}
 }
 
-// tick returns the last failure of the round so the tick observer can count it; each failure
-// is already logged with its job where it happens.
-func (p *RedeemRecoveryPoller) tick(ctx context.Context) error {
+func (p *RedeemRecoveryPoller) tick(ctx context.Context) {
 	if p == nil || p.store == nil || p.redeem == nil {
-		return nil
+		return
 	}
 
 	now := p.clock.Now()
 	jobs, err := p.store.ListStaleActiveRedeemJobs(ctx, now.Add(-p.staleAfter), p.limit)
 	if err != nil {
 		slog.Error("redeem recovery poller list stale jobs failed", "err", err)
-		return err
+		return
 	}
 	p.forgetResolved(jobs)
 	if len(jobs) == 0 {
-		return nil
+		return
 	}
 
 	slog.Warn("redeem recovery poller found abandoned jobs", "count", len(jobs))
-	var tickErr error
 	for _, job := range jobs {
 		if next, ok := p.backoff[job.ID]; ok && now.Before(next) {
 			continue
@@ -133,22 +128,36 @@ func (p *RedeemRecoveryPoller) tick(ctx context.Context) error {
 		outcome, err := p.redeem.RecoverStaleRedeemJob(ctx, job.ID)
 		switch {
 		case errors.Is(err, app.ErrRedeemPayoutUnverified):
-			tickErr = err
 			// Nothing automatic is safe here; keep saying so until a person resolves it.
 			p.recordAttempt(job.ID, attempt, now)
 			slog.Error("redeem job wedged in paying: payout unverified, share units burnt, needs manual review", attrs...)
+			telemetry.MoneyEvent(telemetry.EventRedeemRescue, "wedged")
+			telemetry.Alert(ctx, telemetry.AlertEvent{
+				Kind:     "redeem_wedged",
+				Key:      "redeem_wedged:" + job.ID,
+				Severity: telemetry.SeverityCritical,
+				Title:    "Cash out wedged: payout unverified, needs manual review",
+				Detail:   "Share units are burnt but the USDC payout could not be verified on chain. Nothing automatic is safe.",
+				Fields: map[string]string{
+					"job_id":     job.ID,
+					"group_id":   job.GroupID,
+					"user_id":    job.UserID,
+					"slice_usdc": fmt.Sprint(job.SliceUsdc),
+					"stale_for":  now.Sub(job.UpdatedAt).Round(time.Second).String(),
+				},
+			})
 		case err != nil:
-			tickErr = err
 			p.recordAttempt(job.ID, attempt, now)
 			slog.Error("redeem recovery failed", append(attrs, "err", err)...)
+			telemetry.MoneyEvent(telemetry.EventRedeemRescue, telemetry.OutcomeError)
 		case outcome == app.RedeemRecoveryBusy:
 			slog.Info("redeem recovery skipped", append(attrs, "reason", "member redeem lock held")...)
 		default:
 			p.clearAttempts(job.ID)
 			slog.Warn("redeem recovery resolved job", append(attrs, "outcome", string(outcome))...)
+			telemetry.MoneyEvent(telemetry.EventRedeemRescue, string(outcome))
 		}
 	}
-	return tickErr
 }
 
 func (p *RedeemRecoveryPoller) recordAttempt(jobID string, attempt int, now time.Time) {

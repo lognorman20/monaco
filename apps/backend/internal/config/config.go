@@ -75,7 +75,6 @@ const maxFlashSlippage = 0.05
 //     falls back to the public cluster endpoint, which has no SLA: set a paid RPC outside
 //     local dev.
 //   - DB_MAX_OPEN_CONNS, DB_MAX_IDLE_CONNS, DB_CONN_MAX_LIFETIME, DB_CONN_MAX_IDLE_TIME: see DBPool.
-//   - APP_ENV, APP_RELEASE, SENTRY_DSN, LOG_FORMAT, METRICS_ADDR, METRICS_TOKEN: see Observability.
 type Config struct {
 	DatabaseURL                  string
 	PrivyAppID                   string
@@ -96,7 +95,6 @@ type Config struct {
 	// PrivyVerificationKey is the parsed PRIVY_VERIFICATION_KEY.
 	PrivyVerificationKey *ecdsa.PublicKey
 	DBPool               DBPool
-	Observability        Observability
 }
 
 // Load reads required settings from the process environment.
@@ -169,11 +167,6 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.DBPool = pool
-	observability, err := LoadObservability()
-	if err != nil {
-		return nil, err
-	}
-	cfg.Observability = observability
 
 	return cfg, nil
 }

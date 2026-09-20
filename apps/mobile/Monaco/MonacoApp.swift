@@ -3,6 +3,7 @@
 //  Monaco
 //
 
+import MonacoCore
 import SwiftUI
 
 @main
@@ -10,6 +11,8 @@ struct MonacoApp: App {
     @StateObject private var auth = PrivyAuthService()
 
     init() {
+        APITelemetryRegistry.shared.register(APILogTelemetry())
+        DiagnosticsSubscriber.shared.start()
         MonacoAppearance.configureUIKit()
         MonacoLaunchTrace.markSceneReady()
     }

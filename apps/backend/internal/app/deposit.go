@@ -10,6 +10,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 // DepositStatus is the lifecycle state of a deposit intent.
@@ -481,6 +482,9 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 	committed = true
 
 	logDepositObserveSweepConfirmed(sweep.DepositID, sweep.GroupID, sweep.UserID, sweep.TxSignature, newlyConfirmed)
+	if newlyConfirmed {
+		telemetry.MoneyMoved(telemetry.EventDepositSweep, confirmed.Amount)
+	}
 	return ObserveSweepResult{
 		Deposit:  depositFromRow(confirmed),
 		Position: positionFromRowPostgres(positionRow),
