@@ -36,6 +36,7 @@ type bootResult struct {
 	DB                *sql.DB
 	stopPoller        context.CancelFunc
 	stopExecutePoller context.CancelFunc
+	stopRedeemPoller  context.CancelFunc
 }
 
 var apiRoutes = []string{
@@ -313,6 +314,10 @@ func boot(ctx context.Context) (*bootResult, error) {
 	go worker.RunProposalExecutePoller(executeCtx, executePoller, worker.DefaultProposalExecuteInterval)
 	slog.Info("proposal execute poller started")
 
+	redeemPoller := worker.NewRedeemRecoveryPoller(store, redeem, nil)
+	redeemCtx, stopRedeemPoller := context.WithCancel(context.Background())
+	go worker.RunRedeemRecoveryPoller(redeemCtx, redeemPoller, worker.DefaultRedeemRecoveryInterval)
+
 	return &bootResult{
 		Server: &http.Server{
 			Addr:    addr,
@@ -323,6 +328,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 		DB:                db,
 		stopPoller:        stopPoller,
 		stopExecutePoller: stopExecutePoller,
+		stopRedeemPoller:  stopRedeemPoller,
 	}, nil
 }
 
@@ -367,6 +373,7 @@ func main() {
 	slog.Info("sweep poller stopped")
 	result.stopExecutePoller()
 	slog.Info("proposal execute poller stopped")
+	result.stopRedeemPoller()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()

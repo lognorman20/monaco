@@ -277,3 +277,49 @@ WHERE id = $1`
 	}
 	return nil
 }
+
+// ListStaleActiveRedeemJobs returns unsettled jobs with no recorded payout that have not
+// moved since before cutoff, oldest first. These are the jobs a live request abandoned.
+func (s *Store) ListStaleActiveRedeemJobs(ctx context.Context, cutoff time.Time, limit int) ([]RedeemJobRow, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("limit must be positive")
+	}
+	const selectSQL = `
+SELECT id, group_id, user_id, share_units, slice_usdc, payout_address, status, withdrawal_id, created_at, updated_at
+FROM redeem_jobs
+WHERE status IN ('debited', 'selling', 'paying')
+  AND withdrawal_id IS NULL
+  AND updated_at < $1
+ORDER BY updated_at ASC
+LIMIT $2`
+
+	rows, err := s.db.QueryContext(ctx, selectSQL, cutoff.UTC(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list stale redeem jobs: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []RedeemJobRow
+	for rows.Next() {
+		var row RedeemJobRow
+		if err := rows.Scan(
+			&row.ID,
+			&row.GroupID,
+			&row.UserID,
+			&row.ShareUnits,
+			&row.SliceUsdc,
+			&row.PayoutAddress,
+			&row.Status,
+			&row.WithdrawalID,
+			&row.CreatedAt,
+			&row.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan stale redeem job: %w", err)
+		}
+		jobs = append(jobs, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list stale redeem jobs: %w", err)
+	}
+	return jobs, nil
+}
