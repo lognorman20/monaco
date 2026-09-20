@@ -199,6 +199,56 @@ final class IdempotentSubmissionTests: XCTestCase {
         XCTAssertNotEqual(recorder.idempotencyKeys[0], recorder.idempotencyKeys[1])
     }
 
+    /// A leave the server refuses is a final answer, so the next attempt must reach the handler
+    /// rather than replay the stored 409. The member is told to fix something first ("cash out
+    /// your slice", "vote on the open proposals") and then taps Leave again with a byte-identical
+    /// body: if that retried under the same key, the backend would replay the refusal for the
+    /// full 24 h key TTL and the member could never leave.
+    func testBlockedLeaveGetsNewKeyOnTheNextAttempt() async throws {
+        let recorder = RequestRecorder()
+        MockURLProtocol.requestHandler = { request in
+            recorder.record(request)
+            if recorder.requests.count == 1 {
+                // What the handler returns for a blocked leave: a 409 carrying a reason and no
+                // `Idempotency-Status`, which marks it as the request's own answer.
+                return (Self.response(for: request, status: 409), Data(#"{"error":"cash out your slice first","reason":"share_units_remaining"}"#.utf8))
+            }
+            return (Self.response(for: request, status: 204), Data())
+        }
+        let client = makeClient()
+        let submission = IdempotentSubmission()
+
+        try? await client.leaveGroup(groupId: "g1", withdrawStake: false, submission: submission)
+        try await client.leaveGroup(groupId: "g1", withdrawStake: false, submission: submission)
+
+        XCTAssertEqual(recorder.idempotencyKeys.count, 2)
+        XCTAssertNotEqual(
+            recorder.idempotencyKeys[0], recorder.idempotencyKeys[1],
+            "a refused leave is answered; the retry must be a new submission, not a replay"
+        )
+    }
+
+    /// The other half: a 409 that only means "your first attempt is still running" is not an
+    /// answer, so the retry has to stay under the same key or it would start a second leave.
+    func testLeaveStillRunningRetriesUnderTheSameKey() async throws {
+        let recorder = RequestRecorder()
+        MockURLProtocol.requestHandler = { request in
+            recorder.record(request)
+            if recorder.requests.count == 1 {
+                let headers = [IdempotentSubmission.statusHeader: IdempotentSubmission.inProgressStatus]
+                return (Self.response(for: request, status: 409, headers: headers), Data())
+            }
+            return (Self.response(for: request, status: 204), Data())
+        }
+        let client = makeClient()
+        let submission = IdempotentSubmission()
+
+        try? await client.leaveGroup(groupId: "g1", withdrawStake: true, submission: submission)
+        try await client.leaveGroup(groupId: "g1", withdrawStake: true, submission: submission)
+
+        XCTAssertEqual(recorder.idempotencyKeys[0], recorder.idempotencyKeys[1])
+    }
+
     func testChangedAmountAfterLostResponseGetsNewKey() async throws {
         let recorder = RequestRecorder()
         MockURLProtocol.requestHandler = { request in
