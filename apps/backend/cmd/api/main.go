@@ -17,6 +17,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/config"
 	"github.com/monaco/monaco/apps/backend/internal/faker"
+	"github.com/monaco/monaco/apps/backend/internal/flash"
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
@@ -25,6 +26,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/solana/balance"
 	"github.com/monaco/monaco/apps/backend/internal/storage"
+	"github.com/monaco/monaco/apps/backend/internal/swapprovider"
 	"github.com/monaco/monaco/apps/backend/internal/worker"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
@@ -183,6 +185,15 @@ func boot(ctx context.Context) (*bootResult, error) {
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	signer := app.NewPrivyTreasurySigner(privyClient)
 	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, relayer.PrivateKey(), symbols)
+	if cfg.SwapProvider == swapprovider.NameFlash {
+		swap.SetSwapProvider(flash.NewSwapProvider(
+			flash.NewHTTPClient(cfg.FlashAPIKey),
+			signer,
+			app.NewPrivyFlashSetupSubmitter(privyClient, relayer.PrivateKey()),
+			flash.ProviderConfig{MaxSlippage: cfg.FlashMaxSlippage, SponsorAddress: relayer.PublicKey()},
+		))
+	}
+	slog.Info("swap provider ready", "provider", swap.SwapProviderName())
 	redeem := app.NewRedeemService(store, privyClient, pythClient, jupiterClient, swap, signer)
 	governance.SetRedeemService(redeem)
 	auth := &httpapi.AuthHandlers{Sessions: sessions}

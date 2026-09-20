@@ -121,6 +121,23 @@ sol      0.003044217
 usdc     0.00
 ```
 
+## Swap provider (Jupiter or Definitive Flash)
+
+Treasury buys and sells go through `swapprovider.Provider` (`apps/backend/internal/swapprovider`). `SWAP_PROVIDER` picks the venue at API boot; the choice is logged as `swap provider ready`.
+
+| `SWAP_PROVIDER`     | Venue                                                                 | Needs                                  |
+| ------------------- | --------------------------------------------------------------------- | -------------------------------------- |
+| `jupiter` (default) | Jupiter Swap API v2: order → treasury + relayer sign → execute → poll | nothing new                            |
+| `flash`             | [Definitive Flash](https://flash.definitive.fi/docs): quote → sign → order → poll | `FLASH_API_KEY`, Privy authorization key |
+
+Flash on Solana, per trade: `POST /quote` with the treasury as `funderAddress`, the treasury wallet signs the quote's plaintext `svm.orderMessage` (Privy `signMessage`, Ed25519), `POST /order`, then poll `GET /orders/{orderId}` until `ORDER_STATUS_FILLED`. The backend refuses to sign unless the message commits to the mint and atomic amount it asked for, and unless the quote deadline is still ahead.
+
+First Flash trade of a token per treasury also needs an onchain setup: create the token account and `Approve` the Flash program as SPL delegate. The backend sends both in one transaction with the **relayer as fee payer and rent payer** and the treasury as co-signer, then re-quotes until Flash sees it. That costs the relayer about 0.002 SOL per new token account.
+
+Get a key at [app.definitive.fi](https://app.definitive.fi) → More → Flash → Create Flash Key, then set `SWAP_PROVIDER=flash` and `FLASH_API_KEY` in `.env.local`. `FLASH_MAX_SLIPPAGE` (default `0.01`) bounds executed vs quoted output. Unset `SWAP_PROVIDER` to go back to Jupiter; no data migration either way.
+
+Every treasury swap follows the flag, including the sells a cash-out triggers (`RedeemService` calls `SwapService.SellToUSDC`). Still on Jupiter regardless: the price quotes shown in the app, catalog routability probes, and `cmd/sweep-member-to-address`.
+
 ## Demo data (faker seed)
 
 Seeds fake-but-realistic data so Home, Groups, proposals, and activity look alive without a
