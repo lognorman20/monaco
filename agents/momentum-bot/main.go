@@ -90,7 +90,7 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 		fmt.Fprintln(fs.Output(), "\nEnvironment:")
 		fmt.Fprintln(fs.Output(), "  MONACO_API          API base URL, e.g. http://127.0.0.1:8080 (required)")
 		fmt.Fprintln(fs.Output(), "  MONACO_GROUP_ID     the cabal's group id (required)")
-		fmt.Fprintln(fs.Output(), "  MONACO_AGENT_KEY    the key shown once in the app after the add-bot vote (required; env only, never a flag)")
+		fmt.Fprintln(fs.Output(), "  MONACO_AGENT_KEY    the key shown in the app after the add-bot vote (required; env only, never a flag)")
 		fmt.Fprintln(fs.Output(), "  JUPITER_PRICE_URL   override the price feed (default "+defaultPriceURL+")")
 		fmt.Fprintln(fs.Output(), "\nFlags:")
 		fs.PrintDefaults()

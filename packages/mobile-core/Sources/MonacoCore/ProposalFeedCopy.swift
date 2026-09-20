@@ -277,7 +277,7 @@ public enum ProposeFlowCopy {
     public static let botNamePlaceholder = "Bot name"
     public static let botBudgetHelper = "Budget from the pot"
     public static let botExplainer = "Your cabal votes first. Once it passes, you'll get a key to paste into your bot."
-    public static let botKeyExplainer = "Paste this key into your bot. We only show it once."
+    public static let botKeyExplainer = "Paste this key into your bot. It stays here for 15 minutes, then it\u{2019}s gone for good."
     public static let copyKey = "Copy key"
     public static let keyCopied = "Key copied"
     public static func lifecycleTitle(kind: String) -> String {

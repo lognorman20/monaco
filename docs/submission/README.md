@@ -107,7 +107,7 @@ one readable momentum rule, dry run by default. How to run it:
 | Budget cap, enforced server-side | Each intent is checked against `allocation − executed buys − pending buys`, and against the treasury's USDC. Over budget is a `422`, never a partial fill. The bot's own caps are a second, inner limit. | `domain.ValidateIntent` in `packages/domain/agent.go` |
 | Sells are bounded | An agent cannot sell more of a symbol than the cabal holds. | same |
 | Pause, resume, revoke by vote | Paused: key stays valid, intents get `403`. Revoked: key gets `401`. | `internal/app/agent_intent.go` |
-| One-time key reveal | The key is minted when the vote passes and stored as a SHA-256 hash. The plaintext is held for the proposer and deleted the first time they read it. | `agent_key.go`, `ConsumeAgentKeyReveal` in `internal/postgres/group_agents.go` |
+| Proposer-only key reveal | The key is minted when the vote passes and stored as a SHA-256 hash. The plaintext is readable by the proposer alone for 15 minutes, then purged. | `agent_key.go`, `ReadAgentKeyReveal` in `internal/postgres/group_agents.go` |
 | Wrong-key throttling | 10 wrong keys per cabal or per address, then `429` with `Retry-After`, refilling one try per minute. Correct keys are never throttled. A key for another cabal gets the same `401` as an unknown key. | `internal/httpapi/agent_auth.go` |
 | Audit trail | Every intent is stored, including rejected ones with the reason. Fills appear in the cabal activity feed marked as agent trades. | `InsertAgentIntent` |
 
