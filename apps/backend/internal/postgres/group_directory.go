@@ -20,6 +20,8 @@ type GroupDirectoryRow struct {
 	MemberCount     int
 	NetUsdcInMicros int64
 	CreatedAt       time.Time
+	// PictureURL is the cabal picture, null until the creator uploads one.
+	PictureURL sql.NullString
 }
 
 // GroupSearchRow is a directory row plus the keyset fields search pages on.
@@ -51,7 +53,8 @@ SELECT g.id,
        (SELECT COALESCE(SUM(p.amount_deposited - p.amount_withdrawn), 0)
           FROM positions p JOIN users u ON u.id = p.user_id
          WHERE p.group_id = g.id AND ` + potPositionPredicate + `) AS net_usdc_in,
-       g.created_at`
+       g.created_at,
+       g.picture_url`
 
 // ListGroupDirectory returns every group's public projection, oldest first.
 func (s *Store) ListGroupDirectory(ctx context.Context) ([]GroupDirectoryRow, error) {
@@ -111,7 +114,9 @@ func scanDirectoryRows(rows *sql.Rows) ([]GroupDirectoryRow, error) {
 func scanDirectoryRow(rows *sql.Rows, extra ...any) (GroupDirectoryRow, error) {
 	var row GroupDirectoryRow
 	var joinMode string
-	dest := []any{&row.ID, &row.Name, &joinMode, &row.MemberCount, &row.NetUsdcInMicros, &row.CreatedAt}
+	// This order must match directorySelect. Callers' extras (search's match_rank
+	// and sort_name) are appended here and are selected last for the same reason.
+	dest := []any{&row.ID, &row.Name, &joinMode, &row.MemberCount, &row.NetUsdcInMicros, &row.CreatedAt, &row.PictureURL}
 	dest = append(dest, extra...)
 	if err := rows.Scan(dest...); err != nil {
 		return GroupDirectoryRow{}, fmt.Errorf("scan group directory row: %w", err)

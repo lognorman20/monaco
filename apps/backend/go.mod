@@ -8,6 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.7.5
 	github.com/monaco/monaco/packages/domain v0.0.0
 	github.com/prometheus/client_golang v1.24.1
+	golang.org/x/image v0.32.0
 	golang.org/x/text v0.40.0
 )
 
