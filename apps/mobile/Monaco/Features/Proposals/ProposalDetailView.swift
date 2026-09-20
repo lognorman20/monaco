@@ -19,7 +19,8 @@ struct ProposalDetailView: View {
     @State private var comments: [ProposalCommentDTO] = []
     @State private var commentsLoading = true
     @State private var commentsError: String?
-    @State private var draft = ""
+    /// Bumped when a comment posts; the composer owns the draft and clears it on the change.
+    @State private var postedCommentCount = 0
     @State private var replyTarget: ProposalCommentDTO?
     @State private var isPosting = false
     @State private var toast: MonacoToast?
@@ -81,9 +82,9 @@ struct ProposalDetailView: View {
         .safeAreaInset(edge: .bottom) {
             if proposal != nil {
                 CommentComposer(
-                    text: $draft,
                     replyTarget: replyTarget,
                     isPosting: isPosting,
+                    postedCount: postedCommentCount,
                     onCancelReply: { replyTarget = nil },
                     onPost: { body in Task { await postComment(body) } }
                 )
@@ -275,7 +276,7 @@ struct ProposalDetailView: View {
         let parent = replyTarget
         do {
             _ = try await service.postComment(proposalId: proposalId, body: body, parentId: parent?.id)
-            draft = ""
+            postedCommentCount += 1
             replyTarget = nil
             Haptics.success()
             toast = MonacoToast(

@@ -121,12 +121,15 @@ struct CommentRow: View {
 /// Bottom composer: pill field and a round send button. Posts a top-level comment, or a reply when
 /// `replyTarget` is set.
 struct CommentComposer: View {
-    @Binding var text: String
     let replyTarget: ProposalCommentDTO?
     let isPosting: Bool
+    /// Comments posted from this screen so far. A new value means the draft went out: clear it.
+    let postedCount: Int
     let onCancelReply: () -> Void
     let onPost: (String) -> Void
 
+    /// Owned here, not by the screen: a keystroke re-renders the composer and nothing else.
+    @State private var text = ""
     @FocusState private var focused: Bool
 
     private var draft: ProposalCommentDraft {
@@ -216,6 +219,9 @@ struct CommentComposer: View {
         }
         .onChange(of: replyTarget?.id) { _, newValue in
             if newValue != nil { focused = true }
+        }
+        .onChange(of: postedCount) { _, _ in
+            text = ""
         }
     }
 }
