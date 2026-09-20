@@ -1,11 +1,14 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
@@ -32,6 +35,12 @@ func integrationAssetsApp(t *testing.T) (*AssetsHandlers, *AuthHandlers, privy.C
 	}
 	return handlers, authHandlers, privyClient, jupiterClient, iso
 }
+
+// noRouteProber ranks every catalog asset as not routable, standing in for a stock the
+// catalog's own Jupiter probe has already ruled out.
+type noRouteProber struct{}
+
+func (noRouteProber) IsRoutable(context.Context, xstocks.CatalogAsset) bool { return false }
 
 func seedAssetsToken(t *testing.T, iso *postgres.TestIsolation, authHandlers *AuthHandlers, privyClient privy.Client) string {
 	t.Helper()
@@ -342,10 +351,10 @@ func TestGET_assets_symbol_catalogNotRoutable_liveQuoteSetsRoutable(t *testing.T
 	}
 }
 
-func TestGET_assets_symbol_quoteFail_marksNotRoutable(t *testing.T) {
+func TestGET_assets_symbol_probeError_keepsCatalogRoutable(t *testing.T) {
 	t.Parallel()
 
-	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
+	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
 	token := seedAssetsToken(t, iso, authHandlers, privyClient)
 	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
 		Symbol:     "AAPLx",
@@ -354,6 +363,12 @@ func TestGET_assets_symbol_quoteFail_marksNotRoutable(t *testing.T) {
 		Routable:   true,
 	})
 	jupiter.RegisterPrice(handlers.Price, jupiter.AAPLxMint, jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
+	jupiter.RegisterQuoteBuyError(
+		jupiterClient,
+		jupiter.AAPLxMint,
+		app.CatalogRoutabilityProbeMicros,
+		errors.New("jupiter: order status 429: rate limited"),
+	)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLx", nil)
 	req.SetPathValue("symbol", "AAPLx")
@@ -368,11 +383,85 @@ func TestGET_assets_symbol_quoteFail_marksNotRoutable(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode json: %v", err)
 	}
-	if payload.Liquidity.Routable {
-		t.Fatal("quote fail must not invent a routable book")
+	if !payload.Liquidity.Routable {
+		t.Fatal("a failed probe is not an answer: the catalog verdict must stand")
 	}
-	if payload.Routable {
-		t.Fatal("top-level routable must stay false when the Jupiter probe fails")
+	if !payload.Routable {
+		t.Fatal("a rate-limited probe must not render 'Can't be bought right now'")
+	}
+	if payload.Liquidity.BuyProbeOutAmount != "" {
+		t.Fatalf("buy probe amount = %q, want empty when the probe failed", payload.Liquidity.BuyProbeOutAmount)
+	}
+}
+
+func TestGET_assets_symbol_probeError_keepsCatalogNotRoutable(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+		Symbol:     "DEADx",
+		Name:       "Dead Co",
+		SolanaMint: "MintDead",
+	})
+	xstocks.SetFakeCatalogRoutabilityProber(handlers.Catalog, noRouteProber{})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/DEADx", nil)
+	req.SetPathValue("symbol", "DEADx")
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handlers.GetAssetHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	var payload assetDetailResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if payload.Routable || payload.Liquidity.Routable {
+		t.Fatal("a failed probe must not upgrade a catalog no-route to buyable")
+	}
+}
+
+func TestGET_assets_symbol_probesJupiterOncePerOpen(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+		Symbol:     "AAPLx",
+		Name:       "Apple",
+		SolanaMint: jupiter.AAPLxMint,
+		Routable:   true,
+	})
+	jupiter.RegisterPrice(handlers.Price, jupiter.AAPLxMint, jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
+	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, app.CatalogRoutabilityProbeMicros, jupiter.BuyQuote{
+		Routable:   true,
+		InputMint:  jupiter.USDCMint,
+		OutputMint: jupiter.AAPLxMint,
+		InAmount:   "1000000",
+		OutAmount:  "100000000",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLx", nil)
+	req.SetPathValue("symbol", "AAPLx")
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handlers.GetAssetHandler(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	if calls := jupiter.QuoteBuyCallCount(jupiterClient); calls != 1 {
+		t.Fatalf("QuoteBuy calls = %d, want 1 per detail open", calls)
+	}
+	var payload assetDetailResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if payload.Liquidity.SpreadBps == nil {
+		t.Fatal("the single probe must still carry the spread against the mark")
 	}
 }
 
