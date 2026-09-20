@@ -178,4 +178,73 @@ struct AssetDetailModelTests {
         await model.loadDetail()
         #expect(!model.canBuy)
     }
+
+    /// A refresh that fails keeps the curve already drawn rather than blanking it to an error.
+    @Test func aFailedRefreshKeepsTheCurveAlreadyDrawn() async throws {
+        let source = StubAssetDetailDataSource()
+        let model = AssetDetailModel(symbol: "AAPLx", dataSource: source)
+
+        await model.loadChart(range: .oneDay)
+        let drawn = StubAssetDetailDataSource.series(from: 100, to: 110)
+        #expect(model.chartState == .series(drawn))
+
+        source.chartError = Monaco.MonacoAPIError.httpStatus(500)
+        await model.loadChart(range: .oneDay)
+
+        #expect(model.chartState == .series(drawn), "a failed re-read must not throw the curve away")
+    }
+
+    /// A range that has nothing on screen yet still fails visibly.
+    @Test func aFirstChartFailureIsRetryable() async throws {
+        let source = StubAssetDetailDataSource()
+        source.chartError = Monaco.MonacoAPIError.httpStatus(500)
+        let model = AssetDetailModel(symbol: "AAPLx", dataSource: source)
+
+        await model.loadChart(range: .oneWeek)
+        #expect(model.charts[.oneWeek] == .failed)
+
+        source.chartError = nil
+        await model.loadChart(range: .oneWeek)
+        #expect(model.charts[.oneWeek] == .series(StubAssetDetailDataSource.series(from: 100, to: 110)))
+    }
+
+    /// The review finding: `String(someDouble)` drops into scientific notation under 1e-4, and
+    /// `MonacoTheme.signed` reads the digits of "5e-05" as "505" and tints a flat move as a gain.
+    @Test func aTinyMoveIsWrittenInFixedPoint() async throws {
+        let source = StubAssetDetailDataSource()
+        // +0.005%, small enough that Double's own description goes exponential.
+        source.points = [.oneDay: [
+            AssetChartPointDTO(timestamp: 1_000, priceUsdcMicros: 100_000_000),
+            AssetChartPointDTO(timestamp: 2_000, priceUsdcMicros: 100_005_000),
+        ]]
+        let model = AssetDetailModel(symbol: "AAPLx", dataSource: source)
+
+        await model.loadChart(range: .oneDay)
+
+        let ratio = try #require(model.move?.ratio)
+        #expect(!ratio.lowercased().contains("e"), "got \(ratio)")
+        #expect(model.move?.direction == .up)
+    }
+
+    /// #298 is about the figure and the curve agreeing. A flat move is muted, so the curve must
+    /// not be painted profit-green off a separate `last >= first` of its own.
+    @Test func aFlatMoveIsNeitherAGainNorALoss() async throws {
+        let source = StubAssetDetailDataSource()
+        source.points = [.oneDay: StubAssetDetailDataSource.series(from: 100, to: 100)]
+        let model = AssetDetailModel(symbol: "AAPLx", dataSource: source)
+
+        await model.loadChart(range: .oneDay)
+
+        #expect(model.move?.direction == .flat)
+    }
+
+    @Test func aFallingWindowReadsAsALoss() async throws {
+        let source = StubAssetDetailDataSource()
+        source.points = [.oneDay: StubAssetDetailDataSource.series(from: 110, to: 100)]
+        let model = AssetDetailModel(symbol: "AAPLx", dataSource: source)
+
+        await model.loadChart(range: .oneDay)
+
+        #expect(model.move?.direction == .down)
+    }
 }

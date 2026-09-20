@@ -33,6 +33,9 @@ struct AssetDetailView: View {
                         action: { Task { await model.loadDetail() } }
                     )
                     .accessibilityIdentifier("asset-detail-failed")
+                    // The curve was decoupled from this call; throwing away a chart that did
+                    // arrive would leave the screen emptier than before they were split.
+                    chartSection
                 case .loaded(let detail):
                     header(detail)
                     if !detail.liquidity.routable {
@@ -158,9 +161,9 @@ struct AssetDetailView: View {
     }
 
     private func chart(_ points: [AssetChartPointDTO]) -> some View {
-        // Gain/loss over the drawn window; the header figure reads the same series.
-        let rises = (points.last?.chartValue ?? 0) >= (points.first?.chartValue ?? 0)
-        let tint = rises ? MonacoTheme.profitVivid : MonacoTheme.lossVivid
+        // The figure's own verdict, not a second one computed from the series: a move the header
+        // prints as flat must not be drawn as a gain.
+        let tint = curveTint
         // Prices live far from zero, so the area is clipped to the series' own range.
         let low = points.map(\.chartValue).min() ?? 0
         let high = points.map(\.chartValue).max() ?? 0
@@ -196,6 +199,16 @@ struct AssetDetailView: View {
         .accessibilityElement()
         .accessibilityLabel(chartAccessibilityLabel(points))
         .accessibilityIdentifier("asset-detail-chart")
+    }
+
+    /// Vivid counterpart of `MonacoTheme.signed(move.ratio)`, so the curve and the figure under
+    /// the price always carry the same verdict.
+    private var curveTint: Color {
+        switch model.move?.direction {
+        case .up: return MonacoTheme.profitVivid
+        case .down: return MonacoTheme.lossVivid
+        case .flat, nil: return MonacoTheme.muted
+        }
     }
 
     private var chartPlaceholder: some View {

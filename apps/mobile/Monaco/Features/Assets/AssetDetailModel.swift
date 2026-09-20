@@ -55,8 +55,30 @@ final class AssetDetailModel {
     /// The move the header shows, always measured over the window the curve draws.
     struct Move: Equatable {
         /// Backend-style ratio ("0.0124"), so it formats through `PercentReturnFormatter`.
+        ///
+        /// Always fixed-point. `String(someDouble)` switches to scientific notation below 1e-4
+        /// ("5e-05"), and `MonacoTheme.signed` reads the digits of that as "505" and tints a flat
+        /// move as a gain.
         let ratio: String
         let label: String
+
+        private var value: Decimal {
+            Decimal(string: ratio, locale: Locale(identifier: "en_US_POSIX")) ?? 0
+        }
+
+        /// The curve's tint is read from here, never recomputed from the series: a move the
+        /// header calls flat must not be drawn in profit green.
+        var direction: Direction {
+            if value > 0 { return .up }
+            if value < 0 { return .down }
+            return .flat
+        }
+
+        enum Direction: Equatable {
+            case up
+            case down
+            case flat
+        }
     }
 
     let symbol: String
@@ -98,7 +120,7 @@ final class AssetDetailModel {
     var move: Move? {
         if case .series(let points) = chartState, points.count >= 2,
            let first = points.first?.chartValue, let last = points.last?.chartValue, first > 0 {
-            return Move(ratio: String(last / first - 1), label: range.moveLabel)
+            return Move(ratio: Self.ratioString(last / first - 1), label: range.moveLabel)
         }
         guard let change = detail?.change24h, !change.isEmpty else { return nil }
         return Move(ratio: change, label: AssetChartRange.oneDay.moveLabel)
@@ -127,6 +149,11 @@ final class AssetDetailModel {
                 charts[range] = .failed
             }
         }
+    }
+
+    /// Fixed-point, POSIX, so the string never reaches the formatters in scientific notation.
+    private static func ratioString(_ ratio: Double) -> String {
+        String(format: "%.6f", locale: Locale(identifier: "en_US_POSIX"), ratio)
     }
 
     private func handle(_ error: Error, otherwise: () -> Void) {
