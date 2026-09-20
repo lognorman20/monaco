@@ -188,12 +188,7 @@ struct FundCabalView: View {
     }
 
     private var validDepositAddress: String? {
-        guard let address = balance?.memberWalletAddress.trimmingCharacters(in: .whitespacesAndNewlines),
-              !address.isEmpty,
-              !address.hasPrefix("FAKE") else {
-            return nil
-        }
-        return address
+        DepositAddress.usable(balance?.memberWalletAddress)
     }
 
     private func copyAddress(_ address: String) {
