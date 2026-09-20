@@ -96,7 +96,8 @@ struct FundCabalView: View {
                             amountText: $amountText,
                             max: maxDollars,
                             presets: [.dollars(25), .dollars(50), .dollars(100), .fraction(1, label: "Max")],
-                            helper: "From your account balance"
+                            helper: "From your account balance",
+                            showsKeyboardDoneButton: true
                         )
                         .padding(.top, MonacoTheme.Space.l)
                     }
@@ -133,7 +134,7 @@ struct FundCabalView: View {
             guard let sweep else { return }
             await watchFundSweep(sweep)
         }
-        .pollWhileVisible(every: DepositPolling.balanceInterval) {
+        .pollWhileVisible(every: DepositPolling.balanceInterval, isActive: auth.accessToken != nil) {
             try await refreshBalance()
         }
     }
@@ -265,5 +266,11 @@ struct FundCabalView: View {
                 isSuccess: true
             )
         }
+
+        // This fund has been watched to its end and spoken for. Forgetting it stops `.task(id:)`
+        // from starting the watch again on the next re-appear — switching tabs tears this task
+        // down, and coming back would otherwise re-poll a deposit that already landed and toast
+        // money from a previous session as if it had just arrived.
+        self.sweep = nil
     }
 }
