@@ -110,15 +110,15 @@ public enum ProposalFeedCopy {
         case .failed: return "Didn't pass"
         case .expired: return "Expired"
         case .passed, .none:
+            guard proposal.isTrade else { return "Passed" }
             switch ProposalExecutionStage.of(proposal) {
             case .failed: return "Failed"
             case .executing: return proposal.isSell ? "Selling" : "Buying"
-            default: break
-            }
-            switch proposal.resolvedKind {
-            case "buy": return "Bought"
-            case "sell": return "Sold"
-            default: return "Passed"
+            case .done: return proposal.isSell ? "Sold" : "Bought"
+            // The vote passed but this payload says nothing about the swap — feed rows
+            // carry no execution. Report the vote, not a trade that may still be running
+            // or may have failed.
+            case .voting, .none: return "Passed"
             }
         }
     }
