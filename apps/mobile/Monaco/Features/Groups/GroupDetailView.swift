@@ -347,8 +347,11 @@ struct GroupDetailView: View {
     /// The cabal, its activity and — for an admin — the people waiting to join are read together
     /// rather than one after another, and written through `QuietUpdate`, so a refresh that finds
     /// nothing new changes nothing the member can see. Every caller goes through `refreshGate`,
-    /// which is what stops the appear load and a resuming poll tick from racing each other back
-    /// into the view with two near-identical snapshots.
+    /// which is what stops a resuming poll tick from racing the appear load back into the view
+    /// with two near-identical snapshots: a tick asks with `run` and is dropped while anything
+    /// else holds the gate. It does not serialise the reads the member asks for — `runNow` marks
+    /// the gate busy but waits for nothing — so two of those (a pull-to-refresh over the
+    /// follow-up to a retry, say) can still be in flight together and land last-writer-wins.
     ///
     /// Failure belongs to whoever asked. A `.quiet` read rethrows so the poll loop backs off and
     /// leaves the screen exactly as the member last saw it; the other modes say so.

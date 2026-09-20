@@ -47,18 +47,23 @@ final class GroupLeaveProgressSampleUITests: XCTestCase {
         )
     }
 
-    /// The point of the cover: no second tap on a money action while the first one is still running.
+    /// The point of the cover: no second tap on a money action while the first one is still
+    /// running, and nothing behind the cover reachable by VoiceOver swipe either.
+    ///
+    /// Every assertion here is an absence, so the cover check above is what makes them mean
+    /// anything: it proves the screen is up and in the leaving state. `testTheCoverIsOnly…`
+    /// then proves each of these identifiers is really on this screen when no leave is running,
+    /// so an absence cannot start passing because a query stopped matching.
     @MainActor
     func testLeavingBlocksTheActionRow() {
         let app = launchApp(scenario: "sellAndLeave")
         XCTAssertTrue(anyElement(app, "group-leaving-cover").waitForExistence(timeout: 20))
 
-        for action in ["group-action-fund", "group-action-propose", "group-action-sell", "group-action-chat"] {
-            let button = anyElement(app, action)
-            // Without this the `isHittable` check below passes on a query that matches
-            // nothing, which is how it would rot into saying nothing at all.
-            XCTAssertTrue(button.exists, "\(action) should still be on screen while leaving")
-            XCTAssertFalse(button.isHittable, "\(action) should not be tappable while leaving")
+        for action in Self.actionRow {
+            XCTAssertFalse(
+                anyElement(app, action).exists,
+                "\(action) should be out of reach while leaving: the cover hides the content behind it"
+            )
         }
         // The product removes the toolbar item rather than disabling it, so absence is the
         // assertion. `isHittable` on a missing element is false for the wrong reason.
@@ -69,6 +74,10 @@ final class GroupLeaveProgressSampleUITests: XCTestCase {
     }
 
     /// The same screen without a leave in flight: the cover is absent and the actions work.
+    ///
+    /// This is the positive half of `testLeavingBlocksTheActionRow`. Every identifier that test
+    /// asserts is *absent* while leaving is asserted *present* here, so neither test can go on
+    /// passing against a query that matches nothing on either screen.
     @MainActor
     func testTheCoverIsOnlyThereWhileLeaving() {
         let app = launchApp(scenario: "populated")
@@ -77,11 +86,19 @@ final class GroupLeaveProgressSampleUITests: XCTestCase {
         XCTAssertTrue(fund.waitForExistence(timeout: 20), "the action row should be on screen")
         XCTAssertTrue(fund.isHittable, "Add money should be tappable on a cabal nobody is leaving")
         XCTAssertFalse(anyElement(app, "group-leaving-cover").exists, "no leave is running")
-        // The positive half of the leaving-screen assertion: the details item really does carry
-        // this identifier when it is on screen. Without this, "it is gone while leaving" could
-        // go on passing against a query that never matches anything.
+
+        for action in Self.actionRow {
+            XCTAssertTrue(
+                anyElement(app, action).exists,
+                "\(action) should be on screen when no leave is running"
+            )
+        }
         let details = anyElement(app, "group-details-button")
         XCTAssertTrue(details.exists, "the details item should be on screen when no leave is running")
         XCTAssertTrue(details.isHittable, "the details item should open the sheet when no leave is running")
     }
+
+    private static let actionRow = [
+        "group-action-fund", "group-action-propose", "group-action-sell", "group-action-chat",
+    ]
 }
