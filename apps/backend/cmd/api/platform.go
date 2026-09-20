@@ -71,8 +71,9 @@ func setupLogging() (func(), error) {
 
 // platformHandler wraps the route mux with the cross-cutting middleware. Order matters:
 // the request id is set first so every later log line and error body carries it, and
-// Recover sits outside everything that can panic.
-func platformHandler(mux http.Handler) http.Handler {
+// Recover sits outside everything that can panic. Idempotency runs last so it sees the
+// size-capped body and only spends a key on a request the rate limiter let through.
+func platformHandler(mux http.Handler, idempotency *httpapi.Idempotency) http.Handler {
 	trustProxy := strings.EqualFold(strings.TrimSpace(os.Getenv(envTrustProxyHeaders)), "true")
 	origins := strings.Split(os.Getenv(envCORSAllowedOrigins), ",")
 	return httpapi.Chain(mux,
@@ -81,6 +82,7 @@ func platformHandler(mux http.Handler) http.Handler {
 		httpapi.CORS(origins),
 		httpapi.NewRateLimiter(trustProxy).Middleware(),
 		httpapi.LimitRequestBody(httpapi.DefaultMaxRequestBytes),
+		idempotency.Middleware(),
 	)
 }
 
