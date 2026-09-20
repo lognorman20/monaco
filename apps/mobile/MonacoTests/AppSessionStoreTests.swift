@@ -1,4 +1,6 @@
-import MonacoCore
+// Only MeDTO: importing all of MonacoCore would make the DTO names the app also
+// declares (HomeDashboardDTO, HomeLeaderboardRange…) ambiguous in this file.
+import struct MonacoCore.MeDTO
 import Testing
 @testable import Monaco
 
@@ -56,7 +58,7 @@ private final class StubDataSource: AppSessionDataSource {
         pendingDashboards.removeValue(forKey: range)?.resume()
     }
 
-    static let profile = MeDTO(userId: "user-1", displayName: "Ada", memberWalletAddress: "wallet")
+    static let profile = MeResponse(userId: "user-1", displayName: "Ada", memberWalletAddress: "wallet")
 
     static func dashboard(range: HomeLeaderboardRange) -> HomeDashboardDTO {
         HomeDashboardDTO(
