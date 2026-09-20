@@ -142,7 +142,10 @@ func boot(ctx context.Context) (*bootResult, error) {
 	privyClient := privy.NewHTTPClient(cfg)
 	var hermes *pyth.HermesClient
 	if cfg.PythAPIKey != "" {
-		hermes = pyth.NewHermesClientWithBaseURL(cfg.PythHermesBaseURL, cfg.PythAPIKey)
+		hermes = pyth.NewHermesClientWithBaseURL(cfg.PythHermesBaseURL, cfg.PythAPIKey).
+			// Chart history comes from Benchmarks in one call per range; the Hermes
+			// per-sample path stays behind a breaker as the fallback.
+			WithSeriesSource(pyth.NewBenchmarksClientWithHTTP(cfg.PythBenchmarksBaseURL, nil))
 		slog.Info("pyth client ready")
 	} else {
 		slog.Info("pyth client skipped", "reason", "PYTH_API_KEY unset")
@@ -237,6 +240,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Pyth:    priceChain,
 		Jupiter: jupiterClient,
 		Price:   jupiterPriceClient,
+	}
+	if hermes != nil {
+		// The stock-vs-token card reads the raw feeds, not the valuation chain: its
+		// whole point is to show where the two prices disagree.
+		assetsHandlers.Quotes = hermes
 	}
 	quoteHandlers := &httpapi.QuoteHandlers{
 		Store:      store,
