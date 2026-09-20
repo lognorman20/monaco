@@ -266,7 +266,7 @@ final class MonacoAPIClientTests: XCTestCase {
             return (response, Data())
         }
         let client = MonacoAPIClient(baseURL: URL(string: "https://api.test")!, session: makeMockURLSession(), accessTokenProvider: { TestFixtures.fixtureSessionToken })
-        try await client.leaveGroup(groupId: "550e8400-e29b-41d4-a716-446655440000")
+        try await client.leaveGroup(groupId: "550e8400-e29b-41d4-a716-446655440000", submission: IdempotentSubmission())
     }
 
     func testMeDTO_decodesFixtureJSON() throws {

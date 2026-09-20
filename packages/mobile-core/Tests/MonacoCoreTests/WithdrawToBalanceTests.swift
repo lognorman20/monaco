@@ -28,7 +28,7 @@ final class WithdrawToBalanceTests: XCTestCase {
             accessTokenProvider: { token }
         )
 
-        try await client.leaveGroup(groupId: "g1", withdrawStake: true)
+        try await client.leaveGroup(groupId: "g1", withdrawStake: true, submission: IdempotentSubmission())
 
         let request = try XCTUnwrap(capturedRequest)
         let body = try XCTUnwrap(Self.httpBody(from: request))
@@ -60,7 +60,7 @@ final class WithdrawToBalanceTests: XCTestCase {
             accessTokenProvider: { token }
         )
 
-        let job = try await client.withdrawToBalance(groupId: "g1")
+        let job = try await client.withdrawToBalance(groupId: "g1", submission: IdempotentSubmission())
         XCTAssertEqual(capturedPath, "/v1/groups/g1/withdraw-to-balance")
         XCTAssertEqual(job.status, "settled")
         XCTAssertEqual(job.sliceUsdc, 500_000)

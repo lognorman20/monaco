@@ -1,7 +1,11 @@
 import Foundation
+import MonacoCore
 
 enum Config {
-    static let apiBaseURL = URL(string: "http://localhost:8080")!
+    /// Environment + API base URL from the build configuration (Config/Monaco.xcconfig →
+    /// Info.plist), validated in MonacoCore. Traps on a misconfigured build.
+    static var api: MonacoAPIConfiguration { MonacoConfig.api }
+    static var apiBaseURL: URL { api.baseURL }
 
     /// Privy credentials and login flags for M1 auth (T9/T10).
     static let privy = PrivyAuthSettings.current

@@ -151,9 +151,21 @@ func metricsHandler() http.Handler {
 
 // platformHandler wraps the route mux with the cross-cutting middleware. Order matters:
 // the request id is set first so every later log line and error body carries it,
-// Recover sits outside everything that can panic, and Metrics sits directly on the mux so
-// it can read the matched route pattern.
-func platformHandler(mux http.Handler) http.Handler {
+// Recover sits outside everything that can panic, and Metrics wraps only Idempotency and the
+// mux.
+//
+// Idempotency is innermost on purpose. Inside Metrics, a replayed response, an in-progress
+// 409 and a key-mismatch 422 are counted and timed like any other answer (and carry the
+// request id set further out); outside it they would vanish from the dashboards. It hands
+// the mux the same *http.Request it received, so Metrics still reads the route pattern the
+// mux sets, and for the answers that never reach the mux it fills the pattern in from the
+// mux's own route table. Being inside the rate limiter and body cap also means a key is only
+// spent on a request that was let through, against a size-capped body.
+func platformHandler(mux *http.ServeMux, idempotency *httpapi.Idempotency) http.Handler {
+	idempotency.WithRoutePattern(func(r *http.Request) string {
+		_, pattern := mux.Handler(r)
+		return pattern
+	})
 	trustProxy := strings.EqualFold(strings.TrimSpace(os.Getenv(envTrustProxyHeaders)), "true")
 	origins := strings.Split(os.Getenv(envCORSAllowedOrigins), ",")
 	return httpapi.Chain(mux,
@@ -163,6 +175,7 @@ func platformHandler(mux http.Handler) http.Handler {
 		httpapi.NewRateLimiter(trustProxy).Middleware(),
 		httpapi.LimitRequestBody(httpapi.DefaultMaxRequestBytes),
 		httpapi.Metrics(),
+		idempotency.Middleware(),
 	)
 }
 
