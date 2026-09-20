@@ -1,4 +1,5 @@
 import Foundation
+import MonacoCore
 
 /// Ensures each failed deposit id toasts at most once per app launch.
 enum DepositFailureToastTracker {
@@ -14,12 +15,10 @@ enum DepositFailureToastTracker {
 
     static func isFailedDeposit(_ item: GroupActivityItemDTO) -> Bool {
         guard item.kind.lowercased() == "deposit" else { return false }
-        switch item.status.lowercased() {
-        case "confirmed", "pending":
+        if DepositStatusNormalizer.isConfirmed(item.status) || DepositStatusNormalizer.isPending(item.status) {
             return false
-        default:
-            return true
         }
+        return DepositStatusNormalizer.isFailed(item.status)
     }
 
     static func message(for item: GroupActivityItemDTO) -> String {
@@ -27,7 +26,7 @@ enum DepositFailureToastTracker {
         let amount = String(format: "$%.2f", dollars)
         let status = item.status.trimmingCharacters(in: .whitespacesAndNewlines)
         if status.lowercased() == "failed" || status.isEmpty {
-            return "Fund failed — \(amount) didn't reach the cabal treasury."
+            return "Fund failed — \(amount) didn't reach the cabal."
         }
         return "Deposit failed — \(amount). (\(status))"
     }

@@ -32,6 +32,14 @@ func (s *PrivyTreasurySigner) SignTreasuryTransaction(ctx context.Context, walle
 	return s.client.SignSolanaTransaction(ctx, walletID, unsignedTxBase64)
 }
 
+// SignTreasuryMessage returns the treasury wallet's raw Ed25519 signature over message.
+func (s *PrivyTreasurySigner) SignTreasuryMessage(ctx context.Context, walletID string, message []byte) ([]byte, error) {
+	if walletID == "" || len(message) == 0 {
+		return nil, fmt.Errorf("wallet id and message are required")
+	}
+	return s.client.SignSolanaMessage(ctx, walletID, message)
+}
+
 // fakePrivyTreasurySigner is the locked test double for treasury signing.
 type fakePrivyTreasurySigner struct{}
 
@@ -47,4 +55,15 @@ func (f *fakePrivyTreasurySigner) SignTreasuryTransaction(ctx context.Context, w
 	}
 	sum := sha256.Sum256([]byte("signed:" + walletID + ":" + unsignedTxBase64))
 	return "SIGNED" + hex.EncodeToString(sum[:16]), nil
+}
+
+// SignTreasuryMessage returns a deterministic 64-byte stand-in for an Ed25519 signature.
+func (f *fakePrivyTreasurySigner) SignTreasuryMessage(ctx context.Context, walletID string, message []byte) ([]byte, error) {
+	_ = ctx
+	if walletID == "" || len(message) == 0 {
+		return nil, fmt.Errorf("wallet id and message are required")
+	}
+	first := sha256.Sum256(append([]byte("signed-message:"+walletID+":"), message...))
+	second := sha256.Sum256(first[:])
+	return append(first[:], second[:]...), nil
 }

@@ -16,6 +16,10 @@ func clearConfigEnv(t *testing.T) {
 	t.Setenv("RELAYER_PRIVATE_KEY", "")
 	t.Setenv("PYTH_API_KEY", "")
 	t.Setenv("PYTH_HERMES_BASE_URL", "")
+	t.Setenv("JUPITER_API_KEY", "")
+	t.Setenv("SWAP_PROVIDER", "")
+	t.Setenv("FLASH_API_KEY", "")
+	t.Setenv("FLASH_MAX_SLIPPAGE", "")
 }
 
 func setValidConfigEnv(t *testing.T) {
@@ -158,6 +162,24 @@ func TestLoad_optionalPythAPIKey_isLoadedWhenSet(t *testing.T) {
 	}
 }
 
+func TestLoad_optionalJupiterAPIKey_isLoadedWhenSet(t *testing.T) {
+	// Arrange
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+	t.Setenv("JUPITER_API_KEY", "  test-jupiter-key  ")
+
+	// Act
+	cfg, err := Load()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.JupiterAPIKey != "test-jupiter-key" {
+		t.Fatalf("JupiterAPIKey = %q", cfg.JupiterAPIKey)
+	}
+}
+
 func TestLoad_optionalPythHermesBaseURL_isTrimmedWhenSet(t *testing.T) {
 	clearConfigEnv(t)
 	setValidConfigEnv(t)
@@ -226,5 +248,66 @@ func TestLoad_trimsWhitespaceFromEnvValues(t *testing.T) {
 	}
 	if cfg.PrivyAppID != "app-id" {
 		t.Fatalf("PrivyAppID = %q", cfg.PrivyAppID)
+	}
+}
+
+func TestLoad_swapProvider_defaultsToJupiter(t *testing.T) {
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.SwapProvider != "jupiter" {
+		t.Fatalf("SwapProvider = %q, want jupiter", cfg.SwapProvider)
+	}
+}
+
+func TestLoad_swapProviderFlash_requiresFlashAPIKey(t *testing.T) {
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+	t.Setenv("SWAP_PROVIDER", "flash")
+
+	_, err := Load()
+
+	if err == nil || !strings.Contains(err.Error(), "FLASH_API_KEY") {
+		t.Fatalf("Load error = %v, want FLASH_API_KEY required", err)
+	}
+}
+
+func TestLoad_swapProviderFlash_loadsKeyAndSlippage(t *testing.T) {
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+	t.Setenv("SWAP_PROVIDER", " Flash ")
+	t.Setenv("FLASH_API_KEY", " test-flash-key ")
+	t.Setenv("FLASH_MAX_SLIPPAGE", "0.02")
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.SwapProvider != "flash" || cfg.FlashAPIKey != "test-flash-key" || cfg.FlashMaxSlippage != "0.02" {
+		t.Fatalf("unexpected flash config %+v", cfg)
+	}
+}
+
+func TestLoad_swapProvider_unknownOrBadSlippage_returnsError(t *testing.T) {
+	cases := map[string][2]string{
+		"unknown provider":  {"SWAP_PROVIDER", "uniswap"},
+		"slippage not num":  {"FLASH_MAX_SLIPPAGE", "1%"},
+		"slippage too wide": {"FLASH_MAX_SLIPPAGE", "0.15"},
+		"slippage zero":     {"FLASH_MAX_SLIPPAGE", "0"},
+	}
+	for name, env := range cases {
+		clearConfigEnv(t)
+		setValidConfigEnv(t)
+		t.Setenv(env[0], env[1])
+
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), env[0]) {
+			t.Fatalf("%s: Load error = %v, want %s error", name, err, env[0])
+		}
 	}
 }

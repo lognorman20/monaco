@@ -1,3 +1,4 @@
+import MonacoCore
 import SwiftUI
 
 /// Send available account USDC to an external Solana wallet.
@@ -13,66 +14,94 @@ struct WithdrawView: View {
     @State private var isSubmitting = false
     @State private var showConfirm = false
     @State private var errorMessage: String?
+    /// Shown on the confirm screen, which covers this screen's toast while it is pushed.
+    @State private var submitFailure: FlowFailure?
     @State private var toast: MonacoToast?
 
+    private var maxDollars: Decimal? {
+        guard let micros = balance?.availableUsdcMicros, micros > 0 else { return nil }
+        return Decimal(micros) / Decimal(1_000_000)
+    }
+
+    private var canContinue: Bool {
+        guard let value = AmountEntryText.decimal(amountText), value > 0 else { return false }
+        if let maxDollars, value > maxDollars { return false }
+        if case .success = addressValidation { return true }
+        return false
+    }
+
+    private var addressValidation: Result<String, SolanaAddressProblem> {
+        SolanaAddress.validate(destinationAddress, ownDepositAddress: balance?.memberWalletAddress)
+    }
+
+    /// Nothing while the field is empty; otherwise why the pasted address can't be used.
+    private var addressProblemMessage: String? {
+        guard case .failure(let problem) = addressValidation, problem != .empty else { return nil }
+        return SolanaAddress.message(for: problem)
+    }
+
     var body: some View {
-        Form {
-            Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
                 if isLoadingBalance {
-                    HStack(spacing: 12) {
-                        ProgressView().tint(MonacoTheme.accent)
-                        Text("Loading account balance…")
-                            .monacoSecondaryCaption()
-                    }
-                } else if let balance {
-                    LabeledContent("Available", value: formatUsdc(balance.availableUsdcMicros))
-                        .accessibilityIdentifier("withdraw-available-balance")
+                    ProgressView()
+                        .tint(MonacoTheme.accent)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, MonacoTheme.Space.xl)
                 } else {
-                    Text(errorMessage ?? "Could not load account balance.")
+                    AmountEntry(
+                        amountText: $amountText,
+                        max: maxDollars,
+                        presets: [.fraction(1, label: "Max")],
+                        helper: balanceHelper
+                    )
+
+                    VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                        MonacoSectionHeader("Destination")
+                        MonacoTextField("USDC address on Solana", text: $destinationAddress, keyboard: .asciiCapable)
+                            .accessibilityIdentifier("withdraw-address-field")
+                        if let addressProblemMessage {
+                            Text(addressProblemMessage)
+                                .font(MonacoTheme.Typo.caption)
+                                .foregroundStyle(MonacoTheme.warning)
+                                .accessibilityIdentifier("withdraw-address-problem")
+                        }
+                    }
+                }
+
+                if let errorMessage, balance == nil, !isLoadingBalance {
+                    Text(errorMessage)
+                        .font(MonacoTheme.Typo.callout)
                         .foregroundStyle(MonacoTheme.warning)
                 }
-            } header: {
-                Text("Account balance")
             }
-
-            Section("Destination") {
-                TextField("Solana wallet address", text: $destinationAddress)
-                    .monacoWalletAddressField()
-                    .accessibilityIdentifier("withdraw-address-field")
-            }
-
-            Section("Amount") {
-                TextField("USDC amount", text: $amountText)
-                    .keyboardType(.decimalPad)
-                    .accessibilityIdentifier("withdraw-amount-field")
-                if let maxMicros = balance?.availableUsdcMicros, maxMicros > 0 {
-                    Button("Max") {
-                        amountText = String(format: "%.2f", Double(maxMicros) / 1_000_000.0)
+            .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.top, MonacoTheme.Space.m)
+            .padding(.bottom, MonacoTheme.Space.xl)
+        }
+        .monacoCanvas()
+        .safeAreaInset(edge: .bottom) {
+            if !isLoadingBalance {
+                BottomCTA {
+                    Button("Continue") {
+                        submitFailure = nil
+                        showConfirm = true
                     }
-                    .monacoFormSecondaryAction()
-                    .accessibilityIdentifier("withdraw-max-button")
+                    .buttonStyle(.monacoPrimary)
+                    .disabled(!canContinue)
+                    .accessibilityIdentifier("withdraw-continue-button")
                 }
-            }
-
-            Section {
-                Button("Continue") {
-                    showConfirm = true
-                }
-                .monacoFormPrimaryAction()
-                .disabled(!canContinue)
-                .accessibilityIdentifier("withdraw-continue-button")
             }
         }
-        .monacoFormScreen()
-        .navigationTitle("Withdraw")
+        .navigationTitle("Cash out")
         .navigationBarTitleDisplayMode(.inline)
-        .monacoToast($toast)
+        .monacoToast($toast, bottomInset: 72)
         .navigationDestination(isPresented: $showConfirm) {
             WithdrawConfirmView(
                 destinationAddress: destinationAddress.trimmingCharacters(in: .whitespacesAndNewlines),
-                amountMicros: parsedAmountMicros,
-                formattedAmount: formattedAmount,
+                amountText: amountText,
                 isSubmitting: isSubmitting,
+                failure: submitFailure,
                 onConfirm: { Task { await submitWithdrawal() } }
             )
         }
@@ -81,20 +110,9 @@ struct WithdrawView: View {
         }
     }
 
-    private var parsedAmountMicros: Int64? {
-        parseUsdcMicros(amountText)
-    }
-
-    private var formattedAmount: String {
-        guard let micros = parsedAmountMicros else { return amountText }
-        return formatUsdc(micros)
-    }
-
-    private var canContinue: Bool {
-        guard balance != nil else { return false }
-        guard let micros = parsedAmountMicros, micros > 0 else { return false }
-        let address = destinationAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !address.isEmpty
+    private var balanceHelper: String {
+        guard let balance else { return "" }
+        return "\(UsdAmountFormatter.format(micros: balance.availableUsdcMicros)) available"
     }
 
     private func loadBalance() async {
@@ -109,36 +127,40 @@ struct WithdrawView: View {
         errorMessage = nil
         do {
             balance = try await apiClient.getPlatformBalance(accessToken: token)
-        } catch MonacoAPIError.httpStatus(let status) {
-            errorMessage = "Could not load balance (HTTP \(status))."
+        } catch MonacoAPIError.httpStatus {
+            errorMessage = "Couldn't load your balance. Pull down to try again."
             balance = nil
         } catch {
-            errorMessage = "Could not load account balance."
+            errorMessage = "No connection. Check your internet and try again."
             balance = nil
         }
         isLoadingBalance = false
     }
 
     private func submitWithdrawal() async {
+        // The disabled state only lands on the next render; a second tap in the same frame
+        // must not start a second transfer.
+        guard !isSubmitting else { return }
         guard let token = auth.accessToken else { return }
-        guard let micros = parsedAmountMicros, micros > 0 else {
-            toast = MonacoToast(message: "Enter a valid USDC amount.", isSuccess: false)
+        guard let value = AmountEntryText.decimal(amountText), value > 0 else {
+            toast = MonacoToast(message: "Enter a valid amount.", isSuccess: false)
             return
         }
-        let address = destinationAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !address.isEmpty else {
-            toast = MonacoToast(message: "Enter a destination address.", isSuccess: false)
-            return
-        }
+        var rounded = Decimal()
+        var scaled = value * 1_000_000
+        NSDecimalRound(&rounded, &scaled, 0, .plain)
+        let micros = (rounded as NSDecimalNumber).int64Value
+
+        guard case .success(let address) = addressValidation else { return }
         if let available = balance?.availableUsdcMicros, micros > available {
-            toast = MonacoToast(
-                message: "Withdraw less or move cabal stake to your balance first.",
-                isSuccess: false
+            submitFailure = MoneyFlowCopy.cashOutFailure(
+                FlowErrorInput(status: 400, serverMessage: "amount exceeds available platform balance")
             )
             return
         }
 
         isSubmitting = true
+        submitFailure = nil
         defer { isSubmitting = false }
 
         do {
@@ -147,71 +169,78 @@ struct WithdrawView: View {
                 amount: micros,
                 toAddress: address
             )
-            toast = MonacoToast(message: "Withdrawal sent", isSuccess: true)
+            Haptics.success()
+            toast = MonacoToast(message: "Cashing out. It lands in about a minute.", isSuccess: true)
             destinationAddress = ""
             amountText = ""
             showConfirm = false
             await loadBalance()
-        } catch MonacoAPIError.httpStatus(400) {
-            toast = MonacoToast(
-                message: "Withdraw less or move cabal stake to your balance first.",
-                isSuccess: false
-            )
-        } catch MonacoAPIError.httpStatus(409) {
-            toast = MonacoToast(message: "A withdrawal is already in progress.", isSuccess: false)
-        } catch MonacoAPIError.httpStatus(let status) {
-            toast = MonacoToast(message: "Could not withdraw (HTTP \(status)).", isSuccess: false)
         } catch {
-            toast = MonacoToast(message: "Could not withdraw. Try again.", isSuccess: false)
+            if error.isRequestCancellation { return }
+            submitFailure = MoneyFlowCopy.cashOutFailure(FlowErrorInput(error))
+            Haptics.warning()
         }
-    }
-
-    private func parseUsdcMicros(_ raw: String) -> Int64? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let value = Double(trimmed), value > 0 else { return nil }
-        return Int64((value * 1_000_000.0).rounded())
-    }
-
-    private func formatUsdc(_ micros: Int64) -> String {
-        String(format: "$%.2f", Double(micros) / 1_000_000.0)
     }
 }
 
 private struct WithdrawConfirmView: View {
     let destinationAddress: String
-    let amountMicros: Int64?
-    let formattedAmount: String
+    let amountText: String
     let isSubmitting: Bool
+    let failure: FlowFailure?
     let onConfirm: () -> Void
 
     var body: some View {
-        Form {
-            Section("Review") {
-                LabeledContent("Amount", value: formattedAmount)
-                VStack(alignment: .leading, spacing: 4) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Amount")
+                        .font(MonacoTheme.Typo.caption)
+                        .foregroundStyle(MonacoTheme.muted)
+                    MoneyText(decimalString: amountText, style: .large)
+                }
+
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
                     Text("Destination")
-                        .font(.caption)
-                        .foregroundStyle(MonacoTheme.secondaryText)
+                        .font(MonacoTheme.Typo.caption)
+                        .foregroundStyle(MonacoTheme.muted)
                     MonacoWalletAddressText(address: destinationAddress)
                 }
-            }
 
-            Section {
-                Text("Double-check this address. Transfers cannot be reversed.")
+                Text("Double-check this address. Transfers can't be undone.")
+                    .font(MonacoTheme.Typo.callout)
                     .foregroundStyle(MonacoTheme.warning)
-                    .font(.footnote)
-            }
 
-            Section {
-                Button(isSubmitting ? "Sending…" : "Confirm withdrawal") {
+                if let failure {
+                    VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
+                        Text(failure.message)
+                            .font(MonacoTheme.Typo.body)
+                            .foregroundStyle(MonacoTheme.ink)
+                        if let nextStep = failure.nextStep {
+                            Text(nextStep)
+                                .font(MonacoTheme.Typo.callout)
+                                .foregroundStyle(MonacoTheme.muted)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("withdraw-confirm-failure")
+                }
+            }
+            .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.top, MonacoTheme.Space.m)
+            .padding(.bottom, MonacoTheme.Space.xl)
+        }
+        .monacoCanvas()
+        .safeAreaInset(edge: .bottom) {
+            BottomCTA {
+                Button(isSubmitting ? "Sending…" : failure?.isRetryable == true ? "Try again" : "Cash out") {
                     onConfirm()
                 }
-                .monacoFormPrimaryAction()
-                .disabled(isSubmitting || amountMicros == nil)
+                .buttonStyle(.monacoPrimary)
+                .disabled(isSubmitting || failure?.isRetryable == false)
                 .accessibilityIdentifier("withdraw-confirm-button")
             }
         }
-        .monacoFormScreen()
         .navigationTitle("Confirm")
         .navigationBarTitleDisplayMode(.inline)
     }

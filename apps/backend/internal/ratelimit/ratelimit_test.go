@@ -136,3 +136,28 @@ func TestAllow_concurrentCallersNeverExceedBurst(t *testing.T) {
 		t.Fatalf("allowed = %d under concurrency, want exactly 5", allowed)
 	}
 }
+
+func TestBlocked_reportsWithoutSpending(t *testing.T) {
+	limiter, clock := newTestLimiter(2, 10*time.Second)
+
+	if over, _ := limiter.Blocked("group-a"); over {
+		t.Fatal("unknown key blocked, want open")
+	}
+	limiter.Allow("group-a")
+	for i := 0; i < 5; i++ {
+		if over, _ := limiter.Blocked("group-a"); over {
+			t.Fatal("blocked with one request left; Blocked must not spend")
+		}
+	}
+
+	limiter.Allow("group-a")
+	over, wait := limiter.Blocked("group-a")
+	if !over || wait != 10*time.Second {
+		t.Fatalf("Blocked = (%v, %v), want (true, 10s) once the burst is spent", over, wait)
+	}
+
+	clock.Advance(10 * time.Second)
+	if over, _ := limiter.Blocked("group-a"); over {
+		t.Fatal("still blocked after one interval, want open")
+	}
+}

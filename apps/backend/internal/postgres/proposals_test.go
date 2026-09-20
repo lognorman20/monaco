@@ -95,6 +95,61 @@ func TestInsertProposalTx_roundTripsBuyAndSellAmounts(t *testing.T) {
 	}
 }
 
+func TestInsertProposalTx_roundTripsThesis(t *testing.T) {
+	ctx := context.Background()
+	db := integrationDB(t)
+	iso := prepareIsolation(t, db)
+	store := NewStore(db)
+	userID, groupID := seedProposalGroup(t, store, iso)
+
+	tx, err := store.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	withThesis, err := store.InsertProposalTx(ctx, tx, InsertProposalParams{
+		GroupID:    groupID,
+		ProposerID: userID,
+		Symbol:     "AAPLx",
+		Kind:       domain.ProposalKindBuy,
+		UsdcMicros: 2_000_000,
+		Thesis:     "Strong earnings beat, raising guidance.",
+		ExpiresAt:  time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("insert with thesis: %v", err)
+	}
+	withoutThesis, err := store.InsertProposalTx(ctx, tx, InsertProposalParams{
+		GroupID:    groupID,
+		ProposerID: userID,
+		Symbol:     "AAPLx",
+		Kind:       domain.ProposalKindBuy,
+		UsdcMicros: 2_000_000,
+		ExpiresAt:  time.Now().UTC().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("insert without thesis: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	gotWithThesis, ok, err := store.GetProposalByID(ctx, withThesis.ID)
+	if err != nil || !ok {
+		t.Fatalf("GetProposalByID withThesis: %v ok=%v", err, ok)
+	}
+	if gotWithThesis.Thesis != "Strong earnings beat, raising guidance." {
+		t.Fatalf("thesis = %q, want %q", gotWithThesis.Thesis, "Strong earnings beat, raising guidance.")
+	}
+
+	gotWithoutThesis, ok, err := store.GetProposalByID(ctx, withoutThesis.ID)
+	if err != nil || !ok {
+		t.Fatalf("GetProposalByID withoutThesis: %v ok=%v", err, ok)
+	}
+	if gotWithoutThesis.Thesis != "" {
+		t.Fatalf("thesis = %q, want empty", gotWithoutThesis.Thesis)
+	}
+}
+
 func TestInsertProposalTx_rejectsAmountForWrongKind(t *testing.T) {
 	ctx := context.Background()
 	db := integrationDB(t)

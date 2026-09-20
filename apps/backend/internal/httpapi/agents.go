@@ -16,6 +16,8 @@ const agentKeyHeader = "X-Monaco-Agent-Key"
 // AgentHandlers serves agent intent routes.
 type AgentHandlers struct {
 	Intents *app.AgentIntentService
+	// KeyGuard throttles wrong agent keys. Nil disables throttling.
+	KeyGuard *AgentKeyGuard
 }
 
 type submitAgentIntentRequest struct {
@@ -46,6 +48,10 @@ func (h *AgentHandlers) SubmitAgentIntentHandler(w http.ResponseWriter, r *http.
 	agentKey := strings.TrimSpace(r.Header.Get(agentKeyHeader))
 	if agentKey == "" {
 		logJSONError(ctx, log, "missing_agent_key", w, http.StatusUnauthorized, "missing agent api key", "group_id", groupID)
+		return
+	}
+	if over, wait := h.KeyGuard.blocked(r, groupID); over {
+		writeAgentKeyThrottled(ctx, log, w, wait, groupID)
 		return
 	}
 
@@ -81,6 +87,7 @@ func (h *AgentHandlers) SubmitAgentIntentHandler(w http.ResponseWriter, r *http.
 		TokenAmount: req.TokenAmount,
 	})
 	if err != nil {
+		h.KeyGuard.recordFailure(r, groupID, err)
 		writeAgentIntentError(r.Context(), log, w, err, groupID)
 		return
 	}
@@ -97,11 +104,15 @@ func (h *AgentHandlers) SubmitAgentIntentHandler(w http.ResponseWriter, r *http.
 }
 
 func writeAgentIntentError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, groupID string) {
+	if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
+		return
+	}
 	switch {
 	case errors.Is(err, app.ErrInvalidAgentAPIKey):
 		logJSONError(ctx, log, "invalid_agent_key", w, http.StatusUnauthorized, "invalid agent api key", "group_id", groupID)
 	case errors.Is(err, app.ErrAgentGroupMismatch):
-		logJSONError(ctx, log, "agent_group_mismatch", w, http.StatusForbidden, "agent key does not match group", "group_id", groupID)
+		// Same response as an unknown key: a distinct one would confirm the key is live elsewhere.
+		logJSONError(ctx, log, "agent_group_mismatch", w, http.StatusUnauthorized, "invalid agent api key", "group_id", groupID)
 	case errors.Is(err, app.ErrAgentPaused):
 		logJSONError(ctx, log, "agent_paused", w, http.StatusForbidden, "agent is paused", "group_id", groupID)
 	case errors.Is(err, app.ErrAgentIntentRejected):

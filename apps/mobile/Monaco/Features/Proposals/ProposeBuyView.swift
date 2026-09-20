@@ -1,315 +1,278 @@
+import MonacoCore
 import SwiftUI
 
-/// Search catalog, enter amount, navigate to quote detail.
+/// Buy, step 1 of 3: pick a stock. Popular stocks show before typing; search results page in as the
+/// last row appears. Tapping a stock pushes the amount step.
 struct ProposeBuyView: View {
-    @ObservedObject var auth: PrivyAuthService
     let groupId: String
-    var initialSymbol: String? = nil
+    var initialSymbol: String?
+    var onProposed: ((_ proposalId: String) -> Void)?
 
-    private let apiClient = MonacoAPIClient()
-    private let pageSize = 25
-    private let searchDebounceNanos: UInt64 = 300_000_000
+    private let service: ProposeService
+    private static let pageSize = 25
+    private static let searchDebounce: Duration = .milliseconds(300)
 
-    @State private var searchQuery = ""
-    @State private var assets: [CatalogAssetDTO] = []
-    @State private var hasMoreAssets = false
-    @State private var catalogOffset = 0
-    @State private var selectedSymbol: String?
-    @State private var amountText = ""
-    @State private var errorMessage: String?
-    @State private var isLoadingCatalog = false
+    @Environment(AppSessionStore.self) private var session: AppSessionStore?
+
+    @State private var pot: ProposePot?
+    @State private var query = ""
+    @State private var popular: [ProposeStock] = []
+    @State private var popularLoadFailed = false
+    @State private var results: [ProposeStock] = []
+    @State private var hasMore = false
+    @State private var isSearching = false
     @State private var isLoadingMore = false
-    @State private var catalogLoadFailed = false
-    @State private var isLoadingTreasury = false
-    @State private var treasuryLoadFailed = false
-    @State private var treasuryTotalMicros: Int64?
-    @State private var searchTask: Task<Void, Never>?
+    @State private var searchFailed = false
+    @State private var picked: ProposeStock?
+    @State private var toast: MonacoToast?
+    @State private var didApplyInitialSymbol = false
+
+    /// Entry from Stock detail's cabal picker (no chooser sheet): on success the flow pops back
+    /// here and confirms with a toast.
+    init(auth: PrivyAuthService, groupId: String, initialSymbol: String? = nil, onProposed: ((_ proposalId: String) -> Void)? = nil) {
+        self.init(service: LiveProposeService(auth: auth), groupId: groupId, pot: nil, initialSymbol: initialSymbol, onProposed: onProposed)
+    }
+
+    init(
+        service: ProposeService,
+        groupId: String,
+        pot: ProposePot?,
+        initialSymbol: String? = nil,
+        onProposed: ((_ proposalId: String) -> Void)? = nil
+    ) {
+        self.service = service
+        self.groupId = groupId
+        self.initialSymbol = initialSymbol
+        self.onProposed = onProposed
+        _pot = State(initialValue: pot)
+    }
+
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     var body: some View {
-        Form {
-            Section {
-                Text("Buy Apple with your cabal — search a stock, check the quote, then propose.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Search stocks") {
-                TextField("e.g. AAPL", text: $searchQuery)
-                    .textInputAutocapitalization(.characters)
+        ScrollView {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
+                MonacoSearchField(placeholder: ProposeFlowCopy.searchPlaceholder, text: $query)
+                    .textInputAutocapitalization(.words)
                     .autocorrectionDisabled()
+                    .submitLabel(.search)
                     .accessibilityIdentifier("proposal-search-field")
 
-                if isLoadingTreasury {
-                    HStack {
-                        ProgressView()
-                        Text("Loading treasury…")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                } else if treasuryLoadFailed {
-                    Label("Could not load treasury balance.", systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                    Button("Retry treasury") {
-                        Task { await loadTreasury() }
-                    }
-                } else if let treasuryTotalMicros {
-                    Text("Treasury total: \(formatUsd(microsToDecimal(String(treasuryTotalMicros)) ?? 0))")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                catalogContent
-
-                if hasMoreAssets && !isLoadingCatalog {
-                    Button(isLoadingMore ? "Loading…" : "Load more") {
-                        Task { await loadCatalog(reset: false) }
-                    }
-                    .disabled(isLoadingMore)
-                    .accessibilityIdentifier("proposal-load-more")
+                if trimmedQuery.isEmpty {
+                    popularSection
+                } else {
+                    resultsSection
                 }
             }
-
-            if let selectedSymbol {
-                Section("Amount (USDC) — \(selectedSymbol)") {
-                    TextField("Amount", text: $amountText)
-                        .keyboardType(.decimalPad)
-                        .accessibilityIdentifier("proposal-amount-field")
-
-                    if exceedsTreasury {
-                        Label("Amount exceeds treasury total available.", systemImage: "exclamationmark.triangle.fill")
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                    }
-
-                    if let usdcMicros = parsedUsdcMicro {
-                        NavigationLink {
-                            ProposeQuoteDetailView(
-                                auth: auth,
-                                groupId: groupId,
-                                symbol: selectedSymbol,
-                                usdcMicros: usdcMicros,
-                                treasuryTotalMicros: treasuryTotalMicros
-                            )
-                        } label: {
-                            Text("Get quote")
-                        }
-                        .disabled(exceedsTreasury)
-                        .accessibilityIdentifier("proposal-quote-button")
-                    } else {
-                        Button("Get quote") {}
-                            .disabled(true)
-                            .accessibilityIdentifier("proposal-quote-button")
-                    }
-                }
-            }
-
-            if let errorMessage {
-                Section {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                }
-            }
+            .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.top, MonacoTheme.Space.s)
+            .padding(.bottom, MonacoTheme.Space.xl)
         }
-        .monacoFormScreen()
-        .navigationTitle("Propose buy")
+        .scrollDismissesKeyboard(.immediately)
+        .background(MonacoTheme.canvas.ignoresSafeArea())
+        .navigationTitle(ProposeFlowCopy.buyTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: searchQuery) { _, _ in
-            scheduleCatalogSearch(reset: true)
+        .navigationDestination(item: $picked) { stock in
+            ProposeAmountView(service: service, groupId: groupId, stock: stock, pot: pot, onProposed: finish)
         }
+        .monacoToast($toast)
         .task {
-            if selectedSymbol == nil, let initialSymbol {
-                selectedSymbol = initialSymbol
-                if searchQuery.isEmpty {
-                    searchQuery = initialSymbol
-                }
-            }
-            await loadTreasury()
-            await loadCatalog(reset: true)
+            applyInitialSymbolIfNeeded()
+            await loadPopular()
         }
-        .onDisappear {
-            searchTask?.cancel()
+        .task(id: trimmedQuery) {
+            guard !trimmedQuery.isEmpty else {
+                results = []
+                searchFailed = false
+                return
+            }
+            do {
+                try await Task.sleep(for: Self.searchDebounce)
+            } catch {
+                return
+            }
+            await search(reset: true)
+        }
+        .accessibilityIdentifier("propose-buy")
+    }
+
+    // MARK: Sections
+
+    @ViewBuilder
+    private var popularSection: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            MonacoSectionHeader(ProposeFlowCopy.popularTitle)
+            if popular.isEmpty {
+                if popularLoadFailed {
+                    EmptyState(title: ProposeFlowCopy.stocksLoadFailed, actionTitle: ProposalFeedCopy.tryAgain) {
+                        Task { await loadPopular(force: true) }
+                    }
+                } else {
+                    skeletonRows
+                }
+            } else {
+                stockList(popular)
+            }
         }
     }
 
     @ViewBuilder
-    private var catalogContent: some View {
-        if isLoadingCatalog && assets.isEmpty {
-            HStack {
-                ProgressView()
-                Text("Loading stocks…")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+    private var resultsSection: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            if isSearching && results.isEmpty {
+                skeletonRows
+            } else if searchFailed && results.isEmpty {
+                EmptyState(title: ProposeFlowCopy.stocksLoadFailed, actionTitle: ProposalFeedCopy.tryAgain) {
+                    Task { await search(reset: true) }
+                }
+            } else if results.isEmpty {
+                EmptyState(title: ProposeFlowCopy.noMatches(trimmedQuery))
+                    .accessibilityIdentifier("proposal-search-empty")
+            } else {
+                stockList(results, paginates: true)
+                if isLoadingMore {
+                    ProgressView()
+                        .tint(MonacoTheme.muted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, MonacoTheme.Space.s)
+                }
             }
-        } else if catalogLoadFailed && assets.isEmpty {
-            Label("Could not load stocks.", systemImage: "exclamationmark.triangle.fill")
-                .font(.footnote)
-                .foregroundStyle(.orange)
-            Button("Retry") {
-                Task { await loadCatalog(reset: true) }
+        }
+    }
+
+    private func stockList(_ stocks: [ProposeStock], paginates: Bool = false) -> some View {
+        MonacoGroupedList {
+            ForEach(Array(stocks.enumerated()), id: \.element.id) { index, stock in
+                let isLast = index == stocks.count - 1
+                Button {
+                    pick(stock)
+                } label: {
+                    ProposeStockRow(stock: stock, isLast: isLast)
+                }
+                .buttonStyle(.monacoRow)
+                .accessibilityIdentifier("proposal-asset-\(stock.symbol)")
+                .onAppear {
+                    if paginates, isLast, hasMore { Task { await search(reset: false) } }
+                }
             }
-        } else if assets.isEmpty {
-            Text(searchQuery.isEmpty ? "Type to search stocks." : "No matches for \"\(searchQuery)\".")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        } else {
-            ForEach(assets) { asset in
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text(asset.symbol).font(.body.bold())
-                        Text(asset.displayName).font(.caption).foregroundStyle(.secondary)
-                        if !asset.isTradable {
-                            Text("No quote")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
+        }
+    }
+
+    private var skeletonRows: some View {
+        MonacoGroupedList {
+            ForEach(0..<4, id: \.self) { index in
+                HStack(spacing: MonacoTheme.Space.sm) {
+                    SkeletonBlock(width: 44, height: 44, radius: MonacoTheme.Radius.tile)
+                    VStack(alignment: .leading, spacing: 6) {
+                        SkeletonBlock(width: 120, height: 14)
+                        SkeletonBlock(width: 56, height: 12)
                     }
                     Spacer()
-                    Button("Buy") {
-                        selectAsset(asset.symbol)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .accessibilityIdentifier("proposal-buy-\(asset.symbol)")
+                    SkeletonBlock(width: 64, height: 14)
                 }
-                .opacity(asset.isTradable ? 1 : 0.55)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    selectAsset(asset.symbol)
-                }
-                .accessibilityIdentifier("proposal-asset-\(asset.symbol)")
+                .padding(.horizontal, MonacoTheme.Space.m)
+                .frame(minHeight: 60)
             }
         }
+        .accessibilityLabel("Loading stocks")
     }
 
-    private var parsedUsdcMicro: Int64? {
-        let trimmed = amountText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              let decimal = Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX")),
-              decimal > 0 else {
-            return nil
+    // MARK: Actions
+
+    private func pick(_ stock: ProposeStock) {
+        Haptics.tap()
+        picked = stock
+    }
+
+    private func applyInitialSymbolIfNeeded() {
+        guard !didApplyInitialSymbol, let initialSymbol, !initialSymbol.isEmpty else { return }
+        didApplyInitialSymbol = true
+        let known = (session?.popularAssets ?? []).first { $0.symbol.caseInsensitiveCompare(initialSymbol) == .orderedSame }
+        picked = known.map(ProposeStock.init(market:)) ?? ProposeStock(symbol: initialSymbol)
+    }
+
+    /// Without a chooser sheet to dismiss, pop back to the picker and confirm here.
+    private func finish(_ proposalId: String) {
+        if let onProposed {
+            onProposed(proposalId)
+            return
         }
-        var scaled = decimal * Decimal(1_000_000)
-        var rounded = Decimal()
-        NSDecimalRound(&rounded, &scaled, 0, .plain)
-        let micro = (rounded as NSDecimalNumber).int64Value
-        return micro > 0 ? micro : nil
+        picked = nil
+        Haptics.success()
+        toast = MonacoToast(
+            message: pot.map { ProposeFlowCopy.proposalSent($0.name) } ?? ProposeFlowCopy.proposalSentGeneric,
+            isSuccess: true
+        )
     }
 
-    private var exceedsTreasury: Bool {
-        guard let amount = parsedUsdcMicro, let treasury = treasuryTotalMicros else {
-            return false
+    private func loadPopular(force: Bool = false) async {
+        if !force, let cached = session?.popularAssets, !cached.isEmpty {
+            popular = cached.map(ProposeStock.init(market:))
+            return
         }
-        return amount > treasury
-    }
-
-    private func selectAsset(_ symbol: String) {
-        selectedSymbol = symbol
-        errorMessage = nil
-    }
-
-    private func scheduleCatalogSearch(reset: Bool) {
-        searchTask?.cancel()
-        searchTask = Task {
-            do {
-                try await Task.sleep(nanoseconds: searchDebounceNanos)
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            await loadCatalog(reset: reset)
-        }
-    }
-
-    private func loadTreasury() async {
-        guard let token = auth.accessToken else { return }
-        isLoadingTreasury = true
-        treasuryLoadFailed = false
-        defer { isLoadingTreasury = false }
-
+        popularLoadFailed = false
         do {
-            let view = try await apiClient.getGroupView(accessToken: token, groupId: groupId)
-            treasuryTotalMicros = usdcMicrosFromUsdDecimal(view.resolvedPotTotalUsd)
+            popular = try await service.popularStocks()
+        } catch is CancellationError {
+            return
         } catch {
-            treasuryLoadFailed = true
-            treasuryTotalMicros = nil
+            if !error.isRequestCancellation { popularLoadFailed = true }
         }
     }
 
-    private func loadCatalog(reset: Bool) async {
-        guard let token = auth.accessToken else { return }
+    private func search(reset: Bool) async {
+        let term = trimmedQuery
+        guard !term.isEmpty else { return }
         if reset {
-            isLoadingCatalog = true
-            catalogLoadFailed = false
-            catalogOffset = 0
-            hasMoreAssets = false
-            if !assets.isEmpty {
-                assets = []
-            }
+            isSearching = true
+            searchFailed = false
         } else {
+            guard !isLoadingMore else { return }
             isLoadingMore = true
         }
         defer {
-            isLoadingCatalog = false
+            isSearching = false
             isLoadingMore = false
         }
-
-        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        let offset = reset ? 0 : catalogOffset
-
         do {
-            let response = try await apiClient.searchAssets(
-                accessToken: token,
-                groupId: groupId,
-                query: query,
-                limit: pageSize,
-                offset: offset
+            let page = try await service.searchStocks(
+                groupId: groupId, query: term, offset: reset ? 0 : results.count, limit: Self.pageSize
             )
-            if reset {
-                assets = response.assets
-            } else {
-                assets.append(contentsOf: response.assets)
-            }
-            catalogOffset = assets.count
-            hasMoreAssets = response.hasMore
+            guard term == trimmedQuery else { return }
+            results = reset ? page.stocks : results + page.stocks
+            hasMore = page.hasMore
+        } catch is CancellationError {
+            return
         } catch {
-            if reset {
-                catalogLoadFailed = true
-                assets = []
-            } else {
-                errorMessage = "Could not load more stocks."
+            if error.isRequestCancellation { return }
+            if reset { searchFailed = true; results = [] }
+            hasMore = false
+        }
+    }
+}
+
+/// Stock row for the pick step: mark, name over ticker (or why it can't be bought), price over 24h move.
+struct ProposeStockRow: View {
+    let stock: ProposeStock
+    var isLast = false
+
+    var body: some View {
+        MonacoRow(
+            title: stock.name,
+            subtitle: stock.ticker,
+            chevron: true,
+            isLast: isLast
+        ) {
+            StockMark(symbol: stock.symbol)
+        } trailing: {
+            if let micros = stock.priceMicros {
+                MoneyText(micros: micros, style: .row)
+                if let change = stock.change24h, !change.isEmpty {
+                    PercentText(percentReturn: change, style: .caption)
+                }
             }
         }
-    }
-
-    private func usdcMicrosFromUsdDecimal(_ raw: String) -> Int64? {
-        guard let decimal = Decimal(string: raw, locale: Locale(identifier: "en_US_POSIX")) else {
-            return nil
-        }
-        var scaled = decimal * Decimal(1_000_000)
-        var rounded = Decimal()
-        NSDecimalRound(&rounded, &scaled, 0, .plain)
-        let micros = (rounded as NSDecimalNumber).int64Value
-        return micros >= 0 ? micros : nil
-    }
-
-    private func microsToDecimal(_ raw: String) -> Decimal? {
-        guard let micros = Decimal(string: raw, locale: Locale(identifier: "en_US_POSIX")) else {
-            return nil
-        }
-        return micros / Decimal(1_000_000)
-    }
-
-    private func formatUsd(_ value: Decimal) -> String {
-        var rounded = Decimal()
-        var source = value
-        NSDecimalRound(&rounded, &source, 2, .plain)
-        let number = rounded as NSDecimalNumber
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = "USD"
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        return formatter.string(from: number) ?? "$\(number)"
     }
 }

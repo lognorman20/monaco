@@ -23,16 +23,30 @@ public typealias AccessTokenProvider = @Sendable () async throws -> String?
 
 public final class MonacoAPIClient: @unchecked Sendable {
     private let baseURL: URL
-    private let session: URLSession
+    /// Every request goes through the transport so an expired access token is
+    /// refreshed and the request retried once instead of surfacing a 401.
+    private let session: MonacoHTTPTransport
     private let accessTokenProvider: AccessTokenProvider?
 
-    public init(
+    public convenience init(
         baseURL: URL = MonacoConfig.defaultAPIBaseURL,
         session: URLSession = .shared,
         accessTokenProvider: AccessTokenProvider? = nil
     ) {
+        self.init(
+            baseURL: baseURL,
+            transport: MonacoHTTPTransport(session: session),
+            accessTokenProvider: accessTokenProvider
+        )
+    }
+
+    public init(
+        baseURL: URL = MonacoConfig.defaultAPIBaseURL,
+        transport: MonacoHTTPTransport,
+        accessTokenProvider: AccessTokenProvider? = nil
+    ) {
         self.baseURL = baseURL
-        self.session = session
+        self.session = transport
         self.accessTokenProvider = accessTokenProvider
     }
 
@@ -409,7 +423,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         symbol: String,
         usdc: Int64? = nil,
         kind: String = "buy",
-        tokenAmount: Int64? = nil
+        tokenAmount: Int64? = nil,
+        thesis: String? = nil
     ) async throws -> CreateProposalResponseDTO {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/proposals")
         var request = URLRequest(url: url)
@@ -417,7 +432,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = try JSONEncoder().encode(
-            ProposalRequestDTO(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount)
+            ProposalRequestDTO(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount, thesis: thesis)
         )
 
         let (data, response) = try await session.data(for: request)
@@ -445,6 +460,81 @@ public final class MonacoAPIClient: @unchecked Sendable {
         guard http.statusCode == 200 || http.statusCode == 204 else {
             throw MonacoAPIError.httpStatus(http.statusCode)
         }
+    }
+
+    public func listGroupProposals(groupId: String, tab: ProposalFeedTab) async throws -> ProposalListResponseDTO {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/groups/\(groupId)/proposals"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "tab", value: tab.rawValue)]
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(ProposalListResponseDTO.self, from: data)
+    }
+
+    public func getProposalDetail(proposalId: String) async throws -> ProposalDTO {
+        let url = baseURL.appending(path: "v1/proposals/\(proposalId)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(ProposalDTO.self, from: data)
+    }
+
+    public func listProposalComments(proposalId: String) async throws -> ProposalCommentsResponseDTO {
+        let url = baseURL.appending(path: "v1/proposals/\(proposalId)/comments")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(ProposalCommentsResponseDTO.self, from: data)
+    }
+
+    /// Posts a top-level comment, or a reply when `parentId` is set. Server trims and validates the body.
+    public func postProposalComment(proposalId: String, body: String, parentId: String? = nil) async throws -> ProposalCommentDTO {
+        let url = baseURL.appending(path: "v1/proposals/\(proposalId)/comments")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try await applyAuthorizationHeader(to: &request)
+        request.httpBody = try JSONEncoder().encode(CommentRequestDTO(body: body, parentId: parentId))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 201 || http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(ProposalCommentDTO.self, from: data)
     }
 
     public func leaveGroup(groupId: String, withdrawStake: Bool = false) async throws {
@@ -626,9 +716,10 @@ public final class MonacoAPIClient: @unchecked Sendable {
         let kind: String?
         let usdc: Int64?
         let tokenAmount: Int64?
+        let thesis: String?
 
         enum CodingKeys: String, CodingKey {
-            case symbol, kind, usdc, tokenAmount
+            case symbol, kind, usdc, tokenAmount, thesis
         }
 
         func encode(to encoder: Encoder) throws {
@@ -637,11 +728,17 @@ public final class MonacoAPIClient: @unchecked Sendable {
             if let kind { try container.encode(kind, forKey: .kind) }
             if let usdc { try container.encode(usdc, forKey: .usdc) }
             if let tokenAmount { try container.encode(tokenAmount, forKey: .tokenAmount) }
+            if let thesis { try container.encode(thesis, forKey: .thesis) }
         }
     }
 
     private struct VoteRequestDTO: Encodable {
         let choice: String
+    }
+
+    private struct CommentRequestDTO: Encodable {
+        let body: String
+        let parentId: String?
     }
 
     private func parseLeaveConflict(from data: Data) -> LeaveGroupBlockReason {
@@ -655,4 +752,61 @@ public final class MonacoAPIClient: @unchecked Sendable {
         guard let token = try await accessTokenProvider(), !token.isEmpty else { return }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
+
+    /// `GET /v1/groups/{id}/messages` — newest first. Pass `before` from a prior page's `nextCursor`.
+    public func listGroupMessages(
+        groupId: String,
+        before: String? = nil,
+        limit: Int = 30
+    ) async throws -> GroupMessagesPageDTO {
+        var components = URLComponents(
+            url: baseURL.appending(path: "v1/groups/\(groupId)/messages"),
+            resolvingAgainstBaseURL: false
+        )!
+        var items = [URLQueryItem(name: "limit", value: String(limit))]
+        if let before, !before.isEmpty {
+            items.append(URLQueryItem(name: "before", value: before))
+        }
+        components.queryItems = items
+        guard let url = components.url else {
+            throw MonacoAPIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(GroupMessagesPageDTO.self, from: data)
+    }
+
+    /// `POST /v1/groups/{id}/messages` — returns the stored message (201).
+    public func postGroupMessage(groupId: String, body: String) async throws -> GroupMessageDTO {
+        let url = baseURL.appending(path: "v1/groups/\(groupId)/messages")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try await applyAuthorizationHeader(to: &request)
+        request.httpBody = try JSONEncoder().encode(GroupMessageRequestDTO(body: body))
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 201 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(GroupMessageDTO.self, from: data)
+    }
+
+    private struct GroupMessageRequestDTO: Encodable {
+        let body: String
+    }
+
 }

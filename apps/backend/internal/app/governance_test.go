@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,10 +22,13 @@ import (
 type governanceHarness struct {
 	Governance *GovernanceService
 	Store      *postgres.Store
+	DB         *sql.DB
 	Sessions   *SessionService
 	Privy      privy.Client
 	Jupiter    jupiter.Client
 	XStocks    xstocks.Resolver
+	Swap       *SwapService
+	Symbols    *SymbolResolver
 	ISO        *postgres.TestIsolation
 }
 
@@ -40,10 +45,13 @@ func integrationGovernanceApp(t *testing.T) governanceHarness {
 	return governanceHarness{
 		Governance: governance,
 		Store:      h.Store,
+		DB:         h.DB,
 		Sessions:   NewSessionService(h.Store, h.Privy),
 		Privy:      h.Privy,
 		Jupiter:    h.Jupiter,
 		XStocks:    h.XStocks,
+		Swap:       h.Swap,
+		Symbols:    h.Symbols,
 		ISO:        h.ISO,
 	}
 }
@@ -200,6 +208,28 @@ func TestCreateProposal_exceedsTreasuryUSDC_rejected(t *testing.T) {
 	})
 	if !errors.Is(err, ErrExceedsTreasuryUSDC) {
 		t.Fatalf("err = %v, want ErrExceedsTreasuryUSDC", err)
+	}
+}
+
+func TestCreateProposal_thesisTooLong_rejected(t *testing.T) {
+	h := integrationGovernanceApp(t)
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "thesis-cap", "Thesis Cap")
+	token := h.ISO.UniqueToken("thesis-cap")
+	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "thesis-cap"), DefaultGroupRules())
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	h.ISO.TrackGroup(created.GroupID)
+
+	_, err = h.Governance.CreateProposal(context.Background(), CreateProposalInput{
+		GroupID:    created.GroupID,
+		ProposerID: userID.UserID,
+		Symbol:     "AAPLx",
+		UsdcMicros: 2_000_000,
+		Thesis:     strings.Repeat("a", MaxProposalThesisLength+1),
+	})
+	if !errors.Is(err, ErrThesisTooLong) {
+		t.Fatalf("err = %v, want ErrThesisTooLong", err)
 	}
 }
 

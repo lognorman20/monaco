@@ -43,4 +43,43 @@ final class DepositPollTests: XCTestCase {
         XCTAssertTrue(confirmedTerminal)
         XCTAssertEqual(confirmed.shareUnits, 1_000_000)
     }
+
+    func testDepositStatusNormalizer_failedPrefix() {
+        XCTAssertTrue(DepositStatusNormalizer.isFailed("failed: submit_sweep"))
+        XCTAssertFalse(DepositStatusNormalizer.isFailed("pending"))
+    }
+
+    func testDepositPollStateMachine_pollUntilTerminal_confirmsFromFetchSequence() async {
+        var machine = DepositPollStateMachine()
+        var fetches = ["pending", "pending", "confirmed"]
+
+        let phase = await machine.pollUntilTerminal(
+            maxWait: .seconds(1),
+            interval: .milliseconds(10)
+        ) {
+            guard !fetches.isEmpty else { return "confirmed" }
+            return fetches.removeFirst()
+        }
+
+        XCTAssertEqual(phase, .credited)
+    }
+
+    func testDepositPollStateMachine_pollUntilTerminal_retriesAfterFetchError() async {
+        var machine = DepositPollStateMachine()
+        var calls = 0
+
+        let phase = await machine.pollUntilTerminal(
+            maxWait: .seconds(1),
+            interval: .milliseconds(10)
+        ) {
+            calls += 1
+            if calls == 1 {
+                throw MonacoAPIError.httpStatus(500)
+            }
+            return "confirmed"
+        }
+
+        XCTAssertEqual(phase, .credited)
+        XCTAssertEqual(calls, 2)
+    }
 }

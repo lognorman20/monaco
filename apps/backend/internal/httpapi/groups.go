@@ -54,10 +54,11 @@ type joinGroupStatusResponse struct {
 }
 
 type joinRequestResponse struct {
-	ID          string `json:"id"`
-	UserID      string `json:"userId"`
-	DisplayName string `json:"displayName"`
-	RequestedAt string `json:"requestedAt"`
+	ID              string  `json:"id"`
+	UserID          string  `json:"userId"`
+	DisplayName     string  `json:"displayName"`
+	ProfilePhotoURL *string `json:"profilePhotoUrl"`
+	RequestedAt     string  `json:"requestedAt"`
 }
 
 type joinRequestsListResponse struct {
@@ -138,6 +139,9 @@ func (h *GroupHandlers) JoinGroupHandler(w http.ResponseWriter, r *http.Request)
 
 	outcome, err := h.Governance.JoinGroup(ctx, token, groupID)
 	if err != nil {
+		if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
+			return
+		}
 		if errors.Is(err, privy.ErrInvalidToken) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
@@ -212,6 +216,9 @@ func (h *GroupHandlers) LeaveGroupHandler(w http.ResponseWriter, r *http.Request
 		WithdrawStake: leaveReq.WithdrawStake,
 	})
 	if err != nil {
+		if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
+			return
+		}
 		if errors.Is(err, privy.ErrInvalidToken) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
@@ -289,7 +296,7 @@ func (h *GroupHandlers) ListJoinRequestsHandler(w http.ResponseWriter, r *http.R
 	}
 	respItems := make([]joinRequestResponse, 0, len(items))
 	for _, item := range items {
-		respItems = append(respItems, joinRequestResponse{ID: item.ID, UserID: item.UserID, DisplayName: item.DisplayName, RequestedAt: item.RequestedAt.UTC().Format(time.RFC3339)})
+		respItems = append(respItems, joinRequestResponse{ID: item.ID, UserID: item.UserID, DisplayName: item.DisplayName, ProfilePhotoURL: optionalString(item.ProfilePhotoURL), RequestedAt: item.RequestedAt.UTC().Format(time.RFC3339)})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -325,6 +332,9 @@ func (h *GroupHandlers) decideJoinRequest(w http.ResponseWriter, r *http.Request
 		err = h.Governance.DenyJoinRequest(ctx, token, groupID, requestID)
 	}
 	if err != nil {
+		if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
+			return
+		}
 		if errors.Is(err, privy.ErrInvalidToken) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
@@ -412,10 +422,11 @@ type groupViewMemberRowResponse struct {
 }
 
 type groupViewAgentResponse struct {
-	ID                   string   `json:"id"`
-	Status               string   `json:"status"`
-	AgentDisplayName     string   `json:"agentDisplayName"`
+	ID                   string `json:"id"`
+	Status               string `json:"status"`
+	AgentDisplayName     string `json:"agentDisplayName"`
 	AllocationUsdcMicros string `json:"allocationUsdcMicros"`
+	APIKey               string `json:"apiKey,omitempty"`
 }
 
 type groupViewResponse struct {
@@ -487,12 +498,16 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 
 	var agentResp *groupViewAgentResponse
 	if h.Governance != nil {
-		if agentView, err := h.Governance.GetGroupAgentView(ctx, groupID); err == nil && agentView != nil {
-			agentResp = &groupViewAgentResponse{
-				ID:                   agentView.ID,
-				Status:               string(agentView.Status),
-				AgentDisplayName:     agentView.AgentDisplayName,
-				AllocationUsdcMicros: strconv.FormatInt(agentView.AllocationUsdcMicros, 10),
+		viewerID, viewerErr := h.Governance.AuthorizeGroupReader(ctx, token, groupID)
+		if viewerErr == nil {
+			if agentView, err := h.Governance.GetGroupAgentViewForMember(ctx, groupID, viewerID); err == nil && agentView != nil {
+				agentResp = &groupViewAgentResponse{
+					ID:                   agentView.ID,
+					Status:               string(agentView.Status),
+					AgentDisplayName:     agentView.AgentDisplayName,
+					AllocationUsdcMicros: strconv.FormatInt(agentView.AllocationUsdcMicros, 10),
+					APIKey:               agentView.APIKey,
+				}
 			}
 		}
 	}
@@ -636,6 +651,9 @@ func (h *GroupHandlers) WithdrawToBalanceHandler(w http.ResponseWriter, r *http.
 		ShareAmountMicros: req.ShareAmountMicros,
 	})
 	if err != nil {
+		if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
+			return
+		}
 		if errors.Is(err, privy.ErrInvalidToken) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
@@ -645,7 +663,7 @@ func (h *GroupHandlers) WithdrawToBalanceHandler(w http.ResponseWriter, r *http.
 			return
 		}
 		if errors.Is(err, app.ErrInvalidRedeemRequest) {
-			logJSONError(ctx, log, "invalid_redeem", w, http.StatusBadRequest, "invalid withdraw request", "group_id", groupID)
+			logJSONError(ctx, log, "invalid_redeem", w, http.StatusBadRequest, "Cash out at least $0.10.", "group_id", groupID, "err", err.Error())
 			return
 		}
 		if errors.Is(err, app.ErrRedeemAlreadyInProgress) {
@@ -653,7 +671,15 @@ func (h *GroupHandlers) WithdrawToBalanceHandler(w http.ResponseWriter, r *http.
 			return
 		}
 		if errors.Is(err, app.ErrQuoteNotRoutable) {
-			logJSONError(ctx, log, "quote_not_routable", w, http.StatusBadRequest, err.Error(), "group_id", groupID)
+			logJSONError(ctx, log, "quote_not_routable", w, http.StatusBadRequest,
+				"That amount is too small to sell the pot's stock. Try a larger amount, or wait until the pot holds more USDC.",
+				"group_id", groupID, "err", err.Error())
+			return
+		}
+		if errors.Is(err, app.ErrRedeemPotIlliquid) {
+			logJSONError(ctx, log, "redeem_pot_illiquid", w, http.StatusBadRequest,
+				"The pot could not raise enough USDC to cash that out. Try a smaller amount, or try again in a minute.",
+				"group_id", groupID, "err", err.Error())
 			return
 		}
 		logJSONError(ctx, log, "withdraw_to_balance_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())

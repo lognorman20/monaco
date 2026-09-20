@@ -4,67 +4,80 @@ import UIKit
 /// Root appearance wiring and reusable styles for sibling screen agents.
 enum MonacoAppearance {
     static func configureUIKit() {
+        let canvas = UIColor(MonacoTheme.canvas)
         let surface = UIColor(MonacoTheme.surface)
         let primaryText = UIColor(MonacoTheme.primaryText)
         let muted = UIColor(MonacoTheme.muted)
-        let border = UIColor(MonacoTheme.border)
+        let hairline = UIColor(MonacoTheme.hairline)
         let titleFont = UIFont(name: "AvenirNext-DemiBold", size: 17) ?? .systemFont(ofSize: 17, weight: .semibold)
-
-        let navigationBar = UINavigationBarAppearance()
-        navigationBar.configureWithTransparentBackground()
-        navigationBar.backgroundColor = .clear
-        navigationBar.shadowColor = .clear
-        navigationBar.titleTextAttributes = [
+        let largeTitleFont = UIFont(name: "AvenirNext-Bold", size: 32) ?? .systemFont(ofSize: 32, weight: .bold)
+        let titleAttributes: [NSAttributedString.Key: Any] = [
             .foregroundColor: primaryText,
-            .font: titleFont,
+            .font: UIFontMetrics(forTextStyle: .headline).scaledFont(for: titleFont, maximumPointSize: 22),
         ]
-        navigationBar.largeTitleTextAttributes = [
+        let largeTitleAttributes: [NSAttributedString.Key: Any] = [
             .foregroundColor: primaryText,
-            .font: UIFont(name: "AvenirNext-Bold", size: 28) ?? .systemFont(ofSize: 28, weight: .bold),
+            .font: UIFontMetrics(forTextStyle: .largeTitle).scaledFont(for: largeTitleFont, maximumPointSize: 44),
         ]
 
-        UINavigationBar.appearance().standardAppearance = navigationBar
-        UINavigationBar.appearance().scrollEdgeAppearance = navigationBar
-        UINavigationBar.appearance().compactAppearance = navigationBar
-        UINavigationBar.appearance().tintColor = UIColor(MonacoTheme.ink)
-        UINavigationBar.appearance().prefersLargeTitles = false
+        // Chevron-only back button: the title is drawn clear and at a near-zero size so it takes no width.
+        let backButton = UIBarButtonItemAppearance(style: .plain)
+        backButton.normal.titleTextAttributes = [.foregroundColor: UIColor.clear, .font: UIFont.systemFont(ofSize: 0.1)]
+        backButton.highlighted.titleTextAttributes = [.foregroundColor: UIColor.clear, .font: UIFont.systemFont(ofSize: 0.1)]
+        let backImage = UIImage(systemName: "chevron.left", withConfiguration: UIImage.SymbolConfiguration(weight: .semibold))
 
+        // Scrolled: opaque canvas with a hairline, so content never slides under the title.
+        let standard = UINavigationBarAppearance()
+        standard.configureWithOpaqueBackground()
+        standard.backgroundColor = canvas
+        standard.shadowColor = hairline
+        standard.titleTextAttributes = titleAttributes
+        standard.largeTitleTextAttributes = largeTitleAttributes
+        standard.backButtonAppearance = backButton
+        standard.setBackIndicatorImage(backImage, transitionMaskImage: backImage)
+
+        // At rest (scroll edge): transparent, no hairline.
+        let scrollEdge = UINavigationBarAppearance()
+        scrollEdge.configureWithTransparentBackground()
+        scrollEdge.titleTextAttributes = titleAttributes
+        scrollEdge.largeTitleTextAttributes = largeTitleAttributes
+        scrollEdge.backButtonAppearance = backButton
+        scrollEdge.setBackIndicatorImage(backImage, transitionMaskImage: backImage)
+
+        let navigationBar = UINavigationBar.appearance()
+        navigationBar.standardAppearance = standard
+        navigationBar.compactAppearance = standard
+        navigationBar.scrollEdgeAppearance = scrollEdge
+        navigationBar.compactScrollEdgeAppearance = scrollEdge
+        navigationBar.tintColor = primaryText
+        navigationBar.prefersLargeTitles = true
+
+        // Tab bar: opaque surface, hairline top edge.
         let tabBar = UITabBarAppearance()
         tabBar.configureWithOpaqueBackground()
         tabBar.backgroundColor = surface
-        tabBar.shadowColor = border
+        tabBar.shadowColor = hairline
+        let brand = UIColor(MonacoTheme.brand)
         let tabItem = UITabBarItemAppearance()
         tabItem.normal.iconColor = muted
         tabItem.normal.titleTextAttributes = [.foregroundColor: muted]
-        tabItem.selected.iconColor = primaryText
-        tabItem.selected.titleTextAttributes = [.foregroundColor: primaryText]
+        tabItem.selected.iconColor = brand
+        tabItem.selected.titleTextAttributes = [.foregroundColor: brand]
         tabBar.stackedLayoutAppearance = tabItem
         tabBar.inlineLayoutAppearance = tabItem
         tabBar.compactInlineLayoutAppearance = tabItem
         UITabBar.appearance().standardAppearance = tabBar
         UITabBar.appearance().scrollEdgeAppearance = tabBar
-        UITabBar.appearance().tintColor = primaryText
+        UITabBar.appearance().tintColor = brand
         UITabBar.appearance().unselectedItemTintColor = muted
 
+        // Legacy Form / List screens until they migrate to MonacoGroupedList.
         UITableView.appearance().backgroundColor = .clear
-        UITableView.appearance().separatorColor = border
+        UITableView.appearance().separatorColor = hairline
         UITableViewCell.appearance().backgroundColor = surface
 
-        UITextField.appearance().backgroundColor = UIColor(MonacoTheme.surface)
-        UITextField.appearance().textColor = primaryText
-        UITextField.appearance().tintColor = UIColor(MonacoTheme.accent)
-
-        let segmented = UISegmentedControl.appearance()
-        segmented.selectedSegmentTintColor = UIColor(MonacoTheme.primaryButtonFill)
-        segmented.backgroundColor = UIColor(MonacoTheme.background)
-        segmented.setTitleTextAttributes(
-            [.foregroundColor: UIColor(MonacoTheme.primaryButtonLabel)],
-            for: .selected
-        )
-        segmented.setTitleTextAttributes(
-            [.foregroundColor: UIColor(MonacoTheme.primaryText)],
-            for: .normal
-        )
+        // No global UITextField / UISegmentedControl appearance: it leaked into Privy's sheets.
+        // Use MonacoTextField and MonacoSegmented instead.
     }
 }
 
@@ -77,7 +90,7 @@ struct MonacoRootAppearanceModifier: ViewModifier {
 }
 
 extension View {
-    /// Gray sheet + top grayscale wash. Apply once at a screen root.
+    /// Flat paper canvas. Apply once at a screen root.
     func monacoCanvas() -> some View {
         background { MonacoCanvasBackground() }
     }
@@ -99,6 +112,15 @@ extension View {
                 RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
                     .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
             }
+    }
+
+    /// The premium "money" card: deep ink in both schemes, with a very subtle top-left
+    /// radial highlight. Everything inside draws in `onHero` / `onHeroMuted`.
+    func monacoHeroCard(padding: CGFloat = 24) -> some View {
+        self
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(MonacoHeroCardBackground())
     }
 
     /// Inset grouped list on the app canvas — hides default scroll chrome.
@@ -175,6 +197,7 @@ extension View {
 }
 
 /// Empty list placeholder with bordered surface card.
+@available(*, deprecated, message: "Use EmptyState (no icon).")
 struct MonacoEmptyStateCard: View {
     let message: String
     let systemImage: String
@@ -198,67 +221,27 @@ struct MonacoEmptyStateCard: View {
     }
 }
 
-struct MonacoPrimaryButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
+/// Deep ink money card. One flat ink base plus a soft off-centre highlight — no glass, no glow.
+struct MonacoHeroCardBackground: View {
+    var radius: CGFloat = MonacoTheme.Radius.hero
 
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(MonacoTheme.TypeRole.body.weight(.semibold))
-            .foregroundStyle(isEnabled ? MonacoTheme.primaryButtonLabel : MonacoTheme.disabled)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .background(
-                Capsule()
-                    .fill(isEnabled ? MonacoTheme.primaryButtonFill : MonacoTheme.disabled.opacity(0.35))
-            )
-            .opacity(configuration.isPressed ? 0.85 : 1)
-    }
-}
-
-struct MonacoSecondaryButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(MonacoTheme.TypeRole.body.weight(.semibold))
-            .foregroundStyle(isEnabled ? MonacoTheme.secondaryButtonLabel : MonacoTheme.disabled)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .background(Capsule().fill(MonacoTheme.secondaryButtonFill))
+    var body: some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .fill(MonacoTheme.heroInk)
             .overlay {
-                Capsule()
-                    .strokeBorder(isEnabled ? MonacoTheme.hairline : MonacoTheme.disabled.opacity(0.5), lineWidth: 1)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(
+                        RadialGradient(
+                            colors: [MonacoTheme.heroInkHighlight, .clear],
+                            center: UnitPoint(x: 0.08, y: -0.05),
+                            startRadius: 0,
+                            endRadius: 340
+                        )
+                    )
             }
-            .opacity(configuration.isPressed ? 0.85 : 1)
-    }
-}
-
-extension ButtonStyle where Self == MonacoPrimaryButtonStyle {
-    static var monacoPrimary: MonacoPrimaryButtonStyle { MonacoPrimaryButtonStyle() }
-}
-
-extension ButtonStyle where Self == MonacoSecondaryButtonStyle {
-    static var monacoSecondary: MonacoSecondaryButtonStyle { MonacoSecondaryButtonStyle() }
-}
-
-struct MonacoDestructiveButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(MonacoTheme.TypeRole.body.weight(.semibold))
-            .foregroundStyle(isEnabled ? MonacoTheme.destructive : MonacoTheme.disabled)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
-            .background(Capsule().fill(MonacoTheme.surface))
             .overlay {
-                Capsule()
-                    .strokeBorder(isEnabled ? MonacoTheme.destructive : MonacoTheme.disabled.opacity(0.5), lineWidth: 1)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
             }
-            .opacity(configuration.isPressed ? 0.85 : 1)
     }
-}
-
-extension ButtonStyle where Self == MonacoDestructiveButtonStyle {
-    static var monacoDestructive: MonacoDestructiveButtonStyle { MonacoDestructiveButtonStyle() }
 }

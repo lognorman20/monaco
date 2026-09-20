@@ -33,7 +33,35 @@ func NewStubClock(now time.Time) *stubClock {
 func (c *stubClock) Now() time.Time { return c.now }
 
 // DefaultPollInterval is how often the API process polls pending deposits.
-const DefaultPollInterval = 15 * time.Second
+const DefaultPollInterval = 3 * time.Second
+
+// PollerWake coalesces immediate tick requests (e.g. right after fund intent created).
+type PollerWake struct {
+	ch chan struct{}
+}
+
+// NewPollerWake returns a wake channel for Run.
+func NewPollerWake() *PollerWake {
+	return &PollerWake{ch: make(chan struct{}, 1)}
+}
+
+// Notify requests an immediate poller tick; coalesced if one is already queued.
+func (w *PollerWake) Notify() {
+	if w == nil {
+		return
+	}
+	select {
+	case w.ch <- struct{}{}:
+	default:
+	}
+}
+
+func (w *PollerWake) wakeChan() <-chan struct{} {
+	if w == nil {
+		return nil
+	}
+	return w.ch
+}
 
 // SweepPoller polls member USDC balances and submits sweeps to treasury.
 type SweepPoller struct {
@@ -60,8 +88,8 @@ func NewSweepPoller(store *postgres.Store, privyClient privy.Client, rpc SolanaR
 	}
 }
 
-// Run ticks the poller until ctx is cancelled.
-func Run(ctx context.Context, poller *SweepPoller, interval time.Duration) {
+// Run ticks the poller until ctx is cancelled. wake triggers an immediate coalesced tick.
+func Run(ctx context.Context, poller *SweepPoller, interval time.Duration, wake *PollerWake) {
 	if poller == nil {
 		return
 	}
@@ -75,17 +103,23 @@ func Run(ctx context.Context, poller *SweepPoller, interval time.Duration) {
 	defer ticker.Stop()
 	defer logSweepPollerStopped()
 
+	runTick := func() {
+		tickCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err := poller.Tick(tickCtx)
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			slog.Error("sweep poller tick failed", "err", err)
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			tickCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			err := poller.Tick(tickCtx)
-			cancel()
-			if err != nil && ctx.Err() == nil {
-				slog.Error("sweep poller tick failed", "err", err)
-			}
+			runTick()
+		case <-wake.wakeChan():
+			runTick()
 		}
 	}
 }
@@ -109,9 +143,12 @@ func (p *SweepPoller) Tick(ctx context.Context) error {
 		}
 	}
 
-	if err := p.reconcileAllTreasurySurplus(ctx); err != nil {
-		logSweepPollerTickEnd(len(pending), err)
-		return err
+	// Surplus reconcile scans every real group; skip while fund sweeps are in flight.
+	if len(pending) == 0 {
+		if err := p.reconcileAllTreasurySurplus(ctx); err != nil {
+			logSweepPollerTickEnd(len(pending), err)
+			return err
+		}
 	}
 
 	logSweepPollerTickEnd(len(pending), nil)
@@ -119,7 +156,8 @@ func (p *SweepPoller) Tick(ctx context.Context) error {
 }
 
 func (p *SweepPoller) reconcileAllTreasurySurplus(ctx context.Context) error {
-	groupIDs, err := p.store.ListGroupIDs(ctx)
+	// Faker scale clubs (#153) have dummy treasuries: never read their balance via Privy.
+	groupIDs, err := p.store.ListRealGroupIDs(ctx)
 	if err != nil {
 		return err
 	}

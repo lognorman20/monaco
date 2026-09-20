@@ -15,13 +15,13 @@ struct SMSLoginView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("We’ll text you a one-time code to sign in.")
+            Text("We’ll text you a code to sign in.")
                 .authSecondaryCaption()
 
             TextField(
                 "",
                 text: $phoneNumber,
-                prompt: Text("Phone number").foregroundStyle(MonacoTheme.disabled)
+                prompt: Text("Phone number").foregroundStyle(MonacoTheme.tertiaryText)
             )
                 .keyboardType(.phonePad)
                 .textContentType(.telephoneNumber)
@@ -29,13 +29,14 @@ struct SMSLoginView: View {
                 .autocorrectionDisabled()
                 .focused($focusedField, equals: .phone)
                 .authTextFieldStyle()
+                .disabled(showsOTPField)
                 .accessibilityIdentifier("smsPhoneField")
 
             if showsOTPField {
                 TextField(
                     "",
                     text: $otpCode,
-                    prompt: Text("6-digit code").foregroundStyle(MonacoTheme.disabled)
+                    prompt: Text("6-digit code").foregroundStyle(MonacoTheme.tertiaryText)
                 )
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
@@ -74,6 +75,39 @@ struct SMSLoginView: View {
                     .accessibilityIdentifier("smsSendCodeButton")
                 }
             }
+
+            if showsOTPField {
+                HStack {
+                    Button("Send a new code") {
+                        otpCode = ""
+                        Task {
+                            await auth.sendSMSCode(to: normalizedPhone)
+                            if case .awaitingCode = auth.phase {
+                                focusedField = .code
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .foregroundStyle(MonacoTheme.accent)
+                    .disabled(auth.phase == .verifyingCode)
+                    .accessibilityIdentifier("smsResendCodeButton")
+
+                    Spacer()
+
+                    Button("Change number") {
+                        otpCode = ""
+                        auth.resetLoginFlow()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.footnote.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .disabled(auth.phase == .verifyingCode)
+                    .accessibilityIdentifier("smsChangeAddressButton")
+                }
+            }
         }
     }
 
@@ -92,11 +126,21 @@ struct SMSLoginView: View {
         return trimmed
     }
 
+    /// "(555) 123-4567" for US numbers, otherwise what was typed.
+    private var displayPhone: String {
+        let digits = normalizedPhone.filter(\.isNumber)
+        if normalizedPhone.hasPrefix("+1"), digits.count == 11 {
+            let d = Array(digits.dropFirst())
+            return "(\(String(d[0..<3]))) \(String(d[3..<6]))-\(String(d[6..<10]))"
+        }
+        return normalizedPhone
+    }
+
     private var showsOTPField: Bool {
         switch auth.phase {
-        case .awaitingCode, .verifyingCode, .authenticated:
+        case .awaitingCode, .verifyingCode, .codeRejected, .authenticated:
             true
-        case .idle, .sendingCode, .failed:
+        case .idle, .sendingCode, .failed, .restoring, .restoreFailed:
             false
         }
     }
@@ -111,24 +155,24 @@ struct SMSLoginView: View {
 
     private var statusMessage: String? {
         switch auth.phase {
-        case .idle:
+        case .idle, .restoring, .restoreFailed:
             return nil
         case .sendingCode:
             return "Sending code…"
         case .awaitingCode:
-            return "Enter the code from your text message."
+            return "Enter the 6-digit code we sent to \(displayPhone)."
         case .verifyingCode:
             return "Signing you in…"
         case .authenticated:
-            return "Signed in."
-        case .failed(let message):
+            return nil
+        case .failed(let message), .codeRejected(let message):
             return message
         }
     }
 
     private var statusColor: Color {
         switch auth.phase {
-        case .failed:
+        case .failed, .codeRejected:
             return MonacoTheme.destructive
         case .authenticated:
             return MonacoTheme.success

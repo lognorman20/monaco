@@ -1,62 +1,56 @@
 import MonacoCore
 import SwiftUI
 
-struct HomeNetWorthSection<DepositLink: View>: View {
+/// The hero: total money across every cabal, all-time P&L, and the P&L curve — on the
+/// premium deep-ink money card, in both light and dark. No actions live here —
+/// see `HomeBalanceRowSection` for Add money / Cash out.
+struct HomeNetWorthSection: View {
     let dashboard: HomeDashboardDTO
-    let balance: PlatformBalanceDTO?
-    let isBalanceLoading: Bool
-    @ViewBuilder var depositLink: DepositLink
+
+    /// The 1H series. Fewer than three points and the curve is hidden: a flat line reads as broken.
+    var pnlPoints: [HomePnLSeriesPointDTO] = []
+
+    /// Reserves the curve's height while the series loads after first paint (#217).
+    var isChartLoading = false
+
+    private var showsChart: Bool { pnlPoints.count >= 3 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+        VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-                MonacoHeroHeader(
-                    title: UsdAmountFormatter.format(decimalString: dashboard.netWorthUsd),
-                    caption: "Your cabals"
-                )
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("home-net-worth")
+                Text("Your money in cabals")
+                    .font(MonacoTheme.Typo.caption)
+                    .foregroundStyle(MonacoTheme.onHeroMuted)
 
-                HStack(spacing: MonacoTheme.Space.m) {
-                    Text(dashboard.netWorthDollarPnl)
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(MonacoTheme.signed(dashboard.netWorthDollarPnl))
-                    Text(PercentReturnFormatter.format(dashboard.netWorthPercentReturn))
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(MonacoTheme.signed(dashboard.netWorthPercentReturn))
+                MoneyText(decimalString: dashboard.netWorthUsd, style: .hero, color: MonacoTheme.onHero)
+
+                HStack(spacing: MonacoTheme.Space.s) {
+                    PnLBadge(
+                        dollarPnl: dashboard.netWorthDollarPnl,
+                        percentReturn: dashboard.netWorthPercentReturn,
+                        onInk: true
+                    )
+                    Text("all time")
+                        .font(MonacoTheme.Typo.caption)
+                        .foregroundStyle(MonacoTheme.onHeroMuted)
                 }
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("home-net-worth")
 
-            HStack(alignment: .center, spacing: MonacoTheme.Space.m) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Account")
-                        .font(MonacoTheme.TypeRole.caption)
-                        .foregroundStyle(MonacoTheme.muted)
-                    if let balance {
-                        Text(UsdAmountFormatter.format(micros: balance.availableUsdcMicros))
-                            .font(.body.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(MonacoTheme.ink)
-                            .accessibilityIdentifier("platform-balance-value")
-                    } else if isBalanceLoading {
-                        ProgressView()
-                            .tint(MonacoTheme.accent)
-                            .accessibilityIdentifier("platform-balance-loading")
-                    } else {
-                        Text("$0.00")
-                            .font(.body.monospacedDigit().weight(.semibold))
-                            .foregroundStyle(MonacoTheme.ink)
-                            .accessibilityIdentifier("platform-balance-value")
-                    }
-                }
-                Spacer(minLength: 8)
-                depositLink
+            if showsChart {
+                HomePnLChartSection(points: pnlPoints, onInk: true, height: 104)
+                    .padding(.top, MonacoTheme.Space.m)
+                    // The curve bleeds to the card's edges; the text above keeps its inset.
+                    .padding(.horizontal, -MonacoTheme.Space.m)
+            } else if isChartLoading {
+                Color.clear
+                    .frame(height: 104)
+                    .padding(.top, MonacoTheme.Space.m)
+                    .accessibilityLabel("Loading chart")
+                    .accessibilityIdentifier("home-pnl-chart-loading")
             }
         }
-    }
-}
-
-enum HomePnLTint {
-    static func color(_ raw: String) -> Color {
-        MonacoTheme.signed(raw)
+        .monacoHeroCard(padding: MonacoTheme.Space.l)
     }
 }

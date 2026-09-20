@@ -106,6 +106,9 @@ func (h *TransactionHandlers) RetryTransactionHandler(w http.ResponseWriter, r *
 		UserID:        userID,
 	})
 	if err != nil {
+		if writeFakerReadOnly(ctx, log, w, err, "transaction_id", transactionID) {
+			return
+		}
 		switch {
 		case errors.Is(err, app.ErrTransactionNotRetryable):
 			logJSONError(ctx, log, "transaction_not_retryable", w, http.StatusConflict, "transaction not retryable", "transaction_id", transactionID)
@@ -320,7 +323,8 @@ func (h *TransactionHandlers) getTransactionForMember(ctx context.Context, acces
 		return postgres.TransactionRow{}, errTransactionNotFound
 	}
 
-	if _, err := h.authorizeGroupMemberForTransaction(ctx, accessToken, row.GroupID); err != nil {
+	// Members read their club's swaps; any authed user may spectate faker scale clubs (#153).
+	if _, err := h.authorizeGroupReaderForTransaction(ctx, accessToken, row.GroupID); err != nil {
 		return postgres.TransactionRow{}, err
 	}
 	return row, nil
@@ -347,7 +351,15 @@ func (h *TransactionHandlers) authorizeGroupMember(ctx context.Context, accessTo
 	if err != nil {
 		return "", err
 	}
-	if !found || group.CreatorUserID != user.ID {
+	// Faker treasuries are dummy rows (#153): never hand their address to a Privy balance read.
+	if !found || group.IsFaker {
+		return "", app.ErrGroupNotFound
+	}
+	member, err := h.Store.IsGroupMember(ctx, group.ID, user.ID)
+	if err != nil {
+		return "", err
+	}
+	if !member {
 		return "", app.ErrGroupNotFound
 	}
 
@@ -383,6 +395,33 @@ func (h *TransactionHandlers) authorizeGroupMemberForTransaction(ctx context.Con
 		return "", err
 	}
 	if !member {
+		return "", app.ErrGroupNotFound
+	}
+	return user.ID, nil
+}
+
+func (h *TransactionHandlers) authorizeGroupReaderForTransaction(ctx context.Context, accessToken, groupID string) (string, error) {
+	identity, err := h.Privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	if err != nil {
+		if errors.Is(err, privy.ErrInvalidToken) {
+			return "", privy.ErrInvalidToken
+		}
+		return "", fmt.Errorf("verify session: %w", err)
+	}
+
+	user, found, err := h.Store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", app.ErrUserNotFound
+	}
+
+	readable, err := h.Store.CanReadGroup(ctx, groupID, user.ID)
+	if err != nil {
+		return "", err
+	}
+	if !readable {
 		return "", app.ErrGroupNotFound
 	}
 	return user.ID, nil

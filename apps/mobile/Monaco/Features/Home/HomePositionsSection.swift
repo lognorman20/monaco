@@ -4,41 +4,88 @@ import SwiftUI
 struct HomePositionsSection: View {
     @ObservedObject var auth: PrivyAuthService
     let rows: [HomeMyGroupRowDTO]
+    /// Pot value per cabal from `/v1/home`, which lands after the dashboard; rows show their
+    /// "Pot …" subtitle once it has.
+    var potValuesUsd: [String: String] = [:]
     var onLeft: () async -> Void = {}
+    var onBrowseCabals: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            Text("Your positions")
-                .font(MonacoTheme.TypeRole.title)
-                .foregroundStyle(MonacoTheme.ink)
+            MonacoSectionHeader("Your cabals")
 
             if rows.isEmpty {
-                MonacoEmptyStateCard(
-                    message: "Join a cabal to see your positions here.",
-                    systemImage: "person.3"
+                EmptyState(
+                    title: "No cabals yet",
+                    message: "Start one with friends or join an open one.",
+                    actionTitle: "Browse cabals",
+                    action: onBrowseCabals
                 )
+                .accessibilityIdentifier("home-cabals-empty")
             } else {
-                ForEach(rows) { row in
-                    NavigationLink {
-                        GroupDetailView(
-                            auth: auth,
-                            groupId: row.groupId,
-                            groupName: row.name,
-                            onLeft: onLeft
-                        )
-                    } label: {
-                        MonacoRowCard(
-                            systemImage: "person.3.fill",
-                            title: row.name,
-                            subtitle: "\(UsdAmountFormatter.format(decimalString: row.equityUsd)) · \(SlicePercentFormatter.format(row.slicePercent)) of pot",
-                            trailing: "\(PercentReturnFormatter.format(row.percentReturn))  \(row.dollarPnl)",
-                            trailingColor: MonacoTheme.signed(row.dollarPnl)
-                        )
+                MonacoGroupedList {
+                    ForEach(rows) { row in
+                        NavigationLink {
+                            GroupDetailView(
+                                auth: auth,
+                                groupId: row.groupId,
+                                groupName: row.name,
+                                onLeft: onLeft
+                            )
+                        } label: {
+                            CabalPositionRow(
+                                groupId: row.groupId,
+                                name: row.name,
+                                potValueUsd: potValuesUsd[row.groupId],
+                                figures: CabalPositionRowFigures(
+                                    equityUsd: row.equityUsd,
+                                    dollarPnl: row.dollarPnl,
+                                    percentReturn: row.percentReturn
+                                ),
+                                isLast: row.groupId == rows.last?.groupId
+                            )
+                        }
+                        .buttonStyle(.monacoRow)
+                        .accessibilityIdentifier("home-my-group-\(row.groupId)")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("home-my-group-\(row.groupId)")
                 }
             }
         }
+    }
+}
+
+/// One "Your cabals" row, shared by Home and Profile so the two lists cannot drift apart:
+/// the cabal and its pot on the left, the member's own money on the right with the change
+/// since they joined underneath.
+struct CabalPositionRow: View {
+    let groupId: String
+    let name: String
+    let potValueUsd: String?
+    /// Nil while the member's position has not loaded; the row then shows no figures.
+    let figures: CabalPositionRowFigures?
+    let isLast: Bool
+
+    var body: some View {
+        MonacoRow(
+            title: name,
+            subtitle: CabalPositionRowFigures.potSubtitle(potValueUsd: potValueUsd),
+            chevron: true,
+            isLast: isLast,
+            leading: { CabalMark(groupId: groupId, name: name) },
+            trailing: {
+                if let figures {
+                    MoneyText(decimalString: figures.equityUsd, style: .row)
+                        .accessibilityLabel("Your slice \(UsdAmountFormatter.format(decimalString: figures.equityUsd))")
+                    switch figures.change {
+                    case .percent(let percentReturn):
+                        PercentText(percentReturn: percentReturn, style: .caption)
+                    case .dollars(let dollarPnl):
+                        PnLText(dollarPnl: dollarPnl, style: .caption)
+                    case .unavailable:
+                        PercentText(percentReturn: nil, style: .caption)
+                    }
+                }
+            }
+        )
     }
 }

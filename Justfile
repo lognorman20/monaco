@@ -284,6 +284,30 @@ reset *target:
         ;;
     esac
 
+# Seed #153 demo data into local Postgres: `just faker scale`, `just faker mixed <group_id>`,
+# `just faker all <group_id>`, `just faker demo <group_id> [proposal_id]` (recording variant).
+# Local DATABASE_URL only; never calls Privy/RPC/Jupiter. Refresh path: `just reset db` then `just faker ...`.
+faker profile *ids:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "${MONACO_DOTENVX:-}" != "1" ]]; then
+      exec {{_dotenvx}} env MONACO_DOTENVX=1 just faker {{profile}} {{ids}}
+    fi
+    source ./scripts/assert-local-database-url.sh
+    read -r -a ids <<< "{{ids}}"
+    if (( ${#ids[@]} > 2 )); then
+      echo "error: usage: just faker <profile> [group_id] [proposal_id]" >&2
+      exit 1
+    fi
+    args=(-profile "{{profile}}")
+    if (( ${#ids[@]} >= 1 )); then
+      args+=(-group-id "${ids[0]}")
+    fi
+    if (( ${#ids[@]} == 2 )); then
+      args+=(-proposal-id "${ids[1]}")
+    fi
+    go run -C apps/backend ./cmd/faker-seed "${args[@]}"
+
 relayer target:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -296,6 +320,31 @@ relayer target:
         ;;
       *)
         echo "error: unknown target '{{target}}' (use balance)"
+        exit 1
+        ;;
+    esac
+
+# Backfill local Postgres with demo cabals (txn history, proposals, nav snapshots).
+# Sign in once via the app (OTP) so a users row exists, then:
+#   just reset db && just run backend   # other terminal
+#   just seed demo
+# Optional: --user-id UUID | --privy-user-id DID | --if-empty=false (after reset db)
+seed target *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{target}}" in
+      demo)
+        if [[ "${MONACO_DOTENVX:-}" != "1" ]]; then
+          exec {{_dotenvx}} env MONACO_DOTENVX=1 just seed demo {{args}}
+        fi
+        ./scripts/require-docker.sh
+        source ./scripts/assert-local-database-url.sh
+        docker compose up -d --wait
+        ./scripts/apply-migrations.sh
+        go run -C apps/backend ./cmd/seed-demo {{args}}
+        ;;
+      *)
+        echo "error: unknown target '{{target}}' (use demo)"
         exit 1
         ;;
     esac

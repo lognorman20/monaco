@@ -4,27 +4,36 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	solanakey "github.com/monaco/monaco/apps/backend/internal/solana/key"
+	"github.com/monaco/monaco/apps/backend/internal/swapprovider"
 )
 
 // SolanaCluster is the production Solana RPC cluster for chain operations.
 const SolanaCluster = "mainnet-beta"
 
 const (
-	envDatabaseURL                   = "DATABASE_URL"
-	envPrivyAppID                    = "PRIVY_APP_ID"
-	envPrivyAppSecret                = "PRIVY_APP_SECRET"
-	envPrivyAuthorizationPrivateKey  = "PRIVY_AUTHORIZATION_PRIVATE_KEY"
-	envPrivyAuthorizationKeyID       = "PRIVY_AUTHORIZATION_KEY_ID"
-	envRelayerPrivateKey             = "RELAYER_PRIVATE_KEY"
-	envSolanaRPCURL                  = "SOLANA_RPC_URL"
-	envPythAPIKey                    = "PYTH_API_KEY"
-	envPythHermesBaseURL             = "PYTH_HERMES_BASE_URL"
-	envSupabaseURL                   = "SUPABASE_URL"
-	envSupabaseServiceRoleKey        = "SUPABASE_SERVICE_ROLE_KEY"
+	envDatabaseURL                  = "DATABASE_URL"
+	envPrivyAppID                   = "PRIVY_APP_ID"
+	envPrivyAppSecret               = "PRIVY_APP_SECRET"
+	envPrivyAuthorizationPrivateKey = "PRIVY_AUTHORIZATION_PRIVATE_KEY"
+	envPrivyAuthorizationKeyID      = "PRIVY_AUTHORIZATION_KEY_ID"
+	envRelayerPrivateKey            = "RELAYER_PRIVATE_KEY"
+	envSolanaRPCURL                 = "SOLANA_RPC_URL"
+	envPythAPIKey                   = "PYTH_API_KEY"
+	envPythHermesBaseURL            = "PYTH_HERMES_BASE_URL"
+	envJupiterAPIKey                = "JUPITER_API_KEY"
+	envSupabaseURL                  = "SUPABASE_URL"
+	envSupabaseServiceRoleKey       = "SUPABASE_SERVICE_ROLE_KEY"
+	envSwapProvider                 = "SWAP_PROVIDER"
+	envFlashAPIKey                  = "FLASH_API_KEY"
+	envFlashMaxSlippage             = "FLASH_MAX_SLIPPAGE"
 )
+
+// maxFlashSlippage caps FLASH_MAX_SLIPPAGE so a typo cannot open a treasury swap to a bad fill.
+const maxFlashSlippage = 0.05
 
 // Config holds runtime credentials for the Monaco API.
 //
@@ -47,19 +56,32 @@ const (
 //     Equity feeds (e.g. AAPLx) require feed grants on the key in Pyth Terminal; crypto-only
 //     keys authenticate but return 403 "Not entitled" for equity price updates.
 //   - PYTH_HERMES_BASE_URL: Optional Hermes base URL override (default https://pyth.dourolabs.app/hermes).
+//   - JUPITER_API_KEY: Jupiter Price API key (x-api-key header) for catalog/popular display
+//     prices. Optional — the Price API also serves unauthenticated requests at a lower rate
+//     limit — but set it in production to avoid 429s.
+//   - SWAP_PROVIDER: venue for treasury buys and sells: "jupiter" (default) or "flash"
+//     (Definitive Flash), including cash-out sells. Display quotes and routability probes stay on Jupiter.
+//   - FLASH_API_KEY: Definitive Flash integrator key (x-definitive-api-key header). Required
+//     when SWAP_PROVIDER=flash. Create one at app.definitive.fi > More > Flash.
+//   - FLASH_MAX_SLIPPAGE: decimal slippage bound for Flash market orders (default 0.01 = 1%,
+//     max 0.05).
 type Config struct {
-	DatabaseURL                   string
-	PrivyAppID                    string
-	PrivyAppSecret                string
-	PrivyAuthorizationPrivateKey  string
-	PrivyAuthorizationKeyID       string
-	RelayerPrivateKey             string
-	SolanaRPCURL                  string
-	PythAPIKey                    string
-	PythHermesBaseURL             string
-	SupabaseURL                   string
-	SupabaseServiceRoleKey        string
-	SolanaCluster                 string
+	DatabaseURL                  string
+	PrivyAppID                   string
+	PrivyAppSecret               string
+	PrivyAuthorizationPrivateKey string
+	PrivyAuthorizationKeyID      string
+	RelayerPrivateKey            string
+	SolanaRPCURL                 string
+	PythAPIKey                   string
+	PythHermesBaseURL            string
+	JupiterAPIKey                string
+	SupabaseURL                  string
+	SupabaseServiceRoleKey       string
+	SolanaCluster                string
+	SwapProvider                 string
+	FlashAPIKey                  string
+	FlashMaxSlippage             string
 }
 
 // Load reads required settings from the process environment.
@@ -75,9 +97,12 @@ func Load() (*Config, error) {
 		SolanaRPCURL:                 strings.TrimSpace(os.Getenv(envSolanaRPCURL)),
 		PythAPIKey:                   strings.TrimSpace(os.Getenv(envPythAPIKey)),
 		PythHermesBaseURL:            strings.TrimRight(strings.TrimSpace(os.Getenv(envPythHermesBaseURL)), "/"),
+		JupiterAPIKey:                strings.TrimSpace(os.Getenv(envJupiterAPIKey)),
 		SupabaseURL:                  strings.TrimSpace(os.Getenv(envSupabaseURL)),
 		SupabaseServiceRoleKey:       strings.TrimSpace(os.Getenv(envSupabaseServiceRoleKey)),
 		SolanaCluster:                SolanaCluster,
+		FlashAPIKey:                  strings.TrimSpace(os.Getenv(envFlashAPIKey)),
+		FlashMaxSlippage:             strings.TrimSpace(os.Getenv(envFlashMaxSlippage)),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -99,6 +124,21 @@ func Load() (*Config, error) {
 	cfg.RelayerPrivateKey = normalizedRelayerKey
 	if cfg.PrivyAuthorizationPrivateKey != "" && cfg.PrivyAuthorizationKeyID == "" {
 		return nil, fmt.Errorf("%s is required when %s is set", envPrivyAuthorizationKeyID, envPrivyAuthorizationPrivateKey)
+	}
+
+	swapProvider, err := swapprovider.ParseName(strings.ToLower(strings.TrimSpace(os.Getenv(envSwapProvider))))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", envSwapProvider, err)
+	}
+	cfg.SwapProvider = swapProvider
+	if cfg.SwapProvider == swapprovider.NameFlash && cfg.FlashAPIKey == "" {
+		return nil, fmt.Errorf("%s is required when %s=%s", envFlashAPIKey, envSwapProvider, swapprovider.NameFlash)
+	}
+	if cfg.FlashMaxSlippage != "" {
+		slippage, err := strconv.ParseFloat(cfg.FlashMaxSlippage, 64)
+		if err != nil || slippage <= 0 || slippage > maxFlashSlippage {
+			return nil, fmt.Errorf("%s must be a decimal in (0, %g], got %q", envFlashMaxSlippage, maxFlashSlippage, cfg.FlashMaxSlippage)
+		}
 	}
 
 	return cfg, nil

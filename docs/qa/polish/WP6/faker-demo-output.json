@@ -1,0 +1,22 @@
+{
+  "mixed": {
+    "groupId": "d6a35cd6-5ccc-41b3-bcd5-c691044e9be5",
+    "fakerUserIds": [
+      "f4a95218-a536-46d7-aa1c-cd5010f9dedc",
+      "cd965103-b8bf-4036-ad6b-6c43cf7a1f35",
+      "ccd0b5ee-2931-4638-a278-ad16e15dac7f"
+    ],
+    "proposalIds": [
+      "6d38121d-c731-4685-b9bb-eb6a41caaa7b",
+      "cf56cfde-a746-45c3-969d-2dd9ae91a884"
+    ],
+    "demo": true,
+    "messages": 6,
+    "commentIds": [
+      "197abd31-1a05-45c4-b7be-199cd44d2edb",
+      "695fb6da-278f-4055-979d-1ef99c1b7874",
+      "766bbc5f-7595-49ef-8b56-0aa5d51b80d2"
+    ]
+  },
+  "profile": "demo"
+}

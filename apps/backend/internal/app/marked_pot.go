@@ -151,7 +151,7 @@ func fetchMarkedPotInput(
 	if pythClient != nil {
 		input, err := pythClient.MarkedPot(ctx, treasuryRef, costBasis)
 		if err != nil {
-			slog.Warn("pyth marked pot failed; using cost basis fallback",
+			slog.Warn("marked pot pricing failed; using cost basis fallback",
 				"group_id", groupID,
 				"treasury_address", treasuryAddress,
 				"err", err,
@@ -161,10 +161,29 @@ func fetchMarkedPotInput(
 		if input.TreasuryUsdc == 0 {
 			input.TreasuryUsdc = treasuryUSDC
 		}
+		logMarkedPotSources(groupID, tx != nil, input)
 		return input, nil
 	}
 
 	return costBasisMarkedPotInput(treasuryUSDC, costBasis)
+}
+
+// logMarkedPotSources records which price source valued each holding, so a NAV (and any
+// shares minted against it) can be traced back to the prices behind it.
+func logMarkedPotSources(groupID string, mintsShares bool, input pyth.NavInput) {
+	sources := make([]string, 0, len(input.Holdings))
+	for _, holding := range input.Holdings {
+		source := holding.Source
+		if source == "" {
+			source = pyth.MarkSourcePyth
+		}
+		sources = append(sources, fmt.Sprintf("%s=%s@%d", holding.Symbol, source, holding.MarkUsdc))
+	}
+	slog.Info("marked pot valued",
+		"group_id", groupID,
+		"mints_shares", mintsShares,
+		"marks", strings.Join(sources, ","),
+	)
 }
 
 func costBasisForHoldings(
@@ -223,6 +242,7 @@ func costBasisMarkedPotInput(treasuryUSDC int64, costBasis []pyth.CostBasis) (py
 			Units:     holding.Units,
 			MarkUsdc:  markPerUnit,
 			CostBasis: holding.Price,
+			Source:    pyth.MarkSourceCostBasis,
 		})
 	}
 	return pyth.NavInput{

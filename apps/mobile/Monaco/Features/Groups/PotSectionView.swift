@@ -1,123 +1,93 @@
-import SwiftUI
-import UIKit
 import MonacoCore
+import SwiftUI
 
+/// Holdings: every stock the cabal owns, then its cash. The cabal account address lives in
+/// the details sheet, not here.
 struct PotSectionView: View {
-    let potTotalUsd: String
     let pot: [PotRowDTO]
-    let treasuryAddress: String?
+    var onAddMoney: () -> Void = {}
 
-    @State private var didCopyTreasury = false
+    /// Largest position first (#214).
+    private var stocks: [PotRowDTO] {
+        pot.filter { !Self.isCash($0) }.sorted {
+            (GroupHeroMath.decimal(from: $0.valueUsd) ?? 0) > (GroupHeroMath.decimal(from: $1.valueUsd) ?? 0)
+        }
+    }
+    private var cash: PotRowDTO? { pot.first(where: Self.isCash) }
+
+    private var hasCash: Bool {
+        guard let cash, let value = GroupHeroMath.decimal(from: cash.valueUsd) else { return false }
+        return value > 0
+    }
 
     var body: some View {
-        Section {
-            if pot.isEmpty {
-                Text("No holdings yet. Fund this cabal to get started.")
-                    .font(.footnote)
-                    .foregroundStyle(MonacoTheme.secondaryText)
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+            MonacoSectionHeader("Holdings")
+
+            if stocks.isEmpty && !hasCash {
+                EmptyState(
+                    title: "Nothing bought yet",
+                    message: "Add money, then propose the first buy.",
+                    actionTitle: "Add money",
+                    action: onAddMoney
+                )
+                .accessibilityIdentifier("pot-empty")
             } else {
-                ForEach(pot) { row in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(AssetSymbolFormatter.format(row.symbol))
-                                .font(.body.bold())
-                                .foregroundStyle(MonacoTheme.primaryText)
-                            if row.afterHours == true {
-                                Text("After hours")
-                                    .font(.caption2.bold())
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(MonacoTheme.warning.opacity(0.15))
-                                    .foregroundStyle(MonacoTheme.warning)
-                                    .clipShape(Capsule())
-                                    .accessibilityIdentifier("pot-after-hours-\(row.symbol)")
-                            }
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text("$\(row.valueUsd)")
-                                    .font(.body.monospacedDigit())
-                                    .foregroundStyle(MonacoTheme.primaryText)
-                                Text(row.dollarPnl)
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundStyle(pnlColor(for: row.dollarPnl))
-                                    .accessibilityIdentifier("pot-row-pnl-\(row.symbol)")
-                            }
-                        }
-                        HStack {
-                            Text("\(row.units) units @ $\(row.markUsd)")
-                                .font(.caption)
-                                .foregroundStyle(MonacoTheme.secondaryText)
-                            Spacer()
-                        }
+                MonacoGroupedList {
+                    ForEach(stocks) { row in
+                        stockRow(row, isLast: row.id == stocks.last?.id && cash == nil)
                     }
-                    .accessibilityIdentifier("pot-row-\(row.symbol)")
-                }
-            }
-
-            if let treasuryAddress {
-                treasuryAddressBlock(treasuryAddress)
-            }
-        } header: {
-            HStack {
-                Text("Pot")
-                Spacer()
-                if !pot.isEmpty {
-                    Text("$\(potTotalUsd)")
-                        .font(.subheadline.bold().monospacedDigit())
-                        .foregroundStyle(MonacoTheme.primaryText)
-                        .accessibilityIdentifier("pot-total-value")
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func treasuryAddressBlock(_ address: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Cabal treasury")
-                .font(.caption)
-                .foregroundStyle(MonacoTheme.secondaryText)
-
-            MonacoWalletAddressText(address: address, textStyle: .footnote)
-                .accessibilityIdentifier("group-treasury-address-value")
-                .onTapGesture {
-                    copyTreasuryAddress(address)
+                    if let cash {
+                        MonacoRow(title: "Cash", isLast: true) {
+                            StockMark(symbol: "USDC")
+                        } trailing: {
+                            MoneyText(decimalString: cash.valueUsd, style: .row)
+                        }
+                        .accessibilityIdentifier("pot-row-\(cash.symbol)")
+                    }
                 }
 
-            HStack {
-                Button {
-                    copyTreasuryAddress(address)
-                } label: {
-                    Label(
-                        didCopyTreasury ? "Copied" : "Copy address",
-                        systemImage: didCopyTreasury ? "checkmark" : "doc.on.doc"
-                    )
-                }
-                .buttonStyle(.monacoSecondary)
-                .accessibilityIdentifier("group-treasury-copy-button")
-
-                if didCopyTreasury {
-                    Text("Copied")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(MonacoTheme.success)
-                        .accessibilityIdentifier("group-treasury-copied-feedback")
+                if stocks.isEmpty {
+                    Text("Nothing bought yet. Propose the first buy.")
+                        .font(MonacoTheme.Typo.caption)
+                        .foregroundStyle(MonacoTheme.muted)
+                        .accessibilityIdentifier("pot-nothing-bought")
                 }
             }
         }
-        .padding(.top, 4)
-        .accessibilityIdentifier("group-treasury-address-block")
+        .accessibilityIdentifier("group-holdings")
     }
 
-    private func copyTreasuryAddress(_ address: String) {
-        UIPasteboard.general.string = address
-        didCopyTreasury = true
-        Task {
-            try? await Task.sleep(for: .seconds(2))
-            didCopyTreasury = false
+    private func stockRow(_ row: PotRowDTO, isLast: Bool) -> some View {
+        MonacoRow(
+            title: AssetDisplayNames.name(forSymbol: row.symbol) ?? AssetSymbolFormatter.display(row.symbol),
+            subtitle: "\(sharesLabel(row)) · \(UsdAmountFormatter.format(decimalString: row.markUsd))",
+            isLast: isLast
+        ) {
+            StockMark(symbol: AssetSymbolFormatter.display(row.symbol))
+        } trailing: {
+            MoneyText(decimalString: row.valueUsd, style: .row)
+            PnLText(dollarPnl: row.dollarPnl, style: .caption)
+                .accessibilityIdentifier("pot-row-pnl-\(row.symbol)")
+            if row.afterHours == true {
+                Text("After hours")
+                    .font(MonacoTheme.Typo.micro)
+                    .foregroundStyle(MonacoTheme.warning)
+                    .accessibilityIdentifier("pot-after-hours-\(row.symbol)")
+            }
         }
+        .accessibilityIdentifier("pot-row-\(row.symbol)")
     }
 
-    private func pnlColor(for dollarPnl: String) -> Color {
-        MonacoTheme.signed(dollarPnl)
+    /// Shares from the raw token amount when present; the decimal `units` string otherwise.
+    private func sharesLabel(_ row: PotRowDTO) -> String {
+        if let atomics = row.tokenAmount, !atomics.isEmpty {
+            return ProposalShareFormatter.sharesLabel(fromAtomics: atomics)
+        }
+        return "\(row.units) shares"
+    }
+
+    static func isCash(_ row: PotRowDTO) -> Bool {
+        row.symbol.uppercased() == "USDC"
     }
 }

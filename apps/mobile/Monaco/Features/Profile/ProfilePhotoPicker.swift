@@ -3,12 +3,14 @@ import PhotosUI
 import SwiftUI
 
 /// Avatar that opens the photo library on tap and uploads the pick for the signed-in
-/// user. The one place profile photos are changed; Profile and Settings both embed it.
+/// user. The one place profile photos are changed; Profile embeds it.
 struct ProfilePhotoPicker: View {
     @ObservedObject var auth: PrivyAuthService
     @Environment(AppSessionStore.self) private var session
 
     var size: CGFloat = 96
+    /// Overridden by the first-run screen, which QA drives as `onboarding-photo`.
+    var accessibilityID: String = "profile-photo-picker"
     /// Reports upload results so the host screen can toast them.
     var onResult: (MonacoToast) -> Void
 
@@ -45,7 +47,7 @@ struct ProfilePhotoPicker: View {
         .buttonStyle(.plain)
         .disabled(isUploading || auth.accessToken == nil)
         .accessibilityLabel(session.me?.profilePhotoUrl == nil ? "Add profile photo" : "Change profile photo")
-        .accessibilityIdentifier("profile-photo-picker")
+        .accessibilityIdentifier(accessibilityID)
         .onChange(of: selection) { _, item in
             guard let item else { return }
             Task { await upload(item) }

@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go (backend, domain, reference bot)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: monaco
+          POSTGRES_PASSWORD: monaco
+          POSTGRES_DB: monaco
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U monaco -d monaco"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      # Throwaway service container, not a secret. Backend tests derive and migrate a
+      # sibling monaco_test database from this URL (internal/postgres/testdb.go).
+      DATABASE_URL: postgres://monaco:monaco@localhost:5432/monaco?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+
+      - name: Apply migrations to a clean database
+        working-directory: apps/backend
+        run: go run ./cmd/migrate
+
+      - name: Vet backend
+        working-directory: apps/backend
+        run: go vet ./...
+
+      # -p 1 matches `just test backend`: packages share one monaco_test database.
+      - name: Test backend
+        working-directory: apps/backend
+        run: go test -p 1 ./...
+
+      - name: Vet and test domain
+        working-directory: packages/domain
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Vet and test reference bot
+        working-directory: agents/momentum-bot
+        run: |
+          go vet ./...
+          go test -race ./...
+
+  swift:
+    name: Swift (mobile-core)
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Test mobile-core
+        working-directory: packages/mobile-core
+        run: swift test

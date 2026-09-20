@@ -1,39 +1,77 @@
 import MonacoCore
 import SwiftUI
 
+/// Leaderboard: every member ranked by return. The leader's row gets a thin ink outline.
 struct MemberBoardSection: View {
     let members: [LeaderboardRowDTO]
+    var currentUserId: String?
 
     var body: some View {
-        Section("Member board") {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+            MonacoSectionHeader("Leaderboard")
+
             if members.isEmpty {
                 Text("No members yet.")
-                    .font(.footnote)
-                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .font(MonacoTheme.Typo.caption)
+                    .foregroundStyle(MonacoTheme.muted)
             } else {
-                ForEach(members) { row in
-                    HStack {
-                        Text("#\(row.rank)")
-                            .font(.caption.bold())
-                            .foregroundStyle(MonacoTheme.secondaryText)
-                            .frame(width: 28, alignment: .leading)
-                        MonacoAvatar(photoURL: row.profilePhotoUrl, displayName: row.displayName, size: 28)
-                        Text(row.displayName)
-                            .font(.body.bold())
-                            .foregroundStyle(MonacoTheme.primaryText)
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(PercentReturnFormatter.format(row.percentReturn))
-                                .font(.subheadline.monospacedDigit())
-                                .foregroundStyle(MonacoTheme.signed(row.percentReturn))
-                            Text(row.dollarPnl)
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(MonacoTheme.signed(row.dollarPnl))
-                        }
+                MonacoGroupedList {
+                    ForEach(members) { row in
+                        memberRow(row, isLast: row.id == members.last?.id)
                     }
-                    .accessibilityIdentifier("member-board-row-\(row.rank)")
                 }
             }
         }
+        .accessibilityIdentifier("group-leaderboard")
+    }
+
+    private func memberRow(_ row: LeaderboardRowDTO, isLast: Bool) -> some View {
+        HStack(spacing: MonacoTheme.Space.sm) {
+            Text("\(row.rank)")
+                .font(MonacoTheme.Typo.moneyRow)
+                .foregroundStyle(MonacoTheme.muted)
+                .frame(width: 24, alignment: .leading)
+            MonacoAvatar(photoURL: row.profilePhotoUrl, displayName: row.displayName, size: 36)
+            HStack(spacing: 4) {
+                Text(row.displayName)
+                    .font(MonacoTheme.Typo.rowTitle)
+                    .foregroundStyle(MonacoTheme.ink)
+                    .lineLimit(1)
+                if isViewer(row) {
+                    Text("(you)")
+                        .font(MonacoTheme.Typo.body)
+                        .foregroundStyle(MonacoTheme.muted)
+                        .fixedSize()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .trailing, spacing: 2) {
+                PercentText(percentReturn: row.percentReturn, style: .row)
+                PnLText(dollarPnl: row.dollarPnl, style: .caption)
+            }
+            .fixedSize()
+        }
+        .padding(.horizontal, MonacoTheme.Space.m)
+        .padding(.vertical, 8)
+        .frame(minHeight: 60)
+        .overlay {
+            if row.rank == 1 {
+                RoundedRectangle(cornerRadius: MonacoTheme.Radius.card - 4, style: .continuous)
+                    .strokeBorder(MonacoTheme.ink, lineWidth: 1)
+                    .padding(4)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if !isLast, row.rank != 1 {
+                Rectangle().fill(MonacoTheme.hairline).frame(height: 1).padding(.leading, 72)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("member-board-row-\(row.rank)")
+    }
+
+    private func isViewer(_ row: LeaderboardRowDTO) -> Bool {
+        guard let currentUserId else { return false }
+        return row.userId == currentUserId
     }
 }

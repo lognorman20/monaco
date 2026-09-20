@@ -4,13 +4,12 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/monaco/monaco/apps/backend/internal/swapprovider"
 )
 
 // PollConfig controls Jupiter execute polling.
-type PollConfig struct {
-	MaxAttempts int
-	Interval    time.Duration
-}
+type PollConfig = swapprovider.PollConfig
 
 // DefaultPollConfig is the standard poll loop for Jupiter execute.
 // Buy/sell paths use this; integration tests inject TestPollConfig instead.

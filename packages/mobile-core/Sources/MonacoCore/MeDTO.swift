@@ -80,19 +80,10 @@ public enum MonacoISO8601 {
     public static func date(from raw: String) -> Date? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        let withFraction = ISO8601DateFormatter()
-        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = withFraction.date(from: trimmed) {
-            return date
-        }
-        let wholeSeconds = ISO8601DateFormatter()
-        wholeSeconds.formatOptions = [.withInternetDateTime]
-        return wholeSeconds.date(from: trimmed)
+        return SharedFormatters.iso8601Date(from: trimmed)
     }
 
     public static func string(from date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.string(from: date)
+        SharedFormatters.iso8601WholeSeconds.string(from: date)
     }
 }

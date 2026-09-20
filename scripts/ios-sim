@@ -38,9 +38,13 @@ _ios_clipboard_bridge() {
 }
 _ios_clipboard_bridge start
 
+# Ad-hoc sign the sim build (see docs/how-to/local-simulator.md#signing) so the Privy
+# session's keychain entry survives relaunch/reinstall instead of being dropped by an
+# unsigned build.
 xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \
   -destination "platform=iOS Simulator,id=${udid}" \
   -configuration Debug \
+  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
   build
 
 app_path=""

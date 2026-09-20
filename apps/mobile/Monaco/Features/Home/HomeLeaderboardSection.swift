@@ -8,9 +8,7 @@ struct HomeLeaderboardSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            Text("Leaderboard")
-                .font(MonacoTheme.TypeRole.title)
-                .foregroundStyle(MonacoTheme.ink)
+            MonacoSectionHeader("Top investors")
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -27,31 +25,35 @@ struct HomeLeaderboardSection: View {
             }
 
             if people.isEmpty {
-                MonacoEmptyStateCard(
-                    message: "Join a cabal to see members on the leaderboard.",
-                    systemImage: "chart.bar"
+                EmptyState(
+                    title: "No investors yet",
+                    message: "Join a cabal to see members on the leaderboard."
                 )
             } else {
-                ForEach(people) { row in
-                    NavigationLink {
-                        UserProfileGroupsView(
-                            auth: auth,
-                            userId: row.userId,
-                            displayName: row.displayName
-                        )
-                    } label: {
-                        MonacoRowCard(
-                            title: row.displayName,
-                            subtitle: PercentReturnFormatter.format(row.percentReturn),
-                            trailing: row.dollarPnl,
-                            subtitleColor: MonacoTheme.signed(row.percentReturn),
-                            trailingColor: MonacoTheme.signed(row.dollarPnl)
-                        ) {
-                            MonacoAvatar(photoURL: row.profilePhotoUrl, displayName: row.displayName, size: 44)
+                MonacoGroupedList {
+                    ForEach(people) { row in
+                        NavigationLink {
+                            UserProfileGroupsView(
+                                auth: auth,
+                                userId: row.userId,
+                                displayName: row.displayName,
+                                profilePhotoUrl: row.profilePhotoUrl
+                            )
+                        } label: {
+                            MonacoRow(
+                                title: row.displayName,
+                                chevron: true,
+                                isLast: row.userId == people.last?.userId,
+                                leading: { MonacoAvatar(photoURL: row.profilePhotoUrl, displayName: row.displayName, size: 44) },
+                                trailing: {
+                                    PercentText(percentReturn: row.percentReturn, style: .row)
+                                    PnLText(dollarPnl: row.dollarPnl, style: .caption)
+                                }
+                            )
                         }
+                        .buttonStyle(.monacoRow)
+                        .accessibilityIdentifier("home-leaderboard-row-\(row.userId)")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("home-leaderboard-row-\(row.userId)")
                 }
             }
         }

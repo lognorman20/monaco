@@ -246,18 +246,47 @@ public enum GroupSearchQuery {
 
 /// Formats a signed server dollar string ("+48.20", "-3.10") as "+$48.20" / "-$3.10".
 public enum SignedUsdFormatter {
+    /// "+$48.20" gains, "−$7.60" losses (U+2212), "$0.00" with no sign when the amount rounds to zero
+    /// ("+0.00", "-0.00", "-0.001"). Unparseable input renders "—".
+    /// Always pass the raw server string, never an already formatted one.
     public static func format(_ raw: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        let magnitude = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "+-"))
-        let body = UsdAmountFormatter.format(decimalString: magnitude)
-        if isLoss(trimmed), body != "$0.00" {
-            return "-\(body)"
-        }
-        return "+\(body)"
+        guard let value = parse(raw) else { return "—" }
+        let magnitude = value < 0 ? -value : value
+        let body = UsdAmountFormatter.format(decimal: magnitude)
+        if body == "$0.00" { return body }
+        return (value < 0 ? typographicMinus : "+") + body
     }
 
-    /// True when the amount is below zero (drives loss styling).
+    /// True when the amount is below zero after rounding to cents (drives loss styling).
     public static func isLoss(_ raw: String) -> Bool {
-        (Double(raw.trimmingCharacters(in: .whitespaces)) ?? 0) < 0
+        guard let value = parse(raw), !isZero(raw) else { return false }
+        return value < 0
+    }
+
+    /// True when the amount rounds to $0.00, including negative zero and dust. False for unparseable input.
+    public static func isZero(_ raw: String) -> Bool {
+        guard let value = parse(raw) else { return false }
+        let magnitude = value < 0 ? -value : value
+        return UsdAmountFormatter.format(decimal: magnitude) == "$0.00"
+    }
+
+    /// Signed decimal from a server string ("+48.2", "-0.001", "−7.60", "$3"). Nil when unparseable.
+    public static func parse(_ raw: String) -> Decimal? {
+        var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: typographicMinus, with: "-")
+            .replacingOccurrences(of: ",", with: "")
+        var negative = false
+        if trimmed.hasPrefix("+") {
+            trimmed.removeFirst()
+        } else if trimmed.hasPrefix("-") {
+            negative = true
+            trimmed.removeFirst()
+        }
+        if trimmed.hasPrefix("$") { trimmed.removeFirst() }
+        guard !trimmed.isEmpty,
+              trimmed.allSatisfy({ $0.isASCII && ($0.isNumber || $0 == ".") }),
+              let magnitude = Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX"))
+        else { return nil }
+        return negative ? -magnitude : magnitude
     }
 }

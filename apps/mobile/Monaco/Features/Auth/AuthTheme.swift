@@ -1,17 +1,18 @@
 import SwiftUI
 
 extension View {
+    /// Same look as `MonacoTextField` (56pt, sunken fill, field radius), for fields that need
+    /// an external focus binding and stable accessibility identifiers.
     func authTextFieldStyle() -> some View {
-        padding(.horizontal, 12)
-            .padding(.vertical, 12)
-            .frame(minHeight: 44)
-            .background(MonacoTheme.surface)
+        font(MonacoTheme.Typo.body)
+            .tint(MonacoTheme.ink)
+            .padding(.horizontal, MonacoTheme.Space.m)
+            .frame(minHeight: 56)
+            .background(
+                MonacoTheme.surfaceSunken,
+                in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous)
+            )
             .foregroundStyle(MonacoTheme.primaryText)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(MonacoTheme.border, lineWidth: 1.5)
-            }
     }
 
     func authSecondaryCaption() -> some View {

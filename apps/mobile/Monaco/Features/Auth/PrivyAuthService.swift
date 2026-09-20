@@ -1,23 +1,39 @@
 import Combine
 import Foundation
+import MonacoCore
+import os
 import PrivySDK
 
-/// Wraps Privy SDK init and SMS/email OTP login. Access token is for later `POST /v1/auth/session`.
+/// Wraps Privy SDK init, session restore, SMS/email OTP login and access-token refresh.
 @MainActor
 final class PrivyAuthService: ObservableObject {
     enum Phase: Equatable {
+        /// Launch: a previous sign-in exists and Privy is restoring it. The gate shows
+        /// a splash, not the login form, until this resolves.
+        case restoring
+        /// The previous sign-in could not be checked right now (offline). Retryable;
+        /// the user stays signed in.
+        case restoreFailed(message: String)
         case idle
         case sendingCode
         case awaitingCode
         case verifyingCode
+        /// The code step failed but the code field stays up so the user can retry.
+        case codeRejected(message: String)
         case authenticated(userID: String)
         case failed(message: String)
     }
 
-    @Published private(set) var phase: Phase = .idle
+    @Published private(set) var phase: Phase
     @Published private(set) var accessToken: String?
+    /// Set when the user lands back on login without asking to (the backend rejected
+    /// their token, or the saved session is gone), so LoginView can explain why.
+    /// Cleared on the next sign-in attempt.
+    @Published private(set) var lastSignOutReason: String?
 
     private var sessionStore = MonacoSessionStore()
+    private let tokenRefresh = SingleFlight<String?>()
+    private var isRestoreInFlight = false
 
     let privy: Privy
 
@@ -28,17 +44,46 @@ final class PrivyAuthService: ObservableObject {
             loggingConfig: .init(logLevel: .none)
         )
         privy = PrivySdk.initialize(config: config)
+        phase = sessionStore.hasExplicitLogin ? .restoring : .idle
+
+        AccessTokenRefreshRegistry.shared.register { [weak self] rejectedToken in
+            try await self?.refreshedAccessToken(replacing: rejectedToken)
+        }
     }
 
     convenience init() {
         self.init(settings: Config.privy)
     }
 
-    func restoreSessionIfNeeded() async {
-        guard accessToken == nil, sessionStore.hasExplicitLogin else { return }
+    // MARK: Session restore
 
-        if case .authenticated(let user) = await privy.getAuthState() {
-            await storeAuthenticatedUser(user, markExplicitLogin: false)
+    func restoreSessionIfNeeded() async {
+        guard accessToken == nil, sessionStore.hasExplicitLogin else {
+            if phase == .restoring { phase = .idle }
+            return
+        }
+        switch phase {
+        case .restoring, .restoreFailed: break
+        default: return
+        }
+        // Launch and the first scene activation both ask for a restore.
+        guard !isRestoreInFlight else { return }
+        isRestoreInFlight = true
+        defer { isRestoreInFlight = false }
+
+        phase = .restoring
+        switch await privy.getAuthState() {
+        case .authenticated(let user):
+            await storeAuthenticatedUser(user, isRestore: true)
+        case .unauthenticated:
+            AppLogger.session.notice("Session restore: Privy has no saved session")
+            endSession(reason: LoginFailureCopy.sessionExpired)
+        case .authenticatedUnverified, .notReady:
+            // Privy has a saved session but could not reach its servers to confirm it.
+            AppLogger.session.notice("Session restore: saved session could not be verified (offline)")
+            phase = .restoreFailed(message: LoginFailureCopy.restoreOffline)
+        @unknown default:
+            phase = .restoreFailed(message: LoginFailureCopy.restoreOffline)
         }
     }
 
@@ -50,80 +95,180 @@ final class PrivyAuthService: ObservableObject {
         sessionStore.recordSession(userId: userId)
     }
 
-    func sendSMSCode(to phoneNumberE164: String) async {
-        phase = .sendingCode
+    // MARK: Access token refresh
 
-        do {
-            try await privy.sms.sendCode(to: phoneNumberE164)
-            phase = .awaitingCode
-        } catch {
-            phase = .failed(message: privySendCodeErrorMessage("Could not send SMS code.", error: error))
+    /// A token to use instead of `rejectedToken`, which the backend just answered with 401.
+    /// Privy access tokens last about an hour; `getAccessToken()` mints a new one from the
+    /// saved session. Returns nil when the user is really signed out; throws when the
+    /// token could not be fetched right now (offline).
+    func refreshedAccessToken(replacing rejectedToken: String) async throws -> String? {
+        if let current = accessToken, current != rejectedToken {
+            return current
         }
+        let privy = self.privy
+        let fresh = try await tokenRefresh.run {
+            guard let user = await privy.getUser() else { return nil }
+            do {
+                return try await user.getAccessToken()
+            } catch where PrivyAuthService.isSignedOutError(error) {
+                return nil
+            }
+        }
+        if let fresh, fresh != rejectedToken, accessToken != nil {
+            accessToken = fresh
+        }
+        return fresh
+    }
+
+    // MARK: One-time codes
+
+    func sendSMSCode(to phoneNumberE164: String) async {
+        await sendCode { try await self.privy.sms.sendCode(to: phoneNumberE164) }
     }
 
     func loginWithSMSCode(_ code: String, sentTo phoneNumberE164: String) async {
-        phase = .verifyingCode
-
-        do {
-            let user = try await privy.sms.loginWithCode(code, sentTo: phoneNumberE164)
-            await storeAuthenticatedUser(user, markExplicitLogin: true)
-        } catch {
-            accessToken = nil
-            phase = .failed(message: "Invalid code or phone number.")
-        }
+        await verifyCode { try await self.privy.sms.loginWithCode(code, sentTo: phoneNumberE164) }
     }
 
     func sendEmailCode(to email: String) async {
-        phase = .sendingCode
-
-        do {
-            try await privy.email.sendCode(to: email)
-            phase = .awaitingCode
-        } catch {
-            phase = .failed(message: privySendCodeErrorMessage("Could not send email code.", error: error))
-        }
+        await sendCode { try await self.privy.email.sendCode(to: email) }
     }
 
     func loginWithEmailCode(_ code: String, sentTo email: String) async {
+        await verifyCode { try await self.privy.email.loginWithCode(code, sentTo: email) }
+    }
+
+    private func sendCode(_ send: () async throws -> Void) async {
+        // A second tap while the first request is in flight must not send a second code.
+        guard phase != .sendingCode, phase != .verifyingCode else { return }
+        lastSignOutReason = nil
+        phase = .sendingCode
+
+        do {
+            try await send()
+            phase = .awaitingCode
+        } catch {
+            let failure = Self.loginFailure(from: error, step: .sendCode)
+            AppLogger.session.error("Send code failed: \(String(describing: error), privacy: .public)")
+            phase = .failed(message: LoginFailureCopy.message(for: failure, step: .sendCode))
+        }
+    }
+
+    private func verifyCode(_ verify: () async throws -> PrivyUser) async {
+        guard phase != .verifyingCode, phase != .sendingCode else { return }
         phase = .verifyingCode
 
         do {
-            let user = try await privy.email.loginWithCode(code, sentTo: email)
-            await storeAuthenticatedUser(user, markExplicitLogin: true)
+            let user = try await verify()
+            await storeAuthenticatedUser(user, isRestore: false)
         } catch {
             accessToken = nil
-            phase = .failed(message: "Invalid code or email address.")
+            let failure = Self.loginFailure(from: error, step: .verifyCode)
+            AppLogger.session.error("Verify code failed: \(String(describing: error), privacy: .public)")
+            let message = LoginFailureCopy.message(for: failure, step: .verifyCode)
+            phase = failure.keepsCodeEntry ? .codeRejected(message: message) : .failed(message: message)
         }
     }
 
     func resetLoginFlow() {
-        guard case .authenticated = phase else {
-            phase = .idle
+        switch phase {
+        case .authenticated, .restoring, .restoreFailed:
             return
+        default:
+            phase = .idle
         }
     }
 
+    // MARK: Sign out
+
     func logout() async {
+        await performLogout()
+    }
+
+    /// Same as `logout()`, but records why so LoginView can explain it instead of
+    /// silently bouncing the user back with no context.
+    func signOut(reason: String) async {
+        await performLogout()
+        lastSignOutReason = reason
+    }
+
+    /// The backend still answered 401 after a token refresh: the session is over.
+    func signOutAfterRejectedSession() async {
+        await signOut(reason: LoginFailureCopy.sessionExpired)
+    }
+
+    private func performLogout() async {
         if let user = await privy.getUser() {
             await user.logout()
         }
+        endSession(reason: nil)
+    }
+
+    private func endSession(reason: String?) {
         accessToken = nil
+        lastSignOutReason = reason
         phase = .idle
         sessionStore.clear()
     }
 
-    private func privySendCodeErrorMessage(_ fallback: String, error: Error) -> String {
-        let detail = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !detail.isEmpty else { return fallback }
-        return "\(fallback) \(detail)"
+    // MARK: Error mapping
+
+    /// True when Privy says there is no usable session, as opposed to a request that
+    /// failed on the way (offline, timeout), which must never sign the user out.
+    nonisolated static func isSignedOutError(_ error: Error) -> Bool {
+        guard let privyError = error as? PrivyError,
+              case .authenticationFailure(let reason) = privyError.errorCode else {
+            return false
+        }
+        switch reason {
+        case .notLoggedIn, .sessionExpired, .invalidJwt:
+            return true
+        case .failureDuringAuthentication(let underlying):
+            return isSignedOutError(underlying)
+        default:
+            return false
+        }
     }
 
-    private func storeAuthenticatedUser(_ user: PrivyUser, markExplicitLogin: Bool) async {
+    nonisolated static func loginFailure(from error: Error, step: LoginStep) -> LoginFailure {
+        if error is URLError || (error as NSError).domain == NSURLErrorDomain {
+            return .offline
+        }
+        if let apiError = error as? ApiError {
+            switch apiError {
+            case .apiError(let httpCode, _, let description):
+                return LoginFailureCopy.failure(forHTTPStatus: httpCode, step: step, detail: description)
+            case .networkError(let responseCode, let description):
+                // Privy reports transport failures with a non-HTTP response code.
+                guard (400..<600).contains(responseCode) else { return .offline }
+                return LoginFailureCopy.failure(forHTTPStatus: responseCode, step: step, detail: description)
+            case .couldNotConstructRequest, .decodingError, .malformedResponse:
+                return .other(detail: nil)
+            @unknown default:
+                return .other(detail: nil)
+            }
+        }
+        if let privyError = error as? PrivyError,
+           case .authenticationFailure(let reason) = privyError.errorCode {
+            switch reason {
+            case .incorrectCredentials:
+                return .codeRejected
+            case .failureDuringAuthentication(let underlying):
+                return loginFailure(from: underlying, step: step)
+            default:
+                return .other(detail: privyError.errorDescription)
+            }
+        }
+        return .other(detail: nil)
+    }
+
+    private func storeAuthenticatedUser(_ user: PrivyUser, isRestore: Bool) async {
         do {
             let token = try await user.getAccessToken()
             accessToken = token
+            lastSignOutReason = nil
             phase = .authenticated(userID: user.id)
-            if markExplicitLogin {
+            if !isRestore {
                 sessionStore.markExplicitLogin()
             }
             #if DEBUG
@@ -131,8 +276,16 @@ final class PrivyAuthService: ObservableObject {
             await ensureServerSweepSigner(for: user)
             #endif
         } catch {
+            AppLogger.session.error("getAccessToken failed (restore: \(isRestore)): \(String(describing: error), privacy: .public)")
             accessToken = nil
-            phase = .failed(message: "Logged in but could not fetch access token.")
+            if Self.isSignedOutError(error) {
+                endSession(reason: LoginFailureCopy.sessionExpired)
+            } else if isRestore {
+                // Couldn't reach Privy. The saved session is still good; let the user retry.
+                phase = .restoreFailed(message: LoginFailureCopy.restoreOffline)
+            } else {
+                phase = .failed(message: LoginFailureCopy.tokenUnavailable)
+            }
         }
     }
 

@@ -246,7 +246,7 @@ final class MonacoUITests: XCTestCase {
     }
 
     @MainActor
-    func testFiveTabShell() throws {
+    func testFourTabShell() throws {
         let app = XCUIApplication()
         app.launchEnvironment = privyLaunchEnvironment()
         app.launch()
@@ -256,11 +256,12 @@ final class MonacoUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(tabButton(app, "Home").waitForExistence(timeout: 30), "session restore should land on tabs")
 
-        for name in ["Home", "Profile", "Cabals", "Assets", "Settings"] {
+        for name in ["Home", "Profile", "Cabals", "Assets"] {
             let tab = tabButton(app, name)
             XCTAssertTrue(tab.waitForExistence(timeout: 5), "missing tab \(name)")
             tab.tap()
         }
+        XCTAssertFalse(app.buttons["tab-settings"].exists, "Settings tab should be removed")
 
         tabButton(app, "Assets").tap()
         XCTAssertTrue(
@@ -296,13 +297,13 @@ final class MonacoUITests: XCTestCase {
             }
         }
 
-        tabButton(app, "Settings").tap()
-        attachScreenshot(app, name: "issue-161-settings")
-        let signOut = app.buttons["settings-sign-out"].exists ? app.buttons["settings-sign-out"] : app.buttons["Sign out"]
+        tabButton(app, "Profile").tap()
+        attachScreenshot(app, name: "issue-207-profile")
+        let signOut = app.buttons["profile-sign-out"].exists ? app.buttons["profile-sign-out"] : app.buttons["Sign out"]
         XCTAssertTrue(signOut.waitForExistence(timeout: 10))
         signOut.tap()
         XCTAssertTrue(app.textFields["Phone number"].waitForExistence(timeout: 20), "sign out should return to login")
-        attachScreenshot(app, name: "issue-161-signed-out")
+        attachScreenshot(app, name: "issue-207-signed-out")
     }
 
     @MainActor

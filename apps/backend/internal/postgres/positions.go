@@ -14,7 +14,16 @@ type PositionRow struct {
 	ShareUnits      int64
 	AmountDeposited int64
 	AmountWithdrawn int64
+	// Ghost is true for a faker user's position inside a real (non-faker) group (#153 mixed club).
+	// Ghost positions are display-only: they never back treasury USDC, so they are excluded from
+	// share sums, net USDC in, surplus credits, and NAV snapshots. Only ListPositionsByGroup sets it.
+	Ghost bool
 }
+
+// potPositionPredicate keeps positions that are backed by the group's pot: every position in a
+// faker group (the whole club is fake), and only non-faker users in a real group.
+// Requires aliases u (users) and g (groups).
+const potPositionPredicate = `(g.is_faker OR NOT u.is_faker)`
 
 // GetPositionForUpdateTx row-locks the position for a user in a group within tx.
 func (s *Store) GetPositionForUpdateTx(ctx context.Context, tx *sql.Tx, userID, groupID string) (PositionRow, bool, error) {
@@ -50,7 +59,12 @@ func (s *Store) NetUSDCInByGroupTx(ctx context.Context, tx *sql.Tx, groupID stri
 	if groupID == "" {
 		return 0, fmt.Errorf("group_id is required")
 	}
-	const selectSQL = `SELECT COALESCE(SUM(amount_deposited - amount_withdrawn), 0) FROM positions WHERE group_id = $1`
+	const selectSQL = `
+SELECT COALESCE(SUM(p.amount_deposited - p.amount_withdrawn), 0)
+FROM positions p
+JOIN users u ON u.id = p.user_id
+JOIN groups g ON g.id = p.group_id
+WHERE p.group_id = $1 AND ` + potPositionPredicate
 	var total int64
 	if err := tx.QueryRowContext(ctx, selectSQL, groupID).Scan(&total); err != nil {
 		return 0, fmt.Errorf("net usdc in by group tx: %w", err)
@@ -120,7 +134,12 @@ func (s *Store) SumAmountDepositedByGroup(ctx context.Context, groupID string) (
 		return 0, fmt.Errorf("group_id is required")
 	}
 
-	const selectSQL = `SELECT COALESCE(SUM(amount_deposited), 0) FROM positions WHERE group_id = $1`
+	const selectSQL = `
+SELECT COALESCE(SUM(p.amount_deposited), 0)
+FROM positions p
+JOIN users u ON u.id = p.user_id
+JOIN groups g ON g.id = p.group_id
+WHERE p.group_id = $1 AND ` + potPositionPredicate
 	var total int64
 	if err := s.db.QueryRowContext(ctx, selectSQL, groupID).Scan(&total); err != nil {
 		return 0, fmt.Errorf("sum amount deposited: %w", err)
@@ -128,18 +147,13 @@ func (s *Store) SumAmountDepositedByGroup(ctx context.Context, groupID string) (
 	return total, nil
 }
 
-// SumShareUnitsByGroup returns total outstanding share_units micros for a group.
+// SumShareUnitsByGroup returns total outstanding pot-backed share_units micros for a group.
+// Ghost (faker-in-real-group) shares are excluded so they never dilute real equity.
 func (s *Store) SumShareUnitsByGroup(ctx context.Context, groupID string) (int64, error) {
 	if groupID == "" {
 		return 0, fmt.Errorf("group_id is required")
 	}
-
-	const selectSQL = `SELECT COALESCE(SUM(share_units), 0) FROM positions WHERE group_id = $1`
-	var total int64
-	if err := s.db.QueryRowContext(ctx, selectSQL, groupID).Scan(&total); err != nil {
-		return 0, fmt.Errorf("sum share units: %w", err)
-	}
-	return total, nil
+	return sumShareUnitsByGroupQuery(ctx, s.db, groupID)
 }
 
 // IncrementPositionTx credits share units and amount_deposited independently.
@@ -308,17 +322,20 @@ RETURNING user_id, group_id, share_units, amount_deposited, amount_withdrawn`
 	return row, nil
 }
 
-// ListPositionsByGroup returns all positions for a group.
+// ListPositionsByGroup returns all positions for a group, including ghost positions (see PositionRow.Ghost).
 func (s *Store) ListPositionsByGroup(ctx context.Context, groupID string) ([]PositionRow, error) {
 	if groupID == "" {
 		return nil, fmt.Errorf("group_id is required")
 	}
 
 	const selectSQL = `
-SELECT user_id, group_id, share_units, amount_deposited, amount_withdrawn
-FROM positions
-WHERE group_id = $1
-ORDER BY user_id`
+SELECT p.user_id, p.group_id, p.share_units, p.amount_deposited, p.amount_withdrawn,
+       (u.is_faker AND NOT g.is_faker) AS ghost
+FROM positions p
+JOIN users u ON u.id = p.user_id
+JOIN groups g ON g.id = p.group_id
+WHERE p.group_id = $1
+ORDER BY p.user_id`
 
 	rows, err := s.db.QueryContext(ctx, selectSQL, groupID)
 	if err != nil {
@@ -335,6 +352,7 @@ ORDER BY user_id`
 			&row.ShareUnits,
 			&row.AmountDeposited,
 			&row.AmountWithdrawn,
+			&row.Ghost,
 		); err != nil {
 			return nil, fmt.Errorf("scan position: %w", err)
 		}

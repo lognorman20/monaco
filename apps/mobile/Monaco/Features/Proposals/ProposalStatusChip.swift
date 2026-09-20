@@ -1,48 +1,37 @@
+import MonacoCore
 import SwiftUI
 
+/// The one chip a closed proposal shows: Bought / Sold / Didn't pass / Expired / Failed.
+/// Open proposals show none.
 struct ProposalStatusChip: View {
+    let label: String
+    let stage: ProposalExecutionStage?
     let status: String
     var kind: String = "buy"
 
     var body: some View {
         Text(label)
-            .font(.caption.bold())
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(backgroundColor.opacity(0.15))
-            .foregroundStyle(backgroundColor)
-            .clipShape(Capsule())
+            .font(MonacoTheme.Typo.micro)
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(fill))
+            .lineLimit(1)
+            .fixedSize()
             .accessibilityIdentifier("proposal-status-\(kind.lowercased())-\(status.lowercased())")
     }
 
-    private var chipStyle: ProposalStatusChipStyle? {
-        ProposalStatusChipStyle(status: status)
+    private var isPositive: Bool {
+        ProposalStatusDisplay.from(status: status) == .passed && stage != .failed
     }
 
-    private var label: String {
-        switch kind.lowercased() {
-        case "sell":
-            return "Sell \(chipStyle?.label ?? status.capitalized)"
-        case "add_agent":
-            return "Add agent \(chipStyle?.label ?? status.capitalized)"
-        case "pause_agent":
-            return "Pause agent \(chipStyle?.label ?? status.capitalized)"
-        case "resume_agent":
-            return "Resume agent \(chipStyle?.label ?? status.capitalized)"
-        case "revoke_agent":
-            return "Revoke agent \(chipStyle?.label ?? status.capitalized)"
-        default:
-            return "Buy \(chipStyle?.label ?? status.capitalized)"
-        }
+    private var tint: Color {
+        if stage == .failed { return MonacoTheme.loss }
+        if stage == .executing { return MonacoTheme.warning }
+        return isPositive ? MonacoTheme.ink : MonacoTheme.muted
     }
 
-    private var backgroundColor: Color {
-        switch chipStyle {
-        case .open: .blue
-        case .passed: .green
-        case .failed: .red
-        case .expired: .gray
-        case .none: .secondary
-        }
+    private var fill: Color {
+        stage == .failed ? MonacoTheme.lossWash : MonacoTheme.surfaceSunken
     }
 }

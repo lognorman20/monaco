@@ -1,162 +1,95 @@
+import MonacoCore
 import SwiftUI
 
-enum ProposalHistoryTab: String, CaseIterable, Identifiable {
-    case open
-    case closed
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .open: "Open"
-        case .closed: "Closed"
-        }
-    }
-}
-
+/// Group screen: up to two open proposals as full cards with inline voting, and "See all" to the
+/// feed. Hidden while loading and when nothing is open, so the screen doesn't jump or nag.
 struct ProposalHistorySection: View {
-    @ObservedObject var auth: PrivyAuthService
+    let service: ProposalFeedService
     let groupId: String
+    /// Changes when the parent screen refreshes, so the preview reloads with it.
+    var refreshToken: String = ""
+    /// Tells the group screen whether a vote is in play, which is what sets its refresh cadence.
+    var onOpenVotesChange: (Bool) -> Void = { _ in }
+    var onSeeAll: () -> Void = {}
+    var onToast: (MonacoToast) -> Void = { _ in }
 
-    private let apiClient = MonacoAPIClient()
+    private static let previewLimit = 2
 
-    @State private var selectedTab: ProposalHistoryTab = .open
     @State private var openProposals: [ProposalDTO] = []
-    @State private var closedProposals: [ProposalDTO] = []
-    @State private var isLoading = true
-    @State private var errorMessage: String?
+    @State private var votingIDs: Set<String> = []
 
+    /// Proposals still waiting on this viewer come first.
+    private var preview: [ProposalDTO] {
+        let waiting = openProposals.filter(\.showsVoteActions)
+        let rest = openProposals.filter { !$0.showsVoteActions }
+        return Array((waiting + rest).prefix(Self.previewLimit))
+    }
+
+    private var title: String {
+        openProposals.contains(where: \.showsVoteActions) ? ProposalFeedCopy.needsYourVote : "Open votes"
+    }
+
+    /// Always-present zero-height container so `.task` fires even when nothing is open; the parent
+    /// stacks this with the next section so an empty preview adds no gap.
     var body: some View {
-        Section {
-            Picker("Proposal tab", selection: $selectedTab) {
-                ForEach(ProposalHistoryTab.allCases) { tab in
-                    Text(tab.title).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("group-proposals-tab-picker")
-
-            if isLoading {
-                HStack(spacing: 12) {
-                    ProgressView()
-                        .tint(MonacoTheme.accent)
-                    Text("Loading proposals…")
-                        .font(.footnote)
-                        .foregroundStyle(MonacoTheme.secondaryText)
-                }
-                .accessibilityIdentifier("group-proposals-loading")
-            } else if let errorMessage {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(MonacoTheme.warning)
-                    .accessibilityIdentifier("group-proposals-error")
-            } else if visibleProposals.isEmpty {
-                Text(emptyMessage)
-                    .font(.footnote)
-                    .foregroundStyle(MonacoTheme.secondaryText)
-                    .accessibilityIdentifier("group-proposals-empty")
-            } else {
-                ForEach(visibleProposals) { proposal in
-                    NavigationLink {
-                        ProposalDetailView(auth: auth, proposalId: proposal.id, initialProposal: proposal)
-                    } label: {
-                        proposalRow(proposal)
+        VStack(alignment: .leading, spacing: 0) {
+            if !openProposals.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    MonacoSectionHeader(title, trailing: "See all", action: onSeeAll)
+                        .accessibilityIdentifier("group-proposals-feed-link")
+                    VStack(spacing: 12) {
+                        ForEach(preview) { proposal in
+                            ProposalCardView(
+                                proposal: proposal,
+                                isVoting: votingIDs.contains(proposal.id),
+                                onVote: { choice in Task { await vote(choice, on: proposal) } },
+                                destination: {
+                                    ProposalDetailView(service: service, proposalId: proposal.id, initialProposal: proposal)
+                                },
+                                thesisIdentifierPrefix: "group-proposal-thesis"
+                            )
+                        }
                     }
-                    .accessibilityIdentifier("group-proposal-row-\(proposal.id)")
                 }
-            }
-        } header: {
-            Text("Proposals")
-        }
-        .task(id: loadTaskID) {
-            await loadProposals()
-        }
-    }
-
-    private var loadTaskID: String {
-        "\(groupId)-\(selectedTab.rawValue)-\(auth.accessToken ?? "")"
-    }
-
-    private var visibleProposals: [ProposalDTO] {
-        selectedTab == .open ? openProposals : closedProposals
-    }
-
-    private var emptyMessage: String {
-        selectedTab == .open ? "No open proposals." : "No closed proposals yet."
-    }
-
-    @ViewBuilder
-    private func proposalRow(_ proposal: ProposalDTO) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(proposal.resolvedKind == "sell" ? "Sell \(proposal.symbol)" : proposal.symbol)
-                    .font(.body.weight(.semibold))
-                Spacer()
-                ProposalStatusChip(status: proposal.status, kind: proposal.resolvedKind)
-            }
-            if let proposerName = proposal.proposerName {
-                Text("By \(proposerName)")
-                    .font(.caption)
-                    .foregroundStyle(MonacoTheme.secondaryText)
-            }
-            if selectedTab == .open, let expiresAt = proposal.expiresAt {
-                Text(timeRemaining(until: expiresAt))
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(MonacoTheme.accent)
+                .padding(.bottom, 32)
+                .accessibilityIdentifier("group-open-votes")
             }
         }
+        .task(id: "\(groupId)-\(refreshToken)") {
+            await load()
+        }
+        .pollWhileVisible(every: LiveRefreshCadence.watching(openProposals)) {
+            try await poll()
+        }
+        .onChange(of: openProposals.contains(where: \.isOpen), initial: true) { _, hasOpenVotes in
+            onOpenVotesChange(hasOpenVotes)
+        }
     }
 
-    private func timeRemaining(until raw: String) -> String {
-        guard let expiry = ISO8601DateFormatter().date(from: raw) else {
-            return "Expires \(raw)"
-        }
-        let remaining = expiry.timeIntervalSinceNow
-        if remaining <= 0 {
-            return "Expired"
-        }
-        let hours = Int(remaining) / 3600
-        let minutes = (Int(remaining) % 3600) / 60
-        if hours >= 24 {
-            let days = hours / 24
-            return "Expires in \(days)d"
-        }
-        if hours > 0 {
-            return "Expires in \(hours)h \(minutes)m"
-        }
-        return "Expires in \(minutes)m"
-    }
-
-    private func loadProposals() async {
-        guard let token = auth.accessToken else {
-            isLoading = false
-            errorMessage = "Missing sign-in token."
-            return
-        }
-
-        isLoading = true
-        errorMessage = nil
-        defer { isLoading = false }
-
+    /// Keeps the last good list on failure; the section only disappears when the server says nothing is open.
+    private func load() async {
         do {
-            let response = try await apiClient.listGroupProposals(
-                accessToken: token,
-                groupId: groupId,
-                tab: selectedTab.rawValue
-            )
-            if selectedTab == .open {
-                openProposals = response.proposals
-            } else {
-                closedProposals = response.proposals
-            }
-        } catch is CancellationError {
-            return
-        } catch MonacoAPIError.httpStatus(let code) {
-            if Task.isCancelled { return }
-            errorMessage = "Could not load proposals (HTTP \(code))."
+            openProposals = try await service.listProposals(groupId: groupId, tab: .open)
         } catch {
-            if error.isRequestCancellation { return }
-            errorMessage = "Could not load proposals."
+            return
         }
+    }
+
+    /// Background re-read, so another member's vote or a new proposal shows up without a pull.
+    /// Stands down while the member's own vote is in flight — `vote` reloads when it lands.
+    private func poll() async throws {
+        guard votingIDs.isEmpty else { return }
+        let fresh = try await service.listProposals(groupId: groupId, tab: .open)
+        guard votingIDs.isEmpty, !Task.isCancelled else { return }
+        QuietUpdate.apply(fresh, over: openProposals) { openProposals = $0 }
+    }
+
+    private func vote(_ choice: ProposalVoteChoice, on proposal: ProposalDTO) async {
+        guard votingIDs.insert(proposal.id).inserted else { return }
+        defer { votingIDs.remove(proposal.id) }
+        let result = await ProposalVoting.cast(choice, proposalId: proposal.id, service: service)
+        if result.succeeded { Haptics.success() }
+        onToast(result.toast)
+        await load()
     }
 }
