@@ -1,5 +1,12 @@
+import Combine
 import Foundation
 import MonacoCore
+
+/// Why a picture write could not even be attempted. The API's own errors
+/// cover everything that can happen once a request is on the wire.
+enum CabalPictureWriteError: Error {
+    case notSignedIn
+}
 
 /// How a cabal picture write ended.
 enum CabalPictureOutcome: Equatable {
@@ -100,30 +107,35 @@ final class CabalPictureEditor: ObservableObject {
     }
 
     /// Server copy wins where the server wrote some: it knows which rule was
-    /// broken ("only the cabal's creator…"), and this screen does not.
+    /// broken ("only the cabal's creator..."), and this screen does not.
+    ///
+    /// `MonacoCore` is spelled out because the app target declares an error type
+    /// of the same name; these writes go through the core client.
     static func failureMessage(for error: Error, fallback: String) -> String {
-        switch error {
-        case MonacoAPIError.rejected(_, let message, _) where !message.isEmpty:
+        if case CabalPictureWriteError.notSignedIn = error {
+            return "Sign in again to change the cabal picture."
+        }
+        guard let apiError = error as? MonacoCore.MonacoAPIError else {
+            if let urlError = error as? URLError, urlError.code != .cancelled {
+                return "Could not reach Monaco. Check your connection."
+            }
+            return fallback
+        }
+        if case .rejected(_, let message, _) = apiError, !message.isEmpty {
             return message
-        case MonacoAPIError.rateLimited(let retryAfter, _):
-            if let retryAfter, retryAfter > 0 {
-                return "Too many changes. Try again in \(retryAfter)s."
+        }
+        if case .rateLimited(let retryAfterSeconds, _) = apiError {
+            if let retryAfterSeconds, retryAfterSeconds > 0 {
+                return "Too many changes. Try again in \(retryAfterSeconds)s."
             }
             return "Too many changes. Try again in a minute."
-        case MonacoAPIError.httpStatus(403, _):
-            return "Only the cabal's creator can change its picture."
-        case MonacoAPIError.httpStatus(404, _):
-            return "This cabal is no longer available."
-        case MonacoAPIError.httpStatus(413, _):
-            return "That picture is too big. Try another."
-        case MonacoAPIError.httpStatus(503, _):
-            return "Cabal pictures are not set up on this server."
-        case MonacoAPIError.missingAccessToken:
-            return "Sign in again to change the cabal picture."
-        case let urlError as URLError where urlError.code != .cancelled:
-            return "Could not reach Monaco. Check your connection."
-        default:
-            return fallback
+        }
+        switch apiError.statusCode {
+        case 403: return "Only the cabal's creator can change its picture."
+        case 404: return "This cabal is no longer available."
+        case 413: return "That picture is too big. Try another."
+        case 503: return "Cabal pictures are not set up on this server."
+        default: return fallback
         }
     }
 }
@@ -136,11 +148,11 @@ final class CabalPictureEditor: ObservableObject {
 struct LiveCabalPictureWriter: CabalPictureWriting {
     let accessToken: () -> String?
 
-    private func client() throws -> MonacoAPIClient {
+    private func client() throws -> MonacoCore.MonacoAPIClient {
         guard let token = accessToken(), !token.isEmpty else {
-            throw MonacoAPIError.missingAccessToken
+            throw CabalPictureWriteError.notSignedIn
         }
-        return MonacoAPIClient(baseURL: Config.apiBaseURL, accessTokenProvider: { token })
+        return MonacoCore.MonacoAPIClient(baseURL: Config.apiBaseURL, accessTokenProvider: { token })
     }
 
     func uploadPicture(groupId: String, imageData: Data, mimeType: String) async throws -> String? {

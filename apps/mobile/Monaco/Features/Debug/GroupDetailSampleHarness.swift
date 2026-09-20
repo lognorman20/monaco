@@ -322,7 +322,7 @@ struct SampleCabalPictureWriter: CabalPictureWriting {
     func uploadPicture(groupId: String, imageData: Data, mimeType: String) async throws -> String? {
         try? await Task.sleep(for: .milliseconds(700))
         if alwaysFails {
-            throw MonacoAPIError.rejected(status: 413, message: "picture must be at most 2MB", requestID: nil)
+            throw MonacoCore.MonacoAPIError.rejected(status: 413, message: "picture must be at most 2MB")
         }
         return GroupDetailSampleData.samplePictureURL()?.absoluteString
     }
@@ -330,7 +330,7 @@ struct SampleCabalPictureWriter: CabalPictureWriting {
     func removePicture(groupId: String) async throws -> String? {
         try? await Task.sleep(for: .milliseconds(400))
         if alwaysFails {
-            throw MonacoAPIError.httpStatus(503, nil)
+            throw MonacoCore.MonacoAPIError.httpStatus(503)
         }
         return nil
     }

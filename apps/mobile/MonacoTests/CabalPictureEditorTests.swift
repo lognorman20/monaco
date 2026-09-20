@@ -82,7 +82,7 @@ final class CabalPictureEditorTests: XCTestCase {
     /// on screen would tell the member something untrue.
     func testSetPicture_failureKeepsTheCurrentPicture() async {
         let writer = StubCabalPictureWriter()
-        writer.uploadResult = .failure(MonacoAPIError.rejected(status: 413, message: "picture must be at most 2MB", requestID: nil))
+        writer.uploadResult = .failure(MonacoCore.MonacoAPIError.rejected(status: 413, message: "picture must be at most 2MB"))
         let editor = makeEditor(pictureUrl: "https://cdn.test/groups/g1/first.jpg", writer: writer)
 
         let outcome = await editor.setPicture(imageData: image, mimeType: "image/jpeg")
@@ -109,7 +109,7 @@ final class CabalPictureEditorTests: XCTestCase {
 
     func testRemovePicture_failureKeepsIt() async {
         let writer = StubCabalPictureWriter()
-        writer.removeResult = .failure(MonacoAPIError.httpStatus(403, nil))
+        writer.removeResult = .failure(MonacoCore.MonacoAPIError.httpStatus(403))
         let editor = makeEditor(pictureUrl: "https://cdn.test/groups/g1/first.jpg", writer: writer)
 
         let outcome = await editor.removePicture()
@@ -193,22 +193,22 @@ final class CabalPictureEditorTests: XCTestCase {
 
         XCTAssertEqual(
             CabalPictureEditor.failureMessage(
-                for: MonacoAPIError.rejected(status: 400, message: "picture must be a jpeg, png, or webp image", requestID: nil),
+                for: MonacoCore.MonacoAPIError.rejected(status: 400, message: "picture must be a jpeg, png, or webp image"),
                 fallback: fallback
             ),
             "picture must be a jpeg, png, or webp image",
             "server copy names the rule that was broken; this screen cannot"
         )
         XCTAssertEqual(
-            CabalPictureEditor.failureMessage(for: MonacoAPIError.rateLimited(retryAfter: 12, requestID: nil), fallback: fallback),
+            CabalPictureEditor.failureMessage(for: MonacoCore.MonacoAPIError.rateLimited(retryAfterSeconds: 12), fallback: fallback),
             "Too many changes. Try again in 12s."
         )
         XCTAssertEqual(
-            CabalPictureEditor.failureMessage(for: MonacoAPIError.httpStatus(404, nil), fallback: fallback),
+            CabalPictureEditor.failureMessage(for: MonacoCore.MonacoAPIError.httpStatus(404), fallback: fallback),
             "This cabal is no longer available."
         )
         XCTAssertEqual(
-            CabalPictureEditor.failureMessage(for: MonacoAPIError.httpStatus(503, nil), fallback: fallback),
+            CabalPictureEditor.failureMessage(for: MonacoCore.MonacoAPIError.httpStatus(503), fallback: fallback),
             "Cabal pictures are not set up on this server."
         )
         XCTAssertEqual(
@@ -216,7 +216,7 @@ final class CabalPictureEditorTests: XCTestCase {
             "Could not reach Monaco. Check your connection."
         )
         XCTAssertEqual(
-            CabalPictureEditor.failureMessage(for: MonacoAPIError.missingAccessToken, fallback: fallback),
+            CabalPictureEditor.failureMessage(for: CabalPictureWriteError.notSignedIn, fallback: fallback),
             "Sign in again to change the cabal picture."
         )
         XCTAssertEqual(
