@@ -17,3 +17,19 @@ func logLatestPrice(feedID string, err error) {
 	}
 	slog.Info("pyth latest price", "feed_id", feedID, "ok", true)
 }
+
+func logHistoricalPrice(symbol, feedID string, atUnix int64, err error) {
+	if err != nil {
+		slog.Warn("pyth historical price failed", "symbol", symbol, "feed_id", feedID, "timestamp", atUnix, "err", err)
+	}
+}
+
+func logChartSeries(symbol string, chartRange ChartRange, requested, failed, pointCount int) {
+	slog.Info("pyth chart series",
+		"symbol", symbol,
+		"range", chartRange,
+		"requested_samples", requested,
+		"failed_samples", failed,
+		"point_count", pointCount,
+	)
+}

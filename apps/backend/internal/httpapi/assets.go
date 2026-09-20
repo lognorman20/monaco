@@ -219,7 +219,13 @@ func (h *AssetsHandlers) GetAssetChartHandler(w http.ResponseWriter, r *http.Req
 		Points:      series.Points,
 		EmptyReason: series.EmptyReason,
 	}
-	writeMarketJSON(ctx, log, w, http.StatusOK, resp, "ok", "symbol", symbol, "range", chartRange, "point_count", len(resp.Points))
+	writeMarketJSON(ctx, log, w, http.StatusOK, resp, "ok",
+		"symbol", symbol,
+		"range", chartRange,
+		"point_count", len(resp.Points),
+		"requested_samples", series.RequestedSamples,
+		"failed_samples", series.FailedSamples,
+	)
 }
 
 func (h *AssetsHandlers) authorizeUser(ctx context.Context, accessToken string) (string, error) {
