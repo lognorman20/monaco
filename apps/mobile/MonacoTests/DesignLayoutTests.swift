@@ -29,7 +29,54 @@ struct MonacoRowLayoutTests {
     @Test func inlineRowsKeepAFloorForTheTitle() {
         // The trailing column used to be fixedSize, so a wide figure took the whole row.
         let layout = MonacoRowLayout(dynamicTypeSize: .large)
+        #expect(layout.minimumTitleWidth == MonacoRowLayout.baseMinimumTitleWidth)
         #expect(layout.minimumTitleWidth == 96)
+    }
+
+    /// The floor is a width for *text*, and the text scales while the row is still inline, so a
+    /// fixed 96pt shrank to about five characters at xxxLarge and the title went on truncating.
+    @Test func theTitleFloorScalesWithTheTitle() {
+        // xxxLarge is the largest size that still lays out inline.
+        let scaled = MonacoRowLayout(dynamicTypeSize: .xxxLarge, scaledTitleWidthFloor: 130)
+        #expect(scaled.minimumTitleWidth == 130)
+        #expect(scaled.isStacked == false)
+    }
+
+    /// A stacked row has a full-width title, so a floor would only fight the layout.
+    @Test func aStackedRowHasNoTitleFloorEvenWhenOneIsPassedIn() {
+        let stacked = MonacoRowLayout(dynamicTypeSize: .accessibility3, scaledTitleWidthFloor: 130)
+        #expect(stacked.minimumTitleWidth == nil)
+    }
+}
+
+struct CircleActionMetricsTests {
+    /// `GroupActionRow` gives each of its four actions about 97pt on a 390pt screen. Unclamped,
+    /// a 56pt disc reaches ~99pt at AX1 and ~189pt at AX5, so Add money / Propose / Cash out /
+    /// Chat drew over each other from AX1 upwards.
+    @Test func theDiscStopsBeforeItOutgrowsItsColumn() {
+        let narrowestColumn: CGFloat = 97
+        #expect(CircleActionMetrics.maximumDiscSize < narrowestColumn)
+
+        // The scaled values @ScaledMetric produces at AX1 and AX5 for a 56pt base on .footnote.
+        for scaled in [CGFloat(99), 189] {
+            #expect(CircleActionMetrics.discSize(scaled: scaled) < narrowestColumn)
+            #expect(CircleActionMetrics.discSize(scaled: scaled) == CircleActionMetrics.maximumDiscSize)
+        }
+    }
+
+    @Test func theGlyphStopsWithTheDisc() {
+        #expect(CircleActionMetrics.glyphSize(scaled: 68) == CircleActionMetrics.maximumGlyphSize)
+        // A glyph that outgrew its disc would spill over the circle's edge.
+        #expect(CircleActionMetrics.maximumGlyphSize < CircleActionMetrics.maximumDiscSize)
+    }
+
+    /// The point of the PR was that these used to be frozen at their design size while every
+    /// label around them grew. Clamping must not put them back there.
+    @Test func bothStillScaleUpToTheirCeiling() {
+        #expect(CircleActionMetrics.discSize(scaled: 56) == 56)
+        #expect(CircleActionMetrics.discSize(scaled: 70) == 70)
+        #expect(CircleActionMetrics.glyphSize(scaled: 20) == 20)
+        #expect(CircleActionMetrics.glyphSize(scaled: 26) == 26)
     }
 }
 
@@ -44,9 +91,20 @@ struct StockMarkTests {
         ("GOOGL", "GOOG"),
         (" nvda ", "NVDA"),
         ("", ""),
+        // A class suffix cut at four characters left the separator hanging: "BRK." read as an
+        // abbreviation of itself rather than as Berkshire.
+        ("BRK.B", "BRK"),
+        ("BRK.A", "BRK"),
+        ("brk.b", "BRK"),
+        ("RDS-A", "RDS"),
     ])
     func tileTextKeepsTheWholeTicker(ticker: String, expected: String) {
         #expect(StockMark.tileText(forTicker: ticker) == expected)
+    }
+
+    /// A separator inside the first four characters is content, not a dangling edge.
+    @Test func aSeparatorThatIsNotAtTheEndIsKept() {
+        #expect(StockMark.tileText(forTicker: "BF.B") == "BF.B")
     }
 
     @Test func tickersStartingWithTheSameLetterGetDifferentTiles() {
@@ -62,6 +120,9 @@ struct StockMarkTests {
     }
 }
 
+/// `MoneyFont` builds its `@ScaledMetric` bases from `MoneyStyle.baseSize`, so these assertions
+/// are over the numbers that actually render. They used to be over a parallel copy: the sizes were
+/// restated as literals in `MoneyFont` and nothing tied the two together.
 struct MoneyStyleScalingTests {
     @Test func everyStyleHasTheDesignSizeItUsedToPreScale() {
         #expect(MoneyStyle.hero.baseSize == 44)

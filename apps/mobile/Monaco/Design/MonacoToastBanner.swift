@@ -66,12 +66,48 @@ enum MonacoToastTiming {
     static let voiceOverFactor: Double = 1.5
     static let voiceOverCeiling: TimeInterval = 15
 
+    /// The longest a drag may hold the countdown open past the toast's own dwell.
+    ///
+    /// The hold is driven by a gesture flag, and SwiftUI does not deliver `onEnded` when a gesture
+    /// is cancelled rather than completed — the banner torn down mid-drag, the screen pushed away,
+    /// a system edge gesture winning. Without a ceiling the flag stays set, the countdown never
+    /// decrements, and the toast pins itself over a money screen with tap as the only way out.
+    static let maximumHold: TimeInterval = 2.5
+
     static func dwell(message: String, isSuccess: Bool, voiceOverRunning: Bool) -> TimeInterval {
         let reading = base + secondsPerCharacter * Double(message.count)
         let floor = isSuccess ? successFloor : failureFloor
         let dwell = min(max(reading, floor), ceiling)
         guard voiceOverRunning else { return dwell }
         return min(dwell * voiceOverFactor, voiceOverCeiling)
+    }
+}
+
+/// The dwell countdown, as state rather than as a loop, so the hold and its ceiling are testable
+/// without a view or a running clock.
+///
+/// A drag pauses the countdown so a toast is not dismissed out from under a moving thumb, but the
+/// pause is bounded by wall clock: `elapsed` keeps running while `isHeld` is true, and once the
+/// toast has been up for `dwell + maximumHold` it goes regardless. That bound is what a flag alone
+/// cannot give — see `MonacoToastTiming.maximumHold`.
+struct MonacoToastCountdown {
+    private(set) var remaining: TimeInterval
+    private let limit: TimeInterval
+    private var elapsed: TimeInterval = 0
+
+    init(dwell: TimeInterval, maximumHold: TimeInterval = MonacoToastTiming.maximumHold) {
+        remaining = dwell
+        limit = dwell + maximumHold
+    }
+
+    /// True once the toast should come down: either the countdown ran out or the hold ceiling did.
+    var isFinished: Bool { remaining <= 0 || elapsed >= limit }
+
+    /// Advances by one slice. A held toast keeps its `remaining` but still spends wall clock.
+    mutating func tick(slice: TimeInterval, isHeld: Bool) {
+        elapsed += slice
+        guard !isHeld else { return }
+        remaining -= slice
     }
 }
 
@@ -84,8 +120,12 @@ enum MonacoToastPlacement: Equatable {
     /// A caller-measured inset.
     case custom(CGFloat)
 
-    /// `BottomCTA`'s button floor at the default text size.
-    static let bottomCTAButtonHeight: CGFloat = 50
+    /// `BottomCTA`'s button floor, taken from the button itself rather than restated here.
+    static let bottomCTAButtonHeight = MonacoButtonMetrics.minimumHeight
+
+    /// One line of `.body` at the default text size — `BottomCTA`'s button is a single such line
+    /// (17pt at roughly 1.2 line height) inside the `minimumHeight` frame.
+    static let bottomCTALabelLineHeight: CGFloat = 21
 
     /// `BottomCTA`'s own padding above and below its button.
     static let bottomCTAChrome: CGFloat = MonacoTheme.Space.sm + MonacoTheme.Space.s
@@ -93,18 +133,28 @@ enum MonacoToastPlacement: Equatable {
     /// Gap between the toast and whatever is under it.
     static let gap: CGFloat = MonacoTheme.Space.sm
 
-    /// `scaledButtonHeight` is `BottomCTA`'s 50pt button floor scaled for the current text size.
-    /// A bottom bar grows with Dynamic Type, so an inset sized for one has to grow with it —
-    /// otherwise the toast lands on top of the button at accessibility sizes.
-    func bottomInset(scaledButtonHeight: CGFloat) -> CGFloat {
-        let growth = max(0, scaledButtonHeight - Self.bottomCTAButtonHeight)
+    /// At or above this, a caller-measured inset is assumed to have been sized for a bottom bar.
+    static let callerInsetBarThreshold = bottomCTAButtonHeight
+
+    /// `scaledLabelLineHeight` is `bottomCTALabelLineHeight` scaled for the current text size.
+    ///
+    /// The bar grows by its *label*, not in proportion to the button floor: the button is
+    /// `max(floor, one line of body)`, so it does not move at all until the line outgrows the
+    /// floor, and then it grows a line-height at a time. Scaling the 50pt floor instead put the
+    /// toast roughly 100pt above the bar at AX5 — the floor is a minimum, not a base to multiply.
+    func bottomInset(scaledLabelLineHeight: CGFloat) -> CGFloat {
+        let button = max(Self.bottomCTAButtonHeight, scaledLabelLineHeight)
+        let growth = button - Self.bottomCTAButtonHeight
         switch self {
         case .screenBottom:
             return Self.gap
         case .aboveBottomCTA:
-            return Self.bottomCTAButtonHeight + Self.bottomCTAChrome + growth + Self.gap
+            return button + Self.bottomCTAChrome + Self.gap
         case .custom(let inset):
-            return inset >= Self.bottomCTAButtonHeight ? inset + growth : inset
+            // A heuristic standing in for a measurement until #398 lands: it reads "sized for a
+            // bar" off the magnitude of the number, so it cannot tell a taller bar from a shorter
+            // one — OnboardingNameView's 108 and WithdrawView's 72 both get the same growth.
+            return inset >= Self.callerInsetBarThreshold ? inset + growth : inset
         }
     }
 }
@@ -115,12 +165,13 @@ private struct MonacoToastModifier: ViewModifier {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
-    @ScaledMetric(relativeTo: .body) private var ctaButtonHeight: CGFloat = MonacoToastPlacement.bottomCTAButtonHeight
+    @ScaledMetric(relativeTo: .body)
+    private var labelLineHeight: CGFloat = MonacoToastPlacement.bottomCTALabelLineHeight
     @State private var dragOffset: CGFloat = 0
     @State private var isDragging = false
 
     private var bottomInset: CGFloat {
-        placement.bottomInset(scaledButtonHeight: ctaButtonHeight)
+        placement.bottomInset(scaledLabelLineHeight: labelLineHeight)
     }
 
     private var transitionAnimation: Animation {
@@ -151,12 +202,16 @@ private struct MonacoToastModifier: ViewModifier {
             }
             .task(id: toast?.id) {
                 guard let current = toast else { return }
+                // A drag that was cancelled rather than ended leaves this set; a new toast must not
+                // inherit it, or it starts its life already held.
+                isDragging = false
                 await dismiss(current, after: MonacoToastTiming.dwell(
                     message: current.message,
                     isSuccess: current.isSuccess,
                     voiceOverRunning: voiceOverEnabled
                 ))
             }
+            .onDisappear { isDragging = false }
     }
 
     private func banner(_ toast: MonacoToast) -> some View {
@@ -187,19 +242,18 @@ private struct MonacoToastModifier: ViewModifier {
             .zIndex(1)
     }
 
-    /// Counts down in slices so a held toast is not dismissed out from under the user's thumb.
+    /// Counts down in slices so a toast is not dismissed out from under a dragging thumb, and never
+    /// past `MonacoToastTiming.maximumHold` beyond its dwell even if the drag never reports an end.
     private func dismiss(_ current: MonacoToast, after dwell: TimeInterval) async {
         let slice: TimeInterval = 0.1
-        var remaining = dwell
-        while remaining > 0 {
+        var countdown = MonacoToastCountdown(dwell: dwell)
+        while !countdown.isFinished {
             do {
                 try await Task.sleep(for: .seconds(slice))
             } catch {
                 return
             }
-            if !isDragging {
-                remaining -= slice
-            }
+            countdown.tick(slice: slice, isHeld: isDragging)
         }
         if toast?.id == current.id {
             toast = nil
@@ -210,6 +264,10 @@ private struct MonacoToastModifier: ViewModifier {
 extension View {
     /// Bottom toast: swipe down or tap to dismiss, otherwise it dwells for as long as its message
     /// takes to read. Screens with a `BottomCTA` pass `placement: .aboveBottomCTA`.
+    ///
+    /// A drag in progress pauses the countdown, so a toast is not pulled out from under a moving
+    /// thumb. A finger resting on the toast without moving does not pause it: the dismiss gesture
+    /// only begins after 8pt of travel, so there is nothing to tell a still finger from no finger.
     func monacoToast(_ toast: Binding<MonacoToast?>, placement: MonacoToastPlacement = .screenBottom) -> some View {
         modifier(MonacoToastModifier(toast: toast, placement: placement))
     }

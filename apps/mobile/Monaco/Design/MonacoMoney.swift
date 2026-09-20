@@ -49,10 +49,13 @@ struct MoneyFont: ViewModifier {
     let style: MoneyStyle
     var weightOverride: Font.Weight?
 
-    @ScaledMetric(relativeTo: .largeTitle) private var hero: CGFloat = 44
-    @ScaledMetric(relativeTo: .title) private var large: CGFloat = 28
-    @ScaledMetric(relativeTo: .body) private var row: CGFloat = 17
-    @ScaledMetric(relativeTo: .footnote) private var caption: CGFloat = 13
+    // `@ScaledMetric` needs its text style and base size as literals in the property wrapper, so
+    // there is one per role rather than one driven by `style`. The sizes come from `MoneyStyle`
+    // so the two cannot drift; the text styles are asserted against it in `MoneyStyleScalingTests`.
+    @ScaledMetric(relativeTo: .largeTitle) private var hero = MoneyStyle.hero.baseSize
+    @ScaledMetric(relativeTo: .title) private var large = MoneyStyle.large.baseSize
+    @ScaledMetric(relativeTo: .body) private var row = MoneyStyle.row.baseSize
+    @ScaledMetric(relativeTo: .footnote) private var caption = MoneyStyle.caption.baseSize
 
     private var size: CGFloat {
         switch style {
