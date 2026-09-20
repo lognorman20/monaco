@@ -32,9 +32,13 @@ struct CabalsStripSection: View {
                 case .loading:
                     placeholderStrip
                 case .unavailable:
+                    // Deliberately no cause: the store swallows the reason, so a
+                    // missing token, a 401 and a 500 all arrive here and naming
+                    // the connection would be a guess. See "Needs from other
+                    // areas" — a load state on the store is what fixes this.
                     EmptyState(
                         title: "Couldn't load your cabals",
-                        message: "Check your connection and try again.",
+                        message: "Give it another go.",
                         actionTitle: "Try again",
                         action: onRetry
                     )
