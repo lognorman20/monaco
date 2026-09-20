@@ -110,8 +110,7 @@ func (h *DepositHandlers) FundGroupHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req createDepositRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body", "group_id", groupID)
+	if !decodeJSONBody(ctx, log, w, r, &req, "group_id", groupID) {
 		return
 	}
 	if req.Amount <= 0 {
@@ -199,6 +198,10 @@ func (h *DepositHandlers) GetDepositHandler(w http.ResponseWriter, r *http.Reque
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "deposit_id", depositID)
 			return
 		}
+		if errors.Is(err, app.ErrUserNotFound) {
+			logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", "deposit_id", depositID)
+			return
+		}
 		if errors.Is(err, app.ErrDepositNotFound) {
 			logJSONError(ctx, log, "deposit_not_found", w, http.StatusNotFound, "deposit not found", "deposit_id", depositID)
 			return
@@ -245,6 +248,10 @@ func (h *DepositHandlers) GetMemberShareUnitsHandler(w http.ResponseWriter, r *h
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
+		if errors.Is(err, app.ErrUserNotFound) {
+			logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", "group_id", groupID)
+			return
+		}
 		logJSONError(ctx, log, "get_share_units_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
 		return
 	}
@@ -279,6 +286,10 @@ func (h *DepositHandlers) GetTreasuryUsdcBalanceHandler(w http.ResponseWriter, r
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
+			return
+		}
+		if errors.Is(err, app.ErrUserNotFound) {
+			logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", "group_id", groupID)
 			return
 		}
 		if errors.Is(err, app.ErrGroupNotFound) {

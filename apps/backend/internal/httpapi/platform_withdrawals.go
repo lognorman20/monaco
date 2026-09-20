@@ -42,8 +42,7 @@ func (h *PlatformWithdrawHandlers) CreatePlatformWithdrawalHandler(w http.Respon
 	}
 
 	var req createPlatformWithdrawalRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
+	if !decodeJSONBody(ctx, log, w, r, &req) {
 		return
 	}
 	if req.Amount <= 0 {
@@ -113,6 +112,10 @@ func (h *PlatformWithdrawHandlers) GetPlatformWithdrawalHandler(w http.ResponseW
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "withdrawal_id", withdrawalID)
+			return
+		}
+		if errors.Is(err, app.ErrUserNotFound) {
+			logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", "withdrawal_id", withdrawalID)
 			return
 		}
 		if errors.Is(err, app.ErrPlatformWithdrawalNotFound) {

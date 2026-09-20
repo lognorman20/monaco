@@ -1,6 +1,6 @@
 # Agent trading operator guide
 
-Monaco runs trades for a cabal agent. Your bot POSTs intents; Monaco validates and executes via the same Jupiter + Privy treasury path as member votes. Fills stay in the **cabal treasury**.
+Monaco runs trades for a cabal agent. Your bot POSTs intents; Monaco validates and executes through the same swap provider (Jupiter by default, Definitive Flash when `SWAP_PROVIDER=flash`) and Privy treasury path as member votes. Fills stay in the **cabal treasury**.
 
 ## Setup
 
@@ -120,6 +120,8 @@ Every error body is `{ "error", "requestId" }`. When Monaco had an outcome for t
 | **5xx** after the intent was accepted | `failed` | `execution failed` (the internal error is not exposed) | yes |
 
 Branch on `status` and `rejectReason`, not on the `error` text, and quote `intentId` and `requestId` when reporting a problem. **401**, **429** and a **5xx** from before the intent was decided carry only `error` and `requestId`.
+
+**Only resend with the same `idempotencyKey`.** The swap runs inside the request, so after a timeout or `5xx` it may already have filled. A resend under the same key returns the first outcome; without a key it is a new trade.
 
 ## Pause / resume / revoke
 

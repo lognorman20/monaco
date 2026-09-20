@@ -62,12 +62,12 @@ func RecordConfirmedBuyHoldings(
 	store *postgres.Store,
 	groupID string,
 	tx postgres.TransactionRow,
-	treasuryUSDC int64,
+	navVals postgres.NavSnapshotValues,
 ) error {
 	if _, err := TreasuryHoldingsForGroup(ctx, store, groupID); err != nil {
 		return err
 	}
-	return store.RecordTreasuryHoldingsAndNavSnapshotOnConfirm(ctx, groupID, tx, treasuryUSDC)
+	return store.RecordTreasuryHoldingsAndNavSnapshotOnConfirm(ctx, groupID, tx, navVals)
 }
 
 // BuildMemberBoardAfterWithdrawal re-ranks the in-group board after a withdrawal payout (M4-T35).

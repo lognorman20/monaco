@@ -31,6 +31,9 @@ type fakePrivyClient struct {
 	validProofs     map[string]struct{}
 	lastPayout      PayUSDCRequest
 	payoutCount     int
+	preparedPayoutCount int
+	payouts         map[string]*fakePayout
+	payoutBehavior  FakePayoutBehavior
 	rejectProofs    bool
 	rejectSubmitSweep bool
 	rejectSubmitSweepErr error
@@ -46,6 +49,7 @@ func NewFakeClient() Client {
 		memberBalances:   make(map[string]int64),
 		treasuryBalances: make(map[string]int64),
 		validProofs:      make(map[string]struct{}),
+		payouts:          make(map[string]*fakePayout),
 	}
 }
 
@@ -184,25 +188,100 @@ func (f *fakePrivyClient) VerifyPayoutProof(ctx context.Context, userID string, 
 	return ErrInvalidPayoutProof
 }
 
-func (f *fakePrivyClient) PayUSDC(ctx context.Context, req PayUSDCRequest) (PayUSDCResult, error) {
+// fakePayout is one prepared treasury payout and what the fake chain did with it.
+type fakePayout struct {
+	req     PayUSDCRequest
+	state   PayoutState
+	reason  string
+	reached bool
+	expired bool
+}
+
+// FakePayoutBehavior scripts what the fake chain does with treasury payouts.
+type FakePayoutBehavior struct {
+	// PrepareErr fails PrepareUSDCPayout before anything is signed.
+	PrepareErr error
+	// BroadcastErr is returned by BroadcastUSDCPayout. The transfer still reaches the chain
+	// unless BroadcastLost is set: a timeout does not mean the cluster never saw it.
+	BroadcastErr error
+	// BroadcastLost means a broadcast never reaches the cluster.
+	BroadcastLost bool
+	// FailOnChain lands the transfer with an on-chain error. No USDC moves.
+	FailOnChain bool
+	// StatusErr fails USDCPayoutStatus, as an RPC outage would.
+	StatusErr error
+}
+
+func (f *fakePrivyClient) PrepareUSDCPayout(ctx context.Context, req PayUSDCRequest) (PreparedPayout, error) {
 	_ = ctx
 	if req.Amount <= 0 || req.ToAddress == "" || req.TreasuryAddress == "" {
-		return PayUSDCResult{}, fmt.Errorf("%w: invalid payout request", ErrAPI)
+		return PreparedPayout{}, fmt.Errorf("%w: invalid payout request", ErrAPI)
 	}
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	logFake("pay_usdc", "amount", req.Amount, "to", req.ToAddress)
-	f.lastPayout = req
-	f.payoutCount++
-	balance := f.treasuryBalances[req.TreasuryAddress]
-	if balance < req.Amount {
-		return PayUSDCResult{}, fmt.Errorf("%w: insufficient treasury usdc", ErrAPI)
+	if f.payoutBehavior.PrepareErr != nil {
+		return PreparedPayout{}, f.payoutBehavior.PrepareErr
 	}
-	f.treasuryBalances[req.TreasuryAddress] = balance - req.Amount
-	f.memberBalances[req.ToAddress] += req.Amount
-	sig := deterministicTxSignature(req.TreasuryAddress, req.ToAddress, req.Amount, f.payoutCount)
-	return PayUSDCResult{TxSignature: sig}, nil
+	f.preparedPayoutCount++
+	sig := deterministicTxSignature(req.TreasuryAddress, req.ToAddress, req.Amount, f.preparedPayoutCount)
+	f.payouts[sig] = &fakePayout{req: req, state: PayoutStatePending}
+	logFake("prepare_usdc_payout", "amount", req.Amount, "to", req.ToAddress, "tx_signature", sig)
+	return PreparedPayout{
+		TxSignature:          sig,
+		SignedTransaction:    "SIGNED:" + sig,
+		LastValidBlockHeight: uint64(1000 + f.preparedPayoutCount),
+	}, nil
+}
+
+func (f *fakePrivyClient) BroadcastUSDCPayout(ctx context.Context, prepared PreparedPayout) error {
+	_ = ctx
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	payout, ok := f.payouts[prepared.TxSignature]
+	if !ok || prepared.SignedTransaction != "SIGNED:"+prepared.TxSignature {
+		return fmt.Errorf("%w: unknown signed payout", ErrAPI)
+	}
+	logFake("broadcast_usdc_payout", "amount", payout.req.Amount, "to", payout.req.ToAddress, "tx_signature", prepared.TxSignature)
+
+	if payout.expired {
+		return fmt.Errorf("%w: blockhash not found", ErrAPI)
+	}
+	// A signature lands at most once, however often it is broadcast.
+	if !payout.reached && !f.payoutBehavior.BroadcastLost {
+		payout.reached = true
+		balance := f.treasuryBalances[payout.req.TreasuryAddress]
+		switch {
+		case f.payoutBehavior.FailOnChain:
+			payout.state, payout.reason = PayoutStateFailed, "InstructionError: scripted failure"
+		case balance < payout.req.Amount:
+			payout.state, payout.reason = PayoutStateFailed, "InstructionError: insufficient funds"
+		default:
+			payout.state = PayoutStateConfirmed
+			f.treasuryBalances[payout.req.TreasuryAddress] = balance - payout.req.Amount
+			f.memberBalances[payout.req.ToAddress] += payout.req.Amount
+			f.lastPayout = payout.req
+			f.payoutCount++
+		}
+	}
+	return f.payoutBehavior.BroadcastErr
+}
+
+func (f *fakePrivyClient) USDCPayoutStatus(ctx context.Context, prepared PreparedPayout) (PayoutStatus, error) {
+	_ = ctx
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.payoutBehavior.StatusErr != nil {
+		return PayoutStatus{}, f.payoutBehavior.StatusErr
+	}
+	payout, ok := f.payouts[prepared.TxSignature]
+	if ok && payout.reached {
+		return PayoutStatus{State: payout.state, Reason: payout.reason}, nil
+	}
+	if ok && payout.expired {
+		return PayoutStatus{State: PayoutStateDropped}, nil
+	}
+	return PayoutStatus{State: PayoutStatePending}, nil
 }
 
 func (f *fakePrivyClient) SubmitMemberUSDCTransfer(ctx context.Context, req TransferRequest) (TransferResult, error) {
@@ -379,7 +458,56 @@ func SetRejectPayoutProofs(client Client, reject bool) {
 	fake.mu.Unlock()
 }
 
-// LastPayUSDCRequest returns the most recent payout submitted to the fake client.
+// SetPayoutBehavior scripts how the fake chain treats treasury payouts from now on.
+func SetPayoutBehavior(client Client, behavior FakePayoutBehavior) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		panic("privy: SetPayoutBehavior requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.payoutBehavior = behavior
+	fake.mu.Unlock()
+}
+
+// ExpirePendingPayouts moves the fake chain past the blockhash of every prepared payout that
+// has not reached it: those can never land now and report as dropped.
+func ExpirePendingPayouts(client Client) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		panic("privy: ExpirePendingPayouts requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	for _, payout := range fake.payouts {
+		if !payout.reached {
+			payout.expired = true
+		}
+	}
+}
+
+// PreparedPayoutCount returns how many treasury payouts the fake client has signed.
+func PreparedPayoutCount(client Client) int {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		return 0
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	return fake.preparedPayoutCount
+}
+
+// LandedPayoutCount returns how many treasury payouts moved USDC on the fake chain.
+func LandedPayoutCount(client Client) int {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		return 0
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	return fake.payoutCount
+}
+
+// LastPayUSDCRequest returns the most recent payout that moved USDC on the fake chain.
 func LastPayUSDCRequest(client Client) (PayUSDCRequest, bool) {
 	fake, ok := client.(*fakePrivyClient)
 	if !ok {

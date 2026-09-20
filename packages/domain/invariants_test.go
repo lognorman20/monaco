@@ -7,29 +7,31 @@ import (
 	"testing"
 )
 
-// Rounding rules these properties are derived from (money.go ratRoundToInt64):
-// every amount is rounded to the NEAREST micro, halves up. Nothing floors, so a
-// single operation can land up to half a micro on either side of the exact value.
+// Rounding rules these properties are derived from: money that moves between a
+// member and the pool is FLOORED, so rounding always stays with the members who
+// are not acting. Displayed values (NAV per share, member equity) still round to
+// the nearest micro.
 //
-//   - Redeem: |UsdcOwed − exact slice| ≤ ½ micro, and UsdcOwed ≤ pot NAV.
-//   - Deposit: share price P is itself round(NAV/shares), then minted share micros
-//     are round(D×1e6/P). Value moved between the depositor and existing members
-//     is at most D/(2P) + p/(2×1e6) micros, where p is the exact share price.
+//   - Redeem: UsdcOwed = floor(shares × NAV / totalShares), so the redeemer gives
+//     up less than one micro and is never overpaid.
+//   - Deposit: minted share micros = floor(D × totalShares / NAV) against the exact
+//     pre-credit NAV, so the depositor gives up less than one share micro of value,
+//     (NAV + D) / (totalShares + minted) micros, and never dilutes anyone.
 //
 // depositDustBound and redeemDustBound state those bounds; the simulation asserts
 // them after every operation and asserts their running sum at the end.
 
 // redeemDustBound is the most value (in micros) one redeem can shift between the
 // redeemer and everyone else.
-var redeemDustBound = big.NewRat(1, 2)
+var redeemDustBound = big.NewRat(1, 1)
 
-// depositDustBound returns D/(2P) + p/(2×1e6): the most value one deposit can
-// shift between the depositor and existing members.
-func depositDustBound(deposited USDCMicros, nav PotNAV, totalShareMicros int64) *big.Rat {
-	bound := big.NewRat(int64(deposited), 2*int64(nav.PerShareUsdc))
+// depositDustBound returns the value of one share micro after the credit, plus one
+// micro for the display rounding the simulation compares through: the most value one
+// deposit can shift between the depositor and existing members.
+func depositDustBound(deposited USDCMicros, nav PotNAV, totalShareMicros, minted int64) *big.Rat {
+	bound := big.NewRat(1, 1)
 	if totalShareMicros > 0 {
-		// p/(2×1e6) with p = NAV / (shareMicros/1e6) simplifies to NAV/(2×shareMicros).
-		bound.Add(bound, big.NewRat(int64(nav.TotalUsdc), 2*totalShareMicros))
+		bound.Add(bound, big.NewRat(int64(nav.TotalUsdc)+int64(deposited), totalShareMicros+minted))
 	}
 	return bound
 }
@@ -164,14 +166,14 @@ func (p *simPot) deposit(member string, amount USDCMicros) {
 	p.t.Helper()
 	nav := p.nav()
 	before := p.equities(nav)
-	minted, err := ShareUnitsMicrosForDeposit(amount, nav)
+	minted, err := ShareUnitsMicrosForDeposit(amount, p.totalShares, nav.TotalUsdc)
 	if err != nil {
-		if nav.PerShareUsdc == 0 {
-			return // share price rounded to zero: deposits are refused, not mispriced
+		if p.totalShares > 0 && (nav.TotalUsdc == 0 || new(big.Int).Mul(big.NewInt(int64(amount)), big.NewInt(p.totalShares)).Cmp(big.NewInt(int64(nav.TotalUsdc))) < 0) {
+			return // worthless pot, or a deposit below one share micro: refused, not mispriced
 		}
-		p.t.Fatalf("ShareUnitsMicrosForDeposit(%d, %+v): %v", amount, nav, err)
+		p.t.Fatalf("ShareUnitsMicrosForDeposit(%d, %d, %+v): %v", amount, p.totalShares, nav, err)
 	}
-	bound := depositDustBound(amount, nav, p.totalShares)
+	bound := depositDustBound(amount, nav, p.totalShares, minted)
 	p.dust.Add(p.dust, bound)
 
 	p.treasury += amount
@@ -210,9 +212,9 @@ func (p *simPot) redeem(member string, shareMicros int64) bool {
 	if slice.UsdcOwed > nav.TotalUsdc {
 		p.t.Fatalf("redeem pays %d from a pot worth %d", slice.UsdcOwed, nav.TotalUsdc)
 	}
-	drift := new(big.Rat).Sub(big.NewRat(int64(slice.UsdcOwed), 1), exact)
-	if drift.Abs(drift).Cmp(redeemDustBound) > 0 {
-		p.t.Fatalf("redeem pays %d, exact slice %s: off by more than half a micro", slice.UsdcOwed, exact.FloatString(6))
+	drift := new(big.Rat).Sub(exact, big.NewRat(int64(slice.UsdcOwed), 1))
+	if drift.Sign() < 0 || drift.Cmp(redeemDustBound) >= 0 {
+		p.t.Fatalf("redeem pays %d, exact slice %s: not the floor", slice.UsdcOwed, exact.FloatString(6))
 	}
 	p.dust.Add(p.dust, redeemDustBound)
 
@@ -402,7 +404,7 @@ func TestSharesForDeposit_firstDeposit_mintsAtOneDollarPerShare(t *testing.T) {
 		}
 
 		// Act
-		micros, err := ShareUnitsMicrosForDeposit(deposited, nav)
+		micros, err := ShareUnitsMicrosForDeposit(deposited, 0, nav.TotalUsdc)
 
 		// Assert
 		if err != nil {
@@ -421,13 +423,20 @@ func TestShareUnitsMicrosForDeposit_largerDeposit_neverMintsFewerShares(t *testi
 	rng := newSeededRand(t, 11)
 	for i := 0; i < 2_000; i++ {
 		// Arrange
-		nav := PotNAV{PerShareUsdc: USDCMicros(1 + rng.Int63n(5_000_000_000))}
-		small := USDCMicros(1 + rng.Int63n(1_000_000_000_000))
+		// A pot priced between $0.000001 and $5,000 a share; deposits of at least one share.
+		totalShares := 1_000_000 + rng.Int63n(1_000_000_000_000)
+		perShare := 1 + rng.Int63n(5_000_000_000)
+		potNav, err := MulDivFloor(totalShares, perShare, 1_000_000)
+		if err != nil || potNav == 0 {
+			t.Fatalf("pot nav for %d shares at %d: %d, %v", totalShares, perShare, potNav, err)
+		}
+		nav := PotNAV{TotalUsdc: USDCMicros(potNav), PerShareUsdc: USDCMicros(perShare)}
+		small := USDCMicros(perShare + rng.Int63n(1_000_000_000_000))
 		large := small + USDCMicros(rng.Int63n(1_000_000_000_000))
 
 		// Act
-		smallMicros, errSmall := ShareUnitsMicrosForDeposit(small, nav)
-		largeMicros, errLarge := ShareUnitsMicrosForDeposit(large, nav)
+		smallMicros, errSmall := ShareUnitsMicrosForDeposit(small, totalShares, nav.TotalUsdc)
+		largeMicros, errLarge := ShareUnitsMicrosForDeposit(large, totalShares, nav.TotalUsdc)
 
 		// Assert
 		if errSmall != nil || errLarge != nil {
@@ -444,20 +453,23 @@ func TestShareUnitsMicrosForDeposit_higherSharePrice_neverMintsMoreShares(t *tes
 	rng := newSeededRand(t, 13)
 	for i := 0; i < 2_000; i++ {
 		// Arrange
-		deposited := randomDeposit(rng)
+		// The same 1,000 shares backed by a cheaper and a dearer pot; the deposit is at
+		// least the dearer pot's value, so neither mint floors to zero.
+		const totalShares = int64(1_000_000_000)
 		cheap := USDCMicros(1 + rng.Int63n(5_000_000_000))
 		dear := cheap + USDCMicros(rng.Int63n(5_000_000_000))
+		deposited := dear + randomDeposit(rng)
 
 		// Act
-		cheapMicros, errCheap := ShareUnitsMicrosForDeposit(deposited, PotNAV{PerShareUsdc: cheap})
-		dearMicros, errDear := ShareUnitsMicrosForDeposit(deposited, PotNAV{PerShareUsdc: dear})
+		cheapMicros, errCheap := ShareUnitsMicrosForDeposit(deposited, totalShares, cheap)
+		dearMicros, errDear := ShareUnitsMicrosForDeposit(deposited, totalShares, dear)
 
 		// Assert
 		if errCheap != nil || errDear != nil {
 			t.Fatalf("ShareUnitsMicrosForDeposit: %v / %v", errCheap, errDear)
 		}
 		if dearMicros > cheapMicros {
-			t.Fatalf("%d micros minted %d at %d/share but only %d at cheaper %d/share",
+			t.Fatalf("%d micros minted %d into a pot worth %d but only %d into a cheaper pot worth %d",
 				deposited, dearMicros, dear, cheapMicros, cheap)
 		}
 	}
@@ -465,24 +477,25 @@ func TestShareUnitsMicrosForDeposit_higherSharePrice_neverMintsMoreShares(t *tes
 
 func TestSharesForDeposit_nonPositiveInputs_rejected(t *testing.T) {
 	cases := []struct {
-		name      string
-		deposited USDCMicros
-		perShare  USDCMicros
+		name        string
+		deposited   USDCMicros
+		totalShares int64
+		potNav      USDCMicros
 	}{
-		{name: "zero deposit", deposited: 0, perShare: BootstrapSharePriceMicros},
-		{name: "negative deposit", deposited: -1, perShare: BootstrapSharePriceMicros},
-		{name: "most negative deposit", deposited: -1 << 63, perShare: BootstrapSharePriceMicros},
-		{name: "zero share price", deposited: 1_000_000, perShare: 0},
-		{name: "negative share price", deposited: 1_000_000, perShare: -1_000_000},
+		{name: "zero deposit", deposited: 0, totalShares: 1_000_000, potNav: 1_000_000},
+		{name: "negative deposit", deposited: -1, totalShares: 1_000_000, potNav: 1_000_000},
+		{name: "most negative deposit", deposited: -1 << 63, totalShares: 1_000_000, potNav: 1_000_000},
+		{name: "negative shares outstanding", deposited: 1_000_000, totalShares: -1, potNav: 1_000_000},
+		{name: "worthless pot with shares outstanding", deposited: 1_000_000, totalShares: 1_000_000, potNav: 0},
+		{name: "negative pot with shares outstanding", deposited: 1_000_000, totalShares: 1_000_000, potNav: -1_000_000},
+		{name: "deposit below one share micro", deposited: 1, totalShares: 1, potNav: 2},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			nav := PotNAV{PerShareUsdc: tc.perShare}
-
 			// Act
-			shares, err := SharesForDeposit(tc.deposited, nav)
-			micros, errMicros := ShareUnitsMicrosForDeposit(tc.deposited, nav)
+			shares, err := SharesForDeposit(tc.deposited, tc.totalShares, tc.potNav)
+			micros, errMicros := ShareUnitsMicrosForDeposit(tc.deposited, tc.totalShares, tc.potNav)
 
 			// Assert
 			if err == nil || errMicros == nil {
@@ -504,7 +517,7 @@ func TestComputeRedeemSlice_nonPositiveOrOversizedInputs_rejected(t *testing.T) 
 		{name: "more than outstanding", in: RedeemSliceInput{SharesRedeemedMicros: 11, TotalSharesMicros: 10, PotNav: 10}},
 		{name: "negative pot", in: RedeemSliceInput{SharesRedeemedMicros: 1, TotalSharesMicros: 10, PotNav: -1}},
 		{name: "empty pot", in: RedeemSliceInput{SharesRedeemedMicros: 10, TotalSharesMicros: 10, PotNav: 0}},
-		{name: "slice rounds to zero", in: RedeemSliceInput{SharesRedeemedMicros: 1, TotalSharesMicros: 1_000, PotNav: 499}},
+		{name: "slice floors to zero", in: RedeemSliceInput{SharesRedeemedMicros: 1, TotalSharesMicros: 1_000, PotNav: 999}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

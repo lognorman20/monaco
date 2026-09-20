@@ -63,7 +63,7 @@ Solana transaction fees are paid by an **app relayer**. Treasuries may hold no S
 The backend can sign the treasury. That custodial fact is accepted for the hackathon. Demo the buy. Do not spend UX on a trust explainer.
 
 ```
-SwiftUI (iOS 17+)
+SwiftUI (iOS 18+)
   → Privy Swift (auth, member wallets)
   → Go API (groups, invites, votes, share ledger, sweeps, swaps, P&L)
   → Supabase Postgres DB
@@ -137,7 +137,15 @@ Worked numbers (ignore Jupiter slippage for the story):
 5. Blair deposits $110. She gets `110 / 1.10 = 100` shares. Pot $220. Total shares 200. Each still owns half.
 6. Blair redeems 50 shares. That is `50 / 200` of the pot = $55 USDC. She keeps 50 shares. Alex still has 100.
 
-Marks: Jupiter fill price is cost basis. Ongoing P&L may use Pyth equity feeds. If the token still trades on-chain after the cash equity market closes, show an after-hours label.
+**One valuation.** Deposit credit, redeem quote and payout, the surplus reconcile, NAV snapshots, and the group screens all read the same pot valuation (`valuePot` in `apps/backend/internal/app/pot_valuation.go`):
+
+- Pot NAV is treasury USDC that the group's ledger accounts for (net contributed − confirmed buys + confirmed sells) plus holdings at their mark. On-chain USDC above the ledger has landed without being credited yet and is nobody's gain.
+- Total shares is every outstanding claim: position share units plus units already debited by a redeem that has not paid out.
+- Shares mint 1:1 only while no shares are outstanding. After that every pot, cash-only or not, mints `amount × total shares / pre-credit NAV`. Mints and payouts round down, in favour of the pool.
+- Anything that mints shares or pays USDC needs a live mark (Pyth, then Jupiter). With none, the deposit stays pending and is retried, and the redeem fails with the shares returned. Cost basis is never used as a price for money movement; screens and NAV snapshots may fall back to it so they keep rendering.
+- The surplus reconcile only credits USDC the ledger cannot explain (a transfer straight to the treasury address). Realized gains stay P&L, and USDC owed to an in-flight redeem stays owed.
+
+Marks: Jupiter fill price is cost basis. A live mark comes from Pyth Hermes first, then Jupiter's price for the mint (rejected under $10,000 of pool liquidity, more than 25% from the last accepted mark, or more than 5× from cost basis). A failing source is skipped by a circuit breaker until its cooldown ends (`apps/backend/internal/pricechain`). If the token still trades on-chain after the cash equity market closes, show an after-hours label.
 
 **UI copy.** Do not say "NAV" to users. Say the pot value, their slice, and gain or loss in dollars.
 
@@ -190,6 +198,8 @@ The user picks how many dollars (or how many shares) to take, from a dust minimu
 1. **Debit share units** first (row-locked in Postgres).
 2. Compute the member's slice of the pot (`shares redeemed / total shares × pot NAV`). If the treasury holds stock, **sell that slice to USDC** on Jupiter first.
 3. Send USDC only to a **payout address the user proved they own** (signed message). The proof is required on every redeem, including partials. Reject attacker-supplied pubkeys.
+4. **Settle on chain, exactly once.** The signed transfer and its signature are stored before the transfer is broadcast, and the redeem only settles (withdrawal row, NAV snapshot) once Solana confirms that signature. A transfer that fails on chain or expires without landing returns the share units. A redeem never signs a second transfer, so a retry can only finish the first one.
+5. If the sale raises less USDC than the slice, the payout is what the treasury holds and **only the share units that payout covers are burned**. The member keeps the rest and can redeem them later.
 
 They receive USDC equal to their redeemed fraction of the pot at that moment, not a refund of dollars they put in. That group's member board, the global group board, and the global people board all recompute from the new net-USDC-in figure.
 
@@ -204,7 +214,7 @@ They receive USDC equal to their redeemed fraction of the pot at that moment, no
 | Execution        | [Jupiter Swap API v2](https://dev.jup.ag/docs/swap) on mainnet                                               |
 | Fees             | App relayer (SOL)                                                                                            |
 | Asset metadata   | [xStocks public API](https://api.xstocks.fi/api/v2/public/assets) (mints only)                               |
-| Marks            | Jupiter fill + [Pyth Hermes](https://docs.pyth.network/price-feeds/core/api-instances-and-providers/hermes)  |
+| Marks            | [Pyth Hermes](https://docs.pyth.network/price-feeds/core/api-instances-and-providers/hermes), then Jupiter Price API; cost basis for display only |
 
 ## Hackathon demo checklist
 

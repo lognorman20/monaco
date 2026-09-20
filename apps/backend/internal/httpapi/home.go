@@ -152,10 +152,12 @@ type homeMyGroupRowResponse struct {
 	PercentReturn *string `json:"percentReturn"`
 }
 
+// Timestamps on the home DTOs are strings formatted as UTC RFC 3339, like every other
+// route. A time.Time field would be encoded with nanoseconds and the value's own offset.
 type homePnLSeriesPointResponse struct {
-	TS        time.Time `json:"ts"`
-	EquityUsd string    `json:"equityUsd"`
-	DollarPnl string    `json:"dollarPnl"`
+	TS        string `json:"ts"`
+	EquityUsd string `json:"equityUsd"`
+	DollarPnl string `json:"dollarPnl"`
 }
 
 type homeLeaderboardSectionResponse struct {
@@ -164,13 +166,13 @@ type homeLeaderboardSectionResponse struct {
 }
 
 type homeMissedProposalRowResponse struct {
-	GroupID    string    `json:"groupId"`
-	GroupName  string    `json:"groupName"`
-	ProposalID string    `json:"proposalId"`
-	Symbol     string    `json:"symbol"`
-	Status     string    `json:"status"`
-	CreatedAt  time.Time `json:"createdAt"`
-	ExpiresAt  time.Time `json:"expiresAt"`
+	GroupID    string `json:"groupId"`
+	GroupName  string `json:"groupName"`
+	ProposalID string `json:"proposalId"`
+	Symbol     string `json:"symbol"`
+	Status     string `json:"status"`
+	CreatedAt  string `json:"createdAt"`
+	ExpiresAt  string `json:"expiresAt"`
 }
 
 type homeDashboardResponse struct {
@@ -339,7 +341,7 @@ func mapHomePnLSeriesPoints(points []app.HomePnLSeriesPoint) []homePnLSeriesPoin
 	out := make([]homePnLSeriesPointResponse, 0, len(points))
 	for _, point := range points {
 		out = append(out, homePnLSeriesPointResponse{
-			TS:        point.TS,
+			TS:        point.TS.UTC().Format(time.RFC3339),
 			EquityUsd: point.EquityUsd,
 			DollarPnl: point.DollarPnL,
 		})
@@ -356,8 +358,8 @@ func mapHomeMissedProposals(rows []app.HomeMissedProposalRow) []homeMissedPropos
 			ProposalID: row.ProposalID,
 			Symbol:     row.Symbol,
 			Status:     row.Status,
-			CreatedAt:  row.CreatedAt,
-			ExpiresAt:  row.ExpiresAt,
+			CreatedAt:  row.CreatedAt.UTC().Format(time.RFC3339),
+			ExpiresAt:  row.ExpiresAt.UTC().Format(time.RFC3339),
 		})
 	}
 	return out

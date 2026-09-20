@@ -89,13 +89,8 @@ func (h *ProposalHandlers) CreateProposalCommentHandler(w http.ResponseWriter, r
 	}
 
 	var req createProposalCommentRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxCommentRequestBytes)).Decode(&req); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			logJSONError(ctx, log, "comment_too_long", w, http.StatusBadRequest, "comment is too long", "proposal_id", proposalID)
-			return
-		}
-		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body", "proposal_id", proposalID)
+	r.Body = http.MaxBytesReader(w, r.Body, maxCommentRequestBytes)
+	if !decodeJSONBody(ctx, log, w, r, &req, "proposal_id", proposalID) {
 		return
 	}
 

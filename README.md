@@ -6,7 +6,7 @@ Monaco lets you create a hedge fund with friends by pooling money to buy stocks 
 
 ## Prereqs
 
-macOS, Xcode (iOS 18+ simulator), Docker, Go 1.23+, [just](https://github.com/casey/just), [dotenvx CLI](https://dotenvx.com/docs/install). SimSlim is optional.
+macOS, Xcode (iOS 18+ simulator), Docker, Go 1.25+, [just](https://github.com/casey/just), [dotenvx CLI](https://dotenvx.com/docs/install). SimSlim is optional.
 
 ## Clone setup
 
@@ -62,14 +62,16 @@ To pull leftover QA cash back out, use in-app **redeem** (Phantom cannot spend P
 | `just reset mobile`          | Stop app + `xcodebuild clean` on the resolved sim                                                                                                                      |
 | `just reset db`              | Wipe local Docker Postgres volume + migrations (localhost only, dotenvx)                                                                                               |
 | `just killports`             | Kill listeners on API port (default 8080; not Postgres 54322)                                                                                                          |
-| `just test backend`          | Go tests + local DB smoke (dotenvx)                                                                                                                                    |
+| `just test backend`          | Go tests with the race detector + local DB smoke (dotenvx)                                                                                                             |
 | `just test mobile`           | Host `swift test` in `packages/mobile-core` — fast, no secrets                                                                                                         |
 | `just build backend`         | `go build` only — no dotenvx                                                                                                                                           |
 | `just build mobile`          | Privy xcconfig, then `xcodebuild` on the resolved sim                                                                                                                  |
 | `just relayer balance`       | Fee payer pubkey + mainnet SOL and USDC (dotenvx; no private key)                                                                                                      |
+| `just seed demo`             | Backfill local Postgres with demo cabals, trades, proposals and NAV history for the most recent user. Flags: `--user-id`, `--privy-user-id`, `--if-empty=false`       |
+| `just faker <profile>`       | Seed scale or mixed fake data into local Postgres. See **[Demo data](#demo-data-faker-seed)**                                                                          |
 | `./scripts/ios-sim`          | Monaco run with Privy env. Falls back to a stock sim if slim is missing                                                                                                |
 | `./scripts/ios-build`        | Monaco compile with Privy xcconfig                                                                                                                                     |
-| `./scripts/sweep-wallets.sh` | **Ops.** Sweep USDC out of Privy wallets. See **[Ops: sweep USDC](#ops-sweep-usdc-out-of-privy-wallets)**                                                              |
+| `./scripts/sweep-wallets.sh` | **Ops.** Sweep USDC out of Privy wallets. See **[Ops: sweep USDC](#sweep-usdc-out-of-privy-wallets)**                                                              |
 
 Simulator UDID is **per machine**. Never commit one. Recipes call `scripts/resolve-ios-sim.sh`.
 
@@ -409,13 +411,13 @@ Do not copy these skills into another machine's home path. Clone the repo; Curso
 | Suite | Command |
 | --- | --- |
 | Backend (needs Docker Postgres) | `just test backend` |
-| Domain math, no database | `cd packages/domain && go test ./...` |
+| Domain math, no database | `cd packages/domain && go test -race ./...` |
 | Reference trading bot | `cd agents/momentum-bot && go test ./...` |
 | Shared Swift logic | `just test mobile` |
 
-Backend tests never touch the app database: they derive `{dbname}_test` from `DATABASE_URL`, create it if missing, and migrate it (`apps/backend/internal/postgres/testdb.go`).
+Backend tests never touch the app database: they derive `{dbname}_test` from `DATABASE_URL`, create it if missing, and migrate it (`apps/backend/internal/postgres/testdb.go`). Without `just`: export `DATABASE_URL` and run `go test -race -p 1 ./...` from `apps/backend` (`-p 1` because the packages share that one test database).
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to `main`: a Go job (Postgres 16 service container, migrations on a clean database, `go vet`, `go test` for `apps/backend`, `packages/domain` and `agents/momentum-bot`) and a macOS job (`swift test` in `packages/mobile-core`). The iOS app target is not built in CI.
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`: a Go job (Postgres 16 service container, migrations on a clean database, `go vet`, `go test -race` for `apps/backend`, `packages/domain` and `agents/momentum-bot`) and a macOS job (`swift test` in `packages/mobile-core`). The iOS app target is not built in CI.
 
 ## Deploy
 
@@ -433,6 +435,7 @@ API_ADDR=0.0.0.0:8080 MIGRATIONS_DIR=/path/to/supabase/migrations ./bin/monaco-a
 - The relayer address must hold more than 0.001 SOL or the API exits at boot. See [Relayer](#relayer-fee-payer).
 - The API listens on `API_ADDR` (default `127.0.0.1:8080`). `GET /health` probes Postgres and the access-token verifier (critical, `503` when down), Solana RPC, the relayer's SOL balance, poller liveness, Privy and the price API, and reports `ok`, `degraded` or `down`.
 - Metrics are at `GET /metrics` (Prometheus; bearer `METRICS_TOKEN`, or loopback only when unset). Set `SENTRY_DSN` and `ALERT_WEBHOOK_URL` so panics and money alerts reach a person. What is recorded and what to alert on: [`docs/ops-observability.md`](docs/ops-observability.md).
+- Routes, rate limits, idempotency keys, body and timeout limits: [`docs/api.md`](docs/api.md).
 - The deposit sweep, execute-on-pass and redeem recovery pollers run inside the API process. A panic in a tick is recovered, alerted and counted; the loop keeps running. The deposit sweep poller is safe to run in several instances: it leases each deposit (`FOR UPDATE SKIP LOCKED`) and records the sweep signature before broadcasting, so a crash or a second instance never sweeps a deposit twice. The other two pollers have not been tested with more than one instance.
 
 **iOS.** Archive and upload steps are in [`apps/mobile/TestFlight.md`](apps/mobile/TestFlight.md).

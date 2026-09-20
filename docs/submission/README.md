@@ -21,14 +21,14 @@ flowchart LR
     HTTP["HTTP handlers<br/>internal/httpapi"]
     App["Services: governance, deposits,<br/>swaps, redeem, agents<br/>internal/app"]
     Domain["Pure money math<br/>packages/domain"]
-    Workers["Pollers: deposit sweep,<br/>execute-on-pass<br/>internal/worker"]
+    Workers["Pollers: deposit sweep,<br/>execute-on-pass,<br/>redeem recovery<br/>internal/worker"]
   end
 
   PG[("Postgres<br/>supabase/migrations")]
   Privy["Privy<br/>auth, member wallets,<br/>one treasury wallet per cabal"]
   Jup["Jupiter<br/>Swap API v2, Price API v3"]
   XS["xStocks API<br/>symbol → Solana mint"]
-  Pyth["Pyth Hermes<br/>equity marks for NAV"]
+  Pyth["Pyth Hermes<br/>first source for NAV marks"]
   Sol[("Solana mainnet<br/>USDC + xStock tokens")]
 
   iOS -->|"Privy login"| Privy
@@ -72,7 +72,9 @@ flowchart LR
 
 All of this is pure integer math in `packages/domain`, tested without a database.
 
-- **Pot NAV** = treasury USDC + Σ (xStock units × mark), marks from Pyth (`nav.go`,
+- **Pot NAV** = treasury USDC + Σ (xStock units × mark). Marks come from Pyth Hermes, then
+  Jupiter's price for the mint, behind a circuit breaker (`internal/pricechain`). Cost basis is
+  a display-only fallback: minting shares or paying out needs a live mark (`nav.go`,
   `internal/app/marked_pot.go`). **NAV per share** = pot NAV ÷ total shares, or $1.00 before
   any shares exist.
 - **Deposit**: USDC is swept from the member's wallet to the treasury, then
@@ -80,7 +82,9 @@ All of this is pure integer math in `packages/domain`, tested without a database
   price and do not dilute earlier members.
 - **Withdraw**: `payout = shares redeemed ÷ total shares × pot NAV` (`redeem.go`). Shares are
   debited first; if the treasury is short of USDC, the member's slice of holdings is sold; then
-  USDC is paid to their wallet. The job is resumable if it dies midway (`internal/app/redeem.go`).
+  USDC is paid to their wallet. If the API dies midway, a recovery poller rolls the abandoned job back and re-credits the
+  shares; one that stopped mid-payout alerts a person instead of guessing
+  (`internal/app/redeem_recovery.go`).
 - A member's P&L is the current value of their shares minus their net USDC in.
 
 ## Agent trading
@@ -125,7 +129,7 @@ and comments on proposals, a cabal leaderboard, per-member P&L.
 
 Flash status, stated exactly:
 
-- A Flash swap provider is implemented in **PR #233** (open, not merged into `main`) behind
+- A Flash swap provider is on `main` (`internal/flash`, `internal/swapprovider`) behind
   `SWAP_PROVIDER=flash`. Jupiter stays the default. `SwapService` calls a provider interface,
   so vote execution, agent intents, and redeem sells all route through Flash when the flag is set.
 - The flow is quote → one-time on-chain setup (token account + SPL approve, relayer pays) →

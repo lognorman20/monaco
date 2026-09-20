@@ -58,8 +58,7 @@ func (h *AgentHandlers) SubmitAgentIntentHandler(w http.ResponseWriter, r *http.
 	}
 
 	var req submitAgentIntentRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body", "group_id", groupID)
+	if !decodeJSONBody(ctx, log, w, r, &req, "group_id", groupID) {
 		return
 	}
 	side, err := domain.ParseAgentIntentSide(strings.TrimSpace(req.Side))

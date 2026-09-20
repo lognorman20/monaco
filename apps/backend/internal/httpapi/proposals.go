@@ -59,8 +59,7 @@ func (h *ProposalHandlers) CreateProposalHandler(w http.ResponseWriter, r *http.
 	}
 
 	var req createProposalRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body", "group_id", groupID)
+	if !decodeJSONBody(ctx, log, w, r, &req, "group_id", groupID) {
 		return
 	}
 	kind := strings.TrimSpace(req.Kind)
@@ -148,8 +147,7 @@ func (h *ProposalHandlers) CastVoteHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req castVoteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body", "proposal_id", proposalID)
+	if !decodeJSONBody(ctx, log, w, r, &req, "proposal_id", proposalID) {
 		return
 	}
 

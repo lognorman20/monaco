@@ -6,34 +6,40 @@ import (
 	"strings"
 )
 
-// SharesForDeposit mints claim units from swept USDC at the current pot NAV per share.
-// Invariant: shares = deposited / nav.PerShareUsdc (ledger stores micro-scaled units).
-func SharesForDeposit(deposited USDCMicros, nav PotNAV) (ShareUnits, error) {
-	micros, err := ShareUnitsMicrosForDeposit(deposited, nav)
+// SharesForDeposit mints claim units from swept USDC against the pot as it stood before the credit.
+func SharesForDeposit(deposited USDCMicros, totalSharesMicros int64, preCreditNav USDCMicros) (ShareUnits, error) {
+	micros, err := ShareUnitsMicrosForDeposit(deposited, totalSharesMicros, preCreditNav)
 	if err != nil {
 		return "", err
 	}
 	return shareUnitsFromMicros(micros)
 }
 
-// ShareUnitsMicrosForDeposit returns the positions.share_units increment for a deposit.
-func ShareUnitsMicrosForDeposit(deposited USDCMicros, nav PotNAV) (int64, error) {
+// ShareUnitsMicrosForDeposit returns the positions.share_units increment for a deposit:
+// deposited × totalShares / preCreditNav, floored so rounding never favours the depositor
+// over the members already in the pot. Shares are minted 1:1 only while none are outstanding;
+// a pot that already has shares is always priced at its NAV, cash-only or not.
+func ShareUnitsMicrosForDeposit(deposited USDCMicros, totalSharesMicros int64, preCreditNav USDCMicros) (int64, error) {
 	if deposited <= 0 {
 		return 0, fmt.Errorf("deposited must be positive")
 	}
-	if nav.PerShareUsdc <= 0 {
-		return 0, fmt.Errorf("per-share usdc must be positive")
+	if totalSharesMicros < 0 {
+		return 0, fmt.Errorf("total shares must be non-negative")
 	}
-	product := new(big.Rat).Mul(
-		big.NewRat(int64(deposited), 1),
-		big.NewRat(1_000_000, 1),
-	)
-	quotient := new(big.Rat).Quo(product, big.NewRat(int64(nav.PerShareUsdc), 1))
-	micros, err := ratRoundToInt64(quotient)
+	if totalSharesMicros == 0 {
+		return int64(deposited), nil
+	}
+	if preCreditNav <= 0 {
+		return 0, fmt.Errorf("pre-credit pot nav must be positive while shares are outstanding")
+	}
+	minted, err := MulDivFloor(int64(deposited), totalSharesMicros, int64(preCreditNav))
 	if err != nil {
-		return 0, fmt.Errorf("share units for deposit: %w", err)
+		return 0, fmt.Errorf("mint share units: %w", err)
 	}
-	return micros, nil
+	if minted <= 0 {
+		return 0, fmt.Errorf("deposit below minimum share increment")
+	}
+	return minted, nil
 }
 
 func shareUnitsFromMicros(micros int64) (ShareUnits, error) {
