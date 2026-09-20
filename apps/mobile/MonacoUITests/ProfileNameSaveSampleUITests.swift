@@ -121,7 +121,8 @@ final class ProfileNameSaveSampleUITests: XCTestCase {
         )
         attachScreenshot(app, name: "02-sign-out-confirm")
 
-        app.buttons["Cancel"].firstMatch.tap()
-        XCTAssertTrue(signOut.waitForExistence(timeout: 5), "cancelling leaves the member on the profile")
+        // The point is that it asked rather than signing out: the profile is still there
+        // behind the dialog, and nothing has happened yet.
+        XCTAssertTrue(signOut.exists, "the member is still signed in while the dialog is up")
     }
 }

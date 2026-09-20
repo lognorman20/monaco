@@ -291,6 +291,7 @@ struct ProfileTabView: View {
                 }
                 .accessibilityIdentifier("profile-sign-out-confirm")
                 Button("Cancel", role: .cancel) {}
+                    .accessibilityIdentifier("profile-sign-out-cancel")
             } message: {
                 Text(ProfileSignOutCopy.message(
                     smsLoginEnabled: Config.dynamic.smsLoginEnabled,
