@@ -12,6 +12,7 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry/telemetrytest"
 )
 
 const (
@@ -544,5 +545,30 @@ func TestChain_chartSeries_errorPassesThrough(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("expected a chart error to reach the caller")
+	}
+}
+
+func TestChain_breakerOpen_isCountedOncePerOutage_notPerFailedProbe(t *testing.T) {
+	// Arrange
+	const series = `monaco_price_breaker_opens_total{source="pyth"}`
+	clock := newFakeClock()
+	source := &fakePythSource{err: entitlementError(t)}
+	cfg := testConfig(clock)
+	chain := New(source, jupiterWithPrice(205_000_000, 500_000), nil, cfg)
+	before := telemetrytest.Value(t, series)
+
+	// Act: the first failure opens the breaker; two failed recovery probes re-arm it.
+	markOne(t, chain)
+	for i := 0; i < 2; i++ {
+		clock.Advance(cfg.EntitlementCooldown)
+		markOne(t, chain)
+	}
+
+	// Assert
+	if got := source.callCount(); got != 3 {
+		t.Fatalf("pyth called %d times, want 3 (open + two probes)", got)
+	}
+	if got := telemetrytest.Value(t, series) - before; got != 1 {
+		t.Fatalf("breaker opens moved by %v, want 1: a re-armed breaker is the same outage", got)
 	}
 }

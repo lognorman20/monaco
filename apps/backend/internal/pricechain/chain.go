@@ -14,6 +14,7 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -195,6 +196,7 @@ func (c *Chain) markHolding(ctx context.Context, treasury pyth.TreasuryRef, hold
 	}
 	c.warn("cost-basis:"+markKey(holding.Symbol, holding.Mint), "no live price source; holding valued at cost basis",
 		"group_id", treasury.GroupID, "symbol", holding.Symbol, "mint", holding.Mint)
+	telemetry.PriceFallback("cost_basis")
 	out.MarkUsdc = costMark
 	out.Source = pyth.MarkSourceCostBasis
 	return out, nil
@@ -509,11 +511,40 @@ func (c *Chain) breakerAllows(key string) bool {
 
 func (c *Chain) openBreaker(key string, cooldown time.Duration, entitlement bool) {
 	c.mu.Lock()
+	_, alreadyOpen := c.breakers[key]
 	c.breakers[key] = breaker{openUntil: c.cfg.Now().Add(cooldown), entitlement: entitlement}
 	if entitlement {
 		delete(c.entitled, key)
 	}
 	c.mu.Unlock()
+
+	if alreadyOpen {
+		// A failed recovery probe re-arms an open breaker; only the first open is news.
+		return
+	}
+	source := breakerSource(key)
+	telemetry.BreakerOpened(source)
+	if source == jupiterBreakerKey {
+		// Jupiter is the last live tier. With it open, pots are valued at cost basis and
+		// P&L silently stops moving, so this one goes to a person.
+		telemetry.Alert(context.Background(), telemetry.AlertEvent{
+			Kind:     "price_source_down",
+			Key:      "price_source_down:" + source,
+			Severity: telemetry.SeverityWarning,
+			Title:    "Jupiter price source breaker opened",
+			Detail:   "Holdings fall back to cost basis until it recovers.",
+			Fields:   map[string]string{"retry_in": cooldown.String()},
+		})
+	}
+}
+
+// breakerSource maps a breaker key to its metric label. Pyth breakers are per symbol
+// ("pyth:AAPLx"); the label is the source only, so the series count stays fixed.
+func breakerSource(key string) string {
+	if source, _, found := strings.Cut(key, ":"); found {
+		return source
+	}
+	return key
 }
 
 func (c *Chain) closeBreaker(key string) {

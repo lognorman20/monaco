@@ -7,6 +7,7 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 // DefaultProposalExecuteInterval is how often passed proposals are executed.
@@ -49,6 +50,7 @@ func RunProposalExecutePoller(ctx context.Context, poller *ProposalExecutePoller
 	}
 
 	logProposalExecutePollerStarted(interval)
+	telemetry.RegisterPoller(PollerProposalExecute, interval)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -59,7 +61,10 @@ func RunProposalExecutePoller(ctx context.Context, poller *ProposalExecutePoller
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			poller.tick(ctx)
+			telemetry.GuardTick(ctx, PollerProposalExecute, func() error {
+				poller.tick(ctx)
+				return nil
+			})
 		}
 	}
 }
