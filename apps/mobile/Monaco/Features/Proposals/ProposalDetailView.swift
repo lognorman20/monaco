@@ -282,7 +282,7 @@ struct ProposalDetailView: View {
         if result.succeeded {
             Haptics.success()
             withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.7)) {
-                votes.record(choice, for: proposalId)
+                votes.record(choice, for: proposalId, viewerId: service.viewerId)
             }
         }
         await loadProposal()
