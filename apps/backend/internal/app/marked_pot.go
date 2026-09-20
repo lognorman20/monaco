@@ -251,6 +251,9 @@ func potRowsFromPythInput(input pyth.NavInput) ([]GroupViewPotRow, error) {
 		MarkUsd:   "1.00",
 		ValueUsd:  formatMicrosAsUsdDecimal(input.TreasuryUsdc),
 		DollarPnL: formatSignedDollarPnL(0),
+
+		MarkUsdcMicros:  1_000_000,
+		ValueUsdcMicros: input.TreasuryUsdc,
 	}}
 
 	for _, holding := range input.Holdings {
@@ -277,6 +280,10 @@ func potRowsFromPythInput(input pyth.NavInput) ([]GroupViewPotRow, error) {
 			DollarPnL:   formatSignedDollarPnL(valueMicros - holding.CostBasis),
 			AfterHours:  afterHours,
 			TokenAmount: strconv.FormatInt(holding.Units, 10),
+
+			MarkUsdcMicros:      holding.MarkUsdc,
+			ValueUsdcMicros:     valueMicros,
+			DollarPnLUsdcMicros: valueMicros - holding.CostBasis,
 		})
 	}
 	return rows, nil

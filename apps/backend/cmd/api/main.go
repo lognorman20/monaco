@@ -40,6 +40,7 @@ type bootResult struct {
 	stopPoller        context.CancelFunc
 	stopExecutePoller context.CancelFunc
 	stopRedeemPoller  context.CancelFunc
+	stopSparkWarmer   context.CancelFunc
 	// workers tracks the poller goroutines so shutdown can wait for an in-flight tick.
 	workers *sync.WaitGroup
 }
@@ -84,6 +85,7 @@ var apiRoutes = []string{
 	"GET /v1/groups/{id}/cost-basis/{symbol}",
 	"GET /v1/groups/{id}/assets",
 	"GET /v1/assets",
+	"GET /v1/assets/held",
 	"GET /v1/assets/popular",
 	"GET /v1/assets/{symbol}/chart",
 	"GET /v1/assets/{symbol}",
@@ -222,7 +224,14 @@ func boot(ctx context.Context) (*bootResult, error) {
 	auth := &httpapi.AuthHandlers{Sessions: sessions}
 	me := &httpapi.MeHandlers{Sessions: sessions, ProfilePhoto: profilePhotos}
 	homeHandlers := &httpapi.HomeHandlers{Home: home}
-	groupHandlers := &httpapi.GroupHandlers{Groups: groups, Governance: governance, Home: home, Redeem: redeem}
+	groupHandlers := &httpapi.GroupHandlers{
+		Groups:     groups,
+		Governance: governance,
+		Home:       home,
+		Redeem:     redeem,
+		// Holdings rows read the market the same way the Stocks tab does.
+		Market: &httpapi.MarketRowSource{Catalog: catalogSearcher, Pyth: priceChain, Price: jupiterPriceClient},
+	}
 	groupsTabHandlers := &httpapi.GroupsTabHandlers{GroupsTab: app.NewGroupsTabService(home, store)}
 	executeOnPass := app.NewExecuteOnPassService(swap, store)
 	governance.SetBuyService(buy)
@@ -249,6 +258,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Pyth:    priceChain,
 		Jupiter: jupiterClient,
 		Price:   jupiterPriceClient,
+		Home:    home,
 	}
 	if hermes != nil {
 		// The stock-vs-token card reads the raw feeds, not the valuation chain: its
@@ -332,6 +342,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/groups/{id}/cost-basis/{symbol}", transactionHandlers.GetCostBasisBySymbolHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/assets", catalogHandlers.SearchAssetsHandler)
 	mux.HandleFunc("GET /v1/assets", assetsHandlers.ListAssetsHandler)
+	mux.HandleFunc("GET /v1/assets/held", assetsHandlers.HeldAssetsHandler)
 	mux.HandleFunc("GET /v1/assets/popular", assetsHandlers.PopularAssetsHandler)
 	mux.HandleFunc("GET /v1/assets/{symbol}/chart", assetsHandlers.GetAssetChartHandler)
 	mux.HandleFunc("GET /v1/assets/{symbol}", assetsHandlers.GetAssetHandler)
@@ -373,6 +384,18 @@ func boot(ctx context.Context) (*bootResult, error) {
 		worker.RunRedeemRecoveryPoller(redeemCtx, redeemPoller, worker.DefaultRedeemRecoveryInterval)
 	}()
 
+	// Keeps the popular symbols' day series hot, so the Stocks list serves every
+	// row's sparkline from the chart cache instead of waiting on Hermes.
+	sparkCtx, stopSparkWarmer := context.WithCancel(context.Background())
+	if sparkWarmer := worker.NewSparkWarmer(catalogSearcher, priceChain, 10); sparkWarmer != nil {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			worker.RunSparkWarmer(sparkCtx, sparkWarmer, worker.DefaultSparkWarmInterval)
+		}()
+		slog.Info("spark warmer started")
+	}
+
 	return &bootResult{
 		Server:            newHTTPServer(addr, platformHandler(mux, privyClient, httpapi.NewIdempotency(store, privyClient))),
 		Config:            cfg,
@@ -381,6 +404,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 		stopPoller:        stopPoller,
 		stopExecutePoller: stopExecutePoller,
 		stopRedeemPoller:  stopRedeemPoller,
+		stopSparkWarmer:   stopSparkWarmer,
 		workers:           workers,
 	}, nil
 }
@@ -449,6 +473,7 @@ func main() {
 	result.stopPoller()
 	result.stopExecutePoller()
 	result.stopRedeemPoller()
+	result.stopSparkWarmer()
 	if waitWorkers(result.workers, workerStopTimeout) {
 		slog.Info("pollers stopped")
 	} else {

@@ -437,10 +437,14 @@ func TestPOST_join_requestGroup_createsPendingRequest(t *testing.T) {
 	joinReq.SetPathValue("id", created.GroupID)
 	joinReq.Header.Set("Authorization", "Bearer "+string(joinerToken))
 	groupHandlers.JoinGroupHandler(joinRec, joinReq)
-	if joinRec.Code != http.StatusAccepted { t.Fatalf("join status = %d, want 202", joinRec.Code) }
+	if joinRec.Code != http.StatusAccepted {
+		t.Fatalf("join status = %d, want 202", joinRec.Code)
+	}
 	var pendingCount int
 	_ = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM group_join_requests WHERE group_id = $1 AND status = 'pending'", created.GroupID).Scan(&pendingCount)
-	if pendingCount != 1 { t.Fatalf("expected 1 pending join request, got %d", pendingCount) }
+	if pendingCount != 1 {
+		t.Fatalf("expected 1 pending join request, got %d", pendingCount)
+	}
 }
 
 func TestPOST_join_requestGroup_adminApproveAddsMember(t *testing.T) {
@@ -467,10 +471,14 @@ func TestPOST_join_requestGroup_adminApproveAddsMember(t *testing.T) {
 	approveReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
 	approveRec := httptest.NewRecorder()
 	groupHandlers.ApproveJoinRequestHandler(approveRec, approveReq)
-	if approveRec.Code != http.StatusNoContent { t.Fatalf("approve status = %d, want 204", approveRec.Code) }
+	if approveRec.Code != http.StatusNoContent {
+		t.Fatalf("approve status = %d, want 204", approveRec.Code)
+	}
 	var memberCount int
 	_ = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM group_members WHERE group_id = $1", created.GroupID).Scan(&memberCount)
-	if memberCount != 2 { t.Fatalf("expected 2 members after approval, got %d", memberCount) }
+	if memberCount != 2 {
+		t.Fatalf("expected 2 members after approval, got %d", memberCount)
+	}
 }
 
 func TestGET_groupActivity_returnsMixedStatuses(t *testing.T) {

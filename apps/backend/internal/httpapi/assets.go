@@ -30,6 +30,10 @@ type AssetsHandlers struct {
 	Jupiter jupiter.Client
 	// Price batches current display prices via Jupiter's Price API (not Swap API v2).
 	Price jupiter.PriceClient
+	// Home answers "what do my cabals own and what are they voting on" for
+	// GET /v1/assets/held. Nil makes that one route unavailable and leaves the
+	// catalogue routes untouched.
+	Home *app.HomeService
 	// Quotes serves the stock-vs-token comparison straight from the Pyth feeds.
 	// Deliberately not the price chain: the comparison exists to show what the two
 	// feeds actually said, and a valuation-policy-filtered mark would hide exactly
@@ -70,6 +74,17 @@ type marketAssetResponse struct {
 	Routable        bool    `json:"routable"`
 	PriceUsdcMicros *int64  `json:"priceUsdcMicros,omitempty"`
 	Change24h       *string `json:"change24h,omitempty"`
+	// Spark is the day's closes, downsampled to what a row's sparkline draws, and
+	// served from the same chart cache the detail screen fills. It is batched here
+	// precisely so the app never asks per row: twenty visible rows would otherwise
+	// be twenty chart requests, all arriving after the user has scrolled past.
+	// Omitted when no series could be sourced in budget — the row then draws no
+	// sparkline rather than a flat line.
+	Spark []int64 `json:"spark,omitempty"`
+	// LogoURL is the company's logo. Omitted until a catalogue source for it
+	// exists; the app falls back to its ticker tile, which is the resting state of
+	// the mark rather than a placeholder.
+	LogoURL string `json:"logoUrl,omitempty"`
 }
 
 type listAssetsResponse struct {
@@ -370,53 +385,32 @@ func (h *AssetsHandlers) authorizeUser(ctx context.Context, accessToken string) 
 	return user.ID, nil
 }
 
+// marketRows is the one place a stock row's market figures come from, shared with
+// the cabal screen so the same instrument is read the same way everywhere.
+func (h *AssetsHandlers) marketRows() *MarketRowSource {
+	return &MarketRowSource{Catalog: h.Catalog, Pyth: h.Pyth, Price: h.Price}
+}
+
 func (h *AssetsHandlers) lookupAsset(ctx context.Context, symbol string) (xstocks.CatalogAsset, bool, error) {
-	page, err := h.Catalog.Search(ctx, symbol, 5, 0)
-	if err != nil {
-		return xstocks.CatalogAsset{}, false, err
-	}
-	needle := strings.ToUpper(strings.TrimSpace(symbol))
-	for _, asset := range page.Assets {
-		if strings.EqualFold(strings.TrimSpace(asset.Symbol), needle) {
-			return asset, true, nil
-		}
-	}
-	return xstocks.CatalogAsset{}, false, nil
+	return h.marketRows().LookupAsset(ctx, symbol)
 }
 
 // enrichAssets marks every asset with one batched Jupiter Price API call instead
 // of a per-asset round trip (Pyth or Jupiter QuoteBuy). Shared by the list and
 // popular routes — both just display current price, so both get the same source.
 func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []xstocks.CatalogAsset) []marketAssetResponse {
-	prices := h.fetchPrices(ctx, assets)
-	out := make([]marketAssetResponse, 0, len(assets))
-	for _, asset := range assets {
-		out = append(out, marketAssetResponseFor(asset, prices))
-	}
-	return out
+	return h.marketRows().Enrich(ctx, assets)
 }
 
-// fetchPrices batches current USD marks for assets in one Jupiter Price API call.
-// A nil Price client or a failed fetch degrades to "no price" rather than erroring
-// the whole catalog response.
 func (h *AssetsHandlers) fetchPrices(ctx context.Context, assets []xstocks.CatalogAsset) map[string]jupiter.TokenPrice {
-	if h.Price == nil {
-		return nil
-	}
-	mints := make([]string, 0, len(assets))
-	for _, asset := range assets {
-		if mint := strings.TrimSpace(asset.SolanaMint); mint != "" {
-			mints = append(mints, mint)
-		}
-	}
-	prices, err := h.Price.Prices(ctx, mints)
-	if err != nil {
-		return nil
-	}
-	return prices
+	return h.marketRows().Prices(ctx, assets)
 }
 
-func marketAssetResponseFor(asset xstocks.CatalogAsset, prices map[string]jupiter.TokenPrice) marketAssetResponse {
+func marketAssetResponseFor(
+	asset xstocks.CatalogAsset,
+	prices map[string]jupiter.TokenPrice,
+	sparks map[string][]int64,
+) marketAssetResponse {
 	resp := marketAssetResponse{
 		Symbol:     asset.Symbol,
 		Name:       asset.Name,
@@ -426,6 +420,9 @@ func marketAssetResponseFor(asset xstocks.CatalogAsset, prices map[string]jupite
 	if price, ok := prices[asset.SolanaMint]; ok && price.PriceUsdcMicros > 0 {
 		resp.PriceUsdcMicros = &price.PriceUsdcMicros
 		resp.Change24h = price.Change24h
+	}
+	if spark, ok := sparks[asset.SolanaMint]; ok && len(spark) > 1 {
+		resp.Spark = spark
 	}
 	return resp
 }

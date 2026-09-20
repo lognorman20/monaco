@@ -58,7 +58,14 @@ struct CabalMark: View {
     }
 }
 
-/// A stock's tile: sunken fill with a hairline and the ticker. "USDC" (cash) shows a dollar sign.
+/// A stock's tile: the company's logo when the catalogue knows one, and the ticker
+/// on a sunken fill when it does not. "USDC" (cash) shows a dollar sign.
+///
+/// The ticker tile is the resting state, not a placeholder: it is drawn
+/// immediately, a logo replaces it only once one has been decoded, and a logo that
+/// 404s or is not an image leaves the tile in place. A row is therefore readable on
+/// its first frame whatever the network is doing — which is the whole reason the
+/// logo is not an `AsyncImage`.
 struct StockMark: View {
     private enum Content {
         case letter(String)
@@ -67,8 +74,9 @@ struct StockMark: View {
 
     private let content: Content
     private let size: CGFloat
+    private let logoURL: URL?
 
-    init(symbol: String, size: CGFloat = 44) {
+    init(symbol: String, size: CGFloat = 44, logoURL: URL? = nil) {
         let ticker = AssetSymbolFormatter.display(symbol)
         if ticker.uppercased() == "USDC" {
             content = .symbol("dollarsign")
@@ -76,6 +84,7 @@ struct StockMark: View {
             content = .letter(StockMark.tileText(forTicker: ticker))
         }
         self.size = size
+        self.logoURL = logoURL
     }
 
     /// The whole ticker, up to four characters. One letter is not an identity: nine tickers in
@@ -107,32 +116,65 @@ struct StockMark: View {
     init(systemImage: String, size: CGFloat = 44) {
         content = .symbol(systemImage)
         self.size = size
+        logoURL = nil
+    }
+
+    @State private var logo: UIImage?
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: MarkGeometry.radius(for: size), style: .continuous)
     }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: MarkGeometry.radius(for: size), style: .continuous)
+        shape
             .fill(MonacoTheme.surfaceSunken)
             .frame(width: size, height: size)
             .overlay {
-                RoundedRectangle(cornerRadius: MarkGeometry.radius(for: size), style: .continuous)
-                    .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+                shape.strokeBorder(MonacoTheme.hairline, lineWidth: 1)
             }
             .overlay {
-                switch content {
-                case .letter(let letter):
-                    Text(letter)
-                        .font(.system(size: size * StockMark.textScale(for: letter), weight: .semibold))
-                        .foregroundStyle(MonacoTheme.ink)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .padding(.horizontal, size * 0.08)
-                case .symbol(let name):
-                    Image(systemName: name)
-                        .font(.system(size: size * 0.40, weight: .semibold))
-                        .foregroundStyle(MonacoTheme.ink)
+                if let logo = logo ?? logoURL.flatMap({ MonacoRemoteImageStore.stockLogos.cachedImage(for: $0) }) {
+                    Image(uiImage: logo)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: size, height: size)
+                        .clipShape(shape)
+                } else {
+                    tileGlyph
                 }
             }
             .accessibilityHidden(true)
+            .task(id: logoURL) { await loadLogo() }
+    }
+
+    @ViewBuilder
+    private var tileGlyph: some View {
+        switch content {
+        case .letter(let letter):
+            Text(letter)
+                .font(.system(size: size * StockMark.textScale(for: letter), weight: .semibold))
+                .foregroundStyle(MonacoTheme.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .padding(.horizontal, size * 0.08)
+        case .symbol(let name):
+            Image(systemName: name)
+                .font(.system(size: size * 0.40, weight: .semibold))
+                .foregroundStyle(MonacoTheme.ink)
+        }
+    }
+
+    private func loadLogo() async {
+        logo = nil
+        guard let logoURL else { return }
+        let store = MonacoRemoteImageStore.stockLogos
+        if let cached = store.cachedImage(for: logoURL) {
+            logo = cached
+            return
+        }
+        let image = await store.image(for: logoURL)
+        guard !Task.isCancelled, let image else { return }
+        logo = image
     }
 }
 

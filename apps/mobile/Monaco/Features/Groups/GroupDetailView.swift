@@ -14,6 +14,10 @@ enum GroupDetailRoute: Hashable {
     case chat
     case proposals
     case activity
+    /// A holding on the cabal screen, opened as the stock it is. The row already
+    /// shows the day's shape and its change; tapping it should go where those
+    /// numbers come from rather than being the end of the road.
+    case stock(symbol: String)
 }
 
 /// What a refresh of the cabal screen is allowed to show while it runs.
@@ -303,6 +307,8 @@ struct GroupDetailView: View {
                 retryingTransactionIDs: retryingTransactionIDs,
                 onRetry: { item in Task { await retryTransaction(item) } }
             )
+        case .stock(let symbol):
+            AssetDetailView(auth: auth, symbol: symbol)
         }
     }
 
@@ -728,7 +734,8 @@ struct GroupDetailContent: View {
                     )
                     PotSectionView(
                         pot: view.pot,
-                        onAddMoney: { onRoute(.addMoney) }
+                        onAddMoney: { onRoute(.addMoney) },
+                        onOpenStock: { onRoute(.stock(symbol: $0)) }
                     )
                 }
 

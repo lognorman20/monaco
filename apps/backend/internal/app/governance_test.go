@@ -110,7 +110,7 @@ func TestPOST_proposals_happyPath_createsOpenProposalWithExpiry(t *testing.T) {
 
 func TestCreateProposal_jupiterTakerOrderFails_priceOnlyQuoteCreates(t *testing.T) {
 	const (
-		usdcMicros  = 2_000_000
+		usdcMicros   = 2_000_000
 		treasuryUSDC = 5_000_000
 	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

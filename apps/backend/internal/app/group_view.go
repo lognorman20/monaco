@@ -19,6 +19,13 @@ type GroupViewPotRow struct {
 	DollarPnL   string
 	AfterHours  *bool
 	TokenAmount string
+	// MarkUsdcMicros and ValueUsdcMicros are the same two figures the display
+	// strings were formatted from. Callers that need to do arithmetic — the
+	// viewer's slice of one position, for instance — should not have to parse
+	// their way back out of "1,248.50".
+	MarkUsdcMicros      int64
+	ValueUsdcMicros     int64
+	DollarPnLUsdcMicros int64
 }
 
 // GroupViewMemberSlice is the authenticated viewer's slice in a group.
@@ -268,4 +275,3 @@ func formatShareFractionDecimal(memberShares, totalShares domain.ShareUnits) str
 	fraction := new(big.Rat).Quo(member, total)
 	return strings.TrimRight(strings.TrimRight(fraction.FloatString(6), "0"), ".")
 }
-

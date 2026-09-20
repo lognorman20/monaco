@@ -28,7 +28,7 @@ type DevExecuteBuyRequest struct {
 // DevExecuteBuyResult is the persisted confirmed buy transaction.
 type DevExecuteBuyResult struct {
 	Transaction postgres.TransactionRow
-	Created       bool
+	Created     bool
 }
 
 // SellToUSDCRequest sells treasury xStock back to USDC.
@@ -46,7 +46,7 @@ type SellToUSDCRequest struct {
 // SellToUSDCResult is the persisted confirmed sell transaction.
 type SellToUSDCResult struct {
 	Transaction postgres.TransactionRow
-	Created       bool
+	Created     bool
 	// ProceedsUSDC is the USDC the fill raised, in micros.
 	ProceedsUSDC int64
 }

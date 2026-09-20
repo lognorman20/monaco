@@ -69,6 +69,34 @@ public struct SparklineSeries: Equatable, Sendable {
     }
 }
 
+/// One market list row, prepared once when its data lands.
+///
+/// The normalised series is the reason this type exists. Building it inside the row
+/// view would redo the same reduction on every layout pass of every visible row,
+/// which is precisely the per-row work that costs a list its frame budget. A model
+/// builds these when a response arrives; the view only draws them.
+public struct MarketRowData: Identifiable, Equatable, Sendable {
+    public let asset: MarketAssetDTO
+    /// Nil when the backend had no day series for this symbol, in which case the
+    /// row draws no sparkline at all.
+    public let spark: SparklineSeries?
+    /// Replaces the ticker under the name, for the rows that have something more
+    /// useful to say there ("2 cabals · your slice $294.70").
+    public let subtitle: String?
+    /// Read by VoiceOver after the row's figures, for what the subtitle cannot say
+    /// in the space it has ("closes in 4 hours").
+    public let accessoryLabel: String?
+
+    public var id: String { asset.symbol }
+
+    public init(asset: MarketAssetDTO, subtitle: String? = nil, accessoryLabel: String? = nil) {
+        self.asset = asset
+        spark = SparklineSeries(usdcMicros: asset.sparkUsdcMicros)
+        self.subtitle = subtitle
+        self.accessoryLabel = accessoryLabel
+    }
+}
+
 /// The two faces of a day-change pill: the percent the backend reports, and the
 /// dollars that percent is worth at the current price.
 ///

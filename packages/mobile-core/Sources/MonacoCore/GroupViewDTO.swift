@@ -8,8 +8,32 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
     public let dollarPnl: String
     public let afterHours: Bool?
     public let tokenAmount: String?
+    /// The stock's day change, as the market list routes report it. Distinct from
+    /// `dollarPnl`, which is what this cabal has made on the position since it
+    /// bought — the two answer different questions and the row shows both.
+    public let change24h: String?
+    /// The day's closes for the row's sparkline, in USDC micros. Empty when the
+    /// backend had no series; the row then draws none.
+    public let sparkUsdcMicros: [Int64]
+    public let logoUrl: String?
 
     public var id: String { symbol }
+
+    public var logoURL: URL? {
+        guard let logoUrl, !logoUrl.isEmpty else { return nil }
+        return URL(string: logoUrl)
+    }
+
+    /// The mark in micros, for the figures that work in micros — the day-change
+    /// pill's dollar face, for one. Derived from `markUsd` rather than carried as
+    /// a second field, so the two cannot disagree.
+    public var markUsdcMicros: Int64? {
+        guard let decimal = SignedUsdFormatter.parse(markUsd), decimal > 0 else { return nil }
+        var rounded = Decimal()
+        var scaled = decimal * 1_000_000
+        NSDecimalRound(&rounded, &scaled, 0, .plain)
+        return (rounded as NSDecimalNumber).int64Value
+    }
 
     public init(
         symbol: String,
@@ -18,7 +42,10 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
         valueUsd: String,
         dollarPnl: String,
         afterHours: Bool?,
-        tokenAmount: String? = nil
+        tokenAmount: String? = nil,
+        change24h: String? = nil,
+        sparkUsdcMicros: [Int64] = [],
+        logoUrl: String? = nil
     ) {
         self.symbol = symbol
         self.units = units
@@ -27,6 +54,29 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
         self.dollarPnl = dollarPnl
         self.afterHours = afterHours
         self.tokenAmount = tokenAmount
+        self.change24h = change24h
+        self.sparkUsdcMicros = sparkUsdcMicros
+        self.logoUrl = logoUrl
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case symbol, units, markUsd, valueUsd, dollarPnl, afterHours, tokenAmount, change24h
+        case sparkUsdcMicros = "spark"
+        case logoUrl
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        symbol = try container.decode(String.self, forKey: .symbol)
+        units = try container.decode(String.self, forKey: .units)
+        markUsd = try container.decode(String.self, forKey: .markUsd)
+        valueUsd = try container.decode(String.self, forKey: .valueUsd)
+        dollarPnl = try container.decode(String.self, forKey: .dollarPnl)
+        afterHours = try container.decodeIfPresent(Bool.self, forKey: .afterHours)
+        tokenAmount = try container.decodeIfPresent(String.self, forKey: .tokenAmount)
+        change24h = try container.decodeIfPresent(String.self, forKey: .change24h)
+        sparkUsdcMicros = try container.decodeIfPresent([Int64].self, forKey: .sparkUsdcMicros) ?? []
+        logoUrl = try container.decodeIfPresent(String.self, forKey: .logoUrl)
     }
 }
 
