@@ -12,7 +12,21 @@ struct HomePnLChartSection: View {
     var onInk = false
     var height: CGFloat = 120
 
-    private var isUp: Bool { (points.last?.chartValue ?? 0) >= 0 }
+    /// The window's own direction — where the curve ends against where it starts — not the
+    /// lifetime sign. A portfolio down over the hour but up all time drew a green falling
+    /// line before (#327).
+    private var windowChange: Double {
+        guard let first = points.first?.chartValue, let last = points.last?.chartValue else { return 0 }
+        return last - first
+    }
+
+    private var isUp: Bool { windowChange >= 0 }
+
+    /// What the line says, in one sentence, for VoiceOver.
+    private var accessibilitySummary: String {
+        guard !points.isEmpty else { return "no data" }
+        return PnLSpeech.dollars(String(format: "%+.2f", windowChange)) + " over the window"
+    }
 
     private var chartTint: Color {
         if onInk {
@@ -50,6 +64,11 @@ struct HomePnLChartSection: View {
         .chartYAxis(.hidden)
         .chartPlotStyle { $0.background(Color.clear) }
         .frame(height: height)
+        // Without this VoiceOver reads every "Time / P&L" mark in turn. One sentence says
+        // what the curve says.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("P&L curve")
+        .accessibilityValue(accessibilitySummary)
         .accessibilityIdentifier("home-pnl-chart")
     }
 }
