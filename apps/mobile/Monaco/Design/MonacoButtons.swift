@@ -144,14 +144,18 @@ struct BottomCTA<Content: View>: View {
     }
 }
 
-/// 56pt brand-tinted disc with a symbol and a 13pt label below (Group detail action row).
+/// Brand-tinted disc with a symbol and a footnote label below (Group detail action row).
 /// A wash rather than a solid fill: four solid brand discs in a row would spend the accent.
+/// The disc, the glyph and the label all scale with Dynamic Type — these are the main money
+/// actions, and they used to stay at 13pt while every label around them grew.
 struct CircleAction: View {
     private let title: String
     private let systemImage: String
     private let action: () -> Void
 
     @Environment(\.isEnabled) private var isEnabled
+    @ScaledMetric(relativeTo: .footnote) private var discSize: CGFloat = 56
+    @ScaledMetric(relativeTo: .footnote) private var glyphSize: CGFloat = 20
 
     init(_ title: String, systemImage: String, action: @escaping () -> Void) {
         self.title = title
@@ -166,14 +170,15 @@ struct CircleAction: View {
         } label: {
             VStack(spacing: MonacoTheme.Space.s) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(isEnabled ? MonacoTheme.brand : MonacoTheme.tertiaryText)
-                    .frame(width: 56, height: 56)
+                    .font(.system(size: glyphSize, weight: .semibold))
+                    .foregroundStyle(isEnabled ? MonacoTheme.brandOnWash : MonacoTheme.tertiaryText)
+                    .frame(width: discSize, height: discSize)
                     .background(Circle().fill(isEnabled ? MonacoTheme.brandWash : MonacoTheme.surfaceSunken))
                 Text(title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(.footnote, weight: .medium))
                     .foregroundStyle(isEnabled ? MonacoTheme.ink : MonacoTheme.tertiaryText)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.8)
             }
             .frame(minWidth: 64)
