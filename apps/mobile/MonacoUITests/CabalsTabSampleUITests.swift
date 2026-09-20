@@ -17,9 +17,12 @@ final class CabalsTabSampleUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchApp() -> XCUIApplication {
+    private func launchApp(scenario: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-MonacoCabalsTabSample"]
+        if let scenario {
+            app.launchArguments += ["-MonacoCabalsTabSampleScenario", scenario]
+        }
         app.launch()
         return app
     }
@@ -203,7 +206,82 @@ final class CabalsTabSampleUITests: XCTestCase {
         attachScreenshot(app, name: "05-join-approval")
     }
 
-    // MARK: - (g) Strip card pushes detail
+    // MARK: - (g) A thin range keeps the chart section and its picker (#294)
+
+    @MainActor
+    func testPickingADayWithThinHistoryKeepsTheRangePicker() throws {
+        let app = launchApp()
+
+        let pnlSection = anyElement(app, "cabals-pnl-section")
+        XCTAssertTrue(pnlSection.waitForExistence(timeout: 10), "P&L section should exist on the default range")
+
+        // The sample cabals have no points inside a single day, so 1D is the
+        // sparse range. Before this fix, tapping it deleted the whole section —
+        // picker included — with no way back.
+        let oneDay = anyElement(app, "cabals-pnl-range-1D")
+        XCTAssertTrue(oneDay.waitForExistence(timeout: 5), "1D chip should exist")
+        oneDay.tap()
+
+        XCTAssertTrue(
+            anyElement(app, "cabals-pnl-sparse").waitForExistence(timeout: 5),
+            "a range with thin history should say so inside the card"
+        )
+        XCTAssertTrue(pnlSection.exists, "the P&L section should survive a sparse range")
+
+        let oneMonth = anyElement(app, "cabals-pnl-range-1M")
+        XCTAssertTrue(oneMonth.exists, "the range picker should still be on screen")
+        oneMonth.tap()
+        XCTAssertTrue(
+            anyElement(app, "cabals-pnl-chart").waitForExistence(timeout: 5),
+            "switching back to 1M should draw the chart again"
+        )
+
+        attachScreenshot(app, name: "06-pnl-sparse-range")
+    }
+
+    // MARK: - (h) Cabals that have not loaded are not "no cabals" (#295)
+
+    @MainActor
+    func testUnloadedCabalsDoNotClaimTheMemberHasNone() throws {
+        let app = launchApp(scenario: "cabalsUnavailable")
+
+        let root = anyElement(app, "cabals-root")
+        XCTAssertTrue(root.waitForExistence(timeout: 10), "cabals-root should exist after launch")
+
+        // The list never lands. The strip must offer a retry, not tell a funded
+        // member they have no cabals and nudge them to create one.
+        XCTAssertTrue(
+            anyElement(app, "cabals-strip-error").waitForExistence(timeout: 10),
+            "an unloaded cabals list should offer a retry"
+        )
+        XCTAssertFalse(
+            anyElement(app, "cabals-strip-empty").exists,
+            "an unloaded cabals list must not claim 'No cabals yet'"
+        )
+
+        attachScreenshot(app, name: "07-cabals-unavailable")
+    }
+
+    // MARK: - (i) Board rank reaches VoiceOver (#332)
+
+    @MainActor
+    func testLeaderboardRowAnnouncesItsRank() throws {
+        let app = launchApp()
+
+        XCTAssertTrue(anyElement(app, "cabals-leaderboard").waitForExistence(timeout: 10), "leaderboard should exist")
+        app.swipeUp()
+        app.swipeUp()
+
+        // Dorm 4B fund is +32%, the top of the sample board.
+        let topRow = anyElement(app, "cabals-leaderboard-row-5b1f0c9e-0004-4c55-9a51-000000000004")
+        XCTAssertTrue(topRow.waitForExistence(timeout: 10), "the top board row should exist")
+        XCTAssertTrue(
+            topRow.label.contains("Rank 1"),
+            "the rank is the point of this board; it should be in the row's label, got: \(topRow.label)"
+        )
+    }
+
+    // MARK: - (j) Strip card pushes detail
 
     @MainActor
     func testWeekendInvestorsStripCardPushesDetail() throws {
