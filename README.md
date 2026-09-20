@@ -200,6 +200,24 @@ sweep poller, surplus reconcile, execute poller (buys and sells), swap, redeem/w
 `FAKER_ENABLED` is set, so leftover seed rows stay inert. A DB trigger rejects member wallets
 for faker users.
 
+## iOS API environments
+
+The app's API base URL comes from the build, not from source: `apps/mobile/Config/Monaco.xcconfig` → Info.plist (`MONACO_ENVIRONMENT`, `MONACO_API_BASE_URL`) → `MonacoConfig.api` in `packages/mobile-core`, which both API clients use.
+
+| Environment  | Default for | Base URL                                                                 |
+| ------------ | ----------- | ------------------------------------------------------------------------ |
+| `local`      | Debug       | `http://localhost:8080` (`Config/Environments/Local.xcconfig`)           |
+| `staging`    | —           | `MONACO_STAGING_API_BASE_URL` — **placeholder, empty until you set it**   |
+| `production` | Release     | `MONACO_PRODUCTION_API_BASE_URL` — **placeholder, empty until you set it** |
+
+- `just run` / `just run mobile` need nothing extra: Debug is `local`.
+- Set the remote URLs once (not secrets, `https://` only): `dotenvx set MONACO_STAGING_API_BASE_URL https://… -f .env.local --plain` (same for `MONACO_PRODUCTION_API_BASE_URL`). `scripts/ensure-ios-privy-config.sh` writes them to the gitignored `Config/Environment.local.xcconfig` and rejects a non-https value.
+- Build for another environment: `xcodebuild … MONACO_ENVIRONMENT=staging` (or pass `MONACO_STAGING_API_BASE_URL=https://…` on the same command line).
+- Point an already-built Debug sim at staging or a tunnel without rebuilding: `MONACO_API_BASE_URL=https://<tunnel-host> just run mobile` (exported as `SIMCTL_CHILD_MONACO_API_BASE_URL`; add `MONACO_ENVIRONMENT=staging` to label it). Debug builds only.
+- Release builds ignore the process environment and refuse to launch (`fatalError` naming the setting to fix) when the URL is empty, malformed, not `https`, a local host, or the environment is `local`. The rules live in `MonacoAPIConfiguration` and are covered by `just test mobile`.
+- ATS stays strict. Only the Debug Info.plist carries `NSAllowsLocalNetworking`; there is no `NSAllowsArbitraryLoads`, so a Debug tunnel/staging URL must be `https` too.
+- The active environment is logged at launch (`API environment: …`); Debug builds also show it under the session error on the sign-in gate.
+
 ## Simulator
 
 Slim is **not** required. `just run`, `just run mobile`, and `./scripts/ios-sim` warn and use a stock Xcode simulator when SimSlim is missing or `SIMSLIM_UDID` is unset. Privy xcconfig and `SIMCTL_CHILD_*` still apply.

@@ -63,7 +63,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
     /// - Parameter telemetry: receives one event per request; defaults to whatever is
     ///   registered in `APITelemetryRegistry.shared`.
     public convenience init(
-        baseURL: URL = MonacoConfig.defaultAPIBaseURL,
+        baseURL: URL = MonacoConfig.apiBaseURL,
         session: URLSession = .shared,
         accessTokenProvider: AccessTokenProvider? = nil,
         telemetry: APITelemetry? = nil
@@ -76,7 +76,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
     }
 
     public init(
-        baseURL: URL = MonacoConfig.defaultAPIBaseURL,
+        baseURL: URL = MonacoConfig.apiBaseURL,
         transport: MonacoHTTPTransport,
         accessTokenProvider: AccessTokenProvider? = nil
     ) {

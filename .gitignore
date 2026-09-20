@@ -3,6 +3,8 @@
 .audit/
 apps/mobile/Config/Privy.local.xcconfig
 apps/mobile/Config/Privy.local.Info.plist
+apps/mobile/Config/Privy.local.Debug.Info.plist
+apps/mobile/Config/Environment.local.xcconfig
 bin/
 *.exe
 .DS_Store
