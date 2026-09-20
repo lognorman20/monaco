@@ -74,11 +74,6 @@ func (c *HermesClient) ChartSeries(ctx context.Context, symbol string, chartRang
 	for _, ts := range samples {
 		price, err := c.fetchHistoricalPrice(ctx, feedID, ts)
 		if err != nil {
-			// A denied feed is denied for every sample; asking 30 more times only
-			// spams Hermes. Surface it so the caller can stop asking for a while.
-			if IsEntitlementError(err) {
-				return AssetChartSeries{}, err
-			}
 			continue
 		}
 		points = append(points, ChartPoint{

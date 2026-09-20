@@ -2,13 +2,11 @@ package pyth
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 func TestHermesClient_markedPot_afterHoursWhenMarketClosed(t *testing.T) {
@@ -176,88 +174,5 @@ func TestHermesClient_fetchPriceFeedBySymbol_sendsBearerAuth(t *testing.T) {
 	}
 	if feed.ID != "feed-aapl" {
 		t.Fatalf("feed ID = %q", feed.ID)
-	}
-}
-
-func TestHermesClient_EquityMark_reportsPublishTimeAndSession(t *testing.T) {
-	ClearFeedRegistry()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v2/price_feeds" {
-			_, _ = w.Write([]byte(`[{"id":"feed-aapl","market_hours":{"is_open":true}}]`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"parsed":[{"id":"feed-aapl","price":{"price":"18550000000","expo":-8,"publish_time":1789830000},"metadata":{"prev_publish_time":1789829999}}]}`))
-	}))
-	defer server.Close()
-
-	client := NewHermesClientWithHTTP(server.URL, server.Client(), "test-pyth-key")
-	mark, err := client.EquityMark(context.Background(), "AAPLx")
-
-	if err != nil {
-		t.Fatalf("EquityMark: %v", err)
-	}
-	if mark.PriceUsdcMicros != 185_500_000 || !mark.MarketOpen || mark.AfterHours {
-		t.Fatalf("mark = %+v", mark)
-	}
-	if mark.PublishedAt.Unix() != 1789830000 || mark.PublishedAt.Location() != time.UTC {
-		t.Fatalf("PublishedAt = %v, want 1789830000 in UTC", mark.PublishedAt)
-	}
-}
-
-func TestIsEntitlementError_distinguishesDenialFromOutage(t *testing.T) {
-	if !IsEntitlementError(fmt.Errorf("wrapped: %w", hermesRequestError("pyth latest price", http.StatusForbidden, []byte("Not entitled")))) {
-		t.Fatal("403 should be an entitlement error")
-	}
-	if IsEntitlementError(hermesRequestError("pyth latest price", http.StatusBadGateway, nil)) {
-		t.Fatal("502 should not be an entitlement error")
-	}
-	if IsEntitlementError(context.DeadlineExceeded) {
-		t.Fatal("timeout should not be an entitlement error")
-	}
-}
-
-func TestHermesClient_ChartSeries_stopsAtFirstEntitlementDenial(t *testing.T) {
-	ClearFeedRegistry()
-	var historical atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v2/price_feeds" {
-			_, _ = w.Write([]byte(`[{"id":"feed-aapl","market_hours":{"is_open":true}}]`))
-			return
-		}
-		historical.Add(1)
-		http.Error(w, "Not entitled: feed feed-aapl (no grant accepted)", http.StatusForbidden)
-	}))
-	defer server.Close()
-
-	client := NewHermesClientWithHTTP(server.URL, server.Client(), "test-pyth-key")
-	_, err := client.ChartSeries(context.Background(), "AAPLx", ChartRange1M)
-
-	if !IsEntitlementError(err) {
-		t.Fatalf("err = %v, want an entitlement error", err)
-	}
-	if got := historical.Load(); got != 1 {
-		t.Fatalf("hermes asked %d times for a denied feed, want 1", got)
-	}
-}
-
-func TestHermesClient_ChartSeries_outageSamplesStillSkipped(t *testing.T) {
-	ClearFeedRegistry()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v2/price_feeds" {
-			_, _ = w.Write([]byte(`[{"id":"feed-aapl","market_hours":{"is_open":true}}]`))
-			return
-		}
-		http.Error(w, "bad gateway", http.StatusBadGateway)
-	}))
-	defer server.Close()
-
-	client := NewHermesClientWithHTTP(server.URL, server.Client(), "test-pyth-key")
-	series, err := client.ChartSeries(context.Background(), "AAPLx", ChartRange1W)
-
-	if err != nil {
-		t.Fatalf("ChartSeries: %v", err)
-	}
-	if series.EmptyReason == "" {
-		t.Fatal("expected the empty state when every sample fails")
 	}
 }

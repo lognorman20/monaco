@@ -474,12 +474,13 @@ func TestChain_holdingsFallBackIndependently(t *testing.T) {
 	}
 }
 
-func TestChain_chartSeries_entitlementErrorOpensBreakerAndReturnsEmptyState(t *testing.T) {
+func TestChain_chartSeries_deniedFeedNeverReachesTheChartSampler(t *testing.T) {
 	// Arrange
 	clock := newFakeClock()
-	charts := &fakeCharts{err: entitlementError(t)}
+	source := &fakePythSource{err: entitlementError(t)}
+	charts := &fakeCharts{}
 	cfg := testConfig(clock)
-	chain := New(nil, nil, charts, cfg)
+	chain := New(source, nil, charts, cfg)
 
 	// Act
 	for i := 0; i < 10; i++ {
@@ -492,26 +493,47 @@ func TestChain_chartSeries_entitlementErrorOpensBreakerAndReturnsEmptyState(t *t
 		}
 	}
 
-	// Assert
-	if got := charts.calls.Load(); got != 1 {
-		t.Fatalf("charts called %d times while denied, want 1", got)
+	// Assert — one entitlement probe, zero per-sample history requests.
+	if got := source.callCount(); got != 1 {
+		t.Fatalf("pyth probed %d times while denied, want 1", got)
+	}
+	if got := charts.calls.Load(); got != 0 {
+		t.Fatalf("chart sampler called %d times for a denied feed, want 0", got)
 	}
 
 	// Recovery after the cooldown, then served from cache.
-	charts.err = nil
 	clock.Advance(cfg.EntitlementCooldown)
+	source.set(pyth.EquityMark{PriceUsdcMicros: 206_000_000, PublishedAt: clock.Now(), MarketOpen: true}, nil)
 	for i := 0; i < 3; i++ {
 		series, err := chain.ChartSeries(context.Background(), testSymbol, pyth.ChartRange1D)
 		if err != nil || len(series.Points) != 1 {
 			t.Fatalf("got %+v, %v; want one point", series, err)
 		}
 	}
-	if got := charts.calls.Load(); got != 2 {
-		t.Fatalf("charts called %d times, want 2", got)
+	if got := charts.calls.Load(); got != 1 {
+		t.Fatalf("chart sampler called %d times, want 1", got)
+	}
+	if got := source.callCount(); got != 2 {
+		t.Fatalf("pyth probed %d times, want 2", got)
 	}
 }
 
-func TestChain_chartSeries_outageErrorPassesThrough(t *testing.T) {
+func TestChain_chartSeries_pythOutageDoesNotBlockHistory(t *testing.T) {
+	// Arrange — a 502 on the latest mark says nothing about entitlement.
+	source := &fakePythSource{err: errors.New("pyth latest price: status 502")}
+	charts := &fakeCharts{}
+	chain := New(source, nil, charts, testConfig(newFakeClock()))
+
+	// Act
+	series, err := chain.ChartSeries(context.Background(), testSymbol, pyth.ChartRange1D)
+
+	// Assert
+	if err != nil || len(series.Points) != 1 {
+		t.Fatalf("got %+v, %v; want one point", series, err)
+	}
+}
+
+func TestChain_chartSeries_errorPassesThrough(t *testing.T) {
 	// Arrange
 	charts := &fakeCharts{err: errors.New("boom")}
 	chain := New(nil, nil, charts, testConfig(newFakeClock()))
@@ -521,6 +543,6 @@ func TestChain_chartSeries_outageErrorPassesThrough(t *testing.T) {
 
 	// Assert
 	if err == nil {
-		t.Fatal("expected a non-entitlement chart error to reach the caller")
+		t.Fatal("expected a chart error to reach the caller")
 	}
 }

@@ -92,6 +92,13 @@ type reference struct {
 	at          time.Time
 }
 
+// breaker is an open circuit for one source. entitlement marks a denial that also
+// rules out the feed's price history, not just its latest mark.
+type breaker struct {
+	openUntil   time.Time
+	entitlement bool
+}
+
 type chartEntry struct {
 	series    pyth.AssetChartSeries
 	fetchedAt time.Time
@@ -109,7 +116,8 @@ type Chain struct {
 	marks      map[string]marketMark
 	references map[string]reference
 	chartCache map[string]chartEntry
-	breakers   map[string]time.Time
+	breakers   map[string]breaker
+	entitled   map[string]time.Time
 	warned     map[string]time.Time
 
 	flights flightGroup
@@ -129,7 +137,8 @@ func New(pythSource PythSource, jupiterPrices jupiter.PriceClient, charts pyth.A
 		marks:      make(map[string]marketMark),
 		references: make(map[string]reference),
 		chartCache: make(map[string]chartEntry),
-		breakers:   make(map[string]time.Time),
+		breakers:   make(map[string]breaker),
+		entitled:   make(map[string]time.Time),
 		warned:     make(map[string]time.Time),
 	}
 }
@@ -252,14 +261,18 @@ func (c *Chain) pythMark(ctx context.Context, symbol string) (marketMark, bool) 
 
 	mark, err := c.pyth.EquityMark(ctx, symbol)
 	if err == nil {
+		c.mu.Lock()
+		c.entitled[breakerKey] = c.cfg.Now()
+		c.mu.Unlock()
 		err = c.checkPythMark(mark)
 	}
 	if err != nil {
 		cooldown := c.cfg.FailureCooldown
-		if pyth.IsEntitlementError(err) {
+		denied := pyth.IsEntitlementError(err)
+		if denied {
 			cooldown = c.cfg.EntitlementCooldown
 		}
-		c.openBreaker(breakerKey, cooldown)
+		c.openBreaker(breakerKey, cooldown, denied)
 		c.warn(breakerKey, "pyth price unavailable; falling back to jupiter",
 			"symbol", symbol, "retry_in", cooldown.String(), "err", err)
 		return marketMark{}, false
@@ -300,7 +313,7 @@ func (c *Chain) jupiterMark(ctx context.Context, symbol, mint string) (marketMar
 
 	prices, err := c.jupiter.Prices(ctx, []string{mint})
 	if err != nil {
-		c.openBreaker(jupiterBreakerKey, c.cfg.FailureCooldown)
+		c.openBreaker(jupiterBreakerKey, c.cfg.FailureCooldown, false)
 		c.warn(jupiterBreakerKey, "jupiter price unavailable",
 			"retry_in", c.cfg.FailureCooldown.String(), "err", err)
 		return marketMark{}, false
@@ -395,19 +408,20 @@ func (c *Chain) AssetMark(ctx context.Context, symbol string) (pyth.AssetMark, e
 	return c.charts.AssetMark(ctx, symbol)
 }
 
-// ChartSeries serves Pyth price history behind the same breaker as marks, so a denied
-// feed costs one request per cooldown instead of one per sample per chart load.
+// ChartSeries serves Pyth price history. Hermes samples a chart with one request per
+// point and reports a denied feed as an empty series, so the chain first confirms the
+// feed is entitled (one shared, breaker-guarded mark lookup) instead of letting every
+// chart load fire 25-31 requests that are all going to be refused.
 func (c *Chain) ChartSeries(ctx context.Context, symbol string, chartRange pyth.ChartRange) (pyth.AssetChartSeries, error) {
 	unavailable := pyth.AssetChartSeries{EmptyReason: "price history unavailable"}
 	if c.charts == nil {
 		return unavailable, nil
 	}
-	breakerKey := "pyth:" + normalizeSymbol(symbol)
 	cacheKey := normalizeSymbol(symbol) + "|" + string(chartRange)
 	if series, ok := c.cachedChart(cacheKey); ok {
 		return series, nil
 	}
-	if !c.breakerAllows(breakerKey) {
+	if !c.pythEntitled(ctx, symbol) {
 		return unavailable, nil
 	}
 
@@ -423,20 +437,55 @@ func (c *Chain) ChartSeries(ctx context.Context, symbol string, chartRange pyth.
 		defer cancel()
 		series, err := c.charts.ChartSeries(fetchCtx, symbol, chartRange)
 		if err != nil {
-			if pyth.IsEntitlementError(err) {
-				c.openBreaker(breakerKey, c.cfg.EntitlementCooldown)
-				c.warn(breakerKey, "pyth price history unavailable",
-					"symbol", symbol, "retry_in", c.cfg.EntitlementCooldown.String(), "err", err)
-				return chartResult{series: unavailable}
-			}
 			return chartResult{err: err}
 		}
-		c.mu.Lock()
-		c.chartCache[cacheKey] = chartEntry{series: series, fetchedAt: c.cfg.Now()}
-		c.mu.Unlock()
+		if len(series.Points) > 0 {
+			c.mu.Lock()
+			c.chartCache[cacheKey] = chartEntry{series: series, fetchedAt: c.cfg.Now()}
+			c.mu.Unlock()
+		}
 		return chartResult{series: series}
 	}).(chartResult)
 	return result.series, result.err
+}
+
+// pythEntitled reports whether Hermes currently serves this symbol's feed to our key.
+// A recent successful mark answers it for free; otherwise one shared probe does.
+func (c *Chain) pythEntitled(ctx context.Context, symbol string) bool {
+	if c.pyth == nil {
+		// No mark source to probe with; let the chart client answer for itself.
+		return true
+	}
+	breakerKey := "pyth:" + normalizeSymbol(symbol)
+	if denied, known := c.entitlementState(breakerKey); known {
+		return !denied
+	}
+	c.flights.do("probe:"+breakerKey, func() any {
+		if _, known := c.entitlementState(breakerKey); known {
+			return nil
+		}
+		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.cfg.FetchTimeout)
+		defer cancel()
+		c.pythMark(probeCtx, symbol)
+		return nil
+	})
+	denied, _ := c.entitlementState(breakerKey)
+	return !denied
+}
+
+// entitlementState returns (denied, known). known is false when neither an open
+// entitlement breaker nor a recent successful mark says anything about the feed.
+func (c *Chain) entitlementState(breakerKey string) (denied, known bool) {
+	now := c.cfg.Now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if state, open := c.breakers[breakerKey]; open && state.entitlement && now.Before(state.openUntil) {
+		return true, true
+	}
+	if at, ok := c.entitled[breakerKey]; ok && now.Sub(at) < c.cfg.EntitlementCooldown {
+		return false, true
+	}
+	return false, false
 }
 
 func (c *Chain) cachedChart(key string) (pyth.AssetChartSeries, bool) {
@@ -454,13 +503,16 @@ func (c *Chain) cachedChart(key string) (pyth.AssetChartSeries, bool) {
 func (c *Chain) breakerAllows(key string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	openUntil, open := c.breakers[key]
-	return !open || !c.cfg.Now().Before(openUntil)
+	state, open := c.breakers[key]
+	return !open || !c.cfg.Now().Before(state.openUntil)
 }
 
-func (c *Chain) openBreaker(key string, cooldown time.Duration) {
+func (c *Chain) openBreaker(key string, cooldown time.Duration, entitlement bool) {
 	c.mu.Lock()
-	c.breakers[key] = c.cfg.Now().Add(cooldown)
+	c.breakers[key] = breaker{openUntil: c.cfg.Now().Add(cooldown), entitlement: entitlement}
+	if entitlement {
+		delete(c.entitled, key)
+	}
 	c.mu.Unlock()
 }
 
