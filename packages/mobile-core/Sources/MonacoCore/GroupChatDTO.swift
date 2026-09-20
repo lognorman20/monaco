@@ -48,12 +48,8 @@ public struct GroupMessagesPageDTO: Codable, Equatable, Sendable {
 
 enum GroupChatDates {
     static func parse(_ value: String) -> Date? {
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        if let date = plain.date(from: value) { return date }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: truncatingFraction(value, toDigits: 3))
+        if let date = SharedFormatters.iso8601WholeSeconds.date(from: value) { return date }
+        return SharedFormatters.iso8601Fractional.date(from: truncatingFraction(value, toDigits: 3))
     }
 
     /// ISO8601DateFormatter only reliably reads millisecond fractions; drop digits past that.
@@ -221,11 +217,7 @@ public enum GroupChatCopy {
         calendar: Calendar = .current,
         locale: Locale = .current
     ) -> String {
-        let time = DateFormatter()
-        time.locale = locale
-        time.timeZone = calendar.timeZone
-        time.setLocalizedDateFormatFromTemplate("jmm")
-        let clock = time.string(from: date)
+        let clock = SharedFormatters.string(from: date, pattern: .template("jmm"), locale: locale, calendar: calendar)
         if calendar.isDate(date, inSameDayAs: now) {
             return "Today \(clock)"
         }
@@ -233,12 +225,14 @@ public enum GroupChatCopy {
            calendar.isDate(date, inSameDayAs: yesterday) {
             return "Yesterday \(clock)"
         }
-        let day = DateFormatter()
-        day.locale = locale
-        day.timeZone = calendar.timeZone
         let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
-        day.setLocalizedDateFormatFromTemplate(sameYear ? "MMMd" : "yMMMd")
-        return "\(day.string(from: date)), \(clock)"
+        let day = SharedFormatters.string(
+            from: date,
+            pattern: .template(sameYear ? "MMMd" : "yMMMd"),
+            locale: locale,
+            calendar: calendar
+        )
+        return "\(day), \(clock)"
     }
 
     public static func loadFailure(_ error: Error) -> String {

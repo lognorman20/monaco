@@ -14,23 +14,24 @@ struct MonacoAvatar: View {
         return URL(string: trimmed)
     }
 
+    @State private var loadedImage: UIImage?
+    @State private var didFail = false
+
     var body: some View {
         Group {
             if let resolvedURL {
-                AsyncImage(url: resolvedURL, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .failure:
-                        placeholder
-                    default:
-                        placeholder.overlay {
-                            ProgressView()
-                                .controlSize(size >= 64 ? .regular : .mini)
-                                .tint(MonacoTheme.muted)
-                        }
+                // A photo seen before is drawn on the first pass, with no placeholder flash.
+                if let image = loadedImage ?? MonacoAvatarImageStore.shared.cachedImage(for: resolvedURL) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else if didFail {
+                    placeholder
+                } else {
+                    placeholder.overlay {
+                        ProgressView()
+                            .controlSize(size >= 64 ? .regular : .mini)
+                            .tint(MonacoTheme.muted)
                     }
                 }
             } else {
@@ -43,6 +44,26 @@ struct MonacoAvatar: View {
             Circle().strokeBorder(MonacoTheme.hairline, lineWidth: 1)
         }
         .accessibilityHidden(true)
+        .task(id: resolvedURL) {
+            await loadPhoto()
+        }
+    }
+
+    private func loadPhoto() async {
+        loadedImage = nil
+        didFail = false
+        guard let resolvedURL else { return }
+        let store = MonacoAvatarImageStore.shared
+        if let cached = store.cachedImage(for: resolvedURL) {
+            loadedImage = cached
+            return
+        }
+        let image = await store.image(for: resolvedURL)
+        guard !Task.isCancelled else { return }
+        withAnimation(.easeOut(duration: 0.2)) {
+            loadedImage = image
+            didFail = image == nil
+        }
     }
 
     private var placeholder: some View {

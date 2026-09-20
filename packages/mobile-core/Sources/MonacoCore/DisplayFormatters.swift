@@ -164,6 +164,12 @@ public enum UsdAmountFormatter {
         var source = decimal
         NSDecimalRound(&rounded, &source, 2, .plain)
         let number = rounded as NSDecimalNumber
+        let body = twoDecimalFormatter.string(from: number) ?? number.stringValue
+        return "$\(body)"
+    }
+
+    /// Built once: this runs for every money label on every body pass.
+    private static let twoDecimalFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.minimumFractionDigits = 2
@@ -171,9 +177,8 @@ public enum UsdAmountFormatter {
         formatter.groupingSeparator = ","
         formatter.usesGroupingSeparator = true
         formatter.locale = posix
-        let body = formatter.string(from: number) ?? number.stringValue
-        return "$\(body)"
-    }
+        return formatter
+    }()
 }
 
 /// Converts between a member's deployed stake (USD NAV) and share micros for withdraw APIs.
@@ -276,6 +281,11 @@ extension ProposalShareFormatter {
         var rounded = Decimal()
         NSDecimalRound(&rounded, &shares, 4, .plain)
         if rounded == 0, shares > 0 { return "< 0.0001 shares" }
+        let body = sharesLabelFormatter.string(from: rounded as NSDecimalNumber) ?? "\(rounded)"
+        return rounded == 1 ? "1 share" : "\(body) shares"
+    }
+
+    private static let sharesLabelFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.numberStyle = .decimal
@@ -283,9 +293,8 @@ extension ProposalShareFormatter {
         formatter.groupingSeparator = ","
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = 4
-        let body = formatter.string(from: rounded as NSDecimalNumber) ?? "\(rounded)"
-        return rounded == 1 ? "1 share" : "\(body) shares"
-    }
+        return formatter
+    }()
 }
 
 /// Compact age from an ISO-8601 UTC timestamp: "now", "15m", "3h", then "Sep 14" (local calendar).
@@ -300,20 +309,17 @@ public enum RelativeTimeFormatter {
         if elapsed < 60 { return "now" }
         if elapsed < 3600 { return "\(Int(elapsed / 60))m" }
         if elapsed < 86_400 { return "\(Int(elapsed / 3600))h" }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
         let sameYear = calendar.component(.year, from: date) == calendar.component(.year, from: now)
-        formatter.dateFormat = sameYear ? "MMM d" : "MMM d, yyyy"
-        return formatter.string(from: date)
+        return SharedFormatters.string(
+            from: date,
+            pattern: .fixed(sameYear ? "MMM d" : "MMM d, yyyy"),
+            locale: Locale(identifier: "en_US_POSIX"),
+            calendar: calendar
+        )
     }
 
     static func parse(_ raw: String) -> Date? {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractional.date(from: trimmed) { return date }
-        return ISO8601DateFormatter().date(from: trimmed)
+        return SharedFormatters.iso8601Date(from: trimmed)
     }
 }

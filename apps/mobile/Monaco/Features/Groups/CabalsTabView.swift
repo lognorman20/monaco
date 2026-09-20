@@ -103,6 +103,7 @@ struct CabalsTabView: View {
             }
         }
         .accessibilityIdentifier("cabals-root")
+        .monacoFrameStats("Cabals")
     }
 
     private func refreshAll() async {

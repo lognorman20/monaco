@@ -140,14 +140,19 @@ enum GroupHeroMath {
         var value = total
         var rounded = Decimal()
         NSDecimalRound(&rounded, &value, 2, .plain)
+        let magnitude = pnlFormatter.string(from: NSDecimalNumber(decimal: rounded < 0 ? -rounded : rounded)) ?? "0.00"
+        return (rounded < 0 ? "-" : "+") + magnitude
+    }
+
+    /// Built once: the hero recomputes this on every body pass.
+    private static let pnlFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.minimumFractionDigits = 2
         formatter.maximumFractionDigits = 2
         formatter.minimumIntegerDigits = 1
-        let magnitude = formatter.string(from: NSDecimalNumber(decimal: rounded < 0 ? -rounded : rounded)) ?? "0.00"
-        return (rounded < 0 ? "-" : "+") + magnitude
-    }
+        return formatter
+    }()
 
     static func hasSlice(_ slice: MemberSliceDTO) -> Bool {
         (Double(slice.slicePercent) ?? 0) > 0

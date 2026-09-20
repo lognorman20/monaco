@@ -74,6 +74,7 @@ struct ProfileTabView: View {
         .onAppear {
             if initiallyShowEditProfile { showEditProfile = true }
         }
+        .monacoFrameStats("Profile")
     }
 
     private var loadError: some View {

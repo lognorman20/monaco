@@ -1,4 +1,5 @@
 import Foundation
+import MonacoCore
 
 struct HomeDashboardDTO: Codable, Equatable {
     let netWorthUsd: String
@@ -82,14 +83,7 @@ func monacoISO8601JSONDecoder() -> JSONDecoder {
     decoder.dateDecodingStrategy = .custom { decoder in
         let container = try decoder.singleValueContainer()
         let raw = try container.decode(String.self)
-        let withFraction = ISO8601DateFormatter()
-        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = withFraction.date(from: raw) {
-            return date
-        }
-        let wholeSeconds = ISO8601DateFormatter()
-        wholeSeconds.formatOptions = [.withInternetDateTime]
-        if let date = wholeSeconds.date(from: raw) {
+        if let date = SharedFormatters.iso8601Date(from: raw) {
             return date
         }
         throw DecodingError.dataCorruptedError(
