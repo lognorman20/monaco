@@ -68,6 +68,7 @@ struct HomeView: View {
         .pollWhileVisible(every: LiveRefreshCadence.resting) {
             try await session.pollLive(auth: auth)
         }
+        .monacoFrameStats("Home")
     }
 
     /// The viewer's photo (or initials) in the corner; tapping it switches to the Profile tab.

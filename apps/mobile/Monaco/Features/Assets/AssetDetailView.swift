@@ -60,6 +60,7 @@ struct AssetDetailView: View {
         .navigationDestination(item: $pickerKind) { kind in
             GroupPickerForProposalView(auth: auth, symbol: symbol, kind: kind)
         }
+        .monacoFrameStats("AssetDetail")
     }
 
     private func header(_ detail: AssetDetailDTO) -> some View {

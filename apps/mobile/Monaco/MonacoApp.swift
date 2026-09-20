@@ -11,6 +11,7 @@ struct MonacoApp: App {
 
     init() {
         MonacoAppearance.configureUIKit()
+        MonacoLaunchTrace.markSceneReady()
     }
 
     var body: some Scene {

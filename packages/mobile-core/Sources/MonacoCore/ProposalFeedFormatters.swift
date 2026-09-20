@@ -4,15 +4,20 @@ import Foundation
 public enum ProposalAmountFormatter {
     public static func dollars(fromMicros raw: String) -> String {
         guard let micros = Int64(raw.trimmingCharacters(in: .whitespaces)) else { return raw }
+        let value = Decimal(micros) / Decimal(1_000_000)
+        return dollarsFormatter.string(from: value as NSDecimalNumber) ?? raw
+    }
+
+    /// Built once: every proposal card formats its amount on every body pass.
+    private static let dollarsFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "en_US")
         formatter.numberStyle = .currency
         formatter.currencyCode = "USD"
         formatter.minimumFractionDigits = 2
         formatter.maximumFractionDigits = 2
-        let value = Decimal(micros) / Decimal(1_000_000)
-        return formatter.string(from: value as NSDecimalNumber) ?? raw
-    }
+        return formatter
+    }()
 }
 
 /// Share count for a sell proposal's `tokenAmount` (atomic units, 8 decimals), e.g. "0.5".
@@ -22,13 +27,17 @@ public enum ProposalShareFormatter {
     public static func shares(fromAtomics raw: String) -> String {
         guard let atomics = Decimal(string: raw.trimmingCharacters(in: .whitespaces)), atomics >= 0 else { return raw }
         let shares = atomics / Decimal(sign: .plus, exponent: decimals, significand: 1)
+        return sharesFormatter.string(from: shares as NSDecimalNumber) ?? raw
+    }
+
+    private static let sharesFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "en_US")
         formatter.numberStyle = .decimal
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = decimals
-        return formatter.string(from: shares as NSDecimalNumber) ?? raw
-    }
+        return formatter
+    }()
 }
 
 /// One dot per eligible voter on a proposal card: yes votes first, then no, then still to vote.
@@ -141,11 +150,7 @@ extension ProposalDTO {
 
 public enum ProposalTimeFormatter {
     public static func parse(_ raw: String) -> Date? {
-        let plain = ISO8601DateFormatter()
-        if let date = plain.date(from: raw) { return date }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: raw)
+        SharedFormatters.iso8601WholeSeconds.date(from: raw) ?? SharedFormatters.iso8601Fractional.date(from: raw)
     }
 
     /// Time left on an open vote, e.g. "Closes in 2d", "Closes in 20h", "Closes in 12m".
@@ -177,10 +182,6 @@ public enum ProposalTimeFormatter {
         if elapsed < 3600 { return "\(elapsed / 60)m" }
         if elapsed < 86_400 { return "\(elapsed / 3600)h" }
         if elapsed < 7 * 86_400 { return "\(elapsed / 86_400)d" }
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.timeZone = calendar.timeZone
-        formatter.setLocalizedDateFormatFromTemplate("MMMd")
-        return formatter.string(from: date)
+        return SharedFormatters.string(from: date, pattern: .template("MMMd"), locale: .current, calendar: calendar)
     }
 }

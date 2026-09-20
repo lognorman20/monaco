@@ -7,6 +7,7 @@ struct ContentView: View {
         root
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .monacoRootAppearance()
+            .onAppear { MonacoLaunchTrace.markFirstFrame() }
     }
 
     @ViewBuilder
