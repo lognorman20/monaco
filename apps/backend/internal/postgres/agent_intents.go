@@ -22,10 +22,12 @@ type AgentIntentRow struct {
 	Status       string
 	RejectReason sql.NullString
 	TransactionID sql.NullString
+	IdempotencyKey sql.NullString
+	Mint         sql.NullString
 	CreatedAt    time.Time
 }
 
-const agentIntentSelectColumns = `id, group_agent_id, group_id, side, symbol, usdc_micros, token_amount, status, reject_reason, transaction_id, created_at`
+const agentIntentSelectColumns = `id, group_agent_id, group_id, side, symbol, usdc_micros, token_amount, status, reject_reason, transaction_id, idempotency_key, mint, created_at`
 
 func scanAgentIntentRow(scanner interface{ Scan(dest ...any) error }) (AgentIntentRow, error) {
 	var row AgentIntentRow
@@ -41,6 +43,8 @@ func scanAgentIntentRow(scanner interface{ Scan(dest ...any) error }) (AgentInte
 		&row.Status,
 		&row.RejectReason,
 		&row.TransactionID,
+		&row.IdempotencyKey,
+		&row.Mint,
 		&row.CreatedAt,
 	); err != nil {
 		return AgentIntentRow{}, err
@@ -73,8 +77,8 @@ func (s *Store) InsertAgentIntent(ctx context.Context, row AgentIntentRow) (Agen
 // InsertAgentIntentTx records an agent intent within tx.
 func (s *Store) InsertAgentIntentTx(ctx context.Context, tx *sql.Tx, row AgentIntentRow) (AgentIntentRow, error) {
 	const insertSQL = `
-INSERT INTO agent_intents (group_agent_id, group_id, side, symbol, usdc_micros, token_amount, status, reject_reason, transaction_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO agent_intents (group_agent_id, group_id, side, symbol, usdc_micros, token_amount, status, reject_reason, transaction_id, idempotency_key, mint)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING ` + agentIntentSelectColumns
 
 	var usdc any
@@ -93,6 +97,14 @@ RETURNING ` + agentIntentSelectColumns
 	if row.TransactionID.Valid {
 		txID = row.TransactionID.String
 	}
+	var idempotencyKey any
+	if row.IdempotencyKey.Valid {
+		idempotencyKey = row.IdempotencyKey.String
+	}
+	var mint any
+	if row.Mint.Valid {
+		mint = row.Mint.String
+	}
 
 	out, err := scanAgentIntentRow(tx.QueryRowContext(ctx, insertSQL,
 		row.GroupAgentID,
@@ -104,6 +116,8 @@ RETURNING ` + agentIntentSelectColumns
 		row.Status,
 		reject,
 		txID,
+		idempotencyKey,
+		mint,
 	))
 	if err != nil {
 		return AgentIntentRow{}, fmt.Errorf("insert agent intent: %w", err)

@@ -220,36 +220,3 @@ WHERE proposal_id = $1`
 	}
 	return key, true, nil
 }
-
-// SumAgentExecutedBuyUSDCByAgentID sums confirmed agent-initiated buy USDC for allocation tracking.
-func (s *Store) SumAgentExecutedBuyUSDCByAgentID(ctx context.Context, agentID string) (int64, error) {
-	const selectSQL = `
-SELECT COALESCE(SUM(t.amount), 0)
-FROM transactions t
-WHERE t.agent_intent_id IN (SELECT id FROM agent_intents WHERE group_agent_id = $1)
-  AND t.action = 'buy'
-  AND t.status = 'confirmed'
-  AND t.initiated_by = 'agent'`
-	var sum int64
-	if err := s.db.QueryRowContext(ctx, selectSQL, agentID).Scan(&sum); err != nil {
-		return 0, fmt.Errorf("sum agent executed buy usdc: %w", err)
-	}
-	return sum, nil
-}
-
-// SumPendingAgentBuyUSDCByAgentID sums pending agent buy USDC reserved against allocation.
-func (s *Store) SumPendingAgentBuyUSDCByAgentID(ctx context.Context, agentID string) (int64, error) {
-	const selectSQL = `
-SELECT COALESCE(SUM(t.amount), 0)
-FROM transactions t
-JOIN agent_intents ai ON ai.id = t.agent_intent_id
-WHERE ai.group_agent_id = $1
-  AND t.action = 'buy'
-  AND t.status = 'pending'
-  AND t.initiated_by = 'agent'`
-	var sum int64
-	if err := s.db.QueryRowContext(ctx, selectSQL, agentID).Scan(&sum); err != nil {
-		return 0, fmt.Errorf("sum pending agent buy usdc: %w", err)
-	}
-	return sum, nil
-}

@@ -59,10 +59,13 @@ type AgentIntentRequest struct {
 
 // AgentTreasurySnapshot is treasury state for intent validation.
 type AgentTreasurySnapshot struct {
-	TreasuryUsdcMicros   int64
-	AgentSpentUsdcMicros int64
-	PendingAgentUsdcMicros int64
-	TokenHoldingsBySymbol map[string]int64
+	TreasuryUsdcMicros int64
+	// AgentCommittedUsdcMicros is every buy the agent has in flight, pending or confirmed.
+	// Sells do not reduce it: the allocation is a lifetime spend cap.
+	AgentCommittedUsdcMicros int64
+	TokenHoldingsBySymbol    map[string]int64
+	// AgentTokenHoldingsBySymbol is what the agent itself bought, net of its own sells.
+	AgentTokenHoldingsBySymbol map[string]int64
 }
 
 // ValidateIntent rejects intents that breach agent status or allocation.
@@ -82,7 +85,7 @@ func ValidateIntent(agent GroupAgent, intent AgentIntentRequest, snap AgentTreas
 		if intent.UsdcMicros <= 0 {
 			return fmt.Errorf("usdc amount must be positive")
 		}
-		available := agent.AllocationUsdcMicros - snap.AgentSpentUsdcMicros - snap.PendingAgentUsdcMicros
+		available := agent.AllocationUsdcMicros - snap.AgentCommittedUsdcMicros
 		if intent.UsdcMicros > available {
 			return fmt.Errorf("trade exceeds agent allocation")
 		}
@@ -96,6 +99,11 @@ func ValidateIntent(agent GroupAgent, intent AgentIntentRequest, snap AgentTreas
 		held := snap.TokenHoldingsBySymbol[intent.Symbol]
 		if intent.TokenAmount > held {
 			return fmt.Errorf("insufficient treasury holding")
+		}
+		// An agent trades without a vote, so it may only unwind what it bought itself.
+		// Positions members voted in stay under member control.
+		if intent.TokenAmount > snap.AgentTokenHoldingsBySymbol[intent.Symbol] {
+			return fmt.Errorf("sell exceeds agent position")
 		}
 	default:
 		return fmt.Errorf("invalid intent side")

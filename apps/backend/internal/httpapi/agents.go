@@ -25,6 +25,8 @@ type submitAgentIntentRequest struct {
 	Symbol      string `json:"symbol"`
 	UsdcMicros  int64  `json:"usdcMicros"`
 	TokenAmount int64  `json:"tokenAmount"`
+	// IdempotencyKey is optional. A resend under the same key gets the first intent's answer.
+	IdempotencyKey string `json:"idempotencyKey"`
 }
 
 type submitAgentIntentResponse struct {
@@ -78,13 +80,20 @@ func (h *AgentHandlers) SubmitAgentIntentHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	if len(idempotencyKey) > app.MaxAgentIdempotencyKeyLength {
+		logJSONError(ctx, log, "invalid_idempotency_key", w, http.StatusBadRequest, "idempotencyKey is too long", "group_id", groupID)
+		return
+	}
+
 	result, err := h.Intents.SubmitAgentIntent(ctx, app.SubmitAgentIntentInput{
-		GroupID:     groupID,
-		AgentKey:    agentKey,
-		Side:        side,
-		Symbol:      strings.TrimSpace(req.Symbol),
-		UsdcMicros:  req.UsdcMicros,
-		TokenAmount: req.TokenAmount,
+		GroupID:        groupID,
+		AgentKey:       agentKey,
+		Side:           side,
+		Symbol:         strings.TrimSpace(req.Symbol),
+		UsdcMicros:     req.UsdcMicros,
+		TokenAmount:    req.TokenAmount,
+		IdempotencyKey: idempotencyKey,
 	})
 	if err != nil {
 		h.KeyGuard.recordFailure(r, groupID, err)
@@ -115,6 +124,8 @@ func writeAgentIntentError(ctx context.Context, log *requestLog, w http.Response
 		logJSONError(ctx, log, "agent_group_mismatch", w, http.StatusUnauthorized, "invalid agent api key", "group_id", groupID)
 	case errors.Is(err, app.ErrAgentPaused):
 		logJSONError(ctx, log, "agent_paused", w, http.StatusForbidden, "agent is paused", "group_id", groupID)
+	case errors.Is(err, app.ErrAgentIntentInFlight):
+		logJSONError(ctx, log, "intent_in_flight", w, http.StatusConflict, "intent with this idempotencyKey is still executing", "group_id", groupID)
 	case errors.Is(err, app.ErrAgentIntentRejected):
 		logJSONError(ctx, log, "intent_rejected", w, http.StatusUnprocessableEntity, err.Error(), "group_id", groupID)
 	default:
