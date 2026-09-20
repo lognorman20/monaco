@@ -22,7 +22,11 @@ type Client interface {
 	SubmitSweep(ctx context.Context, req SweepRequest) (SweepResult, error)
 	SubmitMemberUSDCTransfer(ctx context.Context, req TransferRequest) (TransferResult, error)
 	VerifyPayoutProof(ctx context.Context, userID string, proof PayoutProof) error
-	PayUSDC(ctx context.Context, req PayUSDCRequest) (PayUSDCResult, error)
+	// A treasury payout is three steps so the caller can persist the signature between
+	// signing and broadcasting, and settle only on what the chain reports.
+	PrepareUSDCPayout(ctx context.Context, req PayUSDCRequest) (PreparedPayout, error)
+	BroadcastUSDCPayout(ctx context.Context, payout PreparedPayout) error
+	USDCPayoutStatus(ctx context.Context, payout PreparedPayout) (PayoutStatus, error)
 }
 
 // HTTPClient calls Privy REST APIs with app credentials.
