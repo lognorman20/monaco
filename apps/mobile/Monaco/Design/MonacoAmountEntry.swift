@@ -17,22 +17,29 @@ struct AmountEntry: View {
     private let presets: [AmountPreset]
     private let helper: String?
     private let overLimitHelper: String
+    private let problem: String?
 
     @FocusState private var focused: Bool
+    @State private var hasRaisedKeyboard = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// - Parameter problem: why the amount can't be used, in the member's words. It replaces
+    ///   `helper` while it is set, so a screen with a rule of its own — a minimum, a remainder
+    ///   too small to leave behind — can say so instead of leaving a dead button unexplained.
     init(
         amountText: Binding<String>,
         max: Decimal? = nil,
         presets: [AmountPreset] = [],
         helper: String? = nil,
-        overLimitHelper: String = "More than you have"
+        overLimitHelper: String = "More than you have",
+        problem: String? = nil
     ) {
         _amountText = amountText
         self.max = max
         self.presets = presets
         self.helper = helper
         self.overLimitHelper = overLimitHelper
+        self.problem = problem
     }
 
     private var value: Decimal? {
@@ -53,16 +60,33 @@ struct AmountEntry: View {
             if let helperLine {
                 Text(helperLine)
                     .font(MonacoTheme.Typo.callout)
-                    .foregroundStyle(isOverLimit ? MonacoTheme.loss : MonacoTheme.muted)
+                    .foregroundStyle(hasProblem ? MonacoTheme.loss : MonacoTheme.muted)
                     .multilineTextAlignment(.center)
                     .contentTransition(.opacity)
-                    .animation(reduceMotion ? nil : .snappy, value: isOverLimit)
+                    .animation(reduceMotion ? nil : .snappy, value: helperLine)
+                    .accessibilityIdentifier("amount-entry-helper")
             }
         }
         .frame(maxWidth: .infinity)
-        .onAppear {
-            // Let the push/present transition settle before the keyboard rises.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { focused = true }
+        .task {
+            // Let the push transition settle before the keyboard rises. This is the view's own
+            // task, so it is cancelled with the screen: a keyboard never arrives after the member
+            // has left, and coming back from a pushed screen does not raise it a second time.
+            guard !hasRaisedKeyboard else { return }
+            try? await Task.sleep(for: AmountEntry.keyboardRevealDelay)
+            guard !Task.isCancelled else { return }
+            hasRaisedKeyboard = true
+            focused = true
+        }
+        .toolbar {
+            // The decimal pad has no return key, so the member needs a way out of it.
+            if focused {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { focused = false }
+                        .accessibilityIdentifier("amount-entry-done-button")
+                }
+            }
         }
         .onChange(of: amountText) { _, newValue in
             let cleaned = AmountEntryText.sanitize(newValue)
@@ -70,8 +94,16 @@ struct AmountEntry: View {
         }
     }
 
+    /// Long enough for a push transition to settle before the keyboard rises over it.
+    private static let keyboardRevealDelay: Duration = .milliseconds(350)
+
+    private var hasProblem: Bool {
+        problem != nil || isOverLimit
+    }
+
     private var helperLine: String? {
-        isOverLimit ? overLimitHelper : helper
+        if let problem { return problem }
+        return isOverLimit ? overLimitHelper : helper
     }
 
     private var figure: some View {
@@ -79,7 +111,7 @@ struct AmountEntry: View {
             HStack(alignment: .center, spacing: 2) {
                 Text(AmountEntryText.display(amountText))
                     .font(MonacoTheme.Typo.moneyHero)
-                    .foregroundStyle(amountText.isEmpty ? MonacoTheme.tertiaryText : (isOverLimit ? MonacoTheme.loss : MonacoTheme.ink))
+                    .foregroundStyle(amountText.isEmpty ? MonacoTheme.tertiaryText : (hasProblem ? MonacoTheme.loss : MonacoTheme.ink))
                     .lineLimit(1)
                     .minimumScaleFactor(0.4)
                     .contentTransition(reduceMotion ? .identity : .numericText())
@@ -177,7 +209,7 @@ enum AmountEntryText {
 
     /// Digits and one ".", at most two decimals, no leading zeros ("007" → "7", "." → "0.").
     static func sanitize(_ raw: String) -> String {
-        let normalised = raw.replacingOccurrences(of: ",", with: ".")
+        let normalised = normalisingSeparators(raw)
         var result = ""
         var seenDot = false
         var decimals = 0
@@ -200,9 +232,38 @@ enum AmountEntryText {
         return result
     }
 
+    /// A comma is grouping here far more often than it is a decimal point: the figure over the pad
+    /// renders "$1,250.50", and that is what gets copied and pasted back in. Treating every comma
+    /// as a decimal point turned a pasted "$1,250.50" into $1.25 — a thousandfold error on a money
+    /// screen. A single comma that is *not* followed by exactly three digits can only be a decimal
+    /// separator, which is what a decimal pad types in a comma-decimal locale, so that still works.
+    private static func normalisingSeparators(_ raw: String) -> String {
+        guard raw.contains(",") else { return raw }
+        if !raw.contains("."), commaIsDecimalSeparator(raw) {
+            return raw.replacingOccurrences(of: ",", with: ".")
+        }
+        return raw.replacingOccurrences(of: ",", with: "")
+    }
+
+    private static func commaIsDecimalSeparator(_ raw: String) -> Bool {
+        let parts = raw.split(separator: ",", omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return false }
+        return parts[1].filter { $0.isASCII && $0.isNumber }.count != 3
+    }
+
     static func decimal(_ text: String) -> Decimal? {
         guard !text.isEmpty else { return nil }
         return Decimal(string: text, locale: posix)
+    }
+
+    /// The typed amount in USDC micros, rounded to the nearest micro. Add money, Cash out and
+    /// Withdraw each used to carry their own copy of this conversion.
+    static func micros(_ text: String) -> Int64? {
+        guard let value = decimal(text), value >= 0 else { return nil }
+        var scaled = value * 1_000_000
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &scaled, 0, .plain)
+        return (rounded as NSDecimalNumber).int64Value
     }
 
     /// "$1,250.5" while typing: grouping on the integer part, the typed decimals kept as typed.
@@ -210,12 +271,7 @@ enum AmountEntryText {
         guard !text.isEmpty else { return "$0" }
         let parts = text.split(separator: ".", omittingEmptySubsequences: false)
         let integer = Int(parts[0]) ?? 0
-        let formatter = NumberFormatter()
-        formatter.locale = posix
-        formatter.numberStyle = .decimal
-        formatter.usesGroupingSeparator = true
-        formatter.groupingSeparator = ","
-        let integerText = formatter.string(from: NSNumber(value: integer)) ?? String(parts[0])
+        let integerText = groupedIntegerFormatter.string(from: NSNumber(value: integer)) ?? String(parts[0])
         if parts.count > 1 {
             return "$\(integerText).\(parts[1])"
         }
@@ -224,14 +280,30 @@ enum AmountEntryText {
 
     /// "25", "12.5", "12.05" — no grouping, no trailing zeros.
     static func plain(_ decimal: Decimal) -> String {
+        plainFormatter.string(from: decimal as NSDecimalNumber) ?? "\(decimal)"
+    }
+
+    // A NumberFormatter loads ICU data when it is built and is cheap to read afterwards. These
+    // run on every body pass of a screen the member is typing into — several times per keystroke
+    // between the figure, the CTA title and the preset chips — so they are built once.
+    private static let groupedIntegerFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.locale = posix
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        formatter.groupingSeparator = ","
+        return formatter
+    }()
+
+    private static let plainFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.locale = posix
         formatter.numberStyle = .decimal
         formatter.usesGroupingSeparator = false
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = 2
-        return formatter.string(from: decimal as NSDecimalNumber) ?? "\(decimal)"
-    }
+        return formatter
+    }()
 
     static func roundDownToCents(_ decimal: Decimal) -> Decimal {
         var source = decimal
