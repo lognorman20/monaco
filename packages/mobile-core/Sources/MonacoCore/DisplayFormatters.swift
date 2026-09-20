@@ -7,6 +7,10 @@ public enum PercentReturnFormatter {
     /// Formats a backend return ratio ("0.124", "-0.036") as "+12.4%" / "−3.6%" (U+2212).
     /// Ratios that round to 0.0% render "0.0%" with no sign. Nil / empty renders "—".
     /// Strings that are already percentages ("+12.4%") pass through with the minus normalised.
+    /// Anything else that is not a finite number — "nan", "inf", or a string that is not a
+    /// number at all — renders "—" rather than being passed through. This is wider than just
+    /// the non-finite case on purpose: everything reaching here is a backend-supplied ratio,
+    /// and there is no input that is both unparseable and worth showing a member raw.
     public static func format(_ raw: String?) -> String {
         guard let raw else { return "—" }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)

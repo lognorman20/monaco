@@ -15,8 +15,8 @@ extension FlowErrorInput {
             self.init(status: status)
         case MonacoCore.MonacoAPIError.rejected(let status, let message, _):
             self.init(status: status, serverMessage: message)
-        case MonacoCore.MonacoAPIError.rateLimited:
-            self.init(status: 429)
+        case MonacoCore.MonacoAPIError.rateLimited(let retryAfterSeconds, _):
+            self.init(status: 429, retryAfterSeconds: retryAfterSeconds)
         // Nothing was sent: the app never confirmed the member is signed in.
         case MonacoAPIError.missingAccessToken:
             self.init(isSignInUnavailable: true)

@@ -66,17 +66,22 @@ public struct FlowErrorInput: Equatable, Sendable {
     /// True when the app could not check the member's sign-in before sending (the token
     /// refresh failed, or there was no token). The request never ran, so nothing moved.
     public let isSignInUnavailable: Bool
+    /// The server's `Retry-After` on a 429, when it sent one. Chat already tells the member
+    /// how long to wait; the money flows said "a moment" for the same header.
+    public let retryAfterSeconds: Int?
 
     public init(
         status: Int? = nil,
         serverMessage: String? = nil,
         isOffline: Bool = false,
-        isSignInUnavailable: Bool = false
+        isSignInUnavailable: Bool = false,
+        retryAfterSeconds: Int? = nil
     ) {
         self.status = status
         self.serverMessage = serverMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.isOffline = isOffline
         self.isSignInUnavailable = isSignInUnavailable
+        self.retryAfterSeconds = retryAfterSeconds
     }
 
     public static func offline() -> FlowErrorInput { FlowErrorInput(isOffline: true) }
@@ -225,12 +230,17 @@ public enum MoneyFlowCopy {
     }
 
     private static func generic(_ input: FlowErrorInput, action: String) -> FlowFailure {
+        // Rejected by the rate limiter before the handler claimed a key, so nothing moved and
+        // a fresh send is safe. The server usually says how long to wait; chat has always
+        // shown that, and the money flows now do too instead of saying "a moment".
         if input.status == 429 {
-            return FlowFailure(
-                message: "Too many tries in a row.",
-                recovery: .retry,
-                nextStep: "Wait a moment and try again."
-            )
+            let wait: String
+            if let seconds = input.retryAfterSeconds, seconds > 0 {
+                wait = "Try again in \(seconds) second\(seconds == 1 ? "" : "s")."
+            } else {
+                wait = "Wait a moment and try again."
+            }
+            return FlowFailure(message: "Too many tries in a row.", recovery: .retry, nextStep: wait)
         }
         if input.status == 401 {
             return FlowFailure(

@@ -182,6 +182,30 @@ final class MoneyFlowCopyTests: XCTestCase {
         XCTAssertTrue(MoneyFlowCopy.fundCabalFailure(FlowErrorInput(status: 429)).isRetryable)
     }
 
+    /// Same PR, same `Retry-After` header: chat read it and the money flows threw it away,
+    /// so a throttled member was told "a moment" in one place and "60 seconds" in the other.
+    func testRateLimited_readsTheServersRetryAfter_likeChatAlreadyDoes() {
+        let counted = MoneyFlowCopy.fundCabalFailure(
+            FlowErrorInput(status: 429, retryAfterSeconds: 60)
+        )
+        XCTAssertEqual(counted.nextStep, "Try again in 60 seconds.")
+        XCTAssertEqual(counted.recovery, .retry)
+
+        XCTAssertEqual(
+            MoneyFlowCopy.cashOutFailure(FlowErrorInput(status: 429, retryAfterSeconds: 1)).nextStep,
+            "Try again in 1 second."
+        )
+        // No header, or a useless one, keeps the old wording rather than inventing a number.
+        for input in [
+            FlowErrorInput(status: 429),
+            FlowErrorInput(status: 429, retryAfterSeconds: 0),
+        ] {
+            XCTAssertEqual(
+                MoneyFlowCopy.sellStakeFailure(input).nextStep, "Wait a moment and try again."
+            )
+        }
+    }
+
     func testMemberFacingMessage_rejectsInternalFragments() {
         XCTAssertNil(MoneyFlowCopy.memberFacingMessage("not a group member"))
         XCTAssertNil(MoneyFlowCopy.memberFacingMessage("Internal error"))
