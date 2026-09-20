@@ -21,7 +21,7 @@ struct AgentKeyRevealView: View {
                 .background(MonacoTheme.surfaceSunken, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous))
                 .accessibilityIdentifier("agent-key-reveal")
             Button(ProposeFlowCopy.copyKey) {
-                UIPasteboard.general.string = apiKey
+                SecretPasteboard.copy(apiKey)
                 Haptics.success()
                 onCopied()
             }
