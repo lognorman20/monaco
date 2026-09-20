@@ -369,6 +369,40 @@ Learned prefs and durable facts live in [`AGENTS.md`](AGENTS.md). Skills are the
 
 Do not copy these skills into another machine's home path. Clone the repo; Cursor sees `.cursor/skills/` from the workspace.
 
+## Tests and CI
+
+| Suite | Command |
+| --- | --- |
+| Backend (needs Docker Postgres) | `just test backend` |
+| Domain math, no database | `cd packages/domain && go test ./...` |
+| Reference trading bot | `cd agents/momentum-bot && go test ./...` |
+| Shared Swift logic | `just test mobile` |
+
+Backend tests never touch the app database: they derive `{dbname}_test` from `DATABASE_URL`, create it if missing, and migrate it (`apps/backend/internal/postgres/testdb.go`).
+
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`: a Go job (Postgres 16 service container, migrations on a clean database, `go vet`, `go test` for `apps/backend`, `packages/domain` and `agents/momentum-bot`) and a macOS job (`swift test` in `packages/mobile-core`). The iOS app target is not built in CI.
+
+## Deploy
+
+There is no deploy pipeline in this repo yet; the demo runs the API on a laptop. What a host needs:
+
+**API.** One Go binary.
+
+```bash
+just build backend          # bin/monaco-api
+API_ADDR=0.0.0.0:8080 MIGRATIONS_DIR=/path/to/supabase/migrations ./bin/monaco-api
+```
+
+- Migrations in `supabase/migrations` are applied at boot, in filename order, before the server listens. `go run ./cmd/migrate` (from `apps/backend`) applies them without starting the API.
+- Required env: `DATABASE_URL`, `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `RELAYER_PRIVATE_KEY`. The full list with comments is in `.env.example`. Use separate Privy apps, relayer keys and databases per environment; production values go in `.env.production` (dotenvx-encrypted), never in the image.
+- The relayer address must hold more than 0.001 SOL or the API exits at boot. See [Relayer](#relayer-fee-payer).
+- The API listens on `API_ADDR` (default `127.0.0.1:8080`). `GET /health` returns `{"status":"ok"}` once it is up; it does not probe Postgres or upstream APIs.
+- The deposit sweep poller and the execute-on-pass poller run inside the API process. Running more than one instance has not been tested.
+
+**iOS.** Archive and upload steps are in [`apps/mobile/TestFlight.md`](apps/mobile/TestFlight.md).
+
+**Trading agent.** `agents/momentum-bot` runs anywhere Go runs; see [`docs/how-to/connect-an-agent.md`](docs/how-to/connect-an-agent.md).
+
 ## Layout
 
 ```
@@ -379,10 +413,12 @@ monaco/
 ├── AGENTS.md
 ├── README.md                 this file
 ├── apps/backend/             Go API
+├── agents/momentum-bot/      reference trading agent
 ├── apps/mobile/              SwiftUI
 ├── packages/mobile-core/     host Swift tests
 ├── docs/product.md           product + architecture
 ├── docs/index.md             milestone backlog
+├── docs/submission/          hackathon submission notes
 └── scripts/
 ```
 

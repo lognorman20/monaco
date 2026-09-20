@@ -24,7 +24,7 @@ Every agent call:
 X-Monaco-Agent-Key: k7m2p
 ```
 
-No member JWT. Missing/invalid/revoked key → **401**. Wrong cabal in URL → **403**.
+No member JWT. Missing/invalid/revoked key → **401**. A key for a different cabal than the URL also gets **401**, same as an unknown key. After 10 wrong keys → **429** with `Retry-After`.
 
 ## List assets
 
@@ -71,8 +71,9 @@ Success: `{ "intentId", "status": "executed", "transactionId" }`. Swap goes pend
 | HTTP | Meaning |
 |------|---------|
 | **401** | Bad or revoked key |
-| **403** | Wrong group, or agent **paused** |
+| **403** | Agent **paused** |
 | **422** | Over allocation, bad symbol, insufficient treasury |
+| **429** | Too many wrong keys for this cabal or from this address; wait `Retry-After` seconds |
 
 ## Pause / resume / revoke
 
