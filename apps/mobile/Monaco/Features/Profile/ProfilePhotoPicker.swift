@@ -75,11 +75,8 @@ struct ProfilePhotoPicker: View {
         switch await ProfilePhotoUploadPreparer.prepared(from: data) {
         case .success(let ready):
             prepared = ready
-        case .failure(.unreadable):
-            onResult(MonacoToast(message: "That photo could not be opened. Try another.", isSuccess: false))
-            return
-        case .failure(.tooLarge):
-            onResult(MonacoToast(message: "That photo is too big to upload. Try another.", isSuccess: false))
+        case .failure(let failure):
+            onResult(MonacoToast(message: failure.memberMessage, isSuccess: false))
             return
         }
 

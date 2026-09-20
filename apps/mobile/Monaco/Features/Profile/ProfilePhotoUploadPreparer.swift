@@ -21,11 +21,23 @@ nonisolated enum ProfilePhotoUploadPreparer {
     /// Why a pick could not be turned into an upload. The two cases read differently to the
     /// member, so they must not collapse into one "could not be shrunk" message.
     enum Failure: Error, Equatable, Sendable {
-        /// Nothing here this device can decode: a RAW the decoder refuses, a corrupt file,
-        /// an iCloud photo that never finished downloading.
+        /// Nothing usable came out of this file: a RAW the decoder refuses, a corrupt file, an
+        /// iCloud photo that never finished downloading — or one that decoded but that ImageIO
+        /// would not write back out. Either way the member's next move is another photo.
         case unreadable
-        /// Decoded fine, but still over the cap at the smallest size and quality we send.
+        /// Bytes were produced and measured, and they were over the cap at the smallest size
+        /// and quality we send. Only this one may tell the member their photo is too big.
         case tooLarge
+
+        /// What the member is told and what to do next. Here rather than in the picker so the
+        /// two sentences cannot drift apart from the cases they describe, and so a copy audit
+        /// can reach them.
+        var memberMessage: String {
+            switch self {
+            case .unreadable: return "That photo could not be opened. Try another."
+            case .tooLarge: return "That photo is too big to upload. Try another."
+            }
+        }
     }
 
     struct Prepared: Equatable, Sendable {
@@ -34,29 +46,37 @@ nonisolated enum ProfilePhotoUploadPreparer {
     }
 
     /// Prepares off the main actor, so the picker's spinner can actually spin.
-    static func prepared(from data: Data) async -> Result<Prepared, Failure> {
-        await Task.detached(priority: .userInitiated) { prepare(from: data) }.value
+    static func prepared(from data: Data, maxBytes: Int = Self.maxBytes) async -> Result<Prepared, Failure> {
+        await Task.detached(priority: .userInitiated) { prepare(from: data, maxBytes: maxBytes) }.value
     }
 
     /// One downsample at 1024px, then quality steps. The fallback to 512px only exists as a
     /// guard: a 1024px JPEG at 0.8 lands far under 2MB.
-    static func prepare(from data: Data) -> Result<Prepared, Failure> {
+    ///
+    /// `maxBytes` is a parameter so the over-the-cap branch can be reached from a test. At the
+    /// real cap it is close to unreachable, which is exactly how it shipped untested.
+    static func prepare(from data: Data, maxBytes: Int = Self.maxBytes) -> Result<Prepared, Failure> {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else {
             return .failure(.unreadable)
         }
 
-        var decodedAnything = false
+        // Only bytes we actually produced and measured earn "too big". Decoding and then
+        // failing to *encode* is not the member's photo being oversized, and telling them it
+        // is sends them to find a smaller one that will fail in exactly the same way — the
+        // copy-collapsing this preparer was rewritten to stop, one branch further along.
+        var encodedOverTheCap = false
         for pixelSize in [maxPixelSize, maxPixelSize / 2] {
             guard let image = downsample(source, maxPixelSize: pixelSize) else { continue }
-            decodedAnything = true
             for quality in [0.8, 0.6, 0.4] as [CGFloat] {
-                if let jpeg = encodeJPEG(image, quality: quality), jpeg.count <= maxBytes {
+                guard let jpeg = encodeJPEG(image, quality: quality) else { continue }
+                if jpeg.count <= maxBytes {
                     return .success(Prepared(data: jpeg, mimeType: "image/jpeg"))
                 }
+                encodedOverTheCap = true
             }
         }
-        return .failure(decodedAnything ? .tooLarge : .unreadable)
+        return .failure(encodedOverTheCap ? .tooLarge : .unreadable)
     }
 
     private static func downsample(_ source: CGImageSource, maxPixelSize: Int) -> CGImage? {

@@ -17,9 +17,10 @@ struct GroupChatView: View {
     @State private var timeline = GroupChatTimeline()
     @State private var isLoadingOlder = false
     @State private var loadError: String?
-    /// Set once this thread is closed to the viewer (removed from the cabal, cabal deleted).
-    /// Parks the poll and the composer: there is nothing left to ask the server for.
-    @State private var closedMessage: String?
+    /// Whether this thread is closed to the viewer (removed from the cabal, cabal deleted).
+    /// Parks the poll and the composer — so it takes more than one background tick to enter,
+    /// and there is always something on screen that asks the server again.
+    @State private var closure = GroupChatClosureTracker()
     @State private var toast: MonacoToast?
     @State private var unreadCount = 0
     /// Bumped to ask the thread to scroll to the newest message.
@@ -31,8 +32,18 @@ struct GroupChatView: View {
     /// is false the thread follows the conversation, which is both what decides an arrival's
     /// scroll and what keeps a LazyVStack's estimated layout pinned to the end.
     @State private var readerControlsScroll = false
+    /// Where the thread is resting, kept as state rather than read back out of a geometry
+    /// *transition*: a derived `Bool` is only reported when it changes, and a drag that never
+    /// leaves the `pinnedSlack` window — swiping down to dismiss the keyboard, a flick to
+    /// check for new messages, a pull to refresh on a thread shorter than the screen —
+    /// produces no transition at all. Without somewhere to remember the answer, those drags
+    /// latched `readerControlsScroll` with nothing able to clear it.
+    @State private var position = ThreadPosition(offset: 0, isAtEnd: true)
+    /// What the thread looked like when the drag in progress began; nil between drags.
+    @State private var dragOrigin: DragOrigin?
     @State private var refreshGate = RefreshGate()
     @FocusState private var composerFocused: Bool
+    @Environment(\.scenePhase) private var scenePhase
 
     private let pageSize = 30
     private let pollInterval: Duration = .seconds(4)
@@ -43,7 +54,7 @@ struct GroupChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             messagesArea
-            if let closedMessage {
+            if let closedMessage = closure.message {
                 // Only once there is a thread behind it; before that the error state says
                 // the same thing across the whole screen.
                 if timeline.hasLoadedNewest {
@@ -71,8 +82,15 @@ struct GroupChatView: View {
             }
         }
         .task { await loadNewest() }
-        .pollWhileVisible(every: pollInterval, isActive: closedMessage == nil, gate: refreshGate) {
+        .pollWhileVisible(every: pollInterval, isActive: !closure.isClosed, gate: refreshGate) {
             try await pollNewest()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // The poll is parked while the thread is closed, so without this the screen would
+            // keep telling a member they are out of their cabal until they navigate away.
+            // Coming back to the app is the cheapest moment to ask the server once more.
+            guard phase == .active, closure.isClosed else { return }
+            Task { await loadNewest() }
         }
         .monacoToast($toast)
         // `.contain`, not a bare identifier: an identifier on its own was being applied to
@@ -91,12 +109,17 @@ struct GroupChatView: View {
                 statusMessage {
                     Label(loadError, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(MonacoTheme.warning)
-                    if closedMessage == nil {
-                        Button("Try again") { Task { await loadNewest() } }
-                            .buttonStyle(.monacoPrimary)
-                            .accessibilityIdentifier("group-chat-retry")
-                    }
+                    // Offered even when the thread reads as closed. Being removed from a cabal
+                    // and a cabal that briefly answered 404 look identical from here, and a
+                    // member told they were thrown out of theirs needs something to tap.
+                    Button("Try again") { Task { await loadNewest() } }
+                        .buttonStyle(.monacoPrimary)
+                        .accessibilityIdentifier("group-chat-retry")
                 }
+                // `.contain` again: a bare identifier on this container was being handed to
+                // the Try again button inside it, so the one control on the screen could not
+                // be addressed — by a UI test or by anything else.
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("group-chat-error")
             } else {
                 statusMessage {
@@ -158,15 +181,21 @@ struct GroupChatView: View {
             .refreshable {
                 await refreshGate.runNow { await loadNewest() }
             }
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentOffset.y + geometry.containerSize.height
-                    >= geometry.contentSize.height - Self.pinnedSlack
-            } action: { _, isAtBottom in
+            .onScrollGeometryChange(for: ThreadPosition.self) { geometry in
+                ThreadPosition(
+                    offset: geometry.contentOffset.y,
+                    isAtEnd: geometry.contentOffset.y + geometry.containerSize.height
+                        >= geometry.contentSize.height - Self.pinnedSlack
+                )
+            } action: { _, updated in
+                // Remembered in both directions: the phase handler needs the answer at the
+                // moment a drag ends, and by then there may be no transition left to read.
+                position = updated
                 // Reaching the end is the reader rejoining the conversation, whether they
                 // dragged there or we took them. Nothing here may set `readerControlsScroll`:
                 // content growing pushes the end away for a frame or two, and that is the
                 // thread working, not the reader leaving.
-                guard isAtBottom else { return }
+                guard updated.isAtEnd else { return }
                 readerControlsScroll = false
                 unreadCount = 0
             }
@@ -180,8 +209,52 @@ struct GroupChatView: View {
                 proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
             }
             .onScrollPhaseChange { _, phase in
-                // A drag, not our own animated scroll: from here the position is theirs.
-                if phase == .interacting { readerControlsScroll = true }
+                switch phase {
+                case .interacting:
+                    // A drag, not our own animated scroll: from here the position is theirs.
+                    if dragOrigin == nil {
+                        dragOrigin = DragOrigin(offset: position.offset, wasFollowing: !readerControlsScroll)
+                    }
+                    readerControlsScroll = true
+                case .idle:
+                    // …unless the drag left them where it found them. That is what the
+                    // geometry handler cannot answer on its own: its derived value never
+                    // leaves `true` for a drag inside the pinned window, so it has no
+                    // transition to report and the latch would stay set for the life of the
+                    // view — the stranded thread again, pill drawn over the message that just
+                    // landed.
+                    //
+                    // "Where it found them" is compared as an *offset*, not as end-ness: a
+                    // message arriving mid-drag moves the end away, and an arrival is not the
+                    // reader going anywhere. End-ness alone would hand the latch straight back
+                    // on a busy cabal, which is the one place this matters.
+                    let origin = dragOrigin
+                    dragOrigin = nil
+                    if position.isAtEnd {
+                        readerControlsScroll = false
+                        unreadCount = 0
+                        return
+                    }
+                    // A gesture that barely moved the thread did not hand it over, so give
+                    // back whatever control the reader had before it. That is the whole of
+                    // the bug: swiping down to dismiss the keyboard, a flick to check for new
+                    // messages, or a pull-to-refresh on a short thread all latched the reader
+                    // in control of a thread they never left, and nothing could clear it
+                    // again — every arrival counted unread, the pill drawn over the message
+                    // that had just landed, and the correction that keeps a LazyVStack at its
+                    // end switched off for the life of the view.
+                    //
+                    // Measured as movement rather than as "is it at the end", because the end
+                    // moves on its own: a message arriving mid-drag pushes it away, and that
+                    // is not the reader going anywhere.
+                    guard let origin, origin.wasFollowing,
+                          abs(position.offset - origin.offset) <= Self.pinnedSlack
+                    else { return }
+                    readerControlsScroll = false
+                    unreadCount = 0
+                default:
+                    return
+                }
             }
             .onChange(of: scrollToBottomRequests) { _, _ in
                 withAnimation(.easeOut(duration: 0.2)) {
@@ -247,18 +320,28 @@ struct GroupChatView: View {
         .accessibilityIdentifier("group-chat-new-messages")
     }
 
+    /// Replaces the composer on a closed thread. It keeps a way back: this is the only thing
+    /// on screen once the poll is parked, and the reason behind it may have been a blip.
     private func closedBanner(_ message: String) -> some View {
-        Label(message, systemImage: "lock.fill")
-            .font(.footnote)
-            .foregroundStyle(MonacoTheme.secondaryText)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .background(MonacoTheme.background)
-            .overlay(alignment: .top) {
-                Rectangle().fill(MonacoTheme.border).frame(height: 0.5)
-            }
-            .accessibilityIdentifier("group-chat-closed")
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Label(message, systemImage: "lock.fill")
+                .font(.footnote)
+                .foregroundStyle(MonacoTheme.secondaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button("Try again") { Task { await loadNewest() } }
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(MonacoTheme.accent)
+                .accessibilityIdentifier("group-chat-closed-retry")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(MonacoTheme.background)
+        .overlay(alignment: .top) {
+            Rectangle().fill(MonacoTheme.border).frame(height: 0.5)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("group-chat-closed")
     }
 
     private func statusMessage<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -280,12 +363,12 @@ struct GroupChatView: View {
             let page = try await service.listGroupMessages(groupId: groupId, before: nil, limit: pageSize)
             apply(page)
             loadError = nil
+            // The server just handed over the thread, which reopens it if we had it shut.
+            closure.succeeded()
         } catch is CancellationError {
             return
         } catch {
-            if let closed = GroupChatCopy.chatClosed(error) {
-                closedMessage = closed
-            }
+            closure.memberLoadFailed(error)
             if timeline.hasLoadedNewest {
                 toast = MonacoToast(message: GroupChatCopy.refreshFailure(error))
             } else {
@@ -302,11 +385,13 @@ struct GroupChatView: View {
             let page = try await service.listGroupMessages(groupId: groupId, before: nil, limit: pageSize)
             apply(page)
             if loadError != nil { loadError = nil }
+            closure.succeeded()
         } catch {
-            if let closed = GroupChatCopy.chatClosed(error) {
-                closedMessage = closed
-                return
-            }
+            closure.pollFailed(error)
+            // A closed answer this loop has not corroborated yet is not something to back off
+            // from — it is the one thing worth asking again promptly, on the normal cadence,
+            // to find out whether it was a blip. Once it is believed, `isActive` parks us.
+            guard GroupChatCopy.chatClosed(error) == nil else { return }
             throw error
         }
     }
@@ -344,6 +429,12 @@ struct GroupChatView: View {
         defer { isLoadingOlder = false }
         // The row at the top right now is the one the reader is looking at.
         let topRowID = timeline.rows.first?.id
+        // Asking for history is the reader taking the thread over, whether or not they had to
+        // drag to reach the button — on a thread barely taller than the screen it is reachable
+        // without one. Said before the prepend, because the content-size correction fires on
+        // it: otherwise it races the place-keeping scroll below and wins, dropping the reader
+        // at the bottom of the very history they just asked for.
+        readerControlsScroll = true
         do {
             let page = try await service.listGroupMessages(groupId: groupId, before: cursor, limit: pageSize)
             timeline.mergeOlder(page)
@@ -351,30 +442,57 @@ struct GroupChatView: View {
         } catch is CancellationError {
             return
         } catch {
-            if let closed = GroupChatCopy.chatClosed(error) { closedMessage = closed }
+            closure.memberLoadFailed(error)
             toast = MonacoToast(message: GroupChatCopy.earlierFailure(error))
         }
     }
 
-    /// Posts `body`. Returns true once it has landed, which is what clears the composer.
-    private func send(_ body: String) async -> Bool {
+    /// Posts `body`, and says what the composer should do with the member's text.
+    private func send(_ body: String) async -> GroupChatSendOutcome {
         guard let service = makeService() else {
             toast = MonacoToast(message: GroupChatCopy.sendFailure(MonacoCore.MonacoAPIError.httpStatus(401)))
-            return false
+            return .failed
         }
         do {
             let sent = try await service.postGroupMessage(groupId: groupId, body: body)
             timeline.appendSent(sent)
             followThread()
-            return true
+            return .sent
         } catch is CancellationError {
-            return false
+            return .failed
         } catch {
-            if let closed = GroupChatCopy.chatClosed(error) { closedMessage = closed }
+            closure.memberLoadFailed(error)
             toast = MonacoToast(message: GroupChatCopy.sendFailure(error))
-            return false
+            return GroupChatCopy.isSendUnconfirmed(error) ? .unconfirmed : .failed
         }
     }
+}
+
+/// Where the thread is resting: how far it is scrolled, and whether that counts as being at
+/// the newest message. Both together, because deciding what a drag meant needs the offset —
+/// end-ness moves on its own whenever a message arrives.
+private struct ThreadPosition: Equatable {
+    var offset: CGFloat
+    var isAtEnd: Bool
+}
+
+/// Where the thread stood when a drag began, which is what says whether the drag meant
+/// anything: who was in control, and how far it has moved since.
+private struct DragOrigin: Equatable {
+    var offset: CGFloat
+    var wasFollowing: Bool
+}
+
+/// What a send leaves the composer to do.
+private enum GroupChatSendOutcome {
+    /// It landed. The composer stays empty.
+    case sent
+    /// It definitely did not land, so the member's text comes back.
+    case failed
+    /// It may well have landed, and chat has no delete. The text is deliberately *not* handed
+    /// back: a composer refilled with a message that is already in the thread is one tap from
+    /// the duplicate the warning is there to prevent.
+    case unconfirmed
 }
 
 extension GroupChatView {
@@ -391,8 +509,8 @@ extension GroupChatView {
 /// the whole thread.
 private struct GroupChatComposer: View {
     var focus: FocusState<Bool>.Binding
-    /// Posts the trimmed body; true once it landed.
-    let send: (String) async -> Bool
+    /// Posts the trimmed body and says what to do with the member's text.
+    let send: (String) async -> GroupChatSendOutcome
 
     @State private var draft = ""
     @State private var isSending = false
@@ -470,10 +588,15 @@ private struct GroupChatComposer: View {
         draft = ""
         isSending = true
         defer { isSending = false }
-        if await send(body) { return }
-        // Failed. Give the text back, unless something new was typed while it was in flight.
-        if draft.isEmpty {
-            draft = submitted
+
+        switch await send(body) {
+        case .sent, .unconfirmed:
+            return
+        case .failed:
+            // Give the text back. Anything typed while it was in flight is the member's too,
+            // so the failed message goes in front of it rather than one of the two being
+            // picked to throw away silently.
+            draft = draft.isEmpty ? submitted : submitted + "\n" + draft
         }
     }
 }

@@ -208,13 +208,26 @@ public struct GroupChatTimeline: Equatable, Sendable {
         // not re-sorted, not rebuilt, and — this is the point — not invalidated.
         guard !addedIDs.isEmpty else { return [] }
         messages = byID.values.sorted(by: Self.chronological)
-        rows = Self.rows(for: messages)
+        rows = Self.rows(for: messages, reusing: rows)
         return messages.filter { addedIDs.contains($0.id) }
     }
 
     /// Two passes because a bubble's tail depends on the row *after* it.
-    private static func rows(for messages: [GroupMessageDTO]) -> [GroupChatRow] {
-        let dates = messages.map(\.createdAtDate)
+    ///
+    /// Dates come from `reusing` wherever the message was already on screen. Parsing a chat
+    /// timestamp costs two formatter passes and a fresh string, and a poll that brings one
+    /// message used to re-parse the whole loaded thread on the main actor every four seconds —
+    /// which on a busy cabal gave back most of what building rows once was meant to win. Only
+    /// the arrivals are parsed now; the runs and separators are plain `Date` comparisons.
+    private static func rows(
+        for messages: [GroupMessageDTO],
+        reusing previous: [GroupChatRow]
+    ) -> [GroupChatRow] {
+        var known = [String: Date?](minimumCapacity: previous.count)
+        for row in previous { known[row.message.id] = row.date }
+        // Two optionals deep on purpose: a miss re-parses, while a hit that parsed to nil
+        // before stays nil rather than being parsed again to fail again.
+        let dates = messages.map { known[$0.id] ?? $0.createdAtDate }
         var separators = [Bool](repeating: false, count: messages.count)
         for index in messages.indices {
             guard let date = dates[index] else { continue }
@@ -243,6 +256,60 @@ public struct GroupChatTimeline: Equatable, Sendable {
     private static func chronological(_ lhs: GroupMessageDTO, _ rhs: GroupMessageDTO) -> Bool {
         if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
         return lhs.id < rhs.id
+    }
+}
+
+/// Whether the thread is currently shut to the viewer, and how sure the app is about it.
+///
+/// Closing is heavy-handed: it parks the poll, takes the composer away and tells a paying
+/// member they are out of their cabal. It used to be one-way and a single background tick
+/// could trigger it, so one 403 or 404 — a membership read served by a lagging replica, one of
+/// the messages route's non-cabal 404s — ended the screen for the life of the view, with
+/// nothing on it to tap.
+///
+/// Two rules put that right. Being thrown out of a cabal is a durable fact: the server says so
+/// every time it is asked, so a background poll has to say it `pollsBeforeClosing` times in a
+/// row before it is believed. And a load the member asked for is answered at once and in both
+/// directions — they are watching, and a server that just handed over the thread settles the
+/// question whatever the app believed a moment ago.
+public struct GroupChatClosureTracker: Equatable, Sendable {
+    /// Consecutive closed answers a background poll must give before the thread closes. At the
+    /// 4-second tick that is a server holding the same story for over ten seconds, which no
+    /// replica blip does and a real removal always will.
+    public static let pollsBeforeClosing = 3
+
+    /// Why the thread is shut, or nil while it is open.
+    public private(set) var message: String?
+    private var consecutiveClosedPolls = 0
+
+    public init() {}
+
+    public var isClosed: Bool { message != nil }
+
+    /// The server answered with a page. Whatever the app believed about being shut out is out
+    /// of date, so this reopens the thread as well as resetting the run of closed polls.
+    public mutating func succeeded() {
+        message = nil
+        consecutiveClosedPolls = 0
+    }
+
+    /// A load the member asked for — opening the screen, Try again, pull to refresh, Load
+    /// earlier, sending. They are waiting on this one, so it is believed immediately.
+    public mutating func memberLoadFailed(_ error: Error) {
+        guard let closed = GroupChatCopy.chatClosed(error) else { return }
+        message = closed
+        consecutiveClosedPolls = 0
+    }
+
+    /// A background tick. One closed answer is not evidence of anything.
+    public mutating func pollFailed(_ error: Error) {
+        guard let closed = GroupChatCopy.chatClosed(error) else {
+            consecutiveClosedPolls = 0
+            return
+        }
+        consecutiveClosedPolls += 1
+        guard consecutiveClosedPolls >= Self.pollsBeforeClosing else { return }
+        message = closed
     }
 }
 
@@ -307,6 +374,18 @@ public enum GroupChatCopy {
     /// URL errors raised before any byte leaves the device.
     public static let sendUnconfirmed = "We couldn't confirm that went through. Check above before sending it again."
 
+    /// True when a failed send leaves it unknown whether the API stored the message.
+    ///
+    /// The same judgement `sendFailure` already makes, asked as a question rather than
+    /// restated, so the two cannot drift apart. The caller needs it because the two answers
+    /// differ in what to do with the member's text: a send that definitely failed should hand
+    /// it back, while one that may have landed must not — chat has no delete, and a composer
+    /// refilled with a message that is already in the thread is one tap from the duplicate
+    /// this sentence exists to prevent.
+    public static func isSendUnconfirmed(_ error: Error) -> Bool {
+        sendFailure(error) == sendUnconfirmed
+    }
+
     /// The chat screen is titled with the cabal's own name; "Cabal chat" only when it's missing.
     public static func title(groupName: String?) -> String {
         let trimmed = groupName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -370,17 +449,39 @@ public enum GroupChatCopy {
     /// Why this thread is no longer readable, or nil for a failure worth retrying. Chat stops
     /// polling on one of these instead of asking a cabal it was thrown out of every 4 seconds.
     public static func chatClosed(_ error: Error) -> String? {
-        let status: Int
         switch error {
-        case MonacoAPIError.httpStatus(let code, _): status = code
-        case MonacoAPIError.rejected(let code, _, _): status = code
-        default: return nil
+        case MonacoAPIError.httpStatus(let code, _):
+            return chatClosed(status: code, serverMessage: nil)
+        case MonacoAPIError.rejected(let code, let message, _):
+            return chatClosed(status: code, serverMessage: message)
+        default:
+            return nil
         }
+    }
+
+    /// 403 is the API making a decision about this member, and it means what it says.
+    ///
+    /// 404 does not. The messages route answers 404 for a missing user and a missing path id
+    /// as well as a missing cabal, so reading every 404 as "your cabal is gone" tells a member
+    /// their cabal was deleted because a membership read landed on a replica that had not
+    /// caught up yet. The body is the only thing that tells them apart — these branches log a
+    /// machine-readable reason but do not put it in the response — so match the one that is
+    /// about something other than the group and treat it as worth retrying.
+    private static func chatClosed(status: Int, serverMessage: String?) -> String? {
         switch status {
-        case 403: return "You're no longer in this cabal, so its chat is closed to you."
-        case 404: return "This cabal no longer exists."
-        default: return nil
+        case 403:
+            return "You're no longer in this cabal, so its chat is closed to you."
+        case 404:
+            guard !isAboutTheUser(serverMessage) else { return nil }
+            return "This cabal no longer exists."
+        default:
+            return nil
         }
+    }
+
+    private static func isAboutTheUser(_ serverMessage: String?) -> Bool {
+        guard let serverMessage else { return false }
+        return serverMessage.localizedCaseInsensitiveContains("user not found")
     }
 
     /// The pill offered to a member reading history when messages land below them.

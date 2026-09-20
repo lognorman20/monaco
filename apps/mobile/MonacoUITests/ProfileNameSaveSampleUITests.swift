@@ -86,6 +86,40 @@ final class ProfileNameSaveSampleUITests: XCTestCase {
         wait(for: [cleared], timeout: 10)
     }
 
+    // MARK: - An accepted save closes the sheet, then reports
+
+    /// The other half of the same fix, and the half that had no coverage: the toast is an
+    /// overlay on the *presenting* screen, so a success reported while the sheet is still up
+    /// renders behind it. The sheet has to close first and the toast land on the uncovered
+    /// screen — with the new name on it.
+    @MainActor
+    func testAcceptedSaveClosesTheSheetThenToastsOnTheScreenBehind() throws {
+        let app = launchApp("saveSuccess")
+
+        let saveButton = anyElement(app, "profile-name-save")
+        XCTAssertTrue(saveButton.waitForExistence(timeout: 10), "the edit sheet should open with Save available")
+        XCTAssertTrue(saveButton.isEnabled, "the sample draft is valid and differs from the saved name")
+
+        saveButton.tap()
+
+        // Asked for first, because the banner clears itself after 2.5s. It is one combined
+        // accessibility element, so the message is its label rather than a static text.
+        let toast = anyElement(app, "monaco-toast-banner")
+        XCTAssertTrue(
+            toast.waitForExistence(timeout: 10),
+            "the success must be reported, not swallowed. On screen:\n\(app.debugDescription.suffix(6000))"
+        )
+        XCTAssertTrue(
+            toast.label.contains("Name updated."),
+            "the toast should confirm the save; its label was \(toast.label)"
+        )
+        attachScreenshot(app, name: "03-save-accepted")
+
+        // And it is readable, because the sheet it would have rendered behind is gone.
+        let sheetClosed = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: saveButton)
+        wait(for: [sheetClosed], timeout: 10)
+    }
+
     // MARK: - Header controls stay individually addressable
 
     /// The header used to `.combine` its children, which merged the photo picker and the
