@@ -33,6 +33,7 @@
 		B463062030590360008E7964 /* MonacoTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MonacoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B463062A30590360008E7964 /* MonacoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MonacoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B463064230590362008E7964 /* Privy.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Privy.xcconfig; sourceTree = "<group>"; };
+		B463064430590362008E7964 /* Monaco.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Monaco.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -104,6 +105,7 @@
 		B463064330590362008E7964 /* Config */ = {
 			isa = PBXGroup;
 			children = (
+				B463064430590362008E7964 /* Monaco.xcconfig */,
 				B463064230590362008E7964 /* Privy.xcconfig */,
 			);
 			path = Config;
@@ -415,7 +417,7 @@
 		};
 		B463063530590360008E7964 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = B463064230590362008E7964 /* Privy.xcconfig */;
+			baseConfigurationReference = B463064430590362008E7964 /* Monaco.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -424,8 +426,7 @@
 				DEVELOPMENT_TEAM = JSF53DFS29;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Config/Privy.local.Info.plist;
-				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_FILE = Config/Privy.local.Debug.Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
@@ -450,7 +451,7 @@
 		};
 		B463063630590360008E7964 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = B463064230590362008E7964 /* Privy.xcconfig */;
+			baseConfigurationReference = B463064430590362008E7964 /* Monaco.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -460,7 +461,6 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Config/Privy.local.Info.plist;
-				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;

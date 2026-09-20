@@ -5,11 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"math/big"
-	"strings"
 	"time"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -143,22 +140,15 @@ func (s *Store) WriteNavSnapshot(ctx context.Context, groupID string, reason Nav
 }
 
 // WriteNavSnapshotOnDepositConfirmTx records pot NAV after a confirmed deposit credit.
-func (s *Store) WriteNavSnapshotOnDepositConfirmTx(ctx context.Context, tx *sql.Tx, groupID string, treasuryUSDC int64) error {
-	vals, err := s.computeNavSnapshotValues(ctx, tx, groupID, treasuryUSDC)
-	if err != nil {
-		return err
-	}
-	_, err = s.InsertNavSnapshotTx(ctx, tx, groupID, NavSnapshotReasonDeposit, vals)
+// The store only persists: vals come from the app's single pot valuation.
+func (s *Store) WriteNavSnapshotOnDepositConfirmTx(ctx context.Context, tx *sql.Tx, groupID string, vals NavSnapshotValues) error {
+	_, err := s.InsertNavSnapshotTx(ctx, tx, groupID, NavSnapshotReasonDeposit, vals)
 	return err
 }
 
 // WriteNavSnapshotOnTransactionConfirm records pot NAV after a newly confirmed transaction.
-func (s *Store) WriteNavSnapshotOnTransactionConfirm(ctx context.Context, groupID string, treasuryUSDC int64) error {
-	vals, err := s.ComputeNavSnapshotValues(ctx, groupID, treasuryUSDC)
-	if err != nil {
-		return err
-	}
-	_, err = s.WriteNavSnapshot(ctx, groupID, NavSnapshotReasonTransactionConfirm, vals)
+func (s *Store) WriteNavSnapshotOnTransactionConfirm(ctx context.Context, groupID string, vals NavSnapshotValues) error {
+	_, err := s.WriteNavSnapshot(ctx, groupID, NavSnapshotReasonTransactionConfirm, vals)
 	return err
 }
 
@@ -167,7 +157,7 @@ func (s *Store) RecordTreasuryHoldingsAndNavSnapshotOnConfirm(
 	ctx context.Context,
 	groupID string,
 	tx TransactionRow,
-	treasuryUSDC int64,
+	vals NavSnapshotValues,
 ) error {
 	if groupID == "" {
 		return fmt.Errorf("group_id is required")
@@ -187,7 +177,7 @@ func (s *Store) RecordTreasuryHoldingsAndNavSnapshotOnConfirm(
 		return fmt.Errorf("treasury holdings missing output mint %s", tx.OutputMint)
 	}
 
-	return s.WriteNavSnapshotOnTransactionConfirm(ctx, groupID, treasuryUSDC)
+	return s.WriteNavSnapshotOnTransactionConfirm(ctx, groupID, vals)
 }
 
 func holdingIncludesMint(holdings []TokenHoldingRow, mint string) bool {
@@ -200,25 +190,9 @@ func holdingIncludesMint(holdings []TokenHoldingRow, mint string) bool {
 }
 
 // WriteNavSnapshotOnWithdrawalPayoutTx records pot NAV after a confirmed withdrawal payout.
-func (s *Store) WriteNavSnapshotOnWithdrawalPayoutTx(ctx context.Context, tx *sql.Tx, groupID string, treasuryUSDC int64) error {
-	vals, err := s.computeNavSnapshotValues(ctx, tx, groupID, treasuryUSDC)
-	if err != nil {
-		return err
-	}
-	_, err = s.InsertNavSnapshotTx(ctx, tx, groupID, NavSnapshotReasonWithdrawalPayout, vals)
+func (s *Store) WriteNavSnapshotOnWithdrawalPayoutTx(ctx context.Context, tx *sql.Tx, groupID string, vals NavSnapshotValues) error {
+	_, err := s.InsertNavSnapshotTx(ctx, tx, groupID, NavSnapshotReasonWithdrawalPayout, vals)
 	return err
-}
-
-// ComputeNavSnapshotValues derives pot NAV from treasury USDC, outstanding shares, and confirmed fills.
-func (s *Store) ComputeNavSnapshotValues(ctx context.Context, groupID string, treasuryUSDC int64) (NavSnapshotValues, error) {
-	return s.computeNavSnapshotValues(ctx, s.db, groupID, treasuryUSDC)
-}
-
-// ComputeNavSnapshotValuesWithShareBase derives pot NAV as if extraShareUnitsMicros additional
-// share units were still outstanding. Redeem uses it to re-price an in-flight job: those shares
-// are already debited, but the pot they are a claim on has not been paid out yet.
-func (s *Store) ComputeNavSnapshotValuesWithShareBase(ctx context.Context, groupID string, treasuryUSDC, extraShareUnitsMicros int64) (NavSnapshotValues, error) {
-	return s.computeNavSnapshotValuesWithShareBase(ctx, s.db, groupID, treasuryUSDC, extraShareUnitsMicros)
 }
 
 // SumShareUnitsByGroupTx returns total share_units within tx.
@@ -234,94 +208,6 @@ func (s *Store) ListNetTokenHoldingsByGroupTx(ctx context.Context, tx *sql.Tx, g
 // GetFillDerivedCostBasisByOutputMintTx returns fill cost basis visible within tx.
 func (s *Store) GetFillDerivedCostBasisByOutputMintTx(ctx context.Context, tx *sql.Tx, groupID, outputMint string) (int64, int64, bool, error) {
 	return fillDerivedCostBasisByOutputMintQuery(ctx, tx, groupID, outputMint)
-}
-
-func (s *Store) computeNavSnapshotValues(ctx context.Context, q navSnapshotQuerier, groupID string, treasuryUSDC int64) (NavSnapshotValues, error) {
-	return s.computeNavSnapshotValuesWithShareBase(ctx, q, groupID, treasuryUSDC, 0)
-}
-
-func (s *Store) computeNavSnapshotValuesWithShareBase(ctx context.Context, q navSnapshotQuerier, groupID string, treasuryUSDC, extraShareUnitsMicros int64) (NavSnapshotValues, error) {
-	if groupID == "" {
-		return NavSnapshotValues{}, fmt.Errorf("group_id is required")
-	}
-	if treasuryUSDC < 0 {
-		return NavSnapshotValues{}, fmt.Errorf("treasury usdc must be non-negative")
-	}
-	if extraShareUnitsMicros < 0 {
-		return NavSnapshotValues{}, fmt.Errorf("extra share units must be non-negative")
-	}
-
-	totalSharesMicro, err := sumShareUnitsByGroupQuery(ctx, q, groupID)
-	if err != nil {
-		return NavSnapshotValues{}, err
-	}
-	totalSharesMicro += extraShareUnitsMicros
-
-	holdings, err := listNetTokenHoldingsByGroupQuery(ctx, q, groupID)
-	if err != nil {
-		return NavSnapshotValues{}, err
-	}
-
-	totalShares, err := domain.ShareUnitsMicrosToDomain(totalSharesMicro)
-	if err != nil {
-		return NavSnapshotValues{}, err
-	}
-
-	if len(holdings) == 0 {
-		potNav := treasuryUSDC
-		// Uncredited treasury USDC must not inflate NAV until shares are minted (1:1 M2).
-		if totalSharesMicro > 0 && potNav > totalSharesMicro {
-			potNav = totalSharesMicro
-		}
-		if potNav == 0 && totalSharesMicro > 0 {
-			potNav = totalSharesMicro
-		}
-		return NavSnapshotValues{
-			PotNavMicros:      potNav,
-			NavPerShareMicros: domain.BootstrapSharePriceMicros,
-			TotalShares:       totalSharesMicro,
-		}, nil
-	}
-
-	markedHoldings := make([]domain.MarkedHolding, 0, len(holdings))
-	for _, holding := range holdings {
-		price, fillAmount, found, err := fillDerivedCostBasisByOutputMintQuery(ctx, q, groupID, holding.Mint)
-		if err != nil {
-			return NavSnapshotValues{}, err
-		}
-		if !found {
-			return NavSnapshotValues{}, fmt.Errorf("cost basis not found for mint %s", holding.Mint)
-		}
-		if fillAmount <= 0 {
-			return NavSnapshotValues{}, fmt.Errorf("cost basis amount must be positive for mint %s", holding.Mint)
-		}
-		markPerUnit, err := costBasisMarkPerUnitMicros(price, fillAmount)
-		if err != nil {
-			return NavSnapshotValues{}, err
-		}
-		units, err := tokenAtomicsToShareUnits(holding.Amount)
-		if err != nil {
-			return NavSnapshotValues{}, err
-		}
-		markedHoldings = append(markedHoldings, domain.MarkedHolding{
-			Symbol:    symbolForMint(holding.Mint),
-			Units:     string(units),
-			MarkUsdc:  domain.USDCMicros(markPerUnit),
-			CostBasis: domain.USDCMicros(markPerUnit),
-		})
-	}
-
-	nav, err := domain.ComputePotNAV(domain.NavInput{
-		Mode:         domain.NavMarked,
-		TreasuryUsdc: domain.USDCMicros(treasuryUSDC),
-		TotalShares:  totalShares,
-		Holdings:     markedHoldings,
-	})
-	if err != nil {
-		return NavSnapshotValues{}, fmt.Errorf("compute pot nav: %w", err)
-	}
-
-	return NavSnapshotValuesFromPotNAV(nav, totalSharesMicro), nil
 }
 
 func sumShareUnitsByGroupQuery(ctx context.Context, q navSnapshotQuerier, groupID string) (int64, error) {
@@ -416,15 +302,6 @@ SELECT buys.usdc, buys.tokens, sells.tokens FROM buys, sells`
 		return 0, 0, false, fmt.Errorf("remaining cost basis: %w", err)
 	}
 	return remainingBasis, remaining, true, nil
-}
-
-// NavSnapshotValuesFromPotNAV converts domain pot NAV into persisted micro values.
-func NavSnapshotValuesFromPotNAV(nav domain.PotNAV, totalSharesMicro int64) NavSnapshotValues {
-	return NavSnapshotValues{
-		PotNavMicros:      int64(nav.TotalUsdc),
-		NavPerShareMicros: int64(nav.PerShareUsdc),
-		TotalShares:       totalSharesMicro,
-	}
 }
 
 // ListNavSnapshotsForGroupsSince returns snapshots for groupIDs at or after since, oldest first.
@@ -527,43 +404,4 @@ SELECT COUNT(*) FROM nav_snapshots WHERE group_id = $1 AND reason = $2`, groupID
 		return 0, fmt.Errorf("count nav snapshots: %w", err)
 	}
 	return count, nil
-}
-
-func tokenAtomicsToShareUnits(atomics int64) (domain.ShareUnits, error) {
-	if atomics < 0 {
-		return "", fmt.Errorf("token atomics must be non-negative")
-	}
-	if atomics == 0 {
-		return domain.ShareUnits("0"), nil
-	}
-	r := new(big.Rat).SetFrac(big.NewInt(atomics), big.NewInt(jupiter.XStockAtomicScale))
-	s := strings.TrimRight(r.FloatString(8), "0")
-	s = strings.TrimRight(s, ".")
-	return domain.ShareUnits(s), nil
-}
-
-func symbolForMint(mint string) string {
-	switch mint {
-	case jupiter.AAPLxMint:
-		return "AAPLx"
-	default:
-		return mint
-	}
-}
-
-func costBasisMarkPerUnitMicros(totalUSDCMicros, tokenAtomics int64) (int64, error) {
-	if totalUSDCMicros < 0 {
-		return 0, fmt.Errorf("cost basis usdc must be non-negative")
-	}
-	if tokenAtomics <= 0 {
-		return 0, fmt.Errorf("cost basis token amount must be positive")
-	}
-	mark, err := domain.MulDivFloor(totalUSDCMicros, jupiter.XStockAtomicScale, tokenAtomics)
-	if err != nil {
-		return 0, fmt.Errorf("derive mark per unit: %w", err)
-	}
-	if mark <= 0 {
-		return 0, fmt.Errorf("derived mark per unit must be positive")
-	}
-	return mark, nil
 }

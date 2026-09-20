@@ -2,6 +2,7 @@ package privy
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"net/http"
 	"net/url"
 	"time"
@@ -29,6 +30,14 @@ type Client interface {
 	USDCPayoutStatus(ctx context.Context, payout PreparedPayout) (PayoutStatus, error)
 }
 
+// SweepClient is the sweep poller's view of Privy. Sweeps are split in two so the poller can
+// persist the transaction signature between PrepareSweep and BroadcastSweep.
+type SweepClient interface {
+	MemberUSDCBalance(ctx context.Context, memberAddress string) (int64, error)
+	PrepareSweep(ctx context.Context, req SweepRequest) (PreparedSweep, error)
+	BroadcastSweep(ctx context.Context, prepared PreparedSweep) (SweepResult, error)
+}
+
 // HTTPClient calls Privy REST APIs with app credentials.
 type HTTPClient struct {
 	appID                        string
@@ -38,7 +47,8 @@ type HTTPClient struct {
 	relayerPrivateKey            string
 	baseURL                      string
 	solanaCluster                string
-	solanaRPCURL                 string // test override; empty uses cluster default
+	solanaRPCURL                 string // SOLANA_RPC_URL; empty uses the public cluster endpoint
+	verificationKey              *ecdsa.PublicKey
 	httpClient                   *http.Client
 }
 
@@ -53,6 +63,7 @@ func NewHTTPClient(cfg *config.Config) *HTTPClient {
 		baseURL:                      defaultBaseURL,
 		solanaCluster:                cfg.SolanaCluster,
 		solanaRPCURL:                 cfg.SolanaRPCURL,
+		verificationKey:              cfg.PrivyVerificationKey,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},

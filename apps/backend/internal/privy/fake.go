@@ -21,6 +21,8 @@ type fakePrivyClient struct {
 	treasuryBalances map[string]int64
 	lastSweep       SweepRequest
 	sweepCount      int
+	prepareCount    int
+	sweepLastValidBlockHeight uint64
 	lastTransfer    TransferRequest
 	transferCount   int
 	rejectSubmitTransfer bool
@@ -318,15 +320,43 @@ func (f *fakePrivyClient) SubmitMemberUSDCTransfer(ctx context.Context, req Tran
 }
 
 func (f *fakePrivyClient) SubmitSweep(ctx context.Context, req SweepRequest) (SweepResult, error) {
+	prepared, err := f.PrepareSweep(ctx, req)
+	if err != nil {
+		return SweepResult{}, err
+	}
+	return f.BroadcastSweep(ctx, prepared)
+}
+
+func (f *fakePrivyClient) PrepareSweep(ctx context.Context, req SweepRequest) (PreparedSweep, error) {
 	_ = ctx
 	if req.MemberAddress == "" || req.TreasuryAddress == "" {
-		return SweepResult{}, fmt.Errorf("%w: missing addresses", ErrAPI)
+		return PreparedSweep{}, fmt.Errorf("%w: %w: missing addresses", ErrBroadcastRejected, ErrAPI)
 	}
 	if req.Amount <= 0 {
-		return SweepResult{}, fmt.Errorf("%w: invalid amount", ErrAPI)
+		return PreparedSweep{}, fmt.Errorf("%w: %w: invalid amount", ErrBroadcastRejected, ErrAPI)
 	}
 	if req.RelayerKey == "" {
-		return SweepResult{}, fmt.Errorf("%w: relayer key required", ErrAPI)
+		return PreparedSweep{}, fmt.Errorf("%w: %w: relayer key required", ErrBroadcastRejected, ErrAPI)
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.prepareCount++
+	logFake("prepare_sweep", "amount", req.Amount, "member", req.MemberAddress, "treasury", req.TreasuryAddress)
+	return PreparedSweep{
+		Request:              req,
+		WalletID:             deterministicPrivyWalletID("member-address", req.MemberAddress),
+		TransactionBase64:    "fake-sweep-transaction",
+		TxSignature:          deterministicTxSignature(req.MemberAddress, req.TreasuryAddress, req.Amount, f.prepareCount),
+		LastValidBlockHeight: f.sweepLastValidBlockHeight,
+	}, nil
+}
+
+func (f *fakePrivyClient) BroadcastSweep(ctx context.Context, prepared PreparedSweep) (SweepResult, error) {
+	_ = ctx
+	req := prepared.Request
+	if prepared.TxSignature == "" {
+		return SweepResult{}, fmt.Errorf("%w: %w: sweep is not prepared", ErrBroadcastRejected, ErrAPI)
 	}
 
 	f.mu.Lock()
@@ -334,7 +364,7 @@ func (f *fakePrivyClient) SubmitSweep(ctx context.Context, req SweepRequest) (Sw
 	if f.rejectSubmitSweep {
 		err := f.rejectSubmitSweepErr
 		if err == nil {
-			err = fmt.Errorf("%w: submit sweep rejected", ErrAPI)
+			err = fmt.Errorf("%w: %w: submit sweep rejected", ErrBroadcastRejected, ErrAPI)
 		}
 		return SweepResult{}, err
 	}
@@ -346,8 +376,7 @@ func (f *fakePrivyClient) SubmitSweep(ctx context.Context, req SweepRequest) (Sw
 		f.memberBalances[req.MemberAddress] = 0
 	}
 	f.treasuryBalances[req.TreasuryAddress] += req.Amount
-	sig := deterministicTxSignature(req.MemberAddress, req.TreasuryAddress, req.Amount, f.sweepCount)
-	return SweepResult{TxSignature: sig}, nil
+	return SweepResult{TxSignature: prepared.TxSignature}, nil
 }
 
 // SetMemberUSDCBalance sets fake member wallet USDC for tests.
@@ -384,7 +413,29 @@ func RegisterPayoutProof(client Client, signature string) {
 	fake.mu.Unlock()
 }
 
-// SetRejectSubmitSweep forces SubmitSweep to fail for tests.
+// SweepCount returns how many sweeps the fake client broadcast.
+func SweepCount(client Client) int {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		panic("privy: SweepCount requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	return fake.sweepCount
+}
+
+// SetSweepLastValidBlockHeight sets the expiry height reported by PrepareSweep for tests.
+func SetSweepLastValidBlockHeight(client Client, height uint64) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		panic("privy: SetSweepLastValidBlockHeight requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.sweepLastValidBlockHeight = height
+	fake.mu.Unlock()
+}
+
+// SetRejectSubmitSweep forces SubmitSweep and BroadcastSweep to fail for tests.
 func SetRejectSubmitSweep(client Client, reject bool, err error) {
 	fake, ok := client.(*fakePrivyClient)
 	if !ok {

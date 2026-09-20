@@ -48,8 +48,10 @@ func costBasisMarkPerUnitMicros(totalUSDCMicros, tokenAtomics int64) (int64, err
 // groupPotView is marked treasury NAV plus per-asset pot rows for group screens.
 type groupPotView struct {
 	PotNavMicros int64
-	Rows         []GroupViewPotRow
-	AfterHours   bool
+	// ShareBaseMicros is every claim on PotNavMicros, including units held by in-flight redeem jobs.
+	ShareBaseMicros int64
+	Rows            []GroupViewPotRow
+	AfterHours      bool
 }
 
 func computeGroupPotView(
@@ -60,70 +62,21 @@ func computeGroupPotView(
 	groupID, treasuryAddress string,
 	treasuryUSDC int64,
 ) (groupPotView, error) {
-	if groupID == "" {
-		return groupPotView{}, fmt.Errorf("group_id is required")
-	}
-	if treasuryUSDC < 0 {
-		return groupPotView{}, fmt.Errorf("treasury usdc must be non-negative")
-	}
-
-	holdings, err := store.ListNetTokenHoldingsByGroup(ctx, groupID)
+	valuation, err := valuePot(ctx, store, pythClient, symbols, nil, groupID, treasuryAddress, treasuryUSDC, potMarksBestAvailable)
 	if err != nil {
 		return groupPotView{}, err
 	}
 
-	totalSharesMicro, err := store.SumShareUnitsByGroup(ctx, groupID)
-	if err != nil {
-		return groupPotView{}, err
-	}
-	totalShares, err := domain.ShareUnitsMicrosToDomain(totalSharesMicro)
-	if err != nil {
-		return groupPotView{}, err
-	}
-
-	if len(holdings) == 0 {
-		potNav := treasuryUSDC
-		if totalSharesMicro > 0 && potNav > totalSharesMicro {
-			potNav = totalSharesMicro
-		}
-		if potNav == 0 && totalSharesMicro > 0 {
-			potNav = totalSharesMicro
-		}
-		return groupPotView{
-			PotNavMicros: potNav,
-			Rows: []GroupViewPotRow{{
-				Symbol:    "USDC",
-				Units:     formatMicrosAsUsdDecimal(treasuryUSDC),
-				MarkUsd:   "1.00",
-				ValueUsd:  formatMicrosAsUsdDecimal(treasuryUSDC),
-				DollarPnL: formatSignedDollarPnL(0),
-			}},
-		}, nil
-	}
-
-	pythInput, err := fetchMarkedPotInput(ctx, store, pythClient, symbols, nil, groupID, treasuryAddress, treasuryUSDC, holdings)
-	if err != nil {
-		return groupPotView{}, err
-	}
-
-	navInput, err := domainNavInputFromPyth(pythInput, totalShares)
-	if err != nil {
-		return groupPotView{}, err
-	}
-	nav, err := ComputePotNAV(navInput)
-	if err != nil {
-		return groupPotView{}, fmt.Errorf("compute pot nav: %w", err)
-	}
-
-	rows, err := potRowsFromPythInput(pythInput)
+	rows, err := potRowsFromPythInput(valuation.Marked)
 	if err != nil {
 		return groupPotView{}, err
 	}
 
 	return groupPotView{
-		PotNavMicros: int64(nav.TotalUsdc),
-		Rows:         rows,
-		AfterHours:   pythInput.AfterHours,
+		PotNavMicros:    valuation.PotNavMicros,
+		ShareBaseMicros: valuation.ShareBaseMicros,
+		Rows:            rows,
+		AfterHours:      valuation.Marked.AfterHours,
 	}, nil
 }
 
@@ -136,6 +89,7 @@ func fetchMarkedPotInput(
 	groupID, treasuryAddress string,
 	treasuryUSDC int64,
 	holdings []postgres.TokenHoldingRow,
+	policy potMarkPolicy,
 ) (pyth.NavInput, error) {
 	costBasis, err := costBasisForHoldings(ctx, store, symbols, tx, groupID, holdings)
 	if err != nil {
@@ -148,24 +102,35 @@ func fetchMarkedPotInput(
 		TreasuryUsdc: treasuryUSDC,
 	}
 
-	if pythClient != nil {
-		input, err := pythClient.MarkedPot(ctx, treasuryRef, costBasis)
-		if err != nil {
-			slog.Warn("marked pot pricing failed; using cost basis fallback",
-				"group_id", groupID,
-				"treasury_address", treasuryAddress,
-				"err", err,
-			)
-			return costBasisMarkedPotInput(treasuryUSDC, costBasis)
+	if pythClient == nil {
+		if policy == potMarksLiveOnly {
+			return pyth.NavInput{}, fmt.Errorf("%w: no price client configured", ErrPotMarkUnavailable)
 		}
-		if input.TreasuryUsdc == 0 {
-			input.TreasuryUsdc = treasuryUSDC
-		}
-		logMarkedPotSources(groupID, tx != nil, input)
-		return input, nil
+		return costBasisMarkedPotInput(treasuryUSDC, costBasis)
 	}
 
-	return costBasisMarkedPotInput(treasuryUSDC, costBasis)
+	input, err := pythClient.MarkedPot(ctx, treasuryRef, costBasis)
+	if err != nil {
+		if policy == potMarksLiveOnly {
+			return pyth.NavInput{}, fmt.Errorf("%w: %v", ErrPotMarkUnavailable, err)
+		}
+		slog.Warn("marked pot pricing failed; using cost basis fallback",
+			"group_id", groupID,
+			"treasury_address", treasuryAddress,
+			"err", err,
+		)
+		return costBasisMarkedPotInput(treasuryUSDC, costBasis)
+	}
+	input.Holdings, err = marksForLedgerHoldings(groupID, costBasis, input.Holdings, policy)
+	if err != nil {
+		return pyth.NavInput{}, err
+	}
+	input.AfterHours = pyth.PotAfterHours(input.Holdings)
+	if input.TreasuryUsdc == 0 {
+		input.TreasuryUsdc = treasuryUSDC
+	}
+	logMarkedPotSources(groupID, policy == potMarksLiveOnly, input)
+	return input, nil
 }
 
 // logMarkedPotSources records which price source valued each holding, so a NAV (and any

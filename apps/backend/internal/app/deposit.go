@@ -210,25 +210,65 @@ func (d *DepositService) FundGroup(ctx context.Context, accessToken string, grou
 		return CreateDepositResult{}, ErrUserNotFound
 	}
 
-	available, _, err := d.platformBalanceForWallet(ctx, user.ID, wallet.SolanaAddress)
-	if err != nil {
-		logDepositBranchError("fund group balance check failed", err, "group_id", groupID, "user_id", user.ID)
-		return CreateDepositResult{}, err
-	}
-	if amount > available {
+	row, available, err := d.reserveFundDeposit(ctx, user.ID, groupID, amount, wallet.SolanaAddress)
+	if errors.Is(err, ErrInsufficientPlatformBalance) {
 		logDepositBranchWarn("fund group rejected", "insufficient platform balance",
 			"group_id", groupID, "user_id", user.ID, "amount", amount, "available", available)
 		return CreateDepositResult{}, ErrInsufficientPlatformBalance
 	}
-
-	row, err := d.store.InsertDeposit(ctx, user.ID, groupID, amount, wallet.SolanaAddress)
 	if err != nil {
-		logDepositBranchError("fund group insert failed", err, "group_id", groupID, "user_id", user.ID)
+		logDepositBranchError("fund group reserve failed", err, "group_id", groupID, "user_id", user.ID)
 		return CreateDepositResult{}, err
 	}
 
 	logDepositCreateSuccess(user.ID, groupID, row.ID, amount)
 	return CreateDepositResult{Deposit: depositFromRow(row)}, nil
+}
+
+// reserveFundDeposit checks the member's available balance and inserts the pending deposit
+// under the member funds lock, so concurrent fund requests cannot both reserve the same USDC.
+// Reservations are summed before the chain read: a sweep landing in between then shrinks the
+// chain balance without shrinking the reservations, which errs toward rejecting.
+func (d *DepositService) reserveFundDeposit(ctx context.Context, userID, groupID string, amount int64, memberAddress string) (postgres.DepositRow, int64, error) {
+	tx, err := d.store.BeginTx(ctx)
+	if err != nil {
+		return postgres.DepositRow{}, 0, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if err := d.store.LockMemberFundsTx(ctx, tx, userID); err != nil {
+		return postgres.DepositRow{}, 0, err
+	}
+	reserved, err := d.store.SumPendingReservationsByUserIDTx(ctx, tx, userID)
+	if err != nil {
+		return postgres.DepositRow{}, 0, err
+	}
+	chainBalance, err := d.privy.MemberUSDCBalance(ctx, memberAddress)
+	if err != nil {
+		return postgres.DepositRow{}, 0, fmt.Errorf("member usdc balance: %w", err)
+	}
+	available := chainBalance - reserved
+	if available < 0 {
+		available = 0
+	}
+	if amount > available {
+		return postgres.DepositRow{}, available, ErrInsufficientPlatformBalance
+	}
+
+	row, err := d.store.InsertDepositTx(ctx, tx, userID, groupID, amount, memberAddress)
+	if err != nil {
+		return postgres.DepositRow{}, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return postgres.DepositRow{}, 0, fmt.Errorf("commit fund deposit: %w", err)
+	}
+	committed = true
+	return row, available, nil
 }
 
 func (d *DepositService) platformBalanceForWallet(ctx context.Context, userID, memberAddress string) (available int64, pending int64, err error) {
@@ -430,8 +470,12 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 
 	var positionRow postgres.PositionRow
 	if newlyConfirmed {
-		shareUnits, err := d.shareCreditForSweep(ctx, tx, sweep.GroupID, treasury.SolanaAddress, sweep.Amount)
+		shareUnits, navAfterCredit, err := d.shareCreditForSweep(ctx, tx, sweep.GroupID, treasury.SolanaAddress, sweep.Amount)
 		if err != nil {
+			if errors.Is(err, ErrPotMarkUnavailable) {
+				// Rolling back leaves the deposit pending, so the poller prices it again next tick.
+				logPotMarkUnavailable(sweep.GroupID, "deposit_credit", err)
+			}
 			logDepositBranchError("deposit observe sweep share credit failed", err,
 				"deposit_id", sweep.DepositID, "group_id", sweep.GroupID, "amount", sweep.Amount)
 			return ObserveSweepResult{}, err
@@ -444,13 +488,7 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 			return ObserveSweepResult{}, err
 		}
 
-		treasuryUsdc, err := d.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
-		if err != nil {
-			logDepositBranchError("deposit observe sweep treasury balance failed", err,
-				"deposit_id", sweep.DepositID, "group_id", sweep.GroupID, "treasury_address", treasury.SolanaAddress)
-			return ObserveSweepResult{}, fmt.Errorf("treasury usdc balance: %w", err)
-		}
-		if err := d.store.WriteNavSnapshotOnDepositConfirmTx(ctx, tx, sweep.GroupID, treasuryUsdc); err != nil {
+		if err := d.store.WriteNavSnapshotOnDepositConfirmTx(ctx, tx, sweep.GroupID, navAfterCredit); err != nil {
 			logDepositBranchError("deposit observe sweep nav snapshot failed", err,
 				"deposit_id", sweep.DepositID, "group_id", sweep.GroupID)
 			return ObserveSweepResult{}, err

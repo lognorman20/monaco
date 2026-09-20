@@ -71,8 +71,9 @@ func (h groupsTabHarness) createGroup(t *testing.T, token privy.AccessToken, nam
 }
 
 // fundUSDCOnly credits shareMicros share units against depositedMicros net in
-// and sets the treasury balance. A USDC-only pot is valued at min(treasury,
-// shares), so shares > deposits models a pot that already gained.
+// and sets the treasury balance. A USDC-only pot is valued at the treasury USDC
+// its ledger accounts for, so a treasury above deposits is booked as a realized
+// round trip (buy at deposits, sell at the treasury balance): a pot that gained.
 func (h groupsTabHarness) fundUSDCOnly(t *testing.T, userID string, group createGroupResponse, shareMicros, depositedMicros, treasuryMicros int64) {
 	t.Helper()
 	ctx := context.Background()
@@ -87,6 +88,25 @@ func (h groupsTabHarness) fundUSDCOnly(t *testing.T, userID string, group create
 		t.Fatalf("Commit: %v", err)
 	}
 	privy.SetTreasuryUSDCBalance(h.privy, group.TreasuryAddress, treasuryMicros)
+	if treasuryMicros <= depositedMicros {
+		return
+	}
+	const atomics = 10_000_000
+	sfx := group.GroupID + "-" + userID
+	if _, _, err := h.store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
+		GroupID: group.GroupID, Amount: depositedMicros, InputMint: jupiter.USDCMint, OutputMint: jupiter.AAPLxMint,
+		TxSignature: "sig-gain-buy-" + sfx, ExecuteRequestID: "req-gain-buy-" + sfx,
+		CostBasisPrice: depositedMicros, CostBasisAmount: atomics,
+	}); err != nil {
+		t.Fatalf("ConfirmBuyTransaction: %v", err)
+	}
+	if _, _, err := h.store.ConfirmSellTransaction(ctx, postgres.ConfirmSellTransactionParams{
+		GroupID: group.GroupID, Amount: atomics, InputMint: jupiter.AAPLxMint, OutputMint: jupiter.USDCMint,
+		TxSignature: "sig-gain-sell-" + sfx, ExecuteRequestID: "req-gain-sell-" + sfx,
+		ProceedsUSDC: treasuryMicros,
+	}); err != nil {
+		t.Fatalf("ConfirmSellTransaction: %v", err)
+	}
 }
 
 func (h groupsTabHarness) get(t *testing.T, handler http.HandlerFunc, target string, token privy.AccessToken, pathID string) *httptest.ResponseRecorder {
@@ -434,7 +454,7 @@ func TestGET_groupPnLHistory_fundBuyPriceMoveWithdrawal(t *testing.T) {
 	if _, err := h.store.IncrementPositionTx(ctx, tx, ada.UserID, g.GroupID, 100_000_000, 100_000_000); err != nil {
 		t.Fatalf("IncrementPositionTx: %v", err)
 	}
-	if err := h.store.WriteNavSnapshotOnDepositConfirmTx(ctx, tx, g.GroupID, 100_000_000); err != nil {
+	if err := h.store.WriteNavSnapshotOnDepositConfirmTx(ctx, tx, g.GroupID, postgres.NavSnapshotValues{PotNavMicros: 100_000_000, NavPerShareMicros: 1_000_000, TotalShares: 100_000_000}); err != nil {
 		t.Fatalf("deposit snapshot: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -449,7 +469,7 @@ func TestGET_groupPnLHistory_fundBuyPriceMoveWithdrawal(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("ConfirmBuyTransaction: %v", err)
 	}
-	if err := h.store.WriteNavSnapshotOnTransactionConfirm(ctx, g.GroupID, 40_000_000); err != nil {
+	if err := h.store.WriteNavSnapshotOnTransactionConfirm(ctx, g.GroupID, postgres.NavSnapshotValues{PotNavMicros: 100_000_000, NavPerShareMicros: 1_000_000, TotalShares: 100_000_000}); err != nil {
 		t.Fatalf("buy snapshot: %v", err)
 	}
 
@@ -461,7 +481,7 @@ func TestGET_groupPnLHistory_fundBuyPriceMoveWithdrawal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
-	if _, _, err := h.store.ConfirmWithdrawalPayoutTx(ctx, tx, withdrawal.ID, "sig-wd-"+sfx, 17_000_000); err != nil {
+	if _, _, err := h.store.ConfirmWithdrawalPayoutTx(ctx, tx, withdrawal.ID, "sig-wd-"+sfx, postgres.NavSnapshotValues{PotNavMicros: 77_000_000, NavPerShareMicros: 770_000, TotalShares: 100_000_000}); err != nil {
 		t.Fatalf("ConfirmWithdrawalPayoutTx: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

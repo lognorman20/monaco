@@ -57,15 +57,12 @@ func ComputeRedeemSlice(in RedeemSliceInput) (RedeemSlice, error) {
 		return RedeemSlice{}, fmt.Errorf("pot nav must be non-negative")
 	}
 
-	product := new(big.Rat).Mul(
-		big.NewRat(in.SharesRedeemedMicros, in.TotalSharesMicros),
-		big.NewRat(int64(in.PotNav), 1),
-	)
-	rounded, err := ratRoundToInt64(product)
+	// Floored: a payout never rounds up against the members who stay in the pot.
+	owed, err := MulDivFloor(in.SharesRedeemedMicros, int64(in.PotNav), in.TotalSharesMicros)
 	if err != nil {
 		return RedeemSlice{}, fmt.Errorf("redeem slice: %w", err)
 	}
-	usdc := USDCMicros(rounded)
+	usdc := USDCMicros(owed)
 	if usdc <= 0 {
 		return RedeemSlice{}, fmt.Errorf("redeem slice must be positive")
 	}

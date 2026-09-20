@@ -66,6 +66,7 @@ func seedStakeAndHoldings(t *testing.T, h integrationHarness, userID, groupID, l
 	}); err != nil {
 		t.Fatalf("confirm buy: %v", err)
 	}
+	registerLiveAAPLxMark(h, groupID, jupiter.XStockAtomicScale)
 }
 
 // wedgeRedeemJobInPaying reproduces the production wedge left by the old sign-and-send payout:

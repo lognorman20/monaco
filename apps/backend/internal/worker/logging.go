@@ -13,12 +13,8 @@ func logSweepPollerStopped() {
 	slog.Info("sweep poller stopped")
 }
 
-func logSweepPollerTickStart(pendingCount int) {
-	slog.Info("sweep poller tick start", "pending_count", pendingCount)
-}
-
-func logSweepPollerTickEnd(pendingCount int, err error) {
-	args := []any{"pending_count", pendingCount}
+func logSweepPollerTickEnd(handledCount int, err error) {
+	args := []any{"handled_count", handledCount}
 	if err != nil {
 		args = append(args, "err", err)
 		slog.Error("sweep poller tick end", args...)
@@ -27,8 +23,29 @@ func logSweepPollerTickEnd(pendingCount int, err error) {
 	slog.Info("sweep poller tick end", args...)
 }
 
-func logSweepPollerListPendingFailed(err error) {
-	slog.Error("sweep poller list pending failed", "err", err)
+func logSweepPollerClaimFailed(err error) {
+	slog.Error("sweep poller claim failed", "err", err)
+}
+
+func logSweepDepositBackoff(depositID, groupID, stage string, attempts int, nextAttemptAt time.Time) {
+	slog.Warn("sweep deposit backing off",
+		"deposit_id", depositID,
+		"group_id", groupID,
+		"stage", stage,
+		"attempts", attempts,
+		"next_attempt_at", nextAttemptAt.UTC(),
+	)
+}
+
+func logSweepDropped(depositID, groupID, txSignature string, finalizedHeight uint64, lastValidBlockHeight int64, cleared bool) {
+	slog.Warn("sweep dropped before landing; deposit eligible for re-submit",
+		"deposit_id", depositID,
+		"group_id", groupID,
+		"tx_signature", txSignature,
+		"finalized_block_height", finalizedHeight,
+		"last_valid_block_height", lastValidBlockHeight,
+		"cleared", cleared,
+	)
 }
 
 func logSweepDepositProcessing(depositID, groupID, userID string, amount int64, fromAddress, status string, hasBroadcast bool) {

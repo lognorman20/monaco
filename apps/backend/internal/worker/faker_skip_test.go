@@ -47,11 +47,15 @@ func (r *recordingPrivy) EnsureTreasury(ctx context.Context, groupID privy.Group
 	return r.Client.EnsureTreasury(ctx, groupID)
 }
 
-func (r *recordingPrivy) SubmitSweep(ctx context.Context, req privy.SweepRequest) (privy.SweepResult, error) {
+func (r *recordingPrivy) PrepareSweep(ctx context.Context, req privy.SweepRequest) (privy.PreparedSweep, error) {
 	r.mu.Lock()
 	r.sweeps = append(r.sweeps, req)
 	r.mu.Unlock()
-	return r.Client.SubmitSweep(ctx, req)
+	return r.Client.(privy.SweepClient).PrepareSweep(ctx, req)
+}
+
+func (r *recordingPrivy) BroadcastSweep(ctx context.Context, prepared privy.PreparedSweep) (privy.SweepResult, error) {
+	return r.Client.(privy.SweepClient).BroadcastSweep(ctx, prepared)
 }
 
 type recordingRPC struct {
@@ -60,11 +64,15 @@ type recordingRPC struct {
 	sigs  []string
 }
 
-func (r *recordingRPC) IsConfirmed(ctx context.Context, sig string) (bool, error) {
+func (r *recordingRPC) SignatureStatus(ctx context.Context, sig string) (SignatureStatus, error) {
 	r.mu.Lock()
 	r.sigs = append(r.sigs, sig)
 	r.mu.Unlock()
-	return r.inner.IsConfirmed(ctx, sig)
+	return r.inner.SignatureStatus(ctx, sig)
+}
+
+func (r *recordingRPC) FinalizedBlockHeight(ctx context.Context) (uint64, error) {
+	return r.inner.FinalizedBlockHeight(ctx)
 }
 
 type recordingJupiter struct {
@@ -223,6 +231,7 @@ func TestFakerSkip_sweepPollerNeverTouchesFakerRows(t *testing.T) {
 	rpc := &recordingRPC{inner: NewFakeSolanaRPC()}
 	deposits := app.NewDepositService(testApp.Store, rec, nil, app.NewSymbolResolver(nil))
 	poller := NewSweepPoller(testApp.Store, rec, rpc, deposits, "relayer-key", NewStubClock(testApp.Now))
+	markOtherTreasuriesSurplusChecked(t, testApp.DB, testApp.Now, fx.realGroupID, fx.fakerGroupID)
 
 	if err := poller.Tick(ctx); err != nil {
 		t.Fatalf("Tick: %v", err)
@@ -241,12 +250,12 @@ func TestFakerSkip_sweepPollerNeverTouchesFakerRows(t *testing.T) {
 	}
 	for _, sweep := range rec.sweeps {
 		if fakerAddresses[sweep.MemberAddress] || fakerAddresses[sweep.TreasuryAddress] {
-			t.Errorf("SubmitSweep called with faker address: %+v", sweep)
+			t.Errorf("PrepareSweep called with faker address: %+v", sweep)
 		}
 	}
 	for _, sig := range rpc.sigs {
 		if sig == fx.fakerBroadcast {
-			t.Errorf("RPC IsConfirmed called for faker signature %s", sig)
+			t.Errorf("RPC SignatureStatus called for faker signature %s", sig)
 		}
 	}
 	for _, groupID := range rec.ensureTreasury {

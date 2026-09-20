@@ -30,8 +30,9 @@ one of the items below.
      not an error.
 
 4. **Did `scripts/ensure-ios-privy-config.sh` regenerate the iOS Privy config after you pulled?**
-   - It writes `apps/mobile/Config/Privy.local.xcconfig` and
-     `Privy.local.Info.plist` from `.env.local`. Both are gitignored, so a
+   - It writes `apps/mobile/Config/Privy.local.xcconfig`,
+     `Privy.local.Info.plist` and `Privy.local.Debug.Info.plist` (the one Debug
+     builds use) from `.env.local`. All are gitignored, so a
      fresh pull (or a change to `PRIVY_APP_ID`/`PRIVY_APP_CLIENT_ID` in
      `.env.local`) leaves them stale until you re-run it:
      ```

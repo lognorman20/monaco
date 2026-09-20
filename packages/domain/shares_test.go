@@ -8,11 +8,12 @@ func TestSharesForDeposit_usdcOnlyPot_creditsOneToOneWithSweptUsdc(t *testing.T)
 		TotalUsdc:    50_000_000,
 		PerShareUsdc: BootstrapSharePriceMicros,
 	}
+	totalSharesMicros := int64(50_000_000)
 	deposited := USDCMicros(4_000_000)
 
 	// Act
-	shares, err := SharesForDeposit(deposited, nav)
-	micros, errMicros := ShareUnitsMicrosForDeposit(deposited, nav)
+	shares, err := SharesForDeposit(deposited, totalSharesMicros, nav.TotalUsdc)
+	micros, errMicros := ShareUnitsMicrosForDeposit(deposited, totalSharesMicros, nav.TotalUsdc)
 
 	// Assert
 	if err != nil {
@@ -35,11 +36,12 @@ func TestSharesForDeposit_markedPot_mintsSharesFromPotNav(t *testing.T) {
 		TotalUsdc:    110_000_000,
 		PerShareUsdc: 1_100_000,
 	}
+	totalSharesMicros := int64(100_000_000)
 	deposited := USDCMicros(110_000_000)
 
 	// Act
-	shares, err := SharesForDeposit(deposited, nav)
-	micros, errMicros := ShareUnitsMicrosForDeposit(deposited, nav)
+	shares, err := SharesForDeposit(deposited, totalSharesMicros, nav.TotalUsdc)
+	micros, errMicros := ShareUnitsMicrosForDeposit(deposited, totalSharesMicros, nav.TotalUsdc)
 
 	// Assert
 	if err != nil {
@@ -99,11 +101,11 @@ func TestDepositCredit_readmeAlexBlairWorkedExample_matchesLiterals(t *testing.T
 	}
 
 	// Act — step 2: Alex deposits $100 at $1/share
-	alexShares, err := SharesForDeposit(scenario.alexDepositUSDC, emptyNav)
+	alexShares, err := SharesForDeposit(scenario.alexDepositUSDC, 0, emptyNav.TotalUsdc)
 	if err != nil {
 		t.Fatalf("Alex SharesForDeposit: %v", err)
 	}
-	alexMicros, err := ShareUnitsMicrosForDeposit(scenario.alexDepositUSDC, emptyNav)
+	alexMicros, err := ShareUnitsMicrosForDeposit(scenario.alexDepositUSDC, 0, emptyNav.TotalUsdc)
 	if err != nil {
 		t.Fatalf("Alex ShareUnitsMicrosForDeposit: %v", err)
 	}
@@ -133,11 +135,11 @@ func TestDepositCredit_readmeAlexBlairWorkedExample_matchesLiterals(t *testing.T
 	}
 
 	// Act — step 5: Blair deposits $110
-	blairShares, err := SharesForDeposit(scenario.blairDepositUSDC, postBuyNav)
+	blairShares, err := SharesForDeposit(scenario.blairDepositUSDC, scenario.alexShareMicros, postBuyNav.TotalUsdc)
 	if err != nil {
 		t.Fatalf("Blair SharesForDeposit: %v", err)
 	}
-	blairMicros, err := ShareUnitsMicrosForDeposit(scenario.blairDepositUSDC, postBuyNav)
+	blairMicros, err := ShareUnitsMicrosForDeposit(scenario.blairDepositUSDC, scenario.alexShareMicros, postBuyNav.TotalUsdc)
 	if err != nil {
 		t.Fatalf("Blair ShareUnitsMicrosForDeposit: %v", err)
 	}

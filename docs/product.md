@@ -72,6 +72,10 @@ SwiftUI (iOS 17+)
   → Jupiter Swap API v2 (USDC → xStocks)
 ```
 
+### Retrying money requests
+
+The app sends an `Idempotency-Key` header (one UUID per confirmed action, reused when the same submission is retried) on every user money POST: fund, withdraw, cash out, leave, propose, and transaction retry. The API scopes the key to the signed-in user and keeps it for 24 hours. Same key and same body replays the stored response (`Idempotency-Status: replayed`). Same key with a different body or route returns 422. A duplicate that arrives while the first is still running returns 409 with `Idempotency-Status: in_progress`, which tells the app to keep the key. 5xx responses are never stored, so a retry runs again. The header is optional; requests without it behave as before.
+
 ### Wallets
 
 A **wallet** is a keypair on a chain. On Solana the public key is the **address** (base58). The private key **signs** transactions. The address holds:
@@ -132,6 +136,14 @@ Worked numbers (ignore Jupiter slippage for the story):
 4. AAPLx rises 10%. Pot $110. Alex still has 100 shares. His equity is $110. Share price is $1.10.
 5. Blair deposits $110. She gets `110 / 1.10 = 100` shares. Pot $220. Total shares 200. Each still owns half.
 6. Blair redeems 50 shares. That is `50 / 200` of the pot = $55 USDC. She keeps 50 shares. Alex still has 100.
+
+**One valuation.** Deposit credit, redeem quote and payout, the surplus reconcile, NAV snapshots, and the group screens all read the same pot valuation (`valuePot` in `apps/backend/internal/app/pot_valuation.go`):
+
+- Pot NAV is treasury USDC that the group's ledger accounts for (net contributed − confirmed buys + confirmed sells) plus holdings at their mark. On-chain USDC above the ledger has landed without being credited yet and is nobody's gain.
+- Total shares is every outstanding claim: position share units plus units already debited by a redeem that has not paid out.
+- Shares mint 1:1 only while no shares are outstanding. After that every pot, cash-only or not, mints `amount × total shares / pre-credit NAV`. Mints and payouts round down, in favour of the pool.
+- Anything that mints shares or pays USDC needs a live mark (Pyth, then Jupiter). With none, the deposit stays pending and is retried, and the redeem fails with the shares returned. Cost basis is never used as a price for money movement; screens and NAV snapshots may fall back to it so they keep rendering.
+- The surplus reconcile only credits USDC the ledger cannot explain (a transfer straight to the treasury address). Realized gains stay P&L, and USDC owed to an in-flight redeem stays owed.
 
 Marks: Jupiter fill price is cost basis. Ongoing P&L may use Pyth equity feeds. If the token still trades on-chain after the cash equity market closes, show an after-hours label.
 

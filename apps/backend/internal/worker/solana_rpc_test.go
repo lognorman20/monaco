@@ -7,17 +7,45 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/monaco/monaco/apps/backend/internal/config"
 )
 
-func TestNewHTTPSolanaRPC_constructsForCluster(t *testing.T) {
+func TestNewHTTPSolanaRPC_configuredRPCURL_receivesConfirmationCalls(t *testing.T) {
 	// Arrange
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": map[string]any{
+				"value": []map[string]any{{"err": nil, "confirmationStatus": "finalized"}},
+			},
+		})
+	}))
+	defer server.Close()
+	cfg := &config.Config{SolanaCluster: config.SolanaCluster, SolanaRPCURL: server.URL}
+
 	// Act
-	rpc := NewHTTPSolanaRPC("mainnet-beta")
+	rpc := NewHTTPSolanaRPC(cfg.SolanaRPCEndpoint())
+	confirmed, err := rpc.IsConfirmed(context.Background(), "sig")
 
 	// Assert
-	if rpc == nil {
-		t.Fatal("expected rpc client")
+	if err != nil || !confirmed {
+		t.Fatalf("IsConfirmed = %v, %v", confirmed, err)
 	}
+	if calls != 1 {
+		t.Fatalf("configured SOLANA_RPC_URL got %d calls, want 1: sweeps must not confirm against the public endpoint", calls)
+	}
+}
+
+func TestNewHTTPSolanaRPC_noRPCURL_usesPublicClusterEndpoint(t *testing.T) {
+	// Arrange
+	cfg := &config.Config{SolanaCluster: config.SolanaCluster}
+
+	// Act
+	rpc := NewHTTPSolanaRPC(cfg.SolanaRPCEndpoint())
+
+	// Assert
 	if rpc.endpoint != "https://api.mainnet-beta.solana.com" {
 		t.Fatalf("endpoint = %q", rpc.endpoint)
 	}
@@ -39,7 +67,7 @@ func TestHTTPSolanaRPC_IsConfirmed_returnsTrueForFinalizedStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	rpc := NewHTTPSolanaRPC("mainnet-beta")
+	rpc := NewHTTPSolanaRPC("https://api.mainnet-beta.solana.com")
 	rpc.endpoint = server.URL
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -68,7 +96,7 @@ func TestHTTPSolanaRPC_GetBalance_returnsLamports(t *testing.T) {
 	}))
 	defer server.Close()
 
-	rpc := NewHTTPSolanaRPC("mainnet-beta")
+	rpc := NewHTTPSolanaRPC("https://api.mainnet-beta.solana.com")
 	rpc.endpoint = server.URL
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -113,7 +141,7 @@ func TestHTTPSolanaRPC_GetSPLTokenBalance_sumsMatchingMintAccounts(t *testing.T)
 	}))
 	defer server.Close()
 
-	rpc := NewHTTPSolanaRPC("mainnet-beta")
+	rpc := NewHTTPSolanaRPC("https://api.mainnet-beta.solana.com")
 	rpc.endpoint = server.URL
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -137,7 +165,7 @@ func TestHTTPSolanaRPC_GetSPLTokenBalance_returnsZeroWhenNoAccounts(t *testing.T
 	}))
 	defer server.Close()
 
-	rpc := NewHTTPSolanaRPC("mainnet-beta")
+	rpc := NewHTTPSolanaRPC("https://api.mainnet-beta.solana.com")
 	rpc.endpoint = server.URL
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
