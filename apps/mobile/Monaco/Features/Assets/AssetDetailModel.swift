@@ -168,6 +168,9 @@ extension AssetChartRange {
         case .oneDay: return "Past day"
         case .oneWeek: return "Past week"
         case .oneMonth: return "Past month"
+        case .threeMonths: return "Past three months"
+        case .oneYear: return "Past year"
+        case .all: return "All time"
         }
     }
 
@@ -176,6 +179,9 @@ extension AssetChartRange {
         case .oneDay: return "One day"
         case .oneWeek: return "One week"
         case .oneMonth: return "One month"
+        case .threeMonths: return "Three months"
+        case .oneYear: return "One year"
+        case .all: return "All time"
         }
     }
 }

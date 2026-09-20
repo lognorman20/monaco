@@ -9,5 +9,13 @@
       "change24h": "0.027027"
     }
   ],
-  "hasMore": true
+  "hasMore": true,
+  "market": {
+    "session": "open",
+    "isOpen": true,
+    "afterHours": false,
+    "nextSession": "after_hours",
+    "nextTransition": "2026-09-22T20:00:00Z",
+    "asOf": "2026-09-22T14:00:00Z"
+  }
 }
