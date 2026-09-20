@@ -14,9 +14,6 @@ struct ProposalFeedView: View {
     @State private var proposals: [ProposalFeedTab: [ProposalDTO]] = [:]
     @State private var failedTabs: Set<ProposalFeedTab> = []
     @State private var votingIDs: Set<String> = []
-    /// Ballots cast from this screen. Feed rows carry no ballots, so this is how a card knows
-    /// to say "You voted yes" after the server stops offering the buttons.
-    @State private var viewerChoices: [String: String] = [:]
     @State private var toast: MonacoToast?
     /// Bumped by every load the member caused, so a background poll that was already in flight
     /// does not write its older answer over theirs.
@@ -24,9 +21,13 @@ struct ProposalFeedView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Votes and swaps move in seconds; a feed with nothing in play only needs to notice new proposals.
+    private let votes = ProposalVoteLedger.shared
+
+    /// Votes and swaps move in seconds; a feed with nothing in play only needs to notice new
+    /// proposals. Only the Open list counts: list rows carry no execution state, so a closed row
+    /// can never be the reason to poll fast.
     private var pollInterval: Duration {
-        LiveRefreshCadence.watching((proposals[.open] ?? []) + (proposals[.closed] ?? []))
+        LiveRefreshCadence.watching(proposals[.open] ?? [])
     }
 
     var body: some View {
@@ -55,7 +56,7 @@ struct ProposalFeedView: View {
             _ = await (open, closed)
         }
         .pollWhileVisible(every: pollInterval) {
-            try await pollBothTabs()
+            try await pollTick()
         }
         .monacoToast($toast)
         .accessibilityElement(children: .contain)
@@ -103,28 +104,44 @@ struct ProposalFeedView: View {
                     destination: {
                         ProposalDetailView(service: service, proposalId: proposal.id, initialProposal: proposal)
                     },
-                    viewerChoice: viewerChoices[proposal.id],
+                    viewerChoice: votes.choice(for: proposal, viewerId: service.viewerId),
                     highlight: proposal.id == highlightProposalId
                 )
             }
         }
     }
 
-    /// Background re-read of both tabs. Writes only what changed, and never the failure state:
-    /// a poll that throws leaves the cards as they are and lets the loop back off.
-    private func pollBothTabs() async throws {
+    /// Background re-read. Writes only what changed, and never the failure state: a poll that
+    /// throws leaves the cards as they are and lets the loop back off.
+    ///
+    /// Open is re-read on every tick. Closed only when it can have changed or is the tab being
+    /// read, so an open vote no longer drags the cabal's whole history down the wire every five
+    /// seconds for nothing.
+    private func pollTick() async throws {
         guard votingIDs.isEmpty else { return }
         let generation = loadGeneration
-        async let open = service.listProposals(groupId: groupId, tab: .open)
-        async let closed = service.listProposals(groupId: groupId, tab: .closed)
-        let loaded: [ProposalFeedTab: [ProposalDTO]] = [.open: try await open, .closed: try await closed]
+        let previousOpen = proposals[.open]
+        let open = try await service.listProposals(groupId: groupId, tab: .open)
         guard generation == loadGeneration, votingIDs.isEmpty, !Task.isCancelled else { return }
-        for (tab, fresh) in loaded {
-            QuietUpdate.apply(fresh, over: proposals[tab]) { value in
-                withAnimation(reduceMotion ? nil : .snappy) { proposals[tab] = value }
-            }
-            if failedTabs.contains(tab) { failedTabs.remove(tab) }
+        apply(open, to: .open)
+
+        guard ProposalFeedPolling.shouldReloadClosed(
+            previousOpen: previousOpen,
+            freshOpen: open,
+            visibleTab: tab,
+            hasClosed: proposals[.closed] != nil
+        ) else { return }
+        let closed = try await service.listProposals(groupId: groupId, tab: .closed)
+        guard generation == loadGeneration, votingIDs.isEmpty, !Task.isCancelled else { return }
+        apply(closed, to: .closed)
+    }
+
+    private func apply(_ fresh: [ProposalDTO], to tab: ProposalFeedTab) {
+        QuietUpdate.apply(fresh, over: proposals[tab]) { value in
+            withAnimation(reduceMotion ? nil : .snappy) { proposals[tab] = value }
         }
+        // Only write when it changes: a mutating call on @State invalidates the view either way.
+        if failedTabs.contains(tab) { failedTabs.remove(tab) }
     }
 
     private func load(_ tab: ProposalFeedTab) async {
@@ -151,7 +168,7 @@ struct ProposalFeedView: View {
         if result.succeeded {
             Haptics.success()
             withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.7)) {
-                viewerChoices[proposal.id] = choice.rawValue
+                votes.record(choice, for: proposal.id)
             }
         }
         // A vote can close the proposal (threshold reached), so refresh both tabs from the server.
@@ -159,6 +176,28 @@ struct ProposalFeedView: View {
         if result.succeeded {
             await load(.closed)
         }
+    }
+}
+
+/// When a background tick needs the Closed tab as well as the Open one.
+///
+/// Closed rows are the cabal's whole history and the list has no cursor, so re-reading them every
+/// five seconds while a vote is open costs data and a fan-out of backend queries for nothing. They
+/// are worth re-reading when a proposal has just left the Open list — it settled, so the Closed tab
+/// and its count are now wrong — and while Closed is the tab the member is reading, where another
+/// member's deciding vote or a new comment count shows up.
+enum ProposalFeedPolling {
+    static func shouldReloadClosed(
+        previousOpen: [ProposalDTO]?,
+        freshOpen: [ProposalDTO],
+        visibleTab: ProposalFeedTab,
+        hasClosed: Bool
+    ) -> Bool {
+        if !hasClosed { return true }
+        if visibleTab == .closed { return true }
+        guard let previousOpen else { return false }
+        let fresh = Set(freshOpen.map(\.id))
+        return previousOpen.contains { !fresh.contains($0.id) }
     }
 }
 
