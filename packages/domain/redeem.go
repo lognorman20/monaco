@@ -99,3 +99,26 @@ func ShareUnitsMicrosForDollarTarget(target USDCMicros, navPerShare USDCMicros) 
 	}
 	return micros, nil
 }
+
+// ShareUnitsForPartialPayout returns how many of shareUnits a payout of paid retires when the
+// whole claim was worth owed. A member who is paid less than their slice only gives up the
+// share units that payment covers and keeps the rest. It rounds up, so the pot never hands
+// back more than the unpaid remainder, and it never returns more than shareUnits.
+func ShareUnitsForPartialPayout(shareUnits int64, owed, paid USDCMicros) (int64, error) {
+	if shareUnits <= 0 {
+		return 0, fmt.Errorf("share units must be positive")
+	}
+	if owed <= 0 || paid <= 0 {
+		return 0, fmt.Errorf("owed and paid must be positive")
+	}
+	if paid >= owed {
+		return shareUnits, nil
+	}
+
+	product := new(big.Int).Mul(big.NewInt(shareUnits), big.NewInt(int64(paid)))
+	quotient, remainder := new(big.Int).QuoRem(product, big.NewInt(int64(owed)), new(big.Int))
+	if remainder.Sign() > 0 {
+		quotient.Add(quotient, big.NewInt(1))
+	}
+	return quotient.Int64(), nil
+}
