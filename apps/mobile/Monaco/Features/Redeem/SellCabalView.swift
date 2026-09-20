@@ -131,7 +131,9 @@ struct SellCabalView: View {
     // MARK: - Submit
 
     private func submitSell() async {
-        guard let token = auth.accessToken, canSubmit else { return }
+        // The disabled state only lands on the next render; a second tap in the same frame
+        // must not sell the slice twice.
+        guard !isSubmitting, let token = auth.accessToken, canSubmit else { return }
         isSubmitting = true
         defer { isSubmitting = false }
 
@@ -159,20 +161,9 @@ struct SellCabalView: View {
             } else {
                 toast = success
             }
-        } catch MonacoAPIError.apiError(409, _) {
-            toast = MonacoToast(message: "Your last cash out is still finishing. Try again in a minute")
-        } catch MonacoAPIError.apiError(400, let message) {
-            toast = MonacoToast(message: message)
-        } catch MonacoAPIError.httpStatus(400) {
-            toast = MonacoToast(message: "Cash out at least $0.10.")
-        } catch MonacoAPIError.httpStatus(409) {
-            toast = MonacoToast(message: "Your last cash out is still finishing. Try again in a minute")
-        } catch MonacoAPIError.httpStatus {
-            toast = MonacoToast(message: "Couldn't cash out. Try again")
-        } catch let error as URLError where error.code == .notConnectedToInternet {
-            toast = MonacoToast(message: "No connection. Check your internet and try again")
         } catch {
-            toast = MonacoToast(message: "Couldn't cash out. Try again")
+            if error.isRequestCancellation { return }
+            toast = MonacoToast(message: MoneyFlowCopy.sellStakeFailure(FlowErrorInput(error)).summary)
         }
     }
 

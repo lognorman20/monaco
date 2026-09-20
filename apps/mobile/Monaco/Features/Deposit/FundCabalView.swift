@@ -191,6 +191,9 @@ struct FundCabalView: View {
     }
 
     private func submitFund() async {
+        // The disabled state only lands on the next render; a second tap in the same frame
+        // must not fund the pot twice.
+        guard !isSubmitting else { return }
         guard let token = auth.accessToken else { return }
         guard let groupId = selectedGroupId else { return }
         guard let value = AmountEntryText.decimal(amountText), value > 0 else {
@@ -217,14 +220,9 @@ struct FundCabalView: View {
             amountText = ""
             await loadBalance()
             await onFunded()
-        } catch MonacoAPIError.httpStatus(400) {
-            toast = MonacoToast(message: "More than you have. Try a smaller amount.", isSuccess: false)
-        } catch MonacoAPIError.httpStatus(403) {
-            toast = MonacoToast(message: "You must be a cabal member to add money to it.", isSuccess: false)
-        } catch MonacoAPIError.httpStatus {
-            toast = MonacoToast(message: "Couldn't add that money. Try again.", isSuccess: false)
         } catch {
-            toast = MonacoToast(message: "No connection. Check your internet and try again.", isSuccess: false)
+            if error.isRequestCancellation { return }
+            toast = MonacoToast(message: MoneyFlowCopy.fundCabalFailure(FlowErrorInput(error)).summary, isSuccess: false)
         }
     }
 }
