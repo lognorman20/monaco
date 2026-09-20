@@ -151,7 +151,9 @@ final class SampleProposalFeedService: ProposalFeedService {
 /// Root for the sample-data launch (Debug only): the feed under its real title, "Proposals", so it can be
 /// recorded as is. The launch argument, not the screen, is what marks it as sample data.
 /// Extra arguments open other proposal screens on the same sample data:
-/// `-MonacoProposeSample` (a cabal screen with the Propose sheet) and
+/// `-MonacoProposeSample` (a cabal screen with the Propose sheet),
+/// `-MonacoProposeSampleStock` (the Stock detail entry: the buy flow jumped straight to a stock,
+/// with `-MonacoProposePotFails` to make the first pot read fail) and
 /// `-MonacoProposalSampleDetail <id>` (one proposal's detail, e.g. `sample-22` for the swap tracker).
 struct SampleProposalFeedRoot: View {
     @State private var service = SampleProposalFeedService()
@@ -167,6 +169,8 @@ struct SampleProposalFeedRoot: View {
         Group {
             if arguments.contains("-MonacoProposeSample") {
                 SampleProposeRoot()
+            } else if arguments.contains("-MonacoProposeSampleStock") {
+                SampleProposeFromStockRoot()
             } else if let detailId {
                 NavigationStack {
                     ProposalDetailView(service: service, proposalId: detailId)
@@ -218,6 +222,24 @@ private struct SampleProposeRoot: View {
     }
 }
 
+/// The Stock detail entry into the buy flow: no chooser sheet, no pot handed down, and the stock
+/// already picked. With `-MonacoProposePotFails` the first pot read fails, which is the path where
+/// the amount step used to strand the member with a disabled Review button.
+private struct SampleProposeFromStockRoot: View {
+    @State private var service = SampleProposeService()
+
+    var body: some View {
+        NavigationStack {
+            ProposeBuyView(
+                service: service,
+                groupId: SampleProposeService.groupView.id,
+                pot: nil,
+                initialSymbol: "AAPLx"
+            )
+        }
+    }
+}
+
 /// In-memory propose backend: a cabal with $548.20 in the pot, popular stocks with prices,
 /// catalog search, quotes at the listed price, and proposals that always go through.
 @MainActor
@@ -248,8 +270,15 @@ final class SampleProposeService: ProposeService {
         ProposeStock(symbol: "AMBRx", name: "Amber", priceMicros: 12_400_000, change24h: nil, isTradable: false),
     ]
 
+    /// `-MonacoProposePotFails`: the first read fails, so a retry can be driven from a test.
+    private var potReads = 0
+
     func pot(groupId: String) async throws -> ProposePot {
-        ProposePot(view: Self.groupView)
+        potReads += 1
+        if potReads == 1, ProcessInfo.processInfo.arguments.contains("-MonacoProposePotFails") {
+            throw MonacoCore.MonacoAPIError.httpStatus(503)
+        }
+        return ProposePot(view: Self.groupView)
     }
 
     func popularStocks() async throws -> [ProposeStock] {
