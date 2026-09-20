@@ -56,7 +56,8 @@ final class AppSessionStore {
     /// Home used to keep its own copy and pass it in, so a refresh started anywhere else
     /// (Profile pull-to-refresh, a name save, joining a cabal, the hourly token rotation)
     /// quietly reloaded the all-time board under Home's 1W chip and every poll after it
-    /// kept the wrong board. Change it through `selectLeaderboardRange` only.
+    /// kept the wrong board. It only changes when the member picks a range: through
+    /// `selectLeaderboardRange`, or by a caller passing one explicitly.
     private(set) var leaderboardRange: HomeLeaderboardRange = .all
 
     private let apiClient: AppSessionDataSource
