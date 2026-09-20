@@ -91,32 +91,33 @@ WHERE ai.group_agent_id = $1
 	return nil
 }
 
-// SumAgentCommittedBuyUSDCTx is the USDC an agent's buys hold against its allocation: every
-// buy intent that is accepted and still in flight, plus every buy whose swap is pending or
-// confirmed on the ledger. Reading it under LockGroupAgentTx and inserting the accepted intent
-// in the same tx is what reserves budget before the swap is submitted. Sells do not give
-// budget back: the allocation is a lifetime cap on what the agent may spend.
-func (s *Store) SumAgentCommittedBuyUSDCTx(ctx context.Context, tx *sql.Tx, agentID string) (int64, error) {
+// SumAgentBuyUSDCTx is the USDC an agent's buys hold against its allocation. spent is every
+// buy confirmed on the ledger. reserved is every buy not settled yet: accepted and still in
+// flight, or pending on the ledger. Reading it under LockGroupAgentTx and inserting the
+// accepted intent in the same tx is what reserves budget before the swap is submitted. Sells
+// do not give budget back: the allocation is a lifetime cap on what the agent may spend.
+func (s *Store) SumAgentBuyUSDCTx(ctx context.Context, tx *sql.Tx, agentID string) (spent, reserved int64, err error) {
 	const selectSQL = `
-SELECT COALESCE(SUM(ai.usdc_micros), 0)
-FROM agent_intents ai
-WHERE ai.group_agent_id = $1
-  AND ai.side = 'buy'
-  AND (
-    ai.status = 'accepted'
-    OR EXISTS (
+SELECT
+  COALESCE(SUM(b.usdc_micros) FILTER (WHERE b.confirmed), 0),
+  COALESCE(SUM(b.usdc_micros) FILTER (WHERE NOT b.confirmed AND (b.pending OR b.status = 'accepted')), 0)
+FROM (
+  SELECT ai.usdc_micros, ai.status,
+    EXISTS (
       SELECT 1 FROM transactions t
-      WHERE t.agent_intent_id = ai.id
-        AND t.action = 'buy'
-        AND t.initiated_by = 'agent'
-        AND t.status IN ('pending', 'confirmed')
-    )
-  )`
-	var sum int64
-	if err := tx.QueryRowContext(ctx, selectSQL, agentID).Scan(&sum); err != nil {
-		return 0, fmt.Errorf("sum agent committed buy usdc: %w", err)
+      WHERE t.agent_intent_id = ai.id AND t.action = 'buy' AND t.initiated_by = 'agent' AND t.status = 'confirmed'
+    ) AS confirmed,
+    EXISTS (
+      SELECT 1 FROM transactions t
+      WHERE t.agent_intent_id = ai.id AND t.action = 'buy' AND t.initiated_by = 'agent' AND t.status = 'pending'
+    ) AS pending
+  FROM agent_intents ai
+  WHERE ai.group_agent_id = $1 AND ai.side = 'buy'
+) b`
+	if err := tx.QueryRowContext(ctx, selectSQL, agentID).Scan(&spent, &reserved); err != nil {
+		return 0, 0, fmt.Errorf("sum agent buy usdc: %w", err)
 	}
-	return sum, nil
+	return spent, reserved, nil
 }
 
 // AgentSellableTokenAmountTx is how much of mint the agent may still sell: what its own

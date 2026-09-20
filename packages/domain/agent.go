@@ -60,10 +60,13 @@ type AgentIntentRequest struct {
 // AgentTreasurySnapshot is treasury state for intent validation.
 type AgentTreasurySnapshot struct {
 	TreasuryUsdcMicros int64
-	// AgentCommittedUsdcMicros is every buy the agent has in flight, pending or confirmed.
-	// Sells do not reduce it: the allocation is a lifetime spend cap.
-	AgentCommittedUsdcMicros int64
-	TokenHoldingsBySymbol    map[string]int64
+	// AgentSpentUsdcMicros is the agent's confirmed buys. Sells do not reduce it: the
+	// allocation is a lifetime spend cap.
+	AgentSpentUsdcMicros int64
+	// PendingAgentUsdcMicros is every buy still reserved: accepted and in flight, or pending
+	// on the ledger.
+	PendingAgentUsdcMicros int64
+	TokenHoldingsBySymbol  map[string]int64
 	// AgentTokenHoldingsBySymbol is what the agent itself bought, net of its own sells.
 	AgentTokenHoldingsBySymbol map[string]int64
 }
@@ -85,7 +88,10 @@ func ValidateIntent(agent GroupAgent, intent AgentIntentRequest, snap AgentTreas
 		if intent.UsdcMicros <= 0 {
 			return fmt.Errorf("usdc amount must be positive")
 		}
-		available := agent.AllocationUsdcMicros - snap.AgentCommittedUsdcMicros
+		available, err := agentAvailableUsdcMicros(agent, snap)
+		if err != nil {
+			return err
+		}
 		if intent.UsdcMicros > available {
 			return fmt.Errorf("trade exceeds agent allocation")
 		}
@@ -96,17 +102,53 @@ func ValidateIntent(agent GroupAgent, intent AgentIntentRequest, snap AgentTreas
 		if intent.TokenAmount <= 0 {
 			return fmt.Errorf("token amount must be positive")
 		}
-		held := snap.TokenHoldingsBySymbol[intent.Symbol]
+		held, own, err := agentSellableTokenAmounts(intent.Symbol, snap)
+		if err != nil {
+			return err
+		}
 		if intent.TokenAmount > held {
 			return fmt.Errorf("insufficient treasury holding")
 		}
 		// An agent trades without a vote, so it may only unwind what it bought itself.
 		// Positions members voted in stay under member control.
-		if intent.TokenAmount > snap.AgentTokenHoldingsBySymbol[intent.Symbol] {
+		if intent.TokenAmount > own {
 			return fmt.Errorf("sell exceeds agent position")
 		}
 	default:
 		return fmt.Errorf("invalid intent side")
 	}
 	return nil
+}
+
+// agentAvailableUsdcMicros returns allocation − executed − pending, floored at zero.
+// Operands must be non-negative so each subtraction is ordered and cannot wrap:
+// unchecked, 0 − MaxInt64 − MaxInt64 wraps to +2 and would approve a buy.
+func agentAvailableUsdcMicros(agent GroupAgent, snap AgentTreasurySnapshot) (int64, error) {
+	if agent.AllocationUsdcMicros < 0 {
+		return 0, fmt.Errorf("agent allocation must be non-negative")
+	}
+	if snap.AgentSpentUsdcMicros < 0 || snap.PendingAgentUsdcMicros < 0 {
+		return 0, fmt.Errorf("agent spent and pending usdc must be non-negative")
+	}
+	if snap.AgentSpentUsdcMicros >= agent.AllocationUsdcMicros {
+		return 0, nil
+	}
+	remaining := agent.AllocationUsdcMicros - snap.AgentSpentUsdcMicros
+	if snap.PendingAgentUsdcMicros >= remaining {
+		return 0, nil
+	}
+	return remaining - snap.PendingAgentUsdcMicros, nil
+}
+
+// agentSellableTokenAmounts returns the treasury's holding of symbol and the part of it the
+// agent bought itself. Both are net quantities the caller derived by subtraction, so a
+// negative one means that subtraction went wrong; it is refused here rather than compared,
+// the same way agentAvailableUsdcMicros refuses negative spend.
+func agentSellableTokenAmounts(symbol string, snap AgentTreasurySnapshot) (held, own int64, err error) {
+	held = snap.TokenHoldingsBySymbol[symbol]
+	own = snap.AgentTokenHoldingsBySymbol[symbol]
+	if held < 0 || own < 0 {
+		return 0, 0, fmt.Errorf("treasury and agent token holdings must be non-negative")
+	}
+	return held, own, nil
 }

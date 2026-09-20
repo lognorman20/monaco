@@ -75,7 +75,7 @@ extension AppSessionStore {
     }
 
     private func failure(for error: Error, auth: PrivyAuthService, fallback: String) async -> ProfileSaveOutcome {
-        if case MonacoCore.MonacoAPIError.httpStatus(401) = error {
+        if case MonacoCore.MonacoAPIError.httpStatus(401, _) = error {
             await auth.signOutAfterRejectedSession()
             return .failed(LoginFailureCopy.sessionExpired)
         }
@@ -84,14 +84,14 @@ extension AppSessionStore {
 
     static func profileErrorMessage(for error: Error, fallback: String) -> String {
         switch error {
-        case MonacoCore.MonacoAPIError.rejected(_, let message):
+        case MonacoCore.MonacoAPIError.rejected(_, let message, _):
             return message
-        case MonacoCore.MonacoAPIError.rateLimited(let retryAfter):
+        case MonacoCore.MonacoAPIError.rateLimited(let retryAfter, _):
             if let retryAfter, retryAfter > 0 {
                 return "Too many changes. Try again in \(retryAfter)s."
             }
             return "Too many changes. Try again in a minute."
-        case MonacoCore.MonacoAPIError.httpStatus(503):
+        case MonacoCore.MonacoAPIError.httpStatus(503, _):
             return "Photo uploads are not set up on this server."
         case let urlError as URLError where urlError.code != .cancelled:
             return "Could not reach Monaco. Check your connection."

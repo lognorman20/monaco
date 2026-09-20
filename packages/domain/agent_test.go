@@ -35,8 +35,9 @@ func TestValidateIntent_allowsBuyWithinAllocation(t *testing.T) {
 func TestValidateIntent_countsCommittedBuysAgainstAllocation(t *testing.T) {
 	agent := GroupAgent{Status: AgentStatusActive, AllocationUsdcMicros: 500_000}
 	err := ValidateIntent(agent, AgentIntentRequest{Side: AgentIntentBuy, Symbol: "AAPLx", UsdcMicros: 200_000}, AgentTreasurySnapshot{
-		TreasuryUsdcMicros:       1_000_000,
-		AgentCommittedUsdcMicros: 400_000,
+		TreasuryUsdcMicros:     1_000_000,
+		AgentSpentUsdcMicros:   300_000,
+		PendingAgentUsdcMicros: 100_000,
 	})
 	if err == nil {
 		t.Fatal("expected allocation rejection once committed buys leave too little room")
@@ -75,5 +76,16 @@ func TestValidateIntent_rejectsSellBeyondTreasuryHolding(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected rejection: a member-voted sell already took part of what the agent bought")
+	}
+}
+
+func TestValidateIntent_rejectsNegativeAgentPosition(t *testing.T) {
+	agent := GroupAgent{Status: AgentStatusActive, AllocationUsdcMicros: 500_000}
+	err := ValidateIntent(agent, AgentIntentRequest{Side: AgentIntentSell, Symbol: "AAPLx", TokenAmount: 1}, AgentTreasurySnapshot{
+		TokenHoldingsBySymbol:      map[string]int64{"AAPLx": 1_000_000},
+		AgentTokenHoldingsBySymbol: map[string]int64{"AAPLx": -1},
+	})
+	if err == nil {
+		t.Fatal("expected rejection of a negative agent position")
 	}
 }

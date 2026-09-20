@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 	"github.com/monaco/monaco/packages/domain"
 )
@@ -61,6 +62,13 @@ type SubmitAgentIntentResult struct {
 
 // SubmitAgentIntent authenticates the agent key and runs a treasury swap when valid.
 func (s *AgentIntentService) SubmitAgentIntent(ctx context.Context, in SubmitAgentIntentInput) (SubmitAgentIntentResult, error) {
+	result, err := s.submitAgentIntent(ctx, in)
+	telemetry.MoneyEvent(telemetry.EventAgentIntent, moneyOutcome(err))
+	logAgentIntentOutcome(ctx, in, result, err)
+	return result, err
+}
+
+func (s *AgentIntentService) submitAgentIntent(ctx context.Context, in SubmitAgentIntentInput) (SubmitAgentIntentResult, error) {
 	if in.GroupID == "" {
 		return SubmitAgentIntentResult{}, fmt.Errorf("group id is required")
 	}
@@ -102,14 +110,14 @@ func (s *AgentIntentService) SubmitAgentIntent(ctx context.Context, in SubmitAge
 		if errors.Is(execErr, ErrAgentIntentRejected) {
 			status = "rejected"
 		}
-		s.recordIntentOutcome(accepted.ID, status, execErr.Error(), execResult.TransactionID)
+		s.recordIntentStatus(accepted.ID, status, execErr.Error(), execResult.TransactionID)
 		return SubmitAgentIntentResult{
 			IntentID:     accepted.ID,
 			Status:       status,
 			RejectReason: execErr.Error(),
 		}, execErr
 	}
-	s.recordIntentOutcome(accepted.ID, "executed", "", execResult.TransactionID)
+	s.recordIntentStatus(accepted.ID, "executed", "", execResult.TransactionID)
 	return execResult, nil
 }
 
@@ -254,11 +262,12 @@ func replayAgentIntent(earlier postgres.AgentIntentRow, in SubmitAgentIntentInpu
 	return answer, nil
 }
 
-// recordIntentOutcome writes the final status of an intent. It runs on its own context
-// because the request's may already be cancelled (bot timeout) by the time the swap returns.
-// A write that still fails is logged with what is needed to repair the row, and
-// ReconcileAgentIntentsTx repairs it from the ledger on the agent's next intent.
-func (s *AgentIntentService) recordIntentOutcome(intentID, status, reason, transactionID string) {
+// recordIntentStatus writes the intent's final status. It uses a fresh context because the
+// swap has already happened: a caller that hung up must not leave the audit row "accepted".
+// The write is retried; one that still fails is logged loudly, since that row is the cabal's
+// record of what its bot did, and ReconcileAgentIntentsTx repairs it from the ledger on the
+// agent's next intent.
+func (s *AgentIntentService) recordIntentStatus(intentID, status, reason, transactionID string) {
 	var err error
 	for attempt := 1; attempt <= agentIntentStatusWriteAttempts; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), agentIntentStatusWriteTimeout)
@@ -335,11 +344,12 @@ func (s *AgentIntentService) buildAgentSnapshotTx(ctx context.Context, tx *sql.T
 	snap := domain.AgentTreasurySnapshot{TreasuryUsdcMicros: treasuryUSDC}
 	switch in.Side {
 	case domain.AgentIntentBuy:
-		committed, err := s.store.SumAgentCommittedBuyUSDCTx(ctx, tx, agent.ID)
+		spent, reserved, err := s.store.SumAgentBuyUSDCTx(ctx, tx, agent.ID)
 		if err != nil {
 			return domain.AgentTreasurySnapshot{}, err
 		}
-		snap.AgentCommittedUsdcMicros = committed
+		snap.AgentSpentUsdcMicros = spent
+		snap.PendingAgentUsdcMicros = reserved
 	case domain.AgentIntentSell:
 		held, err := s.store.NetTokenHoldingByGroupAndMintTx(ctx, tx, agent.GroupID, sellMint)
 		if err != nil {

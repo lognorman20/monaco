@@ -61,7 +61,11 @@ func ComputeRedeemSlice(in RedeemSliceInput) (RedeemSlice, error) {
 		big.NewRat(in.SharesRedeemedMicros, in.TotalSharesMicros),
 		big.NewRat(int64(in.PotNav), 1),
 	)
-	usdc := USDCMicros(ratRoundToInt64(product))
+	rounded, err := ratRoundToInt64(product)
+	if err != nil {
+		return RedeemSlice{}, fmt.Errorf("redeem slice: %w", err)
+	}
+	usdc := USDCMicros(rounded)
 	if usdc <= 0 {
 		return RedeemSlice{}, fmt.Errorf("redeem slice must be positive")
 	}
@@ -86,7 +90,10 @@ func ShareUnitsMicrosForDollarTarget(target USDCMicros, navPerShare USDCMicros) 
 		big.NewRat(1_000_000, 1),
 	)
 	quotient := new(big.Rat).Quo(product, big.NewRat(int64(navPerShare), 1))
-	micros := ratRoundToInt64(quotient)
+	micros, err := ratRoundToInt64(quotient)
+	if err != nil {
+		return 0, fmt.Errorf("share units for dollar target: %w", err)
+	}
 	if micros <= 0 {
 		return 0, fmt.Errorf("dollar target below minimum share increment")
 	}

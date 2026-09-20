@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"math/rand"
+	"testing"
+)
 
 func buildGroupWithRules(overrides func(*GroupRules)) GroupRules {
 	rules := GroupRules{
@@ -21,15 +24,15 @@ func buildGroupWithRules(overrides func(*GroupRules)) GroupRules {
 
 func buildProposal(overrides func(*Proposal)) Proposal {
 	proposal := Proposal{
-		ID:         "proposal-1",
-		GroupID:    "group-1",
-		ProposerID: "user-1",
-		Symbol:     "AAPLx",
+		ID:          "proposal-1",
+		GroupID:     "group-1",
+		ProposerID:  "user-1",
+		Symbol:      "AAPLx",
 		UsdcMicros:  180_000,
 		Kind:        ProposalKindBuy,
 		TokenAmount: 0,
 		Status:      ProposalOpen,
-		ExpiresAt:  1_700_000_000,
+		ExpiresAt:   1_700_000_000,
 	}
 	if overrides != nil {
 		overrides(&proposal)
@@ -69,4 +72,54 @@ func TestBuildProposal_defaultsOpenStatus(t *testing.T) {
 	if proposal.TokenAmount != 0 {
 		t.Fatalf("token amount: got %d want 0", proposal.TokenAmount)
 	}
+}
+
+// buildActiveAgent returns an active agent with a $500 allocation.
+func buildActiveAgent(overrides func(*GroupAgent)) GroupAgent {
+	agent := GroupAgent{
+		ID:                   "agent-1",
+		GroupID:              "group-1",
+		Status:               AgentStatusActive,
+		AgentDisplayName:     "Test Agent",
+		AllocationUsdcMicros: 500_000_000,
+	}
+	if overrides != nil {
+		overrides(&agent)
+	}
+	return agent
+}
+
+// buildTreasurySnapshot returns a $1,000 treasury with nothing spent or pending.
+func buildTreasurySnapshot(overrides func(*AgentTreasurySnapshot)) AgentTreasurySnapshot {
+	snap := AgentTreasurySnapshot{
+		TreasuryUsdcMicros:         1_000_000_000,
+		TokenHoldingsBySymbol:      map[string]int64{"AAPLx": 1_000_000},
+		AgentTokenHoldingsBySymbol: map[string]int64{"AAPLx": 1_000_000},
+	}
+	if overrides != nil {
+		overrides(&snap)
+	}
+	return snap
+}
+
+// buildTallyInput returns an open, unexpired majority tally with no voters.
+func buildTallyInput(overrides func(*VoteTallyInput)) VoteTallyInput {
+	in := VoteTallyInput{
+		Threshold: ThresholdMajority,
+		Votes:     map[string]VoteChoice{},
+		ExpiresAt: 1_700_000_000,
+		Now:       1_600_000_000,
+		Status:    ProposalOpen,
+	}
+	if overrides != nil {
+		overrides(&in)
+	}
+	return in
+}
+
+// newSeededRand returns a deterministic generator so property failures reproduce.
+func newSeededRand(t *testing.T, seed int64) *rand.Rand {
+	t.Helper()
+	t.Logf("property seed = %d", seed)
+	return rand.New(rand.NewSource(seed))
 }

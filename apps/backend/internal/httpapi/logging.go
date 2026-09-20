@@ -6,10 +6,12 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type requestLog struct {
 	route string
+	start time.Time
 }
 
 func newRequestLog(r *http.Request, route string) *requestLog {
@@ -24,7 +26,7 @@ func newRequestLog(r *http.Request, route string) *requestLog {
 		attrs = append(attrs, "query", query)
 	}
 	slog.InfoContext(r.Context(), "http request", attrs...)
-	return &requestLog{route: route}
+	return &requestLog{route: route, start: time.Now()}
 }
 
 func authHeaderStatus(r *http.Request) string {
@@ -43,6 +45,7 @@ func (l *requestLog) done(ctx context.Context, branch string, status int, attrs 
 		"route", l.route,
 		"branch", branch,
 		"status", status,
+		"duration_ms", time.Since(l.start).Milliseconds(),
 	}
 	args = append(args, attrs...)
 
