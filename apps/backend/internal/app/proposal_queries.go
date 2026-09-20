@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -52,7 +52,7 @@ type ProposalVoteSummary struct {
 // ProposalExecutionDetail is on-chain swap status for a proposal.
 type ProposalExecutionDetail struct {
 	State            string
-	TxSignature      string
+	TxHash      string
 	TransactionID    string
 	ExecuteRequestID string
 	ExecutedAt       *time.Time
@@ -194,15 +194,15 @@ func (g *GovernanceService) GetProposalDetail(ctx context.Context, accessToken, 
 		return ProposalDetailResult{}, fmt.Errorf("proposal id is required")
 	}
 
-	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := g.privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return ProposalDetailResult{}, privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return ProposalDetailResult{}, auth.ErrUnauthorized
 		}
 		return ProposalDetailResult{}, fmt.Errorf("verify session: %w", err)
 	}
 
-	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := g.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return ProposalDetailResult{}, err
 	}
@@ -413,8 +413,8 @@ func buildProposalExecutionDetail(status ProposalStatus, tx postgres.Transaction
 	if tx.ExecuteRequestID.Valid {
 		detail.ExecuteRequestID = tx.ExecuteRequestID.String
 	}
-	if tx.TxSignature.Valid {
-		detail.TxSignature = tx.TxSignature.String
+	if tx.TxHash.Valid {
+		detail.TxHash = tx.TxHash.String
 	}
 	if tx.ConfirmedAt.Valid {
 		at := tx.ConfirmedAt.Time.UTC()

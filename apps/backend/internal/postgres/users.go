@@ -23,16 +23,16 @@ func NewStore(db *sql.DB) *Store {
 // User is a row in users.
 type User struct {
 	ID              string
-	PrivyUserID     string
+	DynamicUserID     string
 	DisplayName     sql.NullString
 	ProfilePhotoURL sql.NullString
 	CreatedAt       time.Time
 }
 
-// UpsertUser inserts a user keyed by privy_user_id or returns the existing row.
+// UpsertUser inserts a user keyed by dynamic_user_id or returns the existing row.
 func (s *Store) UpsertUser(ctx context.Context, privyUserID string, displayName string) (User, error) {
 	if privyUserID == "" {
-		return User{}, fmt.Errorf("privy_user_id is required")
+		return User{}, fmt.Errorf("dynamic_user_id is required")
 	}
 
 	var displayNameArg sql.NullString
@@ -41,16 +41,16 @@ func (s *Store) UpsertUser(ctx context.Context, privyUserID string, displayName 
 	}
 
 	const upsertSQL = `
-INSERT INTO users (privy_user_id, display_name)
+INSERT INTO users (dynamic_user_id, display_name)
 VALUES ($1, $2)
-ON CONFLICT (privy_user_id) DO UPDATE
-  SET privy_user_id = users.privy_user_id
-RETURNING id, privy_user_id, display_name, profile_photo_url, created_at`
+ON CONFLICT (dynamic_user_id) DO UPDATE
+  SET dynamic_user_id = users.dynamic_user_id
+RETURNING id, dynamic_user_id, display_name, profile_photo_url, created_at`
 
 	var user User
 	err := s.db.QueryRowContext(ctx, upsertSQL, privyUserID, displayNameArg).Scan(
 		&user.ID,
-		&user.PrivyUserID,
+		&user.DynamicUserID,
 		&user.DisplayName,
 		&user.ProfilePhotoURL,
 		&user.CreatedAt,
@@ -62,21 +62,21 @@ RETURNING id, privy_user_id, display_name, profile_photo_url, created_at`
 	return user, nil
 }
 
-// GetUserByPrivyUserID returns the user for privyUserID, or false if none exists.
-func (s *Store) GetUserByPrivyUserID(ctx context.Context, privyUserID string) (User, bool, error) {
+// GetUserByDynamicUserID returns the user for privyUserID, or false if none exists.
+func (s *Store) GetUserByDynamicUserID(ctx context.Context, privyUserID string) (User, bool, error) {
 	if privyUserID == "" {
-		return User{}, false, fmt.Errorf("privy_user_id is required")
+		return User{}, false, fmt.Errorf("dynamic_user_id is required")
 	}
 
 	const selectSQL = `
-SELECT id, privy_user_id, display_name, profile_photo_url, created_at
+SELECT id, dynamic_user_id, display_name, profile_photo_url, created_at
 FROM users
-WHERE privy_user_id = $1`
+WHERE dynamic_user_id = $1`
 
 	var user User
 	err := s.db.QueryRowContext(ctx, selectSQL, privyUserID).Scan(
 		&user.ID,
-		&user.PrivyUserID,
+		&user.DynamicUserID,
 		&user.DisplayName,
 		&user.ProfilePhotoURL,
 		&user.CreatedAt,
@@ -85,7 +85,7 @@ WHERE privy_user_id = $1`
 		return User{}, false, nil
 	}
 	if err != nil {
-		return User{}, false, fmt.Errorf("get user by privy_user_id: %w", err)
+		return User{}, false, fmt.Errorf("get user by dynamic_user_id: %w", err)
 	}
 
 	return user, true, nil
@@ -139,12 +139,12 @@ func (s *Store) UpdateUserProfilePhotoURL(ctx context.Context, userID, profilePh
 UPDATE users
 SET profile_photo_url = $2
 WHERE id = $1
-RETURNING id, privy_user_id, display_name, profile_photo_url, created_at`
+RETURNING id, dynamic_user_id, display_name, profile_photo_url, created_at`
 
 	var user User
 	err := s.db.QueryRowContext(ctx, updateSQL, userID, trimmed).Scan(
 		&user.ID,
-		&user.PrivyUserID,
+		&user.DynamicUserID,
 		&user.DisplayName,
 		&user.ProfilePhotoURL,
 		&user.CreatedAt,
@@ -169,12 +169,12 @@ func (s *Store) UpdateUserDisplayName(ctx context.Context, userID, displayName s
 UPDATE users
 SET display_name = $2
 WHERE id = $1
-RETURNING id, privy_user_id, display_name, profile_photo_url, created_at`
+RETURNING id, dynamic_user_id, display_name, profile_photo_url, created_at`
 
 	var user User
 	err := s.db.QueryRowContext(ctx, updateSQL, userID, displayName).Scan(
 		&user.ID,
-		&user.PrivyUserID,
+		&user.DynamicUserID,
 		&user.DisplayName,
 		&user.ProfilePhotoURL,
 		&user.CreatedAt,

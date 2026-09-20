@@ -17,7 +17,7 @@ type DepositRow struct {
 	Amount      int64
 	FromAddress string
 	Status      string
-	TxSignature sql.NullString
+	TxHash sql.NullString
 	CreatedAt   time.Time
 }
 
@@ -36,7 +36,7 @@ func (s *Store) InsertDeposit(ctx context.Context, userID, groupID string, amoun
 	const insertSQL = `
 INSERT INTO deposits (user_id, group_id, amount, from_address, status)
 VALUES ($1, $2, $3, $4, 'pending')
-RETURNING id, user_id, group_id, amount, from_address, status, tx_signature, created_at`
+RETURNING id, user_id, group_id, amount, from_address, status, tx_hash, created_at`
 
 	var row DepositRow
 	var txSig sql.NullString
@@ -53,7 +53,7 @@ RETURNING id, user_id, group_id, amount, from_address, status, tx_signature, cre
 	if err != nil {
 		return DepositRow{}, fmt.Errorf("insert deposit: %w", err)
 	}
-	row.TxSignature = txSig
+	row.TxHash = txSig
 	return row, nil
 }
 
@@ -64,7 +64,7 @@ func (s *Store) GetDepositByID(ctx context.Context, id string) (DepositRow, bool
 	}
 
 	const selectSQL = `
-SELECT id, user_id, group_id, amount, from_address, status, tx_signature, created_at
+SELECT id, user_id, group_id, amount, from_address, status, tx_hash, created_at
 FROM deposits
 WHERE id = $1`
 
@@ -76,7 +76,7 @@ WHERE id = $1`
 		&row.Amount,
 		&row.FromAddress,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -95,7 +95,7 @@ func (s *Store) ListDepositsByGroupID(ctx context.Context, groupID string) ([]De
 	}
 
 	const selectSQL = `
-SELECT id, user_id, group_id, amount, from_address, status, tx_signature, created_at
+SELECT id, user_id, group_id, amount, from_address, status, tx_hash, created_at
 FROM deposits
 WHERE group_id = $1
 ORDER BY created_at DESC
@@ -117,7 +117,7 @@ LIMIT 100`
 			&row.Amount,
 			&row.FromAddress,
 			&row.Status,
-			&row.TxSignature,
+			&row.TxHash,
 			&row.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan deposit: %w", err)
@@ -228,7 +228,7 @@ WHERE user_id = $1 AND status = 'pending'`
 // Faker users and faker groups (#153) are excluded: their rows must never reach Privy/RPC.
 func (s *Store) ListPendingDeposits(ctx context.Context) ([]DepositRow, error) {
 	const selectSQL = `
-SELECT d.id, d.user_id, d.group_id, d.amount, d.from_address, d.status, d.tx_signature, d.created_at
+SELECT d.id, d.user_id, d.group_id, d.amount, d.from_address, d.status, d.tx_hash, d.created_at
 FROM deposits d
 JOIN users u ON u.id = d.user_id
 JOIN groups g ON g.id = d.group_id
@@ -251,7 +251,7 @@ ORDER BY d.created_at ASC`
 			&row.Amount,
 			&row.FromAddress,
 			&row.Status,
-			&row.TxSignature,
+			&row.TxHash,
 			&row.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan deposit: %w", err)
@@ -279,7 +279,7 @@ func (s *Store) FailDeposit(ctx context.Context, depositID, reason string) (Depo
 UPDATE deposits
 SET status = $2
 WHERE id = $1 AND status = 'pending'
-RETURNING id, user_id, group_id, amount, from_address, status, tx_signature, created_at`
+RETURNING id, user_id, group_id, amount, from_address, status, tx_hash, created_at`
 
 	var row DepositRow
 	err := s.db.QueryRowContext(ctx, updateSQL, depositID, status).Scan(
@@ -289,7 +289,7 @@ RETURNING id, user_id, group_id, amount, from_address, status, tx_signature, cre
 		&row.Amount,
 		&row.FromAddress,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -303,17 +303,17 @@ RETURNING id, user_id, group_id, amount, from_address, status, tx_signature, cre
 
 // SetDepositBroadcastSignature records a broadcast sweep signature on a pending deposit.
 // Status stays pending until ObserveSweep confirms on-chain arrival and credits shares.
-func (s *Store) SetDepositBroadcastSignature(ctx context.Context, depositID, txSignature string) error {
-	if depositID == "" || txSignature == "" {
+func (s *Store) SetDepositBroadcastSignature(ctx context.Context, depositID, txHash string) error {
+	if depositID == "" || txHash == "" {
 		return fmt.Errorf("deposit id and tx signature are required")
 	}
 
 	const updateSQL = `
 UPDATE deposits
-SET tx_signature = $2
+SET tx_hash = $2
 WHERE id = $1 AND status = 'pending'`
 
-	result, err := s.db.ExecContext(ctx, updateSQL, depositID, txSignature)
+	result, err := s.db.ExecContext(ctx, updateSQL, depositID, txHash)
 	if err != nil {
 		return fmt.Errorf("set deposit broadcast signature: %w", err)
 	}
@@ -329,26 +329,26 @@ WHERE id = $1 AND status = 'pending'`
 
 // ConfirmDepositTx marks a pending deposit confirmed with a treasury sweep signature.
 // Returns newlyConfirmed=false when another caller already confirmed the same deposit.
-func (s *Store) ConfirmDepositTx(ctx context.Context, tx *sql.Tx, depositID, txSignature string) (DepositRow, bool, error) {
-	if depositID == "" || txSignature == "" {
+func (s *Store) ConfirmDepositTx(ctx context.Context, tx *sql.Tx, depositID, txHash string) (DepositRow, bool, error) {
+	if depositID == "" || txHash == "" {
 		return DepositRow{}, false, fmt.Errorf("deposit id and tx signature are required")
 	}
 
 	const updateSQL = `
 UPDATE deposits
-SET status = 'confirmed', tx_signature = $2
+SET status = 'confirmed', tx_hash = $2
 WHERE id = $1 AND status = 'pending'
-RETURNING id, user_id, group_id, amount, from_address, status, tx_signature, created_at`
+RETURNING id, user_id, group_id, amount, from_address, status, tx_hash, created_at`
 
 	var row DepositRow
-	err := tx.QueryRowContext(ctx, updateSQL, depositID, txSignature).Scan(
+	err := tx.QueryRowContext(ctx, updateSQL, depositID, txHash).Scan(
 		&row.ID,
 		&row.UserID,
 		&row.GroupID,
 		&row.Amount,
 		&row.FromAddress,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.CreatedAt,
 	)
 	if err == nil {
@@ -368,7 +368,7 @@ RETURNING id, user_id, group_id, amount, from_address, status, tx_signature, cre
 	if existing.Status != "confirmed" {
 		return DepositRow{}, false, fmt.Errorf("confirm deposit: deposit not pending")
 	}
-	if !existing.TxSignature.Valid || existing.TxSignature.String != txSignature {
+	if !existing.TxHash.Valid || existing.TxHash.String != txHash {
 		return DepositRow{}, false, fmt.Errorf("confirm deposit: tx signature mismatch")
 	}
 	return existing, false, nil
@@ -376,7 +376,7 @@ RETURNING id, user_id, group_id, amount, from_address, status, tx_signature, cre
 
 func getDepositByIDTx(ctx context.Context, tx *sql.Tx, id string) (DepositRow, bool, error) {
 	const selectSQL = `
-SELECT id, user_id, group_id, amount, from_address, status, tx_signature, created_at
+SELECT id, user_id, group_id, amount, from_address, status, tx_hash, created_at
 FROM deposits
 WHERE id = $1`
 
@@ -388,7 +388,7 @@ WHERE id = $1`
 		&row.Amount,
 		&row.FromAddress,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -400,27 +400,27 @@ WHERE id = $1`
 	return row, true, nil
 }
 
-// GetDepositByTxSignature returns a confirmed deposit keyed by sweep signature for idempotency.
+// GetDepositByTxHash returns a confirmed deposit keyed by sweep signature for idempotency.
 // Pending deposits may store a broadcast signature before confirmation; those are ignored here.
-func (s *Store) GetDepositByTxSignature(ctx context.Context, txSignature string) (DepositRow, bool, error) {
-	if txSignature == "" {
+func (s *Store) GetDepositByTxHash(ctx context.Context, txHash string) (DepositRow, bool, error) {
+	if txHash == "" {
 		return DepositRow{}, false, fmt.Errorf("tx signature is required")
 	}
 
 	const selectSQL = `
-SELECT id, user_id, group_id, amount, from_address, status, tx_signature, created_at
+SELECT id, user_id, group_id, amount, from_address, status, tx_hash, created_at
 FROM deposits
-WHERE tx_signature = $1 AND status = 'confirmed'`
+WHERE tx_hash = $1 AND status = 'confirmed'`
 
 	var row DepositRow
-	err := s.db.QueryRowContext(ctx, selectSQL, txSignature).Scan(
+	err := s.db.QueryRowContext(ctx, selectSQL, txHash).Scan(
 		&row.ID,
 		&row.UserID,
 		&row.GroupID,
 		&row.Amount,
 		&row.FromAddress,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {

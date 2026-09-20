@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 func TestPOST_proposals_happyPath_returnsProposalID(t *testing.T) {
@@ -20,11 +20,11 @@ func TestPOST_proposals_happyPath_returnsProposalID(t *testing.T) {
 
 	proposalHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, resolver, iso := integrationProposalsApp(t)
 	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
-	xstocks.RegisterSolanaMint(resolver, "AAPLx", jupiter.AAPLxMint)
-	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, 5_000_000, jupiter.BuyQuote{
+	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, jupiter.BuyQuote{
 		Routable:   true,
-		InputMint:  jupiter.USDCMint,
-		OutputMint: jupiter.AAPLxMint,
+		InputToken:  evm.USDCAddress,
+		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		InAmount:   "5000000",
 		OutAmount:  "2500000",
 	})
@@ -59,12 +59,12 @@ func TestPOST_proposals_exceedsTreasuryUSDC_returns400(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("get treasury: found=%v err=%v", found, err)
 	}
-	privy.SetTreasuryUSDCBalance(privyClient, treasury.SolanaAddress, 1_000_000)
-	xstocks.RegisterSolanaMint(resolver, "AAPLx", jupiter.AAPLxMint)
-	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, 5_000_000, jupiter.BuyQuote{
+	wallets.SetTreasuryUSDCBalance(privyClient, treasury.Address, 1_000_000)
+	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, jupiter.BuyQuote{
 		Routable:   true,
-		InputMint:  jupiter.USDCMint,
-		OutputMint: jupiter.AAPLxMint,
+		InputToken:  evm.USDCAddress,
+		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		InAmount:   "5000000",
 		OutAmount:  "2500000",
 	})
@@ -86,11 +86,11 @@ func TestPOST_quotes_routable_returnsOutputAndPrice(t *testing.T) {
 
 	quoteHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, resolver, iso := integrationQuotesApp(t)
 	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
-	xstocks.RegisterSolanaMint(resolver, "AAPLx", jupiter.AAPLxMint)
-	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, 5_000_000, jupiter.BuyQuote{
+	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, jupiter.BuyQuote{
 		Routable:   true,
-		InputMint:  jupiter.USDCMint,
-		OutputMint: jupiter.AAPLxMint,
+		InputToken:  evm.USDCAddress,
+		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		InAmount:   "5000000",
 		OutAmount:  "2500000",
 	})
@@ -116,7 +116,7 @@ func TestPOST_quotes_routable_returnsOutputAndPrice(t *testing.T) {
 	if payload.OutputAmount != "2500000" {
 		t.Fatalf("outputAmount = %q, want 2500000", payload.OutputAmount)
 	}
-	wantPrice := strconv.FormatInt((5_000_000*jupiter.XStockAtomicScale)/2_500_000, 10)
+	wantPrice := strconv.FormatInt((5_000_000*b20.TokenAtomicScale)/2_500_000, 10)
 	if payload.PriceUsdcMicros != wantPrice {
 		t.Fatalf("priceUsdcMicros = %q, want %q", payload.PriceUsdcMicros, wantPrice)
 	}
@@ -127,11 +127,11 @@ func TestGET_groupProposals_openTab_returnsCreatedProposal(t *testing.T) {
 
 	proposalHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, resolver, iso := integrationProposalsApp(t)
 	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
-	xstocks.RegisterSolanaMint(resolver, "AAPLx", jupiter.AAPLxMint)
-	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, 5_000_000, jupiter.BuyQuote{
+	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, jupiter.BuyQuote{
 		Routable:   true,
-		InputMint:  jupiter.USDCMint,
-		OutputMint: jupiter.AAPLxMint,
+		InputToken:  evm.USDCAddress,
+		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		InAmount:   "5000000",
 		OutAmount:  "2500000",
 	})
@@ -181,11 +181,11 @@ func TestGET_proposalDetail_returnsProposerAndVotes(t *testing.T) {
 
 	proposalHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, resolver, iso := integrationProposalsApp(t)
 	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
-	xstocks.RegisterSolanaMint(resolver, "AAPLx", jupiter.AAPLxMint)
-	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, 5_000_000, jupiter.BuyQuote{
+	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, jupiter.BuyQuote{
 		Routable:   true,
-		InputMint:  jupiter.USDCMint,
-		OutputMint: jupiter.AAPLxMint,
+		InputToken:  evm.USDCAddress,
+		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		InAmount:   "5000000",
 		OutAmount:  "2500000",
 	})
@@ -241,11 +241,11 @@ func TestPOST_proposals_withThesis_roundTripsOnListAndDetail(t *testing.T) {
 
 	proposalHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, resolver, iso := integrationProposalsApp(t)
 	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
-	xstocks.RegisterSolanaMint(resolver, "AAPLx", jupiter.AAPLxMint)
-	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, 5_000_000, jupiter.BuyQuote{
+	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, jupiter.BuyQuote{
 		Routable:   true,
-		InputMint:  jupiter.USDCMint,
-		OutputMint: jupiter.AAPLxMint,
+		InputToken:  evm.USDCAddress,
+		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		InAmount:   "5000000",
 		OutAmount:  "2500000",
 	})
@@ -307,7 +307,7 @@ func TestPOST_proposals_thesisTooLong_returns400(t *testing.T) {
 
 	proposalHandlers, groupHandlers, authHandlers, privyClient, _, resolver, iso := integrationProposalsApp(t)
 	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
-	xstocks.RegisterSolanaMint(resolver, "AAPLx", jupiter.AAPLxMint)
+	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
 
 	body, err := json.Marshal(map[string]any{
 		"symbol": "AAPLx",
@@ -330,7 +330,7 @@ func TestPOST_proposals_thesisTooLong_returns400(t *testing.T) {
 	}
 }
 
-func integrationProposalsApp(t *testing.T) (*ProposalHandlers, *GroupHandlers, *AuthHandlers, privy.Client, jupiter.Client, xstocks.Resolver, *postgres.TestIsolation) {
+func integrationProposalsApp(t *testing.T) (*ProposalHandlers, *GroupHandlers, *AuthHandlers, wallets.Client, dex.Client, b20.Catalog, *postgres.TestIsolation) {
 	t.Helper()
 
 	quoteHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, resolver, iso := integrationQuotesApp(t)

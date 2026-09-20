@@ -10,13 +10,13 @@ import (
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 )
 
-func integrationHomeApp(t *testing.T) (*HomeHandlers, *AuthHandlers, *GroupHandlers, privy.Client, *postgres.Store, *postgres.TestIsolation) {
+func integrationHomeApp(t *testing.T) (*HomeHandlers, *AuthHandlers, *GroupHandlers, wallets.Client, *postgres.Store, *postgres.TestIsolation) {
 	t.Helper()
 	return integrationHomeAppWithPyth(t, nil)
 }
@@ -32,7 +32,7 @@ func findHomeGroupRow(t *testing.T, groups []homeGroupBoardRowResponse, groupID 
 	return homeGroupBoardRowResponse{}
 }
 
-func integrationHomeAppWithPyth(t *testing.T, pythClient pyth.Client) (*HomeHandlers, *AuthHandlers, *GroupHandlers, privy.Client, *postgres.Store, *postgres.TestIsolation) {
+func integrationHomeAppWithPyth(t *testing.T, pythClient marks.Client) (*HomeHandlers, *AuthHandlers, *GroupHandlers, wallets.Client, *postgres.Store, *postgres.TestIsolation) {
 	t.Helper()
 
 	authHandlers, privyClient, db, iso := integrationApp(t)
@@ -279,7 +279,7 @@ func TestGET_home_nonMember_seesUnjoinedGroupRow(t *testing.T) {
 func TestGET_home_pythError_returns200(t *testing.T) {
 	t.Parallel()
 
-	pythClient := pyth.NewFakeClient()
+	pythClient := chainlink.NewFakeClient()
 	homeHandlers, authHandlers, groupHandlers, privyClient, store, iso := integrationHomeAppWithPyth(t, pythClient)
 	session, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "pyth-fail", "Alfred")
 
@@ -316,9 +316,9 @@ func TestGET_home_pythError_returns200(t *testing.T) {
 	_, _, err = store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          created.GroupID,
 		Amount:           swappedUSDC,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      fmt.Sprintf("sig-%s-buy", iso.Suffix()),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      fmt.Sprintf("sig-%s-buy", iso.Suffix()),
 		ExecuteRequestID: fmt.Sprintf("req-%s-buy", iso.Suffix()),
 		CostBasisPrice:   swappedUSDC,
 		CostBasisAmount:  aaplAtomics,
@@ -331,11 +331,11 @@ func TestGET_home_pythError_returns200(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("GetTreasuryByGroupID: found=%v err=%v", found, err)
 	}
-	privy.SetTreasuryUSDCBalance(privyClient, treasury.SolanaAddress, depositMicros-swappedUSDC)
+	wallets.SetTreasuryUSDCBalance(privyClient, treasury.Address, depositMicros-swappedUSDC)
 
-	pyth.RegisterMarkedPotError(pythClient, pyth.TreasuryRef{
+	chainlink.RegisterMarkedPotError(pythClient, marks.TreasuryRef{
 		GroupID: created.GroupID,
-		Address: treasury.SolanaAddress,
+		Address: treasury.Address,
 	}, fmt.Errorf("pyth latest price: status 403"))
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/home", nil)
@@ -395,7 +395,7 @@ func TestGET_home_treasurySurplus_reconcilesOnRead(t *testing.T) {
 		t.Fatalf("commit position: %v", err)
 	}
 
-	privy.SetTreasuryUSDCBalance(privyClient, treasury.SolanaAddress, 400_000)
+	wallets.SetTreasuryUSDCBalance(privyClient, treasury.Address, 400_000)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/home", nil)
 	req.Header.Set("Authorization", "Bearer "+string(token))
@@ -427,7 +427,7 @@ func TestGET_userSharedGroups_returnsOnlySharedClubs(t *testing.T) {
 	_, bobToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "shared-bob", "Bob")
 	_, carolToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "shared-carol", "Carol")
 
-	createSharedClub := func(token privy.AccessToken, name string) string {
+	createSharedClub := func(token auth.AccessToken, name string) string {
 		t.Helper()
 		createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"`+name+`"}`))
 		createReq.Header.Set("Content-Type", "application/json")
@@ -445,7 +445,7 @@ func TestGET_userSharedGroups_returnsOnlySharedClubs(t *testing.T) {
 		return created.GroupID
 	}
 
-	joinClub := func(token privy.AccessToken, groupID string) {
+	joinClub := func(token auth.AccessToken, groupID string) {
 		t.Helper()
 		joinReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+groupID+"/join", strings.NewReader(`{}`))
 		joinReq.SetPathValue("id", groupID)

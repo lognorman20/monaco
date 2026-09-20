@@ -12,7 +12,7 @@ func TestUpdateUserDisplayName_updatesRowAndReportsMissingUser(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	user, err := store.UpsertUser(ctx, iso.UniquePrivyID("rename"), "Before")
+	user, err := store.UpsertUser(ctx, iso.UniqueDynamicID("rename"), "Before")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestListUserProfilesByIDs_returnsNamesAndPhotosInOneMap(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	withPhoto, err := store.UpsertUser(ctx, iso.UniquePrivyID("profiles-photo"), "Has Photo")
+	withPhoto, err := store.UpsertUser(ctx, iso.UniqueDynamicID("profiles-photo"), "Has Photo")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestListUserProfilesByIDs_returnsNamesAndPhotosInOneMap(t *testing.T) {
 	if _, err := store.UpdateUserProfilePhotoURL(ctx, withPhoto.ID, "https://example.test/a.png"); err != nil {
 		t.Fatalf("UpdateUserProfilePhotoURL: %v", err)
 	}
-	unnamed, err := store.UpsertUser(ctx, iso.UniquePrivyID("profiles-unnamed"), "")
+	unnamed, err := store.UpsertUser(ctx, iso.UniqueDynamicID("profiles-unnamed"), "")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}

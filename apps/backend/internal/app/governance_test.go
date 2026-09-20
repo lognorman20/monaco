@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -24,9 +24,9 @@ type governanceHarness struct {
 	Store      *postgres.Store
 	DB         *sql.DB
 	Sessions   *SessionService
-	Privy      privy.Client
-	Jupiter    jupiter.Client
-	XStocks    xstocks.Resolver
+	Privy      wallets.Client
+	Jupiter    dex.Client
+	XStocks    b20.Catalog
 	Swap       *SwapService
 	Symbols    *SymbolResolver
 	ISO        *postgres.TestIsolation
@@ -56,14 +56,14 @@ func integrationGovernanceApp(t *testing.T) governanceHarness {
 	}
 }
 
-func registerRoutableQuote(t *testing.T, jupiterClient jupiter.Client, resolver xstocks.Resolver, symbol string, usdc int64) {
+func registerRoutableQuote(t *testing.T, jupiterClient dex.Client, resolver b20.Catalog, symbol string, usdc int64) {
 	t.Helper()
 
 	mint := "Mint" + symbol
-	xstocks.RegisterSolanaMint(resolver, symbol, mint)
+	b20.RegisterTokenAddress(resolver, symbol, mint)
 	jupiter.RegisterQuoteBuy(jupiterClient, mint, usdc, jupiter.BuyQuote{
 		Routable:   true,
-		OutputMint: mint,
+		OutputToken: mint,
 		InAmount:   strconv.FormatInt(usdc, 10),
 		OutAmount:  strconv.FormatInt(usdc, 10),
 	})
@@ -120,7 +120,7 @@ func TestCreateProposal_jupiterTakerOrderFails_priceOnlyQuoteCreates(t *testing.
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(jupiter.FixtureJupiterSuccessResponse(jupiter.AAPLxMint))
+		_, _ = w.Write(jupiter.FixtureJupiterSuccessResponse("0xb200000000000000000000c2e324d24d7eecd1fb"))
 	}))
 	t.Cleanup(server.Close)
 
@@ -138,7 +138,7 @@ func TestCreateProposal_jupiterTakerOrderFails_priceOnlyQuoteCreates(t *testing.
 	}
 	h.ISO.TrackGroup(created.GroupID)
 	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, treasuryUSDC)
-	xstocks.RegisterSolanaMint(h.XStocks, "AAPLx", jupiter.AAPLxMint)
+	b20.RegisterTokenAddress(h.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
 
 	proposal, err := h.Governance.CreateProposal(context.Background(), CreateProposalInput{
 		GroupID:    created.GroupID,
@@ -450,13 +450,13 @@ func TestCreateProposal_sellHeldAmount_createsOpenProposal(t *testing.T) {
 	h.ISO.TrackGroup(created.GroupID)
 
 	const held = int64(50_000_000)
-	xstocks.RegisterSolanaMint(h.XStocks, "AAPLx", jupiter.AAPLxMint)
+	b20.RegisterTokenAddress(h.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          created.GroupID,
 		Amount:           2_000_000,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      testTxSignature(h.ISO, "sell-prop-buy"),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      testTxHash(h.ISO, "sell-prop-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "sell-prop-buy"),
 		CostBasisPrice:   2_000_000,
 		CostBasisAmount:  held,
@@ -464,10 +464,10 @@ func TestCreateProposal_sellHeldAmount_createsOpenProposal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfirmBuyTransaction: %v", err)
 	}
-	jupiter.RegisterSellQuote(h.Jupiter, jupiter.AAPLxMint, held, jupiter.SellQuote{
+	jupiter.RegisterSellQuote(h.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", held, jupiter.SellQuote{
 		Routable:   true,
-		InputMint:  jupiter.AAPLxMint,
-		OutputMint: jupiter.USDCMint,
+		InputToken:  "0xb200000000000000000000c2e324d24d7eecd1fb",
+		OutputToken: evm.USDCAddress,
 		InAmount:   "50000000",
 		OutAmount:  "1500000",
 		RequestID:  "sell-quote-held",
@@ -501,7 +501,7 @@ func TestCreateProposal_sellExceedsHolding_rejected(t *testing.T) {
 		t.Fatalf("create group: %v", err)
 	}
 	h.ISO.TrackGroup(created.GroupID)
-	xstocks.RegisterSolanaMint(h.XStocks, "AAPLx", jupiter.AAPLxMint)
+	b20.RegisterTokenAddress(h.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
 
 	_, err = h.Governance.CreateProposal(ctx, CreateProposalInput{
 		GroupID:     created.GroupID,

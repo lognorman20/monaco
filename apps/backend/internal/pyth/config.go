@@ -7,7 +7,7 @@ import (
 )
 
 // NewHermesClientFromConfig returns an authenticated Hermes client for marked pot NAV.
-func NewHermesClientFromConfig(cfg *config.Config) (Client, error) {
+func NewHermesClientFromConfig(cfg *config.Config) (*HermesClient, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}

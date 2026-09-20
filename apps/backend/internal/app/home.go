@@ -9,22 +9,22 @@ import (
 	"sync"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/packages/domain"
 )
 
 // HomeService builds app-home board projections.
 type HomeService struct {
 	store    *postgres.Store
-	privy    privy.Client
-	pyth     pyth.Client
+	privy    wallets.Client
+	pyth     marks.Client
 	deposits *DepositService
 	symbols  *SymbolResolver
 }
 
 // NewHomeService wires home dependencies.
-func NewHomeService(store *postgres.Store, privyClient privy.Client, pythClient pyth.Client, deposits *DepositService, symbols *SymbolResolver) *HomeService {
+func NewHomeService(store *postgres.Store, privyClient wallets.Client, pythClient marks.Client, deposits *DepositService, symbols *SymbolResolver) *HomeService {
 	return &HomeService{
 		store:    store,
 		privy:    privyClient,
@@ -64,17 +64,17 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 	ctx = HomeContextWithPotNavCache(ctx)
 	logHomeGetStart()
 
-	identity, err := h.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := h.privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			slog.Warn("home get rejected", "reason", "invalid token")
-			return HomeResult{}, privy.ErrInvalidToken
+			return HomeResult{}, auth.ErrUnauthorized
 		}
 		logHomeBranchError("home get verify session failed", err)
 		return HomeResult{}, fmt.Errorf("verify session: %w", err)
 	}
 
-	user, found, err := h.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := h.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		logHomeBranchError("home get lookup user failed", err)
 		return HomeResult{}, err
@@ -325,7 +325,7 @@ func (h *HomeService) computeGroupPotNavAndShares(ctx context.Context, groupID s
 		return 0, 0, err
 	}
 	if found {
-		treasuryAddress = treasury.SolanaAddress
+		treasuryAddress = treasury.Address
 	}
 
 	potView, err := computeGroupPotView(ctx, h.store, h.pyth, h.symbols, groupID, treasuryAddress, treasuryUSDC)
@@ -355,7 +355,7 @@ func (h *HomeService) groupTreasuryUSDC(ctx context.Context, groupID string, net
 		return 0, err
 	}
 	if found {
-		balance, err := h.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
+		balance, err := h.privy.TreasuryUSDCBalance(ctx, treasury.Address)
 		if err != nil {
 			return 0, fmt.Errorf("treasury usdc balance: %w", err)
 		}
@@ -412,15 +412,15 @@ func (h *HomeService) GetUserSharedGroups(ctx context.Context, accessToken, targ
 		return nil, fmt.Errorf("user id is required")
 	}
 
-	identity, err := h.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := h.privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return nil, privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return nil, auth.ErrUnauthorized
 		}
 		return nil, fmt.Errorf("verify session: %w", err)
 	}
 
-	viewer, found, err := h.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	viewer, found, err := h.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return nil, err
 	}

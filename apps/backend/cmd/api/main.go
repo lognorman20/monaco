@@ -14,17 +14,21 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
+	"github.com/monaco/monaco/apps/backend/internal/chainlink"
 	"github.com/monaco/monaco/apps/backend/internal/config"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/evm"
 	"github.com/monaco/monaco/apps/backend/internal/faker"
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
-	"github.com/monaco/monaco/apps/backend/internal/solana/balance"
+	"github.com/monaco/monaco/apps/backend/internal/signer"
 	"github.com/monaco/monaco/apps/backend/internal/storage"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/worker"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
 // bootResult holds API wiring produced at startup.
@@ -99,13 +103,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	slog.Info("relayer loaded", "pubkey", relayer.PublicKey())
+	slog.Info("relayer loaded", "address", relayer.Address())
 
-	solanaRPC := worker.NewHTTPSolanaRPC(cfg.SolanaCluster)
-	if err := balance.MustHaveSOL(ctx, solanaRPC, relayer.PublicKey(), balance.FeePayerMinLamports); err != nil {
-		return nil, err
+	chain := evm.NewJSONRPCClient(cfg.BaseRPCURL)
+	if bal, err := chain.ETHBalance(ctx, relayer.Address()); err == nil && bal.Cmp(evm.FeePayerMinWei) < 0 {
+		return nil, fmt.Errorf("relayer ETH below minimum on Base")
 	}
-	slog.Info("relayer SOL balance ok", "pubkey", relayer.PublicKey(), "min_lamports", balance.FeePayerMinLamports)
 
 	if err := postgres.ApplyFromEnv(ctx, cfg.DatabaseURL, postgres.MigrationsDir()); err != nil {
 		return nil, fmt.Errorf("apply migrations: %w", err)
@@ -122,28 +125,27 @@ func boot(ctx context.Context) (*bootResult, error) {
 	slog.Info("database connected")
 
 	store := postgres.NewStore(db)
-	privyClient := privy.NewHTTPClient(cfg)
-	var pythClient pyth.Client
+	signerHTTP := signer.NewHTTPClient(cfg.SignerURL, cfg.SignerSharedSecret)
+	walletClient := wallets.NewSignerClient(signerHTTP, chain, store, nil, relayer.Address())
+	authVerifier := auth.NewDynamicVerifier(cfg.DynamicEnvironmentID, http.DefaultClient)
+	catalog := b20.NewPinnedCatalog()
+	dexClient := dex.NewKyberClient(http.DefaultClient, cfg.KyberClientID)
+	marksClient := chainlink.NewClient(chain, catalog)
+	var hermes *marks.HermesClient
 	if cfg.PythAPIKey != "" {
-		pythClient, err = pyth.NewHermesClientFromConfig(cfg)
+		hermes, err = marks.NewHermesClientFromConfig(cfg)
 		if err != nil {
-			return nil, fmt.Errorf("pyth client: %w", err)
+			return nil, fmt.Errorf("pyth hermes: %w", err)
 		}
-		slog.Info("pyth client ready")
+		slog.Info("pyth hermes ready")
 	} else {
-		slog.Info("pyth client skipped", "reason", "PYTH_API_KEY unset")
+		slog.Info("pyth hermes skipped", "reason", "PYTH_API_KEY unset")
 	}
-	catalogSearcher := xstocks.NewHTTPCatalogSearcher()
-	jupiterClient := jupiter.NewHTTPClientWithPayer(relayer.PublicKey())
-	catalogRoutability := xstocks.NewCachedRoutabilityProber(
-		app.NewJupiterCatalogRoutabilityProber(jupiterClient),
-		xstocks.NewRoutabilityCache(xstocks.DefaultRoutabilityCacheTTL),
-	)
-	catalogSearcher.SetRoutabilityProber(catalogRoutability)
-	symbols := app.NewSymbolResolver(catalogSearcher)
-	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
-	platformWithdrawals := app.NewPlatformWithdrawService(store, privyClient, deposits, solanaRPC, relayer.PrivateKey())
-	sessions := app.NewSessionService(store, privyClient).
+	symbols := app.NewSymbolResolver(catalog)
+	deposits := app.NewDepositService(store, walletClient, marksClient, symbols)
+	confirmer := worker.NewEVMConfirmer(chain)
+	platformWithdrawals := app.NewPlatformWithdrawService(store, walletClient, deposits, confirmer)
+	sessions := app.NewSessionService(store, authVerifier, walletClient).
 		WithDisplayNameLimiter(app.NewDisplayNameUpdateLimiter())
 	var storageClient storage.Client
 	if cfg.SupabaseURL != "" && cfg.SupabaseServiceRoleKey != "" {
@@ -154,16 +156,14 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}
 	profilePhotos := app.NewProfilePhotoService(store, privyClient, storageClient).
 		WithUploadLimiter(app.NewProfilePhotoUploadLimiter())
-	home := app.NewHomeService(store, privyClient, pythClient, deposits, symbols)
-	groups := app.NewGroupService(store, privyClient)
-	governance := app.NewGovernanceService(store, privyClient)
+	home := app.NewHomeService(store, walletClient, marksClient, deposits, symbols)
+	groups := app.NewGroupService(store, walletClient)
+	governance := app.NewGovernanceService(store, walletClient)
 	depositHandlers := &httpapi.DepositHandlers{Deposits: deposits}
 	platformWithdrawHandlers := &httpapi.PlatformWithdrawHandlers{Withdrawals: platformWithdrawals}
-	xstocksResolver := xstocks.NewHTTPResolver()
-	buy := app.NewBuyService(jupiterClient, xstocksResolver)
-	signer := app.NewPrivyTreasurySigner(privyClient)
-	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, relayer.PrivateKey(), symbols)
-	redeem := app.NewRedeemService(store, privyClient, pythClient, jupiterClient, swap, signer)
+	buy := app.NewBuyService(dexClient, catalog)
+	swap := app.NewSwapService(store, buy, dexClient, walletClient, chain, symbols)
+	redeem := app.NewRedeemService(store, walletClient, authVerifier, marksClient, dexClient, swap)
 	governance.SetRedeemService(redeem)
 	auth := &httpapi.AuthHandlers{Sessions: sessions}
 	me := &httpapi.MeHandlers{Sessions: sessions, ProfilePhoto: profilePhotos}
@@ -176,45 +176,38 @@ func boot(ctx context.Context) (*bootResult, error) {
 	governance.SetSwapService(swap)
 	transactionHandlers := &httpapi.TransactionHandlers{
 		Store:   store,
-		Privy:   privyClient,
-		XStocks: xstocksResolver,
+		Wallets: walletClient,
+		Catalog: catalog,
 		Swap:    swap,
 		Symbols: symbols,
 	}
 	agentKeyGuard := httpapi.NewAgentKeyGuard()
 	catalogHandlers := &httpapi.CatalogHandlers{
 		Store:    store,
-		Privy:    privyClient,
-		Catalog:  catalogSearcher,
+		Wallets:  walletClient,
+		Catalog:  catalog,
 		KeyGuard: agentKeyGuard,
 	}
-	var assetPrices pyth.AssetPriceClient
-	if hermes, ok := pythClient.(*pyth.HermesClient); ok {
+	var assetPrices marks.AssetPriceClient
+	if hermes != nil {
 		assetPrices = hermes
-	}
-	jupiterPriceClient := jupiter.NewHTTPPriceClient(cfg.JupiterAPIKey)
-	if cfg.JupiterAPIKey != "" {
-		slog.Info("jupiter price client ready")
-	} else {
-		slog.Info("jupiter price client ready", "reason", "JUPITER_API_KEY unset, using unauthenticated rate limit")
 	}
 	assetsHandlers := &httpapi.AssetsHandlers{
 		Store:   store,
-		Privy:   privyClient,
-		Catalog: catalogSearcher,
+		Wallets: walletClient,
+		Catalog: catalog,
 		Pyth:    assetPrices,
-		Jupiter: jupiterClient,
-		Price:   jupiterPriceClient,
+		Dex:     dexClient,
 	}
 	quoteHandlers := &httpapi.QuoteHandlers{
 		Store:      store,
-		Privy:      privyClient,
+		Wallets:    walletClient,
 		Buy:        buy,
 		Governance: governance,
 	}
 	proposalHandlers := &httpapi.ProposalHandlers{
 		Store:      store,
-		Privy:      privyClient,
+		Wallets:    walletClient,
 		Governance: governance,
 	}
 	agentIntents := app.NewAgentIntentService(store, swap, symbols)
@@ -225,14 +218,14 @@ func boot(ctx context.Context) (*bootResult, error) {
 		addr = v
 	}
 
-	groupChat := app.NewGroupChatService(store, privyClient)
+	groupChat := app.NewGroupChatService(store, walletClient)
 	groupMessageHandlers := &httpapi.GroupMessageHandlers{Chat: groupChat}
 	fakerHandlers := &httpapi.DevFakerHandlers{
 		Enabled:     config.FakerEnabled(),
 		DatabaseURL: cfg.DatabaseURL,
 		Store:       store,
-		Privy:       privyClient,
-		Seeder:      faker.NewSeeder(store, faker.PythMarkSource(pythClient)),
+		Wallets:     walletClient,
+		Seeder:      faker.NewSeeder(store, faker.MarksSource(marksClient)),
 	}
 	if fakerHandlers.Enabled {
 		if config.IsLocalDatabaseURL(cfg.DatabaseURL) {
@@ -297,7 +290,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	routes := registerDevFakerRoute(mux, fakerHandlers, apiRoutes)
 	logRoutesReady(routes)
 
-	poller := worker.NewSweepPoller(store, privyClient, solanaRPC, deposits, relayer.PrivateKey(), nil)
+	poller := worker.NewSweepPoller(store, walletClient, confirmer, deposits, nil)
 	pollerCtx, stopPoller := context.WithCancel(context.Background())
 	go worker.Run(pollerCtx, poller, worker.DefaultPollInterval)
 	slog.Info("sweep poller started")

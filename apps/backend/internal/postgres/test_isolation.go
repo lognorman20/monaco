@@ -14,7 +14,7 @@ import (
 var privyLabelPattern = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 
 // TestIsolation gives each test its own data lane on shared monaco_test.
-// Seed with UniquePrivyID; call TrackUser and TrackGroup after inserts; t.Cleanup
+// Seed with UniqueDynamicID; call TrackUser and TrackGroup after inserts; t.Cleanup
 // deletes only tracked rows (no global TRUNCATE or advisory lock per test).
 type TestIsolation struct {
 	t        *testing.T
@@ -53,8 +53,8 @@ func (iso *TestIsolation) Suffix() string {
 	return iso.suffix
 }
 
-// UniquePrivyID returns a privy user id unique to this test lane.
-func (iso *TestIsolation) UniquePrivyID(label string) string {
+// UniqueDynamicID returns a privy user id unique to this test lane.
+func (iso *TestIsolation) UniqueDynamicID(label string) string {
 	return fmt.Sprintf("did:privy:test-%s-%s", iso.suffix, sanitizeTestLabel(label))
 }
 

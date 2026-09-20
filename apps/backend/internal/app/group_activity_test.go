@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -21,9 +21,9 @@ func TestListGroupActivity_includesDepositsBuysSellsAndMixedStatuses(t *testing.
 	governance.SetBuyService(NewBuyService(h.Jupiter, h.XStocks))
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "activity-user", "Activity User")
-	token := privy.AccessToken(h.ISO.UniqueToken("activity-user"))
-	privy.RegisterToken(h.Privy, token, privy.Identity{
-		PrivyUserID: h.ISO.UniquePrivyID("activity-user"),
+	token := auth.AccessToken(h.ISO.UniqueToken("activity-user"))
+	auth.RegisterToken(h.Privy, token, auth.Identity{
+		PrivyUserID: h.ISO.UniqueDynamicID("activity-user"),
 		DisplayName: "Activity User",
 	})
 
@@ -54,9 +54,9 @@ func TestListGroupActivity_includesDepositsBuysSellsAndMixedStatuses(t *testing.
 	confirmedBuy, _, err := h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           3_000_000,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      testTxSignature(h.ISO, "buy-confirmed"),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      testTxHash(h.ISO, "buy-confirmed"),
 		ExecuteRequestID: testRequestID(h.ISO, "buy-confirmed"),
 		CostBasisPrice:   3_000_000,
 		CostBasisAmount:  1_500_000,
@@ -69,24 +69,24 @@ func TestListGroupActivity_includesDepositsBuysSellsAndMixedStatuses(t *testing.
 	if _, _, err := h.Store.InsertPendingTransaction(ctx, postgres.InsertPendingTransactionParams{
 		GroupID:          group.GroupID,
 		Action:           postgres.TransactionActionBuy,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Amount:           4_000_000,
 		ExecuteRequestID: testRequestID(h.ISO, "buy-pending"),
 	}); err != nil {
 		t.Fatalf("insert pending buy: %v", err)
 	}
 
-	if _, err := h.Store.InsertFailedTransaction(ctx, group.GroupID, postgres.TransactionActionBuy, jupiter.USDCMint, jupiter.AAPLxMint, 5_000_000, testRequestID(h.ISO, "buy-failed")); err != nil {
+	if _, err := h.Store.InsertFailedTransaction(ctx, group.GroupID, postgres.TransactionActionBuy, evm.USDCAddress, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, testRequestID(h.ISO, "buy-failed")); err != nil {
 		t.Fatalf("insert failed buy: %v", err)
 	}
 
 	confirmedSell, _, err := h.Store.ConfirmSellTransaction(ctx, postgres.ConfirmSellTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           1_000_000,
-		InputMint:        jupiter.AAPLxMint,
-		OutputMint:       jupiter.USDCMint,
-		TxSignature:      testTxSignature(h.ISO, "sell-confirmed"),
+		InputToken:        "0xb200000000000000000000c2e324d24d7eecd1fb",
+		OutputToken:       evm.USDCAddress,
+		TxHash:      testTxHash(h.ISO, "sell-confirmed"),
 		ExecuteRequestID: testRequestID(h.ISO, "sell-confirmed"),
 		ProceedsUSDC:     900_000,
 	})
@@ -179,9 +179,9 @@ func TestListGroupActivity_emptyWhenNoRows(t *testing.T) {
 	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
 	governance := NewGovernanceService(h.Store, h.Privy)
 
-	token := privy.AccessToken(h.ISO.UniqueToken("activity-empty"))
-	privy.RegisterToken(h.Privy, token, privy.Identity{
-		PrivyUserID: h.ISO.UniquePrivyID("activity-empty"),
+	token := auth.AccessToken(h.ISO.UniqueToken("activity-empty"))
+	auth.RegisterToken(h.Privy, token, auth.Identity{
+		PrivyUserID: h.ISO.UniqueDynamicID("activity-empty"),
 		DisplayName: "Empty User",
 	})
 	openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "activity-empty", "Empty User")
@@ -209,9 +209,9 @@ func TestListGroupActivity_sortsNewestFirst(t *testing.T) {
 	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
 	governance := NewGovernanceService(h.Store, h.Privy)
 
-	token := privy.AccessToken(h.ISO.UniqueToken("activity-sort"))
-	privy.RegisterToken(h.Privy, token, privy.Identity{
-		PrivyUserID: h.ISO.UniquePrivyID("activity-sort"),
+	token := auth.AccessToken(h.ISO.UniqueToken("activity-sort"))
+	auth.RegisterToken(h.Privy, token, auth.Identity{
+		PrivyUserID: h.ISO.UniqueDynamicID("activity-sort"),
 		DisplayName: "Sort User",
 	})
 	openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "activity-sort", "Sort User")
@@ -224,13 +224,13 @@ func TestListGroupActivity_sortsNewestFirst(t *testing.T) {
 
 	older := time.Now().UTC().Add(-2 * time.Hour)
 	newer := time.Now().UTC().Add(-1 * time.Hour)
-	if _, err := h.Store.InsertFailedTransaction(ctx, group.GroupID, postgres.TransactionActionBuy, jupiter.USDCMint, jupiter.AAPLxMint, 1_000_000, testRequestID(h.ISO, "old")); err != nil {
+	if _, err := h.Store.InsertFailedTransaction(ctx, group.GroupID, postgres.TransactionActionBuy, evm.USDCAddress, "0xb200000000000000000000c2e324d24d7eecd1fb", 1_000_000, testRequestID(h.ISO, "old")); err != nil {
 		t.Fatalf("insert older failed buy: %v", err)
 	}
 	if _, err := h.DB.ExecContext(ctx, `UPDATE transactions SET created_at = $2 WHERE execute_request_id = $1`, testRequestID(h.ISO, "old"), older); err != nil {
 		t.Fatalf("backdate older tx: %v", err)
 	}
-	if _, err := h.Store.InsertFailedTransaction(ctx, group.GroupID, postgres.TransactionActionSell, jupiter.AAPLxMint, jupiter.USDCMint, 1_000_000, testRequestID(h.ISO, "new")); err != nil {
+	if _, err := h.Store.InsertFailedTransaction(ctx, group.GroupID, postgres.TransactionActionSell, "0xb200000000000000000000c2e324d24d7eecd1fb", evm.USDCAddress, 1_000_000, testRequestID(h.ISO, "new")); err != nil {
 		t.Fatalf("insert newer failed sell: %v", err)
 	}
 	if _, err := h.DB.ExecContext(ctx, `UPDATE transactions SET created_at = $2 WHERE execute_request_id = $1`, testRequestID(h.ISO, "new"), newer); err != nil {

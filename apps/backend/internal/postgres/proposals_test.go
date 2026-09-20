@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/evm"
 	"github.com/monaco/monaco/packages/domain"
 )
 
 func seedProposalGroup(t *testing.T, store *Store, iso *TestIsolation) (userID, groupID string) {
 	t.Helper()
 	ctx := context.Background()
-	user, err := store.UpsertUser(ctx, iso.UniquePrivyID("prop-user"), "Prop User")
+	user, err := store.UpsertUser(ctx, iso.UniqueDynamicID("prop-user"), "Prop User")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
@@ -207,8 +207,8 @@ func TestListPassedProposalsPendingExecute_failedBuyStillListed(t *testing.T) {
 		GroupID:          groupID,
 		ProposalID:       buy.ID,
 		Action:           TransactionActionBuy,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Amount:           2_000_000,
 		ExecuteRequestID: fmt.Sprintf("fail-buy-%s", buy.ID),
 	})
@@ -267,8 +267,8 @@ func TestListPassedProposalsPendingExecute_failedSellNotListed(t *testing.T) {
 		GroupID:          groupID,
 		ProposalID:       sell.ID,
 		Action:           TransactionActionSell,
-		InputMint:        jupiter.AAPLxMint,
-		OutputMint:       jupiter.USDCMint,
+		InputToken:        "0xb200000000000000000000c2e324d24d7eecd1fb",
+		OutputToken:       evm.USDCAddress,
 		Amount:           50_000_000,
 		ExecuteRequestID: reqID,
 	})
@@ -303,9 +303,9 @@ func TestGetFillDerivedCostBasis_afterPartialSellReturnsRemainingBasis(t *testin
 	_, _, err := store.ConfirmBuyTransaction(ctx, ConfirmBuyTransactionParams{
 		GroupID:          groupID,
 		Amount:           buyUSDC,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      fmt.Sprintf("sig-%s-basis-buy", iso.Suffix()),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      fmt.Sprintf("sig-%s-basis-buy", iso.Suffix()),
 		ExecuteRequestID: fmt.Sprintf("req-%s-basis-buy", iso.Suffix()),
 		CostBasisPrice:   buyUSDC,
 		CostBasisAmount:  buyTokens,
@@ -316,9 +316,9 @@ func TestGetFillDerivedCostBasis_afterPartialSellReturnsRemainingBasis(t *testin
 	_, _, err = store.ConfirmSellTransaction(ctx, ConfirmSellTransactionParams{
 		GroupID:          groupID,
 		Amount:           sellTokens,
-		InputMint:        jupiter.AAPLxMint,
-		OutputMint:       jupiter.USDCMint,
-		TxSignature:      fmt.Sprintf("sig-%s-basis-sell", iso.Suffix()),
+		InputToken:        "0xb200000000000000000000c2e324d24d7eecd1fb",
+		OutputToken:       evm.USDCAddress,
+		TxHash:      fmt.Sprintf("sig-%s-basis-sell", iso.Suffix()),
 		ExecuteRequestID: fmt.Sprintf("req-%s-basis-sell", iso.Suffix()),
 		ProceedsUSDC:     2_500_000,
 	})
@@ -326,9 +326,9 @@ func TestGetFillDerivedCostBasis_afterPartialSellReturnsRemainingBasis(t *testin
 		t.Fatalf("ConfirmSellTransaction: %v", err)
 	}
 
-	basis, remaining, found, err := store.GetFillDerivedCostBasisByOutputMint(ctx, groupID, jupiter.AAPLxMint)
+	basis, remaining, found, err := store.GetFillDerivedCostBasisByOutputToken(ctx, groupID, "0xb200000000000000000000c2e324d24d7eecd1fb")
 	if err != nil || !found {
-		t.Fatalf("GetFillDerivedCostBasisByOutputMint: found=%v err=%v", found, err)
+		t.Fatalf("GetFillDerivedCostBasisByOutputToken: found=%v err=%v", found, err)
 	}
 	if remaining != 75_000_000 {
 		t.Fatalf("remaining tokens = %d, want 75000000", remaining)

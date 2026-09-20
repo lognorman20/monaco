@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // AuthHandlers serves auth HTTP routes.
@@ -34,7 +34,7 @@ func (h *AuthHandlers) SessionHandler(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.Sessions.OpenSession(ctx, req.AccessToken)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 			return
 		}

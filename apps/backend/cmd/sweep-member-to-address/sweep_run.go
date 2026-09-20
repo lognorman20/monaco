@@ -7,21 +7,21 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/config"
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/solana/txsign"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 type sweepRunner struct {
 	flags        sweepFlags
 	cfg          *config.Config
 	privy        *privy.HTTPClient
-	jupiter      jupiter.Client
+	jupiter      dex.Client
 	signer       app.TreasurySigner
 	relayerPub   string
 	relayerKey   string
-	mintCatalog  xstocks.MintCatalog
+	mintCatalog  b20.MintCatalog
 }
 
 type swapOutcome struct {
@@ -87,7 +87,7 @@ func runSweep(ctx context.Context, runner sweepRunner, sources []sweepSource) (s
 		}
 
 		for _, token := range tokens {
-			if token.Mint == jupiter.USDCMint {
+			if token.Mint == evm.USDCAddress {
 				continue
 			}
 			outcome, err := runner.swapTokenToUSDC(ctx, src, walletID, token)
@@ -141,7 +141,7 @@ func runSweep(ctx context.Context, runner sweepRunner, sources []sweepSource) (s
 			plan.actions = append(plan.actions, sweepAction{
 				kind:   "usdc-sweep",
 				label:  "USDC",
-				mint:   jupiter.USDCMint,
+				mint:   evm.USDCAddress,
 				status: actionFail,
 				errMsg: msg,
 			})
@@ -154,7 +154,7 @@ func runSweep(ctx context.Context, runner sweepRunner, sources []sweepSource) (s
 		sweepAction := sweepAction{
 			kind:      "usdc-sweep",
 			label:     "USDC",
-			mint:      jupiter.USDCMint,
+			mint:      evm.USDCAddress,
 			rawAmount: amount,
 		}
 
@@ -178,7 +178,7 @@ func runSweep(ctx context.Context, runner sweepRunner, sources []sweepSource) (s
 
 		if runner.flags.dryRun {
 			fmt.Printf("dry-run would sweep %s from=%s dest=%s mint=%s amount=%d jupiter_swap=false no_tx_sent\n",
-				src.kind, src.address, runner.flags.destination, jupiter.USDCMint, amount)
+				src.kind, src.address, runner.flags.destination, evm.USDCAddress, amount)
 			sweepAction.status = actionDryRun
 			sweepAction.note = "no tx sent"
 			plan.actions = append(plan.actions, sweepAction)
@@ -192,7 +192,7 @@ func runSweep(ctx context.Context, runner sweepRunner, sources []sweepSource) (s
 			msg := err.Error()
 			fmt.Fprintf(os.Stderr, "build %s %s: %v\n", src.kind, src.address, err)
 			fmt.Printf("fail usdc-sweep %s from=%s mint=%s amount=%d err=%s\n",
-				src.kind, src.address, jupiter.USDCMint, amount, oneLineErr(msg))
+				src.kind, src.address, evm.USDCAddress, amount, oneLineErr(msg))
 			sweepAction.status = actionFail
 			sweepAction.errMsg = msg
 			plan.markFailed()
@@ -206,7 +206,7 @@ func runSweep(ctx context.Context, runner sweepRunner, sources []sweepSource) (s
 			msg := err.Error()
 			fmt.Fprintf(os.Stderr, "submit %s %s amount=%d: %v\n", src.kind, src.address, amount, err)
 			fmt.Printf("fail usdc-sweep %s from=%s mint=%s amount=%d err=%s\n",
-				src.kind, src.address, jupiter.USDCMint, amount, oneLineErr(msg))
+				src.kind, src.address, evm.USDCAddress, amount, oneLineErr(msg))
 			sweepAction.status = actionFail
 			sweepAction.errMsg = msg
 			plan.markFailed()
@@ -216,9 +216,9 @@ func runSweep(ctx context.Context, runner sweepRunner, sources []sweepSource) (s
 			continue
 		}
 		fmt.Printf("ok usdc-sweep %s from=%s dest=%s mint=%s amount=%d tx=%s\n",
-			src.kind, src.address, runner.flags.destination, jupiter.USDCMint, amount, result.TxSignature)
+			src.kind, src.address, runner.flags.destination, evm.USDCAddress, amount, result.TxHash)
 		sweepAction.status = actionOK
-		sweepAction.txSig = result.TxSignature
+		sweepAction.txSig = result.TxHash
 		plan.actions = append(plan.actions, sweepAction)
 		recap.addWallet(plan)
 		swept++
@@ -238,7 +238,7 @@ func (runner sweepRunner) swapTokenToUSDC(ctx context.Context, src sweepSource, 
 		GroupID:   "ops-sweep",
 		UserID:    "ops-sweep",
 		Symbol:    token.Mint,
-		InputMint: token.Mint,
+		InputToken: token.Mint,
 		Amount:    token.Amount,
 		Taker:     src.address,
 	})
@@ -285,8 +285,8 @@ func (runner sweepRunner) swapTokenToUSDC(ctx context.Context, src sweepSource, 
 		Symbol:            token.Mint,
 		RequestID:         quote.RequestID,
 		SignedTransaction: signedTx,
-		InputMint:         token.Mint,
-		OutputMint:        jupiter.USDCMint,
+		InputToken:         token.Mint,
+		OutputToken:        evm.USDCAddress,
 		Amount:            token.Amount,
 	})
 	if err != nil {

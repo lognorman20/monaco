@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 type testSolanaConfirmer struct {
@@ -16,13 +16,13 @@ func newTestSolanaConfirmer() *testSolanaConfirmer {
 	return &testSolanaConfirmer{confirmed: make(map[string]bool)}
 }
 
-func (f *testSolanaConfirmer) IsConfirmed(ctx context.Context, txSignature string) (bool, error) {
+func (f *testSolanaConfirmer) IsConfirmed(ctx context.Context, txHash string) (bool, error) {
 	_ = ctx
-	return f.confirmed[txSignature], nil
+	return f.confirmed[txHash], nil
 }
 
-func (f *testSolanaConfirmer) Confirm(txSignature string) {
-	f.confirmed[txSignature] = true
+func (f *testSolanaConfirmer) Confirm(txHash string) {
+	f.confirmed[txHash] = true
 }
 
 func newPlatformWithdrawHarness(t *testing.T) (integrationHarness, *PlatformWithdrawService, *testSolanaConfirmer) {
@@ -37,28 +37,28 @@ func TestCreatePlatformWithdrawal_success(t *testing.T) {
 	h, svc, solanaRPC := newPlatformWithdrawHarness(t)
 	ctx := context.Background()
 	sessions := NewSessionService(h.Store, h.Privy)
-	token := privy.AccessToken(h.ISO.UniqueToken("pw-success"))
+	token := auth.AccessToken(h.ISO.UniqueToken("pw-success"))
 	session := openTestSession(t, h.ISO, sessions, h.Privy, "pw-success", "Withdrawer")
 
 	wallet, found, err := h.Store.GetMemberWalletByUserID(ctx, session.UserID)
 	if err != nil || !found {
 		t.Fatalf("GetMemberWalletByUserID: found=%v err=%v", found, err)
 	}
-	privy.SetMemberUSDCBalance(h.Privy, wallet.SolanaAddress, 3_000_000)
+	wallets.SetMemberUSDCBalance(h.Privy, wallet.Address, 3_000_000)
 
 	dest := "11111111111111111111111111111112"
 	result, err := svc.CreatePlatformWithdrawal(ctx, string(token), 1_000_000, dest)
 	if err != nil {
 		t.Fatalf("CreatePlatformWithdrawal: %v", err)
 	}
-	if result.TxSignature == "" {
+	if result.TxHash == "" {
 		t.Fatal("expected tx signature")
 	}
 	if result.Status != PlatformWithdrawalStatusPending {
 		t.Fatalf("status = %q, want pending before confirmation", result.Status)
 	}
 
-	solanaRPC.Confirm(result.TxSignature)
+	solanaRPC.Confirm(result.TxHash)
 	got, err := svc.GetPlatformWithdrawal(ctx, string(token), result.ID)
 	if err != nil {
 		t.Fatalf("GetPlatformWithdrawal: %v", err)
@@ -80,14 +80,14 @@ func TestCreatePlatformWithdrawal_rejectsOverBalance(t *testing.T) {
 	h, svc, _ := newPlatformWithdrawHarness(t)
 	ctx := context.Background()
 	sessions := NewSessionService(h.Store, h.Privy)
-	token := privy.AccessToken(h.ISO.UniqueToken("pw-over"))
+	token := auth.AccessToken(h.ISO.UniqueToken("pw-over"))
 	session := openTestSession(t, h.ISO, sessions, h.Privy, "pw-over", "Over")
 
 	wallet, found, err := h.Store.GetMemberWalletByUserID(ctx, session.UserID)
 	if err != nil || !found {
 		t.Fatalf("GetMemberWalletByUserID: found=%v err=%v", found, err)
 	}
-	privy.SetMemberUSDCBalance(h.Privy, wallet.SolanaAddress, 500_000)
+	wallets.SetMemberUSDCBalance(h.Privy, wallet.Address, 500_000)
 
 	_, err = svc.CreatePlatformWithdrawal(ctx, string(token), 750_000, "11111111111111111111111111111112")
 	if !errors.Is(err, ErrInsufficientPlatformBalance) {
@@ -99,7 +99,7 @@ func TestCreatePlatformWithdrawal_rejectsInvalidAddress(t *testing.T) {
 	h, svc, _ := newPlatformWithdrawHarness(t)
 	ctx := context.Background()
 	sessions := NewSessionService(h.Store, h.Privy)
-	token := privy.AccessToken(h.ISO.UniqueToken("pw-invalid"))
+	token := auth.AccessToken(h.ISO.UniqueToken("pw-invalid"))
 	openTestSession(t, h.ISO, sessions, h.Privy, "pw-invalid", "Invalid")
 
 	_, err := svc.CreatePlatformWithdrawal(ctx, string(token), 100_000, "not-a-valid-address!!!")
@@ -108,18 +108,18 @@ func TestCreatePlatformWithdrawal_rejectsInvalidAddress(t *testing.T) {
 	}
 }
 
-func TestCreatePlatformWithdrawal_idempotentOnTxSignature(t *testing.T) {
+func TestCreatePlatformWithdrawal_idempotentOnTxHash(t *testing.T) {
 	h, svc, solanaRPC := newPlatformWithdrawHarness(t)
 	ctx := context.Background()
 	sessions := NewSessionService(h.Store, h.Privy)
-	token := privy.AccessToken(h.ISO.UniqueToken("pw-idem"))
+	token := auth.AccessToken(h.ISO.UniqueToken("pw-idem"))
 	session := openTestSession(t, h.ISO, sessions, h.Privy, "pw-idem", "Idem")
 
 	wallet, found, err := h.Store.GetMemberWalletByUserID(ctx, session.UserID)
 	if err != nil || !found {
 		t.Fatalf("wallet lookup failed")
 	}
-	privy.SetMemberUSDCBalance(h.Privy, wallet.SolanaAddress, 2_000_000)
+	wallets.SetMemberUSDCBalance(h.Privy, wallet.Address, 2_000_000)
 
 	dest := "11111111111111111111111111111112"
 	first, err := svc.CreatePlatformWithdrawal(ctx, string(token), 500_000, dest)
@@ -127,15 +127,15 @@ func TestCreatePlatformWithdrawal_idempotentOnTxSignature(t *testing.T) {
 		t.Fatalf("first CreatePlatformWithdrawal: %v", err)
 	}
 
-	row, found, err := h.Store.GetPlatformWithdrawalByTxSignature(ctx, first.TxSignature)
+	row, found, err := h.Store.GetPlatformWithdrawalByTxHash(ctx, first.TxHash)
 	if err != nil || !found {
-		t.Fatalf("GetPlatformWithdrawalByTxSignature: found=%v err=%v", found, err)
+		t.Fatalf("GetPlatformWithdrawalByTxHash: found=%v err=%v", found, err)
 	}
 	if row.ID != first.ID {
 		t.Fatalf("signature row id = %q, want %q", row.ID, first.ID)
 	}
 
-	solanaRPC.Confirm(first.TxSignature)
+	solanaRPC.Confirm(first.TxHash)
 	second, err := svc.GetPlatformWithdrawal(ctx, string(token), first.ID)
 	if err != nil {
 		t.Fatalf("GetPlatformWithdrawal: %v", err)
@@ -149,14 +149,14 @@ func TestCreatePlatformWithdrawal_failsPendingRowWhenPersistSignatureFails(t *te
 	h, svc, _ := newPlatformWithdrawHarness(t)
 	ctx := context.Background()
 	sessions := NewSessionService(h.Store, h.Privy)
-	token := privy.AccessToken(h.ISO.UniqueToken("pw-persist-fail"))
+	token := auth.AccessToken(h.ISO.UniqueToken("pw-persist-fail"))
 	session := openTestSession(t, h.ISO, sessions, h.Privy, "pw-persist-fail", "Persist Fail")
 
 	wallet, found, err := h.Store.GetMemberWalletByUserID(ctx, session.UserID)
 	if err != nil || !found {
 		t.Fatalf("GetMemberWalletByUserID: found=%v err=%v", found, err)
 	}
-	privy.SetMemberUSDCBalance(h.Privy, wallet.SolanaAddress, 2_000_000)
+	wallets.SetMemberUSDCBalance(h.Privy, wallet.Address, 2_000_000)
 
 	injectedErr := errors.New("injected persist signature failure")
 	h.Store.SetFailPlatformWithdrawalBroadcastSignatureForTests(true, injectedErr)
@@ -192,14 +192,14 @@ func TestCreatePlatformWithdrawal_failsDuplicatePendingRowOnExistingSignature(t 
 	h, svc, solanaRPC := newPlatformWithdrawHarness(t)
 	ctx := context.Background()
 	sessions := NewSessionService(h.Store, h.Privy)
-	token := privy.AccessToken(h.ISO.UniqueToken("pw-dup-sig"))
+	token := auth.AccessToken(h.ISO.UniqueToken("pw-dup-sig"))
 	session := openTestSession(t, h.ISO, sessions, h.Privy, "pw-dup-sig", "Dup Sig")
 
 	wallet, found, err := h.Store.GetMemberWalletByUserID(ctx, session.UserID)
 	if err != nil || !found {
 		t.Fatalf("GetMemberWalletByUserID: found=%v err=%v", found, err)
 	}
-	privy.SetMemberUSDCBalance(h.Privy, wallet.SolanaAddress, 3_000_000)
+	wallets.SetMemberUSDCBalance(h.Privy, wallet.Address, 3_000_000)
 
 	dest := "11111111111111111111111111111112"
 	first, err := svc.CreatePlatformWithdrawal(ctx, string(token), 500_000, dest)
@@ -207,7 +207,7 @@ func TestCreatePlatformWithdrawal_failsDuplicatePendingRowOnExistingSignature(t 
 		t.Fatalf("first CreatePlatformWithdrawal: %v", err)
 	}
 
-	solanaRPC.Confirm(first.TxSignature)
+	solanaRPC.Confirm(first.TxHash)
 	confirmed, err := svc.GetPlatformWithdrawal(ctx, string(token), first.ID)
 	if err != nil {
 		t.Fatalf("GetPlatformWithdrawal: %v", err)
@@ -216,7 +216,7 @@ func TestCreatePlatformWithdrawal_failsDuplicatePendingRowOnExistingSignature(t 
 		t.Fatalf("status = %q, want confirmed", confirmed.Status)
 	}
 
-	privy.SetForcedTransferSignature(h.Privy, first.TxSignature)
+	privy.SetForcedTransferSignature(h.Privy, first.TxHash)
 	t.Cleanup(func() {
 		privy.SetForcedTransferSignature(h.Privy, "")
 	})

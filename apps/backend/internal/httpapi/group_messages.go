@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // groupMessageTimeLayout is fixed-width RFC3339 with microseconds in UTC, so clients can
@@ -145,7 +145,7 @@ func toGroupMessageResponse(m app.GroupMessage) groupMessageResponse {
 func writeGroupMessageError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, attrs ...any) {
 	var limited *app.RateLimitedError
 	switch {
-	case errors.Is(err, privy.ErrInvalidToken):
+	case errors.Is(err, auth.ErrUnauthorized):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)
 	case errors.Is(err, app.ErrUserNotFound):
 		logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", attrs...)

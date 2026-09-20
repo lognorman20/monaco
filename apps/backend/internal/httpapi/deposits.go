@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // DepositHandlers serves deposit HTTP routes.
@@ -34,7 +34,7 @@ type getDepositResponse struct {
 	Amount      int64  `json:"amount"`
 	Status      string `json:"status"`
 	FromAddress string `json:"fromAddress,omitempty"`
-	TxSignature string `json:"txSignature,omitempty"`
+	TxHash string `json:"txHash,omitempty"`
 	ShareUnits  int64  `json:"shareUnits"`
 	CreatedAt   string `json:"createdAt"`
 }
@@ -69,7 +69,7 @@ func (h *DepositHandlers) GetPlatformBalanceHandler(w http.ResponseWriter, r *ht
 
 	result, err := h.Deposits.GetPlatformBalance(ctx, token)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 			return
 		}
@@ -123,7 +123,7 @@ func (h *DepositHandlers) FundGroupHandler(w http.ResponseWriter, r *http.Reques
 		if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
 			return
 		}
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
@@ -190,7 +190,7 @@ func (h *DepositHandlers) GetDepositHandler(w http.ResponseWriter, r *http.Reque
 
 	deposit, position, err := h.Deposits.GetDeposit(ctx, token, depositID)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "deposit_id", depositID)
 			return
 		}
@@ -210,7 +210,7 @@ func (h *DepositHandlers) GetDepositHandler(w http.ResponseWriter, r *http.Reque
 		Amount:      deposit.Amount,
 		Status:      string(deposit.Status),
 		FromAddress: deposit.FromAddress,
-		TxSignature: deposit.TxSignature,
+		TxHash: deposit.TxHash,
 		ShareUnits:  position.ShareUnits,
 		CreatedAt:   deposit.CreatedAt.UTC().Format(time.RFC3339),
 	})
@@ -236,7 +236,7 @@ func (h *DepositHandlers) GetMemberShareUnitsHandler(w http.ResponseWriter, r *h
 
 	position, err := h.Deposits.GetMemberPosition(ctx, token, groupID)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
@@ -272,7 +272,7 @@ func (h *DepositHandlers) GetTreasuryUsdcBalanceHandler(w http.ResponseWriter, r
 
 	balance, treasuryAddress, err := h.Deposits.GetTreasuryUSDCBalance(ctx, token, groupID)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}

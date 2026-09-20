@@ -3,43 +3,51 @@ package config
 import (
 	"fmt"
 
-	solanakey "github.com/monaco/monaco/apps/backend/internal/solana/key"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// Relayer holds the app fee payer key material registered at API startup.
-// M1 validates presence only; transaction signing is deferred to M2 sweeps.
+// Relayer holds the app relayer key material registered at API startup.
 type Relayer struct {
 	privateKey string
-	publicKey  string
+	address    string
 }
 
-// PrivateKey returns the base58-encoded Solana keypair for the fee payer.
+// PrivateKey returns the 0x-prefixed secp256k1 private key hex.
 func (r *Relayer) PrivateKey() string {
 	return r.privateKey
 }
 
-// PublicKey returns the base58-encoded Solana public key for the fee payer.
-func (r *Relayer) PublicKey() string {
+// Address returns the lowercase relayer EOA.
+func (r *Relayer) Address() string {
 	if r == nil {
 		return ""
 	}
-	return r.publicKey
+	return r.address
 }
 
-// LoadRelayer registers the relayer fee payer from config loaded via Load.
+// PublicKey is kept for legacy call sites that logged a relayer pubkey at boot.
+func (r *Relayer) PublicKey() string {
+	return r.Address()
+}
+
+// LoadRelayer registers the relayer from config loaded via Load.
 func LoadRelayer(cfg *Config) (*Relayer, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	if cfg.RelayerPrivateKey == "" {
-		return nil, fmt.Errorf("%s is required", envRelayerPrivateKey)
-	}
-	publicKey, err := solanakey.PublicKeyBase58FromPrivateKey(cfg.RelayerPrivateKey)
+	addr, err := cfg.RelayerAddress()
 	if err != nil {
-		return nil, fmt.Errorf("%s public key: %w", envRelayerPrivateKey, err)
+		return nil, err
 	}
-	return &Relayer{
-		privateKey: cfg.RelayerPrivateKey,
-		publicKey:  publicKey,
-	}, nil
+	return &Relayer{privateKey: cfg.RelayerPrivateKey, address: addr}, nil
+}
+
+// MustRelayerAddress derives the address or panics (tests).
+func MustRelayerAddress(cfg *Config) string {
+	addr, err := cfg.RelayerAddress()
+	if err != nil {
+		panic(err)
+	}
+	_ = crypto.Keccak256Hash([]byte(addr))
+	return addr
 }

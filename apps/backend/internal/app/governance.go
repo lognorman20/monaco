@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
 
 type GovernanceService struct {
 	store  *postgres.Store
-	privy  privy.Client
+	privy  wallets.Client
 	buy    *BuyService
 	swap   *SwapService
 	home   *HomeService
@@ -24,7 +24,7 @@ type GovernanceService struct {
 	now    func() time.Time
 }
 
-func NewGovernanceService(store *postgres.Store, privyClient privy.Client) *GovernanceService {
+func NewGovernanceService(store *postgres.Store, privyClient wallets.Client) *GovernanceService {
 	return &GovernanceService{store: store, privy: privyClient, now: time.Now}
 }
 
@@ -128,16 +128,16 @@ func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToke
 		logGovernanceBranchWarn("governance create group rejected", "invalid rules")
 		return CreateGroupResult{}, err
 	}
-	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := g.privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logGovernanceBranchWarn("governance create group rejected", "invalid token", "name", name)
-			return CreateGroupResult{}, privy.ErrInvalidToken
+			return CreateGroupResult{}, auth.ErrUnauthorized
 		}
 		logGovernanceBranchError("governance create group verify session failed", err, "name", name)
 		return CreateGroupResult{}, fmt.Errorf("verify session: %w", err)
 	}
-	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := g.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		logGovernanceBranchError("governance create group lookup user failed", err, "name", name)
 		return CreateGroupResult{}, err
@@ -169,11 +169,11 @@ func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToke
 			return CreateGroupResult{}, err
 		}
 	}
-	treasuryRef, err := g.privy.EnsureTreasury(ctx, privy.GroupID(group.ID))
+	treasuryRef, err := g.privy.EnsureTreasury(ctx, wallets.GroupID(group.ID))
 	if err != nil {
 		return CreateGroupResult{}, fmt.Errorf("privy ensure treasury: %w", err)
 	}
-	if _, err = g.store.InsertTreasuryTx(ctx, tx, group.ID, treasuryRef.PrivyWalletID, treasuryRef.SolanaAddress); err != nil {
+	if _, err = g.store.InsertTreasuryTx(ctx, tx, group.ID, treasuryRef.WalletID, treasuryRef.Address); err != nil {
 		return CreateGroupResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -182,21 +182,21 @@ func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToke
 	}
 	committed = true
 	logGovernanceCreateGroupSuccess(group.ID, user.ID, name)
-	return CreateGroupResult{GroupID: group.ID, Name: group.Name, TreasuryAddress: treasuryRef.SolanaAddress}, nil
+	return CreateGroupResult{GroupID: group.ID, Name: group.Name, TreasuryAddress: treasuryRef.Address}, nil
 }
 
 func (g *GovernanceService) JoinGroup(ctx context.Context, accessToken, groupID string) (JoinGroupOutcome, error) {
 	if groupID == "" {
 		return "", fmt.Errorf("group id is required")
 	}
-	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := g.privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return "", privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return "", auth.ErrUnauthorized
 		}
 		return "", fmt.Errorf("verify session: %w", err)
 	}
-	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := g.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return "", err
 	}
@@ -355,14 +355,14 @@ func (g *GovernanceService) LeaveGroup(ctx context.Context, req LeaveGroupReques
 	}
 	accessToken := req.AccessToken
 	groupID := req.GroupID
-	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := g.privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return auth.ErrUnauthorized
 		}
 		return fmt.Errorf("verify session: %w", err)
 	}
-	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := g.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return err
 	}
@@ -507,7 +507,7 @@ func (g *GovernanceService) groupTreasuryUSDCForLeaveTx(ctx context.Context, tx 
 		return 0, err
 	}
 	if found {
-		balance, err := g.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
+		balance, err := g.privy.TreasuryUSDCBalance(ctx, treasury.Address)
 		if err == nil && balance > 0 {
 			return balance, nil
 		}
@@ -561,14 +561,14 @@ func (g *GovernanceService) hasSoleRemainingVoteTx(ctx context.Context, tx *sql.
 }
 
 func (g *GovernanceService) authenticatedGroupAdmin(ctx context.Context, accessToken, groupID string) (postgres.User, postgres.Group, error) {
-	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := g.privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return postgres.User{}, postgres.Group{}, privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return postgres.User{}, postgres.Group{}, auth.ErrUnauthorized
 		}
 		return postgres.User{}, postgres.Group{}, fmt.Errorf("verify session: %w", err)
 	}
-	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := g.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return postgres.User{}, postgres.Group{}, err
 	}
@@ -791,7 +791,7 @@ func (g *GovernanceService) groupTreasuryUSDC(ctx context.Context, groupID strin
 		return 0, err
 	}
 	if found {
-		balance, err := g.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
+		balance, err := g.privy.TreasuryUSDCBalance(ctx, treasury.Address)
 		if err != nil {
 			return 0, fmt.Errorf("treasury usdc balance: %w", err)
 		}

@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -18,7 +18,7 @@ import (
 // club show P&L without touching real equity. Fixtures use raw SQL (independent of the seeder).
 
 type spectatorPrivy struct {
-	privy.Client
+	wallets.Client
 	mu               sync.Mutex
 	treasuryBalances []string
 	ensureTreasury   []string
@@ -31,7 +31,7 @@ func (s *spectatorPrivy) TreasuryUSDCBalance(ctx context.Context, address string
 	return s.Client.TreasuryUSDCBalance(ctx, address)
 }
 
-func (s *spectatorPrivy) EnsureTreasury(ctx context.Context, groupID privy.GroupID) (privy.TreasuryRef, error) {
+func (s *spectatorPrivy) EnsureTreasury(ctx context.Context, groupID wallets.GroupID) (wallets.TreasuryRef, error) {
 	s.mu.Lock()
 	s.ensureTreasury = append(s.ensureTreasury, string(groupID))
 	s.mu.Unlock()
@@ -99,7 +99,7 @@ func newSpectatorFixture(t *testing.T) spectatorFixture {
 	h.ISO.TrackGroup(group.GroupID)
 	fx.realGroupID = group.GroupID
 	// Operator holds 10 USDC at NAV 1.0 in the real treasury.
-	privy.SetTreasuryUSDCBalance(h.Privy, group.TreasuryAddress, 10_000_000)
+	wallets.SetTreasuryUSDCBalance(h.Privy, group.TreasuryAddress, 10_000_000)
 	execSQL(t, db, `INSERT INTO positions (user_id, group_id, share_units, amount_deposited) VALUES ($1, $2, 10000000, 10000000)`, fx.operatorID, fx.realGroupID)
 
 	newFaker := func(label, name string) string {
@@ -130,7 +130,7 @@ func newSpectatorFixture(t *testing.T) spectatorFixture {
 	passedID := queryID(t, db, `INSERT INTO proposals (group_id, proposer_id, symbol, usdc_micros, status, expires_at) VALUES ($1, $2, 'AAPLx', 4000000, 'passed', now() - interval '1 day') RETURNING id`, fx.fakerGroupID, fx.fakerAID)
 	fx.fakerTxID = queryID(t, db, `INSERT INTO transactions (group_id, proposal_id, amount, action, input_mint, output_mint, status, tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, confirmed_at)
 VALUES ($1, $2, 4000000, 'buy', $3, $4, 'confirmed', $5, $6, 4000000, 20000, now()) RETURNING id`,
-		fx.fakerGroupID, passedID, jupiter.USDCMint, jupiter.AAPLxMint, "faker-sig-buy-"+sfx, "faker-req-"+sfx)
+		fx.fakerGroupID, passedID, evm.USDCAddress, "0xb200000000000000000000c2e324d24d7eecd1fb", "faker-sig-buy-"+sfx, "faker-req-"+sfx)
 	fx.fakerOpenID = queryID(t, db, `INSERT INTO proposals (group_id, proposer_id, symbol, usdc_micros, status, expires_at) VALUES ($1, $2, 'TSLAx', 1000000, 'open', now() + interval '1 day') RETURNING id`, fx.fakerGroupID, fx.fakerBID)
 	return fx
 }

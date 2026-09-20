@@ -11,10 +11,10 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
-func integrationGroupApp(t *testing.T) (*GroupHandlers, *AuthHandlers, privy.Client, *sql.DB, *postgres.TestIsolation) {
+func integrationGroupApp(t *testing.T) (*GroupHandlers, *AuthHandlers, wallets.Client, *sql.DB, *postgres.TestIsolation) {
 	t.Helper()
 
 	authHandlers, privyClient, db, iso := integrationApp(t)
@@ -121,12 +121,12 @@ func TestCreateGroup_provisionsTreasuryViaPrivyClient(t *testing.T) {
 	}
 	trackCreatedGroup(iso, payload.GroupID)
 
-	expectedTreasury, err := privyClient.EnsureTreasury(context.Background(), privy.GroupID(payload.GroupID))
+	expectedTreasury, err := privyClient.EnsureTreasury(context.Background(), wallets.GroupID(payload.GroupID))
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
-	if payload.TreasuryAddress != expectedTreasury.SolanaAddress {
-		t.Fatalf("treasuryAddress = %q, want %q", payload.TreasuryAddress, expectedTreasury.SolanaAddress)
+	if payload.TreasuryAddress != expectedTreasury.Address {
+		t.Fatalf("treasuryAddress = %q, want %q", payload.TreasuryAddress, expectedTreasury.Address)
 	}
 
 	ctx := context.Background()
@@ -134,8 +134,8 @@ func TestCreateGroup_provisionsTreasuryViaPrivyClient(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "SELECT privy_wallet_id FROM treasuries WHERE group_id = $1", payload.GroupID).Scan(&privyWalletID); err != nil {
 		t.Fatalf("select treasury privy_wallet_id: %v", err)
 	}
-	if privyWalletID != expectedTreasury.PrivyWalletID {
-		t.Fatalf("privy_wallet_id = %q, want %q", privyWalletID, expectedTreasury.PrivyWalletID)
+	if privyWalletID != expectedTreasury.WalletID {
+		t.Fatalf("privy_wallet_id = %q, want %q", privyWalletID, expectedTreasury.WalletID)
 	}
 }
 
@@ -504,8 +504,8 @@ func TestGET_groupActivity_returnsMixedStatuses(t *testing.T) {
 	if _, _, err := store.InsertPendingTransaction(ctx, postgres.InsertPendingTransactionParams{
 		GroupID:          created.GroupID,
 		Action:           postgres.TransactionActionSell,
-		InputMint:        "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
-		OutputMint:       "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+		InputToken:        "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+		OutputToken:       "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 		Amount:           500_000,
 		ExecuteRequestID: "req-pending-" + iso.Suffix(),
 	}); err != nil {
@@ -544,7 +544,7 @@ func TestGET_groupActivity_returnsMixedStatuses(t *testing.T) {
 	}
 }
 
-func createOpenGroupWithJoiner(t *testing.T, groupHandlers *GroupHandlers, authHandlers *AuthHandlers, privyClient privy.Client, iso *postgres.TestIsolation, creatorLabel, joinerLabel string) (createGroupResponse, authSessionResponse, privy.AccessToken, privy.AccessToken) {
+func createOpenGroupWithJoiner(t *testing.T, groupHandlers *GroupHandlers, authHandlers *AuthHandlers, privyClient wallets.Client, iso *postgres.TestIsolation, creatorLabel, joinerLabel string) (createGroupResponse, authSessionResponse, auth.AccessToken, auth.AccessToken) {
 	t.Helper()
 	_, creatorToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, creatorLabel, "Creator")
 	createRec := httptest.NewRecorder()

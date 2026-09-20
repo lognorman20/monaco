@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -22,7 +22,7 @@ func tokenAtomicsToDecimalUnits(atomics int64) (domain.ShareUnits, error) {
 	if atomics == 0 {
 		return domain.ShareUnits("0"), nil
 	}
-	r := new(big.Rat).SetFrac(big.NewInt(atomics), big.NewInt(jupiter.XStockAtomicScale))
+	r := new(big.Rat).SetFrac(big.NewInt(atomics), big.NewInt(b20.TokenAtomicScale))
 	s := strings.TrimRight(r.FloatString(8), "0")
 	s = strings.TrimRight(s, ".")
 	return domain.ShareUnits(s), nil
@@ -35,7 +35,7 @@ func costBasisMarkPerUnitMicros(totalUSDCMicros, tokenAtomics int64) (int64, err
 	if tokenAtomics <= 0 {
 		return 0, fmt.Errorf("cost basis token amount must be positive")
 	}
-	mark, err := domain.MulDivFloor(totalUSDCMicros, jupiter.XStockAtomicScale, tokenAtomics)
+	mark, err := domain.MulDivFloor(totalUSDCMicros, b20.TokenAtomicScale, tokenAtomics)
 	if err != nil {
 		return 0, fmt.Errorf("derive mark per unit: %w", err)
 	}
@@ -55,7 +55,7 @@ type groupPotView struct {
 func computeGroupPotView(
 	ctx context.Context,
 	store *postgres.Store,
-	pythClient pyth.Client,
+	pythClient marks.Client,
 	symbols *SymbolResolver,
 	groupID, treasuryAddress string,
 	treasuryUSDC int64,
@@ -130,19 +130,19 @@ func computeGroupPotView(
 func fetchMarkedPotInput(
 	ctx context.Context,
 	store *postgres.Store,
-	pythClient pyth.Client,
+	pythClient marks.Client,
 	symbols *SymbolResolver,
 	tx *sql.Tx,
 	groupID, treasuryAddress string,
 	treasuryUSDC int64,
 	holdings []postgres.TokenHoldingRow,
-) (pyth.NavInput, error) {
+) (marks.NavInput, error) {
 	costBasis, err := costBasisForHoldings(ctx, store, symbols, tx, groupID, holdings)
 	if err != nil {
-		return pyth.NavInput{}, err
+		return marks.NavInput{}, err
 	}
 
-	treasuryRef := pyth.TreasuryRef{
+	treasuryRef := marks.TreasuryRef{
 		GroupID:      groupID,
 		Address:      treasuryAddress,
 		TreasuryUsdc: treasuryUSDC,
@@ -174,8 +174,8 @@ func costBasisForHoldings(
 	tx *sql.Tx,
 	groupID string,
 	holdings []postgres.TokenHoldingRow,
-) ([]pyth.CostBasis, error) {
-	out := make([]pyth.CostBasis, 0, len(holdings))
+) ([]marks.CostBasis, error) {
+	out := make([]marks.CostBasis, 0, len(holdings))
 	for _, holding := range holdings {
 		if holding.Amount <= 0 {
 			continue
@@ -187,8 +187,8 @@ func costBasisForHoldings(
 		if !found || amount <= 0 {
 			return nil, fmt.Errorf("cost basis not found for mint %s", holding.Mint)
 		}
-		out = append(out, pyth.CostBasis{
-			Symbol: symbolForOutputMint(ctx, symbols, holding.Mint),
+		out = append(out, marks.CostBasis{
+			Symbol: symbolForOutputToken(ctx, symbols, holding.Mint),
 			Mint:   holding.Mint,
 			Units:  holding.Amount,
 			Price:  price,
@@ -205,19 +205,19 @@ func fillDerivedCostBasis(
 	groupID, mint string,
 ) (price, amount int64, found bool, err error) {
 	if tx != nil {
-		return store.GetFillDerivedCostBasisByOutputMintTx(ctx, tx, groupID, mint)
+		return store.GetFillDerivedCostBasisByOutputTokenTx(ctx, tx, groupID, mint)
 	}
-	return store.GetFillDerivedCostBasisByOutputMint(ctx, groupID, mint)
+	return store.GetFillDerivedCostBasisByOutputToken(ctx, groupID, mint)
 }
 
-func costBasisMarkedPotInput(treasuryUSDC int64, costBasis []pyth.CostBasis) (pyth.NavInput, error) {
-	marked := make([]pyth.MarkedHolding, 0, len(costBasis))
+func costBasisMarkedPotInput(treasuryUSDC int64, costBasis []marks.CostBasis) (marks.NavInput, error) {
+	marked := make([]marks.MarkedHolding, 0, len(costBasis))
 	for _, holding := range costBasis {
 		markPerUnit, err := costBasisMarkPerUnitMicros(holding.Price, holding.Amount)
 		if err != nil {
-			return pyth.NavInput{}, err
+			return marks.NavInput{}, err
 		}
-		marked = append(marked, pyth.MarkedHolding{
+		marked = append(marked, marks.MarkedHolding{
 			Symbol:    holding.Symbol,
 			Mint:      holding.Mint,
 			Units:     holding.Units,
@@ -225,14 +225,14 @@ func costBasisMarkedPotInput(treasuryUSDC int64, costBasis []pyth.CostBasis) (py
 			CostBasis: holding.Price,
 		})
 	}
-	return pyth.NavInput{
+	return marks.NavInput{
 		TreasuryUsdc: treasuryUSDC,
 		Holdings:     marked,
-		AfterHours:   pyth.PotAfterHours(marked),
+		AfterHours:   marks.PotAfterHours(marked),
 	}, nil
 }
 
-func domainNavInputFromPyth(input pyth.NavInput, totalShares domain.ShareUnits) (domain.NavInput, error) {
+func domainNavInputFromPyth(input marks.NavInput, totalShares domain.ShareUnits) (domain.NavInput, error) {
 	holdings := make([]domain.MarkedHolding, 0, len(input.Holdings))
 	for _, holding := range input.Holdings {
 		units, err := tokenAtomicsToDecimalUnits(holding.Units)
@@ -259,7 +259,7 @@ func domainNavInputFromPyth(input pyth.NavInput, totalShares domain.ShareUnits) 
 	}, nil
 }
 
-func potRowsFromPythInput(input pyth.NavInput) ([]GroupViewPotRow, error) {
+func potRowsFromPythInput(input marks.NavInput) ([]GroupViewPotRow, error) {
 	rows := []GroupViewPotRow{{
 		Symbol:    "USDC",
 		Units:     formatMicrosAsUsdDecimal(input.TreasuryUsdc),
@@ -276,7 +276,7 @@ func potRowsFromPythInput(input pyth.NavInput) ([]GroupViewPotRow, error) {
 		if err != nil {
 			return nil, err
 		}
-		valueMicros, err := domain.MulDivFloor(holding.Units, holding.MarkUsdc, jupiter.XStockAtomicScale)
+		valueMicros, err := domain.MulDivFloor(holding.Units, holding.MarkUsdc, b20.TokenAtomicScale)
 		if err != nil {
 			return nil, fmt.Errorf("value %s holding: %w", holding.Symbol, err)
 		}
@@ -301,14 +301,14 @@ func boolPtr(v bool) *bool {
 	return &v
 }
 
-func symbolForOutputMint(ctx context.Context, symbols *SymbolResolver, mint string) string {
+func symbolForOutputToken(ctx context.Context, symbols *SymbolResolver, mint string) string {
 	if symbols != nil {
 		return symbols.SymbolForMint(ctx, mint)
 	}
 	if symbol, ok := knownMintSymbol(mint); ok {
 		return symbol
 	}
-	if looksLikeSolanaMint(mint) {
+	if looksLikeTokenAddress(mint) {
 		return unknownStockSymbol
 	}
 	return mint

@@ -93,7 +93,7 @@ func (h *HomeService) GetGroupView(ctx context.Context, accessToken, groupID str
 		return GroupViewResult{}, err
 	}
 
-	potView, err := computeGroupPotView(ctx, h.store, h.pyth, h.symbols, groupID, treasury.SolanaAddress, treasuryUSDC)
+	potView, err := computeGroupPotView(ctx, h.store, h.pyth, h.symbols, groupID, treasury.Address, treasuryUSDC)
 	if err != nil {
 		return GroupViewResult{}, err
 	}
@@ -120,7 +120,7 @@ func (h *HomeService) GetGroupView(ctx context.Context, accessToken, groupID str
 		return GroupViewResult{}, err
 	}
 
-	treasuryAddress := treasury.SolanaAddress
+	treasuryAddress := treasury.Address
 	if group.IsFaker {
 		// Dummy treasury (#153): never surface an address anyone could send real USDC to.
 		treasuryAddress = ""

@@ -21,7 +21,7 @@ func TestParallelIsolation_uniquePrivyIDsDoNotConflict(t *testing.T) {
 			ctx := context.Background()
 			store := NewStore(db)
 
-			privyID := iso.UniquePrivyID("lane")
+			privyID := iso.UniqueDynamicID("lane")
 			user, err := store.UpsertUser(ctx, privyID, "Lane")
 			if err != nil {
 				t.Fatalf("UpsertUser: %v", err)
@@ -29,7 +29,7 @@ func TestParallelIsolation_uniquePrivyIDsDoNotConflict(t *testing.T) {
 			iso.TrackUser(user.ID)
 
 			var count int
-			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE privy_user_id = $1`, privyID).Scan(&count); err != nil {
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE dynamic_user_id = $1`, privyID).Scan(&count); err != nil {
 				t.Fatalf("count users: %v", err)
 			}
 			if count != 1 {
@@ -49,7 +49,7 @@ func TestTestIsolation_cleanupRemovesTrackedRows(t *testing.T) {
 	ctx := context.Background()
 	store := NewStore(db)
 
-	privyID := iso.UniquePrivyID("cleanup")
+	privyID := iso.UniqueDynamicID("cleanup")
 	user, err := store.UpsertUser(ctx, privyID, "Cleanup")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)

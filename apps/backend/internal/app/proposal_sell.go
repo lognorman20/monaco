@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -121,19 +122,19 @@ type SellQuoteRequest struct {
 
 // SellQuoteResult is a routable or refused sell quote.
 type SellQuoteResult struct {
-	InputMint string
-	Quote     jupiter.SellQuote
+	InputToken string
+	Quote     dex.Quote
 }
 
 // QuoteSell resolves the mint, enforces the confirmed holding ceiling, and quotes without a taker.
 func (s *SwapService) QuoteSell(ctx context.Context, req SellQuoteRequest) (SellQuoteResult, error) {
-	if s == nil || s.buy == nil || s.jupiter == nil {
+	if s == nil || s.buy == nil || s.dex == nil {
 		return SellQuoteResult{}, fmt.Errorf("swap service is required")
 	}
 	if req.TokenAmount <= 0 {
 		return SellQuoteResult{}, fmt.Errorf("token amount must be positive")
 	}
-	inputMint, err := s.buy.ResolveOutputMint(ctx, req.Symbol)
+	inputMint, err := s.buy.ResolveOutputToken(ctx, req.Symbol)
 	if err != nil {
 		return SellQuoteResult{}, err
 	}
@@ -151,22 +152,12 @@ func (s *SwapService) QuoteSell(ctx context.Context, req SellQuoteRequest) (Sell
 	if req.TokenAmount > held {
 		return SellQuoteResult{}, ErrExceedsTreasuryHolding
 	}
-	quote, err := s.jupiter.QuoteSell(ctx, jupiter.QuoteSellParams{
-		GroupID:   req.GroupID,
-		UserID:    req.UserID,
-		Symbol:    req.Symbol,
-		InputMint: inputMint,
-		Amount:    req.TokenAmount,
-		Taker:     req.Taker,
-	})
+	quote, err := s.dex.QuoteSell(ctx, inputMint, big.NewInt(req.TokenAmount))
 	if err != nil {
-		if errors.Is(err, jupiter.ErrNoRoute) || errors.Is(err, jupiter.ErrBelowMinimumSize) {
-			return SellQuoteResult{}, fmt.Errorf("%w: %s", ErrQuoteNotRoutable, err.Error())
-		}
 		return SellQuoteResult{}, err
 	}
 	if !quote.Routable {
 		return SellQuoteResult{}, ErrQuoteNotRoutable
 	}
-	return SellQuoteResult{InputMint: inputMint, Quote: quote}, nil
+	return SellQuoteResult{InputToken: inputMint, Quote: quote}, nil
 }

@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/evm"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 )
 
@@ -559,12 +561,12 @@ func insertVotes(ctx context.Context, tx *sql.Tx, proposalID string, ids map[str
 }
 
 // tokenAtomics converts USDC spent at a whole-share price into xStock SPL atomics
-// (8 decimals, jupiter.XStockAtomicScale per whole share), matching real Jupiter fills.
+// (8 decimals, b20.TokenAtomicScale per whole share), matching real Jupiter fills.
 func tokenAtomics(usdcMicros, pxMicros int64) int64 {
 	if pxMicros <= 0 {
 		return 0
 	}
-	return usdcMicros * jupiter.XStockAtomicScale / pxMicros
+	return usdcMicros * b20.TokenAtomicScale / pxMicros
 }
 
 func insertSwaps(ctx context.Context, tx *sql.Tx, groupID, sigKey string, club clubSpec, ids map[string]string, pids map[string]string, mark int64, now time.Time) error {
@@ -585,7 +587,7 @@ func insertSwaps(ctx context.Context, tx *sql.Tx, groupID, sigKey string, club c
 INSERT INTO transactions (group_id, proposal_id, amount, action, input_mint, output_mint, status,
                           tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at)
 VALUES ($1, $2, $3, 'buy', $4, $5, 'confirmed', $6, $7, $3, $8, $9, $9)`,
-		groupID, pids[buy.Key], spent, jupiter.USDCMint, club.BuyMint,
+		groupID, pids[buy.Key], spent, evm.USDCAddress, club.BuyMint,
 		"faker-"+sigKey+"-buy", "faker-"+sigKey+"-buy-req", tokens, confirmed); err != nil {
 		return fmt.Errorf("insert faker buy: %w", err)
 	}
@@ -593,7 +595,7 @@ VALUES ($1, $2, $3, 'buy', $4, $5, 'confirmed', $6, $7, $3, $8, $9, $9)`,
 		return nil
 	}
 	sold := int64(float64(tokens) * club.SellFrac)
-	proceeds := int64(math.Round(float64(sold) * float64(costPx) * club.SellPx / float64(jupiter.XStockAtomicScale)))
+	proceeds := int64(math.Round(float64(sold) * float64(costPx) * club.SellPx / float64(b20.TokenAtomicScale)))
 	soldAt := hoursAgo(now, club.SellHours)
 
 	// Governed sell (main's proposal kind model): passed sell proposal carrying token_amount,
@@ -617,7 +619,7 @@ VALUES ($1, $2, $3, 'sell', $4, 'passed', $5, $6) RETURNING id`,
 INSERT INTO transactions (group_id, proposal_id, amount, action, input_mint, output_mint, status,
                           tx_signature, execute_request_id, cost_basis_amount, created_at, confirmed_at)
 VALUES ($1, $2, $3, 'sell', $4, $5, 'confirmed', $6, $7, $8, $9, $9)`,
-		groupID, sellProposalID, sold, club.BuyMint, jupiter.USDCMint,
+		groupID, sellProposalID, sold, club.BuyMint, evm.USDCAddress,
 		"faker-"+sigKey+"-sell", "faker-"+sigKey+"-sell-req", proceeds, soldAt); err != nil {
 		return fmt.Errorf("insert faker sell: %w", err)
 	}

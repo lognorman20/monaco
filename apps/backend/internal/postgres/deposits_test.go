@@ -15,7 +15,7 @@ func TestFailDeposit_marksPendingDepositFailedWithReason(t *testing.T) {
 	iso := prepareIsolation(t, db)
 	store := NewStore(db)
 
-	user, err := store.UpsertUser(ctx, iso.UniquePrivyID("fail-deposit"), "Fail User")
+	user, err := store.UpsertUser(ctx, iso.UniqueDynamicID("fail-deposit"), "Fail User")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}

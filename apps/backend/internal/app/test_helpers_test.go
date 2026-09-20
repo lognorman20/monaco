@@ -6,25 +6,29 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
+	"github.com/monaco/monaco/apps/backend/internal/chainlink"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/evm"
+	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/pyth"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 type integrationHarness struct {
 	DB       *sql.DB
 	Store    *postgres.Store
-	Privy    privy.Client
-	Pyth     pyth.Client
+	Wallets  wallets.Client
+	Auth     auth.Verifier
+	Marks    marks.Client
 	Deposits *DepositService
 	Groups   *GroupService
 	Swap     *SwapService
 	Redeem   *RedeemService
-	Jupiter  jupiter.Client
-	XStocks  xstocks.Resolver
-	Catalog  xstocks.CatalogSearcher
+	Dex      dex.Client
+	Catalog  b20.Catalog
+	Chain    evm.Client
 	Symbols  *SymbolResolver
 	ISO      *postgres.TestIsolation
 }
@@ -43,21 +47,21 @@ func testRequestID(iso *postgres.TestIsolation, label string) string {
 	return fmt.Sprintf("req-%s-%s", iso.Suffix(), label)
 }
 
-func testTxSignature(iso *postgres.TestIsolation, label string) string {
-	return fmt.Sprintf("sig-%s-%s", iso.Suffix(), label)
+func testTxHash(iso *postgres.TestIsolation, label string) string {
+	return fmt.Sprintf("0x%s%s", iso.Suffix(), label)
 }
 
-func seedTestTreasuryUSDC(t *testing.T, privyClient privy.Client, treasuryAddress string, usdcMicros int64) {
+func seedTestTreasuryUSDC(t *testing.T, walletClient wallets.Client, treasuryAddress string, usdcMicros int64) {
 	t.Helper()
-	privy.SetTreasuryUSDCBalance(privyClient, treasuryAddress, usdcMicros)
+	wallets.SetTreasuryUSDCBalance(walletClient, treasuryAddress, usdcMicros)
 }
 
-func openTestSession(t *testing.T, iso *postgres.TestIsolation, sessions *SessionService, privyClient privy.Client, label, displayName string) SessionResult {
+func openTestSession(t *testing.T, iso *postgres.TestIsolation, sessions *SessionService, verifier auth.Verifier, label, displayName string) SessionResult {
 	t.Helper()
-	token := privy.AccessToken(iso.UniqueToken(label))
-	privy.RegisterToken(privyClient, token, privy.Identity{
-		PrivyUserID: iso.UniquePrivyID(label),
-		DisplayName: displayName,
+	token := auth.AccessToken(iso.UniqueToken(label))
+	auth.RegisterToken(verifier, token, auth.Identity{
+		DynamicUserID: iso.UniqueDynamicID(label),
+		DisplayName:   displayName,
 	})
 	result, err := sessions.OpenSession(context.Background(), string(token))
 	if err != nil {
@@ -72,40 +76,31 @@ func integrationApp(t *testing.T) integrationHarness {
 
 	db, iso := integrationDB(t)
 	store := postgres.NewStore(db)
-	privyClient := privy.NewFakeClient()
-	pythClient := pyth.NewFakeClient()
-	jupiterClient := jupiter.NewFakeClient()
-	xstocksResolver := xstocks.NewFakeResolver()
-	buy := NewBuyService(jupiterClient, xstocksResolver)
-	catalog := xstocks.NewFakeCatalogSearcher()
-	xstocks.RegisterCatalogAsset(catalog, xstocks.CatalogAsset{
-		Symbol:     "AAPLx",
-		Name:       "Apple",
-		SolanaMint: jupiter.AAPLxMint,
-	})
-	xstocks.RegisterCatalogAsset(catalog, xstocks.CatalogAsset{
-		Symbol:     "TSLAx",
-		Name:       "Tesla",
-		SolanaMint: jupiter.TSLAxMint,
-	})
+	walletClient := wallets.NewFakeClient()
+	verifier := auth.NewFakeVerifier()
+	marksClient := chainlink.NewFakeClient()
+	dexClient := dex.NewFakeClient()
+	catalog := b20.NewFakeCatalog()
+	aapl, _ := b20.NewPinnedCatalog().ResolveTokenAddress(context.Background(), "AAPLc")
+	b20.RegisterAsset(catalog, b20.Asset{Symbol: "AAPLc", Name: "Apple", TokenAddress: aapl, Decimals: 8})
+	chain := evm.NewFakeClient()
+	buy := NewBuyService(dexClient, catalog)
 	symbols := NewSymbolResolver(catalog)
-
-	signer := NewFakePrivyTreasurySigner()
-	swap := NewSwapService(store, buy, jupiterClient, privyClient, signer, "", symbols)
-	swap.SetPollConfigForTests(jupiter.TestPollConfig())
+	swap := NewSwapService(store, buy, dexClient, walletClient, chain, symbols)
 
 	return integrationHarness{
 		DB:       db,
 		Store:    store,
-		Privy:    privyClient,
-		Pyth:     pythClient,
-		Deposits: NewDepositService(store, privyClient, pythClient, symbols),
-		Groups:   NewGroupService(store, privyClient),
+		Wallets:  walletClient,
+		Auth:     verifier,
+		Marks:    marksClient,
+		Deposits: NewDepositService(store, walletClient, marksClient, symbols),
+		Groups:   NewGroupService(store, walletClient),
 		Swap:     swap,
-		Redeem:   NewRedeemService(store, privyClient, pythClient, jupiterClient, swap, signer),
-		Jupiter:  jupiterClient,
-		XStocks:  xstocksResolver,
+		Redeem:   NewRedeemService(store, walletClient, verifier, marksClient, dexClient, swap),
+		Dex:      dexClient,
 		Catalog:  catalog,
+		Chain:    chain,
 		Symbols:  symbols,
 		ISO:      iso,
 	}

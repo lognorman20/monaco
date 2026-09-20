@@ -10,16 +10,16 @@ import (
 	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 // QuoteHandlers serves buy quote HTTP routes.
 type QuoteHandlers struct {
 	Store      *postgres.Store
-	Privy      privy.Client
+	Privy      wallets.Client
 	Buy        *app.BuyService
 	Governance *app.GovernanceService
 }
@@ -70,7 +70,7 @@ func ProposalQuoteOK(ctx context.Context, buy *app.BuyService, in ProposalQuoteI
 		USDCAmount: in.USDCAmount,
 	})
 	if err != nil {
-		if errors.Is(err, app.ErrQuoteNotRoutable) || errors.Is(err, xstocks.ErrNotFound) {
+		if errors.Is(err, app.ErrQuoteNotRoutable) || errors.Is(err, b20.ErrNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -140,7 +140,7 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 				logJSONError(ctx, log, "exceeds_treasury_holding", w, http.StatusBadRequest, "amount exceeds treasury holding", "group_id", groupID, "symbol", req.Symbol, "user_id", userID)
 				return
 			}
-			if errors.Is(err, xstocks.ErrNotFound) {
+			if errors.Is(err, b20.ErrNotFound) {
 				logJSONError(ctx, log, "symbol_not_found", w, http.StatusNotFound, "symbol not found", "group_id", groupID, "symbol", req.Symbol, "user_id", userID)
 				return
 			}
@@ -182,7 +182,7 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 		USDCAmount: req.USDC,
 	})
 	if err != nil {
-		if errors.Is(err, xstocks.ErrNotFound) {
+		if errors.Is(err, b20.ErrNotFound) {
 			logJSONError(ctx, log, "symbol_not_found", w, http.StatusNotFound, "symbol not found", "group_id", groupID, "symbol", req.Symbol, "user_id", userID)
 			return
 		}
@@ -239,19 +239,19 @@ func quotePriceUsdcMicros(usdcMicros int64, outputAmount string) (int64, bool) {
 		return 0, false
 	}
 	// USDC micros (6 dp) per whole xStock share; Jupiter outAmount uses 8 dp atomics.
-	return (usdcMicros * jupiter.XStockAtomicScale) / outAtomics, true
+	return (usdcMicros * b20.TokenAtomicScale) / outAtomics, true
 }
 
 func (h *QuoteHandlers) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := h.Privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return "", privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return "", auth.ErrUnauthorized
 		}
 		return "", fmt.Errorf("verify session: %w", err)
 	}
 
-	user, found, err := h.Store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := h.Store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return "", err
 	}
@@ -293,7 +293,7 @@ func writeQuoteError(ctx context.Context, log *requestLog, w http.ResponseWriter
 		return
 	}
 	switch {
-	case errors.Is(err, privy.ErrInvalidToken):
+	case errors.Is(err, auth.ErrUnauthorized):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)
 	case errors.Is(err, app.ErrUserNotFound):
 		logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", attrs...)

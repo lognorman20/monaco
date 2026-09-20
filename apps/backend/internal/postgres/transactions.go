@@ -24,10 +24,10 @@ type TransactionRow struct {
 	ProposalID       sql.NullString
 	Amount           int64
 	Action           string
-	InputMint        string
-	OutputMint       string
+	InputToken        string
+	OutputToken       string
 	Status           string
-	TxSignature      sql.NullString
+	TxHash      sql.NullString
 	ExecuteRequestID sql.NullString
 	CostBasisPrice   sql.NullInt64
 	CostBasisAmount  sql.NullInt64
@@ -40,9 +40,9 @@ type TransactionRow struct {
 type ConfirmBuyTransactionParams struct {
 	GroupID          string
 	Amount           int64
-	InputMint        string
-	OutputMint       string
-	TxSignature      string
+	InputToken        string
+	OutputToken       string
+	TxHash      string
 	ExecuteRequestID string
 	CostBasisPrice   int64
 	CostBasisAmount  int64
@@ -53,9 +53,9 @@ type ConfirmBuyTransactionParams struct {
 type ConfirmSellTransactionParams struct {
 	GroupID          string
 	Amount           int64
-	InputMint        string
-	OutputMint       string
-	TxSignature      string
+	InputToken        string
+	OutputToken       string
+	TxHash      string
 	ExecuteRequestID string
 	ProceedsUSDC     int64
 }
@@ -67,15 +67,15 @@ type InsertPendingTransactionParams struct {
 	AgentIntentID    string
 	InitiatedBy      string
 	Action           string
-	InputMint        string
-	OutputMint       string
+	InputToken        string
+	OutputToken       string
 	Amount           int64
 	ExecuteRequestID string
 }
 
 // InsertPendingTransaction persists a pending swap row idempotently on execute_request_id.
 func (s *Store) InsertPendingTransaction(ctx context.Context, params InsertPendingTransactionParams) (TransactionRow, bool, error) {
-	if params.GroupID == "" || params.Action == "" || params.InputMint == "" || params.OutputMint == "" {
+	if params.GroupID == "" || params.Action == "" || params.InputToken == "" || params.OutputToken == "" {
 		return TransactionRow{}, false, fmt.Errorf("group_id, action, and mints are required")
 	}
 	if params.Amount <= 0 {
@@ -97,10 +97,10 @@ func (s *Store) InsertPendingTransaction(ctx context.Context, params InsertPendi
 	}
 
 	const insertSQL = `
-INSERT INTO transactions (group_id, proposal_id, agent_intent_id, initiated_by, amount, action, input_mint, output_mint, status, execute_request_id)
+INSERT INTO transactions (group_id, proposal_id, agent_intent_id, initiated_by, amount, action, input_token, output_token, status, execute_request_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)
-RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-          tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
+RETURNING id, group_id, proposal_id, amount, action, input_token, output_token, status,
+          tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
 
 	var proposalID sql.NullString
 	if params.ProposalID != "" {
@@ -121,8 +121,8 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		initiatedBy,
 		params.Amount,
 		params.Action,
-		params.InputMint,
-		params.OutputMint,
+		params.InputToken,
+		params.OutputToken,
 		params.ExecuteRequestID,
 	).Scan(
 		&row.ID,
@@ -130,10 +130,10 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		&row.ProposalID,
 		&row.Amount,
 		&row.Action,
-		&row.InputMint,
-		&row.OutputMint,
+		&row.InputToken,
+		&row.OutputToken,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.ExecuteRequestID,
 		&row.CostBasisPrice,
 		&row.CostBasisAmount,
@@ -156,8 +156,8 @@ func (s *Store) FailTransactionByExecuteRequestID(ctx context.Context, executeRe
 UPDATE transactions
 SET status = 'failed'
 WHERE execute_request_id = $1 AND status = 'pending'
-RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-          tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
+RETURNING id, group_id, proposal_id, amount, action, input_token, output_token, status,
+          tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
 
 	var row TransactionRow
 	err := s.db.QueryRowContext(ctx, updateSQL, executeRequestID).Scan(
@@ -166,10 +166,10 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		&row.ProposalID,
 		&row.Amount,
 		&row.Action,
-		&row.InputMint,
-		&row.OutputMint,
+		&row.InputToken,
+		&row.OutputToken,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.ExecuteRequestID,
 		&row.CostBasisPrice,
 		&row.CostBasisAmount,
@@ -192,8 +192,8 @@ func (s *Store) GetTransactionByExecuteRequestID(ctx context.Context, executeReq
 	}
 
 	const selectSQL = `
-SELECT id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-       tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
+SELECT id, group_id, proposal_id, amount, action, input_token, output_token, status,
+       tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
 FROM transactions
 WHERE execute_request_id = $1`
 
@@ -204,10 +204,10 @@ WHERE execute_request_id = $1`
 		&row.ProposalID,
 		&row.Amount,
 		&row.Action,
-		&row.InputMint,
-		&row.OutputMint,
+		&row.InputToken,
+		&row.OutputToken,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.ExecuteRequestID,
 		&row.CostBasisPrice,
 		&row.CostBasisAmount,
@@ -233,10 +233,10 @@ func (s *Store) InsertFailedTransaction(ctx context.Context, groupID, action, in
 	}
 
 	const insertSQL = `
-INSERT INTO transactions (group_id, amount, action, input_mint, output_mint, status, execute_request_id)
+INSERT INTO transactions (group_id, amount, action, input_token, output_token, status, execute_request_id)
 VALUES ($1, $2, $3, $4, $5, 'failed', $6)
-RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-          tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
+RETURNING id, group_id, proposal_id, amount, action, input_token, output_token, status,
+          tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
 
 	var row TransactionRow
 	var executeID sql.NullString
@@ -249,10 +249,10 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		&row.ProposalID,
 		&row.Amount,
 		&row.Action,
-		&row.InputMint,
-		&row.OutputMint,
+		&row.InputToken,
+		&row.OutputToken,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.ExecuteRequestID,
 		&row.CostBasisPrice,
 		&row.CostBasisAmount,
@@ -265,16 +265,16 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 	return row, nil
 }
 
-// ConfirmBuyTransaction upserts a confirmed buy by tx_signature or execute_request_id.
+// ConfirmBuyTransaction upserts a confirmed buy by tx_hash or execute_request_id.
 func (s *Store) ConfirmBuyTransaction(ctx context.Context, params ConfirmBuyTransactionParams) (TransactionRow, bool, error) {
-	if params.GroupID == "" || params.TxSignature == "" {
-		return TransactionRow{}, false, fmt.Errorf("group_id and tx_signature are required")
+	if params.GroupID == "" || params.TxHash == "" {
+		return TransactionRow{}, false, fmt.Errorf("group_id and tx_hash are required")
 	}
 	if params.Amount <= 0 || params.CostBasisAmount <= 0 {
 		return TransactionRow{}, false, fmt.Errorf("amount and cost_basis_amount must be positive")
 	}
 
-	existing, found, err := s.GetConfirmedTransactionBySignature(ctx, params.TxSignature)
+	existing, found, err := s.GetConfirmedTransactionBySignature(ctx, params.TxHash)
 	if err != nil {
 		return TransactionRow{}, false, err
 	}
@@ -300,13 +300,13 @@ func (s *Store) ConfirmBuyTransaction(ctx context.Context, params ConfirmBuyTran
 
 	const insertSQL = `
 INSERT INTO transactions (
-  group_id, amount, action, input_mint, output_mint, status, tx_signature,
+  group_id, amount, action, input_token, output_token, status, tx_hash,
   execute_request_id, cost_basis_price, cost_basis_amount, confirmed_at
 )
 VALUES ($1, $2, 'buy', $3, $4, 'confirmed', $5, $6, $7, $8, now())
-ON CONFLICT (tx_signature) DO NOTHING
-RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-          tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
+ON CONFLICT (tx_hash) DO NOTHING
+RETURNING id, group_id, proposal_id, amount, action, input_token, output_token, status,
+          tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
 
 	var executeID sql.NullString
 	if params.ExecuteRequestID != "" {
@@ -319,9 +319,9 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		insertSQL,
 		params.GroupID,
 		params.Amount,
-		params.InputMint,
-		params.OutputMint,
-		params.TxSignature,
+		params.InputToken,
+		params.OutputToken,
+		params.TxHash,
 		executeID,
 		params.CostBasisPrice,
 		params.CostBasisAmount,
@@ -331,10 +331,10 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		&row.ProposalID,
 		&row.Amount,
 		&row.Action,
-		&row.InputMint,
-		&row.OutputMint,
+		&row.InputToken,
+		&row.OutputToken,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.ExecuteRequestID,
 		&row.CostBasisPrice,
 		&row.CostBasisAmount,
@@ -342,7 +342,7 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		&row.ConfirmedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		existing, found, err := s.GetConfirmedTransactionBySignature(ctx, params.TxSignature)
+		existing, found, err := s.GetConfirmedTransactionBySignature(ctx, params.TxHash)
 		if err != nil {
 			return TransactionRow{}, false, err
 		}
@@ -357,16 +357,16 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 	return row, true, nil
 }
 
-// ConfirmSellTransaction upserts a confirmed sell by tx_signature.
+// ConfirmSellTransaction upserts a confirmed sell by tx_hash.
 func (s *Store) ConfirmSellTransaction(ctx context.Context, params ConfirmSellTransactionParams) (TransactionRow, bool, error) {
-	if params.GroupID == "" || params.TxSignature == "" {
-		return TransactionRow{}, false, fmt.Errorf("group_id and tx_signature are required")
+	if params.GroupID == "" || params.TxHash == "" {
+		return TransactionRow{}, false, fmt.Errorf("group_id and tx_hash are required")
 	}
 	if params.Amount <= 0 || params.ProceedsUSDC <= 0 {
 		return TransactionRow{}, false, fmt.Errorf("amount and proceeds must be positive")
 	}
 
-	existing, found, err := s.GetConfirmedTransactionBySignature(ctx, params.TxSignature)
+	existing, found, err := s.GetConfirmedTransactionBySignature(ctx, params.TxHash)
 	if err != nil {
 		return TransactionRow{}, false, err
 	}
@@ -385,13 +385,13 @@ func (s *Store) ConfirmSellTransaction(ctx context.Context, params ConfirmSellTr
 
 	const insertSQL = `
 INSERT INTO transactions (
-  group_id, amount, action, input_mint, output_mint, status, tx_signature,
+  group_id, amount, action, input_token, output_token, status, tx_hash,
   execute_request_id, cost_basis_price, cost_basis_amount, confirmed_at
 )
 VALUES ($1, $2, 'sell', $3, $4, 'confirmed', $5, $6, $7, $8, now())
-ON CONFLICT (tx_signature) DO NOTHING
-RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-          tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
+ON CONFLICT (tx_hash) DO NOTHING
+RETURNING id, group_id, proposal_id, amount, action, input_token, output_token, status,
+          tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
 
 	var executeID sql.NullString
 	if params.ExecuteRequestID != "" {
@@ -404,9 +404,9 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		insertSQL,
 		params.GroupID,
 		params.Amount,
-		params.InputMint,
-		params.OutputMint,
-		params.TxSignature,
+		params.InputToken,
+		params.OutputToken,
+		params.TxHash,
 		executeID,
 		params.ProceedsUSDC,
 		params.ProceedsUSDC,
@@ -416,10 +416,10 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		&row.ProposalID,
 		&row.Amount,
 		&row.Action,
-		&row.InputMint,
-		&row.OutputMint,
+		&row.InputToken,
+		&row.OutputToken,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.ExecuteRequestID,
 		&row.CostBasisPrice,
 		&row.CostBasisAmount,
@@ -427,7 +427,7 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		&row.ConfirmedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		existing, found, err := s.GetConfirmedTransactionBySignature(ctx, params.TxSignature)
+		existing, found, err := s.GetConfirmedTransactionBySignature(ctx, params.TxHash)
 		if err != nil {
 			return TransactionRow{}, false, err
 		}
@@ -443,28 +443,28 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 }
 
 // GetConfirmedTransactionBySignature returns a confirmed transaction by signature.
-func (s *Store) GetConfirmedTransactionBySignature(ctx context.Context, txSignature string) (TransactionRow, bool, error) {
-	if txSignature == "" {
-		return TransactionRow{}, false, fmt.Errorf("tx_signature is required")
+func (s *Store) GetConfirmedTransactionBySignature(ctx context.Context, txHash string) (TransactionRow, bool, error) {
+	if txHash == "" {
+		return TransactionRow{}, false, fmt.Errorf("tx_hash is required")
 	}
 
 	const selectSQL = `
-SELECT id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-       tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
+SELECT id, group_id, proposal_id, amount, action, input_token, output_token, status,
+       tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
 FROM transactions
-WHERE tx_signature = $1 AND status = 'confirmed'`
+WHERE tx_hash = $1 AND status = 'confirmed'`
 
 	var row TransactionRow
-	err := s.db.QueryRowContext(ctx, selectSQL, txSignature).Scan(
+	err := s.db.QueryRowContext(ctx, selectSQL, txHash).Scan(
 		&row.ID,
 		&row.GroupID,
 		&row.ProposalID,
 		&row.Amount,
 		&row.Action,
-		&row.InputMint,
-		&row.OutputMint,
+		&row.InputToken,
+		&row.OutputToken,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.ExecuteRequestID,
 		&row.CostBasisPrice,
 		&row.CostBasisAmount,
@@ -487,8 +487,8 @@ func (s *Store) GetConfirmedTransactionByExecuteRequestID(ctx context.Context, e
 	}
 
 	const selectSQL = `
-SELECT id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-       tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
+SELECT id, group_id, proposal_id, amount, action, input_token, output_token, status,
+       tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
 FROM transactions
 WHERE execute_request_id = $1 AND status = 'confirmed'`
 
@@ -499,10 +499,10 @@ WHERE execute_request_id = $1 AND status = 'confirmed'`
 		&row.ProposalID,
 		&row.Amount,
 		&row.Action,
-		&row.InputMint,
-		&row.OutputMint,
+		&row.InputToken,
+		&row.OutputToken,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.ExecuteRequestID,
 		&row.CostBasisPrice,
 		&row.CostBasisAmount,
@@ -532,8 +532,8 @@ func (s *Store) ListTransactionActivityByGroupID(ctx context.Context, groupID st
 	}
 
 	const selectSQL = `
-SELECT t.id, t.group_id, t.proposal_id, t.amount, t.action, t.input_mint, t.output_mint, t.status,
-       t.tx_signature, t.execute_request_id, t.cost_basis_price, t.cost_basis_amount, t.created_at, t.confirmed_at,
+SELECT t.id, t.group_id, t.proposal_id, t.amount, t.action, t.input_token, t.output_token, t.status,
+       t.tx_hash, t.execute_request_id, t.cost_basis_price, t.cost_basis_amount, t.created_at, t.confirmed_at,
        COALESCE(t.initiated_by, ''), COALESCE(ga.agent_display_name, '')
 FROM transactions t
 LEFT JOIN agent_intents ai ON ai.id = t.agent_intent_id
@@ -557,10 +557,10 @@ LIMIT 100`
 			&row.ProposalID,
 			&row.Amount,
 			&row.Action,
-			&row.InputMint,
-			&row.OutputMint,
+			&row.InputToken,
+			&row.OutputToken,
 			&row.Status,
-			&row.TxSignature,
+			&row.TxHash,
 			&row.ExecuteRequestID,
 			&row.CostBasisPrice,
 			&row.CostBasisAmount,
@@ -583,8 +583,8 @@ func (s *Store) ListTransactionsByGroupID(ctx context.Context, groupID string) (
 	}
 
 	const selectSQL = `
-SELECT id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-       tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
+SELECT id, group_id, proposal_id, amount, action, input_token, output_token, status,
+       tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
 FROM transactions
 WHERE group_id = $1
 ORDER BY created_at DESC
@@ -605,10 +605,10 @@ LIMIT 100`
 			&row.ProposalID,
 			&row.Amount,
 			&row.Action,
-			&row.InputMint,
-			&row.OutputMint,
+			&row.InputToken,
+			&row.OutputToken,
 			&row.Status,
-			&row.TxSignature,
+			&row.TxHash,
 			&row.ExecuteRequestID,
 			&row.CostBasisPrice,
 			&row.CostBasisAmount,
@@ -629,8 +629,8 @@ func (s *Store) GetTransactionByID(ctx context.Context, id string) (TransactionR
 	}
 
 	const selectSQL = `
-SELECT id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-       tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
+SELECT id, group_id, proposal_id, amount, action, input_token, output_token, status,
+       tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
 FROM transactions
 WHERE id = $1`
 
@@ -641,10 +641,10 @@ WHERE id = $1`
 		&row.ProposalID,
 		&row.Amount,
 		&row.Action,
-		&row.InputMint,
-		&row.OutputMint,
+		&row.InputToken,
+		&row.OutputToken,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.ExecuteRequestID,
 		&row.CostBasisPrice,
 		&row.CostBasisAmount,
@@ -674,16 +674,16 @@ func (s *Store) ListNetTokenHoldingsByGroup(ctx context.Context, groupID string)
 
 	const selectSQL = `
 WITH buys AS (
-  SELECT output_mint AS mint, COALESCE(SUM(cost_basis_amount), 0) AS amount
+  SELECT output_token AS mint, COALESCE(SUM(cost_basis_amount), 0) AS amount
   FROM transactions
   WHERE group_id = $1 AND action = 'buy' AND status = 'confirmed'
-  GROUP BY output_mint
+  GROUP BY output_token
 ),
 sells AS (
-  SELECT input_mint AS mint, COALESCE(SUM(amount), 0) AS amount
+  SELECT input_token AS mint, COALESCE(SUM(amount), 0) AS amount
   FROM transactions
   WHERE group_id = $1 AND action = 'sell' AND status = 'confirmed'
-  GROUP BY input_mint
+  GROUP BY input_token
 )
 SELECT COALESCE(buys.mint, sells.mint) AS mint,
        COALESCE(buys.amount, 0) - COALESCE(sells.amount, 0) AS amount
@@ -712,22 +712,22 @@ ORDER BY mint`
 	return holdings, nil
 }
 
-// GetFillDerivedCostBasisByOutputMint returns cost basis from the latest confirmed buy fill.
-func (s *Store) GetFillDerivedCostBasisByOutputMint(ctx context.Context, groupID, outputMint string) (int64, int64, bool, error) {
+// GetFillDerivedCostBasisByOutputToken returns cost basis from the latest confirmed buy fill.
+func (s *Store) GetFillDerivedCostBasisByOutputToken(ctx context.Context, groupID, outputMint string) (int64, int64, bool, error) {
 	if groupID == "" || outputMint == "" {
-		return 0, 0, false, fmt.Errorf("group_id and output_mint are required")
+		return 0, 0, false, fmt.Errorf("group_id and output_token are required")
 	}
-	return fillDerivedCostBasisByOutputMintQuery(ctx, s.db, groupID, outputMint)
+	return fillDerivedCostBasisByOutputTokenQuery(ctx, s.db, groupID, outputMint)
 }
 
 // CountConfirmedTransactionsBySignature counts confirmed rows for a signature.
-func (s *Store) CountConfirmedTransactionsBySignature(ctx context.Context, txSignature string) (int, error) {
-	if txSignature == "" {
-		return 0, fmt.Errorf("tx_signature is required")
+func (s *Store) CountConfirmedTransactionsBySignature(ctx context.Context, txHash string) (int, error) {
+	if txHash == "" {
+		return 0, fmt.Errorf("tx_hash is required")
 	}
 	var count int
 	err := s.db.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM transactions WHERE tx_signature = $1 AND status = 'confirmed'`, txSignature).Scan(&count)
+SELECT COUNT(*) FROM transactions WHERE tx_hash = $1 AND status = 'confirmed'`, txHash).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count transactions by signature: %w", err)
 	}
@@ -741,8 +741,8 @@ func (s *Store) GetLatestBuyTransactionByProposal(ctx context.Context, proposalI
 	}
 
 	const selectSQL = `
-SELECT id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-       tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
+SELECT id, group_id, proposal_id, amount, action, input_token, output_token, status,
+       tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
 FROM transactions
 WHERE proposal_id = $1 AND action = 'buy'
 ORDER BY created_at DESC
@@ -755,10 +755,10 @@ LIMIT 1`
 		&row.ProposalID,
 		&row.Amount,
 		&row.Action,
-		&row.InputMint,
-		&row.OutputMint,
+		&row.InputToken,
+		&row.OutputToken,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.ExecuteRequestID,
 		&row.CostBasisPrice,
 		&row.CostBasisAmount,
@@ -788,8 +788,8 @@ func (s *Store) GetConfirmedTransactionByProposalAndAction(ctx context.Context, 
 	}
 
 	const selectSQL = `
-SELECT id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-       tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
+SELECT id, group_id, proposal_id, amount, action, input_token, output_token, status,
+       tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
 FROM transactions
 WHERE proposal_id = $1 AND action = $2 AND status = 'confirmed'
 ORDER BY confirmed_at DESC NULLS LAST, created_at DESC
@@ -807,8 +807,8 @@ func (s *Store) GetLatestTransactionByProposalAndAction(ctx context.Context, pro
 	}
 
 	const selectSQL = `
-SELECT id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-       tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
+SELECT id, group_id, proposal_id, amount, action, input_token, output_token, status,
+       tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at
 FROM transactions
 WHERE proposal_id = $1 AND action = $2
 ORDER BY created_at DESC
@@ -825,10 +825,10 @@ func scanTransactionByProposalQuery(ctx context.Context, s *Store, selectSQL, pr
 		&row.ProposalID,
 		&row.Amount,
 		&row.Action,
-		&row.InputMint,
-		&row.OutputMint,
+		&row.InputToken,
+		&row.OutputToken,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.ExecuteRequestID,
 		&row.CostBasisPrice,
 		&row.CostBasisAmount,
@@ -854,8 +854,8 @@ func (s *Store) SetTransactionProposalID(ctx context.Context, transactionID, pro
 UPDATE transactions
 SET proposal_id = $2
 WHERE id = $1 AND status = 'confirmed' AND (proposal_id IS NULL OR proposal_id = $2)
-RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-          tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
+RETURNING id, group_id, proposal_id, amount, action, input_token, output_token, status,
+          tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
 
 	var row TransactionRow
 	err := s.db.QueryRowContext(ctx, updateSQL, transactionID, proposalID).Scan(
@@ -864,10 +864,10 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		&row.ProposalID,
 		&row.Amount,
 		&row.Action,
-		&row.InputMint,
-		&row.OutputMint,
+		&row.InputToken,
+		&row.OutputToken,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.ExecuteRequestID,
 		&row.CostBasisPrice,
 		&row.CostBasisAmount,
@@ -898,20 +898,20 @@ func (s *Store) confirmPendingBuyTransaction(ctx context.Context, transactionID 
 	const updateSQL = `
 UPDATE transactions
 SET status = 'confirmed',
-    tx_signature = $2,
+    tx_hash = $2,
     cost_basis_price = $3,
     cost_basis_amount = $4,
     confirmed_at = now()
 WHERE id = $1 AND status = 'pending'
-RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-          tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
+RETURNING id, group_id, proposal_id, amount, action, input_token, output_token, status,
+          tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
 
 	var row TransactionRow
 	err := s.db.QueryRowContext(
 		ctx,
 		updateSQL,
 		transactionID,
-		params.TxSignature,
+		params.TxHash,
 		params.CostBasisPrice,
 		params.CostBasisAmount,
 	).Scan(
@@ -920,10 +920,10 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		&row.ProposalID,
 		&row.Amount,
 		&row.Action,
-		&row.InputMint,
-		&row.OutputMint,
+		&row.InputToken,
+		&row.OutputToken,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.ExecuteRequestID,
 		&row.CostBasisPrice,
 		&row.CostBasisAmount,
@@ -940,20 +940,20 @@ func (s *Store) confirmPendingSellTransaction(ctx context.Context, transactionID
 	const updateSQL = `
 UPDATE transactions
 SET status = 'confirmed',
-    tx_signature = $2,
+    tx_hash = $2,
     cost_basis_price = $3,
     cost_basis_amount = $4,
     confirmed_at = now()
 WHERE id = $1 AND status = 'pending'
-RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, status,
-          tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
+RETURNING id, group_id, proposal_id, amount, action, input_token, output_token, status,
+          tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at`
 
 	var row TransactionRow
 	err := s.db.QueryRowContext(
 		ctx,
 		updateSQL,
 		transactionID,
-		params.TxSignature,
+		params.TxHash,
 		params.ProceedsUSDC,
 		params.ProceedsUSDC,
 	).Scan(
@@ -962,10 +962,10 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		&row.ProposalID,
 		&row.Amount,
 		&row.Action,
-		&row.InputMint,
-		&row.OutputMint,
+		&row.InputToken,
+		&row.OutputToken,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.ExecuteRequestID,
 		&row.CostBasisPrice,
 		&row.CostBasisAmount,

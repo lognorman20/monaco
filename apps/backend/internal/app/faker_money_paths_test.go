@@ -45,7 +45,7 @@ func TestFakerMoneyPaths_rejectScaleClubAndGhostSells(t *testing.T) {
 		t.Fatalf("ListTreasuries: %v", err)
 	}
 	for _, tr := range treasuries {
-		if tr.GroupID == fx.fakerGroupID || tr.SolanaAddress == fx.fakerTreasury {
+		if tr.GroupID == fx.fakerGroupID || tr.Address == fx.fakerTreasury {
 			t.Errorf("ListTreasuries includes faker treasury %+v", tr)
 		}
 	}

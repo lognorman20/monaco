@@ -11,15 +11,15 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 // CatalogHandlers serves catalog search HTTP routes.
 type CatalogHandlers struct {
 	Store   *postgres.Store
-	Privy   privy.Client
-	Catalog xstocks.CatalogSearcher
+	Privy   wallets.Client
+	Catalog b20.CatalogSearcher
 	// KeyGuard throttles wrong agent keys. Nil disables throttling.
 	KeyGuard *AgentKeyGuard
 }
@@ -27,7 +27,7 @@ type CatalogHandlers struct {
 type catalogAssetResponse struct {
 	Symbol     string `json:"symbol"`
 	Name       string `json:"name"`
-	SolanaMint string `json:"solanaMint"`
+	TokenAddress string `json:"tokenAddress"`
 	Routable   bool   `json:"routable"`
 }
 
@@ -76,7 +76,7 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 
 	page, err := h.Catalog.Search(ctx, query, limit, offset)
 	if err != nil {
-		if errors.Is(err, xstocks.ErrInvalidResponse) {
+		if errors.Is(err, b20.ErrInvalidResponse) {
 			logJSONError(ctx, log, "invalid_catalog_query", w, http.StatusBadRequest, "invalid catalog query", "group_id", groupID, "query", query)
 			return
 		}
@@ -92,7 +92,7 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 		resp.Assets = append(resp.Assets, catalogAssetResponse{
 			Symbol:     asset.Symbol,
 			Name:       asset.Name,
-			SolanaMint: asset.SolanaMint,
+			TokenAddress: asset.TokenAddress,
 			Routable:   asset.Routable,
 		})
 	}
@@ -125,15 +125,15 @@ func parseCatalogOffset(raw string) int {
 }
 
 func (h *CatalogHandlers) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := h.Privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return "", privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return "", auth.ErrUnauthorized
 		}
 		return "", fmt.Errorf("verify session: %w", err)
 	}
 
-	user, found, err := h.Store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := h.Store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return "", err
 	}
@@ -171,7 +171,7 @@ func (h *CatalogHandlers) authorizeGroupMember(ctx context.Context, accessToken,
 
 func writeCatalogError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, attrs ...any) {
 	switch {
-	case errors.Is(err, privy.ErrInvalidToken):
+	case errors.Is(err, auth.ErrUnauthorized):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)
 	case errors.Is(err, app.ErrUserNotFound):
 		logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", attrs...)

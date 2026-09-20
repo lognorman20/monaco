@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // SolanaConfirmer checks whether an on-chain transaction reached confirmed/finalized status.
 type SolanaConfirmer interface {
-	IsConfirmed(ctx context.Context, txSignature string) (bool, error)
+	IsConfirmed(ctx context.Context, txHash string) (bool, error)
 }
 
 // PlatformWithdrawalStatus is the lifecycle state of a platform withdrawal intent.
@@ -33,7 +33,7 @@ type PlatformWithdrawal struct {
 	Amount      int64
 	ToAddress   string
 	Status      PlatformWithdrawalStatus
-	TxSignature string
+	TxHash string
 	CreatedAt   time.Time
 }
 
@@ -52,7 +52,7 @@ var ErrWithdrawToMemberWallet = errors.New("cannot withdraw to member wallet")
 // PlatformWithdrawService orchestrates member-wallet USDC withdrawals.
 type PlatformWithdrawService struct {
 	store      *postgres.Store
-	privy      privy.Client
+	privy      wallets.Client
 	deposits   *DepositService
 	solana     SolanaConfirmer
 	relayerKey string
@@ -61,7 +61,7 @@ type PlatformWithdrawService struct {
 // NewPlatformWithdrawService wires platform withdrawal dependencies.
 func NewPlatformWithdrawService(
 	store *postgres.Store,
-	privyClient privy.Client,
+	privyClient wallets.Client,
 	deposits *DepositService,
 	solana SolanaConfirmer,
 	relayerKey string,
@@ -81,19 +81,19 @@ func (s *PlatformWithdrawService) CreatePlatformWithdrawal(ctx context.Context, 
 	if amount <= 0 {
 		return PlatformWithdrawal{}, fmt.Errorf("amount must be positive")
 	}
-	if err := privy.ValidateSolanaAddress(toAddress); err != nil {
+	if err := privy.ValidateAddress(toAddress); err != nil {
 		return PlatformWithdrawal{}, ErrInvalidWithdrawAddress
 	}
 
-	identity, err := s.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := s.privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return PlatformWithdrawal{}, privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return PlatformWithdrawal{}, auth.ErrUnauthorized
 		}
 		return PlatformWithdrawal{}, fmt.Errorf("verify session: %w", err)
 	}
 
-	user, found, err := s.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := s.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return PlatformWithdrawal{}, err
 	}
@@ -108,7 +108,7 @@ func (s *PlatformWithdrawService) CreatePlatformWithdrawal(ctx context.Context, 
 	if !found {
 		return PlatformWithdrawal{}, ErrUserNotFound
 	}
-	if strings.EqualFold(toAddress, wallet.SolanaAddress) {
+	if strings.EqualFold(toAddress, wallet.Address) {
 		return PlatformWithdrawal{}, ErrWithdrawToMemberWallet
 	}
 
@@ -133,7 +133,7 @@ func (s *PlatformWithdrawService) CreatePlatformWithdrawal(ctx context.Context, 
 		return PlatformWithdrawal{}, err
 	}
 
-	transferReq, err := privy.BuildTransferRequest(wallet.SolanaAddress, toAddress, amount, s.relayerKey)
+	transferReq, err := privy.BuildTransferRequest(wallet.Address, toAddress, amount, s.relayerKey)
 	if err != nil {
 		_, _, _ = s.store.FailPlatformWithdrawal(ctx, row.ID, "build transfer")
 		return PlatformWithdrawal{}, fmt.Errorf("build transfer: %w", err)
@@ -145,7 +145,7 @@ func (s *PlatformWithdrawService) CreatePlatformWithdrawal(ctx context.Context, 
 		return PlatformWithdrawal{}, fmt.Errorf("submit transfer: %w", err)
 	}
 
-	if existing, found, err := s.store.GetPlatformWithdrawalByTxSignature(ctx, result.TxSignature); err != nil {
+	if existing, found, err := s.store.GetPlatformWithdrawalByTxHash(ctx, result.TxHash); err != nil {
 		_, _, _ = s.store.FailPlatformWithdrawal(ctx, row.ID, "signature lookup failed")
 		return PlatformWithdrawal{}, err
 	} else if found && existing.ID != row.ID {
@@ -153,7 +153,7 @@ func (s *PlatformWithdrawService) CreatePlatformWithdrawal(ctx context.Context, 
 		return platformWithdrawalFromRow(existing), nil
 	}
 
-	if err := s.store.SetPlatformWithdrawalBroadcastSignature(ctx, row.ID, result.TxSignature); err != nil {
+	if err := s.store.SetPlatformWithdrawalBroadcastSignature(ctx, row.ID, result.TxHash); err != nil {
 		_, _, _ = s.store.FailPlatformWithdrawal(ctx, row.ID, "persist signature failed")
 		return PlatformWithdrawal{}, fmt.Errorf("persist broadcast signature: %w", err)
 	}
@@ -162,11 +162,11 @@ func (s *PlatformWithdrawService) CreatePlatformWithdrawal(ctx context.Context, 
 		"user_id", user.ID,
 		"amount", amount,
 		"to_address", toAddress,
-		"tx_signature", result.TxSignature,
+		"tx_signature", result.TxHash,
 		"withdrawal_id", row.ID,
 	)
 
-	withdrawal, err := s.refreshConfirmation(ctx, row.ID, result.TxSignature)
+	withdrawal, err := s.refreshConfirmation(ctx, row.ID, result.TxHash)
 	if err != nil {
 		return PlatformWithdrawal{}, err
 	}
@@ -175,15 +175,15 @@ func (s *PlatformWithdrawService) CreatePlatformWithdrawal(ctx context.Context, 
 
 // GetPlatformWithdrawal returns a platform withdrawal for the authenticated owner, refreshing confirmation when pending.
 func (s *PlatformWithdrawService) GetPlatformWithdrawal(ctx context.Context, accessToken, withdrawalID string) (PlatformWithdrawal, error) {
-	identity, err := s.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := s.privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return PlatformWithdrawal{}, privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return PlatformWithdrawal{}, auth.ErrUnauthorized
 		}
 		return PlatformWithdrawal{}, fmt.Errorf("verify session: %w", err)
 	}
 
-	user, found, err := s.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := s.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return PlatformWithdrawal{}, err
 	}
@@ -199,13 +199,13 @@ func (s *PlatformWithdrawService) GetPlatformWithdrawal(ctx context.Context, acc
 		return PlatformWithdrawal{}, ErrPlatformWithdrawalNotFound
 	}
 
-	if row.Status == string(PlatformWithdrawalStatusPending) && row.TxSignature.Valid && row.TxSignature.String != "" {
-		return s.refreshConfirmation(ctx, row.ID, row.TxSignature.String)
+	if row.Status == string(PlatformWithdrawalStatusPending) && row.TxHash.Valid && row.TxHash.String != "" {
+		return s.refreshConfirmation(ctx, row.ID, row.TxHash.String)
 	}
 	return platformWithdrawalFromRow(row), nil
 }
 
-func (s *PlatformWithdrawService) refreshConfirmation(ctx context.Context, withdrawalID, txSignature string) (PlatformWithdrawal, error) {
+func (s *PlatformWithdrawService) refreshConfirmation(ctx context.Context, withdrawalID, txHash string) (PlatformWithdrawal, error) {
 	if s.solana == nil {
 		row, found, err := s.store.GetPlatformWithdrawalByID(ctx, withdrawalID)
 		if err != nil {
@@ -217,7 +217,7 @@ func (s *PlatformWithdrawService) refreshConfirmation(ctx context.Context, withd
 		return platformWithdrawalFromRow(row), nil
 	}
 
-	confirmed, err := s.solana.IsConfirmed(ctx, txSignature)
+	confirmed, err := s.solana.IsConfirmed(ctx, txHash)
 	if err != nil {
 		return PlatformWithdrawal{}, fmt.Errorf("confirm withdrawal tx: %w", err)
 	}
@@ -232,7 +232,7 @@ func (s *PlatformWithdrawService) refreshConfirmation(ctx context.Context, withd
 		return platformWithdrawalFromRow(row), nil
 	}
 
-	row, newlyConfirmed, err := s.store.ConfirmPlatformWithdrawal(ctx, withdrawalID, txSignature)
+	row, newlyConfirmed, err := s.store.ConfirmPlatformWithdrawal(ctx, withdrawalID, txHash)
 	if err != nil {
 		return PlatformWithdrawal{}, err
 	}
@@ -241,7 +241,7 @@ func (s *PlatformWithdrawService) refreshConfirmation(ctx context.Context, withd
 			"user_id", row.UserID,
 			"amount", row.Amount,
 			"to_address", row.ToAddress,
-			"tx_signature", txSignature,
+			"tx_signature", txHash,
 			"withdrawal_id", row.ID,
 		)
 	}
@@ -257,8 +257,8 @@ func platformWithdrawalFromRow(row postgres.PlatformWithdrawalRow) PlatformWithd
 		Status:    PlatformWithdrawalStatus(row.Status),
 		CreatedAt: row.CreatedAt,
 	}
-	if row.TxSignature.Valid {
-		withdrawal.TxSignature = row.TxSignature.String
+	if row.TxHash.Valid {
+		withdrawal.TxHash = row.TxHash.String
 	}
 	return withdrawal
 }

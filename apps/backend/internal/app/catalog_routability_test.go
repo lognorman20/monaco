@@ -4,24 +4,24 @@ import (
 	"context"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 func TestJupiterCatalogRoutabilityProber_reportsRoutableQuote(t *testing.T) {
 	t.Parallel()
 
-	client := jupiter.NewFakeClient()
+	client := dex.NewFakeClient()
 	jupiter.RegisterQuoteBuy(client, "MintAAPL", CatalogRoutabilityProbeMicros, jupiter.BuyQuote{
 		Routable:   true,
-		InputMint:  jupiter.USDCMint,
-		OutputMint: "MintAAPL",
+		InputToken:  evm.USDCAddress,
+		OutputToken: "MintAAPL",
 	})
 
 	prober := NewJupiterCatalogRoutabilityProber(client)
-	routable := prober.IsRoutable(context.Background(), xstocks.CatalogAsset{
+	routable := prober.IsRoutable(context.Background(), b20.Asset{
 		Symbol:     "AAPLx",
-		SolanaMint: "MintAAPL",
+		TokenAddress: "MintAAPL",
 	})
 	if !routable {
 		t.Fatal("expected routable=true for configured Jupiter quote")
@@ -31,11 +31,11 @@ func TestJupiterCatalogRoutabilityProber_reportsRoutableQuote(t *testing.T) {
 func TestJupiterCatalogRoutabilityProber_reportsNoRoute(t *testing.T) {
 	t.Parallel()
 
-	client := jupiter.NewFakeClient()
+	client := dex.NewFakeClient()
 	prober := NewJupiterCatalogRoutabilityProber(client)
-	routable := prober.IsRoutable(context.Background(), xstocks.CatalogAsset{
+	routable := prober.IsRoutable(context.Background(), b20.Asset{
 		Symbol:     "DEADx",
-		SolanaMint: "MintDead",
+		TokenAddress: "MintDead",
 	})
 	if routable {
 		t.Fatal("expected routable=false when Jupiter has no quote")

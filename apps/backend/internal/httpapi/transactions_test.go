@@ -8,25 +8,25 @@ import (
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
-func integrationTransactionHandlers(t *testing.T) (*TransactionHandlers, *AuthHandlers, privy.Client, jupiter.Client, *postgres.TestIsolation) {
+func integrationTransactionHandlers(t *testing.T) (*TransactionHandlers, *AuthHandlers, wallets.Client, dex.Client, *postgres.TestIsolation) {
 	t.Helper()
 
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
-	jupiterClient := jupiter.NewFakeClient()
-	xstocksResolver := xstocks.NewFakeResolver()
+	jupiterClient := dex.NewFakeClient()
+	xstocksResolver := b20.NewFakeCatalog()
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
-	catalog := xstocks.NewFakeCatalogSearcher()
-	xstocks.RegisterCatalogAsset(catalog, xstocks.CatalogAsset{
+	catalog := b20.NewFakeCatalog()
+	b20.RegisterCatalogAsset(catalog, b20.Asset{
 		Symbol:     "AAPLx",
 		Name:       "Apple",
-		SolanaMint: jupiter.AAPLxMint,
+		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 	})
 	symbols := app.NewSymbolResolver(catalog)
 	signer := app.NewFakePrivyTreasurySigner()
@@ -55,11 +55,11 @@ func TestRetryTransactionHandler_failedBuy_returnsConfirmed(t *testing.T) {
 	const usdcAmount int64 = 2_000_000
 	requestID := "req-retry-http-" + iso.Suffix()
 	signature := "sig-retry-http-" + iso.Suffix()
-	xstocks.RegisterSolanaMint(handlers.XStocks, "AAPLx", jupiter.AAPLxMint)
-	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, usdcAmount, jupiter.BuyQuote{
+	b20.RegisterTokenAddress(handlers.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcAmount, jupiter.BuyQuote{
 		Routable:   true,
-		InputMint:  jupiter.USDCMint,
-		OutputMint: jupiter.AAPLxMint,
+		InputToken:  evm.USDCAddress,
+		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		InAmount:   "2000000",
 		OutAmount:  "1000000",
 		RequestID:  requestID,
@@ -69,8 +69,8 @@ func TestRetryTransactionHandler_failedBuy_returnsConfirmed(t *testing.T) {
 		Transaction: "unsigned-buy-tx",
 		InAmount:    "2000000",
 		OutAmount:   "1000000",
-		InputMint:   jupiter.USDCMint,
-		OutputMint:  jupiter.AAPLxMint,
+		InputToken:   evm.USDCAddress,
+		OutputToken:  "0xb200000000000000000000c2e324d24d7eecd1fb",
 	})
 	jupiter.RegisterExecutePoll(jupiterClient, requestID, []jupiter.ExecuteResult{
 		{Status: jupiter.ExecuteStatusPending, Code: -1},
@@ -83,14 +83,14 @@ func TestRetryTransactionHandler_failedBuy_returnsConfirmed(t *testing.T) {
 		},
 	})
 
-	treasury, err := privyClient.EnsureTreasury(ctx, privy.GroupID(created.GroupID))
+	treasury, err := privyClient.EnsureTreasury(ctx, wallets.GroupID(created.GroupID))
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
-	handlers.Swap.SetTreasuryBalances(treasury.SolanaAddress, app.TreasuryBalances{USDC: 5_000_000})
-	privy.SetTreasuryUSDCBalance(privyClient, treasury.SolanaAddress, 5_000_000)
+	handlers.Swap.SetTreasuryBalances(treasury.Address, app.TreasuryBalances{USDC: 5_000_000})
+	wallets.SetTreasuryUSDCBalance(privyClient, treasury.Address, 5_000_000)
 
-	failed, err := handlers.Store.InsertFailedTransaction(ctx, created.GroupID, postgres.TransactionActionBuy, jupiter.USDCMint, jupiter.AAPLxMint, usdcAmount, "req-failed-"+iso.Suffix())
+	failed, err := handlers.Store.InsertFailedTransaction(ctx, created.GroupID, postgres.TransactionActionBuy, evm.USDCAddress, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcAmount, "req-failed-"+iso.Suffix())
 	if err != nil {
 		t.Fatalf("insert failed buy: %v", err)
 	}
@@ -132,9 +132,9 @@ func TestGetTransactionHandler_returnsFullDetail(t *testing.T) {
 	confirmed, _, err := handlers.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          created.GroupID,
 		Amount:           2_000_000,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      "sig-get-tx-" + iso.Suffix(),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      "sig-get-tx-" + iso.Suffix(),
 		ExecuteRequestID: "req-get-tx-" + iso.Suffix(),
 		CostBasisPrice:   2_000_000,
 		CostBasisAmount:  1_000_000,
@@ -169,8 +169,8 @@ func TestGetTransactionHandler_returnsFullDetail(t *testing.T) {
 	if payload.AmountMicros != 2_000_000 {
 		t.Fatalf("amountMicros = %d, want 2000000", payload.AmountMicros)
 	}
-	if payload.TxSignature == "" || payload.ExecuteRequestID == "" {
-		t.Fatalf("expected txSignature and executeRequestId, got sig=%q req=%q", payload.TxSignature, payload.ExecuteRequestID)
+	if payload.TxHash == "" || payload.ExecuteRequestID == "" {
+		t.Fatalf("expected txHash and executeRequestId, got sig=%q req=%q", payload.TxHash, payload.ExecuteRequestID)
 	}
 	if payload.CreatedAt == "" || payload.ConfirmedAt == "" {
 		t.Fatalf("expected timestamps, got created=%q confirmed=%q", payload.CreatedAt, payload.ConfirmedAt)
@@ -195,9 +195,9 @@ func TestRetryTransactionHandler_confirmedBuy_returns409(t *testing.T) {
 	confirmed, _, err := handlers.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          created.GroupID,
 		Amount:           1_000_000,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      "sig-confirmed-" + iso.Suffix(),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      "sig-confirmed-" + iso.Suffix(),
 		ExecuteRequestID: "req-confirmed-" + iso.Suffix(),
 		CostBasisPrice:   1_000_000,
 		CostBasisAmount:  500_000,

@@ -12,8 +12,8 @@ import (
 type Treasury struct {
 	ID            string
 	GroupID       string
-	PrivyWalletID string
-	SolanaAddress string
+	WalletID string
+	Address string
 	CreatedAt     time.Time
 }
 
@@ -32,23 +32,23 @@ func insertTreasury(ctx context.Context, q queryRower, groupID string, privyWall
 		return Treasury{}, fmt.Errorf("group_id is required")
 	}
 	if privyWalletID == "" {
-		return Treasury{}, fmt.Errorf("privy_wallet_id is required")
+		return Treasury{}, fmt.Errorf("wallet_id is required")
 	}
 	if solanaAddress == "" {
-		return Treasury{}, fmt.Errorf("solana_address is required")
+		return Treasury{}, fmt.Errorf("address is required")
 	}
 
 	const insertSQL = `
-INSERT INTO treasuries (group_id, privy_wallet_id, solana_address)
+INSERT INTO treasuries (group_id, wallet_id, address)
 VALUES ($1, $2, $3)
-RETURNING id, group_id, privy_wallet_id, solana_address, created_at`
+RETURNING id, group_id, wallet_id, address, created_at`
 
 	var treasury Treasury
 	err := q.QueryRowContext(ctx, insertSQL, groupID, privyWalletID, solanaAddress).Scan(
 		&treasury.ID,
 		&treasury.GroupID,
-		&treasury.PrivyWalletID,
-		&treasury.SolanaAddress,
+		&treasury.WalletID,
+		&treasury.Address,
 		&treasury.CreatedAt,
 	)
 	if err != nil {
@@ -65,7 +65,7 @@ func (s *Store) GetTreasuryByGroupID(ctx context.Context, groupID string) (Treas
 	}
 
 	const selectSQL = `
-SELECT id, group_id, privy_wallet_id, solana_address, created_at
+SELECT id, group_id, wallet_id, address, created_at
 FROM treasuries
 WHERE group_id = $1`
 
@@ -73,8 +73,8 @@ WHERE group_id = $1`
 	err := s.db.QueryRowContext(ctx, selectSQL, groupID).Scan(
 		&treasury.ID,
 		&treasury.GroupID,
-		&treasury.PrivyWalletID,
-		&treasury.SolanaAddress,
+		&treasury.WalletID,
+		&treasury.Address,
 		&treasury.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -91,7 +91,7 @@ WHERE group_id = $1`
 // dummy treasuries are excluded: they are not Privy wallets and must never be swept or read.
 func (s *Store) ListTreasuries(ctx context.Context) ([]Treasury, error) {
 	const selectSQL = `
-SELECT t.id, t.group_id, t.privy_wallet_id, t.solana_address, t.created_at
+SELECT t.id, t.group_id, t.wallet_id, t.address, t.created_at
 FROM treasuries t
 JOIN groups g ON g.id = t.group_id
 WHERE NOT g.is_faker
@@ -109,8 +109,8 @@ ORDER BY t.created_at ASC`
 		if err := rows.Scan(
 			&treasury.ID,
 			&treasury.GroupID,
-			&treasury.PrivyWalletID,
-			&treasury.SolanaAddress,
+			&treasury.WalletID,
+			&treasury.Address,
 			&treasury.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan treasury: %w", err)

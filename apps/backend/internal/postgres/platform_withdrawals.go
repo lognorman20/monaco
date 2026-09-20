@@ -16,7 +16,7 @@ type PlatformWithdrawalRow struct {
 	Amount      int64
 	ToAddress   string
 	Status      string
-	TxSignature sql.NullString
+	TxHash sql.NullString
 	CreatedAt   time.Time
 }
 
@@ -32,7 +32,7 @@ func (s *Store) InsertPlatformWithdrawal(ctx context.Context, userID string, amo
 	const insertSQL = `
 INSERT INTO platform_withdrawals (user_id, amount, to_address, status)
 VALUES ($1, $2, $3, 'pending')
-RETURNING id, user_id, amount, to_address, status, tx_signature, created_at`
+RETURNING id, user_id, amount, to_address, status, tx_hash, created_at`
 
 	var row PlatformWithdrawalRow
 	err := s.db.QueryRowContext(ctx, insertSQL, userID, amount, toAddress).Scan(
@@ -41,7 +41,7 @@ RETURNING id, user_id, amount, to_address, status, tx_signature, created_at`
 		&row.Amount,
 		&row.ToAddress,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.CreatedAt,
 	)
 	if err != nil {
@@ -98,7 +98,7 @@ func (s *Store) GetPlatformWithdrawalByID(ctx context.Context, id string) (Platf
 	}
 
 	const selectSQL = `
-SELECT id, user_id, amount, to_address, status, tx_signature, created_at
+SELECT id, user_id, amount, to_address, status, tx_hash, created_at
 FROM platform_withdrawals
 WHERE id = $1`
 
@@ -109,7 +109,7 @@ WHERE id = $1`
 		&row.Amount,
 		&row.ToAddress,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -121,25 +121,25 @@ WHERE id = $1`
 	return row, true, nil
 }
 
-// GetPlatformWithdrawalByTxSignature returns a platform withdrawal keyed by on-chain signature.
-func (s *Store) GetPlatformWithdrawalByTxSignature(ctx context.Context, txSignature string) (PlatformWithdrawalRow, bool, error) {
-	if txSignature == "" {
+// GetPlatformWithdrawalByTxHash returns a platform withdrawal keyed by on-chain signature.
+func (s *Store) GetPlatformWithdrawalByTxHash(ctx context.Context, txHash string) (PlatformWithdrawalRow, bool, error) {
+	if txHash == "" {
 		return PlatformWithdrawalRow{}, false, fmt.Errorf("tx signature is required")
 	}
 
 	const selectSQL = `
-SELECT id, user_id, amount, to_address, status, tx_signature, created_at
+SELECT id, user_id, amount, to_address, status, tx_hash, created_at
 FROM platform_withdrawals
-WHERE tx_signature = $1`
+WHERE tx_hash = $1`
 
 	var row PlatformWithdrawalRow
-	err := s.db.QueryRowContext(ctx, selectSQL, txSignature).Scan(
+	err := s.db.QueryRowContext(ctx, selectSQL, txHash).Scan(
 		&row.ID,
 		&row.UserID,
 		&row.Amount,
 		&row.ToAddress,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -163,8 +163,8 @@ func (s *Store) SetFailPlatformWithdrawalBroadcastSignatureForTests(fail bool, e
 }
 
 // SetPlatformWithdrawalBroadcastSignature records the broadcast signature on a pending row.
-func (s *Store) SetPlatformWithdrawalBroadcastSignature(ctx context.Context, withdrawalID, txSignature string) error {
-	if withdrawalID == "" || txSignature == "" {
+func (s *Store) SetPlatformWithdrawalBroadcastSignature(ctx context.Context, withdrawalID, txHash string) error {
+	if withdrawalID == "" || txHash == "" {
 		return fmt.Errorf("withdrawal id and tx signature are required")
 	}
 	if s.platformWithdrawalTestHooks.failSetBroadcastSignature {
@@ -177,10 +177,10 @@ func (s *Store) SetPlatformWithdrawalBroadcastSignature(ctx context.Context, wit
 
 	const updateSQL = `
 UPDATE platform_withdrawals
-SET tx_signature = $2
+SET tx_hash = $2
 WHERE id = $1 AND status = 'pending'`
 
-	result, err := s.db.ExecContext(ctx, updateSQL, withdrawalID, txSignature)
+	result, err := s.db.ExecContext(ctx, updateSQL, withdrawalID, txHash)
 	if err != nil {
 		return fmt.Errorf("set platform withdrawal broadcast signature: %w", err)
 	}
@@ -195,25 +195,25 @@ WHERE id = $1 AND status = 'pending'`
 }
 
 // ConfirmPlatformWithdrawal marks a pending platform withdrawal confirmed with its signature.
-func (s *Store) ConfirmPlatformWithdrawal(ctx context.Context, withdrawalID, txSignature string) (PlatformWithdrawalRow, bool, error) {
-	if withdrawalID == "" || txSignature == "" {
+func (s *Store) ConfirmPlatformWithdrawal(ctx context.Context, withdrawalID, txHash string) (PlatformWithdrawalRow, bool, error) {
+	if withdrawalID == "" || txHash == "" {
 		return PlatformWithdrawalRow{}, false, fmt.Errorf("withdrawal id and tx signature are required")
 	}
 
 	const updateSQL = `
 UPDATE platform_withdrawals
-SET status = 'confirmed', tx_signature = $2
+SET status = 'confirmed', tx_hash = $2
 WHERE id = $1 AND status = 'pending'
-RETURNING id, user_id, amount, to_address, status, tx_signature, created_at`
+RETURNING id, user_id, amount, to_address, status, tx_hash, created_at`
 
 	var row PlatformWithdrawalRow
-	err := s.db.QueryRowContext(ctx, updateSQL, withdrawalID, txSignature).Scan(
+	err := s.db.QueryRowContext(ctx, updateSQL, withdrawalID, txHash).Scan(
 		&row.ID,
 		&row.UserID,
 		&row.Amount,
 		&row.ToAddress,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.CreatedAt,
 	)
 	if err == nil {
@@ -233,7 +233,7 @@ RETURNING id, user_id, amount, to_address, status, tx_signature, created_at`
 	if existing.Status != "confirmed" {
 		return PlatformWithdrawalRow{}, false, fmt.Errorf("confirm platform withdrawal: withdrawal not pending")
 	}
-	if !existing.TxSignature.Valid || existing.TxSignature.String != txSignature {
+	if !existing.TxHash.Valid || existing.TxHash.String != txHash {
 		return PlatformWithdrawalRow{}, false, fmt.Errorf("confirm platform withdrawal: tx signature mismatch")
 	}
 	return existing, false, nil
@@ -254,7 +254,7 @@ func (s *Store) FailPlatformWithdrawal(ctx context.Context, withdrawalID, reason
 UPDATE platform_withdrawals
 SET status = $2
 WHERE id = $1 AND status = 'pending'
-RETURNING id, user_id, amount, to_address, status, tx_signature, created_at`
+RETURNING id, user_id, amount, to_address, status, tx_hash, created_at`
 
 	var row PlatformWithdrawalRow
 	err := s.db.QueryRowContext(ctx, updateSQL, withdrawalID, status).Scan(
@@ -263,7 +263,7 @@ RETURNING id, user_id, amount, to_address, status, tx_signature, created_at`
 		&row.Amount,
 		&row.ToAddress,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {

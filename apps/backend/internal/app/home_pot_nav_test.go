@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 func TestHomeDiscoveryNeedsMarkedPot(t *testing.T) {
@@ -28,7 +28,7 @@ func TestGetHomeDashboard_computesPotNavOncePerJoinedGroup(t *testing.T) {
 	ctx := HomeContextWithPotNavCache(context.Background())
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "dash-dedup", "Dash Dedup")
-	token := string(privy.AccessToken(h.ISO.UniqueToken("dash-dedup")))
+	token := string(auth.AccessToken(h.ISO.UniqueToken("dash-dedup")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "dash-dedup"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)

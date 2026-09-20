@@ -3,7 +3,7 @@ package httpapi
 import (
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 )
 
 func TestQuotePriceUsdcMicros_usesXStockEightDecimals(t *testing.T) {
@@ -28,7 +28,7 @@ func TestQuotePriceUsdcMicros_fixtureFiveUsdcTwoPointFiveShares(t *testing.T) {
 	if !ok {
 		t.Fatal("expected price derivation to succeed")
 	}
-	want := (5_000_000 * jupiter.XStockAtomicScale) / 2_500_000
+	want := (5_000_000 * b20.TokenAtomicScale) / 2_500_000
 	if price != want {
 		t.Fatalf("priceUsdcMicros = %d, want %d ($%.2f/share)", price, want, float64(want)/1_000_000)
 	}

@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // Cabal chat limits.
@@ -65,17 +65,17 @@ type GroupMessagesPage struct {
 // GroupChatService reads and posts cabal chat messages for group members.
 type GroupChatService struct {
 	store   *postgres.Store
-	privy   privy.Client
+	privy   wallets.Client
 	limiter *KeyedRateLimiter
 }
 
 // NewGroupChatService wires chat with the default per-user posting limit.
-func NewGroupChatService(store *postgres.Store, privyClient privy.Client) *GroupChatService {
+func NewGroupChatService(store *postgres.Store, privyClient wallets.Client) *GroupChatService {
 	return NewGroupChatServiceWithLimiter(store, privyClient, NewKeyedRateLimiter(groupMessageBurst, groupMessageRefill, time.Now))
 }
 
 // NewGroupChatServiceWithLimiter wires chat with an explicit posting limiter (tests inject clocks).
-func NewGroupChatServiceWithLimiter(store *postgres.Store, privyClient privy.Client, limiter *KeyedRateLimiter) *GroupChatService {
+func NewGroupChatServiceWithLimiter(store *postgres.Store, privyClient wallets.Client, limiter *KeyedRateLimiter) *GroupChatService {
 	return &GroupChatService{store: store, privy: privyClient, limiter: limiter}
 }
 
@@ -148,14 +148,14 @@ func (s *GroupChatService) PostMessage(ctx context.Context, accessToken, groupID
 // authorizeMember resolves the caller and requires membership.
 // Unknown or malformed group ids are ErrGroupNotFound; existing groups the caller has not joined are ErrNotGroupMember.
 func (s *GroupChatService) authorizeMember(ctx context.Context, accessToken, groupID string) (string, error) {
-	identity, err := s.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := s.privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return "", privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return "", auth.ErrUnauthorized
 		}
 		return "", fmt.Errorf("verify session: %w", err)
 	}
-	user, found, err := s.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := s.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return "", err
 	}

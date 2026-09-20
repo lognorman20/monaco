@@ -11,15 +11,15 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 // TransactionHandlers serves transaction HTTP routes.
 type TransactionHandlers struct {
 	Store   *postgres.Store
-	Privy   privy.Client
-	XStocks xstocks.Resolver
+	Privy   wallets.Client
+	XStocks b20.Catalog
 	Swap    *app.SwapService
 	Symbols *app.SymbolResolver
 }
@@ -30,11 +30,11 @@ type getTransactionResponse struct {
 	Action           string `json:"action"`
 	Status           string `json:"status"`
 	AmountMicros     int64  `json:"amountMicros"`
-	InputMint        string `json:"inputMint,omitempty"`
-	OutputMint       string `json:"outputMint,omitempty"`
+	InputToken        string `json:"inputMint,omitempty"`
+	OutputToken       string `json:"outputMint,omitempty"`
 	InputSymbol      string `json:"inputSymbol,omitempty"`
 	OutputSymbol     string `json:"outputSymbol,omitempty"`
-	TxSignature      string `json:"txSignature,omitempty"`
+	TxHash      string `json:"txHash,omitempty"`
 	ExecuteRequestID string `json:"executeRequestId,omitempty"`
 	ProposalID       string `json:"proposalId,omitempty"`
 	CostBasisPrice   int64  `json:"costBasisPrice,omitempty"`
@@ -175,14 +175,14 @@ func (h *TransactionHandlers) transactionRowToResponse(ctx context.Context, row 
 		Action:        row.Action,
 		Status:        row.Status,
 		AmountMicros:  row.Amount,
-		InputMint:     row.InputMint,
-		OutputMint:    row.OutputMint,
-		InputSymbol:   h.symbolForMint(ctx, row.InputMint),
-		OutputSymbol:  h.symbolForMint(ctx, row.OutputMint),
+		InputToken:     row.InputToken,
+		OutputToken:    row.OutputToken,
+		InputSymbol:   h.symbolForMint(ctx, row.InputToken),
+		OutputSymbol:  h.symbolForMint(ctx, row.OutputToken),
 		CreatedAt:     row.CreatedAt.UTC().Format(time.RFC3339),
 	}
-	if row.TxSignature.Valid {
-		resp.TxSignature = row.TxSignature.String
+	if row.TxHash.Valid {
+		resp.TxHash = row.TxHash.String
 	}
 	if row.ExecuteRequestID.Valid {
 		resp.ExecuteRequestID = row.ExecuteRequestID.String
@@ -287,13 +287,13 @@ func (h *TransactionHandlers) GetCostBasisBySymbolHandler(w http.ResponseWriter,
 		return
 	}
 
-	outputMint, err := h.XStocks.ResolveSolanaMint(ctx, symbol)
+	outputMint, err := h.XStocks.ResolveTokenAddress(ctx, symbol)
 	if err != nil {
 		logJSONError(ctx, log, "symbol_not_found", w, http.StatusNotFound, "symbol not found", "group_id", groupID, "symbol", symbol)
 		return
 	}
 
-	price, amount, found, err := h.Store.GetFillDerivedCostBasisByOutputMint(ctx, groupID, outputMint)
+	price, amount, found, err := h.Store.GetFillDerivedCostBasisByOutputToken(ctx, groupID, outputMint)
 	if err != nil {
 		logJSONError(ctx, log, "cost_basis_lookup_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "symbol", symbol, "err", err.Error())
 		return
@@ -331,15 +331,15 @@ func (h *TransactionHandlers) getTransactionForMember(ctx context.Context, acces
 }
 
 func (h *TransactionHandlers) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := h.Privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return "", privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return "", auth.ErrUnauthorized
 		}
 		return "", fmt.Errorf("verify session: %w", err)
 	}
 
-	user, found, err := h.Store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := h.Store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return "", err
 	}
@@ -370,19 +370,19 @@ func (h *TransactionHandlers) authorizeGroupMember(ctx context.Context, accessTo
 	if !found {
 		return "", app.ErrGroupNotFound
 	}
-	return treasury.SolanaAddress, nil
+	return treasury.Address, nil
 }
 
 func (h *TransactionHandlers) authorizeGroupMemberForTransaction(ctx context.Context, accessToken, groupID string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := h.Privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return "", privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return "", auth.ErrUnauthorized
 		}
 		return "", fmt.Errorf("verify session: %w", err)
 	}
 
-	user, found, err := h.Store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := h.Store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return "", err
 	}
@@ -401,15 +401,15 @@ func (h *TransactionHandlers) authorizeGroupMemberForTransaction(ctx context.Con
 }
 
 func (h *TransactionHandlers) authorizeGroupReaderForTransaction(ctx context.Context, accessToken, groupID string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := h.Privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return "", privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return "", auth.ErrUnauthorized
 		}
 		return "", fmt.Errorf("verify session: %w", err)
 	}
 
-	user, found, err := h.Store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := h.Store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return "", err
 	}
@@ -431,7 +431,7 @@ var errTransactionNotFound = errors.New("transaction not found")
 
 func writeTransactionError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, attrs ...any) {
 	switch {
-	case errors.Is(err, privy.ErrInvalidToken):
+	case errors.Is(err, auth.ErrUnauthorized):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)
 	case errors.Is(err, app.ErrUserNotFound):
 		logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", attrs...)

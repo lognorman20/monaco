@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 type actionStatus string
@@ -163,7 +163,7 @@ func formatActionLine(action sweepAction) string {
 }
 
 func formatActionAmount(action sweepAction) string {
-	if action.mint == jupiter.USDCMint {
+	if action.mint == evm.USDCAddress {
 		return fmt.Sprintf("amount=%s (%d raw)", formatUSDCAtomic(action.rawAmount), action.rawAmount)
 	}
 	amount := fmt.Sprintf("amount=%d raw", action.rawAmount)
@@ -202,9 +202,9 @@ func formatAddress(addr string) string {
 	return addr[:4] + "…" + addr[len(addr)-4:]
 }
 
-func assetLabel(ctx context.Context, mint string, catalog xstocks.MintCatalog) string {
+func assetLabel(ctx context.Context, mint string, catalog b20.MintCatalog) string {
 	mint = strings.TrimSpace(mint)
-	if mint == jupiter.USDCMint {
+	if mint == evm.USDCAddress {
 		return "USDC"
 	}
 	if catalog != nil {

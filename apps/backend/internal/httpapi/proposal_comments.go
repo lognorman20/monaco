@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -130,7 +130,7 @@ func proposalCommentToResponse(comment app.ProposalComment) proposalCommentRespo
 // writeProposalCommentError maps comment errors. Non-members get 404 like GET /v1/proposals/{id}.
 func writeProposalCommentError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, attrs ...any) {
 	switch {
-	case errors.Is(err, privy.ErrInvalidToken):
+	case errors.Is(err, auth.ErrUnauthorized):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)
 	case errors.Is(err, app.ErrUserNotFound), errors.Is(err, app.ErrProposalNotFound), errors.Is(err, app.ErrGroupNotFound):
 		logJSONError(ctx, log, "proposal_not_found", w, http.StatusNotFound, "proposal not found", attrs...)

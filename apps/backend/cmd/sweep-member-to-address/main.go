@@ -11,10 +11,10 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/config"
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -45,7 +45,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	client := privy.NewHTTPClient(cfg)
+	client := wallets.NewSignerClient(cfg)
 
 	db, err := sql.Open("pgx", cfg.DatabaseURL)
 	if err != nil {
@@ -80,7 +80,7 @@ func main() {
 		signer:      app.NewPrivyTreasurySigner(client),
 		relayerPub:  relayer.PublicKey(),
 		relayerKey:  cfg.RelayerPrivateKey,
-		mintCatalog: xstocks.NewHTTPCatalogSearcher(),
+		mintCatalog: b20.NewPinnedCatalog(),
 	}
 
 	swept, skipped, failed, recap := runSweep(ctx, runner, sources)
@@ -106,8 +106,8 @@ func walletKindSets(ctx context.Context, store walletKindReader) (members, treas
 		return nil, nil, err
 	}
 	for _, wallet := range memberWallets {
-		if wallet.SolanaAddress != "" {
-			members[wallet.SolanaAddress] = struct{}{}
+		if wallet.Address != "" {
+			members[wallet.Address] = struct{}{}
 		}
 	}
 
@@ -116,8 +116,8 @@ func walletKindSets(ctx context.Context, store walletKindReader) (members, treas
 		return nil, nil, err
 	}
 	for _, treasury := range treasuryRows {
-		if treasury.SolanaAddress != "" {
-			treasuries[treasury.SolanaAddress] = struct{}{}
+		if treasury.Address != "" {
+			treasuries[treasury.Address] = struct{}{}
 		}
 	}
 	return members, treasuries, nil
@@ -156,10 +156,10 @@ func listDBSweepSources(ctx context.Context, store walletKindReader) ([]sweepSou
 		sources = append(sources, sweepSource{kind: kind, address: address})
 	}
 	for _, wallet := range members {
-		add("member", wallet.SolanaAddress)
+		add("member", wallet.Address)
 	}
 	for _, treasury := range treasuries {
-		add("treasury", treasury.SolanaAddress)
+		add("treasury", treasury.Address)
 	}
 	return sources, nil
 }

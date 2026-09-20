@@ -150,18 +150,17 @@ if [[ ! -f .env.keys ]] && [[ -z "${DOTENV_PRIVATE_KEY:-}" ]]; then
 fi
 
 if have dotenvx && [[ -f .env.local ]]; then
-  if ! dotenvx get PRIVY_APP_ID -f .env.local >/dev/null 2>&1; then
-    missing_required=1
-    err "dotenvx cannot read PRIVY_APP_ID from .env.local. check .env.keys and that the file is encrypted for that key."
-  else
-    client="$(dotenvx get PRIVY_APP_CLIENT_ID -f .env.local 2>/dev/null || true)"
-    auth="$(dotenvx get PRIVY_AUTH_ID -f .env.local 2>/dev/null || true)"
-    if [[ -z "$client" && -z "$auth" ]]; then
+  for key in DYNAMIC_ENVIRONMENT_ID SIGNER_SHARED_SECRET WALLET_SHARES_KEY RELAYER_PRIVATE_KEY; do
+    if ! dotenvx get "$key" -f .env.local >/dev/null 2>&1; then
       missing_required=1
-      err "PRIVY_APP_CLIENT_ID (or PRIVY_AUTH_ID) is empty. iOS will show Privy not configured."
-    else
-      say "Privy app id is readable from .env.local."
+      err "dotenvx cannot read $key from .env.local. check .env.keys and that the file is encrypted for that key."
+    elif [[ -z "$(dotenvx get "$key" -f .env.local 2>/dev/null || true)" ]]; then
+      missing_required=1
+      err "$key is empty in .env.local."
     fi
+  done
+  if [[ "$missing_required" -eq 0 ]]; then
+    say "Dynamic + signer env keys are readable from .env.local."
   fi
 fi
 
@@ -176,12 +175,12 @@ if [[ "$missing_required" -ne 0 ]]; then
 fi
 
 if [[ "$check_only" -eq 1 ]]; then
-  say "required tools and Privy env look ready. next: just run"
+  say "required tools and Dynamic/signer env look ready. next: just run"
   exit 0
 fi
 
 if [[ "$asked_any" -eq 0 ]]; then
   say "required tools already on PATH."
 fi
-say "next: just run   (Postgres + API + iOS). just run mobile injects Privy even without SimSlim."
+say "next: just run   (Postgres + signer + API + iOS)."
 exit 0

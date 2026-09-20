@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // HomeHandlers serves GET /v1/home.
@@ -51,7 +51,7 @@ func (h *HomeHandlers) HomeHandler(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.Home.GetHome(ctx, token)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 			return
 		}
@@ -113,7 +113,7 @@ func (h *HomeHandlers) UserSharedGroupsHandler(w http.ResponseWriter, r *http.Re
 
 	result, err := h.Home.GetUserSharedGroups(ctx, token, targetUserID)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 			return
 		}
@@ -210,7 +210,7 @@ func (h *HomeHandlers) HomeDashboardHandler(w http.ResponseWriter, r *http.Reque
 
 	result, err := h.Home.GetHomeDashboard(ctx, token, leaderboardRange)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 			return
 		}
@@ -250,7 +250,7 @@ func (h *HomeHandlers) HomePnLSeriesHandler(w http.ResponseWriter, r *http.Reque
 
 	points, err := h.Home.GetHomePnLSeries(ctx, token, seriesRange)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 			return
 		}
@@ -281,7 +281,7 @@ func (h *HomeHandlers) HomeMissedProposalsHandler(w http.ResponseWriter, r *http
 
 	proposals, err := h.Home.GetHomeMissedProposals(ctx, token)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 			return
 		}

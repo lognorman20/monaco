@@ -12,12 +12,12 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/ratelimit"
 	"github.com/monaco/monaco/apps/backend/internal/storage"
 )
 
-func patchMe(t *testing.T, handlers *MeHandlers, token privy.AccessToken, body string) *httptest.ResponseRecorder {
+func patchMe(t *testing.T, handlers *MeHandlers, token auth.AccessToken, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPatch, "/v1/me", strings.NewReader(body))
 	if token != "" {
@@ -29,7 +29,7 @@ func patchMe(t *testing.T, handlers *MeHandlers, token privy.AccessToken, body s
 	return rec
 }
 
-func getMe(t *testing.T, handlers *MeHandlers, token privy.AccessToken) meResponse {
+func getMe(t *testing.T, handlers *MeHandlers, token auth.AccessToken) meResponse {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
 	req.Header.Set("Authorization", "Bearer "+string(token))
@@ -372,7 +372,7 @@ func TestUploadProfilePhotoHandler_rejectsOversizedPhoto(t *testing.T) {
 	}
 }
 
-func uploadPhoto(t *testing.T, handlers *MeHandlers, token privy.AccessToken) meResponse {
+func uploadPhoto(t *testing.T, handlers *MeHandlers, token auth.AccessToken) meResponse {
 	t.Helper()
 	body, contentType := multipartPhotoBody(t, minimalPNG())
 	req := httptest.NewRequest(http.MethodPost, "/v1/me/profile-photo", body)

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 func TestParseHomeLeaderboardRange_acceptsKnownValues(t *testing.T) {
@@ -133,7 +133,7 @@ func TestBuildViewerPnLSeries_noInWindowSnapshots_returnsEmpty(t *testing.T) {
 	ctx := context.Background()
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "pnl-empty", "PnL Empty")
-	token := string(privy.AccessToken(h.ISO.UniqueToken("pnl-empty")))
+	token := string(auth.AccessToken(h.ISO.UniqueToken("pnl-empty")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "pnl-empty"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -176,7 +176,7 @@ func TestBuildViewerPnLSeries_oldSnapshot_includesWindowStartAndNow(t *testing.T
 	ctx := context.Background()
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "pnl-old", "PnL Old")
-	token := string(privy.AccessToken(h.ISO.UniqueToken("pnl-old")))
+	token := string(auth.AccessToken(h.ISO.UniqueToken("pnl-old")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "pnl-old"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -221,7 +221,7 @@ func TestBuildRangedLeaderboard_noWindowBaseline_excludesLifetimeRanking(t *test
 	ctx := context.Background()
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "lb-no-base", "No Baseline")
-	token := string(privy.AccessToken(h.ISO.UniqueToken("lb-no-base")))
+	token := string(auth.AccessToken(h.ISO.UniqueToken("lb-no-base")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "lb-no-base"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -260,7 +260,7 @@ func TestBuildRangedLeaderboard_withWindowBaseline_usesWindowDeltaNotLifetime(t 
 	ctx := context.Background()
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "lb-window", "Window Delta")
-	token := string(privy.AccessToken(h.ISO.UniqueToken("lb-window")))
+	token := string(auth.AccessToken(h.ISO.UniqueToken("lb-window")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "lb-window"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)

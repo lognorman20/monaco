@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -22,7 +22,7 @@ func settleSellIntoTreasury(t *testing.T, h integrationHarness, requestID, treas
 			t.Errorf("settlement hook treasury balance: %v", err)
 			return
 		}
-		privy.SetTreasuryUSDCBalance(h.Privy, treasuryAddress, current+proceeds)
+		wallets.SetTreasuryUSDCBalance(h.Privy, treasuryAddress, current+proceeds)
 	})
 }
 
@@ -30,7 +30,7 @@ func settleSellIntoTreasury(t *testing.T, h integrationHarness, requestID, treas
 func registerSellFill(t *testing.T, h integrationHarness, label, treasuryAddress string, sellAmount, proceeds int64) {
 	t.Helper()
 	requestID := testRequestID(h.ISO, label)
-	registerHappySell(h.Jupiter, jupiter.AAPLxMint, sellAmount, requestID, testTxSignature(h.ISO, label))
+	registerHappySell(h.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", sellAmount, requestID, testTxHash(h.ISO, label))
 	settleSellIntoTreasury(t, h, requestID, treasuryAddress, proceeds)
 }
 
@@ -57,9 +57,9 @@ func seedStakeAndHoldings(t *testing.T, h integrationHarness, userID, groupID, l
 	if _, _, err := h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          groupID,
 		Amount:           stockAtomics,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      testTxSignature(h.ISO, label+"-buy"),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      testTxHash(h.ISO, label+"-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, label+"-buy"),
 		CostBasisPrice:   stockAtomics,
 		CostBasisAmount:  stockAtomics,
@@ -105,7 +105,7 @@ func TestWithdrawToBalance_potHoldsStock_sellsThenPaysNoMoreThanTreasuryUsdc(t *
 	governance := NewGovernanceService(h.Store, h.Privy)
 	governance.SetRedeemService(h.Redeem)
 
-	token := privy.AccessToken(h.ISO.UniqueToken("cashout-stock"))
+	token := auth.AccessToken(h.ISO.UniqueToken("cashout-stock"))
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "cashout-stock", "Stock User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "cashout-stock"), DefaultGroupRules())
 	if err != nil {
@@ -177,7 +177,7 @@ func TestWithdrawToBalance_recoversJobWedgedInPaying_repricesInflatedSlice(t *te
 	governance := NewGovernanceService(h.Store, h.Privy)
 	governance.SetRedeemService(h.Redeem)
 
-	token := privy.AccessToken(h.ISO.UniqueToken("cashout-wedged"))
+	token := auth.AccessToken(h.ISO.UniqueToken("cashout-wedged"))
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "cashout-wedged", "Wedged User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "cashout-wedged"), DefaultGroupRules())
 	if err != nil {
@@ -197,7 +197,7 @@ func TestWithdrawToBalance_recoversJobWedgedInPaying_repricesInflatedSlice(t *te
 	// The wedged slice double-counted the USDC the pot had already spent on stock.
 	const redeemShares = int64(500_000)
 	const inflatedSlice = int64(999_500)
-	jobID := wedgeRedeemJobInPaying(t, h, session.UserID, group.GroupID, wallet.SolanaAddress, redeemShares, inflatedSlice)
+	jobID := wedgeRedeemJobInPaying(t, h, session.UserID, group.GroupID, wallet.Address, redeemShares, inflatedSlice)
 
 	const proceeds = int64(495_000)
 	registerSellFill(t, h, "cashout-wedged-sell", group.TreasuryAddress, 505_001, proceeds)
@@ -258,7 +258,7 @@ func TestWithdrawToBalance_potCannotRaiseCash_rollsBackBurntShares(t *testing.T)
 	governance := NewGovernanceService(h.Store, h.Privy)
 	governance.SetRedeemService(h.Redeem)
 
-	token := privy.AccessToken(h.ISO.UniqueToken("cashout-illiquid"))
+	token := auth.AccessToken(h.ISO.UniqueToken("cashout-illiquid"))
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "cashout-illiquid", "Illiquid User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "cashout-illiquid"), DefaultGroupRules())
 	if err != nil {
@@ -276,7 +276,7 @@ func TestWithdrawToBalance_potCannotRaiseCash_rollsBackBurntShares(t *testing.T)
 	}
 
 	const redeemShares = int64(500_000)
-	jobID := wedgeRedeemJobInPaying(t, h, session.UserID, group.GroupID, wallet.SolanaAddress, redeemShares, 500_000)
+	jobID := wedgeRedeemJobInPaying(t, h, session.UserID, group.GroupID, wallet.Address, redeemShares, 500_000)
 
 	_, err = h.Redeem.WithdrawToBalance(ctx, WithdrawToBalanceRequest{
 		AccessToken: string(token),

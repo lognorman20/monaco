@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -16,8 +16,8 @@ func TestProposalExecutePoller_executesPassedProposal(t *testing.T) {
 
 	testApp := integrationWorkerApp(t)
 	store := testApp.Store
-	jupiterClient := jupiter.NewFakeClient()
-	xstocksResolver := xstocks.NewFakeResolver()
+	jupiterClient := dex.NewFakeClient()
+	xstocksResolver := b20.NewFakeCatalog()
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	signer := app.NewFakePrivyTreasurySigner()
 	swap := app.NewSwapService(store, buy, jupiterClient, testApp.Privy, signer, "", app.NewSymbolResolver(nil))
@@ -26,9 +26,9 @@ func TestProposalExecutePoller_executesPassedProposal(t *testing.T) {
 	executeOnPass := app.NewExecuteOnPassService(swap, store)
 
 	ctx := context.Background()
-	privyUserID := testApp.ISO.UniquePrivyID("execute-poller")
-	token := privy.AccessToken(testApp.ISO.UniqueToken("execute-poller"))
-	privy.RegisterToken(testApp.Privy, token, privy.Identity{PrivyUserID: privyUserID, DisplayName: "Execute Poller"})
+	privyUserID := testApp.ISO.UniqueDynamicID("execute-poller")
+	token := auth.AccessToken(testApp.ISO.UniqueToken("execute-poller"))
+	auth.RegisterToken(testApp.Privy, token, auth.Identity{PrivyUserID: privyUserID, DisplayName: "Execute Poller"})
 	sessions := app.NewSessionService(store, testApp.Privy)
 	session, err := sessions.OpenSession(ctx, string(token))
 	if err != nil {
@@ -43,15 +43,15 @@ func TestProposalExecutePoller_executesPassedProposal(t *testing.T) {
 		t.Fatalf("create group: %v", err)
 	}
 	testApp.ISO.TrackGroup(group.GroupID)
-	privy.SetTreasuryUSDCBalance(testApp.Privy, group.TreasuryAddress, usdcAmount)
+	wallets.SetTreasuryUSDCBalance(testApp.Privy, group.TreasuryAddress, usdcAmount)
 
 	requestID := "req-" + testApp.ISO.Suffix()
 	signature := "sig-" + testApp.ISO.Suffix()
-	xstocks.RegisterSolanaMint(xstocksResolver, "AAPLx", jupiter.AAPLxMint)
-	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, usdcAmount, jupiter.BuyQuote{
+	b20.RegisterTokenAddress(xstocksResolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcAmount, jupiter.BuyQuote{
 		Routable:   true,
-		InputMint:  jupiter.USDCMint,
-		OutputMint: jupiter.AAPLxMint,
+		InputToken:  evm.USDCAddress,
+		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		InAmount:   "2000000",
 		OutAmount:  "1000000",
 		RequestID:  requestID,
@@ -61,8 +61,8 @@ func TestProposalExecutePoller_executesPassedProposal(t *testing.T) {
 		Transaction: "unsigned-buy-tx",
 		InAmount:    "2000000",
 		OutAmount:   "1000000",
-		InputMint:   jupiter.USDCMint,
-		OutputMint:  jupiter.AAPLxMint,
+		InputToken:   evm.USDCAddress,
+		OutputToken:  "0xb200000000000000000000c2e324d24d7eecd1fb",
 	})
 	jupiter.RegisterExecutePoll(jupiterClient, requestID, []jupiter.ExecuteResult{
 		{Status: jupiter.ExecuteStatusPending, Code: -1},
@@ -106,8 +106,8 @@ func TestProposalExecutePoller_executesPassedProposal(t *testing.T) {
 	if !found {
 		t.Fatal("expected confirmed transaction after poller tick")
 	}
-	if !tx.TxSignature.Valid || tx.TxSignature.String != signature {
-		t.Fatalf("tx_signature = %v, want %q", tx.TxSignature, signature)
+	if !tx.TxHash.Valid || tx.TxHash.String != signature {
+		t.Fatalf("tx_signature = %v, want %q", tx.TxHash, signature)
 	}
 }
 

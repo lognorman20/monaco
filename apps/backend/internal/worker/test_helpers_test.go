@@ -8,14 +8,14 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 )
 
 type workerTestApp struct {
 	DB       *sql.DB
 	Store    *postgres.Store
-	Privy    privy.Client
+	Privy    wallets.Client
 	Deposits *app.DepositService
 	ISO      *postgres.TestIsolation
 	Now      time.Time
@@ -27,8 +27,8 @@ func integrationWorkerApp(t *testing.T) *workerTestApp {
 	iso := postgres.PrepareTestDB(t, db)
 
 	store := postgres.NewStore(db)
-	privyClient := privy.NewFakeClient()
-	pythClient := pyth.NewFakeClient()
+	privyClient := wallets.NewFakeClient()
+	pythClient := chainlink.NewFakeClient()
 	return &workerTestApp{
 		DB:       db,
 		Store:    store,
@@ -47,9 +47,9 @@ func seedPendingDepositWithToken(t *testing.T, testApp *workerTestApp) (postgres
 func seedPendingDeposit(t *testing.T, testApp *workerTestApp) (postgres.DepositRow, string, string) {
 	t.Helper()
 	ctx := context.Background()
-	privyUserID := testApp.ISO.UniquePrivyID("member")
-	token := privy.AccessToken(testApp.ISO.UniqueToken("member"))
-	privy.RegisterToken(testApp.Privy, token, privy.Identity{PrivyUserID: privyUserID, DisplayName: "Worker"})
+	privyUserID := testApp.ISO.UniqueDynamicID("member")
+	token := auth.AccessToken(testApp.ISO.UniqueToken("member"))
+	auth.RegisterToken(testApp.Privy, token, auth.Identity{PrivyUserID: privyUserID, DisplayName: "Worker"})
 	sessions := app.NewSessionService(testApp.Store, testApp.Privy)
 	session, err := sessions.OpenSession(ctx, string(token))
 	if err != nil {
@@ -62,7 +62,7 @@ func seedPendingDeposit(t *testing.T, testApp *workerTestApp) (postgres.DepositR
 		t.Fatalf("CreateGroup: %v", err)
 	}
 	testApp.ISO.TrackGroup(group.GroupID)
-	deposits := app.NewDepositService(testApp.Store, testApp.Privy, pyth.NewFakeClient(), app.NewSymbolResolver(nil))
+	deposits := app.NewDepositService(testApp.Store, testApp.Privy, chainlink.NewFakeClient(), app.NewSymbolResolver(nil))
 	result, err := deposits.CreateDeposit(ctx, string(token), group.GroupID, 2_000_000)
 	if err != nil {
 		t.Fatalf("CreateDeposit: %v", err)

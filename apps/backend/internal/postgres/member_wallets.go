@@ -12,8 +12,8 @@ import (
 type MemberWallet struct {
 	ID            string
 	UserID        string
-	PrivyWalletID string
-	SolanaAddress string
+	WalletID string
+	Address string
 	CreatedAt     time.Time
 }
 
@@ -24,7 +24,7 @@ func (s *Store) GetMemberWalletByUserID(ctx context.Context, userID string) (Mem
 	}
 
 	const selectSQL = `
-SELECT id, user_id, privy_wallet_id, solana_address, created_at
+SELECT id, user_id, wallet_id, address, created_at
 FROM member_wallets
 WHERE user_id = $1`
 
@@ -32,8 +32,8 @@ WHERE user_id = $1`
 	err := s.db.QueryRowContext(ctx, selectSQL, userID).Scan(
 		&wallet.ID,
 		&wallet.UserID,
-		&wallet.PrivyWalletID,
-		&wallet.SolanaAddress,
+		&wallet.WalletID,
+		&wallet.Address,
 		&wallet.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -50,7 +50,7 @@ WHERE user_id = $1`
 // excluded (and a DB trigger rejects faker wallets) so the sweep scan never queries them.
 func (s *Store) ListMemberWallets(ctx context.Context) ([]MemberWallet, error) {
 	const selectSQL = `
-SELECT w.id, w.user_id, w.privy_wallet_id, w.solana_address, w.created_at
+SELECT w.id, w.user_id, w.wallet_id, w.address, w.created_at
 FROM member_wallets w
 JOIN users u ON u.id = w.user_id
 WHERE NOT u.is_faker
@@ -68,8 +68,8 @@ ORDER BY w.created_at ASC`
 		if err := rows.Scan(
 			&wallet.ID,
 			&wallet.UserID,
-			&wallet.PrivyWalletID,
-			&wallet.SolanaAddress,
+			&wallet.WalletID,
+			&wallet.Address,
 			&wallet.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan member wallet: %w", err)
@@ -88,23 +88,23 @@ func (s *Store) InsertMemberWallet(ctx context.Context, userID string, privyWall
 		return MemberWallet{}, fmt.Errorf("user_id is required")
 	}
 	if privyWalletID == "" {
-		return MemberWallet{}, fmt.Errorf("privy_wallet_id is required")
+		return MemberWallet{}, fmt.Errorf("wallet_id is required")
 	}
 	if solanaAddress == "" {
-		return MemberWallet{}, fmt.Errorf("solana_address is required")
+		return MemberWallet{}, fmt.Errorf("address is required")
 	}
 
 	const insertSQL = `
-INSERT INTO member_wallets (user_id, privy_wallet_id, solana_address)
+INSERT INTO member_wallets (user_id, wallet_id, address)
 VALUES ($1, $2, $3)
-RETURNING id, user_id, privy_wallet_id, solana_address, created_at`
+RETURNING id, user_id, wallet_id, address, created_at`
 
 	var wallet MemberWallet
 	err := s.db.QueryRowContext(ctx, insertSQL, userID, privyWalletID, solanaAddress).Scan(
 		&wallet.ID,
 		&wallet.UserID,
-		&wallet.PrivyWalletID,
-		&wallet.SolanaAddress,
+		&wallet.WalletID,
+		&wallet.Address,
 		&wallet.CreatedAt,
 	)
 	if err != nil {

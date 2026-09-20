@@ -3,88 +3,51 @@ package app
 import (
 	"context"
 	"strings"
-	"unicode"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
+	"github.com/monaco/monaco/apps/backend/internal/evm"
 )
 
 const unknownStockSymbol = "Unknown stock"
 
-// SymbolResolver maps Solana mint addresses to user-facing catalog symbols.
+// SymbolResolver maps token addresses to user-facing catalog symbols.
 type SymbolResolver struct {
-	catalog xstocks.CatalogSearcher
+	catalog b20.Catalog
 }
 
-// NewSymbolResolver returns a resolver backed by the xStocks mint catalog.
-func NewSymbolResolver(catalog xstocks.CatalogSearcher) *SymbolResolver {
+// NewSymbolResolver returns a resolver backed by the B20 catalog.
+func NewSymbolResolver(catalog b20.Catalog) *SymbolResolver {
 	return &SymbolResolver{catalog: catalog}
 }
 
-// SymbolForMint returns a catalog ticker for a mint, never a raw pubkey.
-func (r *SymbolResolver) SymbolForMint(ctx context.Context, mint string) string {
-	mint = strings.TrimSpace(mint)
-	if mint == "" {
+// SymbolForMint returns a catalog ticker for a token address.
+func (r *SymbolResolver) SymbolForMint(ctx context.Context, token string) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
 		return ""
 	}
-	if symbol, ok := knownMintSymbol(mint); ok {
+	if symbol, ok := knownTokenSymbol(token); ok {
 		return symbol
 	}
 	if r != nil && r.catalog != nil {
-		asset, found, err := r.catalog.LookupByMint(ctx, mint)
+		asset, found, err := r.catalog.LookupByAddress(ctx, token)
 		if err == nil && found && strings.TrimSpace(asset.Symbol) != "" {
 			return strings.TrimSpace(asset.Symbol)
 		}
 	}
-	if looksLikeSolanaMint(mint) {
+	if strings.HasPrefix(strings.ToLower(token), "0x") {
 		return unknownStockSymbol
 	}
-	return mint
+	return token
 }
 
-func knownMintSymbol(mint string) (string, bool) {
-	switch mint {
-	case jupiter.USDCMint:
+func knownTokenSymbol(token string) (string, bool) {
+	switch strings.ToLower(token) {
+	case evm.USDCAddress:
 		return "USDC", true
-	case jupiter.AAPLxMint:
-		return "AAPLx", true
-	case jupiter.TSLAxMint:
-		return "TSLAx", true
+	case "0xb200000000000000000000c2e324d24d7eecd1fb":
+		return "AAPLc", true
 	default:
 		return "", false
 	}
-}
-
-func looksLikeSolanaMint(value string) bool {
-	if len(value) < 32 || len(value) > 44 {
-		return false
-	}
-	for _, r := range value {
-		if !isBase58Char(r) {
-			return false
-		}
-	}
-	return true
-}
-
-func isBase58Char(r rune) bool {
-	if unicode.IsDigit(r) {
-		return true
-	}
-	if r >= 'A' && r <= 'H' {
-		return true
-	}
-	if r >= 'J' && r <= 'N' {
-		return true
-	}
-	if r >= 'P' && r <= 'Z' {
-		return true
-	}
-	if r >= 'a' && r <= 'k' {
-		return true
-	}
-	if r >= 'm' && r <= 'z' {
-		return true
-	}
-	return false
 }

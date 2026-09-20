@@ -14,7 +14,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/config"
 	"github.com/monaco/monaco/apps/backend/internal/faker"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -28,7 +28,7 @@ type DevFakerHandlers struct {
 	Enabled     bool
 	DatabaseURL string
 	Store       *postgres.Store
-	Privy       privy.Client
+	Privy       wallets.Client
 	Seeder      *faker.Seeder
 }
 
@@ -70,7 +70,7 @@ func (h *DevFakerHandlers) FakerHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	userID, err := h.authorizeUser(ctx, token)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 			return
 		}
@@ -150,14 +150,14 @@ func (h *DevFakerHandlers) FakerHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *DevFakerHandlers) authorizeUser(ctx context.Context, token string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, privy.AccessToken(token))
+	identity, err := h.Privy.VerifySession(ctx, auth.AccessToken(token))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return "", privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return "", auth.ErrUnauthorized
 		}
 		return "", fmt.Errorf("verify session: %w", err)
 	}
-	user, found, err := h.Store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := h.Store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return "", err
 	}

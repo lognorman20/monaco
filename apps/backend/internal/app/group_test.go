@@ -6,24 +6,24 @@ import (
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 type failingEnsureTreasuryClient struct {
-	inner           privy.Client
+	inner           wallets.Client
 	ensureTreasuryErr error
 }
 
-func (c *failingEnsureTreasuryClient) VerifySession(ctx context.Context, token privy.AccessToken) (privy.Identity, error) {
+func (c *failingEnsureTreasuryClient) VerifySession(ctx context.Context, token auth.AccessToken) (auth.Identity, error) {
 	return c.inner.VerifySession(ctx, token)
 }
 
-func (c *failingEnsureTreasuryClient) EnsureMemberWallet(ctx context.Context, privyUserID string, userID privy.UserID) (privy.WalletRef, error) {
+func (c *failingEnsureTreasuryClient) EnsureMemberWallet(ctx context.Context, privyUserID string, userID wallets.UserID) (wallets.WalletRef, error) {
 	return c.inner.EnsureMemberWallet(ctx, privyUserID, userID)
 }
 
-func (c *failingEnsureTreasuryClient) EnsureTreasury(ctx context.Context, groupID privy.GroupID) (privy.TreasuryRef, error) {
-	return privy.TreasuryRef{}, c.ensureTreasuryErr
+func (c *failingEnsureTreasuryClient) EnsureTreasury(ctx context.Context, groupID wallets.GroupID) (wallets.TreasuryRef, error) {
+	return wallets.TreasuryRef{}, c.ensureTreasuryErr
 }
 
 func (c *failingEnsureTreasuryClient) MemberUSDCBalance(ctx context.Context, memberAddress string) (int64, error) {
@@ -56,10 +56,10 @@ func TestCreateGroup_privyTreasuryFailure_rollsBackGroupRow(t *testing.T) {
 	db, iso := integrationDB(t)
 	store := postgres.NewStore(db)
 
-	fake := privy.NewFakeClient()
-	token := privy.AccessToken(iso.UniqueToken("create-group"))
-	privyUserID := iso.UniquePrivyID("create-group")
-	privy.RegisterToken(fake, token, privy.Identity{
+	fake := wallets.NewFakeClient()
+	token := auth.AccessToken(iso.UniqueToken("create-group"))
+	privyUserID := iso.UniqueDynamicID("create-group")
+	auth.RegisterToken(fake, token, auth.Identity{
 		PrivyUserID: privyUserID,
 		DisplayName: "Alfred",
 	})

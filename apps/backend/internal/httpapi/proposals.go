@@ -12,14 +12,14 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
 
 // ProposalHandlers serves proposal create and vote HTTP routes.
 type ProposalHandlers struct {
 	Store      *postgres.Store
-	Privy      privy.Client
+	Privy      wallets.Client
 	Governance *app.GovernanceService
 }
 
@@ -218,7 +218,7 @@ type proposalVoteSummaryResponse struct {
 
 type proposalExecutionResponse struct {
 	State            string `json:"state"`
-	TxSignature      string `json:"txSignature,omitempty"`
+	TxHash      string `json:"txHash,omitempty"`
 	TransactionID    string `json:"transactionId,omitempty"`
 	ExecuteRequestID string `json:"executeRequestId,omitempty"`
 	ExecutedAt       string `json:"executedAt,omitempty"`
@@ -268,7 +268,7 @@ func (h *ProposalHandlers) ListGroupProposalsHandler(w http.ResponseWriter, r *h
 	tab := strings.TrimSpace(r.URL.Query().Get("tab"))
 	items, err := h.Governance.ListGroupProposals(ctx, token, groupID, tab)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
@@ -348,7 +348,7 @@ func (h *ProposalHandlers) GetProposalDetailHandler(w http.ResponseWriter, r *ht
 
 	detail, err := h.Governance.GetProposalDetail(ctx, token, proposalID)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "proposal_id", proposalID)
 			return
 		}
@@ -376,8 +376,8 @@ func (h *ProposalHandlers) GetProposalDetailHandler(w http.ResponseWriter, r *ht
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	execution := proposalExecutionResponse{State: detail.Execution.State}
-	if detail.Execution.TxSignature != "" {
-		execution.TxSignature = detail.Execution.TxSignature
+	if detail.Execution.TxHash != "" {
+		execution.TxHash = detail.Execution.TxHash
 	}
 	if detail.Execution.TransactionID != "" {
 		execution.TransactionID = detail.Execution.TransactionID
@@ -437,15 +437,15 @@ func (h *ProposalHandlers) GetProposalDetailHandler(w http.ResponseWriter, r *ht
 }
 
 func (h *ProposalHandlers) authorizeUser(ctx context.Context, accessToken string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := h.Privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return "", privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return "", auth.ErrUnauthorized
 		}
 		return "", fmt.Errorf("verify session: %w", err)
 	}
 
-	user, found, err := h.Store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := h.Store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return "", err
 	}
@@ -457,7 +457,7 @@ func (h *ProposalHandlers) authorizeUser(ctx context.Context, accessToken string
 
 func writeProposalError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, attrs ...any) {
 	switch {
-	case errors.Is(err, privy.ErrInvalidToken):
+	case errors.Is(err, auth.ErrUnauthorized):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)
 	case errors.Is(err, app.ErrUserNotFound):
 		logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", attrs...)
@@ -472,7 +472,7 @@ func writeProposalCreateError(ctx context.Context, log *requestLog, w http.Respo
 		return
 	}
 	switch {
-	case errors.Is(err, privy.ErrInvalidToken):
+	case errors.Is(err, auth.ErrUnauthorized):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)
 	case errors.Is(err, app.ErrUserNotFound):
 		logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", attrs...)
@@ -503,7 +503,7 @@ func writeProposalVoteError(ctx context.Context, log *requestLog, w http.Respons
 		return
 	}
 	switch {
-	case errors.Is(err, privy.ErrInvalidToken):
+	case errors.Is(err, auth.ErrUnauthorized):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", attrs...)
 	case errors.Is(err, app.ErrUserNotFound):
 		logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", attrs...)

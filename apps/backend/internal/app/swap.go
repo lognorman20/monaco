@@ -4,15 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
+	"math/big"
+	"time"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/evm"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/solana/txsign"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
-// DevExecuteBuyRequest is input for the M3 dev-only buy execute path.
+// DevExecuteBuyRequest is input for treasury buy execution.
 type DevExecuteBuyRequest struct {
 	GroupID       string
 	UserID        string
@@ -29,12 +31,12 @@ type DevExecuteBuyResult struct {
 	Created       bool
 }
 
-// SellToUSDCRequest sells treasury xStock back to USDC.
+// SellToUSDCRequest sells treasury B20 back to USDC.
 type SellToUSDCRequest struct {
 	GroupID       string
 	UserID        string
 	Symbol        string
-	InputMint     string
+	InputToken    string
 	Amount        int64
 	ProposalID    string
 	AgentIntentID string
@@ -49,62 +51,46 @@ type SellToUSDCResult struct {
 
 // TreasuryBalances tracks fake treasury token balances for integration tests.
 type TreasuryBalances struct {
-	USDC   int64
-	XStock int64
+	USDC  int64
+	Token int64
 }
 
-// SwapService orchestrates Jupiter buy and sell flows for group treasuries.
+// SwapService orchestrates DEX buy and sell flows for group treasuries.
 type SwapService struct {
-	store      *postgres.Store
-	buy        *BuyService
-	jupiter    jupiter.Client
-	privy      privy.Client
-	signer     TreasurySigner
-	relayerKey string
-	balances   map[string]TreasuryBalances
-	pollConfig jupiter.PollConfig
-	symbols    *SymbolResolver
+	store    *postgres.Store
+	buy      *BuyService
+	dex      dex.Client
+	wallets  wallets.Client
+	chain    evm.Client
+	balances map[string]TreasuryBalances
+	symbols  *SymbolResolver
 }
 
 // NewSwapService wires swap dependencies.
 func NewSwapService(
 	store *postgres.Store,
 	buy *BuyService,
-	jupiterClient jupiter.Client,
-	privyClient privy.Client,
-	signer TreasurySigner,
-	relayerKey string,
+	dexClient dex.Client,
+	walletClient wallets.Client,
+	chain evm.Client,
 	symbols *SymbolResolver,
 ) *SwapService {
 	return &SwapService{
-		store:      store,
-		buy:        buy,
-		jupiter:    jupiterClient,
-		privy:      privyClient,
-		signer:     signer,
-		relayerKey: relayerKey,
-		balances:   make(map[string]TreasuryBalances),
-		symbols:    symbols,
+		store:    store,
+		buy:      buy,
+		dex:      dexClient,
+		wallets:  walletClient,
+		chain:    chain,
+		balances: make(map[string]TreasuryBalances),
+		symbols:  symbols,
 	}
 }
 
-// SetPollConfigForTests configures execute polling for integration tests.
-func (s *SwapService) SetPollConfigForTests(cfg jupiter.PollConfig) {
-	s.pollConfig = cfg
-}
-
-func (s *SwapService) symbolForMint(ctx context.Context, mint string) string {
+func (s *SwapService) symbolForToken(ctx context.Context, token string) string {
 	if s.symbols != nil {
-		return s.symbols.SymbolForMint(ctx, mint)
+		return s.symbols.SymbolForMint(ctx, token)
 	}
-	return symbolForOutputMint(ctx, nil, mint)
-}
-
-func (s *SwapService) pollCfg() jupiter.PollConfig {
-	if s.pollConfig.MaxAttempts > 0 {
-		return s.pollConfig
-	}
-	return jupiter.DefaultPollConfig()
+	return symbolForOutputToken(ctx, nil, token)
 }
 
 // SetTreasuryBalances seeds treasury token balances for integration tests.
@@ -120,130 +106,95 @@ func (s *SwapService) TreasuryBalancesFor(treasuryAddress string) TreasuryBalanc
 	return TreasuryBalances{}
 }
 
-// DevExecuteBuy quotes, signs, executes, polls, and persists a treasury buy.
+func executeRequestID(proposalID, agentIntentID string) string {
+	if agentIntentID != "" {
+		return agentIntentID
+	}
+	return proposalID
+}
+
+// DevExecuteBuy quotes, swaps, confirms, and persists a treasury buy.
 func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyRequest) (DevExecuteBuyResult, error) {
 	logSwapBuyStart(req.GroupID, req.UserID, req.Symbol, req.USDCAmount)
-
-	// Faker scale clubs (#153) have a dummy treasury: never reach Privy or Jupiter for them.
 	if err := rejectFakerGroup(ctx, s.store, req.GroupID); err != nil {
-		logSwapBranchError("swap buy rejected", err, "group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol, "stage", "faker_guard")
 		return DevExecuteBuyResult{}, err
 	}
 
-	treasury, err := s.privy.EnsureTreasury(ctx, privy.GroupID(req.GroupID))
+	treasury, err := s.wallets.EnsureTreasury(ctx, wallets.GroupID(req.GroupID))
 	if err != nil {
-		logSwapBranchError("swap buy ensure treasury failed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol, "stage", "ensure_treasury")
 		return DevExecuteBuyResult{}, err
 	}
 
-	outputMint, err := s.buy.ResolveOutputMint(ctx, req.Symbol)
+	tokenOut, err := s.buy.ResolveOutputToken(ctx, req.Symbol)
 	if err != nil {
-		logSwapBranchError("swap buy resolve mint failed", err, "group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol, "stage", "resolve_mint")
 		return DevExecuteBuyResult{}, err
 	}
 
-	order, err := s.jupiter.OrderBuy(ctx, jupiter.OrderBuyParams{
-		GroupID:    req.GroupID,
-		UserID:     req.UserID,
-		Symbol:     req.Symbol,
-		OutputMint: outputMint,
-		Amount:     req.USDCAmount,
-		Taker:      treasury.SolanaAddress,
-	})
+	usdcIn := big.NewInt(req.USDCAmount)
+	quote, err := s.dex.QuoteBuy(ctx, tokenOut, usdcIn)
 	if err != nil {
-		logSwapBranchError("swap buy order failed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
-			"stage", "order_buy", "taker", treasury.SolanaAddress, "output_mint", outputMint, "usdc_amount", req.USDCAmount)
+		return DevExecuteBuyResult{}, err
+	}
+	if !quote.Routable {
+		logSwapRefusal(req.GroupID, req.UserID, req.Symbol, "no route")
+		return DevExecuteBuyResult{}, ErrQuoteNotRoutable
+	}
+
+	execID := executeRequestID(req.ProposalID, req.AgentIntentID)
+	if err := s.ensureTreasuryGas(ctx, treasury); err != nil {
+		return DevExecuteBuyResult{}, err
+	}
+	if err := s.ensureAllowance(ctx, treasury, quote, usdcIn); err != nil {
 		return DevExecuteBuyResult{}, err
 	}
 
-	signedTx, err := s.signSwapTransaction(ctx, treasury.PrivyWalletID, order.Transaction)
+	swapCall, err := s.dex.BuildSwap(ctx, quote, treasury.Address, treasury.Address)
 	if err != nil {
-		logSwapBranchError("swap buy sign failed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
-			"stage", "sign_treasury", "request_id", order.RequestID)
 		return DevExecuteBuyResult{}, err
 	}
 
-	_, err = s.jupiter.ExecuteBuy(ctx, jupiter.ExecuteBuyParams{
-		GroupID:           req.GroupID,
-		UserID:            req.UserID,
-		Symbol:            req.Symbol,
-		RequestID:         order.RequestID,
-		SignedTransaction: signedTx,
-	})
+	txHash, err := s.wallets.SendTreasuryTransaction(ctx, treasury, swapCall.Router, swapCall.Data, big.NewInt(0))
 	if err != nil {
-		logSwapBranchError("swap buy execute submit failed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
-			"stage", "execute_submit", "request_id", order.RequestID)
 		return DevExecuteBuyResult{}, err
 	}
-	logSwapExecuteSubmit(req.GroupID, req.UserID, req.Symbol, "", order.RequestID)
+
 	if _, _, err := s.store.InsertPendingTransaction(ctx, postgres.InsertPendingTransactionParams{
 		GroupID:          req.GroupID,
 		ProposalID:       req.ProposalID,
 		AgentIntentID:    req.AgentIntentID,
 		InitiatedBy:      req.InitiatedBy,
 		Action:           postgres.TransactionActionBuy,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       outputMint,
+		InputToken:       evm.USDCAddress,
+		OutputToken:      tokenOut,
 		Amount:           req.USDCAmount,
-		ExecuteRequestID: order.RequestID,
+		ExecuteRequestID: execID,
 	}); err != nil {
 		return DevExecuteBuyResult{}, err
 	}
 
-	fill, err := jupiter.PollUntilConfirmed(ctx, s.jupiter, jupiter.PollExecuteParams{
-		GroupID:           req.GroupID,
-		UserID:            req.UserID,
-		Symbol:            req.Symbol,
-		RequestID:         order.RequestID,
-		SignedTransaction: signedTx,
-	}, s.pollCfg())
+	fillAmount, err := s.waitFill(ctx, txHash, tokenOut, treasury.Address)
 	if err != nil {
-		logSwapBranchError("swap buy poll failed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
-			"stage", "poll_confirm", "request_id", order.RequestID)
-		_ = s.markSwapFailed(ctx, req.GroupID, postgres.TransactionActionBuy, jupiter.USDCMint, outputMint, req.USDCAmount, order.RequestID)
-		return DevExecuteBuyResult{}, err
-	}
-	if !fill.IsConfirmedSuccess() {
-		err := fmt.Errorf("jupiter buy not confirmed: status=%s code=%d", fill.Status, fill.Code)
-		logSwapBranchError("swap buy poll not confirmed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
-			"stage", "poll_confirm", "request_id", order.RequestID, "status", fill.Status, "code", fill.Code)
-		_ = s.markSwapFailed(ctx, req.GroupID, postgres.TransactionActionBuy, jupiter.USDCMint, outputMint, req.USDCAmount, order.RequestID)
-		return DevExecuteBuyResult{}, err
-	}
-	logSwapPollTransition(req.GroupID, req.UserID, req.Symbol, fill.Signature, jupiter.ExecuteStatusPending, fill.Status, fill.Code)
-
-	costBasisAmount, err := parseAmount(fill.OutputAmountResult)
-	if err != nil {
-		return DevExecuteBuyResult{}, err
-	}
-	costBasisPrice, err := parseAmount(fill.InputAmountResult)
-	if err != nil {
+		_ = s.markSwapFailed(ctx, req.GroupID, postgres.TransactionActionBuy, evm.USDCAddress, tokenOut, req.USDCAmount, execID)
 		return DevExecuteBuyResult{}, err
 	}
 
 	row, created, err := s.store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          req.GroupID,
 		Amount:           req.USDCAmount,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       outputMint,
-		TxSignature:      fill.Signature,
-		ExecuteRequestID: order.RequestID,
-		CostBasisPrice:   costBasisPrice,
-		CostBasisAmount:  costBasisAmount,
+		InputToken:       evm.USDCAddress,
+		OutputToken:      tokenOut,
+		TxHash:           txHash,
+		ExecuteRequestID: execID,
+		CostBasisPrice:   req.USDCAmount,
+		CostBasisAmount:  fillAmount,
 	})
 	if err != nil {
 		return DevExecuteBuyResult{}, err
 	}
 
 	if created {
-		s.applyBuyBalances(treasury.SolanaAddress, outputMint, req.USDCAmount, costBasisAmount)
-		treasuryUsdc, err := s.treasuryUSDCForSnapshot(ctx, treasury.SolanaAddress)
+		s.applyBuyBalances(treasury.Address, tokenOut, req.USDCAmount, fillAmount)
+		treasuryUsdc, err := s.treasuryUSDCForSnapshot(ctx, treasury.Address)
 		if err != nil {
 			return DevExecuteBuyResult{}, err
 		}
@@ -256,39 +207,21 @@ func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyReques
 	return DevExecuteBuyResult{Transaction: row, Created: created}, nil
 }
 
-// SellToUSDC quotes, signs, executes, polls, and persists a treasury sell.
-// Confirmed sells are idempotent on tx_signature via postgres.ConfirmSellTransaction.
+// SellToUSDC quotes, swaps, confirms, and persists a treasury sell.
 func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (SellToUSDCResult, error) {
 	logSwapSellStart(req.GroupID, req.UserID, req.Symbol, req.Amount)
-
 	if err := rejectFakerGroup(ctx, s.store, req.GroupID); err != nil {
-		logSwapBranchError("swap sell rejected", err, "group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol, "stage", "faker_guard")
 		return SellToUSDCResult{}, err
 	}
 
-	treasury, err := s.privy.EnsureTreasury(ctx, privy.GroupID(req.GroupID))
+	treasury, err := s.wallets.EnsureTreasury(ctx, wallets.GroupID(req.GroupID))
 	if err != nil {
-		logSwapBranchError("swap sell ensure treasury failed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol, "stage", "ensure_treasury")
 		return SellToUSDCResult{}, err
 	}
 
-	quote, err := s.jupiter.QuoteSell(ctx, jupiter.QuoteSellParams{
-		GroupID:   req.GroupID,
-		UserID:    req.UserID,
-		Symbol:    req.Symbol,
-		InputMint: req.InputMint,
-		Amount:    req.Amount,
-		Taker:     treasury.SolanaAddress,
-	})
+	amountIn := big.NewInt(req.Amount)
+	quote, err := s.dex.QuoteSell(ctx, req.InputToken, amountIn)
 	if err != nil {
-		if errors.Is(err, jupiter.ErrNoRoute) || errors.Is(err, jupiter.ErrBelowMinimumSize) {
-			logSwapRefusal(req.GroupID, req.UserID, req.Symbol, err.Error())
-			return SellToUSDCResult{}, ErrQuoteNotRoutable
-		}
-		logSwapBranchError("swap sell quote failed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
-			"stage", "quote_sell", "taker", treasury.SolanaAddress, "input_mint", req.InputMint, "amount", req.Amount)
 		return SellToUSDCResult{}, err
 	}
 	if !quote.Routable {
@@ -296,81 +229,51 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 		return SellToUSDCResult{}, ErrQuoteNotRoutable
 	}
 
-	signedTx, err := s.signSwapTransaction(ctx, treasury.PrivyWalletID, quote.Transaction)
-	if err != nil {
-		logSwapBranchError("swap sell sign failed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
-			"stage", "sign_treasury", "request_id", quote.RequestID)
+	execID := executeRequestID(req.ProposalID, req.AgentIntentID)
+	if err := s.ensureTreasuryGas(ctx, treasury); err != nil {
+		return SellToUSDCResult{}, err
+	}
+	if err := s.ensureAllowance(ctx, treasury, quote, amountIn); err != nil {
 		return SellToUSDCResult{}, err
 	}
 
-	_, err = s.jupiter.SellToUSDC(ctx, jupiter.SellToUSDCParams{
-		GroupID:           req.GroupID,
-		UserID:            req.UserID,
-		Symbol:            req.Symbol,
-		RequestID:         quote.RequestID,
-		SignedTransaction: signedTx,
-		InputMint:         req.InputMint,
-		OutputMint:        jupiter.USDCMint,
-		Amount:            req.Amount,
-	})
+	swapCall, err := s.dex.BuildSwap(ctx, quote, treasury.Address, treasury.Address)
 	if err != nil {
-		logSwapBranchError("swap sell execute submit failed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
-			"stage", "execute_submit", "request_id", quote.RequestID)
 		return SellToUSDCResult{}, err
 	}
-	logSwapExecuteSubmit(req.GroupID, req.UserID, req.Symbol, "", quote.RequestID)
+
+	txHash, err := s.wallets.SendTreasuryTransaction(ctx, treasury, swapCall.Router, swapCall.Data, big.NewInt(0))
+	if err != nil {
+		return SellToUSDCResult{}, err
+	}
+
 	if _, _, err := s.store.InsertPendingTransaction(ctx, postgres.InsertPendingTransactionParams{
 		GroupID:          req.GroupID,
 		ProposalID:       req.ProposalID,
 		AgentIntentID:    req.AgentIntentID,
 		InitiatedBy:      req.InitiatedBy,
 		Action:           postgres.TransactionActionSell,
-		InputMint:        req.InputMint,
-		OutputMint:       jupiter.USDCMint,
+		InputToken:       req.InputToken,
+		OutputToken:      evm.USDCAddress,
 		Amount:           req.Amount,
-		ExecuteRequestID: quote.RequestID,
+		ExecuteRequestID: execID,
 	}); err != nil {
 		return SellToUSDCResult{}, err
 	}
 
-	fill, err := jupiter.PollUntilConfirmed(ctx, s.jupiter, jupiter.PollExecuteParams{
-		GroupID:           req.GroupID,
-		UserID:            req.UserID,
-		Symbol:            req.Symbol,
-		RequestID:         quote.RequestID,
-		SignedTransaction: signedTx,
-	}, s.pollCfg())
+	proceeds, err := s.waitFill(ctx, txHash, evm.USDCAddress, treasury.Address)
 	if err != nil {
-		logSwapBranchError("swap sell poll failed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
-			"stage", "poll_confirm", "request_id", quote.RequestID)
-		_ = s.markSwapFailed(ctx, req.GroupID, postgres.TransactionActionSell, req.InputMint, jupiter.USDCMint, req.Amount, quote.RequestID)
-		return SellToUSDCResult{}, err
-	}
-	if !fill.IsConfirmedSuccess() {
-		err := fmt.Errorf("jupiter sell not confirmed: status=%s code=%d", fill.Status, fill.Code)
-		logSwapBranchError("swap sell poll not confirmed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
-			"stage", "poll_confirm", "request_id", quote.RequestID, "status", fill.Status, "code", fill.Code)
-		_ = s.markSwapFailed(ctx, req.GroupID, postgres.TransactionActionSell, req.InputMint, jupiter.USDCMint, req.Amount, quote.RequestID)
-		return SellToUSDCResult{}, err
-	}
-	logSwapPollTransition(req.GroupID, req.UserID, req.Symbol, fill.Signature, jupiter.ExecuteStatusPending, fill.Status, fill.Code)
-
-	proceeds, err := parseAmount(fill.OutputAmountResult)
-	if err != nil {
+		_ = s.markSwapFailed(ctx, req.GroupID, postgres.TransactionActionSell, req.InputToken, evm.USDCAddress, req.Amount, execID)
 		return SellToUSDCResult{}, err
 	}
 
 	row, created, err := s.store.ConfirmSellTransaction(ctx, postgres.ConfirmSellTransactionParams{
 		GroupID:          req.GroupID,
 		Amount:           req.Amount,
-		InputMint:        req.InputMint,
-		OutputMint:       jupiter.USDCMint,
-		TxSignature:      fill.Signature,
-		ExecuteRequestID: quote.RequestID,
+		InputToken:       req.InputToken,
+		OutputToken:      evm.USDCAddress,
+		TxHash:           txHash,
+		ExecuteRequestID: execID,
 		ProceedsUSDC:     proceeds,
 	})
 	if err != nil {
@@ -378,8 +281,8 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 	}
 
 	if created {
-		s.applySellBalances(treasury.SolanaAddress, req.InputMint, req.Amount, proceeds)
-		treasuryUsdc, err := s.treasuryUSDCForSnapshot(ctx, treasury.SolanaAddress)
+		s.applySellBalances(treasury.Address, req.InputToken, req.Amount, proceeds)
+		treasuryUsdc, err := s.treasuryUSDCForSnapshot(ctx, treasury.Address)
 		if err != nil {
 			return SellToUSDCResult{}, err
 		}
@@ -392,21 +295,95 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 	return SellToUSDCResult{Transaction: row, Created: created}, nil
 }
 
+func (s *SwapService) ensureTreasuryGas(ctx context.Context, treasury wallets.TreasuryRef) error {
+	_ = ctx
+	_ = treasury
+	return nil
+}
+
+func (s *SwapService) ensureAllowance(ctx context.Context, treasury wallets.TreasuryRef, quote dex.Quote, amount *big.Int) error {
+	if s.chain == nil {
+		return nil
+	}
+	spender := quote.TokenOut
+	if quote.TokenIn != evm.USDCAddress {
+		spender = quote.TokenOut
+	}
+	// Router address comes from BuildSwap; allowance is checked against quote route in T5.
+	allowance, err := s.chain.Allowance(ctx, quote.TokenIn, treasury.Address, spender)
+	if err != nil {
+		return err
+	}
+	if allowance.Cmp(amount) >= 0 {
+		return nil
+	}
+	data, err := evm.EncodeApprove(spender, amount)
+	if err != nil {
+		return err
+	}
+	txHash, err := s.wallets.SendTreasuryTransaction(ctx, treasury, quote.TokenIn, data, big.NewInt(0))
+	if err != nil {
+		return err
+	}
+	_, err = s.waitReceipt(ctx, txHash)
+	return err
+}
+
+func (s *SwapService) waitFill(ctx context.Context, txHash, tokenOut, treasury string) (int64, error) {
+	receipt, err := s.waitReceipt(ctx, txHash)
+	if err != nil {
+		return 0, err
+	}
+	if receipt.Status != 1 {
+		return 0, fmt.Errorf("transaction failed")
+	}
+	fill := evm.DecodeERC20TransferLogs(receipt.Logs, tokenOut, treasury)
+	if fill.Sign() <= 0 {
+		return 0, fmt.Errorf("missing fill amount")
+	}
+	if !fill.IsInt64() {
+		return 0, fmt.Errorf("fill overflow")
+	}
+	return fill.Int64(), nil
+}
+
+func (s *SwapService) waitReceipt(ctx context.Context, txHash string) (evm.Receipt, error) {
+	if s.chain == nil {
+		return evm.Receipt{Found: true, Status: 1}, nil
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		receipt, err := s.chain.Receipt(ctx, txHash)
+		if err != nil {
+			return evm.Receipt{}, err
+		}
+		if receipt.Found {
+			return receipt, nil
+		}
+		select {
+		case <-ctx.Done():
+			return evm.Receipt{}, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	return evm.Receipt{}, fmt.Errorf("receipt timeout")
+}
+
 func (s *SwapService) treasuryUSDCForSnapshot(ctx context.Context, treasuryAddress string) (int64, error) {
 	if balances, ok := s.balances[treasuryAddress]; ok {
 		return balances.USDC, nil
 	}
-	balance, err := s.privy.TreasuryUSDCBalance(ctx, treasuryAddress)
+	balance, err := s.wallets.TreasuryUSDCBalance(ctx, treasuryAddress)
 	if err != nil {
 		return 0, fmt.Errorf("treasury usdc balance: %w", err)
 	}
 	return balance, nil
 }
 
-func (s *SwapService) applyBuyBalances(treasuryAddress, outputMint string, usdcSpent, xStockReceived int64) {
+func (s *SwapService) applyBuyBalances(treasuryAddress, outputToken string, usdcSpent, tokenReceived int64) {
 	balances := s.TreasuryBalancesFor(treasuryAddress)
-	if outputMint == jupiter.AAPLxMint || outputMint != jupiter.USDCMint {
-		balances.XStock += xStockReceived
+	if outputToken != evm.USDCAddress {
+		balances.Token += tokenReceived
 	}
 	balances.USDC -= usdcSpent
 	if balances.USDC < 0 {
@@ -415,31 +392,19 @@ func (s *SwapService) applyBuyBalances(treasuryAddress, outputMint string, usdcS
 	s.balances[treasuryAddress] = balances
 }
 
-func (s *SwapService) applySellBalances(treasuryAddress, inputMint string, xStockSold, usdcReceived int64) {
+func (s *SwapService) applySellBalances(treasuryAddress, inputToken string, tokenSold, usdcReceived int64) {
 	balances := s.TreasuryBalancesFor(treasuryAddress)
-	if inputMint == jupiter.AAPLxMint || inputMint != jupiter.USDCMint {
-		balances.XStock -= xStockSold
-		if balances.XStock < 0 {
-			balances.XStock = 0
+	if inputToken != evm.USDCAddress {
+		balances.Token -= tokenSold
+		if balances.Token < 0 {
+			balances.Token = 0
 		}
 	}
 	balances.USDC += usdcReceived
 	s.balances[treasuryAddress] = balances
 }
 
-func (s *SwapService) signSwapTransaction(ctx context.Context, walletID, unsignedTx string) (string, error) {
-	tx := unsignedTx
-	if s.relayerKey != "" {
-		var err error
-		tx, err = txsign.SignLocalSignerIfRequired(tx, s.relayerKey)
-		if err != nil {
-			return "", fmt.Errorf("sign fee payer: %w", err)
-		}
-	}
-	return s.signer.SignTreasuryTransaction(ctx, walletID, tx)
-}
-
-func (s *SwapService) markSwapFailed(ctx context.Context, groupID, action, inputMint, outputMint string, amount int64, executeRequestID string) error {
+func (s *SwapService) markSwapFailed(ctx context.Context, groupID, action, inputToken, outputToken string, amount int64, executeRequestID string) error {
 	if executeRequestID == "" {
 		return nil
 	}
@@ -448,20 +413,6 @@ func (s *SwapService) markSwapFailed(ctx context.Context, groupID, action, input
 	} else if ok {
 		return nil
 	}
-	_, err := s.store.InsertFailedTransaction(ctx, groupID, action, inputMint, outputMint, amount, executeRequestID)
+	_, err := s.store.InsertFailedTransaction(ctx, groupID, action, inputToken, outputToken, amount, executeRequestID)
 	return err
-}
-
-func parseAmount(raw string) (int64, error) {
-	if raw == "" {
-		return 0, fmt.Errorf("missing fill amount")
-	}
-	amount, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("invalid fill amount %q: %w", raw, err)
-	}
-	if amount <= 0 {
-		return 0, fmt.Errorf("fill amount must be positive")
-	}
-	return amount, nil
 }

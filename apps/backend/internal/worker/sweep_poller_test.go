@@ -6,13 +6,13 @@ import (
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
-func setupPoller(t *testing.T) (*SweepPoller, *workerTestApp, *fakeSolanaRPC) {
+func setupPoller(t *testing.T) (*SweepPoller, *workerTestApp, *fakeConfirmer) {
 	t.Helper()
 	testApp := integrationWorkerApp(t)
-	rpc := NewFakeSolanaRPC()
+	rpc := NewFakeConfirmer()
 	poller := NewSweepPoller(testApp.Store, testApp.Privy, rpc, testApp.Deposits, "relayer-key", NewStubClock(testApp.Now))
 	return poller, testApp, rpc
 }
@@ -22,7 +22,7 @@ func TestSweepPoller_submitSweepFailure_marksDepositFailed(t *testing.T) {
 	poller, testApp, _ := setupPoller(t)
 	ctx := context.Background()
 	deposit, memberAddress, _ := seedPendingDeposit(t, testApp)
-	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
+	wallets.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
 	privy.SetRejectSubmitSweep(testApp.Privy, true, fmt.Errorf("%w: relayer key invalid", privy.ErrAPI))
 
 	// Act
@@ -48,7 +48,7 @@ func TestSweepPoller_submitSweepFailure_surfacesInGroupActivity(t *testing.T) {
 	poller, testApp, _ := setupPoller(t)
 	ctx := context.Background()
 	deposit, memberAddress, token := seedPendingDepositWithToken(t, testApp)
-	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
+	wallets.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
 	privy.SetRejectSubmitSweep(testApp.Privy, true, fmt.Errorf("%w: relayer key invalid", privy.ErrAPI))
 	tx, err := testApp.Store.BeginTx(ctx)
 	if err != nil {
@@ -93,7 +93,7 @@ func TestSweepPoller_memberBalanceCoversIntent_triggersSubmitSweep(t *testing.T)
 	poller, testApp, _ := setupPoller(t)
 	ctx := context.Background()
 	_, memberAddress, _ := seedPendingDeposit(t, testApp)
-	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
+	wallets.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
 
 	// Act
 	if err := poller.Tick(ctx); err != nil {
@@ -118,7 +118,7 @@ func TestSweepPoller_afterBroadcast_observeSweepRunsWhenBalanceBelowIntent(t *te
 	poller, testApp, rpc := setupPoller(t)
 	ctx := context.Background()
 	deposit, memberAddress, _ := seedPendingDeposit(t, testApp)
-	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
+	wallets.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
 
 	// Act — broadcast while balance covers intent; confirmation not ready yet
 	if err := poller.Tick(ctx); err != nil {
@@ -129,15 +129,15 @@ func TestSweepPoller_afterBroadcast_observeSweepRunsWhenBalanceBelowIntent(t *te
 	if err != nil || !found {
 		t.Fatalf("GetDepositByID: found=%v err=%v", found, err)
 	}
-	if !updated.TxSignature.Valid || updated.TxSignature.String == "" {
+	if !updated.TxHash.Valid || updated.TxHash.String == "" {
 		t.Fatal("expected broadcast tx_signature persisted on pending deposit")
 	}
 	if updated.Status != "pending" {
 		t.Fatalf("status = %q, want pending after broadcast", updated.Status)
 	}
 
-	sig := updated.TxSignature.String
-	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 0)
+	sig := updated.TxHash.String
+	wallets.SetMemberUSDCBalance(testApp.Privy, memberAddress, 0)
 	rpc.Confirm(sig)
 
 	// Act — member balance below intent but stored sig should still confirm and credit
@@ -167,7 +167,7 @@ func TestSweepPoller_memberBalanceBelowIntent_doesNotSweep(t *testing.T) {
 	poller, testApp, _ := setupPoller(t)
 	ctx := context.Background()
 	_, memberAddress, _ := seedPendingDeposit(t, testApp)
-	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 0)
+	wallets.SetMemberUSDCBalance(testApp.Privy, memberAddress, 0)
 
 	// Act
 	if err := poller.Tick(ctx); err != nil {
@@ -185,7 +185,7 @@ func TestSweepPoller_memberBalanceBelowIntent_doesNotSweepPartialAmount(t *testi
 	poller, testApp, _ := setupPoller(t)
 	ctx := context.Background()
 	deposit, memberAddress, _ := seedPendingDeposit(t, testApp)
-	privy.SetMemberUSDCBalance(testApp.Privy, memberAddress, 500_000)
+	wallets.SetMemberUSDCBalance(testApp.Privy, memberAddress, 500_000)
 
 	// Act
 	if err := poller.Tick(ctx); err != nil {
@@ -212,9 +212,9 @@ func TestSweepPoller_scanDoesNotCreateDepositWithoutUserIntent(t *testing.T) {
 	// Arrange
 	poller, testApp, _ := setupPoller(t)
 	ctx := context.Background()
-	privyUserID := testApp.ISO.UniquePrivyID("scan")
-	token := privy.AccessToken(testApp.ISO.UniqueToken("scan"))
-	privy.RegisterToken(testApp.Privy, token, privy.Identity{PrivyUserID: privyUserID, DisplayName: "Scanner"})
+	privyUserID := testApp.ISO.UniqueDynamicID("scan")
+	token := auth.AccessToken(testApp.ISO.UniqueToken("scan"))
+	auth.RegisterToken(testApp.Privy, token, auth.Identity{PrivyUserID: privyUserID, DisplayName: "Scanner"})
 	sessions := app.NewSessionService(testApp.Store, testApp.Privy)
 	session, err := sessions.OpenSession(ctx, string(token))
 	if err != nil {
@@ -232,7 +232,7 @@ func TestSweepPoller_scanDoesNotCreateDepositWithoutUserIntent(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("GetMemberWalletByUserID: found=%v err=%v", found, err)
 	}
-	privy.SetMemberUSDCBalance(testApp.Privy, wallet.SolanaAddress, 750_000)
+	wallets.SetMemberUSDCBalance(testApp.Privy, wallet.Address, 750_000)
 
 	// Act
 	if err := poller.Tick(ctx); err != nil {
@@ -240,7 +240,7 @@ func TestSweepPoller_scanDoesNotCreateDepositWithoutUserIntent(t *testing.T) {
 	}
 
 	// Assert
-	hasPending, err := testApp.Store.HasPendingDepositForFromAddress(ctx, wallet.SolanaAddress)
+	hasPending, err := testApp.Store.HasPendingDepositForFromAddress(ctx, wallet.Address)
 	if err != nil {
 		t.Fatalf("HasPendingDepositForFromAddress: %v", err)
 	}

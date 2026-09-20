@@ -11,7 +11,7 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -94,7 +94,7 @@ func TestGET_homeDashboard_fundedGroup_computesPotNavOncePerJoinedGroup(t *testi
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit position: %v", err)
 	}
-	privy.SetTreasuryUSDCBalance(privyClient, created.TreasuryAddress, 100_000_000)
+	wallets.SetTreasuryUSDCBalance(privyClient, created.TreasuryAddress, 100_000_000)
 
 	ctx = app.HomeContextWithPotNavCache(ctx)
 	req := httptest.NewRequest(http.MethodGet, "/v1/home/dashboard", nil).WithContext(ctx)
@@ -142,7 +142,7 @@ func TestGET_homeDashboard_fundedGroup_returnsMyGroupRow(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit position: %v", err)
 	}
-	privy.SetTreasuryUSDCBalance(privyClient, created.TreasuryAddress, 100_000_000)
+	wallets.SetTreasuryUSDCBalance(privyClient, created.TreasuryAddress, 100_000_000)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/home/dashboard", nil)
 	req.Header.Set("Authorization", "Bearer "+string(token))

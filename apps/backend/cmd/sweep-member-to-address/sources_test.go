@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 type fakeSweepStore struct {
@@ -23,11 +23,11 @@ func (f fakeSweepStore) ListTreasuries(context.Context) ([]postgres.Treasury, er
 }
 
 type fakePrivyLister struct {
-	wallets []privy.WalletRef
+	wallets []wallets.WalletRef
 	err     error
 }
 
-func (f fakePrivyLister) ListAppSolanaWallets(context.Context) ([]privy.WalletRef, error) {
+func (f fakePrivyLister) ListAppSolanaWallets(context.Context) ([]wallets.WalletRef, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -39,8 +39,8 @@ func TestLoadSweepSources_explicitList(t *testing.T) {
 
 	ctx := context.Background()
 	store := fakeSweepStore{
-		members: []postgres.MemberWallet{{SolanaAddress: "Mem111"}},
-		treasuries: []postgres.Treasury{{SolanaAddress: "Tre111"}},
+		members: []postgres.MemberWallet{{Address: "Mem111"}},
+		treasuries: []postgres.Treasury{{Address: "Tre111"}},
 	}
 	flags := sweepFlags{
 		destination: "Dest111",
@@ -73,13 +73,13 @@ func TestLoadSweepSources_allPrivyWallets(t *testing.T) {
 
 	ctx := context.Background()
 	store := fakeSweepStore{
-		members: []postgres.MemberWallet{{SolanaAddress: "Mem111"}},
+		members: []postgres.MemberWallet{{Address: "Mem111"}},
 	}
 	flags := sweepFlags{destination: "Dest111", all: true}
 	privyLister := fakePrivyLister{
-		wallets: []privy.WalletRef{
-			{PrivyWalletID: "pw1", SolanaAddress: "Mem111"},
-			{PrivyWalletID: "pw2", SolanaAddress: "PrivyOnly111"},
+		wallets: []wallets.WalletRef{
+			{WalletID: "pw1", Address: "Mem111"},
+			{WalletID: "pw2", Address: "PrivyOnly111"},
 		},
 	}
 
@@ -106,8 +106,8 @@ func TestLoadSweepSources_dbDefault(t *testing.T) {
 
 	ctx := context.Background()
 	store := fakeSweepStore{
-		members:    []postgres.MemberWallet{{SolanaAddress: "Mem111"}},
-		treasuries: []postgres.Treasury{{SolanaAddress: "Tre111"}},
+		members:    []postgres.MemberWallet{{Address: "Mem111"}},
+		treasuries: []postgres.Treasury{{Address: "Tre111"}},
 	}
 	flags := sweepFlags{destination: "Dest111"}
 

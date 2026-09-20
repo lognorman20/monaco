@@ -4,26 +4,26 @@ import (
 	"context"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 func TestSymbolResolver_TSLAxMint_returnsTickerNotPubkey(t *testing.T) {
 	t.Parallel()
 
-	catalog := xstocks.NewFakeCatalogSearcher()
-	xstocks.RegisterCatalogAsset(catalog, xstocks.CatalogAsset{
+	catalog := b20.NewFakeCatalog()
+	b20.RegisterCatalogAsset(catalog, b20.Asset{
 		Symbol:     "TSLAx",
 		Name:       "Tesla",
-		SolanaMint: jupiter.TSLAxMint,
+		TokenAddress: "0xb2000000000000000000000000000000000004",
 	})
 	resolver := NewSymbolResolver(catalog)
 
-	got := resolver.SymbolForMint(context.Background(), jupiter.TSLAxMint)
+	got := resolver.SymbolForMint(context.Background(), "0xb2000000000000000000000000000000000004")
 	if got != "TSLAx" {
 		t.Fatalf("SymbolForMint = %q, want TSLAx", got)
 	}
-	if got == jupiter.TSLAxMint {
+	if got == "0xb2000000000000000000000000000000000004" {
 		t.Fatalf("SymbolForMint returned raw mint")
 	}
 }

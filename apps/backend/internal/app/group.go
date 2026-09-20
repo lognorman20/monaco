@@ -6,17 +6,17 @@ import (
 	"fmt"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // GroupService orchestrates group create flows.
 type GroupService struct {
 	store *postgres.Store
-	privy privy.Client
+	privy wallets.Client
 }
 
 // NewGroupService wires group dependencies.
-func NewGroupService(store *postgres.Store, privyClient privy.Client) *GroupService {
+func NewGroupService(store *postgres.Store, privyClient wallets.Client) *GroupService {
 	return &GroupService{
 		store: store,
 		privy: privyClient,
@@ -46,17 +46,17 @@ func (g *GroupService) CreateGroup(ctx context.Context, accessToken string, name
 		return CreateGroupResult{}, fmt.Errorf("name is required")
 	}
 
-	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := g.privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logGroupBranchWarn("group create rejected", "invalid token", "name", name)
-			return CreateGroupResult{}, privy.ErrInvalidToken
+			return CreateGroupResult{}, auth.ErrUnauthorized
 		}
 		logGroupBranchError("group create verify session failed", err, "name", name)
 		return CreateGroupResult{}, fmt.Errorf("verify session: %w", err)
 	}
 
-	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := g.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		logGroupBranchError("group create lookup user failed", err, "name", name)
 		return CreateGroupResult{}, err
@@ -87,12 +87,12 @@ func (g *GroupService) CreateGroup(ctx context.Context, accessToken string, name
 		return CreateGroupResult{}, err
 	}
 
-	treasuryRef, err := g.privy.EnsureTreasury(ctx, privy.GroupID(group.ID))
+	treasuryRef, err := g.privy.EnsureTreasury(ctx, wallets.GroupID(group.ID))
 	if err != nil {
 		return CreateGroupResult{}, fmt.Errorf("privy ensure treasury: %w", err)
 	}
 
-	_, err = g.store.InsertTreasuryTx(ctx, tx, group.ID, treasuryRef.PrivyWalletID, treasuryRef.SolanaAddress)
+	_, err = g.store.InsertTreasuryTx(ctx, tx, group.ID, treasuryRef.WalletID, treasuryRef.Address)
 	if err != nil {
 		return CreateGroupResult{}, err
 	}
@@ -107,7 +107,7 @@ func (g *GroupService) CreateGroup(ctx context.Context, accessToken string, name
 	return CreateGroupResult{
 		GroupID:         group.ID,
 		Name:            group.Name,
-		TreasuryAddress: treasuryRef.SolanaAddress,
+		TreasuryAddress: treasuryRef.Address,
 	}, nil
 }
 
@@ -118,17 +118,17 @@ func (g *GroupService) GetGroup(ctx context.Context, accessToken string, groupID
 		return GetGroupResult{}, fmt.Errorf("group id is required")
 	}
 
-	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := g.privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logGroupBranchWarn("group get rejected", "invalid token", "group_id", groupID)
-			return GetGroupResult{}, privy.ErrInvalidToken
+			return GetGroupResult{}, auth.ErrUnauthorized
 		}
 		logGroupBranchError("group get verify session failed", err, "group_id", groupID)
 		return GetGroupResult{}, fmt.Errorf("verify session: %w", err)
 	}
 
-	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := g.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		logGroupBranchError("group get lookup user failed", err, "group_id", groupID)
 		return GetGroupResult{}, err
@@ -169,6 +169,6 @@ func (g *GroupService) GetGroup(ctx context.Context, accessToken string, groupID
 	logGroupGetSuccess(groupID)
 	return GetGroupResult{
 		Name:            group.Name,
-		TreasuryAddress: treasury.SolanaAddress,
+		TreasuryAddress: treasury.Address,
 	}, nil
 }

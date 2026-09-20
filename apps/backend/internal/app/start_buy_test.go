@@ -5,19 +5,19 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/packages/domain"
 )
 
-func registerHappyBuy(client jupiter.Client, resolver xstocks.Resolver, outputMint string, usdcAmount int64, requestID string, signature string) {
-	xstocks.RegisterSolanaMint(resolver, "AAPLx", outputMint)
+func registerHappyBuy(client dex.Client, resolver b20.Catalog, outputMint string, usdcAmount int64, requestID string, signature string) {
+	b20.RegisterTokenAddress(resolver, "AAPLx", outputMint)
 	jupiter.RegisterQuoteBuy(client, outputMint, usdcAmount, jupiter.BuyQuote{
 		Routable:   true,
-		InputMint:  jupiter.USDCMint,
-		OutputMint: outputMint,
+		InputToken:  evm.USDCAddress,
+		OutputToken: outputMint,
 		InAmount:   "1000000",
 		OutAmount:  "500000",
 		RequestID:  requestID,
@@ -27,8 +27,8 @@ func registerHappyBuy(client jupiter.Client, resolver xstocks.Resolver, outputMi
 		Transaction: "unsigned-buy-tx",
 		InAmount:    "1000000",
 		OutAmount:   "500000",
-		InputMint:   jupiter.USDCMint,
-		OutputMint:  outputMint,
+		InputToken:   evm.USDCAddress,
+		OutputToken:  outputMint,
 	})
 	jupiter.RegisterExecutePoll(client, requestID, []jupiter.ExecuteResult{
 		{Status: jupiter.ExecuteStatusPending, Code: -1},
@@ -77,14 +77,14 @@ func TestExecuteOnPass_onlyAfterTallyPassed_callsJupiter(t *testing.T) {
 	h.App.ISO.TrackGroup(created.GroupID)
 	const usdcAmount int64 = 2_000_000
 	requestID := testRequestID(h.App.ISO, "execute-on-pass")
-	signature := testTxSignature(h.App.ISO, "execute-on-pass")
-	registerHappyBuy(h.App.Jupiter, h.App.XStocks, jupiter.AAPLxMint, usdcAmount, requestID, signature)
-	treasury, err := h.App.Privy.EnsureTreasury(ctx, privy.GroupID(created.GroupID))
+	signature := testTxHash(h.App.ISO, "execute-on-pass")
+	registerHappyBuy(h.App.Jupiter, h.App.XStocks, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcAmount, requestID, signature)
+	treasury, err := h.App.Privy.EnsureTreasury(ctx, wallets.GroupID(created.GroupID))
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
-	h.App.Swap.SetTreasuryBalances(treasury.SolanaAddress, TreasuryBalances{USDC: 5_000_000})
-	privy.SetTreasuryUSDCBalance(h.App.Privy, treasury.SolanaAddress, 5_000_000)
+	h.App.Swap.SetTreasuryBalances(treasury.Address, TreasuryBalances{USDC: 5_000_000})
+	wallets.SetTreasuryUSDCBalance(h.App.Privy, treasury.Address, 5_000_000)
 
 	proposal, err := h.Governance.CreateProposal(ctx, CreateProposalInput{
 		GroupID:    created.GroupID,
@@ -126,8 +126,8 @@ func TestExecuteOnPass_onlyAfterTallyPassed_callsJupiter(t *testing.T) {
 	if !result.Created {
 		t.Fatal("expected newly created confirmed buy transaction")
 	}
-	if !result.Transaction.TxSignature.Valid || result.Transaction.TxSignature.String != signature {
-		t.Fatalf("tx signature = %v, want %q", result.Transaction.TxSignature, signature)
+	if !result.Transaction.TxHash.Valid || result.Transaction.TxHash.String != signature {
+		t.Fatalf("tx signature = %v, want %q", result.Transaction.TxHash, signature)
 	}
 	if result.Transaction.Status != postgres.TransactionStatusConfirmed {
 		t.Fatalf("status = %q, want confirmed", result.Transaction.Status)
@@ -200,8 +200,8 @@ func TestExecuteOnPass_duplicateProposalAndSignature_executesOnce(t *testing.T) 
 	if !second.Transaction.ProposalID.Valid || second.Transaction.ProposalID.String != passed.ID {
 		t.Fatalf("proposal_id = %v, want %q", second.Transaction.ProposalID, passed.ID)
 	}
-	if !second.Transaction.TxSignature.Valid || second.Transaction.TxSignature.String != first.Transaction.TxSignature.String {
-		t.Fatalf("tx signature = %v, want %v", second.Transaction.TxSignature, first.Transaction.TxSignature)
+	if !second.Transaction.TxHash.Valid || second.Transaction.TxHash.String != first.Transaction.TxHash.String {
+		t.Fatalf("tx signature = %v, want %v", second.Transaction.TxHash, first.Transaction.TxHash)
 	}
 	proposalCount, err := h.App.Store.CountTransactionsForProposal(ctx, passed.ID)
 	if err != nil {
@@ -210,7 +210,7 @@ func TestExecuteOnPass_duplicateProposalAndSignature_executesOnce(t *testing.T) 
 	if proposalCount != 1 {
 		t.Fatalf("proposal transaction count = %d, want 1", proposalCount)
 	}
-	sigCount, err := h.App.Store.CountConfirmedTransactionsBySignature(ctx, first.Transaction.TxSignature.String)
+	sigCount, err := h.App.Store.CountConfirmedTransactionsBySignature(ctx, first.Transaction.TxHash.String)
 	if err != nil {
 		t.Fatalf("CountConfirmedTransactionsBySignature: %v", err)
 	}
@@ -232,14 +232,14 @@ func seedPassedExecuteProposal(t *testing.T, h executeOnPassHarness, label strin
 	h.App.ISO.TrackGroup(created.GroupID)
 	const usdcAmount int64 = 2_000_000
 	requestID := testRequestID(h.App.ISO, label)
-	signature := testTxSignature(h.App.ISO, label)
-	registerHappyBuy(h.App.Jupiter, h.App.XStocks, jupiter.AAPLxMint, usdcAmount, requestID, signature)
-	treasury, err := h.App.Privy.EnsureTreasury(ctx, privy.GroupID(created.GroupID))
+	signature := testTxHash(h.App.ISO, label)
+	registerHappyBuy(h.App.Jupiter, h.App.XStocks, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcAmount, requestID, signature)
+	treasury, err := h.App.Privy.EnsureTreasury(ctx, wallets.GroupID(created.GroupID))
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
-	h.App.Swap.SetTreasuryBalances(treasury.SolanaAddress, TreasuryBalances{USDC: 5_000_000})
-	privy.SetTreasuryUSDCBalance(h.App.Privy, treasury.SolanaAddress, 5_000_000)
+	h.App.Swap.SetTreasuryBalances(treasury.Address, TreasuryBalances{USDC: 5_000_000})
+	wallets.SetTreasuryUSDCBalance(h.App.Privy, treasury.Address, 5_000_000)
 	proposal, err := h.Governance.CreateProposal(ctx, CreateProposalInput{
 		GroupID:    created.GroupID,
 		ProposerID: userID.UserID,
@@ -276,13 +276,13 @@ func TestExecuteOnPass_sellDoesNotChangeMemberShareUnits(t *testing.T) {
 	h.App.ISO.TrackGroup(created.GroupID)
 
 	const held = int64(100_000_000)
-	xstocks.RegisterSolanaMint(h.App.XStocks, "AAPLx", jupiter.AAPLxMint)
+	b20.RegisterTokenAddress(h.App.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
 	_, _, err = h.App.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          created.GroupID,
 		Amount:           10_000_000,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      testTxSignature(h.App.ISO, "sell-exec-buy"),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      testTxHash(h.App.ISO, "sell-exec-buy"),
 		ExecuteRequestID: testRequestID(h.App.ISO, "sell-exec-buy"),
 		CostBasisPrice:   10_000_000,
 		CostBasisAmount:  held,
@@ -297,10 +297,10 @@ func TestExecuteOnPass_sellDoesNotChangeMemberShareUnits(t *testing.T) {
 	}
 
 	requestID := testRequestID(h.App.ISO, "sell-exec")
-	jupiter.RegisterSellQuote(h.App.Jupiter, jupiter.AAPLxMint, held, jupiter.SellQuote{
+	jupiter.RegisterSellQuote(h.App.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", held, jupiter.SellQuote{
 		Routable:   true,
-		InputMint:  jupiter.AAPLxMint,
-		OutputMint: jupiter.USDCMint,
+		InputToken:  "0xb200000000000000000000c2e324d24d7eecd1fb",
+		OutputToken: evm.USDCAddress,
 		InAmount:   "100000000",
 		OutAmount:  "10000000",
 		RequestID:  requestID,
@@ -308,15 +308,15 @@ func TestExecuteOnPass_sellDoesNotChangeMemberShareUnits(t *testing.T) {
 	jupiter.RegisterExecutePoll(h.App.Jupiter, requestID, []jupiter.ExecuteResult{{
 		Status:             jupiter.ExecuteStatusSuccess,
 		Code:               0,
-		Signature:          testTxSignature(h.App.ISO, "sell-exec"),
+		Signature:          testTxHash(h.App.ISO, "sell-exec"),
 		InputAmountResult:  "100000000",
 		OutputAmountResult: "10000000",
 	}})
-	treasury, err := h.App.Privy.EnsureTreasury(ctx, privy.GroupID(created.GroupID))
+	treasury, err := h.App.Privy.EnsureTreasury(ctx, wallets.GroupID(created.GroupID))
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
-	h.App.Swap.SetTreasuryBalances(treasury.SolanaAddress, TreasuryBalances{USDC: 1_000_000, XStock: held})
+	h.App.Swap.SetTreasuryBalances(treasury.Address, TreasuryBalances{USDC: 1_000_000, XStock: held})
 
 	proposal, err := h.Governance.CreateProposal(ctx, CreateProposalInput{
 		GroupID:     created.GroupID,

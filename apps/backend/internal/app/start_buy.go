@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // ErrQuoteNotRoutable means Jupiter returned no route for the requested buy.
@@ -32,84 +33,63 @@ type StartBuyRequest struct {
 	Taker string
 }
 
-// StartBuyResult holds a routable Jupiter quote ready for execute.
+// StartBuyResult holds a routable DEX quote ready for execute.
 type StartBuyResult struct {
-	OutputMint string
-	Quote      jupiter.BuyQuote
+	OutputToken string
+	Quote       dex.Quote
 }
 
 // BuyService gates treasury buys behind quote availability.
 type BuyService struct {
-	jupiter jupiter.Client
-	xstocks xstocks.Resolver
+	dex     dex.Client
+	catalog b20.Catalog
 }
 
-// NewBuyService wires Jupiter quote and xStocks mint resolution.
-func NewBuyService(jupiterClient jupiter.Client, resolver xstocks.Resolver) *BuyService {
-	return &BuyService{
-		jupiter: jupiterClient,
-		xstocks: resolver,
-	}
+// NewBuyService wires DEX quote and B20 token resolution.
+func NewBuyService(dexClient dex.Client, catalog b20.Catalog) *BuyService {
+	return &BuyService{dex: dexClient, catalog: catalog}
 }
 
-// JupiterCatalogRoutabilityProber probes Jupiter for USDC→xStock routes during catalog ranking.
-type JupiterCatalogRoutabilityProber struct {
-	jupiter jupiter.Client
+// DexCatalogRoutabilityProber probes the DEX for USDC→token routes during catalog ranking.
+type DexCatalogRoutabilityProber struct {
+	dex dex.Client
 }
 
-// NewJupiterCatalogRoutabilityProber returns a catalog prober backed by Jupiter quotes.
-func NewJupiterCatalogRoutabilityProber(jupiterClient jupiter.Client) *JupiterCatalogRoutabilityProber {
-	return &JupiterCatalogRoutabilityProber{jupiter: jupiterClient}
+// NewDexCatalogRoutabilityProber returns a catalog prober backed by DEX quotes.
+func NewDexCatalogRoutabilityProber(dexClient dex.Client) *DexCatalogRoutabilityProber {
+	return &DexCatalogRoutabilityProber{dex: dexClient}
 }
 
-// IsRoutable reports whether Jupiter can quote a small USDC buy into the asset mint.
-func (p *JupiterCatalogRoutabilityProber) IsRoutable(ctx context.Context, asset xstocks.CatalogAsset) bool {
-	if p == nil || p.jupiter == nil || strings.TrimSpace(asset.SolanaMint) == "" {
+// IsRoutable reports whether the DEX can quote a small USDC buy into the asset.
+func (p *DexCatalogRoutabilityProber) IsRoutable(ctx context.Context, asset b20.Asset) bool {
+	if p == nil || p.dex == nil || strings.TrimSpace(asset.TokenAddress) == "" {
 		return false
 	}
-	quote, err := p.jupiter.QuoteBuy(ctx, jupiter.QuoteBuyParams{
-		Symbol:     asset.Symbol,
-		OutputMint: asset.SolanaMint,
-		USDCAmount: CatalogRoutabilityProbeMicros,
-	})
+	quote, err := p.dex.QuoteBuy(ctx, asset.TokenAddress, big.NewInt(CatalogRoutabilityProbeMicros))
 	if err != nil {
 		return false
 	}
 	return quote.Routable
 }
 
-// ResolveOutputMint returns the Solana mint for a catalog symbol.
-func (s *BuyService) ResolveOutputMint(ctx context.Context, symbol string) (string, error) {
-	return s.xstocks.ResolveSolanaMint(ctx, symbol)
+// ResolveOutputToken returns the token address for a catalog symbol.
+func (s *BuyService) ResolveOutputToken(ctx context.Context, symbol string) (string, error) {
+	return s.catalog.ResolveTokenAddress(ctx, symbol)
 }
 
 // StartBuy resolves the xStock mint and refuses when Jupiter has no route.
 func (s *BuyService) StartBuy(ctx context.Context, req StartBuyRequest) (StartBuyResult, error) {
 	logSwapQuoteAttempt(req.GroupID, req.UserID, req.Symbol, req.USDCAmount)
 
-	outputMint, err := s.ResolveOutputMint(ctx, req.Symbol)
+	outputMint, err := s.ResolveOutputToken(ctx, req.Symbol)
 	if err != nil {
 		logSwapRefusal(req.GroupID, req.UserID, req.Symbol, err.Error())
 		return StartBuyResult{}, err
 	}
 
-	quote, err := s.jupiter.QuoteBuy(ctx, jupiter.QuoteBuyParams{
-		GroupID:    req.GroupID,
-		UserID:     req.UserID,
-		Symbol:     req.Symbol,
-		OutputMint: outputMint,
-		USDCAmount: req.USDCAmount,
-		Taker:      req.Taker,
-	})
+	quote, err := s.dex.QuoteBuy(ctx, outputMint, big.NewInt(req.USDCAmount))
 	if err != nil {
-		reason := err.Error()
-		if errors.Is(err, jupiter.ErrNoRoute) {
-			reason = "no route"
-		}
-		logSwapRefusal(req.GroupID, req.UserID, req.Symbol, reason)
-		if errors.Is(err, jupiter.ErrNoRoute) {
-			return StartBuyResult{}, fmt.Errorf("%w: %s", ErrQuoteNotRoutable, reason)
-		}
+		logSwapRefusal(req.GroupID, req.UserID, req.Symbol, err.Error())
 		return StartBuyResult{}, err
 	}
 	if !quote.Routable {
@@ -118,8 +98,8 @@ func (s *BuyService) StartBuy(ctx context.Context, req StartBuyRequest) (StartBu
 	}
 
 	return StartBuyResult{
-		OutputMint: outputMint,
-		Quote:      quote,
+		OutputToken: outputMint,
+		Quote:       quote,
 	}, nil
 }
 
@@ -244,7 +224,7 @@ func (s *ExecuteOnPassService) executeSellOnPass(ctx context.Context, proposal P
 		return ExecuteOnPassResult{}, fmt.Errorf("sell execute already attempted")
 	}
 
-	inputMint, err := s.swap.buy.ResolveOutputMint(ctx, proposal.Symbol)
+	inputMint, err := s.swap.buy.ResolveOutputToken(ctx, proposal.Symbol)
 	if err != nil {
 		return ExecuteOnPassResult{}, err
 	}
@@ -252,7 +232,7 @@ func (s *ExecuteOnPassService) executeSellOnPass(ctx context.Context, proposal P
 		GroupID:    proposal.GroupID,
 		UserID:     proposal.ProposerID,
 		Symbol:     proposal.Symbol,
-		InputMint:  inputMint,
+		InputToken:  inputMint,
 		Amount:     proposal.TokenAmount,
 		ProposalID: proposal.ID,
 	})
@@ -300,10 +280,10 @@ func (s *ExecuteOnPassService) linkBuyToProposal(ctx context.Context, proposalID
 	if tx.ProposalID.Valid && tx.ProposalID.String != proposalID {
 		return postgres.TransactionRow{}, false, fmt.Errorf("transaction already linked to another proposal")
 	}
-	if !tx.TxSignature.Valid {
+	if !tx.TxHash.Valid {
 		return postgres.TransactionRow{}, false, fmt.Errorf("transaction signature is required")
 	}
-	if bySig, found, err := s.store.GetConfirmedTransactionBySignature(ctx, tx.TxSignature.String); err != nil {
+	if bySig, found, err := s.store.GetConfirmedTransactionBySignature(ctx, tx.TxHash.String); err != nil {
 		return postgres.TransactionRow{}, false, err
 	} else if found && bySig.ProposalID.Valid && bySig.ProposalID.String != proposalID {
 		return postgres.TransactionRow{}, false, fmt.Errorf("transaction signature already linked to another proposal")
@@ -320,11 +300,11 @@ func (s *ExecuteOnPassService) recordTreasuryHoldingsAndNavSnapshot(
 	if !buyCreated {
 		return nil
 	}
-	treasury, err := s.swap.privy.EnsureTreasury(ctx, privy.GroupID(proposal.GroupID))
+	treasury, err := s.swap.wallets.EnsureTreasury(ctx, wallets.GroupID(proposal.GroupID))
 	if err != nil {
 		return err
 	}
-	treasuryUSDC, err := s.swap.treasuryUSDCForSnapshot(ctx, treasury.SolanaAddress)
+	treasuryUSDC, err := s.swap.treasuryUSDCForSnapshot(ctx, treasury.Address)
 	if err != nil {
 		return err
 	}

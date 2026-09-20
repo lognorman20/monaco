@@ -156,14 +156,14 @@ func (s *AgentIntentService) executeIntent(ctx context.Context, accepted postgre
 			TransactionID: result.Transaction.ID,
 		}, nil
 	case domain.AgentIntentSell:
-		inputMint, err := s.swap.buy.ResolveOutputMint(ctx, in.Symbol)
+		inputMint, err := s.swap.buy.ResolveOutputToken(ctx, in.Symbol)
 		if err != nil {
 			return SubmitAgentIntentResult{IntentID: accepted.ID}, err
 		}
 		result, err := s.swap.SellToUSDC(ctx, SellToUSDCRequest{
 			GroupID:       in.GroupID,
 			Symbol:        in.Symbol,
-			InputMint:     inputMint,
+			InputToken:     inputMint,
 			Amount:        in.TokenAmount,
 			AgentIntentID: accepted.ID,
 			InitiatedBy:   "agent",
@@ -187,8 +187,8 @@ func (s *AgentIntentService) buildAgentSnapshot(ctx context.Context, agent domai
 	if err != nil {
 		return domain.AgentTreasurySnapshot{}, err
 	}
-	if found && s.swap != nil && s.swap.privy != nil {
-		treasuryUSDC, err = s.swap.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
+	if found && s.swap != nil && s.swap.wallets != nil {
+		treasuryUSDC, err = s.swap.wallets.TreasuryUSDCBalance(ctx, treasury.Address)
 		if err != nil {
 			return domain.AgentTreasurySnapshot{}, err
 		}
@@ -207,7 +207,7 @@ func (s *AgentIntentService) buildAgentSnapshot(ctx context.Context, agent domai
 	}
 	bySymbol := make(map[string]int64, len(holdings))
 	for _, holding := range holdings {
-		symbol := symbolForOutputMint(ctx, s.symbols, holding.Mint)
+		symbol := symbolForOutputToken(ctx, s.symbols, holding.Mint)
 		bySymbol[symbol] += holding.Amount
 	}
 	return domain.AgentTreasurySnapshot{

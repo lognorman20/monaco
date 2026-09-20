@@ -16,7 +16,7 @@ type WithdrawalRow struct {
 	Amount      int64
 	ToAddress   string
 	Status      string
-	TxSignature sql.NullString
+	TxHash sql.NullString
 	CreatedAt   time.Time
 }
 
@@ -32,7 +32,7 @@ func (s *Store) InsertWithdrawalTx(ctx context.Context, tx *sql.Tx, userID, grou
 	const insertSQL = `
 INSERT INTO withdrawals (user_id, group_id, amount, to_address, status)
 VALUES ($1, $2, $3, $4, 'pending')
-RETURNING id, user_id, group_id, amount, to_address, status, tx_signature, created_at`
+RETURNING id, user_id, group_id, amount, to_address, status, tx_hash, created_at`
 
 	var row WithdrawalRow
 	err := tx.QueryRowContext(ctx, insertSQL, userID, groupID, amount, toAddress).Scan(
@@ -42,7 +42,7 @@ RETURNING id, user_id, group_id, amount, to_address, status, tx_signature, creat
 		&row.Amount,
 		&row.ToAddress,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.CreatedAt,
 	)
 	if err != nil {
@@ -76,26 +76,26 @@ func (s *Store) InsertWithdrawal(ctx context.Context, userID, groupID string, am
 }
 
 // ConfirmWithdrawalPayoutTx marks a withdrawal settled, increments amount_withdrawn, and writes NAV snapshot once.
-func (s *Store) ConfirmWithdrawalPayoutTx(ctx context.Context, tx *sql.Tx, withdrawalID, txSignature string, treasuryUSDC int64) (WithdrawalRow, bool, error) {
-	if withdrawalID == "" || txSignature == "" {
+func (s *Store) ConfirmWithdrawalPayoutTx(ctx context.Context, tx *sql.Tx, withdrawalID, txHash string, treasuryUSDC int64) (WithdrawalRow, bool, error) {
+	if withdrawalID == "" || txHash == "" {
 		return WithdrawalRow{}, false, fmt.Errorf("withdrawal id and tx signature are required")
 	}
 
 	const updateSQL = `
 UPDATE withdrawals
-SET status = 'confirmed', tx_signature = $2
+SET status = 'confirmed', tx_hash = $2
 WHERE id = $1 AND status = 'pending'
-RETURNING id, user_id, group_id, amount, to_address, status, tx_signature, created_at`
+RETURNING id, user_id, group_id, amount, to_address, status, tx_hash, created_at`
 
 	var row WithdrawalRow
-	err := tx.QueryRowContext(ctx, updateSQL, withdrawalID, txSignature).Scan(
+	err := tx.QueryRowContext(ctx, updateSQL, withdrawalID, txHash).Scan(
 		&row.ID,
 		&row.UserID,
 		&row.GroupID,
 		&row.Amount,
 		&row.ToAddress,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.CreatedAt,
 	)
 	if err == nil {
@@ -121,7 +121,7 @@ RETURNING id, user_id, group_id, amount, to_address, status, tx_signature, creat
 	if existing.Status != "confirmed" {
 		return WithdrawalRow{}, false, fmt.Errorf("confirm withdrawal payout: withdrawal not pending")
 	}
-	if !existing.TxSignature.Valid || existing.TxSignature.String != txSignature {
+	if !existing.TxHash.Valid || existing.TxHash.String != txHash {
 		return WithdrawalRow{}, false, fmt.Errorf("confirm withdrawal payout: tx signature mismatch")
 	}
 	return existing, false, nil
@@ -129,7 +129,7 @@ RETURNING id, user_id, group_id, amount, to_address, status, tx_signature, creat
 
 func getWithdrawalByIDTx(ctx context.Context, tx *sql.Tx, id string) (WithdrawalRow, bool, error) {
 	const selectSQL = `
-SELECT id, user_id, group_id, amount, to_address, status, tx_signature, created_at
+SELECT id, user_id, group_id, amount, to_address, status, tx_hash, created_at
 FROM withdrawals
 WHERE id = $1`
 
@@ -141,7 +141,7 @@ WHERE id = $1`
 		&row.Amount,
 		&row.ToAddress,
 		&row.Status,
-		&row.TxSignature,
+		&row.TxHash,
 		&row.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -160,7 +160,7 @@ func (s *Store) ListWithdrawalsByGroupID(ctx context.Context, groupID string) ([
 	}
 
 	const selectSQL = `
-SELECT id, user_id, group_id, amount, to_address, status, tx_signature, created_at
+SELECT id, user_id, group_id, amount, to_address, status, tx_hash, created_at
 FROM withdrawals
 WHERE group_id = $1
 ORDER BY created_at DESC`
@@ -181,7 +181,7 @@ ORDER BY created_at DESC`
 			&row.Amount,
 			&row.ToAddress,
 			&row.Status,
-			&row.TxSignature,
+			&row.TxHash,
 			&row.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan withdrawal: %w", err)

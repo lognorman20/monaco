@@ -12,11 +12,11 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/storage"
 )
 
-func integrationMeHandlers(t *testing.T, storageClient storage.Client) (*MeHandlers, *AuthHandlers, privy.Client, *postgres.TestIsolation) {
+func integrationMeHandlers(t *testing.T, storageClient storage.Client) (*MeHandlers, *AuthHandlers, wallets.Client, *postgres.TestIsolation) {
 	t.Helper()
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)

@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 )
 
@@ -12,25 +12,25 @@ func TestPotRowsFromPythInput_perAssetDollarPnL(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		input      pyth.NavInput
+		input      marks.NavInput
 		wantUSDC   string
 		wantSymbol string
 		wantPnL    string
 	}{
 		{
 			name: "usdc only",
-			input: pyth.NavInput{
+			input: marks.NavInput{
 				TreasuryUsdc: 1_250_000,
 			},
 			wantUSDC: "+0.00",
 		},
 		{
 			name: "xstock gain",
-			input: pyth.NavInput{
+			input: marks.NavInput{
 				TreasuryUsdc: 100_000,
-				Holdings: []pyth.MarkedHolding{{
+				Holdings: []marks.MarkedHolding{{
 					Symbol:    "AAPLx",
-					Mint:      jupiter.AAPLxMint,
+					Mint:      "0xb200000000000000000000c2e324d24d7eecd1fb",
 					Units:     50_000_000,
 					MarkUsdc:  2_400_000,
 					CostBasis: 1_000_000,
@@ -42,11 +42,11 @@ func TestPotRowsFromPythInput_perAssetDollarPnL(t *testing.T) {
 		},
 		{
 			name: "xstock loss",
-			input: pyth.NavInput{
+			input: marks.NavInput{
 				TreasuryUsdc: 100_000,
-				Holdings: []pyth.MarkedHolding{{
+				Holdings: []marks.MarkedHolding{{
 					Symbol:    "AAPLx",
-					Mint:      jupiter.AAPLxMint,
+					Mint:      "0xb200000000000000000000c2e324d24d7eecd1fb",
 					Units:     50_000_000,
 					MarkUsdc:  1_600_000,
 					CostBasis: 1_000_000,
@@ -106,7 +106,7 @@ func TestCostBasisMarkPerUnitMicros_largeBasisDoesNotWrap(t *testing.T) {
 	t.Parallel()
 	// Arrange: $200k paid for 1,000 shares. 2e11 micros x 1e8 scale overflows int64.
 	totalUSDC := int64(200_000_000_000)
-	tokenAtomics := int64(1_000) * jupiter.XStockAtomicScale
+	tokenAtomics := int64(1_000) * b20.TokenAtomicScale
 
 	// Act
 	mark, err := costBasisMarkPerUnitMicros(totalUSDC, tokenAtomics)
@@ -123,11 +123,11 @@ func TestCostBasisMarkPerUnitMicros_largeBasisDoesNotWrap(t *testing.T) {
 func TestPotRowsFromPythInput_largeHoldingValueDoesNotWrap(t *testing.T) {
 	t.Parallel()
 	// Arrange: 1,000 shares marked at $250. Units x mark = 2.5e19 > int64.
-	input := pyth.NavInput{
-		Holdings: []pyth.MarkedHolding{{
+	input := marks.NavInput{
+		Holdings: []marks.MarkedHolding{{
 			Symbol:    "AAPLx",
-			Mint:      jupiter.AAPLxMint,
-			Units:     1_000 * jupiter.XStockAtomicScale,
+			Mint:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+			Units:     1_000 * b20.TokenAtomicScale,
 			MarkUsdc:  250_000_000,
 			CostBasis: 200_000_000_000,
 		}},

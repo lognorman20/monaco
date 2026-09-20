@@ -49,7 +49,7 @@ func (d *DepositService) CreditUncreditedTreasuryUSDC(ctx context.Context, group
 		return false, nil
 	}
 
-	treasuryUSDC, err := d.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
+	treasuryUSDC, err := d.privy.TreasuryUSDCBalance(ctx, treasury.Address)
 	if err != nil {
 		return false, fmt.Errorf("treasury usdc balance: %w", err)
 	}

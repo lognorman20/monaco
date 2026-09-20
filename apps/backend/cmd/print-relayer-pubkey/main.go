@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/monaco/monaco/apps/backend/internal/config"
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/solana/balance"
 	"github.com/monaco/monaco/apps/backend/internal/worker"
 )
@@ -27,13 +27,13 @@ func main() {
 	}
 
 	pubkey := relayer.PublicKey()
-	solanaRPC := worker.NewHTTPSolanaRPC(cfg.SolanaCluster)
+	solanaRPC := worker.NewHTTPConfirmer(cfg.SolanaCluster)
 	lamports, err := solanaRPC.GetBalance(ctx, pubkey)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "balance: %v\n", err)
 		os.Exit(1)
 	}
-	usdcMicros, err := solanaRPC.GetSPLTokenBalance(ctx, pubkey, jupiter.USDCMint)
+	usdcMicros, err := solanaRPC.GetSPLTokenBalance(ctx, pubkey, evm.USDCAddress)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "usdc balance: %v\n", err)
 		os.Exit(1)

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 func TestEnsureMemberWallet_existingPrivyWallet_reusesWithoutCreate(t *testing.T) {
@@ -13,19 +13,19 @@ func TestEnsureMemberWallet_existingPrivyWallet_reusesWithoutCreate(t *testing.T
 	ctx := context.Background()
 	db, iso := integrationDB(t)
 	store := postgres.NewStore(db)
-	privyClient := privy.NewFakeClient()
+	privyClient := wallets.NewFakeClient()
 	session := NewSessionService(store, privyClient)
 
-	user, err := store.UpsertUser(ctx, iso.UniquePrivyID("existing-wallet"), "Existing Wallet User")
+	user, err := store.UpsertUser(ctx, iso.UniqueDynamicID("existing-wallet"), "Existing Wallet User")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
 	iso.TrackUser(user.ID)
 
-	existing := privy.WalletRef{
-		UserID:        privy.UserID(user.ID),
-		PrivyWalletID: "wallet-prefixed-existing",
-		SolanaAddress: "SoPrefixedExisting111111111111111111111111111",
+	existing := wallets.WalletRef{
+		UserID:        wallets.UserID(user.ID),
+		WalletID: "wallet-prefixed-existing",
+		Address: "SoPrefixedExisting111111111111111111111111111",
 	}
 	privy.RegisterPrivyMemberWallet(privyClient, user.PrivyUserID, existing)
 
@@ -36,11 +36,11 @@ func TestEnsureMemberWallet_existingPrivyWallet_reusesWithoutCreate(t *testing.T
 	}
 
 	// Assert
-	if wallet.PrivyWalletID != existing.PrivyWalletID {
-		t.Fatalf("PrivyWalletID = %q, want %q", wallet.PrivyWalletID, existing.PrivyWalletID)
+	if wallet.WalletID != existing.WalletID {
+		t.Fatalf("WalletID = %q, want %q", wallet.WalletID, existing.WalletID)
 	}
-	if wallet.SolanaAddress != existing.SolanaAddress {
-		t.Fatalf("SolanaAddress = %q, want %q", wallet.SolanaAddress, existing.SolanaAddress)
+	if wallet.Address != existing.Address {
+		t.Fatalf("Address = %q, want %q", wallet.Address, existing.Address)
 	}
 
 	var rowCount int
@@ -57,10 +57,10 @@ func TestEnsureMemberWallet_repeatSession_reusesSameWallet(t *testing.T) {
 	ctx := context.Background()
 	db, iso := integrationDB(t)
 	store := postgres.NewStore(db)
-	privyClient := privy.NewFakeClient()
+	privyClient := wallets.NewFakeClient()
 	session := NewSessionService(store, privyClient)
 
-	user, err := store.UpsertUser(ctx, iso.UniquePrivyID("wallet"), "Bartholomez")
+	user, err := store.UpsertUser(ctx, iso.UniqueDynamicID("wallet"), "Bartholomez")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
@@ -80,8 +80,8 @@ func TestEnsureMemberWallet_repeatSession_reusesSameWallet(t *testing.T) {
 	if first.ID != second.ID {
 		t.Fatalf("expected same wallet id, got first=%s second=%s", first.ID, second.ID)
 	}
-	if first.SolanaAddress != second.SolanaAddress {
-		t.Fatalf("expected same solana address, got first=%s second=%s", first.SolanaAddress, second.SolanaAddress)
+	if first.Address != second.Address {
+		t.Fatalf("expected same solana address, got first=%s second=%s", first.Address, second.Address)
 	}
 
 	var rowCount int

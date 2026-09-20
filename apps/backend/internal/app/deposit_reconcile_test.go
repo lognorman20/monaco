@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 func TestCreditUncreditedTreasuryUSDC_creditsSharesAndDepositedTogether(t *testing.T) {
@@ -15,7 +15,7 @@ func TestCreditUncreditedTreasuryUSDC_creditsSharesAndDepositedTogether(t *testi
 	h := integrationApp(t)
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "reconcile", "Reconcile User")
-	token := string(privy.AccessToken(h.ISO.UniqueToken("reconcile")))
+	token := string(auth.AccessToken(h.ISO.UniqueToken("reconcile")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "reconcile"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -41,7 +41,7 @@ func TestCreditUncreditedTreasuryUSDC_creditsSharesAndDepositedTogether(t *testi
 		t.Fatalf("Commit: %v", err)
 	}
 
-	privy.SetTreasuryUSDCBalance(h.Privy, treasury.SolanaAddress, 400_000)
+	wallets.SetTreasuryUSDCBalance(h.Privy, treasury.Address, 400_000)
 
 	credited, err := h.Deposits.CreditUncreditedTreasuryUSDC(ctx, group.GroupID)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestGetGroupView_afterSecondDeposit_showsZeroPnL(t *testing.T) {
 	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "view-pnl", "View PnL")
-	token := string(privy.AccessToken(h.ISO.UniqueToken("view-pnl")))
+	token := string(auth.AccessToken(h.ISO.UniqueToken("view-pnl")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "view-pnl"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -104,10 +104,10 @@ func TestGetGroupView_afterSecondDeposit_showsZeroPnL(t *testing.T) {
 	}
 
 	confirmDeposit(200_000)
-	privy.SetTreasuryUSDCBalance(h.Privy, treasury.SolanaAddress, 200_000)
+	wallets.SetTreasuryUSDCBalance(h.Privy, treasury.Address, 200_000)
 
 	confirmDeposit(200_000)
-	privy.SetTreasuryUSDCBalance(h.Privy, treasury.SolanaAddress, 400_000)
+	wallets.SetTreasuryUSDCBalance(h.Privy, treasury.Address, 400_000)
 
 	view, err := home.GetGroupView(ctx, token, group.GroupID)
 	if err != nil {
@@ -132,7 +132,7 @@ func TestGetGroupView_treasurySurplusWithoutShareCredit_reconcilesOnRead(t *test
 	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "surplus", "Surplus User")
-	token := string(privy.AccessToken(h.ISO.UniqueToken("surplus")))
+	token := string(auth.AccessToken(h.ISO.UniqueToken("surplus")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "surplus"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -158,7 +158,7 @@ func TestGetGroupView_treasurySurplusWithoutShareCredit_reconcilesOnRead(t *test
 		t.Fatalf("Commit: %v", err)
 	}
 
-	privy.SetTreasuryUSDCBalance(h.Privy, treasury.SolanaAddress, 400_000)
+	wallets.SetTreasuryUSDCBalance(h.Privy, treasury.Address, 400_000)
 
 	view, err := home.GetGroupView(ctx, token, group.GroupID)
 	if err != nil {

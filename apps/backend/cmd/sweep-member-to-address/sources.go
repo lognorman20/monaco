@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 type walletKindReader interface {
@@ -14,7 +14,7 @@ type walletKindReader interface {
 }
 
 type privySweepLister interface {
-	ListAppSolanaWallets(ctx context.Context) ([]privy.WalletRef, error)
+	ListAppSolanaWallets(ctx context.Context) ([]wallets.WalletRef, error)
 }
 
 func loadSweepSources(ctx context.Context, flags sweepFlags, store walletKindReader, client privySweepLister) ([]sweepSource, string, error) {
@@ -41,9 +41,9 @@ func loadSweepSources(ctx context.Context, flags sweepFlags, store walletKindRea
 		var sources []sweepSource
 		for _, wallet := range wallets {
 			sources = append(sources, sweepSource{
-				kind:     classifyWalletKind(wallet.SolanaAddress, memberSet, treasurySet, "privy"),
-				address:  wallet.SolanaAddress,
-				walletID: wallet.PrivyWalletID,
+				kind:     classifyWalletKind(wallet.Address, memberSet, treasurySet, "privy"),
+				address:  wallet.Address,
+				walletID: wallet.WalletID,
 			})
 		}
 		return sources, "privy app wallets (--all)", nil

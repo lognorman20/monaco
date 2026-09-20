@@ -91,67 +91,67 @@ func logSweepAttempt(groupID, userID, depositID string, amount int64, fromAddres
 	)
 }
 
-func logSweepBroadcastSubmitted(depositID, groupID, txSignature, treasuryAddress string) {
+func logSweepBroadcastSubmitted(depositID, groupID, txHash, treasuryAddress string) {
 	slog.Info("sweep broadcast submitted",
 		"deposit_id", depositID,
 		"group_id", groupID,
-		"tx_signature", txSignature,
+		"tx_signature", txHash,
 		"treasury_address", treasuryAddress,
 	)
 }
 
-func logSweepDepositResuming(depositID, groupID, txSignature string) {
+func logSweepDepositResuming(depositID, groupID, txHash string) {
 	slog.Info("sweep deposit resuming broadcast",
 		"deposit_id", depositID,
 		"group_id", groupID,
-		"tx_signature", txSignature,
+		"tx_signature", txHash,
 	)
 }
 
-func logSweepConfirmationCheck(depositID, txSignature string, confirmed bool, err error) {
+func logSweepConfirmationCheck(depositID, txHash string, confirmed bool, err error) {
 	if err != nil {
 		slog.Warn("sweep confirmation check failed",
 			"deposit_id", depositID,
-			"tx_signature", txSignature,
+			"tx_signature", txHash,
 			"err", err,
 		)
 		return
 	}
 	slog.Info("sweep confirmation check",
 		"deposit_id", depositID,
-		"tx_signature", txSignature,
+		"tx_signature", txHash,
 		"confirmed", confirmed,
 	)
 }
 
-func logSweepConfirm(groupID, userID, depositID, txSignature string) {
+func logSweepConfirm(groupID, userID, depositID, txHash string) {
 	slog.Info("sweep confirmed",
 		"group_id", groupID,
 		"user_id", userID,
 		"deposit_id", depositID,
-		"tx_signature", txSignature,
+		"tx_signature", txHash,
 	)
 }
 
-func logSweepDepositCredited(depositID, groupID, userID, txSignature string) {
+func logSweepDepositCredited(depositID, groupID, userID, txHash string) {
 	slog.Info("sweep deposit credited",
 		"deposit_id", depositID,
 		"group_id", groupID,
 		"user_id", userID,
-		"tx_signature", txSignature,
+		"tx_signature", txHash,
 	)
 }
 
-func logSolanaRPCConfirmationCheck(txSignature string, confirmed bool, confirmationStatus string, err error) {
+func logConfirmerConfirmationCheck(txHash string, confirmed bool, confirmationStatus string, err error) {
 	if err != nil {
 		slog.Warn("solana rpc confirmation check failed",
-			"tx_signature", txSignature,
+			"tx_signature", txHash,
 			"err", err,
 		)
 		return
 	}
 	args := []any{
-		"tx_signature", txSignature,
+		"tx_signature", txHash,
 		"confirmed", confirmed,
 	}
 	if confirmationStatus != "" {

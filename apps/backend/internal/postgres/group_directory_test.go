@@ -38,7 +38,7 @@ func insertNamedGroup(t *testing.T, ctx context.Context, store *Store, iso *Test
 
 func seedDirectoryUser(t *testing.T, ctx context.Context, store *Store, iso *TestIsolation, label string) string {
 	t.Helper()
-	user, err := store.UpsertUser(ctx, iso.UniquePrivyID(label), "Ada "+label)
+	user, err := store.UpsertUser(ctx, iso.UniqueDynamicID(label), "Ada "+label)
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}

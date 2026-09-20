@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 )
 
@@ -19,7 +19,7 @@ func TestGetGroupView_afterUSDCtoAAPLxSwap_potTotalUnchanged(t *testing.T) {
 	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "swap-nav", "Swap NAV")
-	token := string(privy.AccessToken(h.ISO.UniqueToken("swap-nav")))
+	token := string(auth.AccessToken(h.ISO.UniqueToken("swap-nav")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "swap-nav"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -54,9 +54,9 @@ func TestGetGroupView_afterUSDCtoAAPLxSwap_potTotalUnchanged(t *testing.T) {
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      testTxSignature(h.ISO, "buy-aapl"),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      testTxHash(h.ISO, "buy-aapl"),
 		ExecuteRequestID: testRequestID(h.ISO, "buy-aapl"),
 		CostBasisPrice:   swappedUSDC,
 		CostBasisAmount:  aaplAtomics,
@@ -66,16 +66,16 @@ func TestGetGroupView_afterUSDCtoAAPLxSwap_potTotalUnchanged(t *testing.T) {
 	}
 
 	remainingUSDC := depositMicros - swappedUSDC
-	privy.SetTreasuryUSDCBalance(h.Privy, treasury.SolanaAddress, remainingUSDC)
+	wallets.SetTreasuryUSDCBalance(h.Privy, treasury.Address, remainingUSDC)
 
-	pyth.RegisterMarkedPot(h.Pyth, pyth.TreasuryRef{
+	chainlink.RegisterMarkedPot(h.Pyth, marks.TreasuryRef{
 		GroupID: group.GroupID,
-		Address: treasury.SolanaAddress,
-	}, pyth.NavInput{
+		Address: treasury.Address,
+	}, marks.NavInput{
 		TreasuryUsdc: remainingUSDC,
-		Holdings: []pyth.MarkedHolding{{
+		Holdings: []marks.MarkedHolding{{
 			Symbol:    "AAPLx",
-			Mint:      jupiter.AAPLxMint,
+			Mint:      "0xb200000000000000000000c2e324d24d7eecd1fb",
 			Units:     aaplAtomics,
 			MarkUsdc:  2_000_000,
 			CostBasis: swappedUSDC,
@@ -117,7 +117,7 @@ func TestComputeGroupPotView_costBasisFallback_withoutPyth(t *testing.T) {
 	h := integrationApp(t)
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "cb-nav", "CB NAV")
-	token := string(privy.AccessToken(h.ISO.UniqueToken("cb-nav")))
+	token := string(auth.AccessToken(h.ISO.UniqueToken("cb-nav")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "cb-nav"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -149,9 +149,9 @@ func TestComputeGroupPotView_costBasisFallback_withoutPyth(t *testing.T) {
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      testTxSignature(h.ISO, "cb-buy"),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      testTxHash(h.ISO, "cb-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "cb-buy"),
 		CostBasisPrice:   swappedUSDC,
 		CostBasisAmount:  aaplAtomics,
@@ -161,7 +161,7 @@ func TestComputeGroupPotView_costBasisFallback_withoutPyth(t *testing.T) {
 	}
 
 	remainingUSDC := depositMicros - swappedUSDC
-	potView, err := computeGroupPotView(ctx, h.Store, nil, h.Symbols, group.GroupID, treasury.SolanaAddress, remainingUSDC)
+	potView, err := computeGroupPotView(ctx, h.Store, nil, h.Symbols, group.GroupID, treasury.Address, remainingUSDC)
 	if err != nil {
 		t.Fatalf("computeGroupPotView: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestGetHome_pythError_stillSucceeds(t *testing.T) {
 	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "pyth-err", "Pyth Err")
-	token := string(privy.AccessToken(h.ISO.UniqueToken("pyth-err")))
+	token := string(auth.AccessToken(h.ISO.UniqueToken("pyth-err")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "pyth-err"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -213,9 +213,9 @@ func TestGetHome_pythError_stillSucceeds(t *testing.T) {
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      testTxSignature(h.ISO, "pyth-err-buy"),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      testTxHash(h.ISO, "pyth-err-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "pyth-err-buy"),
 		CostBasisPrice:   swappedUSDC,
 		CostBasisAmount:  aaplAtomics,
@@ -225,11 +225,11 @@ func TestGetHome_pythError_stillSucceeds(t *testing.T) {
 	}
 
 	remainingUSDC := depositMicros - swappedUSDC
-	privy.SetTreasuryUSDCBalance(h.Privy, treasury.SolanaAddress, remainingUSDC)
+	wallets.SetTreasuryUSDCBalance(h.Privy, treasury.Address, remainingUSDC)
 
-	pyth.RegisterMarkedPotError(h.Pyth, pyth.TreasuryRef{
+	chainlink.RegisterMarkedPotError(h.Pyth, marks.TreasuryRef{
 		GroupID: group.GroupID,
-		Address: treasury.SolanaAddress,
+		Address: treasury.Address,
 	}, fmt.Errorf("pyth latest price: status 403"))
 
 	result, err := home.GetHome(ctx, token)
@@ -259,7 +259,7 @@ func TestGetGroupView_pythError_stillSucceeds(t *testing.T) {
 	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "view-pyth", "View Pyth")
-	token := string(privy.AccessToken(h.ISO.UniqueToken("view-pyth")))
+	token := string(auth.AccessToken(h.ISO.UniqueToken("view-pyth")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "view-pyth"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -291,9 +291,9 @@ func TestGetGroupView_pythError_stillSucceeds(t *testing.T) {
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      testTxSignature(h.ISO, "view-pyth-buy"),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      testTxHash(h.ISO, "view-pyth-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "view-pyth-buy"),
 		CostBasisPrice:   swappedUSDC,
 		CostBasisAmount:  aaplAtomics,
@@ -303,11 +303,11 @@ func TestGetGroupView_pythError_stillSucceeds(t *testing.T) {
 	}
 
 	remainingUSDC := depositMicros - swappedUSDC
-	privy.SetTreasuryUSDCBalance(h.Privy, treasury.SolanaAddress, remainingUSDC)
+	wallets.SetTreasuryUSDCBalance(h.Privy, treasury.Address, remainingUSDC)
 
-	pyth.RegisterMarkedPotError(h.Pyth, pyth.TreasuryRef{
+	chainlink.RegisterMarkedPotError(h.Pyth, marks.TreasuryRef{
 		GroupID: group.GroupID,
-		Address: treasury.SolanaAddress,
+		Address: treasury.Address,
 	}, fmt.Errorf("pyth latest price: status 403"))
 
 	view, err := home.GetGroupView(ctx, token, group.GroupID)
@@ -327,7 +327,7 @@ func TestGetGroupView_perAssetDollarPnL_gainAndLoss(t *testing.T) {
 	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "pot-pnl", "Pot PnL")
-	token := string(privy.AccessToken(h.ISO.UniqueToken("pot-pnl")))
+	token := string(auth.AccessToken(h.ISO.UniqueToken("pot-pnl")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "pot-pnl"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -359,9 +359,9 @@ func TestGetGroupView_perAssetDollarPnL_gainAndLoss(t *testing.T) {
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      testTxSignature(h.ISO, "pot-pnl-buy"),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      testTxHash(h.ISO, "pot-pnl-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "pot-pnl-buy"),
 		CostBasisPrice:   swappedUSDC,
 		CostBasisAmount:  aaplAtomics,
@@ -371,16 +371,16 @@ func TestGetGroupView_perAssetDollarPnL_gainAndLoss(t *testing.T) {
 	}
 
 	remainingUSDC := depositMicros - swappedUSDC
-	privy.SetTreasuryUSDCBalance(h.Privy, treasury.SolanaAddress, remainingUSDC)
+	wallets.SetTreasuryUSDCBalance(h.Privy, treasury.Address, remainingUSDC)
 
-	pyth.RegisterMarkedPot(h.Pyth, pyth.TreasuryRef{
+	chainlink.RegisterMarkedPot(h.Pyth, marks.TreasuryRef{
 		GroupID: group.GroupID,
-		Address: treasury.SolanaAddress,
-	}, pyth.NavInput{
+		Address: treasury.Address,
+	}, marks.NavInput{
 		TreasuryUsdc: remainingUSDC,
-		Holdings: []pyth.MarkedHolding{{
+		Holdings: []marks.MarkedHolding{{
 			Symbol:    "AAPLx",
-			Mint:      jupiter.AAPLxMint,
+			Mint:      "0xb200000000000000000000c2e324d24d7eecd1fb",
 			Units:     aaplAtomics,
 			MarkUsdc:  2_400_000,
 			CostBasis: swappedUSDC,
@@ -407,7 +407,7 @@ func TestGetGroupView_TSLAxBuy_potRowShowsTickerNotMint(t *testing.T) {
 	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
 
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "tsla-pot", "TSLA Pot")
-	token := string(privy.AccessToken(h.ISO.UniqueToken("tsla-pot")))
+	token := string(auth.AccessToken(h.ISO.UniqueToken("tsla-pot")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "tsla-pot"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -439,9 +439,9 @@ func TestGetGroupView_TSLAxBuy_potRowShowsTickerNotMint(t *testing.T) {
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.TSLAxMint,
-		TxSignature:      testTxSignature(h.ISO, "buy-tsla"),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb2000000000000000000000000000000000004",
+		TxHash:      testTxHash(h.ISO, "buy-tsla"),
 		ExecuteRequestID: testRequestID(h.ISO, "buy-tsla"),
 		CostBasisPrice:   swappedUSDC,
 		CostBasisAmount:  tslaAtomics,
@@ -451,16 +451,16 @@ func TestGetGroupView_TSLAxBuy_potRowShowsTickerNotMint(t *testing.T) {
 	}
 
 	remainingUSDC := depositMicros - swappedUSDC
-	privy.SetTreasuryUSDCBalance(h.Privy, treasury.SolanaAddress, remainingUSDC)
+	wallets.SetTreasuryUSDCBalance(h.Privy, treasury.Address, remainingUSDC)
 
-	pyth.RegisterMarkedPot(h.Pyth, pyth.TreasuryRef{
+	chainlink.RegisterMarkedPot(h.Pyth, marks.TreasuryRef{
 		GroupID: group.GroupID,
-		Address: treasury.SolanaAddress,
-	}, pyth.NavInput{
+		Address: treasury.Address,
+	}, marks.NavInput{
 		TreasuryUsdc: remainingUSDC,
-		Holdings: []pyth.MarkedHolding{{
+		Holdings: []marks.MarkedHolding{{
 			Symbol:    "TSLAx",
-			Mint:      jupiter.TSLAxMint,
+			Mint:      "0xb2000000000000000000000000000000000004",
 			Units:     tslaAtomics,
 			MarkUsdc:  3_630_000,
 			CostBasis: swappedUSDC,
@@ -477,7 +477,7 @@ func TestGetGroupView_TSLAxBuy_potRowShowsTickerNotMint(t *testing.T) {
 	if view.Pot[1].Symbol != "TSLAx" {
 		t.Fatalf("holding symbol = %q, want TSLAx (not raw mint)", view.Pot[1].Symbol)
 	}
-	if view.Pot[1].Symbol == jupiter.TSLAxMint {
+	if view.Pot[1].Symbol == "0xb2000000000000000000000000000000000004" {
 		t.Fatalf("pot row leaked raw mint as symbol")
 	}
 }

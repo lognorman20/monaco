@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -19,7 +19,7 @@ func TestWithdrawToBalance_fullStake_paysMemberWallet(t *testing.T) {
 	governance := NewGovernanceService(h.Store, h.Privy)
 	governance.SetRedeemService(h.Redeem)
 
-	token := privy.AccessToken(h.ISO.UniqueToken("withdraw-full"))
+	token := auth.AccessToken(h.ISO.UniqueToken("withdraw-full"))
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-full", "Withdraw User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-full"), DefaultGroupRules())
 	if err != nil {
@@ -68,14 +68,14 @@ func TestWithdrawToBalance_fullStake_paysMemberWallet(t *testing.T) {
 	if !ok {
 		t.Fatal("expected PayUSDC call")
 	}
-	if payout.ToAddress != wallet.SolanaAddress {
-		t.Fatalf("payout to = %q, want member wallet %q", payout.ToAddress, wallet.SolanaAddress)
+	if payout.ToAddress != wallet.Address {
+		t.Fatalf("payout to = %q, want member wallet %q", payout.ToAddress, wallet.Address)
 	}
 	if payout.Amount != treasuryUSDC {
 		t.Fatalf("payout amount = %d, want %d", payout.Amount, treasuryUSDC)
 	}
 
-	balance, err := h.Privy.MemberUSDCBalance(ctx, wallet.SolanaAddress)
+	balance, err := h.Privy.MemberUSDCBalance(ctx, wallet.Address)
 	if err != nil {
 		t.Fatalf("MemberUSDCBalance: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestWithdrawToBalance_rejectsOverShare(t *testing.T) {
 	governance := NewGovernanceService(h.Store, h.Privy)
 	governance.SetRedeemService(h.Redeem)
 
-	token := privy.AccessToken(h.ISO.UniqueToken("withdraw-over"))
+	token := auth.AccessToken(h.ISO.UniqueToken("withdraw-over"))
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-over", "Over User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-over"), DefaultGroupRules())
 	if err != nil {
@@ -130,7 +130,7 @@ func TestWithdrawToBalance_halfNAV_twoMemberPot(t *testing.T) {
 	ctx := context.Background()
 	governance := NewGovernanceService(h.Store, h.Privy)
 
-	token := privy.AccessToken(h.ISO.UniqueToken("withdraw-half-usdc"))
+	token := auth.AccessToken(h.ISO.UniqueToken("withdraw-half-usdc"))
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-half-usdc", "Half USDC User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-half-usdc"), DefaultGroupRules())
 	if err != nil {
@@ -152,7 +152,7 @@ func TestWithdrawToBalance_halfNAV_twoMemberPot(t *testing.T) {
 		t.Fatalf("commit user position: %v", err)
 	}
 
-	otherUser, err := h.Store.UpsertUser(ctx, h.ISO.UniquePrivyID("withdraw-half-usdc-other"), "Other")
+	otherUser, err := h.Store.UpsertUser(ctx, h.ISO.UniqueDynamicID("withdraw-half-usdc-other"), "Other")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestWithdrawToBalance_halfNAV_withStockHoldings(t *testing.T) {
 	governance := NewGovernanceService(h.Store, h.Privy)
 	governance.SetRedeemService(h.Redeem)
 
-	token := privy.AccessToken(h.ISO.UniqueToken("withdraw-half"))
+	token := auth.AccessToken(h.ISO.UniqueToken("withdraw-half"))
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-half", "Half User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-half"), DefaultGroupRules())
 	if err != nil {
@@ -213,7 +213,7 @@ func TestWithdrawToBalance_halfNAV_withStockHoldings(t *testing.T) {
 		t.Fatalf("commit user position: %v", err)
 	}
 
-	otherUser, err := h.Store.UpsertUser(ctx, h.ISO.UniquePrivyID("withdraw-half-other"), "Other")
+	otherUser, err := h.Store.UpsertUser(ctx, h.ISO.UniqueDynamicID("withdraw-half-other"), "Other")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
@@ -235,9 +235,9 @@ func TestWithdrawToBalance_halfNAV_withStockHoldings(t *testing.T) {
 	if _, _, err := h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           500_000,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      testTxSignature(h.ISO, "withdraw-half-buy"),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      testTxHash(h.ISO, "withdraw-half-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "withdraw-half-buy"),
 		CostBasisPrice:   500_000,
 		CostBasisAmount:  500_000,
@@ -248,7 +248,7 @@ func TestWithdrawToBalance_halfNAV_withStockHoldings(t *testing.T) {
 
 	const sellAmount = int64(250_000)
 	sellRequestID := testRequestID(h.ISO, "withdraw-half-sell")
-	registerHappySell(h.Jupiter, jupiter.AAPLxMint, sellAmount, sellRequestID, testTxSignature(h.ISO, "withdraw-half-sell"))
+	registerHappySell(h.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", sellAmount, sellRequestID, testTxHash(h.ISO, "withdraw-half-sell"))
 
 	job, err := h.Redeem.WithdrawToBalance(ctx, WithdrawToBalanceRequest{
 		AccessToken: string(token),
@@ -273,7 +273,7 @@ func TestLeaveGroup_withWithdrawStake_zeroSharesThenLeaves(t *testing.T) {
 	governance := NewGovernanceService(h.Store, h.Privy)
 	governance.SetRedeemService(h.Redeem)
 
-	token := privy.AccessToken(h.ISO.UniqueToken("leave-withdraw"))
+	token := auth.AccessToken(h.ISO.UniqueToken("leave-withdraw"))
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "leave-withdraw", "Leave Withdraw")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "leave-withdraw"), DefaultGroupRules())
 	if err != nil {
@@ -330,7 +330,7 @@ func TestWithdrawToBalance_abortsStuckDebitedJob_allowsRetry(t *testing.T) {
 	governance := NewGovernanceService(h.Store, h.Privy)
 	governance.SetRedeemService(h.Redeem)
 
-	token := privy.AccessToken(h.ISO.UniqueToken("withdraw-stuck"))
+	token := auth.AccessToken(h.ISO.UniqueToken("withdraw-stuck"))
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-stuck", "Stuck User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-stuck"), DefaultGroupRules())
 	if err != nil {
@@ -353,9 +353,9 @@ func TestWithdrawToBalance_abortsStuckDebitedJob_allowsRetry(t *testing.T) {
 	if _, _, err := h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           500_000,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      testTxSignature(h.ISO, "withdraw-stuck-buy"),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      testTxHash(h.ISO, "withdraw-stuck-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "withdraw-stuck-buy"),
 		CostBasisPrice:   500_000,
 		CostBasisAmount:  500_000,
@@ -413,7 +413,7 @@ func TestWithdrawToBalance_partialUsdcOnly_skipsStockSell(t *testing.T) {
 	governance := NewGovernanceService(h.Store, h.Privy)
 	governance.SetRedeemService(h.Redeem)
 
-	token := privy.AccessToken(h.ISO.UniqueToken("withdraw-usdc-only"))
+	token := auth.AccessToken(h.ISO.UniqueToken("withdraw-usdc-only"))
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-usdc-only", "USDC Only User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-usdc-only"), DefaultGroupRules())
 	if err != nil {
@@ -433,7 +433,7 @@ func TestWithdrawToBalance_partialUsdcOnly_skipsStockSell(t *testing.T) {
 		t.Fatalf("commit user position: %v", err)
 	}
 
-	otherUser, err := h.Store.UpsertUser(ctx, h.ISO.UniquePrivyID("withdraw-usdc-only-other"), "Other")
+	otherUser, err := h.Store.UpsertUser(ctx, h.ISO.UniqueDynamicID("withdraw-usdc-only-other"), "Other")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
@@ -455,9 +455,9 @@ func TestWithdrawToBalance_partialUsdcOnly_skipsStockSell(t *testing.T) {
 	if _, _, err := h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           500_000,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      testTxSignature(h.ISO, "withdraw-usdc-only-buy"),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      testTxHash(h.ISO, "withdraw-usdc-only-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "withdraw-usdc-only-buy"),
 		CostBasisPrice:   500_000,
 		CostBasisAmount:  500_000,
@@ -491,7 +491,7 @@ func TestWithdrawToBalance_clearsDebitedJobBeforeNewWithdraw(t *testing.T) {
 	governance := NewGovernanceService(h.Store, h.Privy)
 	governance.SetRedeemService(h.Redeem)
 
-	token := privy.AccessToken(h.ISO.UniqueToken("withdraw-lock"))
+	token := auth.AccessToken(h.ISO.UniqueToken("withdraw-lock"))
 	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-lock", "Lock User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-lock"), DefaultGroupRules())
 	if err != nil {
@@ -518,7 +518,7 @@ func TestWithdrawToBalance_clearsDebitedJobBeforeNewWithdraw(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTx lock job: %v", err)
 	}
-	if _, err := h.Store.InsertRedeemJobTx(ctx, lockTx, session.UserID, group.GroupID, 100_000, 100_000, wallet.SolanaAddress); err != nil {
+	if _, err := h.Store.InsertRedeemJobTx(ctx, lockTx, session.UserID, group.GroupID, 100_000, 100_000, wallet.Address); err != nil {
 		t.Fatalf("InsertRedeemJobTx: %v", err)
 	}
 	if err := lockTx.Commit(); err != nil {

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -179,15 +179,15 @@ func (h *HomeService) GetHomeMissedProposals(ctx context.Context, accessToken st
 }
 
 func (h *HomeService) authenticateHomeUser(ctx context.Context, accessToken string) (postgres.User, []string, error) {
-	identity, err := h.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := h.privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return postgres.User{}, nil, privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return postgres.User{}, nil, auth.ErrUnauthorized
 		}
 		return postgres.User{}, nil, fmt.Errorf("verify session: %w", err)
 	}
 
-	user, found, err := h.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := h.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return postgres.User{}, nil, err
 	}

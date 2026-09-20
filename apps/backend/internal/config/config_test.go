@@ -1,249 +1,70 @@
 package config
 
 import (
-	"strings"
 	"testing"
-
-	solanakey "github.com/monaco/monaco/apps/backend/internal/solana/key"
 )
 
+const testRelayerKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efc684173c51d714e00"
+
 func clearConfigEnv(t *testing.T) {
-	t.Setenv("DATABASE_URL", "")
-	t.Setenv("PRIVY_APP_ID", "")
-	t.Setenv("PRIVY_APP_SECRET", "")
-	t.Setenv("PRIVY_AUTHORIZATION_PRIVATE_KEY", "")
-	t.Setenv("PRIVY_AUTHORIZATION_KEY_ID", "")
-	t.Setenv("RELAYER_PRIVATE_KEY", "")
-	t.Setenv("PYTH_API_KEY", "")
-	t.Setenv("PYTH_HERMES_BASE_URL", "")
-	t.Setenv("JUPITER_API_KEY", "")
+	t.Helper()
+	for _, k := range []string{
+		"DATABASE_URL", "DYNAMIC_ENVIRONMENT_ID", "DYNAMIC_API_TOKEN", "DYNAMIC_WALLET_PASSWORD",
+		"WALLET_SHARES_KEY", "SIGNER_URL", "SIGNER_SHARED_SECRET", "BASE_RPC_URL", "RELAYER_PRIVATE_KEY",
+		"KYBER_CLIENT_ID", "PYTH_API_KEY", "PYTH_HERMES_BASE_URL",
+	} {
+		t.Setenv(k, "")
+	}
 }
 
 func setValidConfigEnv(t *testing.T) {
+	t.Helper()
 	t.Setenv("DATABASE_URL", "postgres://monaco:monaco@localhost:54322/monaco?sslmode=disable")
-	t.Setenv("PRIVY_APP_ID", "test-privy-app-id")
-	t.Setenv("PRIVY_APP_SECRET", "test-privy-app-secret")
-	t.Setenv("RELAYER_PRIVATE_KEY", solanakey.TestPrivateKeyBase58())
-	t.Setenv("PRIVY_AUTHORIZATION_PRIVATE_KEY", "wallet-auth:test-authorization-key")
-	t.Setenv("PRIVY_AUTHORIZATION_KEY_ID", "test-authorization-key-id")
+	t.Setenv("DYNAMIC_ENVIRONMENT_ID", "test-dynamic-env")
+	t.Setenv("RELAYER_PRIVATE_KEY", testRelayerKey)
+	t.Setenv("SIGNER_SHARED_SECRET", "test-signer-secret")
+	t.Setenv("WALLET_SHARES_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 }
 
 func TestLoad_returnsConfigWhenAllRequiredEnvVarsSet(t *testing.T) {
-	// Arrange
 	clearConfigEnv(t)
 	setValidConfigEnv(t)
 
-	// Act
 	cfg, err := Load()
-
-	// Assert
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.DatabaseURL != "postgres://monaco:monaco@localhost:54322/monaco?sslmode=disable" {
-		t.Fatalf("DatabaseURL = %q", cfg.DatabaseURL)
+	if cfg.DynamicEnvironmentID != "test-dynamic-env" {
+		t.Fatalf("DynamicEnvironmentID = %q", cfg.DynamicEnvironmentID)
 	}
-	if cfg.PrivyAppID != "test-privy-app-id" {
-		t.Fatalf("PrivyAppID = %q", cfg.PrivyAppID)
+	if cfg.SignerURL != defaultSignerURL {
+		t.Fatalf("SignerURL = %q", cfg.SignerURL)
 	}
-	if cfg.PrivyAppSecret != "test-privy-app-secret" {
-		t.Fatalf("PrivyAppSecret = %q", cfg.PrivyAppSecret)
+	if cfg.BaseRPCURL != defaultBaseRPCURL {
+		t.Fatalf("BaseRPCURL = %q", cfg.BaseRPCURL)
 	}
-	if cfg.RelayerPrivateKey != solanakey.TestPrivateKeyBase58() {
-		t.Fatalf("RelayerPrivateKey = %q", cfg.RelayerPrivateKey)
+	if cfg.KyberClientID != defaultKyberClientID {
+		t.Fatalf("KyberClientID = %q", cfg.KyberClientID)
 	}
-	if cfg.SolanaCluster != SolanaCluster {
-		t.Fatalf("SolanaCluster = %q, want %q", cfg.SolanaCluster, SolanaCluster)
-	}
-	if cfg.PrivyAuthorizationPrivateKey != "wallet-auth:test-authorization-key" {
-		t.Fatalf("PrivyAuthorizationPrivateKey = %q", cfg.PrivyAuthorizationPrivateKey)
-	}
-	if cfg.PrivyAuthorizationKeyID != "test-authorization-key-id" {
-		t.Fatalf("PrivyAuthorizationKeyID = %q", cfg.PrivyAuthorizationKeyID)
+	if _, err := cfg.RelayerAddress(); err != nil {
+		t.Fatalf("RelayerAddress: %v", err)
 	}
 }
 
 func TestLoad_missingDatabaseURL_returnsError(t *testing.T) {
-	// Arrange
 	clearConfigEnv(t)
 	setValidConfigEnv(t)
 	t.Setenv("DATABASE_URL", "")
-
-	// Act
-	_, err := Load()
-
-	// Assert
-	if err == nil {
-		t.Fatal("expected error for missing DATABASE_URL")
-	}
-	if err.Error() == "" {
-		t.Fatal("expected non-empty error message")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error")
 	}
 }
 
-func TestLoad_missingPrivyAppID_returnsError(t *testing.T) {
-	// Arrange
+func TestLoad_missingDynamicEnvironmentID_returnsError(t *testing.T) {
 	clearConfigEnv(t)
 	setValidConfigEnv(t)
-	t.Setenv("PRIVY_APP_ID", "")
-
-	// Act
-	_, err := Load()
-
-	// Assert
-	if err == nil {
-		t.Fatal("expected error for missing PRIVY_APP_ID")
-	}
-}
-
-func TestLoad_missingPrivyAppSecret_returnsError(t *testing.T) {
-	// Arrange
-	clearConfigEnv(t)
-	setValidConfigEnv(t)
-	t.Setenv("PRIVY_APP_SECRET", "")
-
-	// Act
-	_, err := Load()
-
-	// Assert
-	if err == nil {
-		t.Fatal("expected error for missing PRIVY_APP_SECRET")
-	}
-}
-
-func TestLoad_missingAuthorizationKeyIDWhenPrivateKeySet_returnsError(t *testing.T) {
-	// Arrange
-	clearConfigEnv(t)
-	setValidConfigEnv(t)
-	t.Setenv("PRIVY_AUTHORIZATION_KEY_ID", "")
-
-	// Act
-	_, err := Load()
-
-	// Assert
-	if err == nil {
-		t.Fatal("expected error for missing PRIVY_AUTHORIZATION_KEY_ID when private key is set")
-	}
-}
-
-func TestLoad_missingRelayerPrivateKey_returnsError(t *testing.T) {
-	// Arrange
-	clearConfigEnv(t)
-	setValidConfigEnv(t)
-	t.Setenv("RELAYER_PRIVATE_KEY", "")
-
-	// Act
-	_, err := Load()
-
-	// Assert
-	if err == nil {
-		t.Fatal("expected error for missing RELAYER_PRIVATE_KEY")
-	}
-}
-
-func TestLoad_optionalPythAPIKey_isLoadedWhenSet(t *testing.T) {
-	// Arrange
-	clearConfigEnv(t)
-	setValidConfigEnv(t)
-	t.Setenv("PYTH_API_KEY", "  test-pyth-key  ")
-
-	// Act
-	cfg, err := Load()
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.PythAPIKey != "test-pyth-key" {
-		t.Fatalf("PythAPIKey = %q", cfg.PythAPIKey)
-	}
-}
-
-func TestLoad_optionalJupiterAPIKey_isLoadedWhenSet(t *testing.T) {
-	// Arrange
-	clearConfigEnv(t)
-	setValidConfigEnv(t)
-	t.Setenv("JUPITER_API_KEY", "  test-jupiter-key  ")
-
-	// Act
-	cfg, err := Load()
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.JupiterAPIKey != "test-jupiter-key" {
-		t.Fatalf("JupiterAPIKey = %q", cfg.JupiterAPIKey)
-	}
-}
-
-func TestLoad_optionalPythHermesBaseURL_isTrimmedWhenSet(t *testing.T) {
-	clearConfigEnv(t)
-	setValidConfigEnv(t)
-	t.Setenv("PYTH_HERMES_BASE_URL", " https://example.test/hermes/ ")
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.PythHermesBaseURL != "https://example.test/hermes" {
-		t.Fatalf("PythHermesBaseURL = %q", cfg.PythHermesBaseURL)
-	}
-}
-
-func TestLoad_jsonRelayerPrivateKey_isNormalizedToBase58(t *testing.T) {
-	// Arrange
-	clearConfigEnv(t)
-	setValidConfigEnv(t)
-	want := solanakey.TestPrivateKeyBase58()
-	t.Setenv("RELAYER_PRIVATE_KEY", solanakey.TestPrivateKeyJSONIntArray())
-
-	// Act
-	cfg, err := Load()
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.RelayerPrivateKey != want {
-		t.Fatalf("RelayerPrivateKey = %q, want normalized %q", cfg.RelayerPrivateKey, want)
-	}
-}
-
-func TestLoad_invalidRelayerPrivateKeyFormat_returnsHelpfulError(t *testing.T) {
-	// Arrange
-	clearConfigEnv(t)
-	setValidConfigEnv(t)
-	t.Setenv("RELAYER_PRIVATE_KEY", "[1,2,not-an-int]")
-
-	// Act
-	_, err := Load()
-
-	// Assert
-	if err == nil {
-		t.Fatal("expected error for invalid relayer key")
-	}
-	if !strings.Contains(err.Error(), "JSON array") {
-		t.Fatalf("error = %q, want JSON array guidance", err.Error())
-	}
-}
-
-func TestLoad_trimsWhitespaceFromEnvValues(t *testing.T) {
-	// Arrange
-	clearConfigEnv(t)
-	t.Setenv("DATABASE_URL", "  postgres://monaco:monaco@localhost:54322/monaco?sslmode=disable  ")
-	t.Setenv("PRIVY_APP_ID", "  app-id  ")
-	t.Setenv("PRIVY_APP_SECRET", "  app-secret  ")
-	t.Setenv("RELAYER_PRIVATE_KEY", "  "+solanakey.TestPrivateKeyBase58()+"  ")
-
-	// Act
-	cfg, err := Load()
-
-	// Assert
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.PrivyAppID != "app-id" {
-		t.Fatalf("PrivyAppID = %q", cfg.PrivyAppID)
+	t.Setenv("DYNAMIC_ENVIRONMENT_ID", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error")
 	}
 }

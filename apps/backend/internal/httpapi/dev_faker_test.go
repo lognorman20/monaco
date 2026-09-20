@@ -10,7 +10,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/config"
 	"github.com/monaco/monaco/apps/backend/internal/faker"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 const localTestDBURL = "postgres://monaco:x@127.0.0.1:55432/monaco?sslmode=disable"
@@ -19,7 +19,7 @@ type fakerTestEnv struct {
 	handlers *DevFakerHandlers
 	groups   *GroupHandlers
 	auth     *AuthHandlers
-	privy    privy.Client
+	privy    wallets.Client
 	iso      *postgres.TestIsolation
 }
 
@@ -41,7 +41,7 @@ func newFakerTestEnv(t *testing.T) fakerTestEnv {
 	}
 }
 
-func (e fakerTestEnv) createGroup(t *testing.T, token privy.AccessToken) string {
+func (e fakerTestEnv) createGroup(t *testing.T, token auth.AccessToken) string {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Operator `+e.iso.Suffix()+`"}`))
 	req.Header.Set("Authorization", "Bearer "+string(token))
@@ -56,7 +56,7 @@ func (e fakerTestEnv) createGroup(t *testing.T, token privy.AccessToken) string 
 	return created.GroupID
 }
 
-func (e fakerTestEnv) post(t *testing.T, token privy.AccessToken, body string, mutate func(*http.Request)) *httptest.ResponseRecorder {
+func (e fakerTestEnv) post(t *testing.T, token auth.AccessToken, body string, mutate func(*http.Request)) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/dev/faker", strings.NewReader(body))
 	req.RemoteAddr = "127.0.0.1:50000"
@@ -99,7 +99,7 @@ func TestDevFaker_guardsAndUnhappyPaths(t *testing.T) {
 	cases := []struct {
 		name   string
 		setup  func()
-		token  privy.AccessToken
+		token  auth.AccessToken
 		body   string
 		mutate func(*http.Request)
 		want   int

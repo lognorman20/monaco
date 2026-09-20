@@ -17,7 +17,7 @@ func TestGetNavSnapshotAtOrBefore_returnsLatestEligible(t *testing.T) {
 	iso := prepareIsolation(t, db)
 	store := NewStore(db)
 
-	user, err := store.UpsertUser(ctx, iso.UniquePrivyID("snap-at"), "Snap User")
+	user, err := store.UpsertUser(ctx, iso.UniqueDynamicID("snap-at"), "Snap User")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestListMissedOpenProposalsForUser_excludesVotedAndExpired(t *testing.T) {
 	iso := prepareIsolation(t, db)
 	store := NewStore(db)
 
-	user, err := store.UpsertUser(ctx, iso.UniquePrivyID("missed"), "Voter")
+	user, err := store.UpsertUser(ctx, iso.UniqueDynamicID("missed"), "Voter")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}

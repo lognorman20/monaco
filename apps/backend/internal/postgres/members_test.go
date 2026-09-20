@@ -12,7 +12,7 @@ func TestUser_inManyGroups_hasDistinctPositionsPerGroup(t *testing.T) {
 	db := integrationDB(t)
 	iso := prepareIsolation(t, db)
 	store := NewStore(db)
-	creator, err := store.UpsertUser(ctx, iso.UniquePrivyID("creator"), "Alex")
+	creator, err := store.UpsertUser(ctx, iso.UniqueDynamicID("creator"), "Alex")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}

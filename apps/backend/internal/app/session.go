@@ -6,26 +6,29 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/ratelimit"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
-// ErrUserNotFound means the Privy token is valid but no Monaco user row exists.
+// ErrUserNotFound means the token is valid but no Monaco user row exists.
 var ErrUserNotFound = errors.New("user not found")
 
 // SessionService orchestrates auth session flows.
 type SessionService struct {
 	store              *postgres.Store
-	privy              privy.Client
+	auth               auth.Verifier
+	wallets            wallets.Client
 	displayNameLimiter *ratelimit.Limiter
 }
 
 // NewSessionService wires session dependencies.
-func NewSessionService(store *postgres.Store, privyClient privy.Client) *SessionService {
+func NewSessionService(store *postgres.Store, verifier auth.Verifier, walletClient wallets.Client) *SessionService {
 	return &SessionService{
-		store: store,
-		privy: privyClient,
+		store:   store,
+		auth:    verifier,
+		wallets: walletClient,
 	}
 }
 
@@ -47,59 +50,70 @@ type MeResult struct {
 	CreatedAt           time.Time
 }
 
-// MemberWallet is the persisted member Solana wallet for a user.
+// MemberWallet is the persisted member wallet for a user.
 type MemberWallet struct {
-	ID            string
-	UserID        string
-	PrivyWalletID string
-	SolanaAddress string
+	ID       string
+	UserID   string
+	WalletID string
+	Address  string
 }
 
-// OpenSession verifies a Privy token, upserts the user, and ensures a member wallet.
+func (s *SessionService) verify(ctx context.Context, accessToken string) (auth.Identity, error) {
+	identity, err := s.auth.VerifySession(ctx, auth.AccessToken(accessToken))
+	if err != nil {
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return auth.Identity{}, auth.ErrUnauthorized
+		}
+		return auth.Identity{}, fmt.Errorf("verify session: %w", err)
+	}
+	return identity, nil
+}
+
+// OpenSession verifies a Dynamic token, upserts the user, and ensures a member wallet.
 func (s *SessionService) OpenSession(ctx context.Context, accessToken string) (SessionResult, error) {
 	logSessionOpenStart()
 
-	identity, err := s.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := s.verify(ctx, accessToken)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logSessionBranchWarn("session open rejected", "invalid token")
-			return SessionResult{}, privy.ErrInvalidToken
+			return SessionResult{}, auth.ErrUnauthorized
 		}
 		logSessionBranchError("session open verify failed", err)
-		return SessionResult{}, fmt.Errorf("verify session: %w", err)
+		return SessionResult{}, err
 	}
 
-	user, err := s.store.UpsertUser(ctx, identity.PrivyUserID, identity.DisplayName)
+	user, err := s.store.UpsertUser(ctx, identity.DynamicUserID, identity.DisplayName)
 	if err != nil {
 		logSessionBranchError("session open upsert user failed", err)
 		return SessionResult{}, err
 	}
 
-	wallet, err := s.EnsureMemberWallet(ctx, identity.PrivyUserID, user.ID)
+	wallet, err := s.EnsureMemberWallet(ctx, identity.DynamicUserID, user.ID)
 	if err != nil {
 		logSessionBranchError("session open ensure wallet failed", err, "user_id", user.ID)
 		return SessionResult{}, err
 	}
 
 	logSessionOpenSuccess(user.ID)
-	return meResultFromUser(user, wallet.SolanaAddress), nil
+	return meResultFromUser(user, wallet.Address), nil
 }
 
 // GetMe returns the authenticated user's profile and member wallet address.
 func (s *SessionService) GetMe(ctx context.Context, accessToken string) (MeResult, error) {
 	logSessionGetMeStart()
 
-	identity, err := s.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := s.verify(ctx, accessToken)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logSessionBranchWarn("session get me rejected", "invalid token")
-			return MeResult{}, privy.ErrInvalidToken
+			return MeResult{}, auth.ErrUnauthorized
 		}
 		logSessionBranchError("session get me verify failed", err)
-		return MeResult{}, fmt.Errorf("verify session: %w", err)
+		return MeResult{}, err
 	}
 
-	user, found, err := s.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := s.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		logSessionBranchError("session get me lookup user failed", err)
 		return MeResult{}, err
@@ -120,24 +134,20 @@ func (s *SessionService) GetMe(ctx context.Context, accessToken string) (MeResul
 	}
 
 	logSessionGetMeSuccess(user.ID)
-	return meResultFromUser(user, wallet.SolanaAddress), nil
+	return meResultFromUser(user, wallet.Address), nil
 }
 
 // SetDisplayName validates and persists a user-chosen display name for PATCH /v1/me.
-//
-// The session is verified before the name is validated so unauthenticated callers
-// always get ErrInvalidToken. Every authenticated attempt, valid or not, spends one
-// request from the per-user limiter.
 func (s *SessionService) SetDisplayName(ctx context.Context, accessToken string, displayName string) (MeResult, error) {
-	identity, err := s.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := s.verify(ctx, accessToken)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return MeResult{}, privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return MeResult{}, auth.ErrUnauthorized
 		}
-		return MeResult{}, fmt.Errorf("verify session: %w", err)
+		return MeResult{}, err
 	}
 
-	user, found, err := s.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := s.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return MeResult{}, err
 	}
@@ -170,19 +180,17 @@ func (s *SessionService) SetDisplayName(ctx context.Context, accessToken string,
 		return MeResult{}, ErrUserNotFound
 	}
 
-	return meResultFromUser(updated, wallet.SolanaAddress), nil
+	return meResultFromUser(updated, wallet.Address), nil
 }
 
 // EnsureMemberWallet provisions a member wallet once per user and returns the persisted row.
-func (s *SessionService) EnsureMemberWallet(ctx context.Context, privyUserID string, userID string) (MemberWallet, error) {
+func (s *SessionService) EnsureMemberWallet(ctx context.Context, dynamicUserID string, userID string) (MemberWallet, error) {
 	if userID == "" {
-		logSessionBranchWarn("session ensure wallet rejected", "user id required")
 		return MemberWallet{}, fmt.Errorf("user_id is required")
 	}
 
 	existing, found, err := s.store.GetMemberWalletByUserID(ctx, userID)
 	if err != nil {
-		logSessionBranchError("session ensure wallet lookup failed", err, "user_id", userID)
 		return MemberWallet{}, err
 	}
 	if found {
@@ -190,15 +198,13 @@ func (s *SessionService) EnsureMemberWallet(ctx context.Context, privyUserID str
 		return memberWalletFromStore(existing), nil
 	}
 
-	ref, err := s.privy.EnsureMemberWallet(ctx, privyUserID, privy.UserID(userID))
+	ref, err := s.wallets.EnsureMemberWallet(ctx, dynamicUserID, wallets.UserID(userID))
 	if err != nil {
-		logSessionBranchError("session ensure wallet privy failed", err, "user_id", userID)
-		return MemberWallet{}, fmt.Errorf("privy ensure member wallet: %w", err)
+		return MemberWallet{}, fmt.Errorf("ensure member wallet: %w", err)
 	}
 
-	inserted, err := s.store.InsertMemberWallet(ctx, userID, ref.PrivyWalletID, ref.SolanaAddress)
+	inserted, err := s.store.InsertMemberWallet(ctx, userID, ref.WalletID, ref.Address)
 	if err != nil {
-		logSessionBranchError("session ensure wallet insert failed", err, "user_id", userID)
 		return MemberWallet{}, err
 	}
 
@@ -208,9 +214,9 @@ func (s *SessionService) EnsureMemberWallet(ctx context.Context, privyUserID str
 
 func memberWalletFromStore(wallet postgres.MemberWallet) MemberWallet {
 	return MemberWallet{
-		ID:            wallet.ID,
-		UserID:        wallet.UserID,
-		PrivyWalletID: wallet.PrivyWalletID,
-		SolanaAddress: wallet.SolanaAddress,
+		ID:       wallet.ID,
+		UserID:   wallet.UserID,
+		WalletID: wallet.WalletID,
+		Address:  wallet.Address,
 	}
 }

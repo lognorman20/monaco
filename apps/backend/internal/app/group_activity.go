@@ -21,7 +21,7 @@ type GroupActivityItem struct {
 	TokenAmount        int64
 	ProceedsUsdcMicros int64
 	CreatedAt          time.Time
-	TxSignature        string
+	TxHash        string
 	InitiatedBy        string
 	AgentDisplayName   string
 }
@@ -64,8 +64,8 @@ func (h *HomeService) ListGroupActivity(ctx context.Context, accessToken, groupI
 			AmountMicros: deposit.Amount,
 			CreatedAt:    deposit.CreatedAt,
 		}
-		if deposit.TxSignature.Valid {
-			item.TxSignature = deposit.TxSignature.String
+		if deposit.TxHash.Valid {
+			item.TxHash = deposit.TxHash.String
 		}
 		items = append(items, item)
 	}
@@ -81,8 +81,8 @@ func (h *HomeService) ListGroupActivity(ctx context.Context, accessToken, groupI
 			AmountMicros: withdrawal.Amount,
 			CreatedAt:    withdrawal.CreatedAt,
 		}
-		if withdrawal.TxSignature.Valid {
-			item.TxSignature = withdrawal.TxSignature.String
+		if withdrawal.TxHash.Valid {
+			item.TxHash = withdrawal.TxHash.String
 		}
 		items = append(items, item)
 	}
@@ -129,17 +129,17 @@ func (h *HomeService) activityItemFromTransaction(ctx context.Context, tx postgr
 	}
 	switch tx.Action {
 	case postgres.TransactionActionBuy:
-		item.Symbol = h.symbolForMint(ctx, tx.OutputMint)
+		item.Symbol = h.symbolForMint(ctx, tx.OutputToken)
 	case postgres.TransactionActionSell:
-		item.Symbol = h.symbolForMint(ctx, tx.InputMint)
+		item.Symbol = h.symbolForMint(ctx, tx.InputToken)
 		item.TokenAmount = tx.Amount
 		if tx.Status == postgres.TransactionStatusConfirmed && tx.CostBasisAmount.Valid {
 			item.ProceedsUsdcMicros = tx.CostBasisAmount.Int64
 			item.AmountMicros = tx.CostBasisAmount.Int64
 		}
 	}
-	if tx.TxSignature.Valid {
-		item.TxSignature = tx.TxSignature.String
+	if tx.TxHash.Valid {
+		item.TxHash = tx.TxHash.String
 	}
 	return item
 }
@@ -155,5 +155,5 @@ func (h *HomeService) symbolForMint(ctx context.Context, mint string) string {
 	if h.symbols != nil {
 		return h.symbols.SymbolForMint(ctx, mint)
 	}
-	return symbolForOutputMint(ctx, nil, mint)
+	return symbolForOutputToken(ctx, nil, mint)
 }

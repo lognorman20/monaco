@@ -10,16 +10,16 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/packages/domain"
 )
 
-func integrationCatalogApp(t *testing.T) (*CatalogHandlers, *GroupHandlers, *AuthHandlers, privy.Client, *postgres.TestIsolation) {
+func integrationCatalogApp(t *testing.T) (*CatalogHandlers, *GroupHandlers, *AuthHandlers, wallets.Client, *postgres.TestIsolation) {
 	t.Helper()
 
 	quoteHandlers, groupHandlers, authHandlers, privyClient, _, _, iso := integrationQuotesApp(t)
-	catalog := xstocks.NewFakeCatalogSearcher()
+	catalog := b20.NewFakeCatalog()
 	return &CatalogHandlers{
 		Store:   quoteHandlers.Store,
 		Privy:   quoteHandlers.Privy,
@@ -33,10 +33,10 @@ func TestGET_assets_paginatesCatalogResults(t *testing.T) {
 	catalogHandlers, groupHandlers, authHandlers, _, iso := integrationCatalogApp(t)
 	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Privy)
 	for i := 0; i < 3; i++ {
-		xstocks.RegisterCatalogAsset(catalogHandlers.Catalog, xstocks.CatalogAsset{
+		b20.RegisterCatalogAsset(catalogHandlers.Catalog, b20.Asset{
 			Symbol:     "SYM" + string(rune('A'+i)) + "x",
 			Name:       "Stock " + string(rune('A'+i)),
-			SolanaMint: "Mint" + string(rune('A'+i)),
+			TokenAddress: "Mint" + string(rune('A'+i)),
 		})
 	}
 
@@ -78,10 +78,10 @@ func TestGET_assets_allowsNonCreatorMember(t *testing.T) {
 		t.Fatalf("join status = %d, want 204; body = %s", joinRec.Code, joinRec.Body.String())
 	}
 
-	xstocks.RegisterCatalogAsset(catalogHandlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(catalogHandlers.Catalog, b20.Asset{
 		Symbol:     "AAPLx",
 		Name:       "Apple",
-		SolanaMint: "MintAAPL",
+		TokenAddress: "MintAAPL",
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/groups/"+groupID+"/assets?query=AAPL&limit=5", nil)
@@ -130,15 +130,15 @@ func TestGET_assets_acceptsAgentAPIKey(t *testing.T) {
 		t.Fatal("expected minted agent key for proposer")
 	}
 
-	xstocks.RegisterCatalogAsset(catalogHandlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(catalogHandlers.Catalog, b20.Asset{
 		Symbol:     "AAPLx",
 		Name:       "Apple",
-		SolanaMint: "MintAAPL",
+		TokenAddress: "MintAAPL",
 	})
-	xstocks.RegisterCatalogAsset(catalogHandlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(catalogHandlers.Catalog, b20.Asset{
 		Symbol:     "TSLAx",
 		Name:       "Tesla",
-		SolanaMint: "MintTSLA",
+		TokenAddress: "MintTSLA",
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/groups/"+groupID+"/assets?limit=10", nil)
@@ -165,10 +165,10 @@ func TestGET_assets_includesRoutableField(t *testing.T) {
 
 	catalogHandlers, groupHandlers, authHandlers, _, iso := integrationCatalogApp(t)
 	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Privy)
-	xstocks.RegisterCatalogAsset(catalogHandlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(catalogHandlers.Catalog, b20.Asset{
 		Symbol:     "AAPLx",
 		Name:       "Apple",
-		SolanaMint: "MintAAPL",
+		TokenAddress: "MintAAPL",
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/groups/"+groupID+"/assets?limit=5", nil)

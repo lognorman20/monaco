@@ -9,16 +9,16 @@ import (
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 // #153: faker rows must never reach Privy, Solana RPC, or Jupiter. These tests seed faker rows
 // directly (independent of the seeder) and run the always-on workers against them.
 
 type recordingPrivy struct {
-	privy.Client
+	wallets.Client
 	mu              sync.Mutex
 	memberBalance   []string
 	treasuryBalance []string
@@ -40,7 +40,7 @@ func (r *recordingPrivy) TreasuryUSDCBalance(ctx context.Context, address string
 	return r.Client.TreasuryUSDCBalance(ctx, address)
 }
 
-func (r *recordingPrivy) EnsureTreasury(ctx context.Context, groupID privy.GroupID) (privy.TreasuryRef, error) {
+func (r *recordingPrivy) EnsureTreasury(ctx context.Context, groupID wallets.GroupID) (wallets.TreasuryRef, error) {
 	r.mu.Lock()
 	r.ensureTreasury = append(r.ensureTreasury, string(groupID))
 	r.mu.Unlock()
@@ -55,7 +55,7 @@ func (r *recordingPrivy) SubmitSweep(ctx context.Context, req privy.SweepRequest
 }
 
 type recordingRPC struct {
-	inner SolanaRPC
+	inner Confirmer
 	mu    sync.Mutex
 	sigs  []string
 }
@@ -68,7 +68,7 @@ func (r *recordingRPC) IsConfirmed(ctx context.Context, sig string) (bool, error
 }
 
 type recordingJupiter struct {
-	jupiter.Client
+	dex.Client
 	mu    sync.Mutex
 	calls []string
 }
@@ -137,7 +137,7 @@ func mustQueryID(t *testing.T, db *sql.DB, query string, args ...any) string {
 	return id
 }
 
-func seedFakerFixture(t *testing.T, testApp *workerTestApp, privyClient privy.Client) fakerFixture {
+func seedFakerFixture(t *testing.T, testApp *workerTestApp, privyClient wallets.Client) fakerFixture {
 	t.Helper()
 	ctx := context.Background()
 	db := testApp.DB
@@ -152,8 +152,8 @@ func seedFakerFixture(t *testing.T, testApp *workerTestApp, privyClient privy.Cl
 	}
 
 	// Real operator club through the normal service path (fake Privy treasury).
-	token := privy.AccessToken(testApp.ISO.UniqueToken("operator"))
-	privy.RegisterToken(privyClient, token, privy.Identity{PrivyUserID: testApp.ISO.UniquePrivyID("operator"), DisplayName: "Operator"})
+	token := auth.AccessToken(testApp.ISO.UniqueToken("operator"))
+	auth.RegisterToken(privyClient, token, auth.Identity{PrivyUserID: testApp.ISO.UniqueDynamicID("operator"), DisplayName: "Operator"})
 	session, err := app.NewSessionService(testApp.Store, privyClient).OpenSession(ctx, string(token))
 	if err != nil {
 		t.Fatalf("OpenSession: %v", err)
@@ -216,11 +216,11 @@ func TestFakerSkip_sweepPollerNeverTouchesFakerRows(t *testing.T) {
 	ctx := context.Background()
 
 	// Real treasury holds 3 USDC nobody is credited for yet; ghost shares must not absorb it.
-	privy.SetTreasuryUSDCBalance(testApp.Privy, fx.realTreasury, 3_000_000)
+	wallets.SetTreasuryUSDCBalance(testApp.Privy, fx.realTreasury, 3_000_000)
 	// If a faker sweep ever went out, these would make it "succeed" loudly.
-	privy.SetMemberUSDCBalance(testApp.Privy, fx.ghostAddress, 5_000_000)
-	privy.SetMemberUSDCBalance(testApp.Privy, fx.fakerAddress, 5_000_000)
-	rpc := &recordingRPC{inner: NewFakeSolanaRPC()}
+	wallets.SetMemberUSDCBalance(testApp.Privy, fx.ghostAddress, 5_000_000)
+	wallets.SetMemberUSDCBalance(testApp.Privy, fx.fakerAddress, 5_000_000)
+	rpc := &recordingRPC{inner: NewFakeConfirmer()}
 	deposits := app.NewDepositService(testApp.Store, rec, nil, app.NewSymbolResolver(nil))
 	poller := NewSweepPoller(testApp.Store, rec, rpc, deposits, "relayer-key", NewStubClock(testApp.Now))
 
@@ -395,8 +395,8 @@ func TestFakerSkip_executeOnPassRefusesFakerProposals(t *testing.T) {
 	fx := seedFakerFixture(t, testApp, testApp.Privy)
 	ctx := context.Background()
 
-	jup := &recordingJupiter{Client: jupiter.NewFakeClient()}
-	buy := app.NewBuyService(jup, xstocks.NewFakeResolver())
+	jup := &recordingJupiter{Client: dex.NewFakeClient()}
+	buy := app.NewBuyService(jup, b20.NewFakeCatalog())
 	swap := app.NewSwapService(testApp.Store, buy, jup, rec, app.NewFakePrivyTreasurySigner(), "", app.NewSymbolResolver(nil))
 	exec := app.NewExecuteOnPassService(swap, testApp.Store)
 
@@ -415,7 +415,7 @@ func TestFakerSkip_executeOnPassRefusesFakerProposals(t *testing.T) {
 	if _, err := swap.DevExecuteBuy(ctx, app.DevExecuteBuyRequest{GroupID: fx.fakerGroupID, UserID: fx.operatorID, Symbol: "AAPLx", USDCAmount: 1_000_000}); !errors.Is(err, app.ErrFakerGroupReadOnly) {
 		t.Errorf("DevExecuteBuy(faker group) err = %v, want ErrFakerGroupReadOnly", err)
 	}
-	if _, err := swap.SellToUSDC(ctx, app.SellToUSDCRequest{GroupID: fx.fakerGroupID, UserID: fx.operatorID, Symbol: "AAPLx", InputMint: jupiter.AAPLxMint, Amount: 1}); !errors.Is(err, app.ErrFakerGroupReadOnly) {
+	if _, err := swap.SellToUSDC(ctx, app.SellToUSDCRequest{GroupID: fx.fakerGroupID, UserID: fx.operatorID, Symbol: "AAPLx", InputToken: "0xb200000000000000000000c2e324d24d7eecd1fb", Amount: 1}); !errors.Is(err, app.ErrFakerGroupReadOnly) {
 		t.Errorf("SellToUSDC(faker group) err = %v, want ErrFakerGroupReadOnly", err)
 	}
 

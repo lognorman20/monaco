@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -175,7 +175,7 @@ func (s *Store) RecordTreasuryHoldingsAndNavSnapshotOnConfirm(
 	if tx.Status != TransactionStatusConfirmed || tx.Action != TransactionActionBuy {
 		return fmt.Errorf("transaction must be a confirmed buy")
 	}
-	if tx.OutputMint == "" {
+	if tx.OutputToken == "" {
 		return fmt.Errorf("output mint is required")
 	}
 
@@ -183,8 +183,8 @@ func (s *Store) RecordTreasuryHoldingsAndNavSnapshotOnConfirm(
 	if err != nil {
 		return err
 	}
-	if !holdingIncludesMint(holdings, tx.OutputMint) {
-		return fmt.Errorf("treasury holdings missing output mint %s", tx.OutputMint)
+	if !holdingIncludesMint(holdings, tx.OutputToken) {
+		return fmt.Errorf("treasury holdings missing output mint %s", tx.OutputToken)
 	}
 
 	return s.WriteNavSnapshotOnTransactionConfirm(ctx, groupID, treasuryUSDC)
@@ -231,9 +231,9 @@ func (s *Store) ListNetTokenHoldingsByGroupTx(ctx context.Context, tx *sql.Tx, g
 	return listNetTokenHoldingsByGroupQuery(ctx, tx, groupID)
 }
 
-// GetFillDerivedCostBasisByOutputMintTx returns fill cost basis visible within tx.
-func (s *Store) GetFillDerivedCostBasisByOutputMintTx(ctx context.Context, tx *sql.Tx, groupID, outputMint string) (int64, int64, bool, error) {
-	return fillDerivedCostBasisByOutputMintQuery(ctx, tx, groupID, outputMint)
+// GetFillDerivedCostBasisByOutputTokenTx returns fill cost basis visible within tx.
+func (s *Store) GetFillDerivedCostBasisByOutputTokenTx(ctx context.Context, tx *sql.Tx, groupID, outputMint string) (int64, int64, bool, error) {
+	return fillDerivedCostBasisByOutputTokenQuery(ctx, tx, groupID, outputMint)
 }
 
 func (s *Store) computeNavSnapshotValues(ctx context.Context, q navSnapshotQuerier, groupID string, treasuryUSDC int64) (NavSnapshotValues, error) {
@@ -285,7 +285,7 @@ func (s *Store) computeNavSnapshotValuesWithShareBase(ctx context.Context, q nav
 
 	markedHoldings := make([]domain.MarkedHolding, 0, len(holdings))
 	for _, holding := range holdings {
-		price, fillAmount, found, err := fillDerivedCostBasisByOutputMintQuery(ctx, q, groupID, holding.Mint)
+		price, fillAmount, found, err := fillDerivedCostBasisByOutputTokenQuery(ctx, q, groupID, holding.Mint)
 		if err != nil {
 			return NavSnapshotValues{}, err
 		}
@@ -341,16 +341,16 @@ WHERE p.group_id = $1 AND ` + potPositionPredicate
 func listNetTokenHoldingsByGroupQuery(ctx context.Context, q navSnapshotQuerier, groupID string) ([]TokenHoldingRow, error) {
 	const selectSQL = `
 WITH buys AS (
-  SELECT output_mint AS mint, COALESCE(SUM(cost_basis_amount), 0) AS amount
+  SELECT output_token AS mint, COALESCE(SUM(cost_basis_amount), 0) AS amount
   FROM transactions
   WHERE group_id = $1 AND action = 'buy' AND status = 'confirmed'
-  GROUP BY output_mint
+  GROUP BY output_token
 ),
 sells AS (
-  SELECT input_mint AS mint, COALESCE(SUM(amount), 0) AS amount
+  SELECT input_token AS mint, COALESCE(SUM(amount), 0) AS amount
   FROM transactions
   WHERE group_id = $1 AND action = 'sell' AND status = 'confirmed'
-  GROUP BY input_mint
+  GROUP BY input_token
 )
 SELECT COALESCE(buys.mint, sells.mint) AS mint,
        COALESCE(buys.amount, 0) - COALESCE(sells.amount, 0) AS amount
@@ -379,19 +379,19 @@ ORDER BY mint`
 	return holdings, nil
 }
 
-func fillDerivedCostBasisByOutputMintQuery(ctx context.Context, q navSnapshotQuerier, groupID, outputMint string) (int64, int64, bool, error) {
+func fillDerivedCostBasisByOutputTokenQuery(ctx context.Context, q navSnapshotQuerier, groupID, outputMint string) (int64, int64, bool, error) {
 	const selectSQL = `
 WITH buys AS (
   SELECT COALESCE(SUM(cost_basis_price), 0)  AS usdc,
          COALESCE(SUM(cost_basis_amount), 0) AS tokens
   FROM transactions
-  WHERE group_id = $1 AND output_mint = $2
+  WHERE group_id = $1 AND output_token = $2
     AND action = 'buy' AND status = 'confirmed'
 ),
 sells AS (
   SELECT COALESCE(SUM(amount), 0) AS tokens
   FROM transactions
-  WHERE group_id = $1 AND input_mint = $2
+  WHERE group_id = $1 AND input_token = $2
     AND action = 'sell' AND status = 'confirmed'
 )
 SELECT buys.usdc, buys.tokens, sells.tokens FROM buys, sells`
@@ -536,7 +536,7 @@ func tokenAtomicsToShareUnits(atomics int64) (domain.ShareUnits, error) {
 	if atomics == 0 {
 		return domain.ShareUnits("0"), nil
 	}
-	r := new(big.Rat).SetFrac(big.NewInt(atomics), big.NewInt(jupiter.XStockAtomicScale))
+	r := new(big.Rat).SetFrac(big.NewInt(atomics), big.NewInt(b20.TokenAtomicScale))
 	s := strings.TrimRight(r.FloatString(8), "0")
 	s = strings.TrimRight(s, ".")
 	return domain.ShareUnits(s), nil
@@ -544,8 +544,8 @@ func tokenAtomicsToShareUnits(atomics int64) (domain.ShareUnits, error) {
 
 func symbolForMint(mint string) string {
 	switch mint {
-	case jupiter.AAPLxMint:
-		return "AAPLx"
+	case "0xb200000000000000000000c2e324d24d7eecd1fb":
+		return "AAPLc"
 	default:
 		return mint
 	}
@@ -558,7 +558,7 @@ func costBasisMarkPerUnitMicros(totalUSDCMicros, tokenAtomics int64) (int64, err
 	if tokenAtomics <= 0 {
 		return 0, fmt.Errorf("cost basis token amount must be positive")
 	}
-	mark, err := domain.MulDivFloor(totalUSDCMicros, jupiter.XStockAtomicScale, tokenAtomics)
+	mark, err := domain.MulDivFloor(totalUSDCMicros, b20.TokenAtomicScale, tokenAtomics)
 	if err != nil {
 		return 0, fmt.Errorf("derive mark per unit: %w", err)
 	}

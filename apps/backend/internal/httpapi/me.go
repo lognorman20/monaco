@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // maxPatchMeBodyBytes bounds PATCH /v1/me bodies. A 32-character name is at most
@@ -197,7 +197,7 @@ func optionalString(value string) *string {
 }
 
 func writeMeError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error) {
-	if errors.Is(err, privy.ErrInvalidToken) {
+	if errors.Is(err, auth.ErrUnauthorized) {
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 		return
 	}
@@ -222,7 +222,7 @@ func writeRateLimited(ctx context.Context, log *requestLog, w http.ResponseWrite
 
 func writeProfilePhotoUploadError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, privy.ErrInvalidToken):
+	case errors.Is(err, auth.ErrUnauthorized):
 		logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 	case errors.Is(err, app.ErrUserNotFound):
 		logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found")

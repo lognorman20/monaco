@@ -9,7 +9,7 @@ import (
 	"fmt"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/ratelimit"
 	"github.com/monaco/monaco/apps/backend/internal/storage"
 )
@@ -30,13 +30,13 @@ type profileImageFormat struct {
 // ProfilePhotoService stores user avatars via backend-mediated storage upload.
 type ProfilePhotoService struct {
 	store   *postgres.Store
-	privy   privy.Client
+	privy   wallets.Client
 	storage storage.Client
 	limiter *ratelimit.Limiter
 }
 
 // NewProfilePhotoService wires profile photo dependencies.
-func NewProfilePhotoService(store *postgres.Store, privyClient privy.Client, storageClient storage.Client) *ProfilePhotoService {
+func NewProfilePhotoService(store *postgres.Store, privyClient wallets.Client, storageClient storage.Client) *ProfilePhotoService {
 	return &ProfilePhotoService{
 		store:   store,
 		privy:   privyClient,
@@ -67,12 +67,12 @@ func (s *ProfilePhotoService) UploadProfilePhoto(ctx context.Context, accessToke
 		return MeResult{}, ErrProfilePhotoInvalid
 	}
 
-	identity, err := s.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := s.privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		return MeResult{}, err
 	}
 
-	user, found, err := s.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := s.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return MeResult{}, err
 	}
@@ -106,7 +106,7 @@ func (s *ProfilePhotoService) UploadProfilePhoto(ctx context.Context, accessToke
 		return MeResult{}, err
 	}
 
-	return meResultFromUser(updated, wallet.SolanaAddress), nil
+	return meResultFromUser(updated, wallet.Address), nil
 }
 
 func meResultFromUser(user postgres.User, memberWalletAddress string) MeResult {

@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 )
 
@@ -21,8 +21,8 @@ type groupsTabHarness struct {
 	tab    *GroupsTabHandlers
 	auth   *AuthHandlers
 	groups *GroupHandlers
-	privy  privy.Client
-	pyth   pyth.Client
+	privy  wallets.Client
+	pyth   marks.Client
 	store  *postgres.Store
 	iso    *postgres.TestIsolation
 }
@@ -31,7 +31,7 @@ func newGroupsTabHarness(t *testing.T) groupsTabHarness {
 	t.Helper()
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
-	pythClient := pyth.NewFakeClient()
+	pythClient := chainlink.NewFakeClient()
 	symbols := app.NewSymbolResolver(nil)
 	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
 	home := app.NewHomeService(store, privyClient, pythClient, deposits, symbols)
@@ -46,12 +46,12 @@ func newGroupsTabHarness(t *testing.T) groupsTabHarness {
 	}
 }
 
-func (h groupsTabHarness) user(t *testing.T, label, name string) (authSessionResponse, privy.AccessToken) {
+func (h groupsTabHarness) user(t *testing.T, label, name string) (authSessionResponse, auth.AccessToken) {
 	t.Helper()
 	return seedAuthenticatedUser(t, h.iso, h.auth, h.privy, label, name)
 }
 
-func (h groupsTabHarness) createGroup(t *testing.T, token privy.AccessToken, name, joinMode string) createGroupResponse {
+func (h groupsTabHarness) createGroup(t *testing.T, token auth.AccessToken, name, joinMode string) createGroupResponse {
 	t.Helper()
 	body := fmt.Sprintf(`{"name":%q,"joinPolicy":{"mode":%q}}`, name, joinMode)
 	req := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(body))
@@ -86,10 +86,10 @@ func (h groupsTabHarness) fundUSDCOnly(t *testing.T, userID string, group create
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	privy.SetTreasuryUSDCBalance(h.privy, group.TreasuryAddress, treasuryMicros)
+	wallets.SetTreasuryUSDCBalance(h.privy, group.TreasuryAddress, treasuryMicros)
 }
 
-func (h groupsTabHarness) get(t *testing.T, handler http.HandlerFunc, target string, token privy.AccessToken, pathID string) *httptest.ResponseRecorder {
+func (h groupsTabHarness) get(t *testing.T, handler http.HandlerFunc, target string, token auth.AccessToken, pathID string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	if token != "" {
@@ -352,13 +352,13 @@ func TestGET_groupsLeaderboard_pythOutageValuesStockAtCostBasis(t *testing.T) {
 	g := h.createGroup(t, token, "lbpyth"+h.iso.Suffix(), "open")
 	h.fundUSDCOnly(t, ada.UserID, g, 100_000_000, 100_000_000, 40_000_000)
 	if _, _, err := h.store.ConfirmBuyTransaction(context.Background(), postgres.ConfirmBuyTransactionParams{
-		GroupID: g.GroupID, Amount: 60_000_000, InputMint: jupiter.USDCMint, OutputMint: jupiter.AAPLxMint,
-		TxSignature: "sig-lbpyth-" + h.iso.Suffix(), ExecuteRequestID: "req-lbpyth-" + h.iso.Suffix(),
+		GroupID: g.GroupID, Amount: 60_000_000, InputToken: evm.USDCAddress, OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash: "sig-lbpyth-" + h.iso.Suffix(), ExecuteRequestID: "req-lbpyth-" + h.iso.Suffix(),
 		CostBasisPrice: 60_000_000, CostBasisAmount: 30_000_000,
 	}); err != nil {
 		t.Fatalf("ConfirmBuyTransaction: %v", err)
 	}
-	pyth.RegisterMarkedPotError(h.pyth, pyth.TreasuryRef{GroupID: g.GroupID}, fmt.Errorf("hermes down"))
+	chainlink.RegisterMarkedPotError(h.pyth, marks.TreasuryRef{GroupID: g.GroupID}, fmt.Errorf("hermes down"))
 
 	// Act
 	rec := h.get(t, h.tab.GroupLeaderboardHandler, "/v1/groups/leaderboard?limit=50", token, "")
@@ -443,8 +443,8 @@ func TestGET_groupPnLHistory_fundBuyPriceMoveWithdrawal(t *testing.T) {
 
 	const aaplAtomics = 30_000_000 // 0.3 share at 8 decimals
 	if _, _, err := h.store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
-		GroupID: g.GroupID, Amount: 60_000_000, InputMint: jupiter.USDCMint, OutputMint: jupiter.AAPLxMint,
-		TxSignature: "sig-buy-" + sfx, ExecuteRequestID: "req-buy-" + sfx,
+		GroupID: g.GroupID, Amount: 60_000_000, InputToken: evm.USDCAddress, OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash: "sig-buy-" + sfx, ExecuteRequestID: "req-buy-" + sfx,
 		CostBasisPrice: 60_000_000, CostBasisAmount: aaplAtomics,
 	}); err != nil {
 		t.Fatalf("ConfirmBuyTransaction: %v", err)
@@ -468,10 +468,10 @@ func TestGET_groupPnLHistory_fundBuyPriceMoveWithdrawal(t *testing.T) {
 		t.Fatalf("Commit: %v", err)
 	}
 
-	privy.SetTreasuryUSDCBalance(h.privy, g.TreasuryAddress, 17_000_000)
-	pyth.RegisterMarkedPot(h.pyth, pyth.TreasuryRef{GroupID: g.GroupID}, pyth.NavInput{
-		Holdings: []pyth.MarkedHolding{{
-			Symbol: "AAPLx", Mint: jupiter.AAPLxMint, Units: aaplAtomics, MarkUsdc: 250_000_000, CostBasis: 60_000_000,
+	wallets.SetTreasuryUSDCBalance(h.privy, g.TreasuryAddress, 17_000_000)
+	chainlink.RegisterMarkedPot(h.pyth, marks.TreasuryRef{GroupID: g.GroupID}, marks.NavInput{
+		Holdings: []marks.MarkedHolding{{
+			Symbol: "AAPLx", Mint: "0xb200000000000000000000c2e324d24d7eecd1fb", Units: aaplAtomics, MarkUsdc: 250_000_000, CostBasis: 60_000_000,
 		}},
 	})
 

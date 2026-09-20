@@ -9,14 +9,14 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 )
 
 type seedEnv struct {
 	store    *postgres.Store
 	iso      *postgres.TestIsolation
-	privy    privy.Client
+	privy    wallets.Client
 	seeder   *Seeder
 	home     *app.HomeService
 	token    string
@@ -29,11 +29,11 @@ func newSeedEnv(t *testing.T) seedEnv {
 	db := postgres.OpenTestDB(t)
 	iso := postgres.PrepareTestDB(t, db)
 	store := postgres.NewStore(db)
-	privyClient := privy.NewFakeClient()
+	privyClient := wallets.NewFakeClient()
 	ctx := context.Background()
 
 	token := iso.UniqueToken("operator")
-	privy.RegisterToken(privyClient, privy.AccessToken(token), privy.Identity{PrivyUserID: iso.UniquePrivyID("operator"), DisplayName: "Operator"})
+	auth.RegisterToken(privyClient, auth.AccessToken(token), auth.Identity{PrivyUserID: iso.UniqueDynamicID("operator"), DisplayName: "Operator"})
 	session, err := app.NewSessionService(store, privyClient).OpenSession(ctx, token)
 	if err != nil {
 		t.Fatalf("OpenSession: %v", err)
@@ -46,7 +46,7 @@ func newSeedEnv(t *testing.T) seedEnv {
 	iso.TrackGroup(group.GroupID)
 
 	symbols := app.NewSymbolResolver(nil)
-	pythClient := pyth.NewFakeClient()
+	pythClient := chainlink.NewFakeClient()
 	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
 	fixed := time.Date(2026, 9, 18, 15, 0, 0, 0, time.UTC)
 	return seedEnv{

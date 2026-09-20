@@ -103,8 +103,8 @@ func (p *ProposalExecutePoller) tick(ctx context.Context) {
 		p.clearExecuteFailure(proposal.ID)
 		txID := result.Transaction.ID
 		sig := ""
-		if result.Transaction.TxSignature.Valid {
-			sig = result.Transaction.TxSignature.String
+		if result.Transaction.TxHash.Valid {
+			sig = result.Transaction.TxHash.String
 		}
 		logProposalExecuteSuccess(proposal.ID, txID, sig, result.Created)
 	}
@@ -177,11 +177,11 @@ func logProposalExecuteFailed(proposalID, groupID, symbol string, usdcMicros int
 	)
 }
 
-func logProposalExecuteSuccess(proposalID, transactionID, txSignature string, created bool) {
+func logProposalExecuteSuccess(proposalID, transactionID, txHash string, created bool) {
 	slog.Info("proposal execute success",
 		"proposal_id", proposalID,
 		"transaction_id", transactionID,
-		"tx_signature", txSignature,
+		"tx_signature", txHash,
 		"created", created,
 	)
 }

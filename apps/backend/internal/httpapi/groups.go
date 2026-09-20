@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // GroupHandlers serves group HTTP routes.
@@ -94,7 +94,7 @@ func (h *GroupHandlers) CreateGroupHandler(w http.ResponseWriter, r *http.Reques
 
 	result, err := h.Governance.CreateGroupWithRules(ctx, token, req.Name, rules)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 			return
 		}
@@ -142,7 +142,7 @@ func (h *GroupHandlers) JoinGroupHandler(w http.ResponseWriter, r *http.Request)
 		if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
 			return
 		}
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
@@ -219,7 +219,7 @@ func (h *GroupHandlers) LeaveGroupHandler(w http.ResponseWriter, r *http.Request
 		if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
 			return
 		}
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
@@ -279,7 +279,7 @@ func (h *GroupHandlers) ListJoinRequestsHandler(w http.ResponseWriter, r *http.R
 	}
 	items, err := h.Governance.ListPendingJoinRequests(ctx, token, groupID)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
@@ -335,7 +335,7 @@ func (h *GroupHandlers) decideJoinRequest(w http.ResponseWriter, r *http.Request
 		if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
 			return
 		}
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
@@ -373,7 +373,7 @@ func (h *GroupHandlers) GetGroupHandler(w http.ResponseWriter, r *http.Request) 
 
 	result, err := h.Groups.GetGroup(ctx, token, groupID)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
@@ -459,7 +459,7 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 
 	result, err := h.Home.GetGroupView(ctx, token, groupID)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
@@ -538,7 +538,7 @@ type groupActivityItemResponse struct {
 	TokenAmount        string `json:"tokenAmount,omitempty"`
 	ProceedsUsdcMicros string `json:"proceedsUsdcMicros,omitempty"`
 	CreatedAt          string `json:"createdAt"`
-	TxSignature        string `json:"txSignature,omitempty"`
+	TxHash        string `json:"txHash,omitempty"`
 	InitiatedBy        string `json:"initiatedBy,omitempty"`
 	AgentDisplayName   string `json:"agentDisplayName,omitempty"`
 }
@@ -566,7 +566,7 @@ func (h *GroupHandlers) ListGroupActivityHandler(w http.ResponseWriter, r *http.
 
 	items, err := h.Home.ListGroupActivity(ctx, token, groupID)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}
@@ -587,7 +587,7 @@ func (h *GroupHandlers) ListGroupActivityHandler(w http.ResponseWriter, r *http.
 			Symbol:           item.Symbol,
 			AmountMicros:     item.AmountMicros,
 			CreatedAt:        item.CreatedAt.UTC().Format(time.RFC3339),
-			TxSignature:      item.TxSignature,
+			TxHash:      item.TxHash,
 			InitiatedBy:        item.InitiatedBy,
 			AgentDisplayName: item.AgentDisplayName,
 		}
@@ -649,7 +649,7 @@ func (h *GroupHandlers) WithdrawToBalanceHandler(w http.ResponseWriter, r *http.
 		if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
 			return
 		}
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 			return
 		}

@@ -6,21 +6,21 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
-func integrationAssetsApp(t *testing.T) (*AssetsHandlers, *AuthHandlers, privy.Client, jupiter.Client, *postgres.TestIsolation) {
+func integrationAssetsApp(t *testing.T) (*AssetsHandlers, *AuthHandlers, wallets.Client, dex.Client, *postgres.TestIsolation) {
 	t.Helper()
 
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
-	jupiterClient := jupiter.NewFakeClient()
-	catalog := xstocks.NewFakeCatalogSearcher()
-	pythClient := pyth.NewFakeAssetPriceClient()
+	jupiterClient := dex.NewFakeClient()
+	catalog := b20.NewFakeCatalog()
+	pythClient := marks.NewFakeAssetPriceClient()
 	priceClient := jupiter.NewFakePriceClient()
 	handlers := &AssetsHandlers{
 		Store:   store,
@@ -33,7 +33,7 @@ func integrationAssetsApp(t *testing.T) (*AssetsHandlers, *AuthHandlers, privy.C
 	return handlers, authHandlers, privyClient, jupiterClient, iso
 }
 
-func seedAssetsToken(t *testing.T, iso *postgres.TestIsolation, authHandlers *AuthHandlers, privyClient privy.Client) string {
+func seedAssetsToken(t *testing.T, iso *postgres.TestIsolation, authHandlers *AuthHandlers, privyClient wallets.Client) string {
 	t.Helper()
 	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "assets-user", "Assets User")
 	return string(token)
@@ -55,19 +55,19 @@ func TestGET_assets_listsCatalogWithPrices(t *testing.T) {
 
 	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
 	token := seedAssetsToken(t, iso, authHandlers, privyClient)
-	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
 		Symbol:     "AAPLx",
 		Name:       "Apple",
-		SolanaMint: jupiter.AAPLxMint,
+		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:   true,
 	})
-	jupiter.RegisterPrice(handlers.Price, jupiter.AAPLxMint, jupiter.TokenPrice{
+	jupiter.RegisterPrice(handlers.Price, "0xb200000000000000000000c2e324d24d7eecd1fb", jupiter.TokenPrice{
 		PriceUsdcMicros: 185_000_000,
 	})
-	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, 1_000_000, jupiter.BuyQuote{
+	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 1_000_000, jupiter.BuyQuote{
 		Routable:   true,
-		InputMint:  jupiter.USDCMint,
-		OutputMint: jupiter.AAPLxMint,
+		InputToken:  evm.USDCAddress,
+		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		InAmount:   "1000000",
 		OutAmount:  "100000000",
 	})
@@ -97,10 +97,10 @@ func TestGET_assets_popular_returnsPinnedAssets(t *testing.T) {
 
 	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
 	token := seedAssetsToken(t, iso, authHandlers, privyClient)
-	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
 		Symbol:     "AAPLx",
 		Name:       "Apple",
-		SolanaMint: jupiter.AAPLxMint,
+		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:   true,
 	})
 
@@ -129,22 +129,22 @@ func TestGET_assets_popular_batchedPrices_preservesOrder(t *testing.T) {
 
 	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
 	token := seedAssetsToken(t, iso, authHandlers, privyClient)
-	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
 		Symbol:     "AAPLx",
 		Name:       "Apple",
-		SolanaMint: jupiter.AAPLxMint,
+		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:   true,
 	})
-	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
 		Symbol:     "MSFTx",
 		Name:       "Microsoft",
-		SolanaMint: "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
+		TokenAddress: "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
 		Routable:   true,
 	})
 	// MSFTx's mark is registered before AAPLx's so a lucky map-iteration order
 	// wouldn't mask a real ordering bug in the response assembly.
 	jupiter.RegisterPrice(handlers.Price, "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX", jupiter.TokenPrice{PriceUsdcMicros: 400_000_000})
-	jupiter.RegisterPrice(handlers.Price, jupiter.AAPLxMint, jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
+	jupiter.RegisterPrice(handlers.Price, "0xb200000000000000000000c2e324d24d7eecd1fb", jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/assets/popular?limit=3", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -177,17 +177,17 @@ func TestGET_assets_popular_usesPriceAPI_skipsQuoteBuy(t *testing.T) {
 
 	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
 	token := seedAssetsToken(t, iso, authHandlers, privyClient)
-	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
 		Symbol:     "AAPLx",
 		Name:       "Apple",
-		SolanaMint: jupiter.AAPLxMint,
+		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:   true,
 	})
-	jupiter.RegisterPrice(handlers.Price, jupiter.AAPLxMint, jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
-	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, 1_000_000, jupiter.BuyQuote{
+	jupiter.RegisterPrice(handlers.Price, "0xb200000000000000000000c2e324d24d7eecd1fb", jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
+	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 1_000_000, jupiter.BuyQuote{
 		Routable:   true,
-		InputMint:  jupiter.USDCMint,
-		OutputMint: jupiter.AAPLxMint,
+		InputToken:  evm.USDCAddress,
+		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		InAmount:   "1000000",
 		OutAmount:  "100000000",
 	})
@@ -220,10 +220,10 @@ func TestGET_assets_popular_missingPrice_omitsPriceField(t *testing.T) {
 
 	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
 	token := seedAssetsToken(t, iso, authHandlers, privyClient)
-	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
 		Symbol:     "AAPLx",
 		Name:       "Apple",
-		SolanaMint: jupiter.AAPLxMint,
+		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:   true,
 	})
 
@@ -255,24 +255,24 @@ func TestGET_assets_symbol_returnsDetailAndLiquidity(t *testing.T) {
 
 	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
 	token := seedAssetsToken(t, iso, authHandlers, privyClient)
-	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
 		Symbol:     "AAPLx",
 		Name:       "Apple",
-		SolanaMint: jupiter.AAPLxMint,
+		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:   true,
 	})
-	jupiter.RegisterPrice(handlers.Price, jupiter.AAPLxMint, jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
-	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, 1_000_000, jupiter.BuyQuote{
+	jupiter.RegisterPrice(handlers.Price, "0xb200000000000000000000c2e324d24d7eecd1fb", jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
+	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 1_000_000, jupiter.BuyQuote{
 		Routable:   true,
-		InputMint:  jupiter.USDCMint,
-		OutputMint: jupiter.AAPLxMint,
+		InputToken:  evm.USDCAddress,
+		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		InAmount:   "1000000",
 		OutAmount:  "100000000",
 	})
-	jupiter.RegisterSellQuote(jupiterClient, jupiter.AAPLxMint, jupiter.XStockAtomicScale, jupiter.SellQuote{
+	jupiter.RegisterSellQuote(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", b20.TokenAtomicScale, jupiter.SellQuote{
 		Routable:   true,
-		InputMint:  jupiter.AAPLxMint,
-		OutputMint: jupiter.USDCMint,
+		InputToken:  "0xb200000000000000000000c2e324d24d7eecd1fb",
+		OutputToken: evm.USDCAddress,
 		InAmount:   "100000000",
 		OutAmount:  "1800000",
 	})
@@ -309,17 +309,17 @@ func TestGET_assets_symbol_catalogNotRoutable_liveQuoteSetsRoutable(t *testing.T
 
 	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
 	token := seedAssetsToken(t, iso, authHandlers, privyClient)
-	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
 		Symbol:     "AAPLx",
 		Name:       "Apple",
-		SolanaMint: jupiter.AAPLxMint,
+		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:   false,
 	})
-	jupiter.RegisterPrice(handlers.Price, jupiter.AAPLxMint, jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
-	jupiter.RegisterQuoteBuy(jupiterClient, jupiter.AAPLxMint, 1_000_000, jupiter.BuyQuote{
+	jupiter.RegisterPrice(handlers.Price, "0xb200000000000000000000c2e324d24d7eecd1fb", jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
+	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 1_000_000, jupiter.BuyQuote{
 		Routable:   true,
-		InputMint:  jupiter.USDCMint,
-		OutputMint: jupiter.AAPLxMint,
+		InputToken:  evm.USDCAddress,
+		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		InAmount:   "1000000",
 		OutAmount:  "100000000",
 	})
@@ -347,13 +347,13 @@ func TestGET_assets_symbol_quoteFail_marksNotRoutable(t *testing.T) {
 
 	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
 	token := seedAssetsToken(t, iso, authHandlers, privyClient)
-	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
 		Symbol:     "AAPLx",
 		Name:       "Apple",
-		SolanaMint: jupiter.AAPLxMint,
+		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:   true,
 	})
-	jupiter.RegisterPrice(handlers.Price, jupiter.AAPLxMint, jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
+	jupiter.RegisterPrice(handlers.Price, "0xb200000000000000000000c2e324d24d7eecd1fb", jupiter.TokenPrice{PriceUsdcMicros: 185_000_000})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLx", nil)
 	req.SetPathValue("symbol", "AAPLx")
@@ -381,13 +381,13 @@ func TestGET_assets_symbol_chart_returnsSeries(t *testing.T) {
 
 	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
 	token := seedAssetsToken(t, iso, authHandlers, privyClient)
-	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
 		Symbol:     "AAPLx",
 		Name:       "Apple",
-		SolanaMint: jupiter.AAPLxMint,
+		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 	})
-	pyth.RegisterChartSeries(handlers.Pyth, "AAPLx", pyth.ChartRange1D, pyth.AssetChartSeries{
-		Points: []pyth.ChartPoint{
+	marks.RegisterChartSeries(handlers.Pyth, "AAPLx", marks.ChartRange1D, marks.AssetChartSeries{
+		Points: []marks.ChartPoint{
 			{Timestamp: 1_700_000_000, PriceUsdcMicros: 180_000_000},
 			{Timestamp: 1_700_003_600, PriceUsdcMicros: 185_000_000},
 		},
@@ -416,10 +416,10 @@ func TestGET_assets_symbol_chart_emptySeries_returnsReason(t *testing.T) {
 
 	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
 	token := seedAssetsToken(t, iso, authHandlers, privyClient)
-	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
 		Symbol:     "AAPLx",
 		Name:       "Apple",
-		SolanaMint: jupiter.AAPLxMint,
+		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLx/chart?range=1W", nil)
@@ -448,7 +448,7 @@ func TestGET_assets_symbol_chart_invalidRange_returns400(t *testing.T) {
 
 	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
 	token := seedAssetsToken(t, iso, authHandlers, privyClient)
-	xstocks.RegisterCatalogAsset(handlers.Catalog, xstocks.CatalogAsset{
+	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
 		Symbol: "AAPLx",
 		Name:   "Apple",
 	})

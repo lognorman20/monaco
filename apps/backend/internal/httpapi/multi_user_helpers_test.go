@@ -12,11 +12,11 @@ import (
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 // multiUserApp wires every HTTP surface a club member touches against one real test
@@ -34,10 +34,10 @@ type multiUserApp struct {
 
 	DepositService *app.DepositService
 	Store          *postgres.Store
-	Privy          privy.Client
-	Pyth           pyth.Client
-	Jupiter        jupiter.Client
-	XStocks        xstocks.Resolver
+	Privy          wallets.Client
+	Pyth           marks.Client
+	Jupiter        dex.Client
+	XStocks        b20.Catalog
 	ISO            *postgres.TestIsolation
 }
 
@@ -46,7 +46,7 @@ type multiUserApp struct {
 type clubMember struct {
 	Name   string
 	UserID string
-	Token  privy.AccessToken
+	Token  auth.AccessToken
 	Wallet string
 }
 
@@ -62,10 +62,10 @@ func newMultiUserApp(t *testing.T) *multiUserApp {
 
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
-	pythClient := pyth.NewFakeClient()
-	jupiterClient := jupiter.NewFakeClient()
-	resolver := xstocks.NewFakeResolver()
-	catalog := xstocks.NewFakeCatalogSearcher()
+	pythClient := chainlink.NewFakeClient()
+	jupiterClient := dex.NewFakeClient()
+	resolver := b20.NewFakeCatalog()
+	catalog := b20.NewFakeCatalog()
 	symbols := app.NewSymbolResolver(catalog)
 
 	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
@@ -105,7 +105,7 @@ func (a *multiUserApp) signIn(t *testing.T, label, displayName string) clubMembe
 
 // call runs one handler with an optional bearer token, JSON body, and path values
 // given as alternating key/value pairs.
-func (a *multiUserApp) call(t *testing.T, handler http.HandlerFunc, method, target string, token privy.AccessToken, body string, pathValues ...string) *httptest.ResponseRecorder {
+func (a *multiUserApp) call(t *testing.T, handler http.HandlerFunc, method, target string, token auth.AccessToken, body string, pathValues ...string) *httptest.ResponseRecorder {
 	t.Helper()
 	var reader io.Reader
 	if body != "" {
@@ -161,7 +161,7 @@ func (a *multiUserApp) topUpBalance(t *testing.T, member clubMember, usdcMicros 
 	if err != nil {
 		t.Fatalf("MemberUSDCBalance: %v", err)
 	}
-	privy.SetMemberUSDCBalance(a.Privy, member.Wallet, current+usdcMicros)
+	wallets.SetMemberUSDCBalance(a.Privy, member.Wallet, current+usdcMicros)
 }
 
 // openFundIntent tops up the member's account balance and moves it toward the club
@@ -184,12 +184,12 @@ func (a *multiUserApp) landSweepInTreasury(t *testing.T, member clubMember, c cl
 	if err != nil {
 		t.Fatalf("MemberUSDCBalance: %v", err)
 	}
-	privy.SetMemberUSDCBalance(a.Privy, member.Wallet, memberBalance-usdcMicros)
+	wallets.SetMemberUSDCBalance(a.Privy, member.Wallet, memberBalance-usdcMicros)
 	treasury, err := a.Privy.TreasuryUSDCBalance(ctx, c.TreasuryAddress)
 	if err != nil {
 		t.Fatalf("TreasuryUSDCBalance: %v", err)
 	}
-	privy.SetTreasuryUSDCBalance(a.Privy, c.TreasuryAddress, treasury+usdcMicros)
+	wallets.SetTreasuryUSDCBalance(a.Privy, c.TreasuryAddress, treasury+usdcMicros)
 }
 
 // confirmSweep applies the credit step the sweep poller runs after on-chain
@@ -197,7 +197,7 @@ func (a *multiUserApp) landSweepInTreasury(t *testing.T, member clubMember, c cl
 func (a *multiUserApp) confirmSweep(t *testing.T, member clubMember, c club, intent createDepositResponse) {
 	t.Helper()
 	result, err := a.DepositService.ObserveSweep(context.Background(), app.ObservedSweep{
-		TxSignature: fmt.Sprintf("sig-%s-%s", a.ISO.Suffix(), intent.DepositID),
+		TxHash: fmt.Sprintf("sig-%s-%s", a.ISO.Suffix(), intent.DepositID),
 		FromAddress: intent.FromAddress,
 		ToAddress:   c.TreasuryAddress,
 		Amount:      intent.Amount,
@@ -228,13 +228,13 @@ func (a *multiUserApp) deposit(t *testing.T, member clubMember, c club, usdcMicr
 func (a *multiUserApp) buyAAPLxAtMark(t *testing.T, c club, usdcSpent, aaplShares, markUsdcPerShare int64) {
 	t.Helper()
 	ctx := context.Background()
-	aaplAtomics := aaplShares * jupiter.XStockAtomicScale
+	aaplAtomics := aaplShares * b20.TokenAtomicScale
 	if _, _, err := a.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          c.ID,
 		Amount:           usdcSpent,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      fmt.Sprintf("sig-%s-buy-%s", a.ISO.Suffix(), c.ID),
+		InputToken:        evm.USDCAddress,
+		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:      fmt.Sprintf("sig-%s-buy-%s", a.ISO.Suffix(), c.ID),
 		ExecuteRequestID: fmt.Sprintf("req-%s-buy-%s", a.ISO.Suffix(), c.ID),
 		CostBasisPrice:   usdcSpent,
 		CostBasisAmount:  aaplAtomics,
@@ -246,12 +246,12 @@ func (a *multiUserApp) buyAAPLxAtMark(t *testing.T, c club, usdcSpent, aaplShare
 		t.Fatalf("TreasuryUSDCBalance: %v", err)
 	}
 	remaining := before - usdcSpent
-	privy.SetTreasuryUSDCBalance(a.Privy, c.TreasuryAddress, remaining)
-	pyth.RegisterMarkedPot(a.Pyth, pyth.TreasuryRef{GroupID: c.ID, Address: c.TreasuryAddress}, pyth.NavInput{
+	wallets.SetTreasuryUSDCBalance(a.Privy, c.TreasuryAddress, remaining)
+	chainlink.RegisterMarkedPot(a.Pyth, marks.TreasuryRef{GroupID: c.ID, Address: c.TreasuryAddress}, marks.NavInput{
 		TreasuryUsdc: remaining,
-		Holdings: []pyth.MarkedHolding{{
+		Holdings: []marks.MarkedHolding{{
 			Symbol:    "AAPLx",
-			Mint:      jupiter.AAPLxMint,
+			Mint:      "0xb200000000000000000000c2e324d24d7eecd1fb",
 			Units:     aaplAtomics,
 			MarkUsdc:  markUsdcPerShare,
 			CostBasis: usdcSpent,
@@ -261,11 +261,11 @@ func (a *multiUserApp) buyAAPLxAtMark(t *testing.T, c club, usdcSpent, aaplShare
 
 // registerRoutableAAPLx makes POST /quotes and POST /proposals routable for usdcMicros.
 func (a *multiUserApp) registerRoutableAAPLx(usdcMicros int64) {
-	xstocks.RegisterSolanaMint(a.XStocks, "AAPLx", jupiter.AAPLxMint)
-	jupiter.RegisterQuoteBuy(a.Jupiter, jupiter.AAPLxMint, usdcMicros, jupiter.BuyQuote{
+	b20.RegisterTokenAddress(a.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	jupiter.RegisterQuoteBuy(a.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcMicros, jupiter.BuyQuote{
 		Routable:   true,
-		InputMint:  jupiter.USDCMint,
-		OutputMint: jupiter.AAPLxMint,
+		InputToken:  evm.USDCAddress,
+		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		InAmount:   strconv.FormatInt(usdcMicros, 10),
 		OutAmount:  strconv.FormatInt(usdcMicros/2, 10),
 	})

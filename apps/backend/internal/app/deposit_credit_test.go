@@ -9,9 +9,9 @@ import (
 
 func TestDomainNavInputFromPyth_scalesTokenAtomicsToDecimalUnits(t *testing.T) {
 	// Arrange
-	input := pyth.NavInput{
+	input := marks.NavInput{
 		TreasuryUsdc: 0,
-		Holdings: []pyth.MarkedHolding{{
+		Holdings: []marks.MarkedHolding{{
 			Symbol:    "AAPLx",
 			Units:     50_000_000,
 			MarkUsdc:  600_000_000,

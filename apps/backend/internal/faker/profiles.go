@@ -13,7 +13,7 @@
 // All timestamps are UTC and spread over the last week relative to the seed time.
 package faker
 
-import "github.com/monaco/monaco/apps/backend/internal/jupiter"
+import "github.com/monaco/monaco/apps/backend/internal/dex"
 
 const usdc = int64(1_000_000)
 
@@ -123,7 +123,7 @@ var scaleClubs = []clubSpec{
 				Votes:  []voteSpec{{"tess", "yes"}, {"marcus", "yes"}},
 				Thesis: "Energy storage is the part nobody prices in. Small bet, we can add later."},
 		},
-		BuySymbol: "AAPLx", BuyMint: jupiter.AAPLxMint, BuyCostPx: 0.9,
+		BuySymbol: "AAPLx", BuyMint: "0xb200000000000000000000c2e324d24d7eecd1fb", BuyCostPx: 0.9,
 		SellFrac: 0.25, SellPx: 1.14, SellHours: 26, ChartDrift: 0.09,
 	},
 	{
@@ -148,7 +148,7 @@ var scaleClubs = []clubSpec{
 				Votes:  []voteSpec{{"omar", "yes"}},
 				Thesis: "Something calmer next to the Tesla position. Earnings are next week."},
 		},
-		BuySymbol: "TSLAx", BuyMint: jupiter.TSLAxMint, BuyCostPx: 1.07,
+		BuySymbol: "TSLAx", BuyMint: "0xb2000000000000000000000000000000000004", BuyCostPx: 1.07,
 		SellFrac: 0.3, SellPx: 0.9, SellHours: 30, ChartDrift: -0.06,
 	},
 	{
@@ -175,7 +175,7 @@ var scaleClubs = []clubSpec{
 				Votes:  []voteSpec{{"ivy", "yes"}, {"zoe", "no"}},
 				Thesis: "Down a lot from the high. If the robotaxi news lands, we want to own some."},
 		},
-		BuySymbol: "AAPLx", BuyMint: jupiter.AAPLxMint, BuyCostPx: 1.03, ChartDrift: 0.02,
+		BuySymbol: "AAPLx", BuyMint: "0xb200000000000000000000c2e324d24d7eecd1fb", BuyCostPx: 1.03, ChartDrift: 0.02,
 	},
 	{
 		// Small, loud winners: most of the pot went into one buy well below today's mark.
@@ -196,7 +196,7 @@ var scaleClubs = []clubSpec{
 				Votes:  []voteSpec{{"chloe", "yes"}},
 				Thesis: "Take a little off the table into something boring."},
 		},
-		BuySymbol: "TSLAx", BuyMint: jupiter.TSLAxMint, BuyCostPx: 0.76, ChartDrift: 0.32,
+		BuySymbol: "TSLAx", BuyMint: "0xb2000000000000000000000000000000000004", BuyCostPx: 0.76, ChartDrift: 0.32,
 	},
 	{
 		// Slightly underwater: bought near a local top.
@@ -214,7 +214,7 @@ var scaleClubs = []clubSpec{
 				Votes:  []voteSpec{{"grace", "yes"}, {"mateo", "yes"}, {"amara", "yes"}, {"felix", "no"}},
 				Thesis: "Safe enough to park rent money for a month. Famous last words."},
 		},
-		BuySymbol: "AAPLx", BuyMint: jupiter.AAPLxMint, BuyCostPx: 1.045, ChartDrift: -0.04,
+		BuySymbol: "AAPLx", BuyMint: "0xb200000000000000000000c2e324d24d7eecd1fb", BuyCostPx: 1.045, ChartDrift: -0.04,
 	},
 	{
 		// Flat and patient.
@@ -233,7 +233,7 @@ var scaleClubs = []clubSpec{
 				Votes:  []voteSpec{{"iris", "yes"}, {"owen", "yes"}, {"dev", "yes"}},
 				Thesis: "Closest thing to the index we can buy here. Then we leave it alone."},
 		},
-		BuySymbol: "AAPLx", BuyMint: jupiter.AAPLxMint, BuyCostPx: 0.97, ChartDrift: 0.02,
+		BuySymbol: "AAPLx", BuyMint: "0xb200000000000000000000c2e324d24d7eecd1fb", BuyCostPx: 0.97, ChartDrift: 0.02,
 	},
 }
 

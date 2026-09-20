@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -22,14 +22,14 @@ import (
 // on "missing fill amount" (the default fake execute result carries no fill amounts). label
 // must be unique per call (e.g. the test isolation suffix) so its execute request id and
 // tx_signature never collide with another test's confirmed transaction in the shared test DB.
-func registerAgentBuyFill(t *testing.T, jupiterClient jupiter.Client, resolver xstocks.Resolver, label, symbol string, usdc int64) {
+func registerAgentBuyFill(t *testing.T, jupiterClient dex.Client, resolver b20.Catalog, label, symbol string, usdc int64) {
 	t.Helper()
 	mint := "Mint" + symbol
-	xstocks.RegisterSolanaMint(resolver, symbol, mint)
+	b20.RegisterTokenAddress(resolver, symbol, mint)
 	requestID := fmt.Sprintf("agent-buy-%s-%s-%d", label, symbol, usdc)
 	jupiter.RegisterQuoteBuy(jupiterClient, mint, usdc, jupiter.BuyQuote{
 		Routable:   true,
-		OutputMint: mint,
+		OutputToken: mint,
 		InAmount:   strconv.FormatInt(usdc, 10),
 		OutAmount:  strconv.FormatInt(usdc, 10),
 		RequestID:  requestID,

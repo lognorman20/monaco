@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // PlatformWithdrawHandlers serves platform withdrawal HTTP routes.
@@ -26,7 +26,7 @@ type platformWithdrawalResponse struct {
 	Amount       int64  `json:"amount"`
 	ToAddress    string `json:"toAddress"`
 	Status       string `json:"status"`
-	TxSignature  string `json:"txSignature,omitempty"`
+	TxHash  string `json:"txHash,omitempty"`
 	CreatedAt    string `json:"createdAt"`
 }
 
@@ -53,7 +53,7 @@ func (h *PlatformWithdrawHandlers) CreatePlatformWithdrawalHandler(w http.Respon
 
 	result, err := h.Withdrawals.CreatePlatformWithdrawal(ctx, token, req.Amount, req.ToAddress)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 			return
 		}
@@ -88,7 +88,7 @@ func (h *PlatformWithdrawHandlers) CreatePlatformWithdrawalHandler(w http.Respon
 		"withdrawal_id", result.ID,
 		"amount", result.Amount,
 		"to_address", result.ToAddress,
-		"tx_signature", result.TxSignature,
+		"tx_signature", result.TxHash,
 	)
 }
 
@@ -111,7 +111,7 @@ func (h *PlatformWithdrawHandlers) GetPlatformWithdrawalHandler(w http.ResponseW
 
 	result, err := h.Withdrawals.GetPlatformWithdrawal(ctx, token, withdrawalID)
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
+		if errors.Is(err, auth.ErrUnauthorized) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "withdrawal_id", withdrawalID)
 			return
 		}
@@ -135,7 +135,7 @@ func platformWithdrawalResponseFromApp(withdrawal app.PlatformWithdrawal) platfo
 		Amount:       withdrawal.Amount,
 		ToAddress:    withdrawal.ToAddress,
 		Status:       string(withdrawal.Status),
-		TxSignature:  withdrawal.TxSignature,
+		TxHash:  withdrawal.TxHash,
 		CreatedAt:    withdrawal.CreatedAt.UTC().Format(time.RFC3339),
 	}
 }

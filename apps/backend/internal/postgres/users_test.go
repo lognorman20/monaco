@@ -10,7 +10,7 @@ func TestSession_samePrivyUserTwice_doesNotDuplicateUsersRow(t *testing.T) {
 	db := integrationDB(t)
 	iso := prepareIsolation(t, db)
 	store := NewStore(db)
-	privyUserID := iso.UniquePrivyID("dup")
+	privyUserID := iso.UniqueDynamicID("dup")
 
 	first, err := store.UpsertUser(ctx, privyUserID, "Alfred")
 	if err != nil {
@@ -28,7 +28,7 @@ func TestSession_samePrivyUserTwice_doesNotDuplicateUsersRow(t *testing.T) {
 	}
 
 	var rowCount int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE privy_user_id = $1", privyUserID).Scan(&rowCount); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE dynamic_user_id = $1", privyUserID).Scan(&rowCount); err != nil {
 		t.Fatalf("count users: %v", err)
 	}
 	if rowCount != 1 {

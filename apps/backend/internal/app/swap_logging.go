@@ -11,14 +11,14 @@ func logSwapQuoteAttempt(groupID, userID, symbol string, usdcAmount int64) {
 	)
 }
 
-func logSwapExecuteSubmit(groupID, userID, symbol, txSignature, executeRequestID string) {
+func logSwapExecuteSubmit(groupID, userID, symbol, txHash, executeRequestID string) {
 	args := []any{
 		"group_id", groupID,
 		"user_id", userID,
 		"symbol", symbol,
 	}
-	if txSignature != "" {
-		args = append(args, "tx_signature", txSignature)
+	if txHash != "" {
+		args = append(args, "tx_signature", txHash)
 	}
 	if executeRequestID != "" {
 		args = append(args, "execute_request_id", executeRequestID)
@@ -26,7 +26,7 @@ func logSwapExecuteSubmit(groupID, userID, symbol, txSignature, executeRequestID
 	slog.Info("swap execute submit", args...)
 }
 
-func logSwapPollTransition(groupID, userID, symbol, txSignature, fromStatus, toStatus string, code int) {
+func logSwapPollTransition(groupID, userID, symbol, txHash, fromStatus, toStatus string, code int) {
 	args := []any{
 		"group_id", groupID,
 		"user_id", userID,
@@ -35,8 +35,8 @@ func logSwapPollTransition(groupID, userID, symbol, txSignature, fromStatus, toS
 		"to_status", toStatus,
 		"code", code,
 	}
-	if txSignature != "" {
-		args = append(args, "tx_signature", txSignature)
+	if txHash != "" {
+		args = append(args, "tx_signature", txHash)
 	}
 	slog.Info("swap poll transition", args...)
 }

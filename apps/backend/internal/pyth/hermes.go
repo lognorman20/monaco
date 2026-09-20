@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	// Post–Pyth Core upgrade Hermes host (drop-in for hermes.pyth.network).
-	defaultHermesBaseURL = "https://pyth.dourolabs.app/hermes"
+	// Post–Pyth Core upgrade Hermes host (drop-in for hermes.marks.network).
+	defaultHermesBaseURL = "https://marks.dourolabs.app/hermes"
 	defaultTimeout       = 15 * time.Second
 )
 

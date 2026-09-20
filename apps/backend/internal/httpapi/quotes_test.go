@@ -9,27 +9,27 @@ import (
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
-	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
-func integrationQuotesApp(t *testing.T) (*QuoteHandlers, *GroupHandlers, *AuthHandlers, privy.Client, jupiter.Client, xstocks.Resolver, *postgres.TestIsolation) {
+func integrationQuotesApp(t *testing.T) (*QuoteHandlers, *GroupHandlers, *AuthHandlers, wallets.Client, dex.Client, b20.Catalog, *postgres.TestIsolation) {
 	t.Helper()
 
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
-	jupiterClient := jupiter.NewFakeClient()
-	xstocksResolver := xstocks.NewFakeResolver()
+	jupiterClient := dex.NewFakeClient()
+	xstocksResolver := b20.NewFakeCatalog()
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	quoteHandlers := &QuoteHandlers{
 		Store: store,
 		Privy: privyClient,
 		Buy:   buy,
 	}
-	deposits := app.NewDepositService(store, privyClient, nil, app.NewSymbolResolver(xstocks.NewFakeCatalogSearcher()))
-	home := app.NewHomeService(store, privyClient, nil, deposits, app.NewSymbolResolver(xstocks.NewFakeCatalogSearcher()))
+	deposits := app.NewDepositService(store, privyClient, nil, app.NewSymbolResolver(b20.NewFakeCatalog()))
+	home := app.NewHomeService(store, privyClient, nil, deposits, app.NewSymbolResolver(b20.NewFakeCatalog()))
 	governance := app.NewGovernanceService(store, privyClient)
 	governance.SetBuyService(buy)
 	governance.SetHomeService(home)
@@ -41,7 +41,7 @@ func integrationQuotesApp(t *testing.T) (*QuoteHandlers, *GroupHandlers, *AuthHa
 	return quoteHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, xstocksResolver, iso
 }
 
-func createGroupForQuotes(t *testing.T, iso *postgres.TestIsolation, groupHandlers *GroupHandlers, authHandlers *AuthHandlers, privyClient privy.Client) (privy.AccessToken, string, string) {
+func createGroupForQuotes(t *testing.T, iso *postgres.TestIsolation, groupHandlers *GroupHandlers, authHandlers *AuthHandlers, privyClient wallets.Client) (auth.AccessToken, string, string) {
 	t.Helper()
 
 	session, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "quotes-user", "Quotes User")
@@ -60,7 +60,7 @@ func createGroupForQuotes(t *testing.T, iso *postgres.TestIsolation, groupHandle
 		t.Fatalf("decode create group json: %v", err)
 	}
 	trackCreatedGroup(iso, created.GroupID)
-	privy.SetTreasuryUSDCBalance(privyClient, created.TreasuryAddress, 100_000_000)
+	wallets.SetTreasuryUSDCBalance(privyClient, created.TreasuryAddress, 100_000_000)
 
 	return token, created.GroupID, session.UserID
 }
@@ -70,7 +70,7 @@ func TestPOST_quotes_noRoute_returnsRoutableFalse(t *testing.T) {
 	// Arrange
 	quoteHandlers, groupHandlers, authHandlers, privyClient, _, resolver, iso := integrationQuotesApp(t)
 	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
-	xstocks.RegisterSolanaMint(resolver, "AAPLx", jupiter.AAPLxMint)
+	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/groups/"+groupID+"/quotes", strings.NewReader(`{"symbol":"AAPLx","usdc":1000000}`))
 	req.SetPathValue("id", groupID)
@@ -106,7 +106,7 @@ func TestPOST_proposals_noRoute_refusesBeforeInsert(t *testing.T) {
 	// Arrange
 	quoteHandlers, groupHandlers, authHandlers, privyClient, _, resolver, iso := integrationQuotesApp(t)
 	token, groupID, userID := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
-	xstocks.RegisterSolanaMint(resolver, "AAPLx", jupiter.AAPLxMint)
+	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
 
 	// Act
 	ok, err := ProposalQuoteOK(context.Background(), quoteHandlers.Buy, ProposalQuoteInput{

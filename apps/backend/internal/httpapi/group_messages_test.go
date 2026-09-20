@@ -13,18 +13,18 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 type chatTestApp struct {
 	chat    *GroupMessageHandlers
 	groups  *GroupHandlers
 	auth    *AuthHandlers
-	privy   privy.Client
+	privy   wallets.Client
 	db      *sql.DB
 	iso     *postgres.TestIsolation
 	groupID string
-	owner   privy.AccessToken
+	owner   auth.AccessToken
 }
 
 // integrationChatApp seeds one cabal owned by a fresh user. limiter nil = effectively unlimited.
@@ -51,7 +51,7 @@ func integrationChatApp(t *testing.T, limiter *app.KeyedRateLimiter) chatTestApp
 	}
 }
 
-func (a chatTestApp) joinAs(t *testing.T, label, displayName string) privy.AccessToken {
+func (a chatTestApp) joinAs(t *testing.T, label, displayName string) auth.AccessToken {
 	t.Helper()
 	_, token := seedAuthenticatedUser(t, a.iso, a.auth, a.privy, label, displayName)
 	req := httptest.NewRequest(http.MethodPost, "/v1/groups/"+a.groupID+"/join", strings.NewReader(`{}`))
@@ -66,7 +66,7 @@ func (a chatTestApp) joinAs(t *testing.T, label, displayName string) privy.Acces
 	return token
 }
 
-func (a chatTestApp) post(token privy.AccessToken, groupID, rawBody string) *httptest.ResponseRecorder {
+func (a chatTestApp) post(token auth.AccessToken, groupID, rawBody string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, "/v1/groups/"+groupID+"/messages", strings.NewReader(rawBody))
 	req.SetPathValue("id", groupID)
 	req.Header.Set("Content-Type", "application/json")
@@ -78,7 +78,7 @@ func (a chatTestApp) post(token privy.AccessToken, groupID, rawBody string) *htt
 	return rec
 }
 
-func (a chatTestApp) list(token privy.AccessToken, groupID string, query url.Values) *httptest.ResponseRecorder {
+func (a chatTestApp) list(token auth.AccessToken, groupID string, query url.Values) *httptest.ResponseRecorder {
 	target := "/v1/groups/" + groupID + "/messages"
 	if len(query) > 0 {
 		target += "?" + query.Encode()

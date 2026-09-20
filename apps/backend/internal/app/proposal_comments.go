@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -117,15 +117,15 @@ func (g *GovernanceService) CreateProposalComment(ctx context.Context, accessTok
 // authorizeProposalMember resolves the viewer and proposal, requiring group membership.
 // Non-members get ErrGroupNotFound so callers can answer 404 without revealing the proposal exists.
 func (g *GovernanceService) authorizeProposalMember(ctx context.Context, accessToken, proposalID string) (string, postgres.ProposalRow, error) {
-	identity, err := g.privy.VerifySession(ctx, privy.AccessToken(accessToken))
+	identity, err := g.privy.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return "", postgres.ProposalRow{}, privy.ErrInvalidToken
+		if errors.Is(err, auth.ErrUnauthorized) {
+			return "", postgres.ProposalRow{}, auth.ErrUnauthorized
 		}
 		return "", postgres.ProposalRow{}, fmt.Errorf("verify session: %w", err)
 	}
 
-	user, found, err := g.store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
+	user, found, err := g.store.GetUserByDynamicUserID(ctx, identity.DynamicUserID)
 	if err != nil {
 		return "", postgres.ProposalRow{}, err
 	}

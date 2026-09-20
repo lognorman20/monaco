@@ -78,7 +78,7 @@ func run() error {
 
 	var marks faker.MarkSource
 	if key := strings.TrimSpace(os.Getenv("PYTH_API_KEY")); key != "" {
-		marks = faker.PythMarkSource(pyth.NewHermesClient(key))
+		marks = faker.PythMarkSource(marks.NewHermesClient(key))
 	}
 	seeder := faker.NewSeeder(postgres.NewStore(db), marks)
 

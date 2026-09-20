@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // GroupsTabHandlers serves the Groups tab discovery routes:
@@ -138,7 +138,7 @@ func (h *GroupsTabHandlers) SearchGroupsHandler(w http.ResponseWriter, r *http.R
 	result, err := h.GroupsTab.SearchGroups(ctx, token, query, limit, cursor)
 	if err != nil {
 		switch {
-		case errors.Is(err, privy.ErrInvalidToken):
+		case errors.Is(err, auth.ErrUnauthorized):
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 		case errors.Is(err, app.ErrUserNotFound):
 			logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found")
@@ -179,7 +179,7 @@ func (h *GroupsTabHandlers) GroupLeaderboardHandler(w http.ResponseWriter, r *ht
 	rows, err := h.GroupsTab.Leaderboard(ctx, token, limit)
 	if err != nil {
 		switch {
-		case errors.Is(err, privy.ErrInvalidToken):
+		case errors.Is(err, auth.ErrUnauthorized):
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 		case errors.Is(err, app.ErrUserNotFound):
 			logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found")
@@ -220,7 +220,7 @@ func (h *GroupsTabHandlers) MyGroupsPnLHistoryHandler(w http.ResponseWriter, r *
 	series, err := h.GroupsTab.MyGroupsPnLHistory(ctx, token, rng)
 	if err != nil {
 		switch {
-		case errors.Is(err, privy.ErrInvalidToken):
+		case errors.Is(err, auth.ErrUnauthorized):
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 		case errors.Is(err, app.ErrUserNotFound):
 			logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found")
@@ -260,7 +260,7 @@ func (h *GroupsTabHandlers) GroupPnLHistoryHandler(w http.ResponseWriter, r *htt
 	series, err := h.GroupsTab.GroupPnLHistory(ctx, token, groupID, rng)
 	if err != nil {
 		switch {
-		case errors.Is(err, privy.ErrInvalidToken):
+		case errors.Is(err, auth.ErrUnauthorized):
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token", "group_id", groupID)
 		case errors.Is(err, app.ErrUserNotFound):
 			logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found", "group_id", groupID)
