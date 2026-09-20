@@ -136,8 +136,13 @@ public struct MonacoHTTPTransport: Sendable {
             return (data, response)
         }
 
-        let freshToken = try await refresh(rejectedToken)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let freshToken: String?
+        do {
+            freshToken = try await refresh(rejectedToken)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            throw Self.tokenRefreshFailure(error)
+        }
         guard let freshToken, !freshToken.isEmpty, freshToken != rejectedToken else {
             return (data, response)
         }
@@ -145,6 +150,18 @@ public struct MonacoHTTPTransport: Sendable {
         var retry = request
         retry.setValue("Bearer \(freshToken)", forHTTPHeaderField: "Authorization")
         return try await session.data(for: retry)
+    }
+
+    /// A refresh that failed says something the request's own failure cannot: the request
+    /// was never sent. It stays a `URLError` so the session screens keep reading it as a
+    /// connection problem, and carries `monacoTokenRefreshFailedErrorKey` so the money
+    /// flows can say "nothing was sent" instead of "we couldn't confirm that went through".
+    private static func tokenRefreshFailure(_ error: Error) -> Error {
+        let code = (error as? URLError)?.code ?? URLError.Code.userAuthenticationRequired
+        var userInfo = (error as? URLError)?.userInfo ?? [:]
+        userInfo[monacoTokenRefreshFailedErrorKey] = true
+        userInfo[NSUnderlyingErrorKey] = error as NSError
+        return URLError(code, userInfo: userInfo)
     }
 
     /// Connection failures stay `URLError`s so callers keep matching on `code`; the request

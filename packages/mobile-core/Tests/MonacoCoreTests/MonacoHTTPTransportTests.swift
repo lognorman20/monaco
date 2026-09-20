@@ -108,6 +108,36 @@ final class MonacoHTTPTransportTests: XCTestCase {
             XCTFail("expected the refresh failure to propagate")
         } catch {
             XCTAssertEqual((error as? URLError)?.code, .notConnectedToInternet)
+            XCTAssertTrue(error.isTokenRefreshFailure)
+        }
+    }
+
+    func test401_whenRefreshThrowsSomethingElse_isStillMarkedAsNeverSent() async {
+        struct AuthProviderDown: Error {}
+        MockURLProtocol.requestHandler = { [self] request in respond(request, status: 401) }
+        let transport = MonacoHTTPTransport(session: makeMockURLSession()) { _ in throw AuthProviderDown() }
+
+        do {
+            _ = try await transport.data(for: request(token: "stale", method: "POST"))
+            XCTFail("expected the refresh failure to propagate")
+        } catch {
+            // A money POST rejected with 401 before the backend claimed its idempotency key
+            // provably did not run, so the copy must not call the outcome unknown.
+            XCTAssertTrue(error.isTokenRefreshFailure)
+            XCTAssertEqual((error as? URLError)?.code, .userAuthenticationRequired)
+            XCTAssertTrue((error as NSError).userInfo[NSUnderlyingErrorKey] is AuthProviderDown)
+        }
+    }
+
+    func testRequestFailure_isNotMistakenForARefreshFailure() async {
+        MockURLProtocol.requestHandler = { _ in throw URLError(.timedOut) }
+        let transport = MonacoHTTPTransport(session: makeMockURLSession()) { _ in "fresh" }
+
+        do {
+            _ = try await transport.data(for: request(token: "stale", method: "POST"))
+            XCTFail("expected a transport error")
+        } catch {
+            XCTAssertFalse(error.isTokenRefreshFailure)
         }
     }
 

@@ -59,6 +59,18 @@ final class MoneyFlowCopyTests: XCTestCase {
         XCTAssertEqual(failure.recovery, .resendSame)
     }
 
+    func testSignInUnavailable_saysNothingWasSent_andStaysRetryable() {
+        let failure = MoneyFlowCopy.cashOutFailure(FlowErrorInput(isSignInUnavailable: true))
+        XCTAssertEqual(failure.message, "We couldn't check your sign-in, so we didn't cash out.")
+        XCTAssertEqual(failure.nextStep, "Try again in a moment — nothing was sent.")
+        XCTAssertEqual(failure.recovery, .retry)
+        XCTAssertNotEqual(failure, MoneyFlowCopy.unconfirmed)
+        XCTAssertEqual(
+            MoneyFlowCopy.fundCabalFailure(FlowErrorInput(isSignInUnavailable: true)).message,
+            "We couldn't check your sign-in, so we didn't add that money."
+        )
+    }
+
     func testRecovery_separatesAFreshTryFromAReplay() {
         XCTAssertEqual(MoneyFlowCopy.fundCabalFailure(.offline()).recovery, .retry)
         XCTAssertEqual(MoneyFlowCopy.fundCabalFailure(FlowErrorInput(status: 429)).recovery, .retry)

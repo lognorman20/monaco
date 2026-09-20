@@ -53,11 +53,20 @@ public struct FlowErrorInput: Equatable, Sendable {
     /// True only when the request provably never left the device. A timeout or a dropped
     /// connection is not offline: the server may have acted on it.
     public let isOffline: Bool
+    /// True when the app could not check the member's sign-in before sending (the token
+    /// refresh failed, or there was no token). The request never ran, so nothing moved.
+    public let isSignInUnavailable: Bool
 
-    public init(status: Int? = nil, serverMessage: String? = nil, isOffline: Bool = false) {
+    public init(
+        status: Int? = nil,
+        serverMessage: String? = nil,
+        isOffline: Bool = false,
+        isSignInUnavailable: Bool = false
+    ) {
         self.status = status
         self.serverMessage = serverMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.isOffline = isOffline
+        self.isSignInUnavailable = isSignInUnavailable
     }
 
     public static func offline() -> FlowErrorInput { FlowErrorInput(isOffline: true) }
@@ -80,6 +89,7 @@ public enum MoneyFlowCopy {
     // MARK: - Cash out to an external wallet (POST /v1/me/withdrawals)
 
     public static func cashOutFailure(_ input: FlowErrorInput) -> FlowFailure {
+        if input.isSignInUnavailable { return signInUnavailableFailure(action: "cash out") }
         if input.isOffline { return offlineFailure(action: "cash out") }
         switch input.status {
         case 400 where matches(input, "amount exceeds available platform balance"):
@@ -114,6 +124,7 @@ public enum MoneyFlowCopy {
     // MARK: - Fund a cabal (POST /v1/groups/{id}/fund)
 
     public static func fundCabalFailure(_ input: FlowErrorInput) -> FlowFailure {
+        if input.isSignInUnavailable { return signInUnavailableFailure(action: "add that money") }
         if input.isOffline { return offlineFailure(action: "add that money") }
         switch input.status {
         case 400 where matches(input, "amount exceeds available platform balance"):
@@ -138,6 +149,7 @@ public enum MoneyFlowCopy {
     // MARK: - Cash out of a cabal to the account balance
 
     public static func sellStakeFailure(_ input: FlowErrorInput) -> FlowFailure {
+        if input.isSignInUnavailable { return signInUnavailableFailure(action: "cash out") }
         if input.isOffline { return offlineFailure(action: "cash out") }
         switch input.status {
         case 409:
@@ -157,6 +169,16 @@ public enum MoneyFlowCopy {
     }
 
     // MARK: - Shared shapes
+
+    /// The app never got as far as sending: it could not confirm the member is signed in.
+    /// Nothing moved, so this is a plain retry, not an unknown outcome.
+    public static func signInUnavailableFailure(action: String) -> FlowFailure {
+        FlowFailure(
+            message: "We couldn't check your sign-in, so we didn't \(action).",
+            recovery: .retry,
+            nextStep: "Try again in a moment — nothing was sent."
+        )
+    }
 
     public static func offlineFailure(action: String) -> FlowFailure {
         FlowFailure(
