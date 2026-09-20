@@ -8,7 +8,8 @@ import UIKit
 /// - `surfaceSunken` — field fill, segmented track, skeleton base, idle chips
 /// - `primaryText` / `ink` — headings, body, primary button fill
 /// - `secondaryText` / `muted` — captions
-/// - `tertiaryText` — timestamps, placeholders
+/// - `tertiaryText` — timestamps and other quiet real content
+/// - `disabledLabel` — disabled control labels and field placeholders; below AA on purpose
 /// - `border` / `hairline` — 1pt separators
 /// - `profit` / `loss` (+ `profitWash` / `lossWash`) — signed P&L only; green never means anything else
 /// - `warning` — amber, pending and after-hours states
@@ -38,9 +39,23 @@ enum MonacoTheme {
 
     static let muted = secondaryText
 
-    /// Timestamps, placeholders and disabled labels. Real content, so it clears AA (4.5:1)
-    /// on `canvas`, `surface` and `surfaceSunken` in both schemes — see `MonacoContrastTests`.
+    /// Timestamps and other real-but-quiet content. Clears AA (4.5:1) on `canvas`, `surface` and
+    /// `surfaceSunken` in both schemes — see `MonacoContrastTests`.
+    ///
+    /// Not for disabled controls or placeholders: see `disabledLabel`.
     static let tertiaryText = Color.adaptive(light: 0x616E86, dark: 0x8290AA)
+
+    /// Disabled control labels and field placeholders.
+    ///
+    /// Deliberately below AA and deliberately not `tertiaryText`. WCAG 1.4.3 exempts disabled
+    /// controls, and unavailable has to *look* unavailable: at `tertiaryText`'s 4.5:1 a disabled
+    /// primary CTA reads as a live button, and the hero-sized `$0.00` placeholder on the amount
+    /// screen reads as an amount the member already entered.
+    ///
+    /// Still legible, though — 2.9:1 to 4.2:1 on the three surfaces, against `tertiaryText`'s
+    /// 4.5:1 to 6.0:1. `MonacoContrastTests` holds it inside that band from both sides, so it
+    /// cannot drift up into looking live or down into being unreadable.
+    static let disabledLabel = Color.adaptive(light: 0x848EA3, dark: 0x69768D)
 
     static let border = Color.adaptive(light: 0xE3E8F0, dark: 0x232C40)
 
@@ -132,11 +147,18 @@ enum MonacoTheme {
 
     static let toastLabel = Color.white
 
-    /// Success glyph on `toastFill` (6.8:1 light, 7.9:1 dark).
-    static let toastSuccessGlyph = profitVivid
+    /// State glyphs on `toastFill`. The toast panel is dark in both schemes, so — like the hero
+    /// pair above — these are fixed colours rather than aliases of the scheme-adaptive
+    /// `profitVivid` / `lossVivid`, which are documented for chart strokes on paper. Pointing a
+    /// toast token at a token tuned for a different background is how `primaryButtonFill = brandFill`
+    /// turned the toast into a blue capsule (#309): a later retune for paper would quietly drop
+    /// the glyph's contrast here.
+    ///
+    /// 9.5:1 light, 8.0:1 dark.
+    static let toastSuccessGlyph = Color(hex: 0x1FD286)
 
-    /// Failure glyph on `toastFill` (4.4:1 light, 5.2:1 dark).
-    static let toastErrorGlyph = lossVivid
+    /// 7.4:1 light, 6.2:1 dark.
+    static let toastErrorGlyph = Color(hex: 0xFF7A7E)
 
     // MARK: Roles
 
@@ -186,8 +208,12 @@ enum MonacoTheme {
     }
 
     /// Saturated identity tints. Picked from the group id, never from the name, so a rename keeps the colour.
-    /// Every `fill` carries white initials at AA; `soft` is the low-alpha wash for tinted areas that
-    /// still hold ink text. No purple, and nothing close to brand blue or profit green.
+    /// `soft` is the low-alpha wash for tinted areas that still hold ink text. No purple, and
+    /// nothing close to brand blue or profit green.
+    ///
+    /// White initials on `fill` clear the 3:1 large-text minimum, not the 4.5:1 body minimum — in
+    /// dark the lighter fills sit at 3.5:1. That is the right bar for what draws there (bold tile
+    /// initials at 15pt and up), but it does mean `fill` must not be used behind small white text.
     enum CabalTint: CaseIterable {
         case sage, peach, butter, clay, sky
 
