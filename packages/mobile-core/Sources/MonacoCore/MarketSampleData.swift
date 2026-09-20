@@ -87,7 +87,9 @@ public enum MarketSampleData {
         week52HighUsdcMicros: 262_000_000,
         week52LowUsdcMicros: 163_000_000,
         spreadBps: 12,
-        confUsdcMicros: 30_000
+        confUsdcMicros: 30_000,
+        basis: .underlying,
+        basisSymbol: "AAPL"
     )
 
     /// A symbol listed a month ago: a session, no year behind it, no Pyth feed.
@@ -96,7 +98,9 @@ public enum MarketSampleData {
         highUsdcMicros: 42_050_000,
         lowUsdcMicros: 40_900_000,
         previousCloseUsdcMicros: 41_000_000,
-        spreadBps: 48
+        spreadBps: 48,
+        basis: .underlying,
+        basisSymbol: "NEW"
     )
 
     // MARK: - Stock vs token
@@ -182,11 +186,16 @@ public enum MarketSampleData {
     // MARK: - Charts
 
     /// A dense intraday series with candles, the way Benchmarks serves it.
+    ///
+    /// The previous close is deliberately *not* the first point's price. It is the
+    /// close of the session before this window, so the dashed baseline sits off the
+    /// curve and the day change is non-zero at t0 — which is what makes the baseline
+    /// worth drawing, and what a harness screenshot has to show.
     public static func chart(
         range: AssetChartRange,
         points: Int = 78,
         startUsdcMicros: Int64 = 226_500_000,
-        previousCloseUsdcMicros: Int64? = 226_500_000
+        previousCloseUsdcMicros: Int64? = 224_800_000
     ) -> AssetChartDTO {
         let step = range.sampleInterval
         let start = tradingTuesday.timeIntervalSince1970 - Double(points) * step
@@ -213,6 +222,8 @@ public enum MarketSampleData {
             previousCloseUsdcMicros: previousCloseUsdcMicros,
             range: range,
             source: .benchmarks,
+            basis: .underlying,
+            basisSymbol: "AAPL",
             market: sessionOpen
         )
     }
@@ -227,6 +238,8 @@ public enum MarketSampleData {
             previousCloseUsdcMicros: nil,
             range: range,
             source: .hermes,
+            basis: .underlying,
+            basisSymbol: "AAPL",
             market: sessionOpen
         )
     }

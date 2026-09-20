@@ -32,7 +32,9 @@
     "week52HighUsdcMicros": 262000000,
     "week52LowUsdcMicros": 163000000,
     "spreadBps": 12,
-    "confUsdcMicros": 30000
+    "confUsdcMicros": 30000,
+    "basis": "underlying",
+    "basisSymbol": "AAPL"
   },
   "stockVsToken": {
     "equity": {

@@ -85,6 +85,28 @@ public struct AssetLiquidityDTO: Codable, Equatable, Sendable {
 ///
 /// Market cap, P/E and dividend yield are deliberately absent: nothing behind
 /// xStocks publishes them.
+/// Which instrument a figure is about.
+///
+/// An xStock has two prices: the underlying equity on its home exchange, and the
+/// token on Solana. They differ by a premium of tens of basis points, which is what
+/// the stock-vs-token card exists to show. Every Pyth history source we have serves
+/// the underlying, so anything folded from candles — the stats grid, the chart —
+/// is the equity's, while the hero price is the token's. A current price above "the
+/// day's high" is therefore two instruments, not a bug, and the label is what makes
+/// that readable instead of alarming.
+public enum MarketPriceBasis: String, Codable, Sendable {
+    /// The equity on NASDAQ/NYSE: `Equity.US.AAPL/USD`.
+    case underlying
+    /// The xStock itself: `Crypto.AAPLX/USD`, or its on-chain price.
+    case token
+    case unknown
+
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = MarketPriceBasis(rawValue: raw) ?? .unknown
+    }
+}
+
 public struct AssetStatsDTO: Codable, Equatable, Sendable {
     public let openUsdcMicros: Int64?
     public let highUsdcMicros: Int64?
@@ -96,6 +118,13 @@ public struct AssetStatsDTO: Codable, Equatable, Sendable {
     public let spreadBps: Int?
     /// Pyth's own confidence interval around the latest mark, in USDC micros.
     public let confUsdcMicros: Int64?
+    /// Which instrument the candle-derived cells describe. Open, high, low, previous
+    /// close and the 52-week range come from the underlying equity's candles, not
+    /// the token's — the grid has to be headed with `basisSymbol` or it reads as
+    /// though those numbers were about the thing the user is buying.
+    public let basis: MarketPriceBasis?
+    /// The instrument `basis` names, for display: "AAPL".
+    public let basisSymbol: String?
 
     public init(
         openUsdcMicros: Int64? = nil,
@@ -105,7 +134,9 @@ public struct AssetStatsDTO: Codable, Equatable, Sendable {
         week52HighUsdcMicros: Int64? = nil,
         week52LowUsdcMicros: Int64? = nil,
         spreadBps: Int? = nil,
-        confUsdcMicros: Int64? = nil
+        confUsdcMicros: Int64? = nil,
+        basis: MarketPriceBasis? = nil,
+        basisSymbol: String? = nil
     ) {
         self.openUsdcMicros = openUsdcMicros
         self.highUsdcMicros = highUsdcMicros
@@ -115,9 +146,12 @@ public struct AssetStatsDTO: Codable, Equatable, Sendable {
         self.week52LowUsdcMicros = week52LowUsdcMicros
         self.spreadBps = spreadBps
         self.confUsdcMicros = confUsdcMicros
+        self.basis = basis
+        self.basisSymbol = basisSymbol
     }
 
-    /// True when nothing could be sourced, so the grid should not be drawn at all.
+    /// True when no figure could be sourced, so the grid should not be drawn at
+    /// all. A basis label on its own is not a grid.
     public var isEmpty: Bool {
         openUsdcMicros == nil
             && highUsdcMicros == nil
@@ -127,6 +161,18 @@ public struct AssetStatsDTO: Codable, Equatable, Sendable {
             && week52LowUsdcMicros == nil
             && spreadBps == nil
             && confUsdcMicros == nil
+    }
+
+    /// Header for the candle-derived cells, e.g. "AAPL on its home exchange". Nil
+    /// when the backend did not say which instrument the cells are about, in which
+    /// case the grid is drawn unheaded rather than under a guess.
+    public var basisCaption: String? {
+        guard let basisSymbol, !basisSymbol.isEmpty else { return nil }
+        switch basis {
+        case .underlying: return "\(basisSymbol) on its home exchange"
+        case .token: return "\(basisSymbol) on Solana"
+        case .unknown, nil: return nil
+        }
     }
 }
 
@@ -412,13 +458,23 @@ public enum AssetChartSource: String, Codable, Sendable {
 public struct AssetChartDTO: Codable, Equatable, Sendable {
     public let points: [AssetChartPointDTO]
     public let emptyReason: String?
-    /// The last close before the window opened: the baseline a day chart draws its
-    /// dashed line at and measures its change against.
+    /// The close of the regular session before this window: the baseline a day
+    /// chart draws its dashed line at and measures its change against.
+    ///
+    /// Absent when the source does not know one. The sampled fallback
+    /// (`source == .hermes`) never does — its grid starts inside the window, so any
+    /// number it could offer here is a point already drawn in `points`, and a
+    /// baseline sitting exactly on the curve's first point is not a baseline. Draw
+    /// nothing rather than a line through t0.
     public let previousCloseUsdcMicros: Int64?
     /// The range this series was built for. A response that names a range the user
     /// has already tapped away from should be discarded, not drawn.
     public let range: AssetChartRange?
     public let source: AssetChartSource?
+    /// Which instrument the curve is. Both Pyth history sources read the underlying
+    /// equity's feed, so a 1D chart is the stock's, drawn under a token hero price.
+    public let basis: MarketPriceBasis?
+    public let basisSymbol: String?
     public let market: MarketStatusDTO?
 
     public init(
@@ -427,6 +483,8 @@ public struct AssetChartDTO: Codable, Equatable, Sendable {
         previousCloseUsdcMicros: Int64? = nil,
         range: AssetChartRange? = nil,
         source: AssetChartSource? = nil,
+        basis: MarketPriceBasis? = nil,
+        basisSymbol: String? = nil,
         market: MarketStatusDTO? = nil
     ) {
         self.points = points
@@ -434,11 +492,13 @@ public struct AssetChartDTO: Codable, Equatable, Sendable {
         self.previousCloseUsdcMicros = previousCloseUsdcMicros
         self.range = range
         self.source = source
+        self.basis = basis
+        self.basisSymbol = basisSymbol
         self.market = market
     }
 
     private enum CodingKeys: String, CodingKey {
-        case points, emptyReason, previousCloseUsdcMicros, range, source, market
+        case points, emptyReason, previousCloseUsdcMicros, range, source, basis, basisSymbol, market
     }
 
     public init(from decoder: Decoder) throws {
@@ -450,6 +510,8 @@ public struct AssetChartDTO: Codable, Equatable, Sendable {
         // a caller matching ranges just will not match this one.
         range = try container.decodeIfPresent(String.self, forKey: .range).flatMap(AssetChartRange.init(rawValue:))
         source = try container.decodeIfPresent(AssetChartSource.self, forKey: .source)
+        basis = try container.decodeIfPresent(MarketPriceBasis.self, forKey: .basis)
+        basisSymbol = try container.decodeIfPresent(String.self, forKey: .basisSymbol)
         market = try container.decodeIfPresent(MarketStatusDTO.self, forKey: .market)
     }
 }

@@ -351,4 +351,72 @@ final class MarketDataDTOTests: XCTestCase {
         let decoded = try JSONDecoder().decode(AssetDetailDTO.self, from: encoded)
         XCTAssertEqual(decoded, MarketSampleData.detail())
     }
+
+    // MARK: - Price basis
+
+    func testAssetStats_carryTheInstrumentTheirCandlesCameFrom() throws {
+        // The grid is folded from the underlying equity's candles while the hero
+        // price is the token's. They differ by the premium, so the token price can
+        // sit above "the day's high" — which reads as a bug unless the grid says
+        // which instrument it is about.
+        let dto = try decode(AssetDetailDTO.self, """
+        {
+          "symbol":"AAPLx","name":"Apple","solanaMint":"Xsb","routable":true,
+          "priceUsdcMicros":232050000,
+          "liquidity":{"label":"Via Jupiter","routable":true,"buyProbeUsdcMicros":1000000},
+          "stats":{"highUsdcMicros":231800000,"basis":"underlying","basisSymbol":"AAPL"}
+        }
+        """)
+
+        let stats = try XCTUnwrap(dto.stats)
+        XCTAssertEqual(stats.basis, .underlying)
+        XCTAssertEqual(stats.basisCaption, "AAPL on its home exchange")
+        // The hero price really is above the grid's high. That is the two
+        // instruments disagreeing, which is the thing the caption explains.
+        XCTAssertGreaterThan(try XCTUnwrap(dto.priceUsdcMicros), try XCTUnwrap(stats.highUsdcMicros))
+    }
+
+    func testAssetStats_unlabelledGridIsDrawnUnheadedRatherThanUnderAGuess() throws {
+        // A backend that has not shipped the label yet, or a source that could not
+        // say. Guessing "AAPL" here would be inventing the one fact the caption is
+        // supposed to carry.
+        let stats = try decode(AssetStatsDTO.self, #"{"highUsdcMicros":231800000}"#)
+        XCTAssertNil(stats.basis)
+        XCTAssertNil(stats.basisCaption)
+
+        let futureBasis = try decode(AssetStatsDTO.self, #"{"highUsdcMicros":1,"basis":"something_new","basisSymbol":"AAPL"}"#)
+        XCTAssertEqual(futureBasis.basis, .unknown, "a basis added server-side must not take the screen down")
+        XCTAssertNil(futureBasis.basisCaption)
+    }
+
+    func testAssetStats_aBasisLabelAloneIsNotAGrid() throws {
+        let stats = try decode(AssetStatsDTO.self, #"{"basis":"underlying","basisSymbol":"AAPL"}"#)
+        XCTAssertTrue(stats.isEmpty, "a grid with a label and no figures must not be drawn")
+    }
+
+    func testAssetChart_carriesTheInstrumentTheCurveIs() throws {
+        let chart = try decode(AssetChartDTO.self, """
+        {"points":[{"timestamp":1,"priceUsdcMicros":2}],"range":"1D","source":"benchmarks",
+         "basis":"underlying","basisSymbol":"AAPL"}
+        """)
+        XCTAssertEqual(chart.basis, .underlying)
+        XCTAssertEqual(chart.basisSymbol, "AAPL")
+    }
+
+    func testAssetChart_sampledFallbackHasNoPreviousCloseBaseline() throws {
+        // The sampler's grid starts inside the window, so its first point is drawn
+        // in the series itself. A baseline sitting exactly on the curve's first
+        // point is not a baseline, and the day change would read 0% at t0.
+        let fallback = MarketSampleData.chartFromFallback(range: .oneDay)
+        XCTAssertEqual(fallback.source, .hermes)
+        XCTAssertNil(fallback.previousCloseUsdcMicros)
+
+        let dense = MarketSampleData.chart(range: .oneDay)
+        XCTAssertEqual(dense.source, .benchmarks)
+        XCTAssertNotNil(dense.previousCloseUsdcMicros)
+        XCTAssertFalse(
+            dense.points.contains { $0.priceUsdcMicros == dense.previousCloseUsdcMicros },
+            "a genuine previous close comes from before the window, so it is not one of its points"
+        )
+    }
 }

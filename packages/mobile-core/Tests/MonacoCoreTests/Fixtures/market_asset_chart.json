@@ -18,6 +18,8 @@
   "previousCloseUsdcMicros": 179000000,
   "range": "1D",
   "source": "benchmarks",
+  "basis": "underlying",
+  "basisSymbol": "AAPL",
   "market": {
     "session": "open",
     "isOpen": true,
