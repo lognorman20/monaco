@@ -5,7 +5,8 @@ import SwiftUI
 /// Debug-only: the group screen and its pushed screens on canned data, no sign-in or backend.
 /// Launch with `-MonacoGroupDetailSample <scenario>`:
 /// `populated` · `empty` · `loading` · `details` (Cabal details sheet open) · `propose` (chooser sheet open)
-/// · `cashOut` · `receipt` (bought) · `receiptFailed` (failed sell) · `activity` (full list).
+/// · `cashOut` · `receipt` (bought) · `receiptFailed` (failed sell) · `activity` (full list)
+/// · `sellAndLeave` (the screen while the slice is being sold).
 enum GroupDetailSampleScenario: String, CaseIterable {
     case populated
     case empty
@@ -16,6 +17,7 @@ enum GroupDetailSampleScenario: String, CaseIterable {
     case receipt
     case receiptFailed
     case activity
+    case sellAndLeave
 
     static let launchArgument = "-MonacoGroupDetailSample"
 
@@ -81,7 +83,7 @@ struct GroupDetailSampleHarness: View {
                 .monacoCanvas()
                 .navigationTitle("Weekend investors")
                 .navigationBarTitleDisplayMode(.inline)
-        case .populated, .empty, .details, .propose:
+        case .populated, .empty, .details, .propose, .sellAndLeave:
             groupScreen(scenario == .empty ? GroupDetailSampleData.emptyView : GroupDetailSampleData.view)
         }
     }
@@ -109,6 +111,8 @@ struct GroupDetailSampleHarness: View {
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .monacoCanvas()
+        // The same cover the real screen puts up while a leave is running.
+        .groupLeaveProgress(isLeaving: scenario == .sellAndLeave, isSellingSlice: true)
         .navigationTitle(heroScrolledAway ? view.name : "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -119,8 +123,8 @@ struct GroupDetailSampleHarness: View {
         }
         .navigationDestination(item: $route) { route in
             switch route {
-            case .cashOut:
-                SellCabalView(auth: auth, groupId: view.id, maxShareUnits: Int64(view.you.shareUnits) ?? 0, equityUsd: view.you.equityUsd)
+            case .cashOut(let shareUnits, let equityUsd):
+                SellCabalView(auth: auth, groupId: view.id, maxShareUnits: shareUnits, equityUsd: equityUsd)
             case .activity:
                 GroupActivityListView(auth: auth, items: GroupDetailSampleData.activity, retryingTransactionIDs: [], onRetry: { _ in })
             case .proposals:
