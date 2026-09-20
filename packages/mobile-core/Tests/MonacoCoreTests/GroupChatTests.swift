@@ -200,6 +200,59 @@ final class GroupChatTimelineTests: XCTestCase {
         XCTAssertTrue(added.isEmpty)
         XCTAssertEqual(timeline.messages, [sent])
     }
+
+    /// Rows now reuse the `Date` already parsed for a message instead of re-parsing the whole
+    /// loaded thread on every merge. The dates, and everything derived from them, have to come
+    /// out identical to a thread built in one go.
+    func testRows_reusedDatesMatchAThreadBuiltInOnePass() {
+        // Arrange: three pages, so most rows are carried across two merges.
+        var merged = GroupChatTimeline()
+        merged.mergeNewest(GroupMessagesPageDTO(messages: [
+            message("m3", at: "2026-09-18T15:00:03.000000Z"),
+            message("m2", at: "2026-09-18T15:00:02.000000Z"),
+            message("m1", at: "2026-09-18T15:00:01.000000Z"),
+        ]))
+        merged.mergeNewest(GroupMessagesPageDTO(messages: [
+            message("m4", at: "2026-09-18T15:30:04.000000Z"),
+        ]))
+        merged.mergeNewest(GroupMessagesPageDTO(messages: [
+            message("m5", at: "2026-09-18T15:30:05.000000Z"),
+        ]))
+
+        var atOnce = GroupChatTimeline()
+        atOnce.mergeNewest(GroupMessagesPageDTO(messages: [
+            message("m5", at: "2026-09-18T15:30:05.000000Z"),
+            message("m4", at: "2026-09-18T15:30:04.000000Z"),
+            message("m3", at: "2026-09-18T15:00:03.000000Z"),
+            message("m2", at: "2026-09-18T15:00:02.000000Z"),
+            message("m1", at: "2026-09-18T15:00:01.000000Z"),
+        ]))
+
+        // Assert: dates, separators and run edges all survive being carried.
+        XCTAssertEqual(merged.rows, atOnce.rows)
+        XCTAssertEqual(merged.rows.map(\.date), atOnce.rows.map(\.date))
+        XCTAssertNotNil(merged.rows.first?.date, "the fixture stamps should parse at all")
+    }
+
+    /// A stamp that will not parse is carried as nil rather than re-parsed on every merge in
+    /// the hope of a different answer.
+    func testRows_anUnparseableStampStaysNilAcrossMerges() {
+        // Arrange
+        var timeline = GroupChatTimeline()
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [message("bad", at: "not a date")]))
+        XCTAssertNil(timeline.rows.first?.date)
+
+        // Act
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [
+            message("m2", at: "2026-09-18T15:00:02.000000Z"),
+            message("bad", at: "not a date"),
+        ]))
+
+        // Assert
+        XCTAssertEqual(timeline.rows.count, 2)
+        XCTAssertNil(timeline.rows.first { $0.id == "bad" }?.date)
+        XCTAssertNotNil(timeline.rows.first { $0.id == "m2" }?.date)
+    }
 }
 
 final class GroupChatCopyTests: XCTestCase {
@@ -615,6 +668,121 @@ final class GroupChatFailureCopyTests: XCTestCase {
         XCTAssertNil(GroupChatCopy.chatClosed(URLError(.notConnectedToInternet)))
     }
 
+    /// The composer branches on this, so it has to line up with the sentence exactly: a send
+    /// that may have landed must not hand the text back, or the warning is one tap from the
+    /// duplicate it exists to prevent.
+    func testIsSendUnconfirmed_matchesTheSentenceItIsDerivedFrom() {
+        // Could only have failed after the request went out.
+        XCTAssertTrue(GroupChatCopy.isSendUnconfirmed(MonacoAPIError.httpStatus(500)))
+        XCTAssertTrue(GroupChatCopy.isSendUnconfirmed(MonacoAPIError.invalidResponse))
+        XCTAssertTrue(GroupChatCopy.isSendUnconfirmed(URLError(.timedOut)))
+
+        // Raised before a byte left the device, or a refusal the API made on purpose.
+        XCTAssertFalse(GroupChatCopy.isSendUnconfirmed(URLError(.notConnectedToInternet)))
+        XCTAssertFalse(GroupChatCopy.isSendUnconfirmed(MonacoAPIError.httpStatus(403)))
+        XCTAssertFalse(GroupChatCopy.isSendUnconfirmed(MonacoAPIError.httpStatus(400)))
+        XCTAssertFalse(GroupChatCopy.isSendUnconfirmed(GroupChatDraft.Problem.empty))
+    }
+
+    /// The messages route answers 404 for a missing *user* as well as a missing cabal, and a
+    /// membership read served by a lagging replica raises exactly that for a member who is
+    /// still in their cabal. Telling them the cabal was deleted is the wrong sentence and,
+    /// worse, the one that parks the screen.
+    func testChatClosed_aUserNotFound404IsNotADeletedCabal() {
+        XCTAssertNil(
+            GroupChatCopy.chatClosed(MonacoAPIError.rejected(status: 404, message: "user not found"))
+        )
+        XCTAssertEqual(
+            GroupChatCopy.chatClosed(MonacoAPIError.rejected(status: 404, message: "group not found")),
+            "This cabal no longer exists."
+        )
+    }
+}
+
+final class GroupChatClosureTrackerTests: XCTestCase {
+    private let removed = MonacoAPIError.httpStatus(403)
+
+    func testStartsOpen() {
+        let tracker = GroupChatClosureTracker()
+        XCTAssertFalse(tracker.isClosed)
+        XCTAssertNil(tracker.message)
+    }
+
+    /// The regression: one background tick closed the thread for the life of the view. A blip
+    /// on the membership read has to stop being able to do that.
+    func testASingleClosedPollDoesNotCloseTheThread() {
+        var tracker = GroupChatClosureTracker()
+        tracker.pollFailed(removed)
+        XCTAssertFalse(tracker.isClosed, "one tick is not evidence that a member was removed")
+    }
+
+    func testTheThreadClosesOnceThePollKeepsSayingSo() {
+        var tracker = GroupChatClosureTracker()
+        for _ in 0..<GroupChatClosureTracker.pollsBeforeClosing {
+            tracker.pollFailed(removed)
+        }
+        XCTAssertEqual(tracker.message, "You're no longer in this cabal, so its chat is closed to you.")
+    }
+
+    /// A blip in the middle of a run is the whole point: the server has to hold the story.
+    func testOneGoodPollResetsTheRun() {
+        var tracker = GroupChatClosureTracker()
+        tracker.pollFailed(removed)
+        tracker.pollFailed(removed)
+        tracker.succeeded()
+        tracker.pollFailed(removed)
+        tracker.pollFailed(removed)
+        XCTAssertFalse(tracker.isClosed)
+    }
+
+    /// Failures that are not about being shut out must not accumulate towards closing either.
+    func testAnUnrelatedFailureResetsTheRun() {
+        var tracker = GroupChatClosureTracker()
+        tracker.pollFailed(removed)
+        tracker.pollFailed(removed)
+        tracker.pollFailed(URLError(.timedOut))
+        tracker.pollFailed(removed)
+        XCTAssertFalse(tracker.isClosed)
+    }
+
+    /// The member asked and is waiting on the answer, so it is not held back for corroboration.
+    func testAMemberLoadClosesImmediately() {
+        var tracker = GroupChatClosureTracker()
+        tracker.memberLoadFailed(removed)
+        XCTAssertTrue(tracker.isClosed)
+    }
+
+    func testAMemberLoadIgnoresFailuresThatAreNotAClosedThread() {
+        var tracker = GroupChatClosureTracker()
+        tracker.memberLoadFailed(URLError(.timedOut))
+        XCTAssertFalse(tracker.isClosed)
+    }
+
+    /// The other half of the one-way street: a closed thread has to be able to reopen, or a
+    /// transient 404 is permanent whatever the retry button does.
+    func testAPageReopensAClosedThread() {
+        var tracker = GroupChatClosureTracker()
+        tracker.memberLoadFailed(removed)
+        XCTAssertTrue(tracker.isClosed)
+
+        tracker.succeeded()
+        XCTAssertFalse(tracker.isClosed)
+        XCTAssertNil(tracker.message)
+    }
+
+    /// Reopening clears the run too, so a thread that recovered does not close on the next
+    /// single blip because of polls that failed before it came back.
+    func testReopeningAlsoClearsTheRun() {
+        var tracker = GroupChatClosureTracker()
+        tracker.pollFailed(removed)
+        tracker.pollFailed(removed)
+        tracker.memberLoadFailed(removed)
+        tracker.succeeded()
+
+        tracker.pollFailed(removed)
+        XCTAssertFalse(tracker.isClosed)
+    }
+
     func testClosedCopy_reachesEveryFailureSurface() {
         let closed = "This cabal no longer exists."
         XCTAssertEqual(GroupChatCopy.loadFailure(MonacoAPIError.httpStatus(404)), closed)
@@ -635,6 +803,11 @@ final class GroupChatFailureCopyTests: XCTestCase {
             GroupChatCopy.chatClosed(MonacoAPIError.httpStatus(403)) ?? "",
             GroupChatCopy.chatClosed(MonacoAPIError.httpStatus(404)) ?? "",
             GroupChatCopy.newMessagesPill(count: 3),
+            // The newest member-facing sentence in chat, and the one a member has to act on.
+            GroupChatCopy.sendUnconfirmed,
+            GroupChatCopy.sendFailure(MonacoAPIError.rateLimited(retryAfterSeconds: 30)),
+            GroupChatCopy.sendFailure(MonacoAPIError.httpStatus(401)),
+            GroupChatCopy.sendFailure(URLError(.notConnectedToInternet)),
         ]))
     }
 }
