@@ -170,7 +170,8 @@ final class MonacoUITests: XCTestCase {
         )
         XCTAssertTrue(
             app.otherElements["asset-detail-chart"].waitForExistence(timeout: 12)
-                || app.staticTexts["Price history is not available yet."].waitForExistence(timeout: 8)
+                || app.otherElements["asset-detail-chart-loading"].waitForExistence(timeout: 8)
+                || app.staticTexts["No price history for this window yet"].waitForExistence(timeout: 8)
         )
         XCTAssertTrue(app.otherElements["asset-detail-jupiter"].waitForExistence(timeout: 8)
             || app.staticTexts["Via Jupiter"].waitForExistence(timeout: 8))
@@ -183,7 +184,7 @@ final class MonacoUITests: XCTestCase {
         XCTAssertTrue(
             app.navigationBars["Pick a cabal"].waitForExistence(timeout: 10)
                 || app.otherElements["group-picker-root"].waitForExistence(timeout: 8)
-                || app.staticTexts["Join a cabal first to propose a buy or sell."].waitForExistence(timeout: 8)
+                || app.staticTexts["Join a cabal first"].waitForExistence(timeout: 8)
         )
         attachScreenshot(app, name: "issue-156-pick-cabal")
 
@@ -192,11 +193,12 @@ final class MonacoUITests: XCTestCase {
         ).firstMatch
         if cabalRow.waitForExistence(timeout: 6) {
             cabalRow.tap()
+            // Picking a cabal goes straight to the amount step, with no stock-search screen
+            // in between and no second push during the transition.
             XCTAssertTrue(
-                app.navigationBars["Propose buy"].waitForExistence(timeout: 12)
-                    || app.textFields["proposal-search-field"].waitForExistence(timeout: 12)
-                    || app.textFields["proposal-amount-field"].waitForExistence(timeout: 8),
-                "propose buy with symbol prefilled"
+                app.otherElements["propose-amount"].waitForExistence(timeout: 12)
+                    || app.textFields["amount-entry-field"].waitForExistence(timeout: 8),
+                "amount step with the stock already set"
             )
             attachScreenshot(app, name: "issue-156-propose-buy")
             if app.navigationBars.buttons.count > 0 {
