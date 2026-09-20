@@ -96,7 +96,7 @@ final class AppSessionStore {
 
         errorMessage = mapped.message
         #if DEBUG
-        errorDebugDetail = mapped.debugDetail
+        errorDebugDetail = "\(mapped.debugDetail)\n\(Config.api.debugSummary)"
         #endif
     }
 
