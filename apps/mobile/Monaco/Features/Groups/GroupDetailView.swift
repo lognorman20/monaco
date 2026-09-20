@@ -48,7 +48,17 @@ struct GroupDetailView: View {
     /// Set once leaving succeeded; `DismissWhenActive` pops the screen.
     @State private var hasLeft = false
 
-    private let activityPollInterval: Duration = .seconds(15)
+    /// Whether the open-votes preview has a proposal collecting votes right now.
+    @State private var hasOpenVotes = false
+    /// Pull-to-refresh and the background poll share it, so a tick stands down while the member
+    /// is refreshing by hand.
+    @State private var refreshGate = RefreshGate()
+
+    /// Votes land and swaps settle in seconds; a quiet cabal only needs its balances kept current.
+    private var pollInterval: Duration {
+        let swapInFlight = activityItems.contains { $0.status.lowercased() == "pending" }
+        return hasOpenVotes || swapInFlight ? LiveRefreshCadence.inPlay : LiveRefreshCadence.resting
+    }
 
     init(
         auth: PrivyAuthService,
@@ -103,13 +113,17 @@ struct GroupDetailView: View {
                 }
                 await loadActivity()
                 await loadJoinRequests()
-                await pollActivityWhileVisible()
+            }
+            .pollWhileVisible(every: pollInterval, isActive: groupView != nil && !hasLeft, gate: refreshGate) {
+                try await pollGroupAndActivity()
             }
             .refreshable {
-                proposalRefreshCount += 1
-                await loadGroup()
-                await loadActivity()
-                await loadJoinRequests()
+                await refreshGate.runNow {
+                    proposalRefreshCount += 1
+                    await loadGroup()
+                    await loadActivity()
+                    await loadJoinRequests()
+                }
             }
             .sheet(isPresented: $showProposeSheet, onDismiss: {
                 proposalRefreshCount += 1
@@ -153,6 +167,7 @@ struct GroupDetailView: View {
                 currentUserId: session?.me?.userId,
                 proposalService: proposalService,
                 proposalRefreshToken: "\(proposalRefreshCount)",
+                onOpenVotesChange: { hasOpenVotes = $0 },
                 activityItems: activityItems,
                 activityLoading: activityLoading,
                 activityError: activityError,
@@ -333,11 +348,21 @@ struct GroupDetailView: View {
         }
     }
 
-    private func pollActivityWhileVisible() async {
-        while !Task.isCancelled {
-            try? await Task.sleep(for: activityPollInterval)
-            guard !Task.isCancelled else { return }
-            await loadActivity(showLoadingIndicator: false)
+    /// Background re-read of the cabal and its activity: the pot, the member's slice, holdings,
+    /// the leaderboard, and swaps settling. Writes only what changed and never a loading or error
+    /// state; a throw leaves the screen as it is and lets the loop back off.
+    private func pollGroupAndActivity() async throws {
+        guard let token = auth.accessToken, !isLeaving else { return }
+        async let viewLoad = apiClient.getGroupView(accessToken: token, groupId: groupId)
+        async let activityLoad = apiClient.getGroupActivity(accessToken: token, groupId: groupId)
+        let loadedView = try await viewLoad
+        let loadedActivity = try? await activityLoad
+        guard !Task.isCancelled, !hasLeft else { return }
+        QuietUpdate.apply(loadedView, over: groupView) { groupView = $0 }
+        if let loadedActivity {
+            QuietUpdate.apply(loadedActivity.items, over: activityItems) { activityItems = $0 }
+            if activityError != nil { activityError = nil }
+            surfaceDepositFailureToasts(from: loadedActivity.items)
         }
     }
 
@@ -481,6 +506,7 @@ struct GroupDetailContent: View {
     let currentUserId: String?
     let proposalService: ProposalFeedService
     let proposalRefreshToken: String
+    var onOpenVotesChange: (Bool) -> Void = { _ in }
     let activityItems: [GroupActivityItemDTO]
     let activityLoading: Bool
     let activityError: String?
@@ -515,6 +541,7 @@ struct GroupDetailContent: View {
                         service: proposalService,
                         groupId: view.id,
                         refreshToken: proposalRefreshToken,
+                        onOpenVotesChange: onOpenVotesChange,
                         onSeeAll: { onRoute(.proposals) },
                         onToast: onToast
                     )

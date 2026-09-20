@@ -15,6 +15,10 @@ struct HomeView: View {
         session.joinedCabals
     }
 
+    private var potValuesUsd: [String: String] {
+        Dictionary(joinedCabals.map { ($0.groupId, $0.potValueUsd) }, uniquingKeysWith: { first, _ in first })
+    }
+
     var body: some View {
         Group {
             // Skeleton until the dashboard lands (#217: session and dashboard load separately).
@@ -60,6 +64,9 @@ struct HomeView: View {
         }
         .onChange(of: leaderboardRange) { _, range in
             Task { await session.refreshDashboard(auth: auth, leaderboardRange: range) }
+        }
+        .pollWhileVisible(every: LiveRefreshCadence.resting) {
+            try await session.pollLive(auth: auth)
         }
     }
 
@@ -110,6 +117,7 @@ struct HomeView: View {
                 HomePositionsSection(
                     auth: auth,
                     rows: dashboard.myGroups,
+                    potValuesUsd: potValuesUsd,
                     onLeft: { await session.refresh(auth: auth, leaderboardRange: leaderboardRange) },
                     onBrowseCabals: { selectedTab = .cabals }
                 )

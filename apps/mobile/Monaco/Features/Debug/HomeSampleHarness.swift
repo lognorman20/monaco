@@ -64,6 +64,16 @@ struct HomeSampleHarness: View {
         let joined = scenario != .empty
         let missed = scenario == .missedVote || scenario == .populated
 
+        // Pot values for the "Your cabals" subtitles; same cabals as `ProfileSampleHarness`.
+        session.home = HomeViewDTO(
+            groups: joined ? [
+                HomeGroupBoardRowDTO(groupId: "g1", name: "Weekend investors", potValueUsd: "548.20", percentReturn: "0.124", dollarPnl: "+48.20", isJoined: true),
+                HomeGroupBoardRowDTO(groupId: "g2", name: "Semis or bust", potValueUsd: "2310.75", percentReturn: "-0.031", dollarPnl: "-73.90", isJoined: true),
+                HomeGroupBoardRowDTO(groupId: "g3", name: "Index huggers", potValueUsd: "120.00", percentReturn: nil, dollarPnl: "+0.00", isJoined: true),
+            ] : [],
+            people: []
+        )
+
         session.dashboard = HomeDashboardDTO(
             netWorthUsd: joined ? "1248.50" : "0.00",
             netWorthDollarPnl: joined ? "+48.20" : "+0.00",

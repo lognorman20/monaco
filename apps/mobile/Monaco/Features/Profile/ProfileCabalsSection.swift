@@ -33,8 +33,10 @@ struct ProfileCabalRow: Identifiable, Equatable {
             }
     }
 
-    var subtitle: String {
-        "Pot \(UsdAmountFormatter.format(decimalString: potValueUsd))"
+    /// Nil when the dashboard has no position for this cabal yet.
+    var figures: CabalPositionRowFigures? {
+        guard let equityUsd, let dollarPnl else { return nil }
+        return CabalPositionRowFigures(equityUsd: equityUsd, dollarPnl: dollarPnl, percentReturn: percentReturn)
     }
 }
 
@@ -64,18 +66,12 @@ struct ProfileCabalsSection: View {
                                 onLeft: onLeft
                             )
                         } label: {
-                            MonacoRow(
-                                title: row.name,
-                                subtitle: row.subtitle,
-                                chevron: true,
-                                isLast: row.groupId == rows.last?.groupId,
-                                leading: { CabalMark(groupId: row.groupId, name: row.name) },
-                                trailing: {
-                                    if let dollarPnl = row.dollarPnl {
-                                        PnLText(dollarPnl: dollarPnl, style: .row)
-                                        PercentText(percentReturn: row.percentReturn, style: .caption)
-                                    }
-                                }
+                            CabalPositionRow(
+                                groupId: row.groupId,
+                                name: row.name,
+                                potValueUsd: row.potValueUsd,
+                                figures: row.figures,
+                                isLast: row.groupId == rows.last?.groupId
                             )
                         }
                         .buttonStyle(.monacoRow)

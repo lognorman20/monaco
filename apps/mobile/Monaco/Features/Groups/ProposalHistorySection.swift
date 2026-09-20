@@ -8,6 +8,8 @@ struct ProposalHistorySection: View {
     let groupId: String
     /// Changes when the parent screen refreshes, so the preview reloads with it.
     var refreshToken: String = ""
+    /// Tells the group screen whether a vote is in play, which is what sets its refresh cadence.
+    var onOpenVotesChange: (Bool) -> Void = { _ in }
     var onSeeAll: () -> Void = {}
     var onToast: (MonacoToast) -> Void = { _ in }
 
@@ -56,6 +58,12 @@ struct ProposalHistorySection: View {
         .task(id: "\(groupId)-\(refreshToken)") {
             await load()
         }
+        .pollWhileVisible(every: LiveRefreshCadence.watching(openProposals)) {
+            try await poll()
+        }
+        .onChange(of: openProposals.contains(where: \.isOpen), initial: true) { _, hasOpenVotes in
+            onOpenVotesChange(hasOpenVotes)
+        }
     }
 
     /// Keeps the last good list on failure; the section only disappears when the server says nothing is open.
@@ -65,6 +73,15 @@ struct ProposalHistorySection: View {
         } catch {
             return
         }
+    }
+
+    /// Background re-read, so another member's vote or a new proposal shows up without a pull.
+    /// Stands down while the member's own vote is in flight — `vote` reloads when it lands.
+    private func poll() async throws {
+        guard votingIDs.isEmpty else { return }
+        let fresh = try await service.listProposals(groupId: groupId, tab: .open)
+        guard votingIDs.isEmpty, !Task.isCancelled else { return }
+        QuietUpdate.apply(fresh, over: openProposals) { openProposals = $0 }
     }
 
     private func vote(_ choice: ProposalVoteChoice, on proposal: ProposalDTO) async {
