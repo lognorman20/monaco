@@ -162,6 +162,77 @@ final class MonacoHTTPTransportTests: XCTestCase {
         )
     }
 
+    /// The central claim of this PR: a money POST whose outcome was never seen can be sent
+    /// again without moving the money twice. That only holds if the resend carries the same
+    /// key AND the same budget. Nothing pinned it before.
+    func testTimedOutMoneyWrite_resendsUnderTheSameKeyAndTheSameBudget() async throws {
+        let keys = Recorder<String?>()
+        let timeouts = Recorder<TimeInterval>()
+        var failFirst = true
+        MockURLProtocol.requestHandler = { [self] request in
+            keys.append(request.value(forHTTPHeaderField: IdempotentSubmission.keyHeader))
+            timeouts.append(request.timeoutInterval)
+            if failFirst {
+                failFirst = false
+                throw URLError(.timedOut)
+            }
+            return respond(request, status: 200)
+        }
+        let transport = MonacoHTTPTransport(session: makeMockURLSession())
+        let submission = IdempotentSubmission { "money-key" }
+        let body = Data(#"{"amount":1}"#.utf8)
+
+        do {
+            _ = try await transport.send(
+                request(token: "t", method: "POST", body: body), submission: submission
+            )
+            XCTFail("expected the first attempt to time out")
+        } catch {
+            XCTAssertEqual((error as? URLError)?.code, .timedOut)
+        }
+        // A timeout stores no response, so the key stays pending for the resend.
+        XCTAssertTrue(submission.hasPendingKey)
+
+        _ = try await transport.send(
+            request(token: "t", method: "POST", body: body), submission: submission
+        )
+
+        XCTAssertEqual(keys.values, ["money-key", "money-key"], "the resend minted a new key")
+        XCTAssertEqual(
+            timeouts.values,
+            [MonacoRequestTimeout.moneyWrite, MonacoRequestTimeout.moneyWrite]
+        )
+        // A 200 is a final answer, so the submission is done.
+        XCTAssertFalse(submission.hasPendingKey)
+    }
+
+    /// The 401 retry rebuilds nothing today — it copies the request and swaps one header —
+    /// but nothing said so. If someone ever reconstructs the request there, the key would be
+    /// dropped and the retry would become a second submission of the same money.
+    func test401Retry_keepsTheIdempotencyKeyAndTheMoneyBudget() async throws {
+        let keys = Recorder<String?>()
+        let timeouts = Recorder<TimeInterval>()
+        MockURLProtocol.requestHandler = { [self] request in
+            keys.append(request.value(forHTTPHeaderField: IdempotentSubmission.keyHeader))
+            timeouts.append(request.timeoutInterval)
+            let header = request.value(forHTTPHeaderField: "Authorization")
+            return respond(request, status: header == "Bearer fresh" ? 200 : 401)
+        }
+        let transport = MonacoHTTPTransport(session: makeMockURLSession()) { _ in "fresh" }
+
+        _ = try await transport.send(
+            request(token: "stale", method: "POST", body: Data(#"{"amount":1}"#.utf8)),
+            submission: IdempotentSubmission { "money-key" }
+        )
+
+        XCTAssertEqual(keys.values, ["money-key", "money-key"], "the 401 retry lost the key")
+        XCTAssertEqual(
+            timeouts.values,
+            [MonacoRequestTimeout.moneyWrite, MonacoRequestTimeout.moneyWrite],
+            "the 401 retry lost the money budget"
+        )
+    }
+
     func testTimeoutBudget_isNeverTheSharedSessionDefault() {
         XCTAssertLessThan(MonacoRequestTimeout.standard, 60)
         // The session carries the *longest* budget, not the shortest: URLSession does not

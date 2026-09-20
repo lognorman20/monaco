@@ -21,6 +21,16 @@ public enum MonacoRequestTimeout {
     /// `postRedeem` sends a key to `/redeems`, which is not on that list, so its key is
     /// inert and the 60s it earns here buys no replay protection. Harmless while the
     /// endpoint has no callers; adding one means adding the route server-side first.
+    ///
+    /// 60s is the same number `URLSession.shared` already gave these routes, so by itself
+    /// this constant is not a behaviour change for money: a confirm that takes 61-180s still
+    /// surfaces as a failure exactly as it did before. It is deliberately not raised to the
+    /// backend's 3-minute `serverWriteTimeout` — three minutes of a spinner is not a better
+    /// answer than a failure the member can act on. What changed for money is the recovery
+    /// classification: that failure is now `.resendSame`, so the retry rides the pending key
+    /// instead of minting a new one. The rest is server-side: the routes that swap inside the
+    /// request should answer 202 with a job to poll, as withdraw-to-balance already does, and
+    /// then this budget and `serverWriteTimeout` can meet in the middle.
     public static let moneyWrite: TimeInterval = 60
 
     /// Uploads (profile photo): megabytes on a phone network.
@@ -32,7 +42,12 @@ public enum MonacoRequestTimeout {
     /// name one inherits `standard` — a slow non-idempotent route has to name its own.
     public static let signIn: TimeInterval = 60
 
-    /// Ceiling for one request including its 401 refresh-and-retry, set on the session.
+    /// Ceiling for one URLSession task, set on the session. Deliberately NOT a ceiling for
+    /// one logical request: a 401 refresh-and-retry runs two tasks (`sendRefreshingToken` in
+    /// `MonacoHTTPTransport`), each getting its own 180s, with the auth provider's `refresh`
+    /// between them on no deadline at all. A money POST that refreshes can therefore run for
+    /// `moneyWrite` + an unbounded refresh + `moneyWrite`. Bounding the whole sequence needs
+    /// a deadline around `send`, not a larger number here.
     static let resource: TimeInterval = 180
 
     /// The longest budget any single request may ask for. The session is configured with
