@@ -148,13 +148,20 @@ public struct GroupChatTimeline: Equatable, Sendable {
 
     /// Whether an arrival should pull the thread down to the newest message.
     ///
-    /// Two things earn a scroll: a message the viewer just sent, and one landing while they
-    /// were already reading the bottom. A member scrolled up in the history keeps their place
-    /// and is told about the new messages instead of being thrown at them.
-    public static func shouldAutoScroll(added: [GroupMessageDTO], isPinnedToBottom: Bool) -> Bool {
+    /// Two things earn a scroll: a message the viewer just sent, and one landing while the
+    /// thread was following the conversation. A member scrolled up in the history keeps their
+    /// place and is told about the new messages instead of being thrown at them.
+    ///
+    /// `isFollowingThread` is the reader's standing intent — they have not dragged away from
+    /// the end, or they have asked to go back to it — and deliberately not a measurement of
+    /// the current offset. Appending a row grows the content before anything scrolls, so a
+    /// thread that is faithfully following the conversation reads as "not at the bottom" for
+    /// a frame or two after every message. Deciding on that would start counting arrivals as
+    /// unread behind a reader who is watching them land.
+    public static func shouldAutoScroll(added: [GroupMessageDTO], isFollowingThread: Bool) -> Bool {
         guard !added.isEmpty else { return false }
         if added.contains(where: \.mine) { return true }
-        return isPinnedToBottom
+        return isFollowingThread
     }
 
     /// Applies a poll or first load of the newest page. Returns the messages that were not

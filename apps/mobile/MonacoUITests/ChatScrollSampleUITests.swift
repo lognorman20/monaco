@@ -96,10 +96,14 @@ final class ChatScrollSampleUITests: XCTestCase {
         XCTAssertTrue(pill.waitForExistence(timeout: 60))
         pill.tap()
 
-        XCTAssertTrue(
-            newest.waitForExistence(timeout: 10),
-            "tapping the pill should take the reader back to the end of the thread"
-        )
+        // Hittable, not merely present: a row stranded just above the fold is still in the
+        // hierarchy, and that is exactly the failure this guards — the thread coming to rest
+        // short of the end, where the reader never counts as being at the bottom.
+        let atTheEnd = expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: newest)
+        wait(for: [atTheEnd], timeout: 10)
+
+        // And it stays cleared: messages keep arriving in this sample, and following the thread
+        // means they land without the count starting up again behind the reader.
         let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: pill)
         wait(for: [gone], timeout: 10)
         attachScreenshot(app, name: "03-back-at-the-bottom")

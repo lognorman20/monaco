@@ -21,13 +21,15 @@ struct GroupChatView: View {
     /// Parks the poll and the composer: there is nothing left to ask the server for.
     @State private var closedMessage: String?
     @State private var toast: MonacoToast?
-    @State private var isPinnedToBottom = true
     @State private var unreadCount = 0
     /// Bumped to ask the thread to scroll to the newest message.
     @State private var scrollToBottomRequests = 0
     /// Set to the row that must stay put after older messages are prepended above it.
     @State private var keepInViewRowID: String?
-    /// False until the reader drags the thread themselves; until then it stays at the end.
+    /// Whether the reader has taken the thread over: true from the moment they drag away from
+    /// the newest message until they come back to it, by hand or by taking the pill. While it
+    /// is false the thread follows the conversation, which is both what decides an arrival's
+    /// scroll and what keeps a LazyVStack's estimated layout pinned to the end.
     @State private var readerControlsScroll = false
     @State private var refreshGate = RefreshGate()
     @FocusState private var composerFocused: Bool
@@ -160,8 +162,13 @@ struct GroupChatView: View {
                 geometry.contentOffset.y + geometry.containerSize.height
                     >= geometry.contentSize.height - Self.pinnedSlack
             } action: { _, isAtBottom in
-                isPinnedToBottom = isAtBottom
-                if isAtBottom { unreadCount = 0 }
+                // Reaching the end is the reader rejoining the conversation, whether they
+                // dragged there or we took them. Nothing here may set `readerControlsScroll`:
+                // content growing pushes the end away for a frame or two, and that is the
+                // thread working, not the reader leaving.
+                guard isAtBottom else { return }
+                readerControlsScroll = false
+                unreadCount = 0
             }
             .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, _ in
                 // A LazyVStack lays out from an estimated content size, so the opening
@@ -220,8 +227,7 @@ struct GroupChatView: View {
 
     private var newMessagesPill: some View {
         Button {
-            unreadCount = 0
-            scrollToBottomRequests += 1
+            followThread()
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.down")
@@ -309,12 +315,27 @@ struct GroupChatView: View {
     private func apply(_ page: GroupMessagesPageDTO) {
         let added = timeline.mergeNewest(page)
         guard !added.isEmpty else { return }
-        if GroupChatTimeline.shouldAutoScroll(added: added, isPinnedToBottom: isPinnedToBottom) {
-            unreadCount = 0
-            scrollToBottomRequests += 1
+        if GroupChatTimeline.shouldAutoScroll(added: added, isFollowingThread: !readerControlsScroll) {
+            followThread()
         } else {
             unreadCount += added.count
         }
+    }
+
+    /// The thread following the newest message again: the reader took the pill, sent something,
+    /// or was already at the end when this arrived.
+    ///
+    /// Handing scroll control back matters as much as the scroll itself. A LazyVStack lays out
+    /// from an estimated content size, so one `scrollTo` the moment a row is appended comes to
+    /// rest short of the end and every row realised afterwards moves it further. While
+    /// `readerControlsScroll` is false the thread corrects itself on each content-size change;
+    /// latched true from an earlier drag, it would leave the reader stranded just above the
+    /// newest message, never counted as "at the bottom", with the pill climbing again behind
+    /// them.
+    private func followThread() {
+        unreadCount = 0
+        readerControlsScroll = false
+        scrollToBottomRequests += 1
     }
 
     private func loadOlder() async {
@@ -344,8 +365,7 @@ struct GroupChatView: View {
         do {
             let sent = try await service.postGroupMessage(groupId: groupId, body: body)
             timeline.appendSent(sent)
-            unreadCount = 0
-            scrollToBottomRequests += 1
+            followThread()
             return true
         } catch is CancellationError {
             return false
