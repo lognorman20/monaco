@@ -7,9 +7,29 @@ import SwiftUI
 /// (screenshots and XCUITests). Never compiled into Release builds.
 enum CabalsTabSampleData {
     static let launchArgument = "-MonacoCabalsTabSample"
+    static let scenarioArgument = "-MonacoCabalsTabSampleScenario"
+
+    /// What the tab is booted into. Add a scenario rather than a second harness:
+    /// the point of this file is that every Cabals screenshot comes from the
+    /// same fixed cabals.
+    enum Scenario: String {
+        /// Signed in, cabals loaded. The default.
+        case normal
+        /// The cabals list never lands, the way a cold start on a slow network
+        /// or a failing `GET /v1/home` leaves it.
+        case cabalsUnavailable
+    }
 
     static var isEnabled: Bool {
         ProcessInfo.processInfo.arguments.contains(launchArgument)
+    }
+
+    static var scenario: Scenario {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flag = arguments.firstIndex(of: scenarioArgument),
+              arguments.indices.contains(flag + 1),
+              let scenario = Scenario(rawValue: arguments[flag + 1]) else { return .normal }
+        return scenario
     }
 
     struct Cabal {
@@ -111,7 +131,11 @@ struct CabalsTabSampleHarness: View {
     @ObservedObject var auth: DynamicAuthService
     @State private var session: AppSessionStore = {
         let session = AppSessionStore()
-        session.home = CabalsTabSampleData.home
+        // `home` stays nil in the unavailable scenario, which is exactly what the
+        // tab sees before the cabals list lands.
+        if CabalsTabSampleData.scenario == .normal {
+            session.home = CabalsTabSampleData.home
+        }
         session.isLoading = false
         return session
     }()
