@@ -110,6 +110,30 @@ final class DisplayFormatterTests: XCTestCase {
         XCTAssertEqual(PercentReturnFormatter.format("—"), "—")
     }
 
+    func testUsdAmountFormatter_negativeAmountReadsLikeEveryOtherNegativeFigure() {
+        // Never "$-12.50": the sign goes first, and it is U+2212, as `compact` already does.
+        XCTAssertEqual(UsdAmountFormatter.format(decimal: Decimal(string: "-12.50")!), "\u{2212}$12.50")
+        XCTAssertEqual(UsdAmountFormatter.format(micros: -12_431_800_000), "\u{2212}$12,431.80")
+        XCTAssertEqual(UsdAmountFormatter.format(decimalString: "-1234.5"), "\u{2212}$1,234.50")
+        // Dust that rounds to nothing keeps the unsigned zero.
+        XCTAssertEqual(UsdAmountFormatter.format(decimal: Decimal(string: "-0.001")!), "$0.00")
+        XCTAssertEqual(UsdAmountFormatter.format(decimal: Decimal(string: "12.50")!), "$12.50")
+    }
+
+    func testPercentFormatters_rejectValuesThatAreNotNumbers() {
+        // A NaN or infinite ratio from the API must read as no figure, not "+nan%".
+        // Both of them: returning the raw string just moved the garbage, so a slice read
+        // "nan" where the return next to it read "—".
+        for raw in ["nan", "-nan", "inf", "-infinity"] {
+            XCTAssertEqual(PercentReturnFormatter.format(raw), "—", raw)
+            XCTAssertEqual(SlicePercentFormatter.format(raw), "—", raw)
+        }
+    }
+
+    func testDollarPnlFormatter_readsATypographicMinusAsALoss() {
+        XCTAssertEqual(DollarPnlFormatter.format("\u{2212}$3.10"), "\u{2212}$3.10 loss")
+    }
+
     func testUsdAmountFormatter_compact() {
         XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "12431.8"), "$12,431.80")
         XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "99999.99"), "$99,999.99")

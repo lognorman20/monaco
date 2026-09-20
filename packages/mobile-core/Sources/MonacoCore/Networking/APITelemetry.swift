@@ -158,7 +158,17 @@ private extension Character {
 /// `userInfo` key under which the transport stamps the request id on a rethrown `URLError`.
 public let monacoRequestIDErrorKey = "MonacoRequestID"
 
+/// `userInfo` flag the transport sets when the failure came from refreshing the access
+/// token, not from the request itself: the request never left the device.
+public let monacoTokenRefreshFailedErrorKey = "MonacoTokenRefreshFailed"
+
 public extension Error {
+    /// True when this failure is a token refresh that did not come back, so whatever the
+    /// caller was trying to do provably did not run.
+    var isTokenRefreshFailure: Bool {
+        (self as NSError).userInfo[monacoTokenRefreshFailedErrorKey] as? Bool == true
+    }
+
     /// Request id of the API call that produced this error, when known.
     var apiRequestID: String? {
         if let apiError = self as? MonacoAPIError {

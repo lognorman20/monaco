@@ -28,6 +28,21 @@ public final class IdempotentSubmission: @unchecked Sendable {
         self.makeKey = makeKey
     }
 
+    /// True while a submission is waiting for a final answer. A retry of the same payload
+    /// is a replay the backend has already seen; a changed payload is a second submission,
+    /// so a screen should say so before it lets the member edit the amount.
+    ///
+    /// This is a snapshot taken under the lock, not a reservation. The key is minted inside
+    /// the send, so it reads false between the member's tap and the request being built: a
+    /// screen that gates an edit on it must read it on the same actor that owns the
+    /// submission (the `@MainActor` screen that drives the send), or it can observe the gap
+    /// and let the edit through while a send is starting.
+    public var hasPendingKey: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return key != nil
+    }
+
     /// The key to send with `request`: the pending one when `request` repeats the pending
     /// submission (same method, URL and body), a fresh one otherwise.
     public func key(for request: URLRequest) -> String {
@@ -87,15 +102,16 @@ extension MonacoHTTPTransport {
     public func send(
         _ request: URLRequest,
         route: String? = nil,
+        timeout: TimeInterval? = nil,
         submission: IdempotentSubmission?
     ) async throws -> MonacoHTTPResponse {
         guard let submission else {
-            return try await send(request, route: route)
+            return try await send(request, route: route, timeout: timeout)
         }
         var request = request
         let key = submission.key(for: request)
         request.setValue(key, forHTTPHeaderField: IdempotentSubmission.keyHeader)
-        let result = try await send(request, route: route)
+        let result = try await send(request, route: route, timeout: timeout)
         submission.record(response: result.response, forKey: key)
         return result
     }

@@ -249,6 +249,50 @@ final class IdempotentSubmissionTests: XCTestCase {
         XCTAssertEqual(submission.key(for: second), "key-2")
     }
 
+    /// `hasPendingKey` is what the money screens are asked to gate an edit on, so its two
+    /// edges matter: it is false until a key is actually minted, and it stays true across
+    /// every non-final answer.
+    func testHasPendingKey_followsTheKeyFromMintToFinalAnswer() throws {
+        let submission = IdempotentSubmission { "key-1" }
+        var request = URLRequest(url: URL(string: "https://api.test/v1/groups/g1/fund")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data(#"{"amount":1}"#.utf8)
+
+        // The key is minted inside the send, so a screen reading this between the tap and
+        // the request being built sees false. That gap is why the doc pins it to the actor
+        // that owns the submission.
+        XCTAssertFalse(submission.hasPendingKey)
+
+        let key = submission.key(for: request)
+        XCTAssertTrue(submission.hasPendingKey)
+
+        // A 5xx is not the request's result, so the key stays pending.
+        submission.record(response: response(status: 502, for: request), forKey: key)
+        XCTAssertTrue(submission.hasPendingKey)
+
+        // An in-progress 409 is not final either.
+        submission.record(
+            response: response(
+                status: 409,
+                for: request,
+                headers: [IdempotentSubmission.statusHeader: IdempotentSubmission.inProgressStatus]
+            ),
+            forKey: key
+        )
+        XCTAssertTrue(submission.hasPendingKey)
+
+        submission.record(response: response(status: 200, for: request), forKey: key)
+        XCTAssertFalse(submission.hasPendingKey)
+    }
+
+    private func response(
+        status: Int,
+        for request: URLRequest,
+        headers: [String: String]? = nil
+    ) -> HTTPURLResponse {
+        HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!
+    }
+
     func testMoneyBodyEncodingIsByteStableAcrossRetries() throws {
         let first = try MonacoHTTPTransport.idempotentBodyEncoder().encode(
             CreatePlatformWithdrawalRequestDTO(amount: 5_000_000, toAddress: "Dest111")

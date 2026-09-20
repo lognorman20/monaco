@@ -318,7 +318,7 @@ final class GroupChatAPITests: XCTestCase {
         XCTAssertNil(query.first { $0.name == "before" })
     }
 
-    func testListGroupMessages_forbidden_throwsHTTPStatus() async {
+    func testListGroupMessages_forbidden_keepsTheStatusAndTheServerReason() async {
         // Arrange
         MockURLProtocol.requestHandler = { request in
             (Self.response(request, status: 403), Data(#"{"error":"not a group member"}"#.utf8))
@@ -329,7 +329,9 @@ final class GroupChatAPITests: XCTestCase {
             _ = try await makeClient().listGroupMessages(groupId: "g1")
             XCTFail("expected throw")
         } catch {
-            XCTAssertEqual(error as? MonacoAPIError, .httpStatus(403))
+            XCTAssertEqual(error as? MonacoAPIError, .rejected(status: 403, message: "not a group member"))
+            XCTAssertEqual((error as? MonacoAPIError)?.statusCode, 403)
+            XCTAssertEqual(GroupChatCopy.loadFailure(error), "Only members of this cabal can read the chat.")
         }
     }
 
@@ -370,10 +372,13 @@ final class GroupChatAPITests: XCTestCase {
         XCTAssertTrue(message.mine)
     }
 
-    func testPostGroupMessage_rateLimited_throws429() async {
+    func testPostGroupMessage_rateLimited_keepsTheServersRetryAfter() async {
         // Arrange
         MockURLProtocol.requestHandler = { request in
-            (Self.response(request, status: 429), Data(#"{"error":"too many messages, try again shortly"}"#.utf8))
+            (
+                Self.response(request, status: 429, headers: ["Retry-After": "60"]),
+                Data(#"{"error":"too many messages, try again shortly"}"#.utf8)
+            )
         }
 
         // Act + Assert
@@ -381,7 +386,12 @@ final class GroupChatAPITests: XCTestCase {
             _ = try await makeClient().postGroupMessage(groupId: "g1", body: "spam")
             XCTFail("expected throw")
         } catch {
-            XCTAssertEqual(error as? MonacoAPIError, .httpStatus(429))
+            // Without the header the member only ever got "Wait a moment and try again".
+            XCTAssertEqual(error as? MonacoAPIError, .rateLimited(retryAfterSeconds: 60))
+            XCTAssertEqual(
+                GroupChatCopy.sendFailure(error),
+                "You're sending messages fast. Try again in 60 seconds."
+            )
         }
     }
 
@@ -412,8 +422,17 @@ final class GroupChatAPITests: XCTestCase {
         )
     }
 
-    private static func response(_ request: URLRequest, status: Int) -> HTTPURLResponse {
-        HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+    private static func response(
+        _ request: URLRequest,
+        status: Int,
+        headers: [String: String] = [:]
+    ) -> HTTPURLResponse {
+        HTTPURLResponse(
+            url: request.url!,
+            statusCode: status,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"].merging(headers) { _, new in new }
+        )!
     }
 
     private static func httpBody(from request: URLRequest) -> Data? {
