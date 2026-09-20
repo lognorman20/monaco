@@ -1,15 +1,34 @@
 import MonacoCore
 import SwiftUI
 
+/// What Home is showing right now. One value instead of a ladder of optionals, so the
+/// screen cannot fall through to a fabricated "$0.00" dashboard (#327) and every state has
+/// exactly one branch.
+enum HomeScreenState: Equatable {
+    case loading
+    case loaded(HomeDashboardDTO)
+    case failed(String)
+
+    /// Data wins over an error: once a poll lands the board is real, and a refresh that fails
+    /// with the board on screen is reported by the toast in `body`, not by replacing it (#278).
+    static func resolve(dashboard: HomeDashboardDTO?, errorMessage: String?) -> HomeScreenState {
+        if let dashboard { return .loaded(dashboard) }
+        if let errorMessage { return .failed(errorMessage) }
+        return .loading
+    }
+}
+
 /// Home dashboard. Order: hero → balance row → "Needs your vote" (if any) →
-/// "Your cabals" → chart (if ≥ 3 points) → "Top investors". The hero is the title —
-/// no large nav title competes with it.
+/// "Your cabals" → "Top investors". The hero is the title — no large nav title competes
+/// with it.
 struct HomeView: View {
     @ObservedObject var auth: PrivyAuthService
     @Binding var selectedTab: MainTab
     @Environment(AppSessionStore.self) private var session
 
-    @State private var leaderboardRange: HomeLeaderboardRange = .all
+    @State private var leaderboard = HomeLeaderboardModel()
+    @State private var isRetrying = false
+    @State private var toast: MonacoToast?
 
     private var joinedCabals: [HomeGroupBoardRowDTO] {
         session.joinedCabals
@@ -19,36 +38,25 @@ struct HomeView: View {
         Dictionary(joinedCabals.map { ($0.groupId, $0.potValueUsd) }, uniquingKeysWith: { first, _ in first })
     }
 
+    private var leaderboardSource: LiveHomeLeaderboardDashboardSource {
+        LiveHomeLeaderboardDashboardSource(auth: auth, session: session)
+    }
+
+    /// The range the board on screen was built with, straight from the payload.
+    private var loadedLeaderboardRange: String? {
+        session.dashboard?.leaderboard.range
+    }
+
     var body: some View {
         Group {
-            // Skeleton until the dashboard lands (#217: session and dashboard load separately).
-            if session.dashboard == nil, session.errorMessage == nil {
+            switch HomeScreenState.resolve(dashboard: session.dashboard, errorMessage: session.errorMessage) {
+            case .loading:
+                // Skeleton until the dashboard lands (#217: session and dashboard load separately).
                 HomeSkeletonView()
-            } else if let dashboard = session.dashboard {
+            case .loaded(let dashboard):
                 dashboardScroll(dashboard)
-            } else if let errorMessage = session.errorMessage {
-                VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
-                    Text(errorMessage)
-                        .font(MonacoTheme.TypeRole.body)
-                        .foregroundStyle(MonacoTheme.destructive)
-                    Button("Try again") {
-                        Task { await session.refresh(auth: auth, leaderboardRange: leaderboardRange) }
-                    }
-                    .buttonStyle(.monacoPrimary)
-                }
-                .padding(MonacoTheme.Space.m)
-            } else {
-                dashboardScroll(
-                    HomeDashboardDTO(
-                        netWorthUsd: "0.00",
-                        netWorthDollarPnl: "+0.00",
-                        netWorthPercentReturn: nil,
-                        myGroups: [],
-                        pnlSeries1H: [],
-                        leaderboard: HomeLeaderboardSectionDTO(range: "ALL", people: []),
-                        missedProposals: []
-                    )
-                )
+            case .failed(let message):
+                failedScroll(message)
             }
         }
         .monacoCanvas()
@@ -60,21 +68,22 @@ struct HomeView: View {
             }
         }
         .refreshable {
-            await session.refresh(auth: auth, leaderboardRange: leaderboardRange)
+            await pullToRefresh()
         }
-        .onChange(of: leaderboardRange) { _, range in
-            Task { await session.refreshDashboard(auth: auth, leaderboardRange: range) }
+        .onChange(of: loadedLeaderboardRange) { _, _ in
+            leaderboard.reconcile(from: leaderboardSource)
         }
         .pollWhileVisible(every: LiveRefreshCadence.resting) {
             try await session.pollLive(auth: auth)
         }
+        .monacoToast($toast)
         .monacoFrameStats("Home")
     }
 
     /// The viewer's photo (or initials) in the corner; tapping it switches to the Profile tab.
+    /// `MainTabView` plays the selection haptic for every tab change, this one included.
     private var profileButton: some View {
         Button {
-            Haptics.selection()
             selectedTab = .profile
         } label: {
             MonacoAvatar(
@@ -93,19 +102,20 @@ struct HomeView: View {
     private func dashboardScroll(_ dashboard: HomeDashboardDTO) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
-                // The 1H series loads after first paint (#217); the hero reserves its height.
+                // The 1H series loads after first paint (#217); the slot is sized from the
+                // dashboard so the layout does not move when it lands.
                 let pnlPoints = session.homePnLSeries ?? dashboard.pnlSeries1H
                 HomeNetWorthSection(
                     dashboard: dashboard,
-                    pnlPoints: pnlPoints,
-                    isChartLoading: session.isHomePnLSeriesLoading && session.homePnLSeries == nil
+                    chart: HomeHeroChart.resolve(points: pnlPoints, hasCabals: !dashboard.myGroups.isEmpty)
                 )
 
                 HomeBalanceRowSection(
                     auth: auth,
                     balance: session.platformBalance,
                     isBalanceLoading: session.isBalanceLoading,
-                    joinedCabals: joinedCabals
+                    joinedCabals: joinedCabals,
+                    onRetryBalance: { Task { await refreshHome() } }
                 )
 
                 if !dashboard.missedProposals.isEmpty {
@@ -119,19 +129,67 @@ struct HomeView: View {
                     auth: auth,
                     rows: dashboard.myGroups,
                     potValuesUsd: potValuesUsd,
-                    onLeft: { await session.refresh(auth: auth, leaderboardRange: leaderboardRange) },
+                    onLeft: { await refreshHome() },
                     onBrowseCabals: { selectedTab = .cabals }
                 )
 
                 HomeLeaderboardSection(
                     auth: auth,
-                    range: $leaderboardRange,
-                    people: dashboard.leaderboard.people
+                    model: leaderboard,
+                    people: dashboard.leaderboard.people,
+                    hasCabals: !dashboard.myGroups.isEmpty,
+                    onSelect: { leaderboard.select($0, from: leaderboardSource) },
+                    onRetry: { leaderboard.retry(from: leaderboardSource) }
                 )
             }
             .padding(.horizontal, MonacoTheme.Space.m)
             .padding(.bottom, MonacoTheme.Space.l)
         }
+    }
+
+    /// The failed state lives in a ScrollView, so the "pull down to try again" the store asks
+    /// for is a gesture this screen actually has (#278).
+    private func failedScroll(_ message: String) -> some View {
+        ScrollView {
+            VStack(spacing: MonacoTheme.Space.s) {
+                EmptyState(
+                    title: message,
+                    actionTitle: "Try again",
+                    action: { Task { await retryLoad() } }
+                )
+                .disabled(isRetrying)
+                if isRetrying {
+                    ProgressView()
+                        .tint(MonacoTheme.ink)
+                        .accessibilityLabel("Loading")
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, MonacoTheme.Space.m)
+            .padding(.top, MonacoTheme.Space.xl)
+        }
+        .scrollBounceBehavior(.always)
+        .accessibilityIdentifier("home-error")
+    }
+
+    private func retryLoad() async {
+        guard !isRetrying else { return }
+        isRetrying = true
+        await refreshHome()
+        isRetrying = false
+    }
+
+    private func pullToRefresh() async {
+        await refreshHome()
+        // `refresh` clears the message when it succeeds, so anything left is this read failing.
+        // With the board already on screen nothing else would say so.
+        if session.dashboard != nil, session.errorMessage != nil {
+            toast = MonacoToast(message: "Couldn't refresh just now")
+        }
+    }
+
+    private func refreshHome() async {
+        await session.refresh(auth: auth, leaderboardRange: leaderboard.selectedRange)
     }
 }
 
