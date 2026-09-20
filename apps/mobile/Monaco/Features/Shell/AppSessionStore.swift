@@ -25,6 +25,9 @@ final class AppSessionStore {
 
     private let apiClient = MonacoAPIClient()
     private var refreshGeneration = 0
+    /// The leaderboard range `dashboard` was last loaded with, so a background poll re-reads
+    /// what is on screen instead of resetting Home's picker.
+    private var dashboardLeaderboardRange: HomeLeaderboardRange = .all
 
     var joinedCabals: [HomeGroupBoardRowDTO] {
         (home?.groups ?? []).filter(\.isJoined)
@@ -120,6 +123,7 @@ final class AppSessionStore {
             let loadedDashboard = try await dashboardLoad
             guard generation == refreshGeneration else { return }
             dashboard = loadedDashboard
+            dashboardLeaderboardRange = leaderboardRange
             if let profile = try? await meLoad {
                 me = profile
             }
@@ -148,6 +152,37 @@ final class AppSessionStore {
         if generation == refreshGeneration {
             isBalanceLoading = false
         }
+    }
+
+    /// One background poll of what Home and Profile show: dashboard, balance, joined cabals, and
+    /// the 1H curve. Unlike `refresh` it never touches `errorMessage` or a loading flag, and it
+    /// only writes values the server actually changed — a poll that fails, or that comes back
+    /// identical, leaves the screen exactly as the member last saw it.
+    ///
+    /// Throws when the dashboard read fails so the caller's poll loop can back off. That includes
+    /// a 401: signing the member out is for a request they made, not one they never saw.
+    func pollLive(auth: PrivyAuthService) async throws {
+        guard let token = auth.accessToken else { return }
+        let generation = refreshGeneration
+        let leaderboardRange = dashboardLeaderboardRange
+
+        async let dashboardLoad = apiClient.getHomeDashboard(accessToken: token, leaderboardRange: leaderboardRange)
+        async let balanceLoad = apiClient.getPlatformBalance(accessToken: token)
+        async let homeLoad = apiClient.getHome(accessToken: token)
+        async let seriesLoad = apiClient.getHomePnLSeries(accessToken: token, range: .oneHour)
+
+        let loadedDashboard = try await dashboardLoad
+        let balance = try? await balanceLoad
+        let boards = try? await homeLoad
+        let series = try? await seriesLoad
+
+        // A pull-to-refresh or a range change started while this was in flight: theirs is newer.
+        guard generation == refreshGeneration, leaderboardRange == dashboardLeaderboardRange,
+              !Task.isCancelled else { return }
+        QuietUpdate.apply(loadedDashboard, over: dashboard) { dashboard = $0 }
+        if let balance { QuietUpdate.apply(balance, over: platformBalance) { platformBalance = $0 } }
+        if let boards { QuietUpdate.apply(boards, over: home) { home = $0 } }
+        if let series { QuietUpdate.apply(series.points, over: homePnLSeries) { homePnLSeries = $0 } }
     }
 
     /// Legacy home boards + popular strip. Does not block Home first paint.
@@ -246,6 +281,7 @@ final class AppSessionStore {
         guard let token = auth.accessToken else { return }
         do {
             dashboard = try await apiClient.getHomeDashboard(accessToken: token, leaderboardRange: leaderboardRange)
+            dashboardLeaderboardRange = leaderboardRange
         } catch {
             if error.isRequestCancellation {
                 return

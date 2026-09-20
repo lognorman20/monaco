@@ -20,6 +20,7 @@ struct MainTabView: View {
                     .accessibilityIdentifier("tab-home")
             }
             .tag(MainTab.home)
+            .environment(\.hostMainTab, .home)
 
             NavigationStack {
                 CabalsTabView(auth: auth)
@@ -29,6 +30,7 @@ struct MainTabView: View {
                     .accessibilityIdentifier("tab-cabals")
             }
             .tag(MainTab.cabals)
+            .environment(\.hostMainTab, .cabals)
 
             NavigationStack {
                 AssetsTabView(auth: auth)
@@ -38,6 +40,7 @@ struct MainTabView: View {
                     .accessibilityIdentifier("tab-assets")
             }
             .tag(MainTab.stocks)
+            .environment(\.hostMainTab, .stocks)
 
             NavigationStack {
                 ProfileTabView(auth: auth)
@@ -47,8 +50,12 @@ struct MainTabView: View {
                     .accessibilityIdentifier("tab-profile")
             }
             .tag(MainTab.profile)
+            .environment(\.hostMainTab, .profile)
         }
         .tint(MonacoTheme.ink)
+        // Each stack knows its tab (`hostMainTab`) and which one is showing, so screens in a tab
+        // the member switched away from stop polling. See `pollWhileVisible`.
+        .environment(\.selectedMainTab, selectedTab)
         .onChange(of: selectedTab) { _, _ in
             Haptics.selection()
         }
