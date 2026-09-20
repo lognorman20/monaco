@@ -10,11 +10,9 @@ import (
 // correct value or an error. A wrapped or negative amount is never acceptable.
 
 func TestShareUnitsMicrosForDeposit_resultBeyondInt64_returnsError(t *testing.T) {
-	// Arrange — MaxInt64 micros at a 1-micro share price needs ~9.2e24 share micros.
-	nav := PotNAV{PerShareUsdc: 1}
-
+	// Arrange — MaxInt64 micros into a 1-micro pot with MaxInt64 share micros needs ~8.5e37 share micros.
 	// Act
-	micros, err := ShareUnitsMicrosForDeposit(USDCMicros(math.MaxInt64), nav)
+	micros, err := ShareUnitsMicrosForDeposit(USDCMicros(math.MaxInt64), math.MaxInt64, 1)
 
 	// Assert
 	if err == nil {
@@ -23,11 +21,9 @@ func TestShareUnitsMicrosForDeposit_resultBeyondInt64_returnsError(t *testing.T)
 }
 
 func TestSharesForDeposit_resultBeyondInt64_returnsError(t *testing.T) {
-	// Arrange
-	nav := PotNAV{PerShareUsdc: 999_999}
-
+	// Arrange — one share micro short of par: the mint is just over MaxInt64.
 	// Act
-	shares, err := SharesForDeposit(USDCMicros(math.MaxInt64), nav)
+	shares, err := SharesForDeposit(USDCMicros(math.MaxInt64), 1_000_000, 999_999)
 
 	// Assert
 	if err == nil {
@@ -37,10 +33,8 @@ func TestSharesForDeposit_resultBeyondInt64_returnsError(t *testing.T) {
 
 func TestShareUnitsMicrosForDeposit_largestRepresentableDeposit_isExact(t *testing.T) {
 	// Arrange — at $1/share the mint is 1:1, so MaxInt64 micros still fits.
-	nav := PotNAV{PerShareUsdc: BootstrapSharePriceMicros}
-
 	// Act
-	micros, err := ShareUnitsMicrosForDeposit(USDCMicros(math.MaxInt64), nav)
+	micros, err := ShareUnitsMicrosForDeposit(USDCMicros(math.MaxInt64), 1_000_000, 1_000_000)
 
 	// Assert
 	if err != nil {

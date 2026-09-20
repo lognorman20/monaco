@@ -430,8 +430,12 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 
 	var positionRow postgres.PositionRow
 	if newlyConfirmed {
-		shareUnits, err := d.shareCreditForSweep(ctx, tx, sweep.GroupID, treasury.SolanaAddress, sweep.Amount)
+		shareUnits, navAfterCredit, err := d.shareCreditForSweep(ctx, tx, sweep.GroupID, treasury.SolanaAddress, sweep.Amount)
 		if err != nil {
+			if errors.Is(err, ErrPotMarkUnavailable) {
+				// Rolling back leaves the deposit pending, so the poller prices it again next tick.
+				logPotMarkUnavailable(sweep.GroupID, "deposit_credit", err)
+			}
 			logDepositBranchError("deposit observe sweep share credit failed", err,
 				"deposit_id", sweep.DepositID, "group_id", sweep.GroupID, "amount", sweep.Amount)
 			return ObserveSweepResult{}, err
@@ -444,13 +448,7 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 			return ObserveSweepResult{}, err
 		}
 
-		treasuryUsdc, err := d.privy.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
-		if err != nil {
-			logDepositBranchError("deposit observe sweep treasury balance failed", err,
-				"deposit_id", sweep.DepositID, "group_id", sweep.GroupID, "treasury_address", treasury.SolanaAddress)
-			return ObserveSweepResult{}, fmt.Errorf("treasury usdc balance: %w", err)
-		}
-		if err := d.store.WriteNavSnapshotOnDepositConfirmTx(ctx, tx, sweep.GroupID, treasuryUsdc); err != nil {
+		if err := d.store.WriteNavSnapshotOnDepositConfirmTx(ctx, tx, sweep.GroupID, navAfterCredit); err != nil {
 			logDepositBranchError("deposit observe sweep nav snapshot failed", err,
 				"deposit_id", sweep.DepositID, "group_id", sweep.GroupID)
 			return ObserveSweepResult{}, err

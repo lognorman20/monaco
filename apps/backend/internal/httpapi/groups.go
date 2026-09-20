@@ -676,6 +676,12 @@ func (h *GroupHandlers) WithdrawToBalanceHandler(w http.ResponseWriter, r *http.
 				"group_id", groupID, "err", err.Error())
 			return
 		}
+		if errors.Is(err, app.ErrPotMarkUnavailable) {
+			logJSONError(ctx, log, "pot_mark_unavailable", w, http.StatusServiceUnavailable,
+				"We can't price the pot's stock right now, so nothing was cashed out. Try again in a minute.",
+				"group_id", groupID, "err", err.Error())
+			return
+		}
 		if errors.Is(err, app.ErrRedeemPotIlliquid) {
 			logJSONError(ctx, log, "redeem_pot_illiquid", w, http.StatusBadRequest,
 				"The pot could not raise enough USDC to cash that out. Try a smaller amount, or try again in a minute.",

@@ -245,6 +245,7 @@ func TestWithdrawToBalance_halfNAV_withStockHoldings(t *testing.T) {
 		t.Fatalf("confirm buy: %v", err)
 	}
 	seedTestTreasuryUSDC(t, h.Privy, group.TreasuryAddress, 500_000)
+	registerLiveAAPLxMark(h, group.GroupID, jupiter.XStockAtomicScale)
 
 	const sellAmount = int64(250_000)
 	sellRequestID := testRequestID(h.ISO, "withdraw-half-sell")
@@ -363,6 +364,7 @@ func TestWithdrawToBalance_abortsStuckDebitedJob_allowsRetry(t *testing.T) {
 		t.Fatalf("confirm buy: %v", err)
 	}
 	seedTestTreasuryUSDC(t, h.Privy, group.TreasuryAddress, 100_000)
+	registerLiveAAPLxMark(h, group.GroupID, jupiter.XStockAtomicScale)
 
 	partial := int64(200_000)
 	_, err = h.Redeem.WithdrawToBalance(ctx, WithdrawToBalanceRequest{
@@ -465,6 +467,7 @@ func TestWithdrawToBalance_partialUsdcOnly_skipsStockSell(t *testing.T) {
 		t.Fatalf("confirm buy: %v", err)
 	}
 	seedTestTreasuryUSDC(t, h.Privy, group.TreasuryAddress, 1_000_000)
+	registerLiveAAPLxMark(h, group.GroupID, jupiter.XStockAtomicScale)
 
 	partial := int64(100_000)
 	job, err := h.Redeem.WithdrawToBalance(ctx, WithdrawToBalanceRequest{

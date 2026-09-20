@@ -95,7 +95,7 @@ func TestGetGroupView_afterSecondDeposit_showsZeroPnL(t *testing.T) {
 		if _, err := h.Store.IncrementPositionTx(ctx, tx, session.UserID, group.GroupID, amount, amount); err != nil {
 			t.Fatalf("IncrementPositionTx: %v", err)
 		}
-		if err := h.Store.WriteNavSnapshotOnDepositConfirmTx(ctx, tx, group.GroupID, amount); err != nil {
+		if err := h.Store.WriteNavSnapshotOnDepositConfirmTx(ctx, tx, group.GroupID, postgres.NavSnapshotValues{PotNavMicros: amount, NavPerShareMicros: 1_000_000, TotalShares: amount}); err != nil {
 			t.Fatalf("WriteNavSnapshotOnDepositConfirmTx: %v", err)
 		}
 		if err := tx.Commit(); err != nil {

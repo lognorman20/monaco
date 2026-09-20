@@ -23,47 +23,54 @@ func halfUp(got int64, num, den *big.Int) bool {
 	return twiceNum.Cmp(low) >= 0 && twiceNum.Cmp(high) < 0
 }
 
-func FuzzShareUnitsMicrosForDeposit(f *testing.F) {
-	f.Add(int64(4_000_000), int64(BootstrapSharePriceMicros)) // $4 at bootstrap
-	f.Add(int64(110_000_000), int64(1_100_000))               // README Alex/Blair
-	f.Add(int64(1), int64(3))                                 // rounds to a fraction of a share
-	f.Add(int64(1), int64(2_000_001))                         // rounds to zero share micros
-	f.Add(int64(math.MaxInt64), int64(1))                     // overflows int64
-	f.Add(int64(math.MaxInt64), int64(BootstrapSharePriceMicros))
-	f.Add(int64(math.MaxInt64), int64(math.MaxInt64))
-	f.Add(int64(0), int64(1_000_000))
-	f.Add(int64(-5), int64(1_000_000))
-	f.Add(int64(1_000_000), int64(0))
-	f.Add(int64(1_000_000), int64(math.MinInt64))
+// floorDiv returns floor(num/den) for non-negative num and positive den.
+func floorDiv(num, den *big.Int) *big.Int {
+	return new(big.Int).Quo(num, den)
+}
 
-	f.Fuzz(func(t *testing.T, deposited, perShare int64) {
-		nav := PotNAV{PerShareUsdc: USDCMicros(perShare)}
-		micros, err := ShareUnitsMicrosForDeposit(USDCMicros(deposited), nav)
-		shares, errShares := SharesForDeposit(USDCMicros(deposited), nav)
+func FuzzShareUnitsMicrosForDeposit(f *testing.F) {
+	f.Add(int64(4_000_000), int64(0), int64(0))                       // first deposit mints 1:1
+	f.Add(int64(4_000_000), int64(0), int64(7_000_000))               // first deposit ignores stray cash
+	f.Add(int64(110_000_000), int64(100_000_000), int64(110_000_000)) // README Alex/Blair
+	f.Add(int64(90_000_000), int64(100_000_000), int64(90_000_000))   // cash-only pot after a loss
+	f.Add(int64(1), int64(1), int64(3))                               // floors to zero share micros: refused
+	f.Add(int64(1), int64(2), int64(3))                               // ⅔ of a share micro: refused, never rounded up
+	f.Add(int64(math.MaxInt64), int64(math.MaxInt64), int64(1))       // overflows int64
+	f.Add(int64(math.MaxInt64), int64(0), int64(0))
+	f.Add(int64(math.MaxInt64), int64(math.MaxInt64), int64(math.MaxInt64))
+	f.Add(int64(0), int64(1_000_000), int64(1_000_000))
+	f.Add(int64(-5), int64(1_000_000), int64(1_000_000))
+	f.Add(int64(1_000_000), int64(1_000_000), int64(0))
+	f.Add(int64(1_000_000), int64(1_000_000), int64(math.MinInt64))
+	f.Add(int64(1_000_000), int64(-1), int64(1_000_000))
+
+	f.Fuzz(func(t *testing.T, deposited, totalShares, preCreditNav int64) {
+		micros, err := ShareUnitsMicrosForDeposit(USDCMicros(deposited), totalShares, USDCMicros(preCreditNav))
+		shares, errShares := SharesForDeposit(USDCMicros(deposited), totalShares, USDCMicros(preCreditNav))
 
 		if (err == nil) != (errShares == nil) {
 			t.Fatalf("micros err = %v but decimal err = %v", err, errShares)
 		}
-		if deposited <= 0 || perShare <= 0 {
+		if deposited <= 0 || totalShares < 0 || (totalShares > 0 && preCreditNav <= 0) {
 			if err == nil {
-				t.Fatalf("accepted deposited=%d perShare=%d", deposited, perShare)
+				t.Fatalf("accepted deposited=%d totalShares=%d preCreditNav=%d", deposited, totalShares, preCreditNav)
 			}
 			return
 		}
-		num := new(big.Int).Mul(big.NewInt(deposited), big.NewInt(1_000_000))
-		den := big.NewInt(perShare)
+		want := big.NewInt(deposited) // no shares outstanding: 1:1
+		if totalShares > 0 {
+			num := new(big.Int).Mul(big.NewInt(deposited), big.NewInt(totalShares))
+			want = floorDiv(num, big.NewInt(preCreditNav))
+		}
 		if err != nil {
-			// The only legitimate failure for positive inputs is an int64 overflow.
-			if q := new(big.Int).Quo(num, den); q.IsInt64() && q.Int64() < math.MaxInt64 {
-				t.Fatalf("rejected representable mint %s: %v", q, err)
+			// Positive inputs are only refused when the mint floors to zero or overflows int64.
+			if want.Sign() > 0 && want.IsInt64() {
+				t.Fatalf("rejected representable mint %s: %v", want, err)
 			}
 			return
 		}
-		if micros < 0 {
-			t.Fatalf("minted negative share micros %d", micros)
-		}
-		if !halfUp(micros, num, den) {
-			t.Fatalf("minted %d for %d micros at %d/share", micros, deposited, perShare)
+		if !want.IsInt64() || micros != want.Int64() {
+			t.Fatalf("minted %d for %d micros into %d shares worth %d, want floor %s", micros, deposited, totalShares, preCreditNav, want)
 		}
 		// The decimal form must round-trip to the same ledger integer.
 		parsed, ok := new(big.Rat).SetString(string(shares))
@@ -77,8 +84,8 @@ func FuzzComputeRedeemSlice(f *testing.F) {
 	f.Add(int64(500_000), int64(2_000_000), int64(4_000_000))   // quarter of a $4 pot
 	f.Add(int64(3_000_000), int64(3_000_000), int64(3_000_000)) // full redeem
 	f.Add(int64(1), int64(3), int64(1))                         // ⅓ micro: dust, refused
-	f.Add(int64(1), int64(2), int64(1))                         // exactly ½ micro rounds up to the whole pot
-	f.Add(int64(1), int64(2), int64(3))                         // 1.5 rounds to 2
+	f.Add(int64(1), int64(2), int64(1))                         // exactly ½ micro floors to zero: refused
+	f.Add(int64(1), int64(2), int64(3))                         // 1.5 floors to 1
 	f.Add(int64(1), int64(math.MaxInt64), int64(math.MaxInt64))
 	f.Add(int64(math.MaxInt64), int64(math.MaxInt64), int64(math.MaxInt64))
 	f.Add(int64(math.MaxInt64-1), int64(math.MaxInt64), int64(math.MaxInt64))
@@ -103,8 +110,8 @@ func FuzzComputeRedeemSlice(f *testing.F) {
 		num := new(big.Int).Mul(big.NewInt(redeemed), big.NewInt(pot))
 		den := big.NewInt(total)
 		if err != nil {
-			// Valid inputs are only refused when the slice rounds to zero micros.
-			if !halfUp(0, num, den) {
+			// Valid inputs are only refused when the slice floors to zero micros.
+			if floorDiv(num, den).Sign() != 0 {
 				t.Fatalf("refused payable slice redeemed=%d total=%d pot=%d: %v", redeemed, total, pot, err)
 			}
 			return
@@ -112,8 +119,8 @@ func FuzzComputeRedeemSlice(f *testing.F) {
 		if slice.UsdcOwed <= 0 || int64(slice.UsdcOwed) > pot {
 			t.Fatalf("owed %d outside (0, pot %d]", slice.UsdcOwed, pot)
 		}
-		if !halfUp(int64(slice.UsdcOwed), num, den) {
-			t.Fatalf("owed %d for %d/%d of %d: more than half a micro from exact", slice.UsdcOwed, redeemed, total, pot)
+		if want := floorDiv(num, den); !want.IsInt64() || int64(slice.UsdcOwed) != want.Int64() {
+			t.Fatalf("owed %d for %d/%d of %d, want floor %s", slice.UsdcOwed, redeemed, total, pot, want)
 		}
 		if redeemed == total && int64(slice.UsdcOwed) != pot {
 			t.Fatalf("full redeem owed %d, pot %d", slice.UsdcOwed, pot)

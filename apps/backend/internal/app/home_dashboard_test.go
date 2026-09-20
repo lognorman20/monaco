@@ -282,6 +282,12 @@ func TestBuildRangedLeaderboard_withWindowBaseline_usesWindowDeltaNotLifetime(t 
 		t.Fatalf("Commit: %v", err)
 	}
 
+	treasury, found, err := h.Store.GetTreasuryByGroupID(ctx, group.GroupID)
+	if err != nil || !found {
+		t.Fatalf("GetTreasuryByGroupID: found=%v err=%v", found, err)
+	}
+	privy.SetTreasuryUSDCBalance(h.Privy, treasury.SolanaAddress, depositMicros)
+
 	windowStart := time.Now().UTC().Add(-48 * time.Hour)
 	insertNavSnapshotAt(t, ctx, h, group.GroupID, windowStart, depositMicros, depositMicros)
 
