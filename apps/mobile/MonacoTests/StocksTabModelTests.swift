@@ -16,6 +16,8 @@ private final class StubStocksDataSource: StocksTabDataSource {
     var delays: [String: Duration] = [:]
     /// Per-offset latency, so page two can be held while page one answers at once.
     var offsetDelays: [Int: Duration] = [:]
+    /// Per-offset failure, so page two can fail while the query's first page succeeds.
+    var offsetErrors: [Int: Error] = [:]
     var errors: [String: Error] = [:]
     var popularError: Error?
 
@@ -24,7 +26,7 @@ private final class StubStocksDataSource: StocksTabDataSource {
         if let delay = offsetDelays[offset] ?? delays[query] {
             try? await Task.sleep(for: delay)
         }
-        if let error = errors[query] { throw error }
+        if let error = offsetErrors[offset] ?? errors[query] { throw error }
         if query == "none" {
             return ListMarketAssetsResponse(assets: [], hasMore: false)
         }
@@ -266,12 +268,12 @@ struct StocksTabModelTests {
         model.updateQuery("aap")
         try await settle()
 
+        // Page two is held and then fails; the retyped query's own first page still answers.
         source.offsetDelays[2] = .milliseconds(400)
-        source.errors["aap"] = Monaco.MonacoAPIError.httpStatus(500)
+        source.offsetErrors[2] = Monaco.MonacoAPIError.httpStatus(500)
         async let pageTwo: Void = model.loadMore()
         try await Task.sleep(for: .milliseconds(50))
 
-        source.errors["aap"] = nil
         model.updateQuery("aapl")
         model.updateQuery("aap")
         await pageTwo
