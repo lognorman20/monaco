@@ -80,12 +80,19 @@ final class ProposalFeedSampleUITests: XCTestCase {
         let field = element("comment-composer-field")
         field.tap()
         field.typeText("Count me in if we cap it at $25.")
+        // A simulator with Connect Hardware Keyboard on never shows the software keyboard, so
+        // asserting it went away would pass there without proving anything. Only hold it to
+        // standing down when it was actually up; the hittability checks below are the real test
+        // either way, since they fail whether the keyboard or the composer is covering the thread.
+        let keyboardWasUp = app.keyboards.firstMatch.exists
         element("comment-composer-send").tap()
         XCTAssertTrue(app.staticTexts["Comment posted"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Count me in if we cap it at $25."].waitForExistence(timeout: 5))
         // The keyboard stands down once the comment lands and the thread scrolls to it, so the
         // member sees what they posted and Reply can be reached without dismissing anything first.
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the keyboard stayed up over the thread")
+        if keyboardWasUp {
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "the keyboard stayed up over the thread")
+        }
         XCTAssertTrue(
             waitUntilHittable(app.staticTexts["Count me in if we cap it at $25."]),
             "the posted comment is off screen or behind the composer"
@@ -322,7 +329,12 @@ final class ProposeFromStockSampleUITests: XCTestCase {
         XCTAssertTrue(retry.waitForExistence(timeout: 10), "no retry offered after the pot failed to load")
         XCTAssertFalse(element("amount-entry-field").exists, "the amount step opened without a pot")
 
-        app.buttons["Try again"].tap()
+        // Scoped to this error state: "Try again" is also the popular-stocks retry on the picker
+        // underneath, so a bare `app.buttons["Try again"]` matches two elements and errors out
+        // instead of failing usefully the day the sample popular load breaks.
+        let retryButton = app.buttons.matching(identifier: "propose-pot-error").firstMatch
+        XCTAssertTrue(retryButton.waitForExistence(timeout: 5), "the pot retry is not a button")
+        retryButton.tap()
 
         let amount = element("amount-entry-field")
         XCTAssertTrue(amount.waitForExistence(timeout: 5))
