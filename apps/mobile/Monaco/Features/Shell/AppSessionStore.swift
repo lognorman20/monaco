@@ -5,6 +5,12 @@ import SwiftUI
 
 /// The reads every tab shares. `MonacoAPIClient` is the production implementation;
 /// tests inject a stub so store behaviour can be checked without a server.
+///
+/// `@MainActor` here is not a decision about where decoding belongs — it matches what
+/// `MonacoAPIClient` already is (implicitly main-actor, #326 / cluster item 15), and a
+/// `nonisolated` protocol would not compile against it today. When `API/` is made
+/// non-isolated this annotation should come off with it, so the JSON decode stops running
+/// on the main thread.
 @MainActor
 protocol AppSessionDataSource {
     func openSession(accessToken: String) async throws -> MeResponse
@@ -26,7 +32,10 @@ protocol SessionAuthenticating: AnyObject {
     func shouldInvalidateBackendSession(serverUserId: String) -> Bool
     func recordBackendSession(userId: String)
     func refreshedAccessToken(replacing rejectedToken: String) async throws -> String?
-    func signOut(reason: String) async
+    /// Ends the session with a reason to show, but only if `rejectedToken` still belongs to
+    /// it. Every sign-out driven by a server reply names the token that reply rejected, so a
+    /// 401 that outlived its sign-in cannot end the session that replaced it.
+    func signOut(reason: String, rejectedToken: String) async
     func signOutAfterRejectedSession(rejectedToken: String) async
 }
 
@@ -65,6 +74,11 @@ final class AppSessionStore {
     /// Orders dashboard responses on their own, so two quick range taps can't land out of
     /// order and leave the older board under the newer chip.
     private var dashboardGeneration = 0
+    /// Orders background polls against each other. Home and Profile both drive `pollLive`,
+    /// and a poll deliberately does not supersede a read the member asked for — so without
+    /// its own counter two polls both look current and the slower one can write its older
+    /// dashboard over the newer one.
+    private var pollGeneration = 0
     /// Home boards, popular assets and the P&L curve: started by a refresh but not awaited by
     /// it. Owned here so the next refresh cancels what the last one left running, instead of
     /// letting a session the member has left behind keep writing.
@@ -156,7 +170,10 @@ final class AppSessionStore {
         AppLogger.session.error("POST /v1/auth/session failed: \(mapped.debugDetail, privacy: .public)")
 
         if case MonacoAPIError.httpStatus(401) = failure {
-            await auth.signOut(reason: mapped.message)
+            // Named against the token that was actually rejected: this bootstrap may have
+            // been overtaken by a sign-out or another sign-in while it was refreshing, and
+            // a reply that outlived its session must not sign out whoever is signed in now.
+            await auth.signOut(reason: mapped.message, rejectedToken: rejectedToken)
             return
         }
 
@@ -249,6 +266,8 @@ final class AppSessionStore {
         guard let token = auth.accessToken else { return }
         let generation = refreshGeneration
         let request = currentDashboardRequest()
+        pollGeneration += 1
+        let poll = pollGeneration
 
         async let dashboardLoad = apiClient.getHomeDashboard(accessToken: token, leaderboardRange: request.range)
         async let balanceLoad = apiClient.getPlatformBalance(accessToken: token)
@@ -260,13 +279,22 @@ final class AppSessionStore {
         let boards = try? await homeLoad
         let series = try? await seriesLoad
 
-        // A pull-to-refresh or a range change started while this was in flight: theirs is newer.
-        guard generation == refreshGeneration, isCurrent(request), !Task.isCancelled else { return }
+        // A pull-to-refresh or a range change started while this was in flight: theirs is
+        // newer. So is a poll from the other tab that has already landed.
+        guard generation == refreshGeneration,
+              isCurrent(request),
+              poll == pollGeneration,
+              !Task.isCancelled else { return }
         QuietUpdate.apply(loadedDashboard, over: dashboard) { dashboard = $0 }
         if let balance { QuietUpdate.apply(balance, over: platformBalance) { platformBalance = $0 } }
         if let boards { QuietUpdate.apply(boards, over: home) { home = $0 } }
         if let series { QuietUpdate.apply(series.points, over: homePnLSeries) { homePnLSeries = $0 } }
-        errorMessage = nil
+        // Only once the screen actually has what the banner said was missing. A poll can
+        // land while bootstrap is still failing — `me` and `home` never arrived — and
+        // clearing it there leaves an empty screen with the explanation wiped off it.
+        if me != nil {
+            errorMessage = nil
+        }
     }
 
     /// Legacy home boards + popular strip. Does not block Home first paint.
@@ -278,8 +306,11 @@ final class AppSessionStore {
     /// Loads GET /v1/home for profile/cabals surfaces. Create-group flows (209) can call this alone.
     func refreshHomeBoards(accessToken: String?) async {
         guard let accessToken else { return }
+        let generation = refreshGeneration
         do {
-            home = try await apiClient.getHome(accessToken: accessToken)
+            let boards = try await apiClient.getHome(accessToken: accessToken)
+            guard mayWrite(generation) else { return }
+            home = boards
         } catch {
             if error.isRequestCancellation { return }
             if case MonacoAPIError.httpStatus(let status) = error, status == 401 {
@@ -292,10 +323,12 @@ final class AppSessionStore {
     func refreshHomePnLSeries(auth: SessionAuthenticating, accessToken: String? = nil) async {
         let token = accessToken ?? auth.accessToken
         guard let token else { return }
+        let generation = refreshGeneration
         isHomePnLSeriesLoading = homePnLSeries == nil
         defer { isHomePnLSeriesLoading = false }
         do {
             let series = try await apiClient.getHomePnLSeries(accessToken: token, range: .oneHour)
+            guard mayWrite(generation) else { return }
             homePnLSeries = series.points
         } catch {
             if error.isRequestCancellation { return }
@@ -354,8 +387,10 @@ final class AppSessionStore {
 
     func refreshPopular(auth: SessionAuthenticating) async {
         guard let token = auth.accessToken else { return }
+        let generation = refreshGeneration
         do {
             let popular = try await apiClient.getPopularAssets(accessToken: token, limit: 10)
+            guard mayWrite(generation) else { return }
             popularAssets = popular.assets
         } catch {
             if error.isRequestCancellation { return }
@@ -441,6 +476,23 @@ final class AppSessionStore {
     private func startDeferredWork(_ work: @escaping @MainActor () async -> Void) {
         deferredWork.removeAll(where: \.isCancelled)
         deferredWork.append(Task { await work() })
+    }
+
+    /// True while a read started at `generation` is still the one whose result belongs on
+    /// screen. Deferred reads outlive the refresh that started them: `cancelDeferredWork()`
+    /// cancels them, but a task already past its last suspension point runs to completion
+    /// and would otherwise write over the refresh that replaced it.
+    private func mayWrite(_ generation: Int) -> Bool {
+        generation == refreshGeneration && !Task.isCancelled
+    }
+
+    /// Awaits the background work this store has started. Nothing in the app needs to wait —
+    /// the point of deferred work is that it does not block a screen — but a test that wants
+    /// to observe its result needs a handle on it rather than a sleep long enough to hope.
+    func awaitDeferredWork() async {
+        for task in deferredWork {
+            await task.value
+        }
     }
 
     /// Drops whatever the last refresh left running, so it cannot write over what the
