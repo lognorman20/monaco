@@ -4,28 +4,46 @@ import SwiftUI
 /// Cabals tab: P&L of your cabals, search, your cabals strip, and the
 /// platform-wide board.
 struct CabalsTabView: View {
-    /// Where the trailing "New cabal" sheet sends you next.
-    private enum DiscoveryRoute: Identifiable {
-        case create
-        case join
-
-        var id: Self { self }
-    }
-
     @ObservedObject var auth: PrivyAuthService
     @Environment(AppSessionStore.self) private var session
     @State private var model: CabalsTabModel
     @State private var searchText = ""
     @State private var showNewCabalSheet = false
-    @State private var discoveryRoute: DiscoveryRoute?
+    /// The pushed screen, if any. One item for the whole tab: see `CabalsRoute`.
+    @State private var route: CabalsRoute?
+    /// Chosen in the "New cabal" sheet, pushed once the sheet is gone. Pushing
+    /// in the same turn as the dismissal makes the stack change mid-transition.
+    @State private var routeAfterSheet: CabalsRoute?
+    /// Starts true: the tab asks for the cabals list in `.task`, so on the very
+    /// first body evaluation a load is about to happen. Starting at false made
+    /// `stripState` compute `.unavailable` and render the hard error for a frame
+    /// before anything had even been attempted.
+    @State private var isLoadingCabals = true
 
-    init(auth: PrivyAuthService, dataSource: CabalsTabDataSource? = nil) {
+    private let actions: CabalsActionSource
+
+    init(
+        auth: PrivyAuthService,
+        dataSource: CabalsTabDataSource? = nil,
+        actions: CabalsActionSource? = nil
+    ) {
         self.auth = auth
+        self.actions = actions ?? LiveCabalsActionSource(auth: auth)
         _model = State(initialValue: CabalsTabModel(dataSource: dataSource ?? LiveCabalsTabDataSource(auth: auth)))
     }
 
-    private var joinedIDs: [String] {
-        session.joinedCabals.map(\.groupId)
+    /// Membership as a set: the board reordering its rows is not a membership change.
+    private var joinedIDs: Set<String> {
+        Set(session.joinedCabals.map(\.groupId))
+    }
+
+    /// "No cabals yet" is only true once we have actually heard from the server.
+    /// Until then the strip says it is loading, or offers a retry. The shell's
+    /// own load counts: the state machine must never be able to claim a failure
+    /// before an attempt has finished.
+    private var stripState: CabalsStripState {
+        if session.home != nil { return .loaded }
+        return isLoadingCabals || session.isLoading ? .loading : .unavailable
     }
 
     var body: some View {
@@ -36,11 +54,16 @@ struct CabalsTabView: View {
                         .accessibilityIdentifier("cabals-search-field")
 
                     if model.isSearching {
-                        CabalsSearchResultsSection(auth: auth, model: model, onChanged: refreshAll)
+                        CabalsSearchResultsSection(model: model, onSelect: { route = $0 })
                     } else {
-                        CabalsStripSection(auth: auth, rows: session.joinedCabals, onChanged: refreshAll)
+                        CabalsStripSection(
+                            rows: session.joinedCabals,
+                            state: stripState,
+                            onSelect: { route = $0 },
+                            onRetry: { Task { await loadCabals() } }
+                        )
                         CabalsPnLChartSection(model: model, hasCabals: !session.joinedCabals.isEmpty)
-                        CabalsLeaderboardSection(auth: auth, model: model, onChanged: refreshAll)
+                        CabalsLeaderboardSection(model: model, onSelect: { route = $0 })
                     }
                 }
                 .padding(.horizontal, MonacoTheme.Space.m)
@@ -63,39 +86,54 @@ struct CabalsTabView: View {
                 .accessibilityIdentifier("cabals-new-button")
             }
         }
-        .sheet(isPresented: $showNewCabalSheet) {
+        .sheet(isPresented: $showNewCabalSheet, onDismiss: {
+            if let routeAfterSheet {
+                route = routeAfterSheet
+                self.routeAfterSheet = nil
+            }
+        }) {
             NewCabalSheet(
                 onCreate: {
+                    routeAfterSheet = .create
                     showNewCabalSheet = false
-                    discoveryRoute = .create
                 },
                 onJoin: {
+                    routeAfterSheet = .joinByCode
                     showNewCabalSheet = false
-                    discoveryRoute = .join
                 }
             )
             .presentationDetents([.medium])
         }
-        .navigationDestination(item: $discoveryRoute) { route in
-            switch route {
-            case .create:
-                CreateGroupView(auth: auth)
-            case .join:
-                JoinGroupView(auth: auth)
-            }
+        .navigationDestination(item: $route) { route in
+            CabalsRouteDestination(
+                auth: auth,
+                route: route,
+                actions: actions,
+                onChanged: refreshAll,
+                onCreated: { created in
+                    // Replace the form with the new cabal. Back then lands on the
+                    // tab, not on a filled-in form that would create a second one.
+                    self.route = .cabal(id: created.groupId, name: created.name)
+                },
+                onJoined: { groupId, groupName in
+                    model.markJoined(groupID: groupId)
+                    self.route = .cabal(id: groupId, name: groupName)
+                }
+            )
         }
         .refreshable {
             await refreshAll()
         }
         .task {
-            await model.reload()
+            if session.home == nil { await loadCabals() }
+            await model.reload(hasCabals: !session.joinedCabals.isEmpty)
         }
         .onChange(of: searchText) { _, newValue in
             model.updateQuery(newValue)
         }
-        .onChange(of: joinedIDs) { _, _ in
+        .onChange(of: joinedIDs) { _, ids in
             // Joined, created, or left a cabal somewhere in the app.
-            Task { await model.reload() }
+            Task { await model.reload(hasCabals: !ids.isEmpty) }
         }
         .onChange(of: model.sessionExpired) { _, expired in
             if expired {
@@ -107,8 +145,19 @@ struct CabalsTabView: View {
     }
 
     private func refreshAll() async {
-        await session.refresh(auth: auth)
-        await model.reload()
+        // `session.refresh` loads the cabals list in a background task of its own,
+        // so pull-to-refresh awaits that read directly: the spinner then ends when
+        // the strip is actually up to date.
+        async let profile: Void = session.refresh(auth: auth)
+        async let cabals: Void = loadCabals()
+        _ = await (profile, cabals)
+        await model.reload(hasCabals: !session.joinedCabals.isEmpty)
+    }
+
+    private func loadCabals() async {
+        isLoadingCabals = true
+        defer { isLoadingCabals = false }
+        await session.refreshHomeBoards(accessToken: auth.accessToken)
     }
 }
 
