@@ -1,18 +1,40 @@
 import Foundation
 
-/// A failure a member can read and act on, plus whether trying again is worth anything.
+/// What the screen should offer after a money request failed.
+public enum FlowRecovery: Equatable, Sendable {
+    /// Nothing moved. Sending again is a fresh submission and is safe.
+    case retry
+    /// The outcome is unknown: the request may be running or may already have finished.
+    /// Sending the same payload again is safe — it goes out under the pending idempotency
+    /// key, so the backend replays its answer instead of moving the money a second time.
+    /// Changing the amount or the address is not: that is a second submission.
+    case resendSame
+    /// The same request would fail the same way (bad address, not a member, signed out).
+    case none
+}
+
+/// A failure a member can read and act on, plus what to offer them next.
 public struct FlowFailure: Equatable, Sendable {
     public let message: String
-    /// False when the same request would fail the same way (bad address, not a member) or
-    /// when the first one may have gone through: the screen must not invite a blind retry.
-    public let isRetryable: Bool
+    public let recovery: FlowRecovery
     /// One short line telling the member what to do next, when there is something to do.
     public let nextStep: String?
 
-    public init(message: String, isRetryable: Bool, nextStep: String? = nil) {
+    /// False only when there is nothing to send again. An unknown outcome is retryable:
+    /// the idempotency key makes resending the same submission safe.
+    public var isRetryable: Bool { recovery != .none }
+
+    /// True when the retry has to be the same payload, under the pending key.
+    public var mustResendSameSubmission: Bool { recovery == .resendSame }
+
+    public init(message: String, recovery: FlowRecovery, nextStep: String? = nil) {
         self.message = message
-        self.isRetryable = isRetryable
+        self.recovery = recovery
         self.nextStep = nextStep
+    }
+
+    public init(message: String, isRetryable: Bool, nextStep: String? = nil) {
+        self.init(message: message, recovery: isRetryable ? .retry : .none, nextStep: nextStep)
     }
 
     /// Message and next step as one line, for a toast.
@@ -172,20 +194,24 @@ public enum MoneyFlowCopy {
            let message = memberFacingMessage(input.serverMessage) {
             return FlowFailure(message: message, isRetryable: false)
         }
-        guard input.status != nil else { return unconfirmed }
+        guard let status = input.status else { return unconfirmed }
+        // A 5xx is as unknown as a timeout: the backend never stores the result of one,
+        // so the same submission has to go back under the same key.
         return FlowFailure(
             message: "We couldn't \(action).",
-            isRetryable: true,
+            recovery: status >= 500 ? .resendSame : .retry,
             nextStep: "Try again in a moment."
         )
     }
 
     /// No status at all (timeout, dropped connection, unreadable reply): the request may
-    /// have gone through, so a blind retry could move the money twice.
+    /// have gone through. Sending the same amount again is still safe — it carries the
+    /// same idempotency key, so the backend answers with the first result instead of
+    /// moving the money twice. Changing the amount first is what would move it twice.
     public static let unconfirmed = FlowFailure(
         message: "We couldn't confirm that went through.",
-        isRetryable: false,
-        nextStep: "Check your balance before trying again."
+        recovery: .resendSame,
+        nextStep: "Try again with the same amount — it can only go through once."
     )
 
     private static func matches(_ input: FlowErrorInput, _ expected: String) -> Bool {

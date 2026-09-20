@@ -39,10 +39,14 @@ final class MoneyFlowCopyTests: XCTestCase {
         }
     }
 
-    func testNoStatus_isUnconfirmedAndNeverInvitesABlindRetry() {
+    func testNoStatus_isUnconfirmedAndSendsTheSameSubmissionAgain() {
         let failure = MoneyFlowCopy.cashOutFailure(FlowErrorInput())
         XCTAssertEqual(failure, MoneyFlowCopy.unconfirmed)
-        XCTAssertFalse(failure.isRetryable)
+        // The idempotency key makes the same payload a replay, so the screen must keep a
+        // way forward instead of stranding the member on a disabled button.
+        XCTAssertEqual(failure.recovery, .resendSame)
+        XCTAssertTrue(failure.isRetryable)
+        XCTAssertTrue(failure.mustResendSameSubmission)
         XCTAssertEqual(MoneyFlowCopy.fundCabalFailure(FlowErrorInput()), MoneyFlowCopy.unconfirmed)
         XCTAssertEqual(MoneyFlowCopy.sellStakeFailure(FlowErrorInput()), MoneyFlowCopy.unconfirmed)
     }
@@ -51,6 +55,16 @@ final class MoneyFlowCopyTests: XCTestCase {
         let failure = MoneyFlowCopy.fundCabalFailure(FlowErrorInput(status: 502, serverMessage: "bad gateway"))
         XCTAssertEqual(failure.message, "We couldn't add that money.")
         XCTAssertTrue(failure.isRetryable)
+        // A 5xx is never stored by the backend, so it is as unknown as a timeout.
+        XCTAssertEqual(failure.recovery, .resendSame)
+    }
+
+    func testRecovery_separatesAFreshTryFromAReplay() {
+        XCTAssertEqual(MoneyFlowCopy.fundCabalFailure(.offline()).recovery, .retry)
+        XCTAssertEqual(MoneyFlowCopy.fundCabalFailure(FlowErrorInput(status: 429)).recovery, .retry)
+        XCTAssertEqual(MoneyFlowCopy.sellStakeFailure(FlowErrorInput(status: 409)).recovery, .retry)
+        XCTAssertEqual(MoneyFlowCopy.cashOutFailure(FlowErrorInput(status: 401)).recovery, .none)
+        XCTAssertEqual(MoneyFlowCopy.fundCabalFailure(FlowErrorInput(status: 404)).recovery, .none)
     }
 
     func testFundCabal_statusSpecificCopy() {
