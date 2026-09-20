@@ -113,6 +113,14 @@ struct AmountEntryTextTests {
         #expect(AmountEntryText.sanitize(raw) == expected)
     }
 
+    /// Commas that are not in the shape of grouping separators are decimal-point attempts — a
+    /// double tap on a comma-decimal pad — and the extras are dropped exactly as extra dots are.
+    /// Reading them as grouping instead made "1,250,5" into 12505, a hundredfold error.
+    @Test(arguments: [("1,2,5", "1.25"), ("1,250,5", "1.25"), ("12,,5", "12.5"), ("1234,567", "1234.56")])
+    func strayCommasReadLikeStrayDots(raw: String, expected: String) {
+        #expect(AmountEntryText.sanitize(raw) == expected)
+    }
+
     /// One conversion for Add money, Cash out and Withdraw, which each carried their own copy.
     @Test func microsRoundsToTheNearestMicro() {
         #expect(AmountEntryText.micros("12.34") == 12_340_000)

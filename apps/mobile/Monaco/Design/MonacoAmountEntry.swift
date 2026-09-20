@@ -18,6 +18,7 @@ struct AmountEntry: View {
     private let helper: String?
     private let overLimitHelper: String
     private let problem: String?
+    private let showsKeyboardDoneButton: Bool
 
     @FocusState private var focused: Bool
     @State private var hasRaisedKeyboard = false
@@ -26,13 +27,19 @@ struct AmountEntry: View {
     /// - Parameter problem: why the amount can't be used, in the member's words. It replaces
     ///   `helper` while it is set, so a screen with a rule of its own — a minimum, a remainder
     ///   too small to leave behind — can say so instead of leaving a dead button unexplained.
+    /// - Parameter showsKeyboardDoneButton: adds a Done bar above the decimal pad, which has no
+    ///   return key of its own. It is opt-in and off by default because it is a keyboard accessory
+    ///   view: it makes the keyboard ~44pt taller on every screen that asks for it, which moves
+    ///   anything the screen pins to the bottom. A screen turns it on once it has checked that its
+    ///   own layout — and its UI tests — survive the taller keyboard.
     init(
         amountText: Binding<String>,
         max: Decimal? = nil,
         presets: [AmountPreset] = [],
         helper: String? = nil,
         overLimitHelper: String = "More than you have",
-        problem: String? = nil
+        problem: String? = nil,
+        showsKeyboardDoneButton: Bool = false
     ) {
         _amountText = amountText
         self.max = max
@@ -40,6 +47,7 @@ struct AmountEntry: View {
         self.helper = helper
         self.overLimitHelper = overLimitHelper
         self.problem = problem
+        self.showsKeyboardDoneButton = showsKeyboardDoneButton
     }
 
     private var value: Decimal? {
@@ -79,8 +87,10 @@ struct AmountEntry: View {
             focused = true
         }
         .toolbar {
-            // The decimal pad has no return key, so the member needs a way out of it.
-            if focused {
+            // The decimal pad has no return key, so the member needs a way out of it. Only for
+            // the screens that asked: this bar is part of the keyboard, so it changes the height
+            // of everything below it.
+            if showsKeyboardDoneButton, focused {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button("Done") { focused = false }
@@ -240,9 +250,11 @@ enum AmountEntryText {
     ///
     /// - Both separators present: only a paste can produce that, and the one that comes last is
     ///   the decimal point. "1,250.50" and "1.250,50" are both 1250.50.
-    /// - Only commas: a single comma with at most two digits after it is a decimal point, which is
-    ///   what a decimal pad types in a comma-decimal locale ("12,", "12,5"). Anything else is
-    ///   grouping ("1,250", "1,250,000").
+    /// - Only commas: decided by shape, not by count. Commas laid out like grouping separators
+    ///   ("1,250", "1,250,000") are grouping and come out. Anything else is the member typing a
+    ///   decimal point on a comma-decimal pad — "12,", "12,5", and "1,2,5" from a double tap —
+    ///   so the first comma becomes the point and the rest are dropped, which is exactly what
+    ///   `sanitize` already does with extra dots.
     /// - Only dots: left alone. `sanitize` keeps the first and ignores the rest, which is what
     ///   typing needs — "1.2" plus another "." must stay 1.2, not become 12.
     private static func normalisingSeparators(_ raw: String) -> String {
@@ -256,16 +268,22 @@ enum AmountEntryText {
             return raw.replacingOccurrences(of: ",", with: "")
         }
 
-        if commaIsDecimalSeparator(raw) {
-            return raw.replacingOccurrences(of: ",", with: ".")
+        if commasAreGrouping(raw) {
+            return raw.replacingOccurrences(of: ",", with: "")
         }
-        return raw.replacingOccurrences(of: ",", with: "")
+        // Every comma becomes a dot; `sanitize` keeps the first and ignores the rest. Treating a
+        // stray second comma as grouping instead turned "1,250,5" into 12505 — a hundredfold
+        // error on a money field.
+        return raw.replacingOccurrences(of: ",", with: ".")
     }
 
-    private static func commaIsDecimalSeparator(_ raw: String) -> Bool {
-        let parts = raw.split(separator: ",", omittingEmptySubsequences: false)
-        guard parts.count == 2 else { return false }
-        return parts[1].filter { $0.isASCII && $0.isNumber }.count <= 2
+    /// Commas in the shape grouping separators actually take: one to three digits, then groups of
+    /// exactly three. Currency symbols and spaces around them are ignored.
+    private static func commasAreGrouping(_ raw: String) -> Bool {
+        let compact = raw.filter { ($0.isASCII && $0.isNumber) || $0 == "," }
+        let groups = compact.split(separator: ",", omittingEmptySubsequences: false)
+        guard groups.count >= 2, (1...3).contains(groups[0].count) else { return false }
+        return groups.dropFirst().allSatisfy { $0.count == 3 }
     }
 
     static func decimal(_ text: String) -> Decimal? {
