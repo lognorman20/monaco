@@ -8,6 +8,8 @@ import MonacoCore
 /// - `-MonacoChatSampleQA` — show chat with a short sample thread
 /// - `-MonacoChatSampleEmpty` — with the above, start with no messages
 /// - `-MonacoChatSampleOffline` — with the above, every send fails as if offline
+/// - `-MonacoChatSampleBusy` — with the above, a long backlog where another member keeps
+///   posting, so a viewer reading history can be tested against the arriving messages
 enum ChatSampleQA {
     static var isEnabled: Bool { arguments.contains("-MonacoChatSampleQA") }
 
@@ -16,7 +18,8 @@ enum ChatSampleQA {
     static func rootView() -> some View {
         let service = SampleGroupChatService(
             startEmpty: arguments.contains("-MonacoChatSampleEmpty"),
-            failSends: arguments.contains("-MonacoChatSampleOffline")
+            failSends: arguments.contains("-MonacoChatSampleOffline"),
+            busy: arguments.contains("-MonacoChatSampleBusy")
         )
         return NavigationStack {
             GroupChatView(groupId: SampleGroupChatService.groupId, groupName: "Weekend investors") { service }
@@ -29,9 +32,13 @@ private actor SampleGroupChatService: GroupChatService {
 
     private var messages: [GroupMessageDTO]
     private let failSends: Bool
+    /// Another member posting while the viewer reads. Off unless `-MonacoChatSampleBusy`.
+    private let busy: Bool
+    private var listCalls = 0
 
-    init(startEmpty: Bool, failSends: Bool) {
+    init(startEmpty: Bool, failSends: Bool, busy: Bool = false) {
         self.failSends = failSends
+        self.busy = busy
         guard !startEmpty else {
             messages = []
             return
@@ -51,10 +58,35 @@ private actor SampleGroupChatService: GroupChatService {
             msg("s7", "u-me", "You", "Voted yes.", 9),
             msg("s8", "u-me", "You", "Leo, you're the last vote.", 9),
         ]
+        guard busy else { return }
+        // A thread tall enough that the viewer can scroll away from the bottom, which is
+        // the whole point: a message arriving must not drag them back down.
+        let filler = (1...40).map { index in
+            msg("b\(index)", "u-leo", "Leo", "Backlog line \(index) about the Apple buy.", 1_180 - Double(index))
+        }
+        messages.insert(contentsOf: filler, at: 4)
+        messages.sort { $0.createdAt < $1.createdAt }
     }
 
     func listGroupMessages(groupId: String, before: String?, limit: Int) async throws -> GroupMessagesPageDTO {
-        GroupMessagesPageDTO(messages: messages.reversed())
+        if before == nil {
+            listCalls += 1
+            // Not on the first load: the test needs to get itself scrolled up first.
+            if busy, listCalls > 1 {
+                messages.append(
+                    GroupMessageDTO(
+                        id: "incoming-\(listCalls)",
+                        groupId: Self.groupId,
+                        authorId: "u-ana",
+                        authorName: "Ana",
+                        body: "Still thinking about Thursday (\(listCalls)).",
+                        createdAt: Self.stamp(Date()),
+                        mine: false
+                    )
+                )
+            }
+        }
+        return GroupMessagesPageDTO(messages: messages.reversed())
     }
 
     func postGroupMessage(groupId: String, body: String) async throws -> GroupMessageDTO {

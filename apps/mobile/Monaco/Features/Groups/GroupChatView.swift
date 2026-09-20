@@ -2,6 +2,12 @@ import SwiftUI
 import MonacoCore
 
 /// Cabal chat: members-only message thread with a composer. Polls for new messages while visible.
+///
+/// Two rules the thread keeps. It only jumps to the newest message when the viewer sent it or
+/// was already reading the bottom — anyone scrolled up in the history keeps their place and
+/// gets a pill instead. And the poll is the shared `pollWhileVisible`, not a timer of its own,
+/// so it pauses off-tab and in the background, backs off when the server stops answering, and
+/// stands down while a pull-to-refresh is in flight.
 struct GroupChatView: View {
     let groupId: String
     let groupName: String?
@@ -9,21 +15,43 @@ struct GroupChatView: View {
     let makeService: () -> (any GroupChatService)?
 
     @State private var timeline = GroupChatTimeline()
-    @State private var draft = ""
-    @State private var isSending = false
     @State private var isLoadingOlder = false
     @State private var loadError: String?
+    /// Set once this thread is closed to the viewer (removed from the cabal, cabal deleted).
+    /// Parks the poll and the composer: there is nothing left to ask the server for.
+    @State private var closedMessage: String?
     @State private var toast: MonacoToast?
+    @State private var unreadCount = 0
+    /// Bumped to ask the thread to scroll to the newest message.
+    @State private var scrollToBottomRequests = 0
+    /// Set to the row that must stay put after older messages are prepended above it.
+    @State private var keepInViewRowID: String?
+    /// Whether the reader has taken the thread over: true from the moment they drag away from
+    /// the newest message until they come back to it, by hand or by taking the pill. While it
+    /// is false the thread follows the conversation, which is both what decides an arrival's
+    /// scroll and what keeps a LazyVStack's estimated layout pinned to the end.
+    @State private var readerControlsScroll = false
+    @State private var refreshGate = RefreshGate()
     @FocusState private var composerFocused: Bool
 
     private let pageSize = 30
     private let pollInterval: Duration = .seconds(4)
     private static let bottomAnchor = "group-chat-bottom"
+    /// How close to the end counts as "reading the bottom", in points.
+    private static let pinnedSlack: CGFloat = 40
 
     var body: some View {
         VStack(spacing: 0) {
             messagesArea
-            composer
+            if let closedMessage {
+                // Only once there is a thread behind it; before that the error state says
+                // the same thing across the whole screen.
+                if timeline.hasLoadedNewest {
+                    closedBanner(closedMessage)
+                }
+            } else {
+                GroupChatComposer(focus: $composerFocused, send: send)
+            }
         }
         .background(MonacoTheme.background)
         .navigationTitle(GroupChatCopy.title(groupName: groupName))
@@ -42,11 +70,15 @@ struct GroupChatView: View {
                 .accessibilityAddTraits(.isHeader)
             }
         }
-        .task {
-            await loadNewest()
-            await pollWhileVisible()
+        .task { await loadNewest() }
+        .pollWhileVisible(every: pollInterval, isActive: closedMessage == nil, gate: refreshGate) {
+            try await pollNewest()
         }
         .monacoToast($toast)
+        // `.contain`, not a bare identifier: an identifier on its own was being applied to
+        // every descendant, so the composer, the send button and the thread all reported
+        // themselves as "group-chat-view" and nothing on this screen could be addressed.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("group-chat-view")
     }
 
@@ -59,9 +91,11 @@ struct GroupChatView: View {
                 statusMessage {
                     Label(loadError, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(MonacoTheme.warning)
-                    Button("Try again") { Task { await loadNewest() } }
-                        .buttonStyle(.monacoPrimary)
-                        .accessibilityIdentifier("group-chat-retry")
+                    if closedMessage == nil {
+                        Button("Try again") { Task { await loadNewest() } }
+                            .buttonStyle(.monacoPrimary)
+                            .accessibilityIdentifier("group-chat-retry")
+                    }
                 }
                 .accessibilityIdentifier("group-chat-error")
             } else {
@@ -72,7 +106,7 @@ struct GroupChatView: View {
                 }
                 .accessibilityIdentifier("group-chat-loading")
             }
-        } else if timeline.messages.isEmpty {
+        } else if timeline.rows.isEmpty {
             statusMessage {
                 Text(GroupChatCopy.emptyState)
                     .font(.subheadline)
@@ -92,47 +126,22 @@ struct GroupChatView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 3) {
                     if timeline.hasOlder {
-                        Button {
-                            Task { await loadOlder() }
-                        } label: {
-                            if isLoadingOlder {
-                                ProgressView().tint(MonacoTheme.accent)
-                            } else {
-                                Text(GroupChatCopy.loadEarlier)
-                                    .font(.footnote.weight(.semibold))
-                            }
-                        }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(MonacoTheme.accent)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .disabled(isLoadingOlder)
-                        .accessibilityIdentifier("group-chat-load-earlier")
+                        loadEarlierButton
                     }
 
-                    ForEach(Array(timeline.messages.enumerated()), id: \.element.id) { index, message in
-                        let previous = index > 0 ? timeline.messages[index - 1] : nil
-                        let next = index + 1 < timeline.messages.count ? timeline.messages[index + 1] : nil
-                        let separator = separatorLabel(for: message, previous: previous)
-                        let startsRun = separator != nil || previous?.authorId != message.authorId
-                        let endsRun = next?.authorId != message.authorId
-                            || next.map { separatorLabel(for: $0, previous: message) != nil } == true
-                        if let separator {
+                    ForEach(timeline.rows) { row in
+                        if let separator = row.timeSeparatorLabel() {
                             Text(separator)
                                 .font(MonacoTheme.Typo.micro)
                                 .foregroundStyle(MonacoTheme.muted)
                                 .frame(maxWidth: .infinity)
-                                .padding(.top, index == 0 ? 8 : 16)
+                                .padding(.top, row.id == timeline.rows.first?.id ? 8 : 16)
                                 .padding(.bottom, 4)
-                                .accessibilityIdentifier("group-chat-separator-\(message.id)")
+                                .accessibilityIdentifier("group-chat-separator-\(row.id)")
                         }
-                        GroupChatBubble(
-                            message: message,
-                            showsAuthor: !message.mine && startsRun,
-                            endsRun: endsRun
-                        )
-                        .padding(.top, startsRun && separator == nil ? 10 : 0)
-                        .id(message.id)
+                        GroupChatBubble(row: row)
+                            .padding(.top, row.startsRun && !row.showsTimeSeparator ? 10 : 0)
+                            .id(row.id)
                     }
 
                     Color.clear.frame(height: 1).id(Self.bottomAnchor)
@@ -140,22 +149,116 @@ struct GroupChatView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 12)
             }
-            .defaultScrollAnchor(.bottom)
+            // Only the opening position. A plain `.defaultScrollAnchor(.bottom)` also anchors
+            // *size changes* to the bottom, which drags the view down whenever a message is
+            // appended — the yank this screen is meant to stop, under the explicit scroll.
+            // Following the thread is a decision now, made in `apply`, not an anchor.
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
             .scrollDismissesKeyboard(.interactively)
-            .refreshable { await loadNewest() }
-            .onChange(of: timeline.messages.last?.id) { _, _ in
+            .refreshable {
+                await refreshGate.runNow { await loadNewest() }
+            }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.containerSize.height
+                    >= geometry.contentSize.height - Self.pinnedSlack
+            } action: { _, isAtBottom in
+                // Reaching the end is the reader rejoining the conversation, whether they
+                // dragged there or we took them. Nothing here may set `readerControlsScroll`:
+                // content growing pushes the end away for a frame or two, and that is the
+                // thread working, not the reader leaving.
+                guard isAtBottom else { return }
+                readerControlsScroll = false
+                unreadCount = 0
+            }
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, _ in
+                // A LazyVStack lays out from an estimated content size, so the opening
+                // anchor comes to rest short of the newest message and every realised row
+                // moves it again. Until the reader takes the thread over, keep them at the
+                // end — which is also the right behaviour for a message arriving while
+                // they sit there.
+                guard !readerControlsScroll else { return }
+                proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+            }
+            .onScrollPhaseChange { _, phase in
+                // A drag, not our own animated scroll: from here the position is theirs.
+                if phase == .interacting { readerControlsScroll = true }
+            }
+            .onChange(of: scrollToBottomRequests) { _, _ in
                 withAnimation(.easeOut(duration: 0.2)) {
                     proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                 }
             }
+            .onChange(of: keepInViewRowID) { _, rowID in
+                // "Load earlier" prepended a page above the reader. Put the row they were
+                // on back where it was, with no animation, so nothing appears to move.
+                guard let rowID else { return }
+                proxy.scrollTo(rowID, anchor: .top)
+                keepInViewRowID = nil
+            }
+            // Identifier on the scroll view itself, before the overlay: applied after, it
+            // would be handed to the pill too and the pill could not be addressed.
             .accessibilityIdentifier("group-chat-thread")
+            .overlay(alignment: .bottom) {
+                if unreadCount > 0 {
+                    newMessagesPill
+                }
+            }
         }
     }
 
-    private func separatorLabel(for message: GroupMessageDTO, previous: GroupMessageDTO?) -> String? {
-        guard let date = message.createdAtDate else { return nil }
-        guard GroupChatCopy.showsTimeSeparator(previous: previous?.createdAtDate, current: date) else { return nil }
-        return GroupChatCopy.timeSeparatorLabel(date)
+    private var loadEarlierButton: some View {
+        Button {
+            Task { await loadOlder() }
+        } label: {
+            if isLoadingOlder {
+                ProgressView().tint(MonacoTheme.accent)
+            } else {
+                Text(GroupChatCopy.loadEarlier)
+                    .font(.footnote.weight(.semibold))
+            }
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(MonacoTheme.accent)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .disabled(isLoadingOlder)
+        .accessibilityIdentifier("group-chat-load-earlier")
+    }
+
+    private var newMessagesPill: some View {
+        Button {
+            followThread()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.down")
+                    .font(.caption.weight(.bold))
+                Text(GroupChatCopy.newMessagesPill(count: unreadCount))
+                    .font(.footnote.weight(.semibold))
+            }
+            .foregroundStyle(MonacoTheme.primaryButtonLabel)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(Capsule().fill(MonacoTheme.primaryButtonFill))
+        }
+        .buttonStyle(.plain)
+        .padding(.bottom, 10)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .animation(.snappy, value: unreadCount)
+        .accessibilityIdentifier("group-chat-new-messages")
+    }
+
+    private func closedBanner(_ message: String) -> some View {
+        Label(message, systemImage: "lock.fill")
+            .font(.footnote)
+            .foregroundStyle(MonacoTheme.secondaryText)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(MonacoTheme.background)
+            .overlay(alignment: .top) {
+                Rectangle().fill(MonacoTheme.border).frame(height: 0.5)
+            }
+            .accessibilityIdentifier("group-chat-closed")
     }
 
     private func statusMessage<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -166,18 +269,146 @@ struct GroupChatView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Composer
+    // MARK: - Loading
 
-    private var composer: some View {
-        let validation = GroupChatDraft.validate(draft)
-        let canSend = !isSending && (try? validation.get()) != nil
-        let count = draft.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.count
+    private func loadNewest() async {
+        guard let service = makeService() else {
+            loadError = "Sign in to read this cabal's chat."
+            return
+        }
+        do {
+            let page = try await service.listGroupMessages(groupId: groupId, before: nil, limit: pageSize)
+            apply(page)
+            loadError = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            if let closed = GroupChatCopy.chatClosed(error) {
+                closedMessage = closed
+            }
+            if timeline.hasLoadedNewest {
+                toast = MonacoToast(message: GroupChatCopy.refreshFailure(error))
+            } else {
+                loadError = GroupChatCopy.loadFailure(error)
+            }
+        }
+    }
+
+    /// A tick. Throws so the shared schedule backs off; a thread the viewer can no longer read
+    /// is not a failure to retry, so it parks the loop instead.
+    private func pollNewest() async throws {
+        guard let service = makeService() else { return }
+        do {
+            let page = try await service.listGroupMessages(groupId: groupId, before: nil, limit: pageSize)
+            apply(page)
+            if loadError != nil { loadError = nil }
+        } catch {
+            if let closed = GroupChatCopy.chatClosed(error) {
+                closedMessage = closed
+                return
+            }
+            throw error
+        }
+    }
+
+    /// Merges a newest page and decides what the arrival means for the viewer's scroll position.
+    private func apply(_ page: GroupMessagesPageDTO) {
+        let added = timeline.mergeNewest(page)
+        guard !added.isEmpty else { return }
+        if GroupChatTimeline.shouldAutoScroll(added: added, isFollowingThread: !readerControlsScroll) {
+            followThread()
+        } else {
+            unreadCount += added.count
+        }
+    }
+
+    /// The thread following the newest message again: the reader took the pill, sent something,
+    /// or was already at the end when this arrived.
+    ///
+    /// Handing scroll control back matters as much as the scroll itself. A LazyVStack lays out
+    /// from an estimated content size, so one `scrollTo` the moment a row is appended comes to
+    /// rest short of the end and every row realised afterwards moves it further. While
+    /// `readerControlsScroll` is false the thread corrects itself on each content-size change;
+    /// latched true from an earlier drag, it would leave the reader stranded just above the
+    /// newest message, never counted as "at the bottom", with the pill climbing again behind
+    /// them.
+    private func followThread() {
+        unreadCount = 0
+        readerControlsScroll = false
+        scrollToBottomRequests += 1
+    }
+
+    private func loadOlder() async {
+        guard let cursor = timeline.olderCursor, !isLoadingOlder, let service = makeService() else { return }
+        isLoadingOlder = true
+        defer { isLoadingOlder = false }
+        // The row at the top right now is the one the reader is looking at.
+        let topRowID = timeline.rows.first?.id
+        do {
+            let page = try await service.listGroupMessages(groupId: groupId, before: cursor, limit: pageSize)
+            timeline.mergeOlder(page)
+            keepInViewRowID = topRowID
+        } catch is CancellationError {
+            return
+        } catch {
+            if let closed = GroupChatCopy.chatClosed(error) { closedMessage = closed }
+            toast = MonacoToast(message: GroupChatCopy.earlierFailure(error))
+        }
+    }
+
+    /// Posts `body`. Returns true once it has landed, which is what clears the composer.
+    private func send(_ body: String) async -> Bool {
+        guard let service = makeService() else {
+            toast = MonacoToast(message: GroupChatCopy.sendFailure(MonacoCore.MonacoAPIError.httpStatus(401)))
+            return false
+        }
+        do {
+            let sent = try await service.postGroupMessage(groupId: groupId, body: body)
+            timeline.appendSent(sent)
+            followThread()
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            if let closed = GroupChatCopy.chatClosed(error) { closedMessage = closed }
+            toast = MonacoToast(message: GroupChatCopy.sendFailure(error))
+            return false
+        }
+    }
+}
+
+extension GroupChatView {
+    /// Chat screen wired to the live API using the current Privy session token.
+    init(auth: PrivyAuthService, groupId: String, groupName: String?) {
+        self.init(groupId: groupId, groupName: groupName) { [weak auth] in
+            guard let token = auth?.accessToken, !token.isEmpty else { return nil }
+            return MonacoCore.MonacoAPIClient(baseURL: Config.apiBaseURL, accessTokenProvider: { token })
+        }
+    }
+}
+
+/// The composer owns the draft so that typing invalidates 44 points of the screen instead of
+/// the whole thread.
+private struct GroupChatComposer: View {
+    var focus: FocusState<Bool>.Binding
+    /// Posts the trimmed body; true once it landed.
+    let send: (String) async -> Bool
+
+    @State private var draft = ""
+    @State private var isSending = false
+
+    private var trimmedCount: Int {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.count
+    }
+
+    var body: some View {
+        let canSend = !isSending && (try? GroupChatDraft.validate(draft).get()) != nil
 
         return VStack(alignment: .trailing, spacing: 4) {
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(GroupChatCopy.composerPlaceholder, text: $draft, axis: .vertical)
                     .lineLimit(1...5)
-                    .focused($composerFocused)
+                    .focused(focus)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 11)
                     .frame(minHeight: 44)
@@ -186,7 +417,7 @@ struct GroupChatView: View {
 
                 Button {
                     Haptics.tap()
-                    Task { await send() }
+                    Task { await submit() }
                 } label: {
                     ZStack {
                         Circle()
@@ -207,10 +438,10 @@ struct GroupChatView: View {
                 .accessibilityIdentifier("group-chat-send")
             }
 
-            if count > GroupChatDraft.maxCharacters - 200 {
-                Text("\(count)/\(GroupChatDraft.maxCharacters)")
+            if trimmedCount > GroupChatDraft.maxCharacters - 200 {
+                Text("\(trimmedCount)/\(GroupChatDraft.maxCharacters)")
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(count > GroupChatDraft.maxCharacters ? MonacoTheme.destructive : MonacoTheme.secondaryText)
+                    .foregroundStyle(trimmedCount > GroupChatDraft.maxCharacters ? MonacoTheme.destructive : MonacoTheme.secondaryText)
                     .accessibilityIdentifier("group-chat-char-count")
             }
         }
@@ -222,108 +453,41 @@ struct GroupChatView: View {
         }
     }
 
-    // MARK: - Loading
-
-    private func loadNewest() async {
-        guard let service = makeService() else {
-            loadError = "Sign in to read this cabal's chat."
-            return
-        }
-        do {
-            let page = try await service.listGroupMessages(groupId: groupId, before: nil, limit: pageSize)
-            timeline.mergeNewest(page)
-            loadError = nil
-        } catch is CancellationError {
-            return
-        } catch {
-            if timeline.hasLoadedNewest {
-                toast = MonacoToast(message: GroupChatCopy.loadFailure(error))
-            } else {
-                loadError = GroupChatCopy.loadFailure(error)
-            }
-        }
-    }
-
-    private func loadOlder() async {
-        guard let cursor = timeline.olderCursor, !isLoadingOlder, let service = makeService() else { return }
-        isLoadingOlder = true
-        defer { isLoadingOlder = false }
-        do {
-            let page = try await service.listGroupMessages(groupId: groupId, before: cursor, limit: pageSize)
-            timeline.mergeOlder(page)
-        } catch is CancellationError {
-            return
-        } catch {
-            toast = MonacoToast(message: GroupChatCopy.loadFailure(error))
-        }
-    }
-
-    /// Quietly fetches the newest page every few seconds; a failed poll waits for the next tick.
-    private func pollWhileVisible() async {
-        while !Task.isCancelled {
-            try? await Task.sleep(for: pollInterval)
-            guard !Task.isCancelled, let service = makeService() else { return }
-            if let page = try? await service.listGroupMessages(groupId: groupId, before: nil, limit: pageSize) {
-                timeline.mergeNewest(page)
-                if loadError != nil { loadError = nil }
-            }
-        }
-    }
-
-    private func send() async {
+    /// Clears the field before the request rather than subtracting the sent text afterwards:
+    /// the field stayed editable mid-flight, so fixing a typo left the already-submitted text
+    /// sitting in the composer, ready to be posted a second time.
+    private func submit() async {
         guard !isSending else { return }
         let body: String
         switch GroupChatDraft.validate(draft) {
         case .success(let trimmed):
             body = trimmed
-        case .failure(let problem):
-            toast = MonacoToast(message: GroupChatCopy.sendFailure(problem))
-            return
-        }
-        guard let service = makeService() else {
-            toast = MonacoToast(message: GroupChatCopy.sendFailure(MonacoCore.MonacoAPIError.httpStatus(401)))
+        case .failure:
             return
         }
 
         let submitted = draft
+        draft = ""
         isSending = true
         defer { isSending = false }
-        do {
-            let sent = try await service.postGroupMessage(groupId: groupId, body: body)
-            timeline.appendSent(sent)
-            // Keep anything typed while the request was in flight.
-            if draft.hasPrefix(submitted) {
-                draft = String(draft.dropFirst(submitted.count)).trimmingCharacters(in: .whitespaces)
-            }
-        } catch is CancellationError {
-            return
-        } catch {
-            // Keep the draft so the member can retry without retyping.
-            toast = MonacoToast(message: GroupChatCopy.sendFailure(error))
-        }
-    }
-}
-
-extension GroupChatView {
-    /// Chat screen wired to the live API using the current Privy session token.
-    init(auth: PrivyAuthService, groupId: String, groupName: String?) {
-        self.init(groupId: groupId, groupName: groupName) { [weak auth] in
-            guard let token = auth?.accessToken, !token.isEmpty else { return nil }
-            return MonacoCore.MonacoAPIClient(baseURL: Config.apiBaseURL, accessTokenProvider: { token })
+        if await send(body) { return }
+        // Failed. Give the text back, unless something new was typed while it was in flight.
+        if draft.isEmpty {
+            draft = submitted
         }
     }
 }
 
 private struct GroupChatBubble: View {
-    let message: GroupMessageDTO
-    let showsAuthor: Bool
-    let endsRun: Bool
+    let row: GroupChatRow
+
+    private var message: GroupMessageDTO { row.message }
 
     var body: some View {
         HStack {
             if message.mine { Spacer(minLength: 56) }
             VStack(alignment: message.mine ? .trailing : .leading, spacing: 4) {
-                if showsAuthor {
+                if !message.mine, row.startsRun {
                     Text(message.authorName)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(MonacoTheme.muted)
@@ -347,7 +511,7 @@ private struct GroupChatBubble: View {
     /// Rounded 20 all round, with a tighter corner on the sender's side at the end of a run.
     private var bubbleShape: UnevenRoundedRectangle {
         let radius = MonacoTheme.Radius.bubble
-        let tail: CGFloat = endsRun ? 6 : radius
+        let tail: CGFloat = row.endsRun ? 6 : radius
         return UnevenRoundedRectangle(
             topLeadingRadius: radius,
             bottomLeadingRadius: message.mine ? radius : tail,
@@ -359,7 +523,7 @@ private struct GroupChatBubble: View {
 
     private var accessibilityText: String {
         let who = message.mine ? "You" : message.authorName
-        guard let date = message.createdAtDate else { return "\(who): \(message.body)" }
+        guard let date = row.date else { return "\(who): \(message.body)" }
         return "\(who), \(date.formatted(date: .omitted, time: .shortened)): \(message.body)"
     }
 }
