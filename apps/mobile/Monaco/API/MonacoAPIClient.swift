@@ -38,11 +38,13 @@ private struct APIErrorBody: Decodable {
 
 final class MonacoAPIClient {
     private let baseURL: URL
-    private let session: URLSession
+    /// Every request goes through the transport so an expired access token is
+    /// refreshed and the request retried once instead of signing the user out.
+    private let session: MonacoHTTPTransport
 
     init(baseURL: URL = Config.apiBaseURL, session: URLSession = .shared) {
         self.baseURL = baseURL
-        self.session = session
+        self.session = MonacoHTTPTransport(session: session)
     }
 
     func health() async throws -> HealthResponse {
@@ -444,7 +446,7 @@ final class MonacoAPIClient {
     ) async throws -> T {
         let token = accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else { throw MonacoAPIError.missingAccessToken }
-        let core = MonacoCore.MonacoAPIClient(baseURL: baseURL, session: session, accessTokenProvider: { token })
+        let core = MonacoCore.MonacoAPIClient(baseURL: baseURL, transport: session, accessTokenProvider: { token })
         do {
             return try await call(core)
         } catch let error as MonacoCore.MonacoAPIError {
