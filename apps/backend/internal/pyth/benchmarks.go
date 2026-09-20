@@ -34,6 +34,21 @@ type SeriesSource interface {
 	Series(ctx context.Context, symbol string, chartRange ChartRange, now time.Time) (AssetChartSeries, error)
 }
 
+// KeylessHistorySource is implemented by chart clients that can serve history
+// without a Hermes feed entitlement. Callers that gate charts on entitlement —
+// because the Hermes sampler would otherwise fire thirty requests at a feed that
+// is going to refuse all of them — must skip that gate for these, or a crypto-only
+// API key would lose charts it can perfectly well serve.
+type KeylessHistorySource interface {
+	HasKeylessHistory() bool
+}
+
+// HasKeylessHistory reports whether Benchmarks is wired up. Benchmarks is a public
+// endpoint and takes no key, so a Hermes entitlement says nothing about it.
+func (c *HermesClient) HasKeylessHistory() bool {
+	return c != nil && c.seriesSource != nil && c.seriesBreaker.allows(time.Now())
+}
+
 // BenchmarksClient reads OHLC history from the Pyth Benchmarks TradingView shim.
 type BenchmarksClient struct {
 	baseURL    string

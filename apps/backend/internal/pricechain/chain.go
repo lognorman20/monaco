@@ -410,12 +410,16 @@ func (c *Chain) AssetMark(ctx context.Context, symbol string) (pyth.AssetMark, e
 	return c.charts.AssetMark(ctx, symbol)
 }
 
-// ChartSeries serves Pyth price history. Hermes samples a chart with one request per
-// point and reports a denied feed as an empty series, so the chain first confirms the
-// feed is entitled (one shared, breaker-guarded mark lookup) instead of letting every
-// chart load fire 25-31 requests that are all going to be refused.
+// ChartSeries serves Pyth price history. The Hermes sampler asks for one point per
+// request and reports a denied feed as an empty series, so the chain first confirms
+// the feed is entitled (one shared, breaker-guarded mark lookup) instead of letting
+// every chart load fire 25-31 requests that are all going to be refused.
+//
+// That gate is about the sampler, not about history in general. A chart client with
+// a keyless one-call source (Pyth Benchmarks) can serve the range whatever Hermes
+// thinks of our key, and gating it on entitlement would lose charts we can draw.
 func (c *Chain) ChartSeries(ctx context.Context, symbol string, chartRange pyth.ChartRange) (pyth.AssetChartSeries, error) {
-	unavailable := pyth.AssetChartSeries{EmptyReason: "price history unavailable"}
+	unavailable := pyth.AssetChartSeries{EmptyReason: pyth.EmptyReasonNoHistory}
 	if c.charts == nil {
 		return unavailable, nil
 	}
@@ -423,7 +427,7 @@ func (c *Chain) ChartSeries(ctx context.Context, symbol string, chartRange pyth.
 	if series, ok := c.cachedChart(cacheKey); ok {
 		return series, nil
 	}
-	if !c.pythEntitled(ctx, symbol) {
+	if !c.chartsAreKeyless() && !c.pythEntitled(ctx, symbol) {
 		return unavailable, nil
 	}
 
@@ -449,6 +453,13 @@ func (c *Chain) ChartSeries(ctx context.Context, symbol string, chartRange pyth.
 		return chartResult{series: series}
 	}).(chartResult)
 	return result.series, result.err
+}
+
+// chartsAreKeyless reports whether the chart client can serve history without a
+// Hermes entitlement.
+func (c *Chain) chartsAreKeyless() bool {
+	source, ok := c.charts.(pyth.KeylessHistorySource)
+	return ok && source.HasKeylessHistory()
 }
 
 // pythEntitled reports whether Hermes currently serves this symbol's feed to our key.

@@ -89,6 +89,14 @@ func (f *fakeCharts) ChartSeries(context.Context, string, pyth.ChartRange) (pyth
 	return pyth.AssetChartSeries{Points: []pyth.ChartPoint{{Timestamp: 1, PriceUsdcMicros: 2}}}, nil
 }
 
+// keylessCharts is a chart client backed by a source that needs no Hermes key —
+// Pyth Benchmarks in production.
+type keylessCharts struct {
+	fakeCharts
+}
+
+func (keylessCharts) HasKeylessHistory() bool { return true }
+
 func entitlementError(t *testing.T) error {
 	t.Helper()
 	// Produce the real Hermes error type through the real client rather than forging one.
@@ -472,6 +480,31 @@ func TestChain_holdingsFallBackIndependently(t *testing.T) {
 	}
 	if input.Holdings[1].Source != pyth.MarkSourceCostBasis || input.Holdings[1].MarkUsdc != 300_000_000 {
 		t.Fatalf("TSLAx got %s @ %d, want cost_basis @ 300000000", input.Holdings[1].Source, input.Holdings[1].MarkUsdc)
+	}
+}
+
+func TestChain_chartSeries_keylessHistoryIsServedEvenWhenHermesDeniesTheFeed(t *testing.T) {
+	// A crypto-only Pyth key is refused the equity feed, which is why the sampler
+	// is gated. Benchmarks needs no key at all, so gating it on that denial would
+	// throw away charts we can draw — and would do it exactly on the keys the team
+	// actually has.
+	clock := newFakeClock()
+	source := &fakePythSource{err: entitlementError(t)}
+	charts := &keylessCharts{}
+	chain := New(source, nil, charts, testConfig(clock))
+
+	series, err := chain.ChartSeries(context.Background(), testSymbol, pyth.ChartRange1Y)
+	if err != nil {
+		t.Fatalf("ChartSeries: %v", err)
+	}
+	if len(series.Points) == 0 {
+		t.Fatalf("expected a series from the keyless source, got %+v", series)
+	}
+	if got := charts.calls.Load(); got != 1 {
+		t.Fatalf("chart client called %d times, want 1", got)
+	}
+	if got := source.callCount(); got != 0 {
+		t.Fatalf("entitlement probed %d times for a keyless source, want 0", got)
 	}
 }
 
