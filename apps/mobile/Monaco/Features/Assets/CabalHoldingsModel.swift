@@ -72,7 +72,10 @@ final class CabalHoldingsModel {
             state = .loaded([])
             return
         }
-        if case .loaded = state {} else { state = .loading }
+        switch state {
+        case .loaded: break // Keep the rows on screen while they are re-read.
+        case .loading, .failed: state = .loading
+        }
 
         let outcomes = await withTaskGroup(of: Outcome.self) { group in
             for cabal in cabals {
@@ -99,7 +102,7 @@ final class CabalHoldingsModel {
             return nil
         }
         // Keep the order the cabals were listed in rather than whichever fetch finished first.
-        let byId = Dictionary(uniqueKeysWithValues: holdings.map { ($0.groupId, $0) })
+        let byId = Dictionary(holdings.map { ($0.groupId, $0) }, uniquingKeysWith: { first, _ in first })
         state = .loaded(cabals.compactMap { byId[$0.groupId] })
     }
 
