@@ -6,6 +6,10 @@ struct AssetsTabView: View {
     @ObservedObject var auth: PrivyAuthService
     @Environment(AppSessionStore.self) private var session
     @Environment(\.scenePhase) private var scenePhase
+    // A tab body's `.task` fires once on first appearance, so coming back to Stocks from another
+    // tab does not re-run it. The shell publishes which tab is showing for exactly this.
+    @Environment(\.selectedMainTab) private var selectedMainTab
+    @Environment(\.hostMainTab) private var hostMainTab
 
     @State private var model: StocksTabModel
     @State private var searchQuery = ""
@@ -60,6 +64,10 @@ struct AssetsTabView: View {
             guard phase == .active else { return }
             Task { await refreshPopular() }
         }
+        .onChange(of: selectedMainTab) { _, tab in
+            guard let hostMainTab, tab == hostMainTab else { return }
+            Task { await refreshPopular() }
+        }
         .onChange(of: model.sessionExpired) { _, expired in
             guard expired else { return }
             Task { await auth.signOutAfterRejectedSession() }
@@ -97,6 +105,14 @@ struct AssetsTabView: View {
             }
         case .results:
             ScrollView {
+                if model.refreshFailed {
+                    Text("Couldn't refresh — these prices may be out of date.")
+                        .font(MonacoTheme.Typo.caption)
+                        .foregroundStyle(MonacoTheme.warning)
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, MonacoTheme.Space.s)
+                        .accessibilityIdentifier("assets-refresh-failed")
+                }
                 assetList(model.results)
                 if model.loadMoreFailed {
                     Text("Could not load more stocks.")
