@@ -10,16 +10,18 @@ import (
 	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 // CatalogHandlers serves catalog search HTTP routes.
 type CatalogHandlers struct {
 	Store   *postgres.Store
-	Privy   wallets.Client
-	Catalog b20.CatalogSearcher
+	Auth    auth.Verifier
+	Wallets wallets.Client
+	Catalog b20.Catalog
 	// KeyGuard throttles wrong agent keys. Nil disables throttling.
 	KeyGuard *AgentKeyGuard
 }
@@ -76,10 +78,6 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 
 	page, err := h.Catalog.Search(ctx, query, limit, offset)
 	if err != nil {
-		if errors.Is(err, b20.ErrInvalidResponse) {
-			logJSONError(ctx, log, "invalid_catalog_query", w, http.StatusBadRequest, "invalid catalog query", "group_id", groupID, "query", query)
-			return
-		}
 		logJSONError(ctx, log, "catalog_search_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "query", query, "err", err.Error())
 		return
 	}
@@ -125,7 +123,7 @@ func parseCatalogOffset(raw string) int {
 }
 
 func (h *CatalogHandlers) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := h.Auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return "", auth.ErrUnauthorized

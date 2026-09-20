@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"bytes"
 	"encoding/json"
 	"io"
@@ -20,7 +21,7 @@ func integrationMeHandlers(t *testing.T, storageClient storage.Client) (*MeHandl
 	t.Helper()
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
-	sessions := app.NewSessionService(store, privyClient)
+	sessions := app.NewSessionService(store, auth.NewFakeVerifier(), privyClient)
 	profilePhotos := app.NewProfilePhotoService(store, privyClient, storageClient)
 	meHandlers := &MeHandlers{Sessions: sessions, ProfilePhoto: profilePhotos}
 	return meHandlers, authHandlers, privyClient, iso
@@ -29,7 +30,7 @@ func integrationMeHandlers(t *testing.T, storageClient storage.Client) (*MeHandl
 func TestMeHandler_returnsProfilePhotoUrlNullWhenUnset(t *testing.T) {
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
-	meHandlers := &MeHandlers{Sessions: app.NewSessionService(store, privyClient)}
+	meHandlers := &MeHandlers{Sessions: app.NewSessionService(store, auth.NewFakeVerifier(), privyClient)}
 
 	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "me-null-photo", "Photo Null")
 

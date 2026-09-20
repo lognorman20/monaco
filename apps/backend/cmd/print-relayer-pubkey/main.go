@@ -1,4 +1,4 @@
-// print-relayer-pubkey prints the fee payer pubkey and mainnet SOL/USDC balances for RELAYER_PRIVATE_KEY.
+// print-relayer-pubkey prints the fee payer address and optional Base ETH balance.
 package main
 
 import (
@@ -7,9 +7,7 @@ import (
 	"os"
 
 	"github.com/monaco/monaco/apps/backend/internal/config"
-	"github.com/monaco/monaco/apps/backend/internal/dex"
-	"github.com/monaco/monaco/apps/backend/internal/solana/balance"
-	"github.com/monaco/monaco/apps/backend/internal/worker"
+	"github.com/monaco/monaco/apps/backend/internal/evm"
 )
 
 func main() {
@@ -26,28 +24,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	pubkey := relayer.PublicKey()
-	solanaRPC := worker.NewHTTPConfirmer(cfg.SolanaCluster)
-	lamports, err := solanaRPC.GetBalance(ctx, pubkey)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "balance: %v\n", err)
-		os.Exit(1)
-	}
-	usdcMicros, err := solanaRPC.GetSPLTokenBalance(ctx, pubkey, evm.USDCAddress)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "usdc balance: %v\n", err)
-		os.Exit(1)
+	addr := relayer.Address()
+	fmt.Printf("address  %s\n", addr)
+
+	if cfg.BaseRPCURL == "" {
+		fmt.Fprintln(os.Stderr, "note: BASE_RPC_URL unset; skipping live balance")
+		return
 	}
 
-	if lamports <= balance.FeePayerMinLamports {
-		fmt.Fprintf(
-			os.Stderr,
-			"warning: SOL balance <= 0.001 (need > %d lamports for backend startup)\n",
-			balance.FeePayerMinLamports,
-		)
+	chain := evm.NewJSONRPCClient(cfg.BaseRPCURL)
+	wei, err := chain.ETHBalance(ctx, addr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "eth balance: %v\n", err)
+		os.Exit(1)
 	}
-
-	fmt.Printf("address  %s\n", pubkey)
-	fmt.Printf("sol      %s\n", formatSOL(lamports))
-	fmt.Printf("usdc     %s\n", formatUSDC(usdcMicros))
+	fmt.Printf("eth_wei  %s\n", wei.String())
 }

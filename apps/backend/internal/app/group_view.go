@@ -58,7 +58,7 @@ func (h *HomeService) GetGroupView(ctx context.Context, accessToken, groupID str
 	}
 
 	// Members read their club; any authed user may spectate a faker scale club (#153).
-	viewerID, err := authorizeGroupReader(ctx, h.store, h.privy, accessToken, groupID)
+	viewerID, err := authorizeGroupReader(ctx, h.store, h.auth, accessToken, groupID)
 	if err != nil {
 		return GroupViewResult{}, err
 	}

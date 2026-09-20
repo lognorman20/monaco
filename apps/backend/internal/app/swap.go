@@ -2,12 +2,10 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 	"time"
 
-	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/evm"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"

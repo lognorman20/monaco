@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -27,7 +28,7 @@ func integrationApp(t *testing.T) (*AuthHandlers, wallets.Client, *sql.DB, *post
 	iso := postgres.PrepareTestDB(t, db)
 	store := postgres.NewStore(db)
 	privyClient := wallets.NewFakeClient()
-	sessions := app.NewSessionService(store, privyClient)
+	sessions := app.NewSessionService(store, auth.NewFakeVerifier(), privyClient)
 	return &AuthHandlers{Sessions: sessions}, privyClient, db, iso
 }
 

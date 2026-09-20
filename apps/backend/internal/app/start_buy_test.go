@@ -1,44 +1,28 @@
 package app
 
 import (
+	"github.com/monaco/monaco/apps/backend/internal/evm"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"errors"
+	"math/big"
 	"testing"
 
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/packages/domain"
 )
 
-func registerHappyBuy(client dex.Client, resolver b20.Catalog, outputMint string, usdcAmount int64, requestID string, signature string) {
-	b20.RegisterTokenAddress(resolver, "AAPLx", outputMint)
-	jupiter.RegisterQuoteBuy(client, outputMint, usdcAmount, jupiter.BuyQuote{
-		Routable:   true,
-		InputToken:  evm.USDCAddress,
-		OutputToken: outputMint,
-		InAmount:   "1000000",
-		OutAmount:  "500000",
-		RequestID:  requestID,
-	})
-	jupiter.RegisterBuyOrder(client, requestID, jupiter.BuyOrder{
-		RequestID:   requestID,
-		Transaction: "unsigned-buy-tx",
-		InAmount:    "1000000",
-		OutAmount:   "500000",
-		InputToken:   evm.USDCAddress,
-		OutputToken:  outputMint,
-	})
-	jupiter.RegisterExecutePoll(client, requestID, []jupiter.ExecuteResult{
-		{Status: jupiter.ExecuteStatusPending, Code: -1},
-		{
-			Status:             jupiter.ExecuteStatusSuccess,
-			Code:               0,
-			Signature:          signature,
-			InputAmountResult:  "1000000",
-			OutputAmountResult: "500000",
-		},
+func registerHappyBuy(client dex.Client, resolver b20.Catalog, outputMint string, usdcAmount int64, _, _ string) {
+	registerTestB20Asset(resolver, "AAPLx", outputMint)
+	dex.RegisterQuote(client, dex.Quote{
+		TokenIn:   dex.USDCAddress(),
+		TokenOut:  outputMint,
+		AmountIn:  big.NewInt(usdcAmount),
+		AmountOut: big.NewInt(500_000),
+		Routable:  true,
 	})
 }
 
@@ -53,7 +37,7 @@ func integrationExecuteOnPassApp(t *testing.T) executeOnPassHarness {
 
 	h := integrationApp(t)
 	buy := NewBuyService(h.Jupiter, h.XStocks)
-	governance := NewGovernanceService(h.Store, h.Privy)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetBuyService(buy)
 	governance.SetSwapService(h.Swap)
 	return executeOnPassHarness{
@@ -67,8 +51,8 @@ func TestExecuteOnPass_onlyAfterTallyPassed_callsJupiter(t *testing.T) {
 	// Arrange
 	h := integrationExecuteOnPassApp(t)
 	ctx := context.Background()
-	sessions := NewSessionService(h.App.Store, h.App.Privy)
-	userID := openTestSession(t, h.App.ISO, sessions, h.App.Privy, "execute-pass", "Execute Pass")
+	sessions := NewSessionService(h.App.Store, h.App.Auth, h.App.Wallets)
+	userID := openTestSession(t, h.App.ISO, sessions, h.App.Auth, "execute-pass", "Execute Pass")
 	token := h.App.ISO.UniqueToken("execute-pass")
 	created, err := h.Governance.CreateGroupWithRules(ctx, token, testGroupName(h.App.ISO, "execute-pass"), DefaultGroupRules())
 	if err != nil {
@@ -79,12 +63,12 @@ func TestExecuteOnPass_onlyAfterTallyPassed_callsJupiter(t *testing.T) {
 	requestID := testRequestID(h.App.ISO, "execute-on-pass")
 	signature := testTxHash(h.App.ISO, "execute-on-pass")
 	registerHappyBuy(h.App.Jupiter, h.App.XStocks, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcAmount, requestID, signature)
-	treasury, err := h.App.Privy.EnsureTreasury(ctx, wallets.GroupID(created.GroupID))
+	treasury, err := h.App.Wallets.EnsureTreasury(ctx, wallets.GroupID(created.GroupID))
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
 	h.App.Swap.SetTreasuryBalances(treasury.Address, TreasuryBalances{USDC: 5_000_000})
-	wallets.SetTreasuryUSDCBalance(h.App.Privy, treasury.Address, 5_000_000)
+	wallets.SetTreasuryUSDCBalance(h.App.Wallets, treasury.Address, 5_000_000)
 
 	proposal, err := h.Governance.CreateProposal(ctx, CreateProposalInput{
 		GroupID:    created.GroupID,
@@ -222,8 +206,8 @@ func TestExecuteOnPass_duplicateProposalAndSignature_executesOnce(t *testing.T) 
 func seedPassedExecuteProposal(t *testing.T, h executeOnPassHarness, label string) Proposal {
 	t.Helper()
 	ctx := context.Background()
-	sessions := NewSessionService(h.App.Store, h.App.Privy)
-	userID := openTestSession(t, h.App.ISO, sessions, h.App.Privy, label, "Execute Pass")
+	sessions := NewSessionService(h.App.Store, h.App.Auth, h.App.Wallets)
+	userID := openTestSession(t, h.App.ISO, sessions, h.App.Auth, label, "Execute Pass")
 	token := h.App.ISO.UniqueToken(label)
 	created, err := h.Governance.CreateGroupWithRules(ctx, token, testGroupName(h.App.ISO, label), DefaultGroupRules())
 	if err != nil {
@@ -234,12 +218,12 @@ func seedPassedExecuteProposal(t *testing.T, h executeOnPassHarness, label strin
 	requestID := testRequestID(h.App.ISO, label)
 	signature := testTxHash(h.App.ISO, label)
 	registerHappyBuy(h.App.Jupiter, h.App.XStocks, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcAmount, requestID, signature)
-	treasury, err := h.App.Privy.EnsureTreasury(ctx, wallets.GroupID(created.GroupID))
+	treasury, err := h.App.Wallets.EnsureTreasury(ctx, wallets.GroupID(created.GroupID))
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
 	h.App.Swap.SetTreasuryBalances(treasury.Address, TreasuryBalances{USDC: 5_000_000})
-	wallets.SetTreasuryUSDCBalance(h.App.Privy, treasury.Address, 5_000_000)
+	wallets.SetTreasuryUSDCBalance(h.App.Wallets, treasury.Address, 5_000_000)
 	proposal, err := h.Governance.CreateProposal(ctx, CreateProposalInput{
 		GroupID:    created.GroupID,
 		ProposerID: userID.UserID,
@@ -266,8 +250,8 @@ func seedPassedExecuteProposal(t *testing.T, h executeOnPassHarness, label strin
 func TestExecuteOnPass_sellDoesNotChangeMemberShareUnits(t *testing.T) {
 	h := integrationExecuteOnPassApp(t)
 	ctx := context.Background()
-	sessions := NewSessionService(h.App.Store, h.App.Privy)
-	user := openTestSession(t, h.App.ISO, sessions, h.App.Privy, "sell-exec", "Sell Exec")
+	sessions := NewSessionService(h.App.Store, h.App.Auth, h.App.Wallets)
+	user := openTestSession(t, h.App.ISO, sessions, h.App.Auth, "sell-exec", "Sell Exec")
 	token := h.App.ISO.UniqueToken("sell-exec")
 	created, err := h.Governance.CreateGroupWithRules(ctx, token, testGroupName(h.App.ISO, "sell-exec"), DefaultGroupRules())
 	if err != nil {
@@ -276,7 +260,7 @@ func TestExecuteOnPass_sellDoesNotChangeMemberShareUnits(t *testing.T) {
 	h.App.ISO.TrackGroup(created.GroupID)
 
 	const held = int64(100_000_000)
-	b20.RegisterTokenAddress(h.App.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	registerTestB20Asset(h.App.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
 	_, _, err = h.App.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          created.GroupID,
 		Amount:           10_000_000,
@@ -296,27 +280,12 @@ func TestExecuteOnPass_sellDoesNotChangeMemberShareUnits(t *testing.T) {
 		t.Fatalf("SumShareUnitsByGroup before: %v", err)
 	}
 
-	requestID := testRequestID(h.App.ISO, "sell-exec")
-	jupiter.RegisterSellQuote(h.App.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", held, jupiter.SellQuote{
-		Routable:   true,
-		InputToken:  "0xb200000000000000000000c2e324d24d7eecd1fb",
-		OutputToken: evm.USDCAddress,
-		InAmount:   "100000000",
-		OutAmount:  "10000000",
-		RequestID:  requestID,
-	})
-	jupiter.RegisterExecutePoll(h.App.Jupiter, requestID, []jupiter.ExecuteResult{{
-		Status:             jupiter.ExecuteStatusSuccess,
-		Code:               0,
-		Signature:          testTxHash(h.App.ISO, "sell-exec"),
-		InputAmountResult:  "100000000",
-		OutputAmountResult: "10000000",
-	}})
-	treasury, err := h.App.Privy.EnsureTreasury(ctx, wallets.GroupID(created.GroupID))
+	registerDexSellQuote(t, h.App.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", held, 10_000_000)
+	treasury, err := h.App.Wallets.EnsureTreasury(ctx, wallets.GroupID(created.GroupID))
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
-	h.App.Swap.SetTreasuryBalances(treasury.Address, TreasuryBalances{USDC: 1_000_000, XStock: held})
+	h.App.Swap.SetTreasuryBalances(treasury.Address, TreasuryBalances{USDC: 1_000_000, Token: held})
 
 	proposal, err := h.Governance.CreateProposal(ctx, CreateProposalInput{
 		GroupID:     created.GroupID,

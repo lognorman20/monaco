@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"testing"
 	"time"
@@ -129,10 +130,10 @@ func TestBuildViewerPnLSeries_noInWindowSnapshots_returnsEmpty(t *testing.T) {
 	t.Parallel()
 
 	h := integrationApp(t)
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
 	ctx := context.Background()
 
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "pnl-empty", "PnL Empty")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "pnl-empty", "PnL Empty")
 	token := string(auth.AccessToken(h.ISO.UniqueToken("pnl-empty")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "pnl-empty"))
 	if err != nil {
@@ -172,10 +173,10 @@ func TestBuildViewerPnLSeries_oldSnapshot_includesWindowStartAndNow(t *testing.T
 	t.Parallel()
 
 	h := integrationApp(t)
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
 	ctx := context.Background()
 
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "pnl-old", "PnL Old")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "pnl-old", "PnL Old")
 	token := string(auth.AccessToken(h.ISO.UniqueToken("pnl-old")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "pnl-old"))
 	if err != nil {
@@ -217,10 +218,10 @@ func TestBuildRangedLeaderboard_noWindowBaseline_excludesLifetimeRanking(t *test
 	t.Parallel()
 
 	h := integrationApp(t)
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
 	ctx := context.Background()
 
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "lb-no-base", "No Baseline")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "lb-no-base", "No Baseline")
 	token := string(auth.AccessToken(h.ISO.UniqueToken("lb-no-base")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "lb-no-base"))
 	if err != nil {
@@ -256,10 +257,10 @@ func TestBuildRangedLeaderboard_withWindowBaseline_usesWindowDeltaNotLifetime(t 
 	t.Parallel()
 
 	h := integrationApp(t)
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
 	ctx := context.Background()
 
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "lb-window", "Window Delta")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "lb-window", "Window Delta")
 	token := string(auth.AccessToken(h.ISO.UniqueToken("lb-window")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "lb-window"))
 	if err != nil {

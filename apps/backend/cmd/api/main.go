@@ -131,9 +131,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 	catalog := b20.NewPinnedCatalog()
 	dexClient := dex.NewKyberClient(http.DefaultClient, cfg.KyberClientID)
 	marksClient := chainlink.NewClient(chain, catalog)
-	var hermes *marks.HermesClient
+	var hermes *pyth.HermesClient
 	if cfg.PythAPIKey != "" {
-		hermes, err = marks.NewHermesClientFromConfig(cfg)
+		hermes, err = pyth.NewHermesClientFromConfig(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("pyth hermes: %w", err)
 		}
@@ -142,9 +142,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 		slog.Info("pyth hermes skipped", "reason", "PYTH_API_KEY unset")
 	}
 	symbols := app.NewSymbolResolver(catalog)
-	deposits := app.NewDepositService(store, walletClient, marksClient, symbols)
+	deposits := app.NewDepositService(store, authVerifier, walletClient, marksClient, symbols)
 	confirmer := worker.NewEVMConfirmer(chain)
-	platformWithdrawals := app.NewPlatformWithdrawService(store, walletClient, deposits, confirmer)
+	platformWithdrawals := app.NewPlatformWithdrawService(store, authVerifier, walletClient, deposits, confirmer)
 	sessions := app.NewSessionService(store, authVerifier, walletClient).
 		WithDisplayNameLimiter(app.NewDisplayNameUpdateLimiter())
 	var storageClient storage.Client
@@ -154,11 +154,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 	} else {
 		slog.Info("supabase storage skipped", "reason", "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY unset")
 	}
-	profilePhotos := app.NewProfilePhotoService(store, privyClient, storageClient).
+	profilePhotos := app.NewProfilePhotoService(store, authVerifier, walletClient, storageClient).
 		WithUploadLimiter(app.NewProfilePhotoUploadLimiter())
-	home := app.NewHomeService(store, walletClient, marksClient, deposits, symbols)
-	groups := app.NewGroupService(store, walletClient)
-	governance := app.NewGovernanceService(store, walletClient)
+	home := app.NewHomeService(store, authVerifier, walletClient, marksClient, deposits, symbols)
+	groups := app.NewGroupService(store, authVerifier, walletClient)
+	governance := app.NewGovernanceService(store, authVerifier, walletClient)
 	depositHandlers := &httpapi.DepositHandlers{Deposits: deposits}
 	platformWithdrawHandlers := &httpapi.PlatformWithdrawHandlers{Withdrawals: platformWithdrawals}
 	buy := app.NewBuyService(dexClient, catalog)
@@ -184,16 +184,18 @@ func boot(ctx context.Context) (*bootResult, error) {
 	agentKeyGuard := httpapi.NewAgentKeyGuard()
 	catalogHandlers := &httpapi.CatalogHandlers{
 		Store:    store,
+		Auth:     authVerifier,
 		Wallets:  walletClient,
 		Catalog:  catalog,
 		KeyGuard: agentKeyGuard,
 	}
-	var assetPrices marks.AssetPriceClient
+	var assetPrices pyth.AssetPriceClient
 	if hermes != nil {
 		assetPrices = hermes
 	}
 	assetsHandlers := &httpapi.AssetsHandlers{
 		Store:   store,
+		Auth:    authVerifier,
 		Wallets: walletClient,
 		Catalog: catalog,
 		Pyth:    assetPrices,
@@ -218,7 +220,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 		addr = v
 	}
 
-	groupChat := app.NewGroupChatService(store, walletClient)
+	groupChat := app.NewGroupChatService(store, authVerifier, walletClient)
 	groupMessageHandlers := &httpapi.GroupMessageHandlers{Chat: groupChat}
 	fakerHandlers := &httpapi.DevFakerHandlers{
 		Enabled:     config.FakerEnabled(),

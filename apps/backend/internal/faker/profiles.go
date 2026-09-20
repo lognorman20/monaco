@@ -13,8 +13,6 @@
 // All timestamps are UTC and spread over the last week relative to the seed time.
 package faker
 
-import "github.com/monaco/monaco/apps/backend/internal/dex"
-
 const usdc = int64(1_000_000)
 
 // person is a seeded faker user. Photo marks the ghosts whose portraits the operator uploads

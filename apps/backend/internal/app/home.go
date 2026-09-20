@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/marks"
@@ -17,18 +18,20 @@ import (
 // HomeService builds app-home board projections.
 type HomeService struct {
 	store    *postgres.Store
-	privy    wallets.Client
+	auth    auth.Verifier
+	wallets wallets.Client
 	pyth     marks.Client
 	deposits *DepositService
 	symbols  *SymbolResolver
 }
 
 // NewHomeService wires home dependencies.
-func NewHomeService(store *postgres.Store, privyClient wallets.Client, pythClient marks.Client, deposits *DepositService, symbols *SymbolResolver) *HomeService {
+func NewHomeService(store *postgres.Store, verifier auth.Verifier, walletClient wallets.Client, marksClient marks.Client, deposits *DepositService, symbols *SymbolResolver) *HomeService {
 	return &HomeService{
 		store:    store,
-		privy:    privyClient,
-		pyth:     pythClient,
+		auth:     verifier,
+		wallets:  walletClient,
+		pyth:     marksClient,
 		deposits: deposits,
 		symbols:  symbols,
 	}
@@ -64,7 +67,7 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 	ctx = HomeContextWithPotNavCache(ctx)
 	logHomeGetStart()
 
-	identity, err := h.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := h.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			slog.Warn("home get rejected", "reason", "invalid token")
@@ -355,7 +358,7 @@ func (h *HomeService) groupTreasuryUSDC(ctx context.Context, groupID string, net
 		return 0, err
 	}
 	if found {
-		balance, err := h.privy.TreasuryUSDCBalance(ctx, treasury.Address)
+		balance, err := h.wallets.TreasuryUSDCBalance(ctx, treasury.Address)
 		if err != nil {
 			return 0, fmt.Errorf("treasury usdc balance: %w", err)
 		}
@@ -412,7 +415,7 @@ func (h *HomeService) GetUserSharedGroups(ctx context.Context, accessToken, targ
 		return nil, fmt.Errorf("user id is required")
 	}
 
-	identity, err := h.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := h.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return nil, auth.ErrUnauthorized

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
@@ -16,7 +17,8 @@ import (
 
 type GovernanceService struct {
 	store  *postgres.Store
-	privy  wallets.Client
+	auth    auth.Verifier
+	wallets wallets.Client
 	buy    *BuyService
 	swap   *SwapService
 	home   *HomeService
@@ -24,8 +26,8 @@ type GovernanceService struct {
 	now    func() time.Time
 }
 
-func NewGovernanceService(store *postgres.Store, privyClient wallets.Client) *GovernanceService {
-	return &GovernanceService{store: store, privy: privyClient, now: time.Now}
+func NewGovernanceService(store *postgres.Store, verifier auth.Verifier, walletClient wallets.Client) *GovernanceService {
+	return &GovernanceService{store: store, auth: verifier, wallets: walletClient, now: time.Now}
 }
 
 // SetBuyService wires quote gating for proposal create (M4-T13).
@@ -128,7 +130,7 @@ func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToke
 		logGovernanceBranchWarn("governance create group rejected", "invalid rules")
 		return CreateGroupResult{}, err
 	}
-	identity, err := g.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := g.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			logGovernanceBranchWarn("governance create group rejected", "invalid token", "name", name)
@@ -169,7 +171,7 @@ func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToke
 			return CreateGroupResult{}, err
 		}
 	}
-	treasuryRef, err := g.privy.EnsureTreasury(ctx, wallets.GroupID(group.ID))
+	treasuryRef, err := g.wallets.EnsureTreasury(ctx, wallets.GroupID(group.ID))
 	if err != nil {
 		return CreateGroupResult{}, fmt.Errorf("privy ensure treasury: %w", err)
 	}
@@ -189,7 +191,7 @@ func (g *GovernanceService) JoinGroup(ctx context.Context, accessToken, groupID 
 	if groupID == "" {
 		return "", fmt.Errorf("group id is required")
 	}
-	identity, err := g.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := g.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return "", auth.ErrUnauthorized
@@ -355,7 +357,7 @@ func (g *GovernanceService) LeaveGroup(ctx context.Context, req LeaveGroupReques
 	}
 	accessToken := req.AccessToken
 	groupID := req.GroupID
-	identity, err := g.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := g.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return auth.ErrUnauthorized
@@ -507,7 +509,7 @@ func (g *GovernanceService) groupTreasuryUSDCForLeaveTx(ctx context.Context, tx 
 		return 0, err
 	}
 	if found {
-		balance, err := g.privy.TreasuryUSDCBalance(ctx, treasury.Address)
+		balance, err := g.wallets.TreasuryUSDCBalance(ctx, treasury.Address)
 		if err == nil && balance > 0 {
 			return balance, nil
 		}
@@ -561,7 +563,7 @@ func (g *GovernanceService) hasSoleRemainingVoteTx(ctx context.Context, tx *sql.
 }
 
 func (g *GovernanceService) authenticatedGroupAdmin(ctx context.Context, accessToken, groupID string) (postgres.User, postgres.Group, error) {
-	identity, err := g.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := g.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return postgres.User{}, postgres.Group{}, auth.ErrUnauthorized
@@ -791,7 +793,7 @@ func (g *GovernanceService) groupTreasuryUSDC(ctx context.Context, groupID strin
 		return 0, err
 	}
 	if found {
-		balance, err := g.privy.TreasuryUSDCBalance(ctx, treasury.Address)
+		balance, err := g.wallets.TreasuryUSDCBalance(ctx, treasury.Address)
 		if err != nil {
 			return 0, fmt.Errorf("treasury usdc balance: %w", err)
 		}

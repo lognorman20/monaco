@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 )
 
 // AuthHandlers serves auth HTTP routes.

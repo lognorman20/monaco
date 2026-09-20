@@ -45,11 +45,7 @@ func TestNewHermesClientFromConfig_withBaseURLOverride_usesCustomHost(t *testing
 	if err != nil {
 		t.Fatalf("NewHermesClientFromConfig: %v", err)
 	}
-	hermes, ok := client.(*HermesClient)
-	if !ok {
-		t.Fatalf("client type = %T", client)
-	}
-	if hermes.baseURL != "https://example.test/hermes" {
-		t.Fatalf("baseURL = %q", hermes.baseURL)
+	if client.baseURL != "https://example.test/hermes" {
+		t.Fatalf("baseURL = %q", client.baseURL)
 	}
 }

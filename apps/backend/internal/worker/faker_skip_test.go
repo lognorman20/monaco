@@ -154,7 +154,7 @@ func seedFakerFixture(t *testing.T, testApp *workerTestApp, privyClient wallets.
 	// Real operator club through the normal service path (fake Privy treasury).
 	token := auth.AccessToken(testApp.ISO.UniqueToken("operator"))
 	auth.RegisterToken(privyClient, token, auth.Identity{PrivyUserID: testApp.ISO.UniqueDynamicID("operator"), DisplayName: "Operator"})
-	session, err := app.NewSessionService(testApp.Store, privyClient).OpenSession(ctx, string(token))
+	session, err := app.NewSessionService(testApp.Store, auth.NewFakeVerifier(), privyClient).OpenSession(ctx, string(token))
 	if err != nil {
 		t.Fatalf("OpenSession: %v", err)
 	}

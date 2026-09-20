@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // Faker (#153) guards shared by app services.
@@ -24,8 +24,8 @@ var ErrFakerGroupReadOnly = errors.New("faker group is read-only")
 
 // authorizeGroupReader verifies the session and allows members, plus any authenticated user
 // for faker scale clubs. Returns the viewer's user id.
-func authorizeGroupReader(ctx context.Context, store *postgres.Store, privyClient wallets.Client, accessToken, groupID string) (string, error) {
-	identity, err := privyClient.VerifySession(ctx, auth.AccessToken(accessToken))
+func authorizeGroupReader(ctx context.Context, store *postgres.Store, verifier auth.Verifier, accessToken, groupID string) (string, error) {
+	identity, err := verifier.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return "", auth.ErrUnauthorized

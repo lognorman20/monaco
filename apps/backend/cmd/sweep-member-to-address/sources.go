@@ -13,11 +13,7 @@ type walletKindReader interface {
 	ListTreasuries(ctx context.Context) ([]postgres.Treasury, error)
 }
 
-type privySweepLister interface {
-	ListAppSolanaWallets(ctx context.Context) ([]wallets.WalletRef, error)
-}
-
-func loadSweepSources(ctx context.Context, flags sweepFlags, store walletKindReader, client privySweepLister) ([]sweepSource, string, error) {
+func loadSweepSources(ctx context.Context, flags sweepFlags, store walletKindReader, _ wallets.Client) ([]sweepSource, string, error) {
 	switch {
 	case len(flags.sources) > 0:
 		memberSet, treasurySet, err := walletKindSets(ctx, store)
@@ -30,23 +26,11 @@ func loadSweepSources(ctx context.Context, flags sweepFlags, store walletKindRea
 		}
 		return sources, fmt.Sprintf("explicit wallets (%d --source)", len(sources)), nil
 	case flags.all:
-		memberSet, treasurySet, err := walletKindSets(ctx, store)
+		sources, err := listDBSweepSources(ctx, store)
 		if err != nil {
 			return nil, "", err
 		}
-		wallets, err := client.ListAppSolanaWallets(ctx)
-		if err != nil {
-			return nil, "", err
-		}
-		var sources []sweepSource
-		for _, wallet := range wallets {
-			sources = append(sources, sweepSource{
-				kind:     classifyWalletKind(wallet.Address, memberSet, treasurySet, "privy"),
-				address:  wallet.Address,
-				walletID: wallet.WalletID,
-			})
-		}
-		return sources, "privy app wallets (--all)", nil
+		return sources, "postgres member_wallets + treasuries (--all)", nil
 	default:
 		sources, err := listDBSweepSources(ctx, store)
 		if err != nil {

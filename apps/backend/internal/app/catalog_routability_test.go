@@ -2,42 +2,45 @@ package app
 
 import (
 	"context"
+	"math/big"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/b20"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 )
 
-func TestJupiterCatalogRoutabilityProber_reportsRoutableQuote(t *testing.T) {
+func TestDexCatalogRoutabilityProber_reportsRoutableQuote(t *testing.T) {
 	t.Parallel()
 
 	client := dex.NewFakeClient()
-	jupiter.RegisterQuoteBuy(client, "MintAAPL", CatalogRoutabilityProbeMicros, jupiter.BuyQuote{
-		Routable:   true,
-		InputToken:  evm.USDCAddress,
-		OutputToken: "MintAAPL",
+	dex.RegisterQuote(client, dex.Quote{
+		TokenIn:   dex.USDCAddress(),
+		TokenOut:  "MintAAPL",
+		AmountIn:  big.NewInt(CatalogRoutabilityProbeMicros),
+		AmountOut: big.NewInt(1),
+		Routable:  true,
 	})
 
-	prober := NewJupiterCatalogRoutabilityProber(client)
+	prober := NewDexCatalogRoutabilityProber(client)
 	routable := prober.IsRoutable(context.Background(), b20.Asset{
-		Symbol:     "AAPLx",
+		Symbol:       "AAPLx",
 		TokenAddress: "MintAAPL",
 	})
 	if !routable {
-		t.Fatal("expected routable=true for configured Jupiter quote")
+		t.Fatal("expected routable=true for configured DEX quote")
 	}
 }
 
-func TestJupiterCatalogRoutabilityProber_reportsNoRoute(t *testing.T) {
+func TestDexCatalogRoutabilityProber_reportsNoRoute(t *testing.T) {
 	t.Parallel()
 
 	client := dex.NewFakeClient()
-	prober := NewJupiterCatalogRoutabilityProber(client)
+	prober := NewDexCatalogRoutabilityProber(client)
 	routable := prober.IsRoutable(context.Background(), b20.Asset{
-		Symbol:     "DEADx",
-		TokenAddress: "MintDead",
+		Symbol:       "AAPLx",
+		TokenAddress: "MintAAPL",
 	})
 	if routable {
-		t.Fatal("expected routable=false when Jupiter has no quote")
+		t.Fatal("expected routable=false without quote")
 	}
 }

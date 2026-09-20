@@ -3,23 +3,21 @@ package app
 import (
 	"context"
 	"errors"
+	"math/big"
 	"testing"
 
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 type failingEnsureTreasuryClient struct {
-	inner           wallets.Client
+	inner             wallets.Client
 	ensureTreasuryErr error
 }
 
-func (c *failingEnsureTreasuryClient) VerifySession(ctx context.Context, token auth.AccessToken) (auth.Identity, error) {
-	return c.inner.VerifySession(ctx, token)
-}
-
-func (c *failingEnsureTreasuryClient) EnsureMemberWallet(ctx context.Context, privyUserID string, userID wallets.UserID) (wallets.WalletRef, error) {
-	return c.inner.EnsureMemberWallet(ctx, privyUserID, userID)
+func (c *failingEnsureTreasuryClient) EnsureMemberWallet(ctx context.Context, dynamicUserID string, userID wallets.UserID) (wallets.WalletRef, error) {
+	return c.inner.EnsureMemberWallet(ctx, dynamicUserID, userID)
 }
 
 func (c *failingEnsureTreasuryClient) EnsureTreasury(ctx context.Context, groupID wallets.GroupID) (wallets.TreasuryRef, error) {
@@ -34,51 +32,49 @@ func (c *failingEnsureTreasuryClient) TreasuryUSDCBalance(ctx context.Context, t
 	return c.inner.TreasuryUSDCBalance(ctx, treasuryAddress)
 }
 
-func (c *failingEnsureTreasuryClient) SubmitSweep(ctx context.Context, req privy.SweepRequest) (privy.SweepResult, error) {
+func (c *failingEnsureTreasuryClient) SubmitSweep(ctx context.Context, req wallets.SweepRequest) (wallets.SweepResult, error) {
 	return c.inner.SubmitSweep(ctx, req)
 }
 
-func (c *failingEnsureTreasuryClient) SubmitMemberUSDCTransfer(ctx context.Context, req privy.TransferRequest) (privy.TransferResult, error) {
+func (c *failingEnsureTreasuryClient) SubmitMemberUSDCTransfer(ctx context.Context, req wallets.TransferRequest) (wallets.TransferResult, error) {
 	return c.inner.SubmitMemberUSDCTransfer(ctx, req)
 }
 
-func (c *failingEnsureTreasuryClient) VerifyPayoutProof(ctx context.Context, userID string, proof privy.PayoutProof) error {
-	return c.inner.VerifyPayoutProof(ctx, userID, proof)
-}
-
-func (c *failingEnsureTreasuryClient) PayUSDC(ctx context.Context, req privy.PayUSDCRequest) (privy.PayUSDCResult, error) {
+func (c *failingEnsureTreasuryClient) PayUSDC(ctx context.Context, req wallets.PayUSDCRequest) (wallets.PayUSDCResult, error) {
 	return c.inner.PayUSDC(ctx, req)
 }
 
+func (c *failingEnsureTreasuryClient) SendTreasuryTransaction(ctx context.Context, treasury wallets.TreasuryRef, to string, data []byte, valueWei *big.Int) (string, error) {
+	return c.inner.SendTreasuryTransaction(ctx, treasury, to, data, valueWei)
+}
+
 func TestCreateGroup_privyTreasuryFailure_rollsBackGroupRow(t *testing.T) {
-	// Arrange
 	ctx := context.Background()
 	db, iso := integrationDB(t)
 	store := postgres.NewStore(db)
 
 	fake := wallets.NewFakeClient()
+	verifier := auth.NewFakeVerifier()
 	token := auth.AccessToken(iso.UniqueToken("create-group"))
-	privyUserID := iso.UniqueDynamicID("create-group")
-	auth.RegisterToken(fake, token, auth.Identity{
-		PrivyUserID: privyUserID,
-		DisplayName: "Alfred",
+	dynamicUserID := iso.UniqueDynamicID("create-group")
+	auth.RegisterToken(verifier, token, auth.Identity{
+		DynamicUserID: dynamicUserID,
+		DisplayName:   "Alfred",
 	})
-	user, err := store.UpsertUser(ctx, privyUserID, "Alfred")
+	user, err := store.UpsertUser(ctx, dynamicUserID, "Alfred")
 	if err != nil {
 		t.Fatalf("UpsertUser: %v", err)
 	}
 	iso.TrackUser(user.ID)
 
-	privyClient := &failingEnsureTreasuryClient{
+	walletClient := &failingEnsureTreasuryClient{
 		inner:             fake,
-		ensureTreasuryErr: errors.New("privy unavailable"),
+		ensureTreasuryErr: errors.New("treasury wallet unavailable"),
 	}
-	groups := NewGroupService(store, privyClient)
+	groups := NewGroupService(store, verifier, walletClient)
 
-	// Act
 	_, err = groups.CreateGroup(ctx, string(token), testGroupName(iso, "alpha"))
 
-	// Assert
 	if err == nil {
 		t.Fatal("expected CreateGroup to fail when EnsureTreasury fails")
 	}

@@ -29,7 +29,7 @@ func TestProposalExecutePoller_executesPassedProposal(t *testing.T) {
 	privyUserID := testApp.ISO.UniqueDynamicID("execute-poller")
 	token := auth.AccessToken(testApp.ISO.UniqueToken("execute-poller"))
 	auth.RegisterToken(testApp.Privy, token, auth.Identity{PrivyUserID: privyUserID, DisplayName: "Execute Poller"})
-	sessions := app.NewSessionService(store, testApp.Privy)
+	sessions := app.NewSessionService(store, auth.NewFakeVerifier(), testApp.Privy)
 	session, err := sessions.OpenSession(ctx, string(token))
 	if err != nil {
 		t.Fatalf("OpenSession: %v", err)

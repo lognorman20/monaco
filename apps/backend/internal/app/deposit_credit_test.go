@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/packages/domain"
 )
 

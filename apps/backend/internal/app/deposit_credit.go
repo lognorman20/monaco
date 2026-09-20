@@ -9,7 +9,7 @@ import (
 )
 
 func (d *DepositService) shareCreditForSweep(ctx context.Context, tx *sql.Tx, groupID, treasuryAddress string, swept int64) (int64, error) {
-	treasuryUsdc, err := d.privy.TreasuryUSDCBalance(ctx, treasuryAddress)
+	treasuryUsdc, err := d.wallets.TreasuryUSDCBalance(ctx, treasuryAddress)
 	if err != nil {
 		return 0, fmt.Errorf("treasury usdc balance: %w", err)
 	}

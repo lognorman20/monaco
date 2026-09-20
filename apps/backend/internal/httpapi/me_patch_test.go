@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -266,7 +267,7 @@ func TestPATCH_me_rateLimited_returns429PerUser(t *testing.T) {
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
 	limiter := ratelimit.New(2, time.Minute)
-	sessions := app.NewSessionService(store, privyClient).WithDisplayNameLimiter(limiter)
+	sessions := app.NewSessionService(store, auth.NewFakeVerifier(), privyClient).WithDisplayNameLimiter(limiter)
 	meHandlers := &MeHandlers{Sessions: sessions}
 	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "patch-limit", "Alfred")
 	_, otherToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "patch-limit-other", "Bartholomez")
@@ -328,7 +329,7 @@ func TestUploadProfilePhotoHandler_rateLimited_returns429(t *testing.T) {
 	store := postgres.NewStore(db)
 	fakeStorage := storage.NewFakeClient("https://example.supabase.co")
 	photos := app.NewProfilePhotoService(store, privyClient, fakeStorage).WithUploadLimiter(ratelimit.New(1, time.Minute))
-	meHandlers := &MeHandlers{Sessions: app.NewSessionService(store, privyClient), ProfilePhoto: photos}
+	meHandlers := &MeHandlers{Sessions: app.NewSessionService(store, auth.NewFakeVerifier(), privyClient), ProfilePhoto: photos}
 	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "photo-limit", "Uploader")
 
 	uploadPhoto(t, meHandlers, token)
@@ -394,7 +395,7 @@ func TestPATCH_me_nameAndPhotoShowOnBoards(t *testing.T) {
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
 	fakeStorage := storage.NewFakeClient("https://example.supabase.co")
-	sessions := app.NewSessionService(store, privyClient)
+	sessions := app.NewSessionService(store, auth.NewFakeVerifier(), privyClient)
 	meHandlers := &MeHandlers{Sessions: sessions, ProfilePhoto: app.NewProfilePhotoService(store, privyClient, fakeStorage)}
 	groups := app.NewGroupService(store, privyClient)
 	governance := app.NewGovernanceService(store, privyClient)

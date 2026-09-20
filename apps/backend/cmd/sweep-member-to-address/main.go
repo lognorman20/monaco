@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/config"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
@@ -45,7 +44,7 @@ func main() {
 	}
 
 	ctx := context.Background()
-	client := wallets.NewSignerClient(cfg)
+	client := wallets.NewFakeClient()
 
 	db, err := sql.Open("pgx", cfg.DatabaseURL)
 	if err != nil {
@@ -71,15 +70,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	jupiterClient := jupiter.NewHTTPClientWithPayer(relayer.PublicKey())
 	runner := sweepRunner{
 		flags:       flags,
 		cfg:         cfg,
-		privy:       client,
-		jupiter:     jupiterClient,
-		signer:      app.NewPrivyTreasurySigner(client),
+		wallets:     client,
+		dex:         dex.NewFakeClient(),
 		relayerPub:  relayer.PublicKey(),
-		relayerKey:  cfg.RelayerPrivateKey,
 		mintCatalog: b20.NewPinnedCatalog(),
 	}
 

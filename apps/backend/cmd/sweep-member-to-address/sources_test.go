@@ -6,40 +6,29 @@ import (
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 type fakeSweepStore struct {
-	members   []postgres.MemberWallet
+	members    []postgres.MemberWallet
 	treasuries []postgres.Treasury
 }
 
-func (f fakeSweepStore) ListMemberWallets(context.Context) ([]postgres.MemberWallet, error) {
+func (f fakeSweepStore) ListMemberWallets(ctx context.Context) ([]postgres.MemberWallet, error) {
+	_ = ctx
 	return f.members, nil
 }
 
-func (f fakeSweepStore) ListTreasuries(context.Context) ([]postgres.Treasury, error) {
+func (f fakeSweepStore) ListTreasuries(ctx context.Context) ([]postgres.Treasury, error) {
+	_ = ctx
 	return f.treasuries, nil
 }
 
-type fakePrivyLister struct {
-	wallets []wallets.WalletRef
-	err     error
-}
-
-func (f fakePrivyLister) ListAppSolanaWallets(context.Context) ([]wallets.WalletRef, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	return f.wallets, nil
-}
-
-func TestLoadSweepSources_explicitList(t *testing.T) {
+func TestLoadSweepSources_explicitSources(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	store := fakeSweepStore{
-		members: []postgres.MemberWallet{{Address: "Mem111"}},
+		members:    []postgres.MemberWallet{{Address: "Mem111"}},
 		treasuries: []postgres.Treasury{{Address: "Tre111"}},
 	}
 	flags := sweepFlags{
@@ -47,7 +36,7 @@ func TestLoadSweepSources_explicitList(t *testing.T) {
 		sources:     []string{"Mem111", "Tre111", "Other111", "Mem111"},
 	}
 
-	sources, note, err := loadSweepSources(ctx, flags, store, fakePrivyLister{})
+	sources, note, err := loadSweepSources(ctx, flags, store, nil)
 	if err != nil {
 		t.Fatalf("loadSweepSources: %v", err)
 	}
@@ -68,36 +57,25 @@ func TestLoadSweepSources_explicitList(t *testing.T) {
 	}
 }
 
-func TestLoadSweepSources_allPrivyWallets(t *testing.T) {
+func TestLoadSweepSources_allUsesDB(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	store := fakeSweepStore{
-		members: []postgres.MemberWallet{{Address: "Mem111"}},
+		members:    []postgres.MemberWallet{{Address: "Mem111"}},
+		treasuries: []postgres.Treasury{{Address: "Tre111"}},
 	}
 	flags := sweepFlags{destination: "Dest111", all: true}
-	privyLister := fakePrivyLister{
-		wallets: []wallets.WalletRef{
-			{WalletID: "pw1", Address: "Mem111"},
-			{WalletID: "pw2", Address: "PrivyOnly111"},
-		},
-	}
 
-	sources, note, err := loadSweepSources(ctx, flags, store, privyLister)
+	sources, note, err := loadSweepSources(ctx, flags, store, nil)
 	if err != nil {
 		t.Fatalf("loadSweepSources: %v", err)
 	}
-	if note != "privy app wallets (--all)" {
+	if note != "postgres member_wallets + treasuries (--all)" {
 		t.Fatalf("note = %q", note)
 	}
 	if len(sources) != 2 {
 		t.Fatalf("sources = %#v", sources)
-	}
-	if sources[0].walletID != "pw1" || sources[0].kind != "member" {
-		t.Fatalf("first source = %#v", sources[0])
-	}
-	if sources[1].walletID != "pw2" || sources[1].kind != "privy" {
-		t.Fatalf("second source = %#v", sources[1])
 	}
 }
 
@@ -111,7 +89,7 @@ func TestLoadSweepSources_dbDefault(t *testing.T) {
 	}
 	flags := sweepFlags{destination: "Dest111"}
 
-	sources, note, err := loadSweepSources(ctx, flags, store, fakePrivyLister{})
+	sources, note, err := loadSweepSources(ctx, flags, store, nil)
 	if err != nil {
 		t.Fatalf("loadSweepSources: %v", err)
 	}

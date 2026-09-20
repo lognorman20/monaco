@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/b20"
+	"github.com/monaco/monaco/apps/backend/internal/evm"
 )
 
 type actionStatus string
@@ -202,13 +202,13 @@ func formatAddress(addr string) string {
 	return addr[:4] + "…" + addr[len(addr)-4:]
 }
 
-func assetLabel(ctx context.Context, mint string, catalog b20.MintCatalog) string {
+func assetLabel(ctx context.Context, mint string, catalog b20.Catalog) string {
 	mint = strings.TrimSpace(mint)
 	if mint == evm.USDCAddress {
 		return "USDC"
 	}
 	if catalog != nil {
-		asset, ok, err := catalog.LookupByMint(ctx, mint)
+		asset, ok, err := catalog.LookupByAddress(ctx, mint)
 		if err == nil && ok && strings.TrimSpace(asset.Symbol) != "" {
 			return strings.TrimSpace(asset.Symbol)
 		}

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/marks"
@@ -87,24 +88,26 @@ var ErrInvalidSweepTarget = errors.New("invalid sweep target")
 // DepositService orchestrates deposit create and sweep credit flows.
 type DepositService struct {
 	store   *postgres.Store
-	privy   wallets.Client
+	auth    auth.Verifier
+	wallets wallets.Client
 	pyth    marks.Client
 	symbols *SymbolResolver
 }
 
 // NewDepositService wires deposit dependencies.
-func NewDepositService(store *postgres.Store, privyClient wallets.Client, pythClient marks.Client, symbols *SymbolResolver) *DepositService {
+func NewDepositService(store *postgres.Store, verifier auth.Verifier, walletClient wallets.Client, marksClient marks.Client, symbols *SymbolResolver) *DepositService {
 	return &DepositService{
 		store:   store,
-		privy:   privyClient,
-		pyth:    pythClient,
+		auth:    verifier,
+		wallets: walletClient,
+		pyth:    marksClient,
 		symbols: symbols,
 	}
 }
 
 // GetPlatformBalance returns chain member-wallet USDC minus in-flight fund reservations.
 func (d *DepositService) GetPlatformBalance(ctx context.Context, accessToken string) (PlatformBalanceResult, error) {
-	identity, err := d.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := d.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return PlatformBalanceResult{}, auth.ErrUnauthorized
@@ -153,7 +156,7 @@ func (d *DepositService) FundGroup(ctx context.Context, accessToken string, grou
 		return CreateDepositResult{}, fmt.Errorf("amount must be positive")
 	}
 
-	identity, err := d.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := d.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			logDepositBranchWarn("fund group rejected", "invalid token", "group_id", groupID)
@@ -231,7 +234,7 @@ func (d *DepositService) FundGroup(ctx context.Context, accessToken string, grou
 }
 
 func (d *DepositService) platformBalanceForWallet(ctx context.Context, userID, memberAddress string) (available int64, pending int64, err error) {
-	chainBalance, err := d.privy.MemberUSDCBalance(ctx, memberAddress)
+	chainBalance, err := d.wallets.MemberUSDCBalance(ctx, memberAddress)
 	if err != nil {
 		return 0, 0, fmt.Errorf("member usdc balance: %w", err)
 	}
@@ -264,7 +267,7 @@ func (d *DepositService) CreateDeposit(ctx context.Context, accessToken string, 
 		return CreateDepositResult{}, fmt.Errorf("amount must be positive")
 	}
 
-	identity, err := d.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := d.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			logDepositBranchWarn("deposit create rejected", "invalid token", "group_id", groupID)
@@ -443,7 +446,7 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 			return ObserveSweepResult{}, err
 		}
 
-		treasuryUsdc, err := d.privy.TreasuryUSDCBalance(ctx, treasury.Address)
+		treasuryUsdc, err := d.wallets.TreasuryUSDCBalance(ctx, treasury.Address)
 		if err != nil {
 			logDepositBranchError("deposit observe sweep treasury balance failed", err,
 				"deposit_id", sweep.DepositID, "group_id", sweep.GroupID, "treasury_address", treasury.Address)
@@ -516,7 +519,7 @@ func positionFromRowPostgres(row postgres.PositionRow) Position {
 
 // GetDeposit returns a deposit by id for authenticated owner.
 func (d *DepositService) GetDeposit(ctx context.Context, accessToken, depositID string) (Deposit, Position, error) {
-	identity, err := d.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := d.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return Deposit{}, Position{}, auth.ErrUnauthorized
@@ -566,7 +569,7 @@ func (d *DepositService) GetDeposit(ctx context.Context, accessToken, depositID 
 
 // GetMemberPosition returns share units for the authenticated user in a group.
 func (d *DepositService) GetMemberPosition(ctx context.Context, accessToken, groupID string) (Position, error) {
-	identity, err := d.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := d.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return Position{}, auth.ErrUnauthorized
@@ -594,7 +597,7 @@ func (d *DepositService) GetMemberPosition(ctx context.Context, accessToken, gro
 
 // GetTreasuryUSDCBalance returns treasury USDC balance via Privy for read API.
 func (d *DepositService) GetTreasuryUSDCBalance(ctx context.Context, accessToken, groupID string) (int64, string, error) {
-	identity, err := d.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := d.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return 0, "", auth.ErrUnauthorized
@@ -634,7 +637,7 @@ func (d *DepositService) GetTreasuryUSDCBalance(ctx context.Context, accessToken
 		return 0, "", ErrGroupNotFound
 	}
 
-	balance, err := d.privy.TreasuryUSDCBalance(ctx, treasury.Address)
+	balance, err := d.wallets.TreasuryUSDCBalance(ctx, treasury.Address)
 	if err != nil {
 		return 0, "", err
 	}

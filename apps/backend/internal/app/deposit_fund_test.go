@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"errors"
 	"testing"
@@ -27,8 +28,8 @@ func ensureGroupMember(t *testing.T, store *postgres.Store, groupID, userID stri
 func TestFundGroup_rejectsOverBalance(t *testing.T) {
 	h := integrationApp(t)
 	ctx := context.Background()
-	sessions := NewSessionService(h.Store, h.Privy)
-	session := openTestSession(t, h.ISO, sessions, h.Privy, "fund-over", "Fund Over")
+	sessions := NewSessionService(h.Store, h.Auth, h.Wallets)
+	session := openTestSession(t, h.ISO, sessions, h.Auth, "fund-over", "Fund Over")
 	token := auth.AccessToken(h.ISO.UniqueToken("fund-over"))
 
 	group, err := h.Groups.CreateGroup(ctx, string(token), testGroupName(h.ISO, "fund-over"))
@@ -53,9 +54,9 @@ func TestFundGroup_rejectsOverBalance(t *testing.T) {
 func TestFundGroup_rejectsNonMember(t *testing.T) {
 	h := integrationApp(t)
 	ctx := context.Background()
-	sessions := NewSessionService(h.Store, h.Privy)
+	sessions := NewSessionService(h.Store, h.Auth, h.Wallets)
 	ownerToken := auth.AccessToken(h.ISO.UniqueToken("fund-owner"))
-	openTestSession(t, h.ISO, sessions, h.Privy, "fund-owner", "Owner")
+	openTestSession(t, h.ISO, sessions, h.Auth, "fund-owner", "Owner")
 	group, err := h.Groups.CreateGroup(ctx, string(ownerToken), testGroupName(h.ISO, "fund-owner"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -63,7 +64,7 @@ func TestFundGroup_rejectsNonMember(t *testing.T) {
 	h.ISO.TrackGroup(group.GroupID)
 
 	outsiderToken := auth.AccessToken(h.ISO.UniqueToken("fund-outsider"))
-	outsider := openTestSession(t, h.ISO, sessions, h.Privy, "fund-outsider", "Outsider")
+	outsider := openTestSession(t, h.ISO, sessions, h.Auth, "fund-outsider", "Outsider")
 	wallet, found, err := h.Store.GetMemberWalletByUserID(ctx, outsider.UserID)
 	if err != nil || !found {
 		t.Fatalf("GetMemberWalletByUserID: found=%v err=%v", found, err)
@@ -79,9 +80,9 @@ func TestFundGroup_rejectsNonMember(t *testing.T) {
 func TestFundGroup_creditsPositionAfterConfirmedSweep(t *testing.T) {
 	h := integrationApp(t)
 	ctx := context.Background()
-	sessions := NewSessionService(h.Store, h.Privy)
+	sessions := NewSessionService(h.Store, h.Auth, h.Wallets)
 	token := auth.AccessToken(h.ISO.UniqueToken("fund-credit"))
-	session := openTestSession(t, h.ISO, sessions, h.Privy, "fund-credit", "Creditor")
+	session := openTestSession(t, h.ISO, sessions, h.Auth, "fund-credit", "Creditor")
 	group, err := h.Groups.CreateGroup(ctx, string(token), testGroupName(h.ISO, "fund-credit"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -130,9 +131,9 @@ func TestFundGroup_creditsPositionAfterConfirmedSweep(t *testing.T) {
 func TestGetPlatformBalance_subtractsPendingAllocations(t *testing.T) {
 	h := integrationApp(t)
 	ctx := context.Background()
-	sessions := NewSessionService(h.Store, h.Privy)
+	sessions := NewSessionService(h.Store, h.Auth, h.Wallets)
 	token := auth.AccessToken(h.ISO.UniqueToken("balance"))
-	session := openTestSession(t, h.ISO, sessions, h.Privy, "balance", "Balancer")
+	session := openTestSession(t, h.ISO, sessions, h.Auth, "balance", "Balancer")
 	group, err := h.Groups.CreateGroup(ctx, string(token), testGroupName(h.ISO, "balance"))
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)

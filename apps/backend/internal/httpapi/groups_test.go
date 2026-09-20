@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"database/sql"
 	"encoding/json"

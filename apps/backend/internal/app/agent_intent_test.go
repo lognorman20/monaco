@@ -8,12 +8,10 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
-	"strconv"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/b20"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -22,27 +20,9 @@ import (
 // on "missing fill amount" (the default fake execute result carries no fill amounts). label
 // must be unique per call (e.g. the test isolation suffix) so its execute request id and
 // tx_signature never collide with another test's confirmed transaction in the shared test DB.
-func registerAgentBuyFill(t *testing.T, jupiterClient dex.Client, resolver b20.Catalog, label, symbol string, usdc int64) {
+func registerAgentBuyFill(t *testing.T, dexClient dex.Client, resolver b20.Catalog, _ /* label */, symbol string, usdc int64) {
 	t.Helper()
-	mint := "Mint" + symbol
-	b20.RegisterTokenAddress(resolver, symbol, mint)
-	requestID := fmt.Sprintf("agent-buy-%s-%s-%d", label, symbol, usdc)
-	jupiter.RegisterQuoteBuy(jupiterClient, mint, usdc, jupiter.BuyQuote{
-		Routable:   true,
-		OutputToken: mint,
-		InAmount:   strconv.FormatInt(usdc, 10),
-		OutAmount:  strconv.FormatInt(usdc, 10),
-		RequestID:  requestID,
-	})
-	jupiter.RegisterExecutePoll(jupiterClient, requestID, []jupiter.ExecuteResult{
-		{
-			Status:             jupiter.ExecuteStatusSuccess,
-			Code:               0,
-			Signature:          "sig-" + requestID,
-			InputAmountResult:  strconv.FormatInt(usdc, 10),
-			OutputAmountResult: strconv.FormatInt(usdc, 10),
-		},
-	})
+	registerRoutableQuote(t, dexClient, resolver, symbol, usdc)
 }
 
 func addAgentAndReveal(t *testing.T, h governanceHarness, groupID, proposerID string, allocationMicros int64) (proposalID, key string) {
@@ -80,8 +60,8 @@ func addAgentAndReveal(t *testing.T, h governanceHarness, groupID, proposerID st
 
 func TestAgentKeyReveal_shownOnceToProposerOnly(t *testing.T) {
 	h := integrationGovernanceApp(t)
-	proposer := openTestSession(t, h.ISO, h.Sessions, h.Privy, "key-proposer", "Key Proposer")
-	other := openTestSession(t, h.ISO, h.Sessions, h.Privy, "key-bystander", "Key Bystander")
+	proposer := openTestSession(t, h.ISO, h.Sessions, h.Auth, "key-proposer", "Key Proposer")
+	other := openTestSession(t, h.ISO, h.Sessions, h.Auth, "key-bystander", "Key Bystander")
 	token := h.ISO.UniqueToken("key-proposer")
 	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "keyreveal"), DefaultGroupRules())
 	if err != nil {
@@ -156,7 +136,7 @@ func TestAgentKeyReveal_shownOnceToProposerOnly(t *testing.T) {
 
 func TestAgentIntent_buyExecutesThenEnforcesBudgetCap(t *testing.T) {
 	h := integrationGovernanceApp(t)
-	proposer := openTestSession(t, h.ISO, h.Sessions, h.Privy, "intent-proposer", "Intent Proposer")
+	proposer := openTestSession(t, h.ISO, h.Sessions, h.Auth, "intent-proposer", "Intent Proposer")
 	token := h.ISO.UniqueToken("intent-proposer")
 	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "intent"), DefaultGroupRules())
 	if err != nil {
@@ -214,7 +194,7 @@ func TestAgentIntent_buyExecutesThenEnforcesBudgetCap(t *testing.T) {
 
 func TestAgentLifecycle_pauseBlocksIntentsResumeRestoresRevokeInvalidatesKey(t *testing.T) {
 	h := integrationGovernanceApp(t)
-	proposer := openTestSession(t, h.ISO, h.Sessions, h.Privy, "lifecycle-proposer", "Lifecycle Proposer")
+	proposer := openTestSession(t, h.ISO, h.Sessions, h.Auth, "lifecycle-proposer", "Lifecycle Proposer")
 	token := h.ISO.UniqueToken("lifecycle-proposer")
 	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "lifecycle"), DefaultGroupRules())
 	if err != nil {

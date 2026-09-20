@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 
 	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/packages/domain"
@@ -69,12 +70,16 @@ func (g *GovernanceService) QuoteProposal(ctx context.Context, in QuoteProposalI
 		if err != nil {
 			return QuoteProposalResult{}, err
 		}
+		outMicros, err := dexAmountOutMicros(result.Quote)
+		if err != nil {
+			return QuoteProposalResult{}, err
+		}
 		return QuoteProposalResult{
 			Kind:         domain.ProposalKindBuy,
 			Symbol:       in.Symbol,
 			UsdcMicros:   in.UsdcMicros,
 			Routable:     result.Quote.Routable,
-			OutputAmount: result.Quote.OutAmount,
+			OutputAmount: strconv.FormatInt(outMicros, 10),
 		}, nil
 	case domain.ProposalKindSell:
 		return g.quoteSellForMember(ctx, in)
@@ -102,12 +107,16 @@ func (g *GovernanceService) quoteSellForMember(ctx context.Context, in QuoteProp
 		}
 		return QuoteProposalResult{}, err
 	}
+	outMicros, err := dexAmountOutMicros(quote.Quote)
+	if err != nil {
+		return QuoteProposalResult{}, err
+	}
 	return QuoteProposalResult{
 		Kind:             domain.ProposalKindSell,
 		Symbol:           in.Symbol,
 		TokenAmount:      in.TokenAmount,
 		Routable:         quote.Quote.Routable,
-		OutputUsdcMicros: quote.Quote.OutAmount,
+		OutputUsdcMicros: strconv.FormatInt(outMicros, 10),
 	}, nil
 }
 

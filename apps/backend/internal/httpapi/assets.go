@@ -6,27 +6,27 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"math/big"
 	"strconv"
 	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
-	"github.com/monaco/monaco/apps/backend/internal/b20"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // AssetsHandlers serves group-agnostic market catalog routes.
 type AssetsHandlers struct {
 	Store   *postgres.Store
-	Privy   wallets.Client
-	Catalog b20.CatalogSearcher
-	// Pyth backs historical chart series only — display prices come from Price.
-	Pyth    marks.AssetPriceClient
-	Jupiter dex.Client
-	// Price batches current display prices via Jupiter's Price API (not Swap API v2).
-	Price jupiter.PriceClient
+	Auth    auth.Verifier
+	Wallets wallets.Client
+	Catalog b20.Catalog
+	Pyth    pyth.AssetPriceClient
+	Dex     dex.Client
 }
 
 type marketAssetResponse struct {
@@ -68,7 +68,7 @@ type assetDetailResponse struct {
 }
 
 type assetChartResponse struct {
-	Points      []marks.ChartPoint `json:"points"`
+	Points      []pyth.ChartPoint `json:"points"`
 	EmptyReason string            `json:"emptyReason,omitempty"`
 }
 
@@ -93,10 +93,6 @@ func (h *AssetsHandlers) ListAssetsHandler(w http.ResponseWriter, r *http.Reques
 
 	page, err := h.Catalog.Search(ctx, query, limit, offset)
 	if err != nil {
-		if errors.Is(err, b20.ErrInvalidResponse) {
-			logJSONError(ctx, log, "invalid_catalog_query", w, http.StatusBadRequest, "invalid catalog query", "query", query)
-			return
-		}
 		logJSONError(ctx, log, "catalog_search_failed", w, http.StatusInternalServerError, "internal server error", "query", query, "err", err.Error())
 		return
 	}
@@ -124,7 +120,10 @@ func (h *AssetsHandlers) PopularAssetsHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	limit := parsePopularLimit(r.URL.Query().Get("limit"))
-	assets, err := b20.Popular(ctx, h.Catalog, limit)
+	assets, err := h.Catalog.Popular(ctx)
+	if err == nil && len(assets) > limit {
+		assets = assets[:limit]
+	}
 	if err != nil {
 		logJSONError(ctx, log, "popular_assets_failed", w, http.StatusInternalServerError, "internal server error", "err", err.Error())
 		return
@@ -190,7 +189,7 @@ func (h *AssetsHandlers) GetAssetChartHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	chartRange, err := marks.ParseChartRange(r.URL.Query().Get("range"))
+	chartRange, err := parsePythChartRange(r.URL.Query().Get("range"))
 	if err != nil {
 		logJSONError(ctx, log, "invalid_chart_range", w, http.StatusBadRequest, "invalid chart range", "symbol", symbol)
 		return
@@ -204,7 +203,7 @@ func (h *AssetsHandlers) GetAssetChartHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	var series marks.AssetChartSeries
+	var series pyth.AssetChartSeries
 	if h.Pyth != nil {
 		series, err = h.Pyth.ChartSeries(ctx, symbol, chartRange)
 		if err != nil {
@@ -212,7 +211,7 @@ func (h *AssetsHandlers) GetAssetChartHandler(w http.ResponseWriter, r *http.Req
 			return
 		}
 	} else {
-		series = marks.AssetChartSeries{EmptyReason: "price history unavailable"}
+		series = pyth.AssetChartSeries{EmptyReason: "price history unavailable"}
 	}
 
 	resp := assetChartResponse{
@@ -223,7 +222,7 @@ func (h *AssetsHandlers) GetAssetChartHandler(w http.ResponseWriter, r *http.Req
 }
 
 func (h *AssetsHandlers) authorizeUser(ctx context.Context, accessToken string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := h.Auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return "", auth.ErrUnauthorized
@@ -270,29 +269,35 @@ func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []b20.Asset) [
 // fetchPrices batches current USD marks for assets in one Jupiter Price API call.
 // A nil Price client or a failed fetch degrades to "no price" rather than erroring
 // the whole catalog response.
-func (h *AssetsHandlers) fetchPrices(ctx context.Context, assets []b20.Asset) map[string]jupiter.TokenPrice {
-	if h.Price == nil {
-		return nil
-	}
-	mints := make([]string, 0, len(assets))
-	for _, asset := range assets {
-		if mint := strings.TrimSpace(asset.TokenAddress); mint != "" {
-			mints = append(mints, mint)
-		}
-	}
-	prices, err := h.Price.Prices(ctx, mints)
-	if err != nil {
-		return nil
-	}
-	return prices
+type assetPriceSnapshot struct {
+	PriceUsdcMicros int64
+	Change24h       *string
 }
 
-func marketAssetResponseFor(asset b20.Asset, prices map[string]jupiter.TokenPrice) marketAssetResponse {
+func (h *AssetsHandlers) fetchPrices(ctx context.Context, assets []b20.Asset) map[string]assetPriceSnapshot {
+	if h.Pyth == nil {
+		return nil
+	}
+	out := make(map[string]assetPriceSnapshot, len(assets))
+	for _, asset := range assets {
+		mark, err := h.Pyth.AssetMark(ctx, asset.Symbol)
+		if err != nil || mark.PriceUsdcMicros <= 0 {
+			continue
+		}
+		out[asset.TokenAddress] = assetPriceSnapshot{
+			PriceUsdcMicros: mark.PriceUsdcMicros,
+			Change24h:       mark.Change24h,
+		}
+	}
+	return out
+}
+
+func marketAssetResponseFor(asset b20.Asset, prices map[string]assetPriceSnapshot) marketAssetResponse {
 	resp := marketAssetResponse{
-		Symbol:     asset.Symbol,
-		Name:       asset.Name,
+		Symbol:       asset.Symbol,
+		Name:         asset.Name,
 		TokenAddress: asset.TokenAddress,
-		Routable:   asset.Routable,
+		Routable:     false,
 	}
 	if price, ok := prices[asset.TokenAddress]; ok && price.PriceUsdcMicros > 0 {
 		resp.PriceUsdcMicros = &price.PriceUsdcMicros
@@ -306,7 +311,6 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset b20.Asset) 
 		Symbol:     asset.Symbol,
 		Name:       asset.Name,
 		TokenAddress: asset.TokenAddress,
-		Routable:   asset.Routable,
 		Liquidity:  h.liquiditySnippet(ctx, asset, nil),
 	}
 	prices := h.fetchPrices(ctx, []b20.Asset{asset})
@@ -322,38 +326,28 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset b20.Asset) 
 
 func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset b20.Asset, markMicros *int64) assetLiquidityResponse {
 	snippet := assetLiquidityResponse{
-		Label:              "Via Jupiter",
-		Routable:           asset.Routable,
+		Label:              "Via DEX",
+		Routable:           false,
 		BuyProbeUsdcMicros: app.CatalogRoutabilityProbeMicros,
 	}
-	if h.Jupiter == nil || strings.TrimSpace(asset.TokenAddress) == "" {
+	if h.Dex == nil || strings.TrimSpace(asset.TokenAddress) == "" {
 		return snippet
 	}
 
-	buyQuote, err := h.Jupiter.QuoteBuy(ctx, jupiter.QuoteBuyParams{
-		Symbol:     asset.Symbol,
-		OutputToken: asset.TokenAddress,
-		USDCAmount: app.CatalogRoutabilityProbeMicros,
-	})
-	if err == nil && buyQuote.Routable {
+	buyQuote, err := h.Dex.QuoteBuy(ctx, asset.TokenAddress, big.NewInt(app.CatalogRoutabilityProbeMicros))
+	if err == nil && buyQuote.Routable && buyQuote.AmountOut != nil {
 		snippet.Routable = true
-		snippet.BuyProbeOutAmount = buyQuote.OutAmount
-		if markMicros != nil {
-			snippet.SpreadBps = marks.MidSpreadBps(*markMicros, buyQuote.OutAmount, app.CatalogRoutabilityProbeMicros, jupiter.XStockDecimals)
-		}
+		snippet.BuyProbeOutAmount = buyQuote.AmountOut.String()
 	} else {
 		snippet.Routable = false
 	}
 
-	sellQuote, err := h.Jupiter.QuoteSell(ctx, jupiter.QuoteSellParams{
-		Symbol:    asset.Symbol,
-		InputToken: asset.TokenAddress,
-		Amount:    b20.TokenAtomicScale,
-	})
-	if err == nil && sellQuote.Routable {
-		snippet.SellProbeInAmount = sellQuote.InAmount
-		snippet.SellProbeOutAmount = sellQuote.OutAmount
+	sellQuote, err := h.Dex.QuoteSell(ctx, asset.TokenAddress, big.NewInt(b20.TokenAtomicScale))
+	if err == nil && sellQuote.Routable && sellQuote.AmountOut != nil {
+		snippet.SellProbeInAmount = strconv.FormatInt(b20.TokenAtomicScale, 10)
+		snippet.SellProbeOutAmount = sellQuote.AmountOut.String()
 	}
+	_ = markMicros
 
 	return snippet
 }
@@ -380,6 +374,10 @@ func writeAssetsError(ctx context.Context, log *requestLog, w http.ResponseWrite
 	default:
 		logJSONError(ctx, log, "internal_error", w, http.StatusInternalServerError, "internal server error", "err", err.Error())
 	}
+}
+
+func parsePythChartRange(raw string) (pyth.ChartRange, error) {
+	return pyth.ParseChartRange(raw)
 }
 
 func writeMarketJSON(ctx context.Context, log *requestLog, w http.ResponseWriter, status int, payload any, outcome string, attrs ...any) {

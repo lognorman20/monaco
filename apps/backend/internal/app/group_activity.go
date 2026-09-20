@@ -33,7 +33,7 @@ func (h *HomeService) ListGroupActivity(ctx context.Context, accessToken, groupI
 	}
 
 	// Members read their club; any authed user may spectate a faker scale club (#153).
-	if _, err := authorizeGroupReader(ctx, h.store, h.privy, accessToken, groupID); err != nil {
+	if _, err := authorizeGroupReader(ctx, h.store, h.auth, accessToken, groupID); err != nil {
 		return nil, err
 	}
 

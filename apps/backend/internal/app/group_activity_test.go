@@ -1,6 +1,8 @@
 package app
 
 import (
+	"github.com/monaco/monaco/apps/backend/internal/evm"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"testing"
 	"time"
@@ -16,14 +18,14 @@ func TestListGroupActivity_includesDepositsBuysSellsAndMixedStatuses(t *testing.
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
-	governance := NewGovernanceService(h.Store, h.Privy)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetBuyService(NewBuyService(h.Jupiter, h.XStocks))
 
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "activity-user", "Activity User")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "activity-user", "Activity User")
 	token := auth.AccessToken(h.ISO.UniqueToken("activity-user"))
-	auth.RegisterToken(h.Privy, token, auth.Identity{
-		PrivyUserID: h.ISO.UniqueDynamicID("activity-user"),
+	auth.RegisterToken(h.Auth, token, auth.Identity{
+		DynamicUserID: h.ISO.UniqueDynamicID("activity-user"),
 		DisplayName: "Activity User",
 	})
 
@@ -176,15 +178,15 @@ func TestListGroupActivity_emptyWhenNoRows(t *testing.T) {
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
-	governance := NewGovernanceService(h.Store, h.Privy)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 
 	token := auth.AccessToken(h.ISO.UniqueToken("activity-empty"))
-	auth.RegisterToken(h.Privy, token, auth.Identity{
-		PrivyUserID: h.ISO.UniqueDynamicID("activity-empty"),
+	auth.RegisterToken(h.Auth, token, auth.Identity{
+		DynamicUserID: h.ISO.UniqueDynamicID("activity-empty"),
 		DisplayName: "Empty User",
 	})
-	openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "activity-empty", "Empty User")
+	openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "activity-empty", "Empty User")
 
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "empty"), DefaultGroupRules())
 	if err != nil {
@@ -206,15 +208,15 @@ func TestListGroupActivity_sortsNewestFirst(t *testing.T) {
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
-	governance := NewGovernanceService(h.Store, h.Privy)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 
 	token := auth.AccessToken(h.ISO.UniqueToken("activity-sort"))
-	auth.RegisterToken(h.Privy, token, auth.Identity{
-		PrivyUserID: h.ISO.UniqueDynamicID("activity-sort"),
+	auth.RegisterToken(h.Auth, token, auth.Identity{
+		DynamicUserID: h.ISO.UniqueDynamicID("activity-sort"),
 		DisplayName: "Sort User",
 	})
-	openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "activity-sort", "Sort User")
+	openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "activity-sort", "Sort User")
 
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "sort"), DefaultGroupRules())
 	if err != nil {

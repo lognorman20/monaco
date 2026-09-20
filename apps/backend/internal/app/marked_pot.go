@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/packages/domain"
@@ -189,7 +189,7 @@ func costBasisForHoldings(
 		}
 		out = append(out, marks.CostBasis{
 			Symbol: symbolForOutputToken(ctx, symbols, holding.Mint),
-			Mint:   holding.Mint,
+			Token:  holding.Mint,
 			Units:  holding.Amount,
 			Price:  price,
 			Amount: amount,
@@ -219,7 +219,7 @@ func costBasisMarkedPotInput(treasuryUSDC int64, costBasis []marks.CostBasis) (m
 		}
 		marked = append(marked, marks.MarkedHolding{
 			Symbol:    holding.Symbol,
-			Mint:      holding.Mint,
+			Token:     holding.Token,
 			Units:     holding.Units,
 			MarkUsdc:  markPerUnit,
 			CostBasis: holding.Price,
@@ -301,15 +301,9 @@ func boolPtr(v bool) *bool {
 	return &v
 }
 
-func symbolForOutputToken(ctx context.Context, symbols *SymbolResolver, mint string) string {
+func symbolForOutputToken(ctx context.Context, symbols *SymbolResolver, token string) string {
 	if symbols != nil {
-		return symbols.SymbolForMint(ctx, mint)
+		return symbols.SymbolForMint(ctx, token)
 	}
-	if symbol, ok := knownMintSymbol(mint); ok {
-		return symbol
-	}
-	if looksLikeTokenAddress(mint) {
-		return unknownStockSymbol
-	}
-	return mint
+	return token
 }

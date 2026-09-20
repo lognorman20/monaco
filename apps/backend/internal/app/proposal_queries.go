@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -90,7 +90,7 @@ func (g *GovernanceService) ListGroupProposals(ctx context.Context, accessToken,
 	}
 
 	// Members read their club; any authed user may spectate a faker scale club (#153).
-	userID, err := authorizeGroupReader(ctx, g.store, g.privy, accessToken, groupID)
+	userID, err := authorizeGroupReader(ctx, g.store, g.auth, accessToken, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +194,7 @@ func (g *GovernanceService) GetProposalDetail(ctx context.Context, accessToken, 
 		return ProposalDetailResult{}, fmt.Errorf("proposal id is required")
 	}
 
-	identity, err := g.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := g.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return ProposalDetailResult{}, auth.ErrUnauthorized

@@ -20,14 +20,18 @@ type integrationHarness struct {
 	DB       *sql.DB
 	Store    *postgres.Store
 	Wallets  wallets.Client
+	Privy    wallets.Client // legacy test name for Wallets
 	Auth     auth.Verifier
 	Marks    marks.Client
+	Pyth     marks.Client // legacy test name for Marks
 	Deposits *DepositService
 	Groups   *GroupService
 	Swap     *SwapService
 	Redeem   *RedeemService
 	Dex      dex.Client
+	Jupiter  dex.Client // legacy test name for Dex
 	Catalog  b20.Catalog
+	XStocks  b20.Catalog // legacy test name for Catalog
 	Chain    evm.Client
 	Symbols  *SymbolResolver
 	ISO      *postgres.TestIsolation
@@ -83,7 +87,7 @@ func integrationApp(t *testing.T) integrationHarness {
 	catalog := b20.NewFakeCatalog()
 	aapl, _ := b20.NewPinnedCatalog().ResolveTokenAddress(context.Background(), "AAPLc")
 	b20.RegisterAsset(catalog, b20.Asset{Symbol: "AAPLc", Name: "Apple", TokenAddress: aapl, Decimals: 8})
-	chain := evm.NewFakeClient()
+	var chain evm.Client // nil: unit tests skip live receipt polling
 	buy := NewBuyService(dexClient, catalog)
 	symbols := NewSymbolResolver(catalog)
 	swap := NewSwapService(store, buy, dexClient, walletClient, chain, symbols)
@@ -92,14 +96,18 @@ func integrationApp(t *testing.T) integrationHarness {
 		DB:       db,
 		Store:    store,
 		Wallets:  walletClient,
+		Privy:    walletClient,
 		Auth:     verifier,
 		Marks:    marksClient,
-		Deposits: NewDepositService(store, walletClient, marksClient, symbols),
-		Groups:   NewGroupService(store, walletClient),
+		Pyth:     marksClient,
+		Deposits: NewDepositService(store, verifier, walletClient, marksClient, symbols),
+		Groups:   NewGroupService(store, verifier, walletClient),
 		Swap:     swap,
 		Redeem:   NewRedeemService(store, walletClient, verifier, marksClient, dexClient, swap),
 		Dex:      dexClient,
+		Jupiter:  dexClient,
 		Catalog:  catalog,
+		XStocks:  catalog,
 		Chain:    chain,
 		Symbols:  symbols,
 		ISO:      iso,

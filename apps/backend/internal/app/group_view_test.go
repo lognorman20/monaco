@@ -1,6 +1,8 @@
 package app
 
 import (
+	"github.com/monaco/monaco/apps/backend/internal/evm"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"fmt"
 	"testing"
@@ -8,7 +10,8 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/chainlink"
+	"github.com/monaco/monaco/apps/backend/internal/marks"
 )
 
 func TestGetGroupView_afterUSDCtoAAPLxSwap_potTotalUnchanged(t *testing.T) {
@@ -16,9 +19,9 @@ func TestGetGroupView_afterUSDCtoAAPLxSwap_potTotalUnchanged(t *testing.T) {
 
 	ctx := context.Background()
 	h := integrationApp(t)
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
 
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "swap-nav", "Swap NAV")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "swap-nav", "Swap NAV")
 	token := string(auth.AccessToken(h.ISO.UniqueToken("swap-nav")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "swap-nav"))
 	if err != nil {
@@ -75,7 +78,7 @@ func TestGetGroupView_afterUSDCtoAAPLxSwap_potTotalUnchanged(t *testing.T) {
 		TreasuryUsdc: remainingUSDC,
 		Holdings: []marks.MarkedHolding{{
 			Symbol:    "AAPLx",
-			Mint:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+			Token:      "0xb200000000000000000000c2e324d24d7eecd1fb",
 			Units:     aaplAtomics,
 			MarkUsdc:  2_000_000,
 			CostBasis: swappedUSDC,
@@ -116,7 +119,7 @@ func TestComputeGroupPotView_costBasisFallback_withoutPyth(t *testing.T) {
 	ctx := context.Background()
 	h := integrationApp(t)
 
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "cb-nav", "CB NAV")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "cb-nav", "CB NAV")
 	token := string(auth.AccessToken(h.ISO.UniqueToken("cb-nav")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "cb-nav"))
 	if err != nil {
@@ -178,9 +181,9 @@ func TestGetHome_pythError_stillSucceeds(t *testing.T) {
 
 	ctx := context.Background()
 	h := integrationApp(t)
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
 
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "pyth-err", "Pyth Err")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "pyth-err", "Pyth Err")
 	token := string(auth.AccessToken(h.ISO.UniqueToken("pyth-err")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "pyth-err"))
 	if err != nil {
@@ -256,9 +259,9 @@ func TestGetGroupView_pythError_stillSucceeds(t *testing.T) {
 
 	ctx := context.Background()
 	h := integrationApp(t)
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
 
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "view-pyth", "View Pyth")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "view-pyth", "View Pyth")
 	token := string(auth.AccessToken(h.ISO.UniqueToken("view-pyth")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "view-pyth"))
 	if err != nil {
@@ -324,9 +327,9 @@ func TestGetGroupView_perAssetDollarPnL_gainAndLoss(t *testing.T) {
 
 	ctx := context.Background()
 	h := integrationApp(t)
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
 
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "pot-pnl", "Pot PnL")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "pot-pnl", "Pot PnL")
 	token := string(auth.AccessToken(h.ISO.UniqueToken("pot-pnl")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "pot-pnl"))
 	if err != nil {
@@ -380,7 +383,7 @@ func TestGetGroupView_perAssetDollarPnL_gainAndLoss(t *testing.T) {
 		TreasuryUsdc: remainingUSDC,
 		Holdings: []marks.MarkedHolding{{
 			Symbol:    "AAPLx",
-			Mint:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+			Token:      "0xb200000000000000000000c2e324d24d7eecd1fb",
 			Units:     aaplAtomics,
 			MarkUsdc:  2_400_000,
 			CostBasis: swappedUSDC,
@@ -404,9 +407,9 @@ func TestGetGroupView_TSLAxBuy_potRowShowsTickerNotMint(t *testing.T) {
 
 	ctx := context.Background()
 	h := integrationApp(t)
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
 
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "tsla-pot", "TSLA Pot")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "tsla-pot", "TSLA Pot")
 	token := string(auth.AccessToken(h.ISO.UniqueToken("tsla-pot")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "tsla-pot"))
 	if err != nil {
@@ -460,7 +463,7 @@ func TestGetGroupView_TSLAxBuy_potRowShowsTickerNotMint(t *testing.T) {
 		TreasuryUsdc: remainingUSDC,
 		Holdings: []marks.MarkedHolding{{
 			Symbol:    "TSLAx",
-			Mint:      "0xb2000000000000000000000000000000000004",
+			Token:      "0xb2000000000000000000000000000000000004",
 			Units:     tslaAtomics,
 			MarkUsdc:  3_630_000,
 			CostBasis: swappedUSDC,

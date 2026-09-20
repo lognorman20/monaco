@@ -38,7 +38,7 @@ const DefaultPollInterval = 15 * time.Second
 // SweepPoller polls member USDC balances and submits sweeps to treasury.
 type SweepPoller struct {
 	store    *postgres.Store
-	privy    wallets.Client
+	wallets  wallets.Client
 	rpc      Confirmer
 	deposits *app.DepositService
 	relayer  string
@@ -46,13 +46,13 @@ type SweepPoller struct {
 }
 
 // NewSweepPoller wires sweep polling dependencies.
-func NewSweepPoller(store *postgres.Store, privyClient wallets.Client, rpc Confirmer, deposits *app.DepositService, relayerKey string, clock Clock) *SweepPoller {
+func NewSweepPoller(store *postgres.Store, walletClient wallets.Client, rpc Confirmer, deposits *app.DepositService, relayerKey string, clock Clock) *SweepPoller {
 	if clock == nil {
 		clock = systemClock{}
 	}
 	return &SweepPoller{
 		store:    store,
-		privy:    privyClient,
+		wallets:  walletClient,
 		rpc:      rpc,
 		deposits: deposits,
 		relayer:  relayerKey,
@@ -161,7 +161,7 @@ func (p *SweepPoller) processPendingDeposit(ctx context.Context, deposit postgre
 	}
 
 	if txHash == "" {
-		balance, err := p.privy.MemberUSDCBalance(ctx, deposit.FromAddress)
+		balance, err := p.wallets.MemberUSDCBalance(ctx, deposit.FromAddress)
 		logSweepBalanceCheck(deposit.ID, deposit.FromAddress, balance, deposit.Amount, err)
 		if err != nil {
 			logSweepDepositFailed(deposit.ID, deposit.GroupID, "balance_check", err)
@@ -178,12 +178,13 @@ func (p *SweepPoller) processPendingDeposit(ctx context.Context, deposit postgre
 		sweepAmount := deposit.Amount
 		logSweepAttempt(deposit.GroupID, deposit.UserID, deposit.ID, sweepAmount, deposit.FromAddress, treasury.Address)
 
-		req, err := privy.BuildSweepRequest(deposit.FromAddress, treasury.Address, sweepAmount, p.relayer)
-		if err != nil {
-			p.markDepositSweepFailed(ctx, deposit.ID, deposit.GroupID, "build_sweep_request", err)
-			return nil
+		req := wallets.SweepRequest{
+			MemberAddress:   deposit.FromAddress,
+			TreasuryAddress: treasury.Address,
+			Amount:          sweepAmount,
+			IntentID:        deposit.ID,
 		}
-		result, err := p.privy.SubmitSweep(ctx, req)
+		result, err := p.wallets.SubmitSweep(ctx, req)
 		if err != nil {
 			p.markDepositSweepFailed(ctx, deposit.ID, deposit.GroupID, "submit_sweep", err)
 			return nil

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"github.com/monaco/monaco/apps/backend/internal/evm"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"errors"
 	"testing"
@@ -16,11 +18,11 @@ func TestWithdrawToBalance_fullStake_paysMemberWallet(t *testing.T) {
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	governance := NewGovernanceService(h.Store, h.Privy)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetRedeemService(h.Redeem)
 
 	token := auth.AccessToken(h.ISO.UniqueToken("withdraw-full"))
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-full", "Withdraw User")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "withdraw-full", "Withdraw User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-full"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -64,7 +66,7 @@ func TestWithdrawToBalance_fullStake_paysMemberWallet(t *testing.T) {
 		t.Fatalf("slice_usdc = %d, want %d", job.SliceUsdc, treasuryUSDC)
 	}
 
-	payout, ok := privy.LastPayUSDCRequest(h.Privy)
+	payout, ok := wallets.LastPayUSDCRequest(h.Wallets)
 	if !ok {
 		t.Fatal("expected PayUSDC call")
 	}
@@ -89,11 +91,11 @@ func TestWithdrawToBalance_rejectsOverShare(t *testing.T) {
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	governance := NewGovernanceService(h.Store, h.Privy)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetRedeemService(h.Redeem)
 
 	token := auth.AccessToken(h.ISO.UniqueToken("withdraw-over"))
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-over", "Over User")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "withdraw-over", "Over User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-over"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -128,10 +130,10 @@ func TestWithdrawToBalance_halfNAV_twoMemberPot(t *testing.T) {
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	governance := NewGovernanceService(h.Store, h.Privy)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 
 	token := auth.AccessToken(h.ISO.UniqueToken("withdraw-half-usdc"))
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-half-usdc", "Half USDC User")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "withdraw-half-usdc", "Half USDC User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-half-usdc"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -188,11 +190,11 @@ func TestWithdrawToBalance_halfNAV_withStockHoldings(t *testing.T) {
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	governance := NewGovernanceService(h.Store, h.Privy)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetRedeemService(h.Redeem)
 
 	token := auth.AccessToken(h.ISO.UniqueToken("withdraw-half"))
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-half", "Half User")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "withdraw-half", "Half User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-half"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -248,7 +250,8 @@ func TestWithdrawToBalance_halfNAV_withStockHoldings(t *testing.T) {
 
 	const sellAmount = int64(250_000)
 	sellRequestID := testRequestID(h.ISO, "withdraw-half-sell")
-	registerHappySell(h.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", sellAmount, sellRequestID, testTxHash(h.ISO, "withdraw-half-sell"))
+	registerHappySell(t, h.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", sellAmount)
+	_ = sellRequestID
 
 	job, err := h.Redeem.WithdrawToBalance(ctx, WithdrawToBalanceRequest{
 		AccessToken: string(token),
@@ -270,11 +273,11 @@ func TestLeaveGroup_withWithdrawStake_zeroSharesThenLeaves(t *testing.T) {
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	governance := NewGovernanceService(h.Store, h.Privy)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetRedeemService(h.Redeem)
 
 	token := auth.AccessToken(h.ISO.UniqueToken("leave-withdraw"))
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "leave-withdraw", "Leave Withdraw")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "leave-withdraw", "Leave Withdraw")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "leave-withdraw"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -327,11 +330,11 @@ func TestWithdrawToBalance_abortsStuckDebitedJob_allowsRetry(t *testing.T) {
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	governance := NewGovernanceService(h.Store, h.Privy)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetRedeemService(h.Redeem)
 
 	token := auth.AccessToken(h.ISO.UniqueToken("withdraw-stuck"))
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-stuck", "Stuck User")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "withdraw-stuck", "Stuck User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-stuck"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -410,11 +413,11 @@ func TestWithdrawToBalance_partialUsdcOnly_skipsStockSell(t *testing.T) {
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	governance := NewGovernanceService(h.Store, h.Privy)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetRedeemService(h.Redeem)
 
 	token := auth.AccessToken(h.ISO.UniqueToken("withdraw-usdc-only"))
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-usdc-only", "USDC Only User")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "withdraw-usdc-only", "USDC Only User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-usdc-only"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -488,11 +491,11 @@ func TestWithdrawToBalance_clearsDebitedJobBeforeNewWithdraw(t *testing.T) {
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	governance := NewGovernanceService(h.Store, h.Privy)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetRedeemService(h.Redeem)
 
 	token := auth.AccessToken(h.ISO.UniqueToken("withdraw-lock"))
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "withdraw-lock", "Lock User")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "withdraw-lock", "Lock User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "withdraw-lock"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)

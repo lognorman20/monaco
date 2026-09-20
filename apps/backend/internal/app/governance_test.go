@@ -5,17 +5,18 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/auth"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/evm"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -24,6 +25,8 @@ type governanceHarness struct {
 	Store      *postgres.Store
 	DB         *sql.DB
 	Sessions   *SessionService
+	Auth       auth.Verifier
+	Wallets    wallets.Client
 	Privy      wallets.Client
 	Jupiter    dex.Client
 	XStocks    b20.Catalog
@@ -37,8 +40,8 @@ func integrationGovernanceApp(t *testing.T) governanceHarness {
 
 	h := integrationApp(t)
 	buy := NewBuyService(h.Jupiter, h.XStocks)
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
-	governance := NewGovernanceService(h.Store, h.Privy)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetBuyService(buy)
 	governance.SetHomeService(home)
 	governance.SetSwapService(h.Swap)
@@ -46,7 +49,9 @@ func integrationGovernanceApp(t *testing.T) governanceHarness {
 		Governance: governance,
 		Store:      h.Store,
 		DB:         h.DB,
-		Sessions:   NewSessionService(h.Store, h.Privy),
+		Sessions:   NewSessionService(h.Store, h.Auth, h.Wallets),
+		Auth:       h.Auth,
+		Wallets:    h.Wallets,
 		Privy:      h.Privy,
 		Jupiter:    h.Jupiter,
 		XStocks:    h.XStocks,
@@ -56,23 +61,24 @@ func integrationGovernanceApp(t *testing.T) governanceHarness {
 	}
 }
 
-func registerRoutableQuote(t *testing.T, jupiterClient dex.Client, resolver b20.Catalog, symbol string, usdc int64) {
+func registerRoutableQuote(t *testing.T, dexClient dex.Client, resolver b20.Catalog, symbol string, usdc int64) {
 	t.Helper()
 
-	mint := "Mint" + symbol
-	b20.RegisterTokenAddress(resolver, symbol, mint)
-	jupiter.RegisterQuoteBuy(jupiterClient, mint, usdc, jupiter.BuyQuote{
-		Routable:   true,
-		OutputToken: mint,
-		InAmount:   strconv.FormatInt(usdc, 10),
-		OutAmount:  strconv.FormatInt(usdc, 10),
+	token := "0x" + symbol + "000000000000000000000000000000000000"
+	b20.RegisterAsset(resolver, b20.Asset{Symbol: symbol, Name: symbol, TokenAddress: token, Decimals: 8})
+	dex.RegisterQuote(dexClient, dex.Quote{
+		TokenIn:   dex.USDCAddress(),
+		TokenOut:  token,
+		AmountIn:  bigIntFromDecimalString(strconv.FormatInt(usdc, 10)),
+		AmountOut: bigIntFromDecimalString(strconv.FormatInt(usdc, 10)),
+		Routable:  true,
 	})
 }
 
 func TestPOST_proposals_happyPath_createsOpenProposalWithExpiry(t *testing.T) {
 	// Arrange
 	h := integrationGovernanceApp(t)
-	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "proposer", "Proposer")
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Auth, "proposer", "Proposer")
 	token := h.ISO.UniqueToken("proposer")
 	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "vote"), DefaultGroupRules())
 	if err != nil {
@@ -110,27 +116,13 @@ func TestPOST_proposals_happyPath_createsOpenProposalWithExpiry(t *testing.T) {
 
 func TestCreateProposal_jupiterTakerOrderFails_priceOnlyQuoteCreates(t *testing.T) {
 	const (
-		usdcMicros  = 2_000_000
+		usdcMicros   = 2_000_000
 		treasuryUSDC = 5_000_000
 	)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("taker") != "" {
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"requestId":"01a0b261-4278-708b-9c6a-710981e01775","error":"Failed to get quotes"}`))
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(jupiter.FixtureJupiterSuccessResponse("0xb200000000000000000000c2e324d24d7eecd1fb"))
-	}))
-	t.Cleanup(server.Close)
 
 	h := integrationGovernanceApp(t)
-	h.Governance.SetBuyService(NewBuyService(
-		jupiter.NewHTTPClientWithBaseURL(server.URL, server.Client()),
-		h.XStocks,
-	))
 
-	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "rfq-propose", "RFQ Proposer")
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Auth, "rfq-propose", "RFQ Proposer")
 	token := h.ISO.UniqueToken("rfq-propose")
 	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "rfq-propose"), DefaultGroupRules())
 	if err != nil {
@@ -138,7 +130,7 @@ func TestCreateProposal_jupiterTakerOrderFails_priceOnlyQuoteCreates(t *testing.
 	}
 	h.ISO.TrackGroup(created.GroupID)
 	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, treasuryUSDC)
-	b20.RegisterTokenAddress(h.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	registerRoutableQuote(t, h.Jupiter, h.XStocks, "AAPLx", usdcMicros)
 
 	proposal, err := h.Governance.CreateProposal(context.Background(), CreateProposalInput{
 		GroupID:    created.GroupID,
@@ -156,7 +148,7 @@ func TestCreateProposal_jupiterTakerOrderFails_priceOnlyQuoteCreates(t *testing.
 
 func TestCreateProposal_treasurySurplusOnChain_allowsAfterReconcile(t *testing.T) {
 	h := integrationGovernanceApp(t)
-	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "surplus-propose", "Surplus Proposer")
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Auth, "surplus-propose", "Surplus Proposer")
 	token := h.ISO.UniqueToken("surplus-propose")
 	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "surplus-propose"), DefaultGroupRules())
 	if err != nil {
@@ -190,7 +182,7 @@ func TestCreateProposal_treasurySurplusOnChain_allowsAfterReconcile(t *testing.T
 
 func TestCreateProposal_exceedsTreasuryUSDC_rejected(t *testing.T) {
 	h := integrationGovernanceApp(t)
-	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "treasury-cap", "Treasury Cap")
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Auth, "treasury-cap", "Treasury Cap")
 	token := h.ISO.UniqueToken("treasury-cap")
 	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "treasury-cap"), DefaultGroupRules())
 	if err != nil {
@@ -213,7 +205,7 @@ func TestCreateProposal_exceedsTreasuryUSDC_rejected(t *testing.T) {
 
 func TestCreateProposal_thesisTooLong_rejected(t *testing.T) {
 	h := integrationGovernanceApp(t)
-	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "thesis-cap", "Thesis Cap")
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Auth, "thesis-cap", "Thesis Cap")
 	token := h.ISO.UniqueToken("thesis-cap")
 	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "thesis-cap"), DefaultGroupRules())
 	if err != nil {
@@ -236,7 +228,7 @@ func TestCreateProposal_thesisTooLong_rejected(t *testing.T) {
 func TestTallyProposal_expiredOpenProposal_failsWithoutSwap(t *testing.T) {
 	// Arrange
 	h := integrationGovernanceApp(t)
-	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "expiry", "Expiry")
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Auth, "expiry", "Expiry")
 	token := h.ISO.UniqueToken("expiry")
 	rules := DefaultGroupRules()
 	rules.VoteExpirySeconds = 60
@@ -282,7 +274,7 @@ func TestTallyProposal_expiredOpenProposal_failsWithoutSwap(t *testing.T) {
 func TestPOST_vote_nonVoterSetMember_returns403(t *testing.T) {
 	// Arrange
 	h := integrationGovernanceApp(t)
-	creator := openTestSession(t, h.ISO, h.Sessions, h.Privy, "creator", "Creator")
+	creator := openTestSession(t, h.ISO, h.Sessions, h.Auth, "creator", "Creator")
 	creatorToken := h.ISO.UniqueToken("creator")
 	rules := DefaultGroupRules()
 	rules.VoterSet = VoterSet{Mode: VoterSetNamed, MemberIDs: []string{creator.UserID}}
@@ -293,7 +285,7 @@ func TestPOST_vote_nonVoterSetMember_returns403(t *testing.T) {
 	h.ISO.TrackGroup(created.GroupID)
 	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 10_000_000)
 
-	outsiderID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "outsider", "Outsider").UserID
+	outsiderID := openTestSession(t, h.ISO, h.Sessions, h.Auth, "outsider", "Outsider").UserID
 	tx, err := h.Store.BeginTx(context.Background())
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
@@ -335,7 +327,7 @@ func TestPOST_vote_nonVoterSetMember_returns403(t *testing.T) {
 func TestPOST_vote_doubleVoteSameMember_isIdempotentOrRejected(t *testing.T) {
 	// Arrange
 	h := integrationGovernanceApp(t)
-	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "double", "Double")
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Auth, "double", "Double")
 	token := h.ISO.UniqueToken("double")
 	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "double-vote"), DefaultGroupRules())
 	if err != nil {
@@ -388,7 +380,7 @@ func TestPOST_vote_doubleVoteSameMember_isIdempotentOrRejected(t *testing.T) {
 func TestPOST_vote_concurrentDoubleVote_recordsOneBallot(t *testing.T) {
 	// Arrange
 	h := integrationGovernanceApp(t)
-	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "race", "Race")
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Auth, "race", "Race")
 	token := h.ISO.UniqueToken("race")
 	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "race-vote"), DefaultGroupRules())
 	if err != nil {
@@ -441,7 +433,7 @@ func TestPOST_vote_concurrentDoubleVote_recordsOneBallot(t *testing.T) {
 func TestCreateProposal_sellHeldAmount_createsOpenProposal(t *testing.T) {
 	h := integrationGovernanceApp(t)
 	ctx := context.Background()
-	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "sell-prop", "Sell Prop")
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Auth, "sell-prop", "Sell Prop")
 	token := h.ISO.UniqueToken("sell-prop")
 	created, err := h.Governance.CreateGroupWithRules(ctx, token, testGroupName(h.ISO, "sell-prop"), DefaultGroupRules())
 	if err != nil {
@@ -450,13 +442,13 @@ func TestCreateProposal_sellHeldAmount_createsOpenProposal(t *testing.T) {
 	h.ISO.TrackGroup(created.GroupID)
 
 	const held = int64(50_000_000)
-	b20.RegisterTokenAddress(h.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	registerTestB20Asset(h.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          created.GroupID,
 		Amount:           2_000_000,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      testTxHash(h.ISO, "sell-prop-buy"),
+		InputToken:       evm.USDCAddress,
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           testTxHash(h.ISO, "sell-prop-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "sell-prop-buy"),
 		CostBasisPrice:   2_000_000,
 		CostBasisAmount:  held,
@@ -464,14 +456,7 @@ func TestCreateProposal_sellHeldAmount_createsOpenProposal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfirmBuyTransaction: %v", err)
 	}
-	jupiter.RegisterSellQuote(h.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", held, jupiter.SellQuote{
-		Routable:   true,
-		InputToken:  "0xb200000000000000000000c2e324d24d7eecd1fb",
-		OutputToken: evm.USDCAddress,
-		InAmount:   "50000000",
-		OutAmount:  "1500000",
-		RequestID:  "sell-quote-held",
-	})
+	registerDexSellQuote(t, h.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", held, 1_500_000)
 
 	proposal, err := h.Governance.CreateProposal(ctx, CreateProposalInput{
 		GroupID:     created.GroupID,
@@ -494,14 +479,14 @@ func TestCreateProposal_sellHeldAmount_createsOpenProposal(t *testing.T) {
 func TestCreateProposal_sellExceedsHolding_rejected(t *testing.T) {
 	h := integrationGovernanceApp(t)
 	ctx := context.Background()
-	userID := openTestSession(t, h.ISO, h.Sessions, h.Privy, "sell-over", "Sell Over")
+	userID := openTestSession(t, h.ISO, h.Sessions, h.Auth, "sell-over", "Sell Over")
 	token := h.ISO.UniqueToken("sell-over")
 	created, err := h.Governance.CreateGroupWithRules(ctx, token, testGroupName(h.ISO, "sell-over"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
 	h.ISO.TrackGroup(created.GroupID)
-	b20.RegisterTokenAddress(h.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	registerTestB20Asset(h.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
 
 	_, err = h.Governance.CreateProposal(ctx, CreateProposalInput{
 		GroupID:     created.GroupID,

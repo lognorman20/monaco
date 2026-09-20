@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
@@ -12,14 +13,16 @@ import (
 // GroupService orchestrates group create flows.
 type GroupService struct {
 	store *postgres.Store
-	privy wallets.Client
+	auth    auth.Verifier
+	wallets wallets.Client
 }
 
 // NewGroupService wires group dependencies.
-func NewGroupService(store *postgres.Store, privyClient wallets.Client) *GroupService {
+func NewGroupService(store *postgres.Store, verifier auth.Verifier, walletClient wallets.Client) *GroupService {
 	return &GroupService{
 		store: store,
-		privy: privyClient,
+		auth: verifier,
+		wallets: walletClient,
 	}
 }
 
@@ -46,7 +49,7 @@ func (g *GroupService) CreateGroup(ctx context.Context, accessToken string, name
 		return CreateGroupResult{}, fmt.Errorf("name is required")
 	}
 
-	identity, err := g.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := g.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			logGroupBranchWarn("group create rejected", "invalid token", "name", name)
@@ -87,7 +90,7 @@ func (g *GroupService) CreateGroup(ctx context.Context, accessToken string, name
 		return CreateGroupResult{}, err
 	}
 
-	treasuryRef, err := g.privy.EnsureTreasury(ctx, wallets.GroupID(group.ID))
+	treasuryRef, err := g.wallets.EnsureTreasury(ctx, wallets.GroupID(group.ID))
 	if err != nil {
 		return CreateGroupResult{}, fmt.Errorf("privy ensure treasury: %w", err)
 	}
@@ -118,7 +121,7 @@ func (g *GroupService) GetGroup(ctx context.Context, accessToken string, groupID
 		return GetGroupResult{}, fmt.Errorf("group id is required")
 	}
 
-	identity, err := g.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := g.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			logGroupBranchWarn("group get rejected", "invalid token", "group_id", groupID)

@@ -50,7 +50,7 @@ func seedPendingDeposit(t *testing.T, testApp *workerTestApp) (postgres.DepositR
 	privyUserID := testApp.ISO.UniqueDynamicID("member")
 	token := auth.AccessToken(testApp.ISO.UniqueToken("member"))
 	auth.RegisterToken(testApp.Privy, token, auth.Identity{PrivyUserID: privyUserID, DisplayName: "Worker"})
-	sessions := app.NewSessionService(testApp.Store, testApp.Privy)
+	sessions := app.NewSessionService(testApp.Store, auth.NewFakeVerifier(), testApp.Privy)
 	session, err := sessions.OpenSession(ctx, string(token))
 	if err != nil {
 		t.Fatalf("OpenSession: %v", err)

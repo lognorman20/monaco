@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"testing"
 
@@ -14,7 +15,7 @@ func TestCreditUncreditedTreasuryUSDC_creditsSharesAndDepositedTogether(t *testi
 	ctx := context.Background()
 	h := integrationApp(t)
 
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "reconcile", "Reconcile User")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "reconcile", "Reconcile User")
 	token := string(auth.AccessToken(h.ISO.UniqueToken("reconcile")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "reconcile"))
 	if err != nil {
@@ -68,9 +69,9 @@ func TestGetGroupView_afterSecondDeposit_showsZeroPnL(t *testing.T) {
 
 	ctx := context.Background()
 	h := integrationApp(t)
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
 
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "view-pnl", "View PnL")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "view-pnl", "View PnL")
 	token := string(auth.AccessToken(h.ISO.UniqueToken("view-pnl")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "view-pnl"))
 	if err != nil {
@@ -129,9 +130,9 @@ func TestGetGroupView_treasurySurplusWithoutShareCredit_reconcilesOnRead(t *test
 
 	ctx := context.Background()
 	h := integrationApp(t)
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
 
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "surplus", "Surplus User")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "surplus", "Surplus User")
 	token := string(auth.AccessToken(h.ISO.UniqueToken("surplus")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "surplus"))
 	if err != nil {

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/evm"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
@@ -80,16 +80,16 @@ func newSpectatorFixture(t *testing.T) spectatorFixture {
 	db := h.DB
 	sfx := h.ISO.Suffix()
 
-	deposits := NewDepositService(h.Store, rec, h.Pyth, h.Symbols)
-	home := NewHomeService(h.Store, rec, h.Pyth, deposits, h.Symbols)
-	governance := NewGovernanceService(h.Store, rec)
+	deposits := NewDepositService(h.Store, h.Auth, rec, h.Pyth, h.Symbols)
+	home := NewHomeService(h.Store, h.Auth, rec, h.Pyth, deposits, h.Symbols)
+	governance := NewGovernanceService(h.Store, h.Auth, rec)
 	governance.SetBuyService(NewBuyService(h.Jupiter, h.XStocks))
 	governance.SetHomeService(home)
 
 	fx := spectatorFixture{h: h, privy: rec, home: home, governance: governance, fakerTreasury: "faker-treasury-" + sfx}
 
-	sessions := NewSessionService(h.Store, h.Privy)
-	op := openTestSession(t, h.ISO, sessions, h.Privy, "operator", "Operator")
+	sessions := NewSessionService(h.Store, h.Auth, h.Wallets)
+	op := openTestSession(t, h.ISO, sessions, h.Auth, "operator", "Operator")
 	fx.operatorID = op.UserID
 	fx.operatorToken = h.ISO.UniqueToken("operator")
 	group, err := governance.CreateGroupWithRules(ctx, fx.operatorToken, testGroupName(h.ISO, "operator"), DefaultGroupRules())
@@ -103,7 +103,7 @@ func newSpectatorFixture(t *testing.T) spectatorFixture {
 	execSQL(t, db, `INSERT INTO positions (user_id, group_id, share_units, amount_deposited) VALUES ($1, $2, 10000000, 10000000)`, fx.operatorID, fx.realGroupID)
 
 	newFaker := func(label, name string) string {
-		id := queryID(t, db, `INSERT INTO users (privy_user_id, display_name, is_faker) VALUES ($1, $2, true) RETURNING id`, "faker:user:test-"+sfx+"-"+label, name)
+		id := queryID(t, db, `INSERT INTO users (dynamic_user_id, display_name, is_faker) VALUES ($1, $2, true) RETURNING id`, "faker:user:test-"+sfx+"-"+label, name)
 		h.ISO.TrackUser(id)
 		return id
 	}
@@ -120,15 +120,15 @@ func newSpectatorFixture(t *testing.T) spectatorFixture {
 	fx.fakerBID = newFaker("b", "Tess Morgan")
 	fx.fakerGroupID = queryID(t, db, `INSERT INTO groups (name, creator_user_id, is_faker, faker_key) VALUES ($1, $2, true, $3) RETURNING id`, "Scale "+sfx, fx.fakerAID, "test:"+sfx)
 	h.ISO.TrackGroup(fx.fakerGroupID)
-	execSQL(t, db, `INSERT INTO treasuries (group_id, privy_wallet_id, solana_address) VALUES ($1, $2, $3)`, fx.fakerGroupID, "faker:treasury:"+sfx, fx.fakerTreasury)
+	execSQL(t, db, `INSERT INTO treasuries (group_id, wallet_id, address) VALUES ($1, $2, $3)`, fx.fakerGroupID, "faker:treasury:"+sfx, fx.fakerTreasury)
 	for _, id := range []string{fx.fakerAID, fx.fakerBID} {
 		execSQL(t, db, `INSERT INTO group_members (group_id, user_id) VALUES ($1, $2)`, fx.fakerGroupID, id)
 	}
 	execSQL(t, db, `INSERT INTO positions (user_id, group_id, share_units, amount_deposited) VALUES ($1, $2, 6000000, 6000000)`, fx.fakerAID, fx.fakerGroupID)
 	execSQL(t, db, `INSERT INTO positions (user_id, group_id, share_units, amount_deposited) VALUES ($1, $2, 3600000, 4000000)`, fx.fakerBID, fx.fakerGroupID)
-	execSQL(t, db, `INSERT INTO deposits (user_id, group_id, amount, from_address, status, tx_signature) VALUES ($1, $2, 6000000, 'faker-wallet-a', 'confirmed', $3)`, fx.fakerAID, fx.fakerGroupID, "faker-sig-a-"+sfx)
+	execSQL(t, db, `INSERT INTO deposits (user_id, group_id, amount, from_address, status, tx_hash) VALUES ($1, $2, 6000000, 'faker-wallet-a', 'confirmed', $3)`, fx.fakerAID, fx.fakerGroupID, "faker-sig-a-"+sfx)
 	passedID := queryID(t, db, `INSERT INTO proposals (group_id, proposer_id, symbol, usdc_micros, status, expires_at) VALUES ($1, $2, 'AAPLx', 4000000, 'passed', now() - interval '1 day') RETURNING id`, fx.fakerGroupID, fx.fakerAID)
-	fx.fakerTxID = queryID(t, db, `INSERT INTO transactions (group_id, proposal_id, amount, action, input_mint, output_mint, status, tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, confirmed_at)
+	fx.fakerTxID = queryID(t, db, `INSERT INTO transactions (group_id, proposal_id, amount, action, input_token, output_token, status, tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, confirmed_at)
 VALUES ($1, $2, 4000000, 'buy', $3, $4, 'confirmed', $5, $6, 4000000, 20000, now()) RETURNING id`,
 		fx.fakerGroupID, passedID, evm.USDCAddress, "0xb200000000000000000000c2e324d24d7eecd1fb", "faker-sig-buy-"+sfx, "faker-req-"+sfx)
 	fx.fakerOpenID = queryID(t, db, `INSERT INTO proposals (group_id, proposer_id, symbol, usdc_micros, status, expires_at) VALUES ($1, $2, 'TSLAx', 1000000, 'open', now() + interval '1 day') RETURNING id`, fx.fakerGroupID, fx.fakerBID)

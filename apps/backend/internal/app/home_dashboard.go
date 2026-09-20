@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -179,7 +179,7 @@ func (h *HomeService) GetHomeMissedProposals(ctx context.Context, accessToken st
 }
 
 func (h *HomeService) authenticateHomeUser(ctx context.Context, accessToken string) (postgres.User, []string, error) {
-	identity, err := h.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := h.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return postgres.User{}, nil, auth.ErrUnauthorized

@@ -1,10 +1,12 @@
 package app
 
 import (
+	"github.com/monaco/monaco/apps/backend/internal/b20"
+	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/dex"
-	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	
 )
 
 func TestPotRowsFromPythInput_perAssetDollarPnL(t *testing.T) {
@@ -30,7 +32,7 @@ func TestPotRowsFromPythInput_perAssetDollarPnL(t *testing.T) {
 				TreasuryUsdc: 100_000,
 				Holdings: []marks.MarkedHolding{{
 					Symbol:    "AAPLx",
-					Mint:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+					Token:      "0xb200000000000000000000c2e324d24d7eecd1fb",
 					Units:     50_000_000,
 					MarkUsdc:  2_400_000,
 					CostBasis: 1_000_000,
@@ -46,7 +48,7 @@ func TestPotRowsFromPythInput_perAssetDollarPnL(t *testing.T) {
 				TreasuryUsdc: 100_000,
 				Holdings: []marks.MarkedHolding{{
 					Symbol:    "AAPLx",
-					Mint:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+					Token:      "0xb200000000000000000000c2e324d24d7eecd1fb",
 					Units:     50_000_000,
 					MarkUsdc:  1_600_000,
 					CostBasis: 1_000_000,
@@ -126,7 +128,7 @@ func TestPotRowsFromPythInput_largeHoldingValueDoesNotWrap(t *testing.T) {
 	input := marks.NavInput{
 		Holdings: []marks.MarkedHolding{{
 			Symbol:    "AAPLx",
-			Mint:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+			Token:      "0xb200000000000000000000c2e324d24d7eecd1fb",
 			Units:     1_000 * b20.TokenAtomicScale,
 			MarkUsdc:  250_000_000,
 			CostBasis: 200_000_000_000,

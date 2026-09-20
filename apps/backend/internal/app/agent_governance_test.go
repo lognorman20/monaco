@@ -9,7 +9,7 @@ import (
 
 func TestValidateAgentProposal_addAgentRejectsDuplicate(t *testing.T) {
 	h := integrationGovernanceApp(t)
-	session := openTestSession(t, h.ISO, h.Sessions, h.Privy, "agent-proposer", "Agent Proposer")
+	session := openTestSession(t, h.ISO, h.Sessions, h.Auth, "agent-proposer", "Agent Proposer")
 	userID := session.UserID
 	token := h.ISO.UniqueToken("agent-proposer")
 	created, err := h.Governance.CreateGroupWithRules(context.Background(), token, testGroupName(h.ISO, "agent"), DefaultGroupRules())

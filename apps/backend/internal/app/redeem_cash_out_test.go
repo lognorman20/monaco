@@ -1,6 +1,8 @@
 package app
 
 import (
+	"github.com/monaco/monaco/apps/backend/internal/evm"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"errors"
 	"testing"
@@ -11,27 +13,15 @@ import (
 	"github.com/monaco/monaco/packages/domain"
 )
 
-// settleSellIntoTreasury credits the fake treasury when a fake Jupiter sell confirms. The Privy
-// and Jupiter fakes hold separate state, so without this a sell raises no cash and the treasury
-// balance stays where the test seeded it.
-func settleSellIntoTreasury(t *testing.T, h integrationHarness, requestID, treasuryAddress string, proceeds int64) {
+// registerSellFill wires a routable sell quote for redeem cash-out tests.
+func registerSellFill(t *testing.T, h integrationHarness, _ /* label */, treasuryAddress string, sellAmount, proceeds int64) {
 	t.Helper()
-	jupiter.RegisterSettlementHook(h.Jupiter, requestID, func(jupiter.ExecuteResult) {
-		current, err := h.Privy.TreasuryUSDCBalance(context.Background(), treasuryAddress)
-		if err != nil {
-			t.Errorf("settlement hook treasury balance: %v", err)
-			return
-		}
-		wallets.SetTreasuryUSDCBalance(h.Privy, treasuryAddress, current+proceeds)
-	})
-}
-
-// registerSellFill wires a routable sell quote, its poll sequence, and the treasury settlement.
-func registerSellFill(t *testing.T, h integrationHarness, label, treasuryAddress string, sellAmount, proceeds int64) {
-	t.Helper()
-	requestID := testRequestID(h.ISO, label)
-	registerHappySell(h.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", sellAmount, requestID, testTxHash(h.ISO, label))
-	settleSellIntoTreasury(t, h, requestID, treasuryAddress, proceeds)
+	registerDexSellQuote(t, h.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", sellAmount, proceeds)
+	current, err := h.Wallets.TreasuryUSDCBalance(context.Background(), treasuryAddress)
+	if err != nil {
+		t.Fatalf("treasury balance: %v", err)
+	}
+	wallets.SetTreasuryUSDCBalance(h.Wallets, treasuryAddress, current+proceeds)
 }
 
 // seedStakeAndHoldings gives userID shareUnits in the group and puts a confirmed buy of
@@ -102,11 +92,11 @@ func TestWithdrawToBalance_potHoldsStock_sellsThenPaysNoMoreThanTreasuryUsdc(t *
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	governance := NewGovernanceService(h.Store, h.Privy)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetRedeemService(h.Redeem)
 
 	token := auth.AccessToken(h.ISO.UniqueToken("cashout-stock"))
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "cashout-stock", "Stock User")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "cashout-stock", "Stock User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "cashout-stock"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -142,7 +132,7 @@ func TestWithdrawToBalance_potHoldsStock_sellsThenPaysNoMoreThanTreasuryUsdc(t *
 		t.Fatalf("slice_usdc = %d, want %d (payout clamped to realised USDC)", job.SliceUsdc, proceeds)
 	}
 
-	payout, ok := privy.LastPayUSDCRequest(h.Privy)
+	payout, ok := wallets.LastPayUSDCRequest(h.Wallets)
 	if !ok {
 		t.Fatal("expected PayUSDC call")
 	}
@@ -174,11 +164,11 @@ func TestWithdrawToBalance_recoversJobWedgedInPaying_repricesInflatedSlice(t *te
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	governance := NewGovernanceService(h.Store, h.Privy)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetRedeemService(h.Redeem)
 
 	token := auth.AccessToken(h.ISO.UniqueToken("cashout-wedged"))
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "cashout-wedged", "Wedged User")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "cashout-wedged", "Wedged User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "cashout-wedged"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -222,7 +212,7 @@ func TestWithdrawToBalance_recoversJobWedgedInPaying_repricesInflatedSlice(t *te
 		t.Fatalf("slice_usdc = %d, want %d", job.SliceUsdc, proceeds)
 	}
 
-	payout, ok := privy.LastPayUSDCRequest(h.Privy)
+	payout, ok := wallets.LastPayUSDCRequest(h.Wallets)
 	if !ok {
 		t.Fatal("expected PayUSDC call")
 	}
@@ -255,11 +245,11 @@ func TestWithdrawToBalance_potCannotRaiseCash_rollsBackBurntShares(t *testing.T)
 
 	h := integrationApp(t)
 	ctx := context.Background()
-	governance := NewGovernanceService(h.Store, h.Privy)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetRedeemService(h.Redeem)
 
 	token := auth.AccessToken(h.ISO.UniqueToken("cashout-illiquid"))
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "cashout-illiquid", "Illiquid User")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "cashout-illiquid", "Illiquid User")
 	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "cashout-illiquid"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -286,7 +276,7 @@ func TestWithdrawToBalance_potCannotRaiseCash_rollsBackBurntShares(t *testing.T)
 		t.Fatalf("WithdrawToBalance err = %v, want ErrRedeemPotIlliquid", err)
 	}
 
-	if _, ok := privy.LastPayUSDCRequest(h.Privy); ok {
+	if _, ok := wallets.LastPayUSDCRequest(h.Wallets); ok {
 		t.Fatal("expected no payout broadcast when the pot cannot cover it")
 	}
 

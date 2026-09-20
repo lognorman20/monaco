@@ -34,7 +34,7 @@ func newSeedEnv(t *testing.T) seedEnv {
 
 	token := iso.UniqueToken("operator")
 	auth.RegisterToken(privyClient, auth.AccessToken(token), auth.Identity{PrivyUserID: iso.UniqueDynamicID("operator"), DisplayName: "Operator"})
-	session, err := app.NewSessionService(store, privyClient).OpenSession(ctx, token)
+	session, err := app.NewSessionService(store, auth.NewFakeVerifier(), privyClient).OpenSession(ctx, token)
 	if err != nil {
 		t.Fatalf("OpenSession: %v", err)
 	}

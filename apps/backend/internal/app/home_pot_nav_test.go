@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"testing"
 
@@ -24,10 +25,10 @@ func TestGetHomeDashboard_computesPotNavOncePerJoinedGroup(t *testing.T) {
 	t.Parallel()
 
 	h := integrationApp(t)
-	home := NewHomeService(h.Store, h.Privy, h.Pyth, h.Deposits, h.Symbols)
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
 	ctx := HomeContextWithPotNavCache(context.Background())
 
-	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Privy), h.Privy, "dash-dedup", "Dash Dedup")
+	session := openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "dash-dedup", "Dash Dedup")
 	token := string(auth.AccessToken(h.ISO.UniqueToken("dash-dedup")))
 	group, err := h.Groups.CreateGroup(ctx, token, testGroupName(h.ISO, "dash-dedup"))
 	if err != nil {

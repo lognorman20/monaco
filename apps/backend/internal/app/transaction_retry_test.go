@@ -5,40 +5,25 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/evm"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
-func registerHappySell(client dex.Client, inputMint string, amount int64, requestID string, signature string) {
-	jupiter.RegisterSellQuote(client, inputMint, amount, jupiter.SellQuote{
-		Routable:    true,
-		InputToken:   inputMint,
-		OutputToken:  evm.USDCAddress,
-		InAmount:    "1000000",
-		OutAmount:   "900000",
-		RequestID:   requestID,
-		Transaction: "unsigned-sell-tx",
-	})
-	jupiter.RegisterExecutePoll(client, requestID, []jupiter.ExecuteResult{
-		{Status: jupiter.ExecuteStatusPending, Code: -1},
-		{
-			Status:             jupiter.ExecuteStatusSuccess,
-			Code:               0,
-			Signature:          signature,
-			InputAmountResult:  "1000000",
-			OutputAmountResult: "900000",
-		},
-	})
+func registerHappySell(t *testing.T, client dex.Client, inputMint string, amount int64) {
+	t.Helper()
+	registerDexSellQuote(t, client, inputMint, amount, 900_000)
 }
 
 func TestRetryFailedSwap_rejectsNonFailedTransaction(t *testing.T) {
 	h := integrationApp(t)
 	ctx := context.Background()
-	sessions := NewSessionService(h.Store, h.Privy)
-	session := openTestSession(t, h.ISO, sessions, h.Privy, "retry-reject", "Retry Reject")
-	governance := NewGovernanceService(h.Store, h.Privy)
+	sessions := NewSessionService(h.Store, h.Auth, h.Wallets)
+	session := openTestSession(t, h.ISO, sessions, h.Auth, "retry-reject", "Retry Reject")
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	group, err := governance.CreateGroupWithRules(ctx, h.ISO.UniqueToken("retry-reject"), testGroupName(h.ISO, "retry-reject"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -71,9 +56,9 @@ func TestRetryFailedSwap_rejectsNonFailedTransaction(t *testing.T) {
 func TestRetryFailedSwap_buySuccessCreatesNewConfirmedRow(t *testing.T) {
 	h := integrationApp(t)
 	ctx := context.Background()
-	sessions := NewSessionService(h.Store, h.Privy)
-	session := openTestSession(t, h.ISO, sessions, h.Privy, "retry-buy", "Retry Buy")
-	governance := NewGovernanceService(h.Store, h.Privy)
+	sessions := NewSessionService(h.Store, h.Auth, h.Wallets)
+	session := openTestSession(t, h.ISO, sessions, h.Auth, "retry-buy", "Retry Buy")
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	group, err := governance.CreateGroupWithRules(ctx, h.ISO.UniqueToken("retry-buy"), testGroupName(h.ISO, "retry-buy"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -118,9 +103,9 @@ func TestRetryFailedSwap_buySuccessCreatesNewConfirmedRow(t *testing.T) {
 func TestRetryFailedSwap_sellSuccessCreatesNewConfirmedRow(t *testing.T) {
 	h := integrationApp(t)
 	ctx := context.Background()
-	sessions := NewSessionService(h.Store, h.Privy)
-	session := openTestSession(t, h.ISO, sessions, h.Privy, "retry-sell", "Retry Sell")
-	governance := NewGovernanceService(h.Store, h.Privy)
+	sessions := NewSessionService(h.Store, h.Auth, h.Wallets)
+	session := openTestSession(t, h.ISO, sessions, h.Auth, "retry-sell", "Retry Sell")
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	group, err := governance.CreateGroupWithRules(ctx, h.ISO.UniqueToken("retry-sell"), testGroupName(h.ISO, "retry-sell"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -130,13 +115,15 @@ func TestRetryFailedSwap_sellSuccessCreatesNewConfirmedRow(t *testing.T) {
 	const amount int64 = 1_000_000
 	requestID := testRequestID(h.ISO, "retry-sell")
 	signature := testTxHash(h.ISO, "retry-sell")
-	registerHappySell(h.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", amount, requestID, signature)
+	registerHappySell(t, h.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", amount)
+	_ = requestID
+	_ = signature
 
 	treasury, err := h.Privy.EnsureTreasury(ctx, wallets.GroupID(group.GroupID))
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
-	h.Swap.SetTreasuryBalances(treasury.Address, TreasuryBalances{XStock: 2_000_000})
+	h.Swap.SetTreasuryBalances(treasury.Address, TreasuryBalances{Token: 2_000_000})
 
 	failed, err := h.Store.InsertFailedTransaction(ctx, group.GroupID, postgres.TransactionActionSell, "0xb200000000000000000000c2e324d24d7eecd1fb", evm.USDCAddress, amount, testRequestID(h.ISO, "sell-failed"))
 	if err != nil {
@@ -161,24 +148,16 @@ func TestRetryFailedSwap_sellSuccessCreatesNewConfirmedRow(t *testing.T) {
 func TestRetryFailedSwap_idempotentWhenProposalAlreadyConfirmed(t *testing.T) {
 	h := integrationApp(t)
 	ctx := context.Background()
-	sessions := NewSessionService(h.Store, h.Privy)
-	session := openTestSession(t, h.ISO, sessions, h.Privy, "retry-idem", "Retry Idem")
-	governance := NewGovernanceService(h.Store, h.Privy)
+	sessions := NewSessionService(h.Store, h.Auth, h.Wallets)
+	session := openTestSession(t, h.ISO, sessions, h.Auth, "retry-idem", "Retry Idem")
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetBuyService(NewBuyService(h.Jupiter, h.XStocks))
 	group, err := governance.CreateGroupWithRules(ctx, h.ISO.UniqueToken("retry-idem"), testGroupName(h.ISO, "retry-idem"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
 	h.ISO.TrackGroup(group.GroupID)
-	b20.RegisterTokenAddress(h.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
-	jupiter.RegisterQuoteBuy(h.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", 2_000_000, jupiter.BuyQuote{
-		Routable:   true,
-		InputToken:  evm.USDCAddress,
-		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
-		InAmount:   "2000000",
-		OutAmount:  "1000000",
-		RequestID:  testRequestID(h.ISO, "proposal-quote"),
-	})
+	registerRoutableQuote(t, h.Jupiter, h.XStocks, "AAPLx", 2_000_000)
 	treasury, err := h.Privy.EnsureTreasury(ctx, wallets.GroupID(group.GroupID))
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)

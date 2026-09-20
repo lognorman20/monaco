@@ -8,12 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
-// SolanaConfirmer checks whether an on-chain transaction reached confirmed/finalized status.
-type SolanaConfirmer interface {
+// Confirmer checks whether an on-chain transaction reached confirmed status.
+type Confirmer interface {
 	IsConfirmed(ctx context.Context, txHash string) (bool, error)
 }
 
@@ -52,26 +53,26 @@ var ErrWithdrawToMemberWallet = errors.New("cannot withdraw to member wallet")
 // PlatformWithdrawService orchestrates member-wallet USDC withdrawals.
 type PlatformWithdrawService struct {
 	store      *postgres.Store
-	privy      wallets.Client
+	auth    auth.Verifier
+	wallets wallets.Client
 	deposits   *DepositService
-	solana     SolanaConfirmer
-	relayerKey string
+	confirmer Confirmer
 }
 
 // NewPlatformWithdrawService wires platform withdrawal dependencies.
 func NewPlatformWithdrawService(
 	store *postgres.Store,
-	privyClient wallets.Client,
+	verifier auth.Verifier,
+	walletClient wallets.Client,
 	deposits *DepositService,
-	solana SolanaConfirmer,
-	relayerKey string,
+	confirmer Confirmer,
 ) *PlatformWithdrawService {
 	return &PlatformWithdrawService{
-		store:      store,
-		privy:      privyClient,
-		deposits:   deposits,
-		solana:     solana,
-		relayerKey: relayerKey,
+		store:     store,
+		auth:      verifier,
+		wallets:   walletClient,
+		deposits:  deposits,
+		confirmer: confirmer,
 	}
 }
 
@@ -81,11 +82,11 @@ func (s *PlatformWithdrawService) CreatePlatformWithdrawal(ctx context.Context, 
 	if amount <= 0 {
 		return PlatformWithdrawal{}, fmt.Errorf("amount must be positive")
 	}
-	if err := privy.ValidateAddress(toAddress); err != nil {
+	if err := wallets.ValidateAddress(toAddress); err != nil {
 		return PlatformWithdrawal{}, ErrInvalidWithdrawAddress
 	}
 
-	identity, err := s.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := s.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return PlatformWithdrawal{}, auth.ErrUnauthorized
@@ -133,13 +134,14 @@ func (s *PlatformWithdrawService) CreatePlatformWithdrawal(ctx context.Context, 
 		return PlatformWithdrawal{}, err
 	}
 
-	transferReq, err := privy.BuildTransferRequest(wallet.Address, toAddress, amount, s.relayerKey)
-	if err != nil {
-		_, _, _ = s.store.FailPlatformWithdrawal(ctx, row.ID, "build transfer")
-		return PlatformWithdrawal{}, fmt.Errorf("build transfer: %w", err)
+	transferReq := wallets.TransferRequest{
+		MemberAddress: wallet.Address,
+		ToAddress:     toAddress,
+		Amount:        amount,
+		IntentID:      row.ID,
 	}
 
-	result, err := s.privy.SubmitMemberUSDCTransfer(ctx, transferReq)
+	result, err := s.wallets.SubmitMemberUSDCTransfer(ctx, transferReq)
 	if err != nil {
 		_, _, _ = s.store.FailPlatformWithdrawal(ctx, row.ID, "broadcast failed")
 		return PlatformWithdrawal{}, fmt.Errorf("submit transfer: %w", err)
@@ -175,7 +177,7 @@ func (s *PlatformWithdrawService) CreatePlatformWithdrawal(ctx context.Context, 
 
 // GetPlatformWithdrawal returns a platform withdrawal for the authenticated owner, refreshing confirmation when pending.
 func (s *PlatformWithdrawService) GetPlatformWithdrawal(ctx context.Context, accessToken, withdrawalID string) (PlatformWithdrawal, error) {
-	identity, err := s.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := s.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return PlatformWithdrawal{}, auth.ErrUnauthorized
@@ -206,7 +208,7 @@ func (s *PlatformWithdrawService) GetPlatformWithdrawal(ctx context.Context, acc
 }
 
 func (s *PlatformWithdrawService) refreshConfirmation(ctx context.Context, withdrawalID, txHash string) (PlatformWithdrawal, error) {
-	if s.solana == nil {
+	if s.confirmer == nil {
 		row, found, err := s.store.GetPlatformWithdrawalByID(ctx, withdrawalID)
 		if err != nil {
 			return PlatformWithdrawal{}, err
@@ -217,7 +219,7 @@ func (s *PlatformWithdrawService) refreshConfirmation(ctx context.Context, withd
 		return platformWithdrawalFromRow(row), nil
 	}
 
-	confirmed, err := s.solana.IsConfirmed(ctx, txHash)
+	confirmed, err := s.confirmer.IsConfirmed(ctx, txHash)
 	if err != nil {
 		return PlatformWithdrawal{}, fmt.Errorf("confirm withdrawal tx: %w", err)
 	}

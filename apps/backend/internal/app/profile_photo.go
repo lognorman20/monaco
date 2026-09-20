@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/ratelimit"
@@ -30,16 +31,18 @@ type profileImageFormat struct {
 // ProfilePhotoService stores user avatars via backend-mediated storage upload.
 type ProfilePhotoService struct {
 	store   *postgres.Store
-	privy   wallets.Client
+	auth    auth.Verifier
+	wallets wallets.Client
 	storage storage.Client
 	limiter *ratelimit.Limiter
 }
 
 // NewProfilePhotoService wires profile photo dependencies.
-func NewProfilePhotoService(store *postgres.Store, privyClient wallets.Client, storageClient storage.Client) *ProfilePhotoService {
+func NewProfilePhotoService(store *postgres.Store, verifier auth.Verifier, walletClient wallets.Client, storageClient storage.Client) *ProfilePhotoService {
 	return &ProfilePhotoService{
 		store:   store,
-		privy:   privyClient,
+		auth:    verifier,
+		wallets: walletClient,
 		storage: storageClient,
 	}
 }
@@ -67,7 +70,7 @@ func (s *ProfilePhotoService) UploadProfilePhoto(ctx context.Context, accessToke
 		return MeResult{}, ErrProfilePhotoInvalid
 	}
 
-	identity, err := s.privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := s.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		return MeResult{}, err
 	}

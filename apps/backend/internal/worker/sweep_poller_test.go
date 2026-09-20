@@ -215,7 +215,7 @@ func TestSweepPoller_scanDoesNotCreateDepositWithoutUserIntent(t *testing.T) {
 	privyUserID := testApp.ISO.UniqueDynamicID("scan")
 	token := auth.AccessToken(testApp.ISO.UniqueToken("scan"))
 	auth.RegisterToken(testApp.Privy, token, auth.Identity{PrivyUserID: privyUserID, DisplayName: "Scanner"})
-	sessions := app.NewSessionService(testApp.Store, testApp.Privy)
+	sessions := app.NewSessionService(testApp.Store, auth.NewFakeVerifier(), testApp.Privy)
 	session, err := sessions.OpenSession(ctx, string(token))
 	if err != nil {
 		t.Fatalf("OpenSession: %v", err)
