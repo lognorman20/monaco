@@ -20,21 +20,16 @@ struct LiveCabalsTabDataSource: CabalsTabDataSource {
         self.auth = auth
     }
 
-    private func token() throws -> String {
-        guard let token = auth.accessToken else { throw MonacoAPIError.missingAccessToken }
-        return token
-    }
-
     func leaderboard() async throws -> GroupLeaderboardResponseDTO {
-        try await apiClient.groupLeaderboard(accessToken: try token(), limit: 20)
+        try await auth.withAccessToken { try await apiClient.groupLeaderboard(accessToken: $0, limit: 20) }
     }
 
     func pnlHistory(range: GroupPnLRange) async throws -> MyGroupsPnLHistoryDTO {
-        try await apiClient.myGroupsPnLHistory(accessToken: try token(), range: range)
+        try await auth.withAccessToken { try await apiClient.myGroupsPnLHistory(accessToken: $0, range: range) }
     }
 
     func search(query: String, cursor: String?) async throws -> GroupSearchResponseDTO {
-        try await apiClient.searchGroups(accessToken: try token(), query: query, limit: 20, cursor: cursor)
+        try await auth.withAccessToken { try await apiClient.searchGroups(accessToken: $0, query: query, limit: 20, cursor: cursor) }
     }
 }
 
