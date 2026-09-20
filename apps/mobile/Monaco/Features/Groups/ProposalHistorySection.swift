@@ -96,7 +96,7 @@ struct ProposalHistorySection: View {
         if result.succeeded {
             Haptics.success()
             withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.7)) {
-                votes.record(choice, for: proposal.id)
+                votes.record(choice, for: proposal.id, viewerId: service.viewerId)
             }
         }
         onToast(result.toast)
