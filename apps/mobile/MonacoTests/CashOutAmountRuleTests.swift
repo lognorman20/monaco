@@ -55,6 +55,51 @@ struct CashOutAmountRuleTests {
         #expect(CashOutAmountRule.verdict(enteredMicros: slice, sliceMicros: slice) == .sellsWholeSlice)
     }
 
+    // MARK: - What goes on the wire
+
+    /// The highest-stakes decision on the screen: a full exit sends no share amount at all, so the
+    /// backend closes the position outright. Passing the converted unit count here instead would
+    /// send a partial sale for the full slice amount and strand the dust all over again — which is
+    /// exactly what the rest of this rule exists to prevent.
+    @Test func aFullExitSendsNoShareAmount() {
+        let entered = slice - (floor - 1)
+        let verdict = CashOutAmountRule.verdict(enteredMicros: entered, sliceMicros: slice)
+        #expect(verdict == .sellsWholeSlice)
+
+        let sale = CashOutAmountRule.sale(for: verdict, selectedShareUnits: 49_999_000)
+        #expect(sale == .wholeSlice)
+        #expect(sale?.shareAmountMicros == nil)
+    }
+
+    @Test func sellingTheWholeSliceOutrightAlsoSendsNoShareAmount() {
+        let verdict = CashOutAmountRule.verdict(enteredMicros: slice, sliceMicros: slice)
+        #expect(CashOutAmountRule.sale(for: verdict, selectedShareUnits: 50_000_000)?.shareAmountMicros == nil)
+    }
+
+    @Test func aPartialSaleSendsExactlyTheUnitsItSelected() {
+        let sale = CashOutAmountRule.sale(for: .ok, selectedShareUnits: 1_234)
+        #expect(sale == .units(1_234))
+        #expect(sale?.shareAmountMicros == 1_234)
+    }
+
+    /// Nothing the screen refuses may reach the wire — and in particular must not fall through to
+    /// the nil that means "sell everything".
+    @Test func anAmountTheScreenWontTakeIsNotASaleAtAll() {
+        #expect(CashOutAmountRule.sale(for: .noAmount, selectedShareUnits: 10) == nil)
+        #expect(CashOutAmountRule.sale(for: .belowMinimum, selectedShareUnits: 10) == nil)
+        #expect(CashOutAmountRule.sale(for: .overSlice, selectedShareUnits: 10) == nil)
+        // A partial sale that converts to no units is not a sale either.
+        #expect(CashOutAmountRule.sale(for: .ok, selectedShareUnits: 0) == nil)
+    }
+
+    /// A promotion to a full exit changes what the screen is about to do, so it stops saying
+    /// "this much of your slice".
+    @Test func theExplainerFollowsThePromotion() {
+        #expect(CashOutAmountRule.explainer(for: .sellsWholeSlice).contains("your whole slice"))
+        #expect(CashOutAmountRule.explainer(for: .ok).contains("this much of your slice"))
+        #expect(CashOutAmountRule.explainer(for: .ok) != CashOutAmountRule.explainer(for: .sellsWholeSlice))
+    }
+
     @Test func aSliceUnderTheFloorHasNoAmountThatWorks() {
         #expect(CashOutAmountRule.sliceIsBelowMinimum(sliceMicros: 50_000))
         #expect(CashOutAmountRule.sliceIsBelowMinimum(sliceMicros: floor) == false)
