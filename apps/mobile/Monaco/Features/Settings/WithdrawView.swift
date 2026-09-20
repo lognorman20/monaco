@@ -14,6 +14,8 @@ struct WithdrawView: View {
     @State private var isSubmitting = false
     @State private var showConfirm = false
     @State private var errorMessage: String?
+    /// Shown on the confirm screen, which covers this screen's toast while it is pushed.
+    @State private var submitFailure: FlowFailure?
     @State private var toast: MonacoToast?
 
     private var maxDollars: Decimal? {
@@ -24,7 +26,18 @@ struct WithdrawView: View {
     private var canContinue: Bool {
         guard let value = AmountEntryText.decimal(amountText), value > 0 else { return false }
         if let maxDollars, value > maxDollars { return false }
-        return !destinationAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if case .success = addressValidation { return true }
+        return false
+    }
+
+    private var addressValidation: Result<String, SolanaAddressProblem> {
+        SolanaAddress.validate(destinationAddress, ownDepositAddress: balance?.memberWalletAddress)
+    }
+
+    /// Nothing while the field is empty; otherwise why the pasted address can't be used.
+    private var addressProblemMessage: String? {
+        guard case .failure(let problem) = addressValidation, problem != .empty else { return nil }
+        return SolanaAddress.message(for: problem)
     }
 
     var body: some View {
@@ -47,6 +60,12 @@ struct WithdrawView: View {
                         MonacoSectionHeader("Destination")
                         MonacoTextField("USDC address on Solana", text: $destinationAddress, keyboard: .asciiCapable)
                             .accessibilityIdentifier("withdraw-address-field")
+                        if let addressProblemMessage {
+                            Text(addressProblemMessage)
+                                .font(MonacoTheme.Typo.caption)
+                                .foregroundStyle(MonacoTheme.warning)
+                                .accessibilityIdentifier("withdraw-address-problem")
+                        }
                     }
                 }
 
@@ -65,6 +84,7 @@ struct WithdrawView: View {
             if !isLoadingBalance {
                 BottomCTA {
                     Button("Continue") {
+                        submitFailure = nil
                         showConfirm = true
                     }
                     .buttonStyle(.monacoPrimary)
@@ -81,6 +101,7 @@ struct WithdrawView: View {
                 destinationAddress: destinationAddress.trimmingCharacters(in: .whitespacesAndNewlines),
                 amountText: amountText,
                 isSubmitting: isSubmitting,
+                failure: submitFailure,
                 onConfirm: { Task { await submitWithdrawal() } }
             )
         }
@@ -117,6 +138,9 @@ struct WithdrawView: View {
     }
 
     private func submitWithdrawal() async {
+        // The disabled state only lands on the next render; a second tap in the same frame
+        // must not start a second transfer.
+        guard !isSubmitting else { return }
         guard let token = auth.accessToken else { return }
         guard let value = AmountEntryText.decimal(amountText), value > 0 else {
             toast = MonacoToast(message: "Enter a valid amount.", isSuccess: false)
@@ -127,20 +151,16 @@ struct WithdrawView: View {
         NSDecimalRound(&rounded, &scaled, 0, .plain)
         let micros = (rounded as NSDecimalNumber).int64Value
 
-        let address = destinationAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !address.isEmpty else {
-            toast = MonacoToast(message: "Enter a destination address.", isSuccess: false)
-            return
-        }
+        guard case .success(let address) = addressValidation else { return }
         if let available = balance?.availableUsdcMicros, micros > available {
-            toast = MonacoToast(
-                message: "Withdraw less, or cash out of a cabal to your balance first.",
-                isSuccess: false
+            submitFailure = MoneyFlowCopy.cashOutFailure(
+                FlowErrorInput(status: 400, serverMessage: "amount exceeds available platform balance")
             )
             return
         }
 
         isSubmitting = true
+        submitFailure = nil
         defer { isSubmitting = false }
 
         do {
@@ -155,17 +175,10 @@ struct WithdrawView: View {
             amountText = ""
             showConfirm = false
             await loadBalance()
-        } catch MonacoAPIError.httpStatus(400) {
-            toast = MonacoToast(
-                message: "Withdraw less, or cash out of a cabal to your balance first.",
-                isSuccess: false
-            )
-        } catch MonacoAPIError.httpStatus(409) {
-            toast = MonacoToast(message: "A withdrawal is already in progress.", isSuccess: false)
-        } catch MonacoAPIError.httpStatus {
-            toast = MonacoToast(message: "Couldn't withdraw. Try again.", isSuccess: false)
         } catch {
-            toast = MonacoToast(message: "No connection. Check your internet and try again.", isSuccess: false)
+            if error.isRequestCancellation { return }
+            submitFailure = MoneyFlowCopy.cashOutFailure(FlowErrorInput(error))
+            Haptics.warning()
         }
     }
 }
@@ -174,6 +187,7 @@ private struct WithdrawConfirmView: View {
     let destinationAddress: String
     let amountText: String
     let isSubmitting: Bool
+    let failure: FlowFailure?
     let onConfirm: () -> Void
 
     var body: some View {
@@ -196,6 +210,21 @@ private struct WithdrawConfirmView: View {
                 Text("Double-check this address. Transfers can't be undone.")
                     .font(MonacoTheme.Typo.callout)
                     .foregroundStyle(MonacoTheme.warning)
+
+                if let failure {
+                    VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
+                        Text(failure.message)
+                            .font(MonacoTheme.Typo.body)
+                            .foregroundStyle(MonacoTheme.ink)
+                        if let nextStep = failure.nextStep {
+                            Text(nextStep)
+                                .font(MonacoTheme.Typo.callout)
+                                .foregroundStyle(MonacoTheme.muted)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("withdraw-confirm-failure")
+                }
             }
             .padding(.horizontal, MonacoTheme.Space.gutter)
             .padding(.top, MonacoTheme.Space.m)
@@ -204,11 +233,11 @@ private struct WithdrawConfirmView: View {
         .monacoCanvas()
         .safeAreaInset(edge: .bottom) {
             BottomCTA {
-                Button(isSubmitting ? "Sending…" : "Cash out") {
+                Button(isSubmitting ? "Sending…" : failure?.isRetryable == true ? "Try again" : "Cash out") {
                     onConfirm()
                 }
                 .buttonStyle(.monacoPrimary)
-                .disabled(isSubmitting)
+                .disabled(isSubmitting || failure?.isRetryable == false)
                 .accessibilityIdentifier("withdraw-confirm-button")
             }
         }

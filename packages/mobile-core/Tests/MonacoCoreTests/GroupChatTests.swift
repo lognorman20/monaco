@@ -206,6 +206,9 @@ final class GroupChatCopyTests: XCTestCase {
     func testSendFailure_mapsStatusesAndNetworkErrors() {
         XCTAssertEqual(GroupChatCopy.sendFailure(MonacoAPIError.httpStatus(403)), "Only members of this cabal can chat here.")
         XCTAssertEqual(GroupChatCopy.sendFailure(MonacoAPIError.httpStatus(429)), "You're sending messages fast. Wait a moment and try again.")
+        XCTAssertEqual(GroupChatCopy.sendFailure(MonacoAPIError.rateLimited(retryAfterSeconds: 1)), "You're sending messages fast. Try again in 1 second.")
+        XCTAssertEqual(GroupChatCopy.sendFailure(MonacoAPIError.rateLimited(retryAfterSeconds: nil)), "You're sending messages fast. Wait a moment and try again.")
+        XCTAssertEqual(GroupChatCopy.sendFailure(MonacoAPIError.rejected(status: 403, message: "not a group member")), "Only members of this cabal can chat here.")
         XCTAssertEqual(GroupChatCopy.sendFailure(URLError(.notConnectedToInternet)), "You're offline. Message not sent.")
         XCTAssertEqual(GroupChatCopy.sendFailure(URLError(.timedOut)), "Message not sent. Check your connection and try again.")
         XCTAssertEqual(GroupChatCopy.sendFailure(GroupChatDraft.Problem.tooLong(count: 2001)), "Messages can be up to 2000 characters.")
