@@ -216,3 +216,112 @@ func TestRetryTransactionHandler_confirmedBuy_returns409(t *testing.T) {
 		t.Fatalf("status = %d, want 409; body = %s", retryRec.Code, retryRec.Body.String())
 	}
 }
+
+// unknownTransactionID is a well-formed id no transaction row carries.
+const unknownTransactionID = "00000000-0000-4000-8000-000000000000"
+
+// seedClubWithFailedBuy creates a club owned by a fresh user and records one failed buy in it.
+func seedClubWithFailedBuy(t *testing.T, handlers *TransactionHandlers, authHandlers *AuthHandlers, privyClient privy.Client, iso *postgres.TestIsolation, label string) postgres.TransactionRow {
+	t.Helper()
+	ctx := context.Background()
+	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, label, "Owner "+label)
+
+	governance := app.NewGovernanceService(handlers.Store, handlers.Privy)
+	created, err := governance.CreateGroupWithRules(ctx, string(token), label+" Club "+iso.Suffix(), app.DefaultGroupRules())
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	trackCreatedGroup(iso, created.GroupID)
+
+	failed, err := handlers.Store.InsertFailedTransaction(ctx, created.GroupID, postgres.TransactionActionBuy, jupiter.USDCMint, jupiter.AAPLxMint, 2_000_000, "req-failed-"+label+"-"+iso.Suffix())
+	if err != nil {
+		t.Fatalf("insert failed buy: %v", err)
+	}
+	return failed
+}
+
+func callTransactionHandler(handler http.HandlerFunc, method, target, transactionID, bearer string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, target, nil)
+	req.SetPathValue("id", transactionID)
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+	return rec
+}
+
+func TestRetryTransactionHandler_invalidToken_returns401ForEveryID(t *testing.T) {
+	// Arrange
+	handlers, authHandlers, privyClient, _, iso := integrationTransactionHandlers(t)
+	failed := seedClubWithFailedBuy(t, handlers, authHandlers, privyClient, iso, "retry-401")
+
+	for name, id := range map[string]string{"existing id": failed.ID, "unknown id": unknownTransactionID} {
+		// Act
+		rec := callTransactionHandler(handlers.RetryTransactionHandler, http.MethodPost, "/v1/transactions/"+id+"/retry", id, "not-a-registered-token")
+
+		// Assert
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s: status = %d, want 401; body = %s", name, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestRetryTransactionHandler_nonMember_matchesUnknownID(t *testing.T) {
+	// Arrange
+	handlers, authHandlers, privyClient, _, iso := integrationTransactionHandlers(t)
+	failed := seedClubWithFailedBuy(t, handlers, authHandlers, privyClient, iso, "retry-owner")
+	_, outsider := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "retry-outsider", "Retry Outsider")
+
+	// Act
+	foreign := callTransactionHandler(handlers.RetryTransactionHandler, http.MethodPost, "/v1/transactions/"+failed.ID+"/retry", failed.ID, string(outsider))
+	unknown := callTransactionHandler(handlers.RetryTransactionHandler, http.MethodPost, "/v1/transactions/"+unknownTransactionID+"/retry", unknownTransactionID, string(outsider))
+
+	// Assert
+	if unknown.Code != http.StatusNotFound {
+		t.Fatalf("unknown id: status = %d, want 404; body = %s", unknown.Code, unknown.Body.String())
+	}
+	if foreign.Code != unknown.Code || foreign.Body.String() != unknown.Body.String() {
+		t.Fatalf("non-member answer (%d %s) differs from unknown id answer (%d %s)", foreign.Code, foreign.Body.String(), unknown.Code, unknown.Body.String())
+	}
+	rows, err := handlers.Store.ListTransactionsByGroupID(context.Background(), failed.GroupID)
+	if err != nil {
+		t.Fatalf("list transactions: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("transactions in club = %d, want only the original failed row", len(rows))
+	}
+}
+
+func TestGetTransactionHandler_invalidToken_returns401ForEveryID(t *testing.T) {
+	// Arrange
+	handlers, authHandlers, privyClient, _, iso := integrationTransactionHandlers(t)
+	failed := seedClubWithFailedBuy(t, handlers, authHandlers, privyClient, iso, "get-401")
+
+	for name, id := range map[string]string{"existing id": failed.ID, "unknown id": unknownTransactionID} {
+		// Act
+		rec := callTransactionHandler(handlers.GetTransactionHandler, http.MethodGet, "/v1/transactions/"+id, id, "not-a-registered-token")
+
+		// Assert
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s: status = %d, want 401; body = %s", name, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestGetTransactionHandler_nonMember_matchesUnknownID(t *testing.T) {
+	// Arrange
+	handlers, authHandlers, privyClient, _, iso := integrationTransactionHandlers(t)
+	failed := seedClubWithFailedBuy(t, handlers, authHandlers, privyClient, iso, "get-owner")
+	_, outsider := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "get-outsider", "Get Outsider")
+
+	// Act
+	foreign := callTransactionHandler(handlers.GetTransactionHandler, http.MethodGet, "/v1/transactions/"+failed.ID, failed.ID, string(outsider))
+	unknown := callTransactionHandler(handlers.GetTransactionHandler, http.MethodGet, "/v1/transactions/"+unknownTransactionID, unknownTransactionID, string(outsider))
+
+	// Assert
+	if unknown.Code != http.StatusNotFound {
+		t.Fatalf("unknown id: status = %d, want 404; body = %s", unknown.Code, unknown.Body.String())
+	}
+	if foreign.Code != unknown.Code || foreign.Body.String() != unknown.Body.String() {
+		t.Fatalf("non-member answer (%d %s) differs from unknown id answer (%d %s)", foreign.Code, foreign.Body.String(), unknown.Code, unknown.Body.String())
+	}
+}

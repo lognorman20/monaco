@@ -68,6 +68,33 @@ func TestRetryFailedSwap_rejectsNonFailedTransaction(t *testing.T) {
 	}
 }
 
+func TestRetryFailedSwap_nonMember_returnsNotFound(t *testing.T) {
+	h := integrationApp(t)
+	ctx := context.Background()
+	sessions := NewSessionService(h.Store, h.Privy)
+	openTestSession(t, h.ISO, sessions, h.Privy, "retry-owner", "Retry Owner")
+	outsider := openTestSession(t, h.ISO, sessions, h.Privy, "retry-outsider", "Retry Outsider")
+	governance := NewGovernanceService(h.Store, h.Privy)
+	group, err := governance.CreateGroupWithRules(ctx, h.ISO.UniqueToken("retry-owner"), testGroupName(h.ISO, "retry-owner"), DefaultGroupRules())
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	h.ISO.TrackGroup(group.GroupID)
+
+	failed, err := h.Store.InsertFailedTransaction(ctx, group.GroupID, postgres.TransactionActionBuy, jupiter.USDCMint, jupiter.AAPLxMint, 2_000_000, testRequestID(h.ISO, "outsider-failed"))
+	if err != nil {
+		t.Fatalf("insert failed buy: %v", err)
+	}
+
+	_, err = h.Swap.RetryFailedSwap(ctx, RetryFailedSwapRequest{
+		TransactionID: failed.ID,
+		UserID:        outsider.UserID,
+	})
+	if !errors.Is(err, ErrTransactionNotFound) {
+		t.Fatalf("retry by non-member err = %v, want ErrTransactionNotFound", err)
+	}
+}
+
 func TestRetryFailedSwap_buySuccessCreatesNewConfirmedRow(t *testing.T) {
 	h := integrationApp(t)
 	ctx := context.Background()

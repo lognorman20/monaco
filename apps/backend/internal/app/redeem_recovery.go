@@ -9,11 +9,11 @@ import (
 	"github.com/monaco/monaco/packages/domain"
 )
 
-// ErrRedeemPayoutUnverified means a job stopped in `paying` with no withdrawal recorded, so
-// whether the payout reached the chain is unknown. PayUSDC signs and sends in one Privy call:
-// an error from it (a timeout, a dropped response) does not prove the transfer did not land,
-// and neither does a failure while recording it afterwards. Paying again could pay twice and
-// returning the shares could hand back a claim that was already paid, so neither is automatic.
+// ErrRedeemPayoutUnverified means a job is in `paying` with no payout signature on record, so
+// whether a payout reached the chain cannot be established. Only jobs left behind by the old
+// sign-and-send path look like this: a payout is now recorded before it is broadcast. Paying
+// again could pay twice and returning the shares could hand back a claim that was already
+// paid, so neither the recovery poller nor the member's next request does either.
 var ErrRedeemPayoutUnverified = errors.New("redeem payout unverified")
 
 // RedeemRecoveryOutcome is what RecoverStaleRedeemJob did with a job.
@@ -26,6 +26,10 @@ const (
 	RedeemRecoveryGone RedeemRecoveryOutcome = "gone"
 	// RedeemRecoveryBusy: a live request holds the member's redeem lock; leave it alone.
 	RedeemRecoveryBusy RedeemRecoveryOutcome = "busy"
+	// RedeemRecoverySettled: the recorded payout was confirmed on chain and the job settled.
+	RedeemRecoverySettled RedeemRecoveryOutcome = "settled"
+	// RedeemRecoveryPending: the recorded payout can still land; look again later.
+	RedeemRecoveryPending RedeemRecoveryOutcome = "pending"
 )
 
 // RecoverStaleRedeemJob resolves a redeem job that a request abandoned, without the member
@@ -37,7 +41,10 @@ const (
 // credit and the job delete share one transaction, so a second call finds no job and reports
 // RedeemRecoveryGone. Recovery never pays: money only moves with the member's request behind it.
 //
-// Jobs in `paying` return ErrRedeemPayoutUnverified and are left untouched.
+// Jobs in `paying` are decided by the payout signature recorded before the broadcast, read
+// from the chain once: confirmed settles the job, failed or dropped rolls it back, and a
+// transfer that can still land is left alone. A `paying` job with no payout on record returns
+// ErrRedeemPayoutUnverified and is left untouched.
 func (r *RedeemService) RecoverStaleRedeemJob(ctx context.Context, jobID string) (RedeemRecoveryOutcome, error) {
 	job, found, err := r.store.GetRedeemJobByID(ctx, jobID)
 	if err != nil {
@@ -80,7 +87,17 @@ func (r *RedeemService) RecoverStaleRedeemJob(ctx context.Context, jobID string)
 		}
 		return RedeemRecoveryRolledBack, nil
 	case domain.RedeemJobPaying:
-		return "", ErrRedeemPayoutUnverified
+		_, err := r.resolveRedeemPayout(ctx, view, false)
+		switch {
+		case err == nil:
+			return RedeemRecoverySettled, nil
+		case errors.Is(err, ErrRedeemPayoutPending):
+			return RedeemRecoveryPending, nil
+		case errors.Is(err, ErrRedeemPayoutDropped), errors.Is(err, ErrRedeemPayoutFailed):
+			return RedeemRecoveryRolledBack, nil
+		default:
+			return "", err
+		}
 	default:
 		return "", fmt.Errorf("unsupported redeem job status %q", job.Status)
 	}

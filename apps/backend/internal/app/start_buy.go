@@ -328,9 +328,9 @@ func (s *ExecuteOnPassService) recordTreasuryHoldingsAndNavSnapshot(
 	if err != nil {
 		return err
 	}
-	treasuryUSDC, err := s.swap.treasuryUSDCForSnapshot(ctx, treasury.SolanaAddress)
+	navVals, err := s.swap.navSnapshotAfterSwap(ctx, proposal.GroupID, treasury.SolanaAddress)
 	if err != nil {
 		return err
 	}
-	return RecordConfirmedBuyHoldings(ctx, s.store, proposal.GroupID, tx, treasuryUSDC)
+	return RecordConfirmedBuyHoldings(ctx, s.store, proposal.GroupID, tx, navVals)
 }

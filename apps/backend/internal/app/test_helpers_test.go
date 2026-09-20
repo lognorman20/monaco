@@ -110,3 +110,17 @@ func integrationApp(t *testing.T) integrationHarness {
 		ISO:      iso,
 	}
 }
+
+// registerLiveAAPLxMark gives the group's AAPLx holding a live Pyth mark. Deposit credit and
+// redeem refuse to price a holding at cost basis, so any test that moves money against a pot
+// holding stock registers the mark it expects.
+func registerLiveAAPLxMark(h integrationHarness, groupID string, markMicros int64) {
+	pyth.RegisterMarkedPot(h.Pyth, pyth.TreasuryRef{GroupID: groupID}, pyth.NavInput{
+		Holdings: []pyth.MarkedHolding{{
+			Symbol:   "AAPLx",
+			Mint:     jupiter.AAPLxMint,
+			MarkUsdc: markMicros,
+			Source:   pyth.MarkSourcePyth,
+		}},
+	})
+}

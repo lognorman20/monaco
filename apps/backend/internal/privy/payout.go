@@ -27,9 +27,33 @@ type PayUSDCRequest struct {
 	UserID                string
 }
 
-// PayUSDCResult is the submitted payout transaction signature.
-type PayUSDCResult struct {
-	TxSignature string
+// PreparedPayout is a fully signed treasury payout that has not been broadcast yet. Its
+// signature is known before anything reaches the chain, so the caller can persist it first.
+type PreparedPayout struct {
+	TxSignature          string
+	SignedTransaction    string
+	LastValidBlockHeight uint64
+}
+
+// PayoutState is where a payout transaction stands on chain.
+type PayoutState string
+
+const (
+	// PayoutStatePending: not seen on chain yet, and its blockhash is still valid.
+	PayoutStatePending PayoutState = "pending"
+	// PayoutStateConfirmed: landed without error at confirmed or finalized commitment.
+	PayoutStateConfirmed PayoutState = "confirmed"
+	// PayoutStateFailed: landed and the chain rejected it. No USDC moved.
+	PayoutStateFailed PayoutState = "failed"
+	// PayoutStateDropped: never landed and its blockhash has expired, so it never can.
+	PayoutStateDropped PayoutState = "dropped"
+)
+
+// PayoutStatus is the on-chain fate of a payout signature.
+type PayoutStatus struct {
+	State PayoutState
+	// Reason is the chain's error for PayoutStateFailed.
+	Reason string
 }
 
 // PayoutMessage returns the canonical ownership proof message for a user and payout address.
@@ -53,21 +77,26 @@ func (c *HTTPClient) VerifyPayoutProof(ctx context.Context, userID string, proof
 	return fmt.Errorf("%w: live payout proof verification not implemented", ErrAPI)
 }
 
-// PayUSDC sends USDC from a group treasury to a proven payout address.
-func (c *HTTPClient) PayUSDC(ctx context.Context, req PayUSDCRequest) (PayUSDCResult, error) {
+// PrepareUSDCPayout builds and signs a treasury USDC payout without broadcasting it.
+func (c *HTTPClient) PrepareUSDCPayout(ctx context.Context, req PayUSDCRequest) (PreparedPayout, error) {
 	if req.Amount <= 0 || req.ToAddress == "" || req.TreasuryAddress == "" {
-		return PayUSDCResult{}, fmt.Errorf("%w: invalid payout request", ErrAPI)
+		return PreparedPayout{}, fmt.Errorf("%w: invalid payout request", ErrAPI)
 	}
 	if req.TreasuryPrivyWalletID == "" {
-		return PayUSDCResult{}, fmt.Errorf("%w: treasury wallet id required", ErrAPI)
+		return PreparedPayout{}, fmt.Errorf("%w: treasury wallet id required", ErrAPI)
 	}
 	if c.relayerPrivateKey == "" {
-		return PayUSDCResult{}, fmt.Errorf("%w: relayer key required", ErrAPI)
+		return PreparedPayout{}, fmt.Errorf("%w: relayer key required", ErrAPI)
 	}
 
-	blockhash, err := c.getLatestBlockhash(ctx)
+	blockhash, lastValidBlockHeight, err := c.getLatestBlockhashWithExpiry(ctx)
 	if err != nil {
-		return PayUSDCResult{}, err
+		return PreparedPayout{}, err
+	}
+	// Without it a transfer that never lands could never be told apart from one still in
+	// flight, so nothing is signed.
+	if lastValidBlockHeight == 0 {
+		return PreparedPayout{}, fmt.Errorf("%w: solana rpc did not report a last valid block height", ErrAPI)
 	}
 
 	txBase64, err := buildUSDCPayoutTransaction(usdcPayoutRequest{
@@ -77,15 +106,80 @@ func (c *HTTPClient) PayUSDC(ctx context.Context, req PayUSDCRequest) (PayUSDCRe
 		Amount:          req.Amount,
 	}, blockhash)
 	if err != nil {
-		return PayUSDCResult{}, err
+		return PreparedPayout{}, err
 	}
-
-	hash, err := c.signAndSendSolanaTransaction(ctx, req.TreasuryPrivyWalletID, txBase64)
+	// The relayer is the fee payer, so its signature is the transaction id.
+	relayerSignature, err := feePayerSignature(txBase64)
 	if err != nil {
-		return PayUSDCResult{}, err
+		return PreparedPayout{}, err
 	}
 
-	return PayUSDCResult{TxSignature: hash}, nil
+	signed, err := c.signSolanaTransaction(ctx, req.TreasuryPrivyWalletID, txBase64)
+	if err != nil {
+		return PreparedPayout{}, err
+	}
+	signature, err := feePayerSignature(signed)
+	if err != nil {
+		return PreparedPayout{}, err
+	}
+	if signature != relayerSignature {
+		return PreparedPayout{}, fmt.Errorf("%w: signed payout does not carry the relayer signature", ErrAPI)
+	}
+
+	return PreparedPayout{
+		TxSignature:          signature,
+		SignedTransaction:    signed,
+		LastValidBlockHeight: lastValidBlockHeight,
+	}, nil
+}
+
+// BroadcastUSDCPayout sends a prepared payout to the cluster. Sending the same signed
+// transaction again is harmless: it carries one signature and can only land once. An error
+// does not prove the transfer missed the chain; USDCPayoutStatus is the only authority.
+func (c *HTTPClient) BroadcastUSDCPayout(ctx context.Context, payout PreparedPayout) error {
+	if payout.SignedTransaction == "" {
+		return fmt.Errorf("%w: signed payout transaction required", ErrAPI)
+	}
+	var txSignature string
+	return c.callSolanaRPC(ctx, "sendTransaction", []any{
+		payout.SignedTransaction,
+		map[string]any{"encoding": "base64", "preflightCommitment": "confirmed"},
+	}, &txSignature)
+}
+
+// USDCPayoutStatus reports whether a payout landed, failed, is still in flight, or can no
+// longer land because its blockhash expired.
+func (c *HTTPClient) USDCPayoutStatus(ctx context.Context, payout PreparedPayout) (PayoutStatus, error) {
+	if payout.TxSignature == "" || payout.LastValidBlockHeight == 0 {
+		return PayoutStatus{}, fmt.Errorf("%w: payout signature and last valid block height required", ErrAPI)
+	}
+
+	status, seen, err := c.getSignatureStatus(ctx, payout.TxSignature)
+	if err != nil {
+		return PayoutStatus{}, err
+	}
+	if seen {
+		return status, nil
+	}
+
+	blockHeight, err := c.getFinalizedBlockHeight(ctx)
+	if err != nil {
+		return PayoutStatus{}, err
+	}
+	if blockHeight <= payout.LastValidBlockHeight {
+		return PayoutStatus{State: PayoutStatePending}, nil
+	}
+
+	// The blockhash is dead at finalized commitment. Anything that landed did so in a block
+	// that is final by now, so one more look settles it either way.
+	status, seen, err = c.getSignatureStatus(ctx, payout.TxSignature)
+	if err != nil {
+		return PayoutStatus{}, err
+	}
+	if seen {
+		return status, nil
+	}
+	return PayoutStatus{State: PayoutStateDropped}, nil
 }
 
 type usdcPayoutRequest struct {

@@ -3,7 +3,6 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -77,8 +76,7 @@ func (h *GroupHandlers) CreateGroupHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req createGroupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
+	if !decodeJSONBody(ctx, log, w, r, &req) {
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
@@ -197,18 +195,8 @@ func (h *GroupHandlers) LeaveGroupHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var leaveReq leaveGroupRequest
-	if r.Body != nil {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
-			return
-		}
-		if len(body) > 0 {
-			if err := json.Unmarshal(body, &leaveReq); err != nil {
-				logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
-				return
-			}
-		}
+	if !decodeOptionalJSONBody(ctx, log, w, r, &leaveReq) {
+		return
 	}
 	err := h.Governance.LeaveGroup(ctx, app.LeaveGroupRequest{
 		AccessToken:   token,
@@ -229,8 +217,7 @@ func (h *GroupHandlers) LeaveGroupHandler(w http.ResponseWriter, r *http.Request
 		}
 		var leaveErr *app.LeaveGroupError
 		if errors.As(err, &leaveErr) {
-			writeLeaveConflict(w, leaveErr.Reason, leaveConflictMessage(leaveErr.Reason))
-			log.done(ctx, "leave_blocked", http.StatusConflict, "group_id", groupID, "reason", string(leaveErr.Reason))
+			logJSONErrorWithReason(ctx, log, "leave_blocked", w, http.StatusConflict, leaveConflictMessage(leaveErr.Reason), string(leaveErr.Reason), "group_id", groupID)
 			return
 		}
 		logJSONError(ctx, log, "leave_group_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
@@ -238,12 +225,6 @@ func (h *GroupHandlers) LeaveGroupHandler(w http.ResponseWriter, r *http.Request
 	}
 	w.WriteHeader(http.StatusNoContent)
 	logNoContent(ctx, log, "left", "group_id", groupID)
-}
-
-func writeLeaveConflict(w http.ResponseWriter, reason app.LeaveBlockReason, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusConflict)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": message, "reason": string(reason)})
 }
 
 func leaveConflictMessage(reason app.LeaveBlockReason) string {
@@ -631,18 +612,8 @@ func (h *GroupHandlers) WithdrawToBalanceHandler(w http.ResponseWriter, r *http.
 	}
 
 	var req withdrawToBalanceRequest
-	if r.Body != nil {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
-			return
-		}
-		if len(body) > 0 {
-			if err := json.Unmarshal(body, &req); err != nil {
-				logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
-				return
-			}
-		}
+	if !decodeOptionalJSONBody(ctx, log, w, r, &req) {
+		return
 	}
 
 	job, err := h.Redeem.WithdrawToBalance(ctx, app.WithdrawToBalanceRequest{
@@ -670,9 +641,33 @@ func (h *GroupHandlers) WithdrawToBalanceHandler(w http.ResponseWriter, r *http.
 			logJSONError(ctx, log, "redeem_in_progress", w, http.StatusConflict, "withdraw already in progress", "group_id", groupID)
 			return
 		}
+		if errors.Is(err, app.ErrRedeemPayoutPending) {
+			logJSONError(ctx, log, "redeem_payout_pending", w, http.StatusConflict,
+				"Your cash out was sent and is still confirming on Solana. Check back in a minute.",
+				"group_id", groupID, "err", err.Error())
+			return
+		}
+		if errors.Is(err, app.ErrRedeemPayoutDropped) || errors.Is(err, app.ErrRedeemPayoutFailed) {
+			logJSONError(ctx, log, "redeem_payout_not_sent", w, http.StatusBadGateway,
+				"The cash out did not go through on Solana. Nothing was paid and your shares are back. Try again.",
+				"group_id", groupID, "err", err.Error())
+			return
+		}
+		if errors.Is(err, app.ErrRedeemPayoutUnverified) {
+			logJSONError(ctx, log, "redeem_payout_unverified", w, http.StatusConflict,
+				"An earlier cash out is being reviewed. We'll sort it out before you can cash out again.",
+				"group_id", groupID, "err", err.Error())
+			return
+		}
 		if errors.Is(err, app.ErrQuoteNotRoutable) {
 			logJSONError(ctx, log, "quote_not_routable", w, http.StatusBadRequest,
 				"That amount is too small to sell the pot's stock. Try a larger amount, or wait until the pot holds more USDC.",
+				"group_id", groupID, "err", err.Error())
+			return
+		}
+		if errors.Is(err, app.ErrPotMarkUnavailable) {
+			logJSONError(ctx, log, "pot_mark_unavailable", w, http.StatusServiceUnavailable,
+				"We can't price the pot's stock right now, so nothing was cashed out. Try again in a minute.",
 				"group_id", groupID, "err", err.Error())
 			return
 		}

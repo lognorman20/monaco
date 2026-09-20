@@ -58,6 +58,7 @@ var apiRoutes = []string{
 	"GET /v1/home/dashboard",
 	"GET /v1/home/pnl-series",
 	"GET /v1/home/missed-proposals",
+	"GET /v1/users/{id}/groups",
 	"POST /v1/groups",
 	"GET /v1/groups/search",
 	"GET /v1/groups/leaderboard",
@@ -66,10 +67,12 @@ var apiRoutes = []string{
 	"POST /v1/groups/{id}/join",
 	"POST /v1/groups/{id}/leave",
 	"POST /v1/groups/{id}/withdraw-to-balance",
+	"GET /v1/groups/{id}/join-requests",
+	"POST /v1/groups/{id}/join-requests/{requestId}/approve",
+	"POST /v1/groups/{id}/join-requests/{requestId}/deny",
 	"GET /v1/groups/{id}",
 	"GET /v1/groups/{id}/view",
 	"GET /v1/groups/{id}/activity",
-	"GET /v1/groups/{id}/proposals",
 	"POST /v1/groups/{id}/deposits",
 	"POST /v1/groups/{id}/fund",
 	"GET /v1/groups/{id}/share-units",
@@ -82,9 +85,10 @@ var apiRoutes = []string{
 	"GET /v1/groups/{id}/assets",
 	"GET /v1/assets",
 	"GET /v1/assets/popular",
-	"GET /v1/assets/{symbol}",
 	"GET /v1/assets/{symbol}/chart",
+	"GET /v1/assets/{symbol}",
 	"POST /v1/groups/{id}/quotes",
+	"GET /v1/groups/{id}/proposals",
 	"POST /v1/groups/{id}/proposals",
 	"GET /v1/groups/{id}/messages",
 	"POST /v1/groups/{id}/messages",
@@ -191,6 +195,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	signer := app.NewPrivyTreasurySigner(privyClient)
 	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, relayer.PrivateKey(), symbols)
+	swap.SetPriceClient(pythClient)
 	if cfg.SwapProvider == swapprovider.NameFlash {
 		swap.SetSwapProvider(flash.NewSwapProvider(
 			flash.NewHTTPClient(cfg.FlashAPIKey),
@@ -352,7 +357,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}()
 
 	return &bootResult{
-		Server:            newHTTPServer(addr, platformHandler(mux, httpapi.NewIdempotency(store, privyClient))),
+		Server:            newHTTPServer(addr, platformHandler(mux, privyClient, httpapi.NewIdempotency(store, privyClient))),
 		Config:            cfg,
 		Relayer:           relayer,
 		DB:                db,

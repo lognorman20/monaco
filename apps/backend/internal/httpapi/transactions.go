@@ -85,19 +85,11 @@ func (h *TransactionHandlers) RetryTransactionHandler(w http.ResponseWriter, r *
 		return
 	}
 
-	row, found, err := h.Store.GetTransactionByID(ctx, transactionID)
+	// Verify the token before the id is looked up, so an unauthenticated caller gets 401 for
+	// every id. Membership in the transaction's club is enforced by RetryFailedSwap.
+	userID, err := h.authenticateUser(ctx, token)
 	if err != nil {
-		logJSONError(ctx, log, "get_transaction_failed", w, http.StatusInternalServerError, "internal server error", "transaction_id", transactionID, "err", err.Error())
-		return
-	}
-	if !found {
-		logJSONError(ctx, log, "transaction_not_found", w, http.StatusNotFound, "transaction not found", "transaction_id", transactionID)
-		return
-	}
-
-	userID, err := h.authorizeGroupMemberForTransaction(ctx, token, row.GroupID)
-	if err != nil {
-		writeTransactionError(ctx, log, w, err, "transaction_id", transactionID, "group_id", row.GroupID)
+		writeTransactionError(ctx, log, w, err, "transaction_id", transactionID)
 		return
 	}
 
@@ -314,7 +306,14 @@ func (h *TransactionHandlers) GetCostBasisBySymbolHandler(w http.ResponseWriter,
 	logJSONOK(ctx, log, "ok", "group_id", groupID, "symbol", symbol)
 }
 
+// getTransactionForMember verifies the token before it looks the id up, and answers a caller
+// who may not read the transaction's club exactly like an unknown id, so ids cannot be probed.
 func (h *TransactionHandlers) getTransactionForMember(ctx context.Context, accessToken, transactionID string) (postgres.TransactionRow, error) {
+	userID, err := h.authenticateUser(ctx, accessToken)
+	if err != nil {
+		return postgres.TransactionRow{}, err
+	}
+
 	row, found, err := h.Store.GetTransactionByID(ctx, transactionID)
 	if err != nil {
 		return postgres.TransactionRow{}, err
@@ -324,13 +323,18 @@ func (h *TransactionHandlers) getTransactionForMember(ctx context.Context, acces
 	}
 
 	// Members read their club's swaps; any authed user may spectate faker scale clubs (#153).
-	if _, err := h.authorizeGroupReaderForTransaction(ctx, accessToken, row.GroupID); err != nil {
+	readable, err := h.Store.CanReadGroup(ctx, row.GroupID, userID)
+	if err != nil {
 		return postgres.TransactionRow{}, err
+	}
+	if !readable {
+		return postgres.TransactionRow{}, errTransactionNotFound
 	}
 	return row, nil
 }
 
-func (h *TransactionHandlers) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {
+// authenticateUser verifies the access token and resolves the Monaco user id behind it.
+func (h *TransactionHandlers) authenticateUser(ctx context.Context, accessToken string) (string, error) {
 	identity, err := h.Privy.VerifySession(ctx, privy.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
@@ -346,6 +350,14 @@ func (h *TransactionHandlers) authorizeGroupMember(ctx context.Context, accessTo
 	if !found {
 		return "", app.ErrUserNotFound
 	}
+	return user.ID, nil
+}
+
+func (h *TransactionHandlers) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {
+	userID, err := h.authenticateUser(ctx, accessToken)
+	if err != nil {
+		return "", err
+	}
 
 	group, found, err := h.Store.GetGroupByID(ctx, groupID)
 	if err != nil {
@@ -355,7 +367,7 @@ func (h *TransactionHandlers) authorizeGroupMember(ctx context.Context, accessTo
 	if !found || group.IsFaker {
 		return "", app.ErrGroupNotFound
 	}
-	member, err := h.Store.IsGroupMember(ctx, group.ID, user.ID)
+	member, err := h.Store.IsGroupMember(ctx, group.ID, userID)
 	if err != nil {
 		return "", err
 	}
@@ -371,60 +383,6 @@ func (h *TransactionHandlers) authorizeGroupMember(ctx context.Context, accessTo
 		return "", app.ErrGroupNotFound
 	}
 	return treasury.SolanaAddress, nil
-}
-
-func (h *TransactionHandlers) authorizeGroupMemberForTransaction(ctx context.Context, accessToken, groupID string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, privy.AccessToken(accessToken))
-	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return "", privy.ErrInvalidToken
-		}
-		return "", fmt.Errorf("verify session: %w", err)
-	}
-
-	user, found, err := h.Store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
-	if err != nil {
-		return "", err
-	}
-	if !found {
-		return "", app.ErrUserNotFound
-	}
-
-	member, err := h.Store.IsGroupMember(ctx, groupID, user.ID)
-	if err != nil {
-		return "", err
-	}
-	if !member {
-		return "", app.ErrGroupNotFound
-	}
-	return user.ID, nil
-}
-
-func (h *TransactionHandlers) authorizeGroupReaderForTransaction(ctx context.Context, accessToken, groupID string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, privy.AccessToken(accessToken))
-	if err != nil {
-		if errors.Is(err, privy.ErrInvalidToken) {
-			return "", privy.ErrInvalidToken
-		}
-		return "", fmt.Errorf("verify session: %w", err)
-	}
-
-	user, found, err := h.Store.GetUserByPrivyUserID(ctx, identity.PrivyUserID)
-	if err != nil {
-		return "", err
-	}
-	if !found {
-		return "", app.ErrUserNotFound
-	}
-
-	readable, err := h.Store.CanReadGroup(ctx, groupID, user.ID)
-	if err != nil {
-		return "", err
-	}
-	if !readable {
-		return "", app.ErrGroupNotFound
-	}
-	return user.ID, nil
 }
 
 var errTransactionNotFound = errors.New("transaction not found")

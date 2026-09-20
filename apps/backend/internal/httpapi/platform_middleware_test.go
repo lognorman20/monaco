@@ -233,7 +233,8 @@ func TestClassifyRateLimit(t *testing.T) {
 func TestRateLimiter_moneyRoute_overBudgetGets429ThenRecovers(t *testing.T) {
 	// Arrange
 	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
-	limiter := NewRateLimiter(false).WithClock(func() time.Time { return now })
+	sessions := fakeSessions{"alice": "did:privy:alice", "bob": "did:privy:bob"}
+	limiter := NewRateLimiter(sessions, false).WithClock(func() time.Time { return now })
 	served := 0
 	handler := Chain(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { served++ }), limiter.Middleware())
 	send := func(token string) *httptest.ResponseRecorder {
@@ -261,7 +262,7 @@ func TestRateLimiter_moneyRoute_overBudgetGets429ThenRecovers(t *testing.T) {
 		t.Fatalf("over budget = %d retry-after = %q, want 429 with Retry-After", blocked.Code, blocked.Header().Get("Retry-After"))
 	}
 	if other.Code != http.StatusOK {
-		t.Fatalf("another user = %d, want 200 (buckets are per credential)", other.Code)
+		t.Fatalf("another user = %d, want 200 (buckets are per user)", other.Code)
 	}
 	if recovered.Code != http.StatusOK {
 		t.Fatalf("after refill = %d, want 200", recovered.Code)
@@ -273,7 +274,7 @@ func TestRateLimiter_moneyRoute_overBudgetGets429ThenRecovers(t *testing.T) {
 
 func TestRateLimiter_readsAreNeverLimited(t *testing.T) {
 	// Arrange
-	limiter := NewRateLimiter(false)
+	limiter := NewRateLimiter(nil, false)
 	handler := Chain(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), limiter.Middleware())
 
 	// Act / Assert

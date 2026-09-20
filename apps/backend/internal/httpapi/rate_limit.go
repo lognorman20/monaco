@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/ratelimit"
 )
 
@@ -47,16 +49,23 @@ var rateLimitRules = map[string]rateLimitRule{
 type RateLimiter struct {
 	user map[string]*ratelimit.Limiter
 	ip   map[string]*ratelimit.Limiter
+	// sessions resolves a bearer token to its Privy subject so the per-user bucket
+	// survives a token refresh. It runs on every limited request, ahead of the handler,
+	// so it must verify locally: privy.HTTPClient checks the ES256 signature against the
+	// key loaded at boot and makes no network call.
+	sessions SessionVerifier
 	// trustProxyHeaders enables X-Forwarded-For parsing. Only turn it on behind a
 	// proxy that overwrites the header, otherwise a client spoofs its own IP key.
 	trustProxyHeaders bool
 }
 
-// NewRateLimiter builds limiters for every route class.
-func NewRateLimiter(trustProxyHeaders bool) *RateLimiter {
+// NewRateLimiter builds limiters for every route class. Without a verifier no bearer
+// token can be tied to a user, so those callers are limited per IP only.
+func NewRateLimiter(sessions SessionVerifier, trustProxyHeaders bool) *RateLimiter {
 	limiter := &RateLimiter{
 		user:              make(map[string]*ratelimit.Limiter, len(rateLimitRules)),
 		ip:                make(map[string]*ratelimit.Limiter, len(rateLimitRules)),
+		sessions:          sessions,
 		trustProxyHeaders: trustProxyHeaders,
 	}
 	for class, rule := range rateLimitRules {
@@ -92,7 +101,7 @@ func (l *RateLimiter) Middleware() Middleware {
 				l.reject(w, r, class, "ip", retryAfter)
 				return
 			}
-			if identity := callerIdentity(r); identity != "" {
+			if identity := l.callerIdentity(r); identity != "" {
 				if ok, retryAfter := l.user[class].Allow(class + "|user|" + identity); !ok {
 					l.reject(w, r, class, "user", retryAfter)
 					return
@@ -157,16 +166,35 @@ func isMoneyPath(path string) bool {
 	return false
 }
 
-// callerIdentity returns a stable, non-reversible key for the caller's
-// credential. The raw token never reaches a bucket key or a log line.
-func callerIdentity(r *http.Request) string {
+// callerIdentity returns the key of the caller's per-user bucket, or "" when the
+// request is limited per IP only.
+//
+// A bearer token keys on its verified Privy subject, not on the token: access tokens are
+// short-lived and refreshable, so a token-derived key hands out a fresh budget on every
+// refresh. A token that fails verification gets no user bucket at all, so a forged token
+// can neither mint buckets nor spend the budget of the subject it names.
+//
+// Agent keys are long-lived and checked (with their own failure limiter) by the agent
+// routes, so they key on a hash: the raw key never reaches a bucket key or a log line.
+func (l *RateLimiter) callerIdentity(r *http.Request) string {
 	if token, ok := bearerToken(r); ok {
-		return "t:" + hashCredential(token)
+		return l.verifiedSubject(r.Context(), token)
 	}
 	if key := strings.TrimSpace(r.Header.Get(agentKeyHeader)); key != "" {
 		return "a:" + hashCredential(key)
 	}
 	return ""
+}
+
+func (l *RateLimiter) verifiedSubject(ctx context.Context, token string) string {
+	if l.sessions == nil {
+		return ""
+	}
+	identity, err := l.sessions.VerifySession(ctx, privy.AccessToken(token))
+	if err != nil || identity.PrivyUserID == "" {
+		return ""
+	}
+	return "u:" + identity.PrivyUserID
 }
 
 func hashCredential(value string) string {

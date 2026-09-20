@@ -2,14 +2,23 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
+	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/packages/domain"
 )
 
-// CreditUncreditedTreasuryUSDC mints share_units and amount_deposited for USDC-only pots
-// when treasury USDC exceeds attributed share units (1:1 M2 invariant).
+// CreditUncreditedTreasuryUSDC credits treasury USDC that the group's ledger cannot explain:
+// USDC that reached the treasury without a deposit row (a transfer straight to the treasury
+// address). Only that is an uncredited deposit. Realized trading gains, sell proceeds and
+// USDC reserved for an in-flight redeem payout are all on the ledger already, so they stay
+// P&L and stay owed to whoever they belong to.
+//
+// The credit is priced like any other deposit: shares are minted at pre-credit NAV from the
+// shared pot valuation and split across holders by their share of the pot. When the pot
+// cannot be priced from live marks the credit is deferred to a later pass.
 // Faker scale clubs (#153) are skipped: their treasury is a dummy row with no chain balance.
 // Ghost (faker) positions in real groups are excluded from the share sum and from credits.
 func (d *DepositService) CreditUncreditedTreasuryUSDC(ctx context.Context, groupID string) (bool, error) {
@@ -25,6 +34,8 @@ func (d *DepositService) CreditUncreditedTreasuryUSDC(ctx context.Context, group
 		return false, nil
 	}
 
+	// A pending sweep or swap may already have moved treasury USDC that the ledger only
+	// records once it confirms; until then the difference is not a surplus.
 	hasPending, err := d.store.HasPendingDepositsForGroup(ctx, groupID)
 	if err != nil {
 		return false, err
@@ -32,12 +43,11 @@ func (d *DepositService) CreditUncreditedTreasuryUSDC(ctx context.Context, group
 	if hasPending {
 		return false, nil
 	}
-
-	holdings, err := d.store.ListNetTokenHoldingsByGroup(ctx, groupID)
+	hasPendingSwap, err := d.store.HasPendingTransactionsForGroup(ctx, groupID)
 	if err != nil {
 		return false, err
 	}
-	if len(holdings) > 0 {
+	if hasPendingSwap {
 		return false, nil
 	}
 
@@ -54,22 +64,58 @@ func (d *DepositService) CreditUncreditedTreasuryUSDC(ctx context.Context, group
 		return false, fmt.Errorf("treasury usdc balance: %w", err)
 	}
 
-	totalSharesMicro, err := d.store.SumShareUnitsByGroup(ctx, groupID)
+	ledgerUSDC, err := d.store.PotLedgerUSDC(ctx, groupID)
 	if err != nil {
 		return false, err
 	}
-
-	surplus := treasuryUSDC - totalSharesMicro
+	if ledgerUSDC < 0 {
+		ledgerUSDC = 0
+	}
+	surplus := treasuryUSDC - ledgerUSDC
 	if surplus <= 0 {
 		return false, nil
 	}
 
-	credits, err := d.surplusCredits(ctx, groupID, surplus, totalSharesMicro)
+	// The valuation caps cash at the ledger, so this is the pot before the surplus counts.
+	valuation, err := valuePot(ctx, d.store, d.pyth, d.symbols, nil, groupID, treasury.SolanaAddress, treasuryUSDC, potMarksLiveOnly)
+	if err != nil {
+		if errors.Is(err, ErrPotMarkUnavailable) {
+			logPotMarkUnavailable(groupID, "treasury_surplus_credit", err)
+			return false, nil
+		}
+		return false, err
+	}
+	if valuation.ShareBaseMicros > 0 && valuation.PotNavMicros <= 0 {
+		slog.Warn("treasury surplus credit deferred: pot with shares outstanding has no value to price against",
+			"group_id", groupID,
+			"surplus_micros", surplus,
+			"share_base_micros", valuation.ShareBaseMicros,
+		)
+		return false, nil
+	}
+
+	minted, err := domain.ShareUnitsMicrosForDeposit(domain.USDCMicros(surplus), valuation.ShareBaseMicros, domain.USDCMicros(valuation.PotNavMicros))
+	if err != nil {
+		// Only a surplus too small to mint a single share unit gets here; it waits for more.
+		slog.Warn("treasury surplus credit deferred: surplus cannot be priced",
+			"group_id", groupID,
+			"surplus_micros", surplus,
+			"err", err,
+		)
+		return false, nil
+	}
+
+	credits, err := d.surplusCredits(ctx, groupID, surplus, minted, valuation.ShareBaseMicros)
 	if err != nil {
 		return false, err
 	}
 	if len(credits) == 0 {
 		return false, nil
+	}
+
+	navAfterCredit, err := navSnapshotValuesFor(valuation.PotNavMicros+surplus, valuation.ShareBaseMicros+minted)
+	if err != nil {
+		return false, err
 	}
 
 	tx, err := d.store.BeginTx(ctx)
@@ -84,15 +130,12 @@ func (d *DepositService) CreditUncreditedTreasuryUSDC(ctx context.Context, group
 	}()
 
 	for userID, credit := range credits {
-		if credit <= 0 {
-			continue
-		}
-		if _, err := d.store.IncrementPositionTx(ctx, tx, userID, groupID, credit, credit); err != nil {
+		if _, err := d.store.IncrementPositionTx(ctx, tx, userID, groupID, credit.shareUnits, credit.usdc); err != nil {
 			return false, err
 		}
 	}
 
-	if err := d.store.WriteNavSnapshotOnDepositConfirmTx(ctx, tx, groupID, treasuryUSDC); err != nil {
+	if err := d.store.WriteNavSnapshotOnDepositConfirmTx(ctx, tx, groupID, navAfterCredit); err != nil {
 		return false, err
 	}
 
@@ -104,21 +147,32 @@ func (d *DepositService) CreditUncreditedTreasuryUSDC(ctx context.Context, group
 	slog.Info("treasury surplus credited",
 		"group_id", groupID,
 		"surplus_micros", surplus,
+		"share_units_minted", minted,
+		"pre_credit_nav_micros", valuation.PotNavMicros,
 		"recipients", len(credits),
 	)
 	return true, nil
 }
 
+// surplusCredit is one holder's part of a credited treasury surplus.
+type surplusCredit struct {
+	shareUnits int64
+	usdc       int64
+}
+
+// surplusCredits splits the surplus USDC and the share units minted for it across holders by
+// share units held, so nobody's share of the pot moves. With no shares outstanding the
+// group creator receives it all.
 func (d *DepositService) surplusCredits(
 	ctx context.Context,
 	groupID string,
-	surplus, totalSharesMicro int64,
-) (map[string]int64, error) {
+	surplus, minted, shareBaseMicro int64,
+) (map[string]surplusCredit, error) {
 	if surplus <= 0 {
 		return nil, nil
 	}
 
-	if totalSharesMicro == 0 {
+	if shareBaseMicro == 0 {
 		group, found, err := d.store.GetGroupByID(ctx, groupID)
 		if err != nil {
 			return nil, err
@@ -126,7 +180,7 @@ func (d *DepositService) surplusCredits(
 		if !found {
 			return nil, fmt.Errorf("group not found")
 		}
-		return map[string]int64{group.CreatorUserID: surplus}, nil
+		return map[string]surplusCredit{group.CreatorUserID: {shareUnits: minted, usdc: surplus}}, nil
 	}
 
 	positions, err := d.store.ListPositionsByGroup(ctx, groupID)
@@ -134,35 +188,52 @@ func (d *DepositService) surplusCredits(
 		return nil, err
 	}
 
-	credits := make(map[string]int64)
-	var allocated int64
+	holders := make([]postgres.PositionRow, 0, len(positions))
+	var heldMicro int64
 	for _, position := range positions {
 		if position.Ghost || position.ShareUnits <= 0 {
 			continue
 		}
-		credit, err := domain.MulDivFloor(surplus, position.ShareUnits, totalSharesMicro)
+		holders = append(holders, position)
+		heldMicro += position.ShareUnits
+	}
+	if len(holders) == 0 {
+		// Every outstanding unit belongs to an in-flight redeem job; wait for it to settle.
+		return nil, nil
+	}
+
+	credits := make(map[string]surplusCredit, len(holders))
+	var allocatedUnits, allocatedUSDC int64
+	firstCredited := ""
+	for _, position := range holders {
+		units, err := domain.MulDivFloor(minted, position.ShareUnits, heldMicro)
+		if err != nil {
+			return nil, fmt.Errorf("surplus share credit: %w", err)
+		}
+		usdc, err := domain.MulDivFloor(surplus, position.ShareUnits, heldMicro)
 		if err != nil {
 			return nil, fmt.Errorf("surplus credit: %w", err)
 		}
-		if credit <= 0 {
+		if units <= 0 || usdc <= 0 {
+			// A holder too small to receive a whole micro of either leaves it to the remainder.
 			continue
 		}
-		credits[position.UserID] = credit
-		allocated += credit
-	}
-
-	remainder := surplus - allocated
-	if remainder > 0 {
-		for _, position := range positions {
-			if !position.Ghost && position.ShareUnits > 0 {
-				credits[position.UserID] += remainder
-				break
-			}
+		credits[position.UserID] = surplusCredit{shareUnits: units, usdc: usdc}
+		allocatedUnits += units
+		allocatedUSDC += usdc
+		if firstCredited == "" {
+			firstCredited = position.UserID
 		}
 	}
-
-	if len(credits) == 0 {
-		return nil, fmt.Errorf("no share holders to credit treasury surplus")
+	if firstCredited == "" {
+		return nil, nil
 	}
+
+	// Flooring leaves a few micros unallocated; the first holder takes them so the ledger
+	// matches the treasury exactly.
+	first := credits[firstCredited]
+	first.shareUnits += minted - allocatedUnits
+	first.usdc += surplus - allocatedUSDC
+	credits[firstCredited] = first
 	return credits, nil
 }

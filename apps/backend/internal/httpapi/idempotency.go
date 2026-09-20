@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -42,7 +41,9 @@ const (
 )
 
 // idempotentPathSuffixes are the user-initiated POST routes that move or commit USDC.
-// Agent intents authenticate with an agent key and dedupe on their own intent id.
+// Agent intents authenticate with an agent key and are not covered: the intent id is minted
+// server-side, so nothing dedupes a resent intent. A bot must never resend one after a
+// timeout or 5xx (docs/agent-trading.md).
 var idempotentPathSuffixes = []string{
 	"/fund",
 	"/withdraw-to-balance",
@@ -137,9 +138,8 @@ func (i *Idempotency) Middleware() Middleware {
 
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
-				var tooLarge *http.MaxBytesError
-				if errors.As(err, &tooLarge) {
-					writeJSONError(ctx, w, http.StatusRequestEntityTooLarge, "request body too large")
+				if isBodyTooLarge(err) {
+					writeJSONError(ctx, w, http.StatusRequestEntityTooLarge, bodyTooLargeMessage)
 					return
 				}
 				writeJSONError(ctx, w, http.StatusBadRequest, "invalid request body")

@@ -130,14 +130,14 @@ func (p *RedeemRecoveryPoller) tick(ctx context.Context) {
 		case errors.Is(err, app.ErrRedeemPayoutUnverified):
 			// Nothing automatic is safe here; keep saying so until a person resolves it.
 			p.recordAttempt(job.ID, attempt, now)
-			slog.Error("redeem job wedged in paying: payout unverified, share units burnt, needs manual review", attrs...)
+			slog.Error("redeem job wedged in paying: no payout signature on record, share units burnt, needs manual review", attrs...)
 			telemetry.MoneyEvent(telemetry.EventRedeemRescue, "wedged")
 			telemetry.Alert(ctx, telemetry.AlertEvent{
 				Kind:     "redeem_wedged",
 				Key:      "redeem_wedged:" + job.ID,
 				Severity: telemetry.SeverityCritical,
 				Title:    "Cash out wedged: payout unverified, needs manual review",
-				Detail:   "Share units are burnt but the USDC payout could not be verified on chain. Nothing automatic is safe.",
+				Detail:   "Share units are burnt and the job has no payout signature on record, so the payout cannot be verified on chain. Nothing automatic is safe.",
 				Fields: map[string]string{
 					"job_id":     job.ID,
 					"group_id":   job.GroupID,
@@ -152,6 +152,8 @@ func (p *RedeemRecoveryPoller) tick(ctx context.Context) {
 			telemetry.MoneyEvent(telemetry.EventRedeemRescue, telemetry.OutcomeError)
 		case outcome == app.RedeemRecoveryBusy:
 			slog.Info("redeem recovery skipped", append(attrs, "reason", "member redeem lock held")...)
+		case outcome == app.RedeemRecoveryPending:
+			slog.Info("redeem recovery skipped", append(attrs, "reason", "payout not confirmed yet")...)
 		default:
 			p.clearAttempts(job.ID)
 			slog.Warn("redeem recovery resolved job", append(attrs, "outcome", string(outcome))...)

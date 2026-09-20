@@ -12,7 +12,7 @@ import (
 // ErrTransactionNotRetryable means the transaction is not a failed buy/sell swap.
 var ErrTransactionNotRetryable = errors.New("transaction not retryable")
 
-// ErrTransactionNotFound means no transaction exists for the id.
+// ErrTransactionNotFound means no transaction exists for the id, or the caller may not see it.
 var ErrTransactionNotFound = errors.New("transaction not found")
 
 // RetryFailedSwapRequest retries a failed treasury buy or sell.
@@ -45,6 +45,15 @@ func (s *SwapService) RetryFailedSwap(ctx context.Context, req RetryFailedSwapRe
 	}
 	if err := rejectFakerGroup(ctx, s.store, tx.GroupID); err != nil {
 		return RetryFailedSwapResult{}, err
+	}
+	// Only a member of the transaction's club may retry it. A non-member gets the same answer
+	// as an unknown id, so transaction ids cannot be probed across clubs.
+	member, err := s.store.IsGroupMember(ctx, tx.GroupID, req.UserID)
+	if err != nil {
+		return RetryFailedSwapResult{}, err
+	}
+	if !member {
+		return RetryFailedSwapResult{}, ErrTransactionNotFound
 	}
 	if tx.Status != postgres.TransactionStatusFailed {
 		return RetryFailedSwapResult{}, ErrTransactionNotRetryable

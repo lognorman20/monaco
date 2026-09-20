@@ -191,6 +191,7 @@ func TestGET_home_authenticated_returnsFundedGroupAndPeopleRows(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit position: %v", err)
 	}
+	privy.SetTreasuryUSDCBalance(privyClient, created.TreasuryAddress, 100_000_000)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/home", nil)
 	req.Header.Set("Authorization", "Bearer "+string(token))

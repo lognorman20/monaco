@@ -333,11 +333,7 @@ func (h *HomeService) computeGroupPotNavAndShares(ctx context.Context, groupID s
 		return 0, 0, err
 	}
 
-	totalSharesMicro, err := h.store.SumShareUnitsByGroup(ctx, groupID)
-	if err != nil {
-		return 0, 0, err
-	}
-	return potView.PotNavMicros, totalSharesMicro, nil
+	return potView.PotNavMicros, potView.ShareBaseMicros, nil
 }
 
 func (h *HomeService) groupTreasuryUSDC(ctx context.Context, groupID string, netUsdcIn int64) (int64, error) {
