@@ -171,8 +171,14 @@ final class LiveProposeService: ProposeService {
 /// Maps propose errors to one sentence a member can act on. Never shows status codes or
 /// `localizedDescription`.
 enum ProposeErrorCopy {
-    static func quote(_ error: Error) -> String {
-        isOffline(error) ? ProposeFlowCopy.noConnection : ProposeFlowCopy.priceCheckFailed
+    /// The price check, which runs before anything is sent. It shares the refusal mapping with
+    /// `propose`, because the quote endpoint refuses the same things in the same words: a sell
+    /// over the holding is answered with "amount exceeds treasury holding" there too, and Review
+    /// is reachable while the member is over it, so that refusal has to say what happened instead
+    /// of "couldn't check the price" — advice that would fail identically on every retry.
+    static func quote(_ error: Error, isSell: Bool = false) -> String {
+        if isOffline(error) { return ProposeFlowCopy.noConnection }
+        return refusal(error, isSell: isSell) ?? ProposeFlowCopy.priceCheckFailed
     }
 
     /// One mapping for every propose refusal — buy, sell and bot. The server answers each refusal
@@ -184,15 +190,27 @@ enum ProposeErrorCopy {
     /// check and the send.
     static func propose(_ error: Error, stockName: String? = nil, isSell: Bool = false) -> String {
         if isOffline(error) { return ProposeFlowCopy.noConnection }
-        guard case MonacoAPIError.apiError(_, let message) = error else { return ProposeFlowCopy.sendFailed }
+        return refusal(error, stockName: stockName, isSell: isSell) ?? ProposeFlowCopy.sendFailed
+    }
+
+    /// What the server's refusal means, or nil when the app cannot tell the member anything more
+    /// useful than the caller's own fallback.
+    private static func refusal(_ error: Error, stockName: String? = nil, isSell: Bool = false) -> String? {
+        guard case MonacoAPIError.apiError(_, let message) = error else { return nil }
         switch message {
         case "amount exceeds treasury holding": return ProposeFlowCopy.sellNoLongerAvailable
         case "amount exceeds treasury total available": return isSell ? ProposeFlowCopy.overHoldings : ProposeFlowCopy.overPot
         case "thesis exceeds maximum length": return ProposeFlowCopy.reasonTooLong
         case "quote not routable":
-            if isSell { return ProposeFlowCopy.sellTooSmall }
-            return stockName.map(ProposeFlowCopy.cantBuyStock) ?? ProposeFlowCopy.sendFailed
-        default: return ProposeFlowCopy.sendFailed
+            // The backend collapses "no route", "below the minimum size" and "not routable" into
+            // this one sentence, with nothing on the response to tell them apart. On a buy the
+            // member picked the stock and never saw a quote, so naming the stock holds either way.
+            // On a sell the amount was quoted routable seconds earlier, so the route went away —
+            // "try a bigger amount" would send the member back to a trade that still cannot route.
+            // A `code` on the error body would let us say which (see the PR's "Needs from other
+            // areas"); until then a sell gets the caller's neutral fallback.
+            return isSell ? nil : stockName.map(ProposeFlowCopy.cantBuyStock)
+        default: return nil
         }
     }
 

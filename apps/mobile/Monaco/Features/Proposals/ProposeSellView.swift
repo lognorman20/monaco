@@ -285,8 +285,10 @@ struct ProposeSellAmountView: View {
             )
         } catch {
             if error.isRequestCancellation { return }
-            // Nothing has been sent yet, so this is a failed price check, not a failed proposal.
-            errorMessage = ProposeErrorCopy.quote(error)
+            // Nothing has been sent yet, so this is a failed price check, not a failed proposal —
+            // but Review is reachable while the member is over the holding, and the quote endpoint
+            // refuses that in the same words the propose endpoint does, so it still gets named.
+            errorMessage = ProposeErrorCopy.quote(error, isSell: true)
             Haptics.warning()
         }
     }
