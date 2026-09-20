@@ -15,6 +15,8 @@ struct ProfileTabView: View {
 
     @State private var toast: MonacoToast?
     @State private var showEditProfile = false
+    @State private var confirmSignOut = false
+    @State private var isSigningOut = false
 
     private var displayName: String {
         let name = session.me?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -55,9 +57,14 @@ struct ProfileTabView: View {
         .sheet(isPresented: $showEditProfile) {
             NavigationStack {
                 Form {
-                    ProfileNameEditor(auth: auth, initialDraft: initialNameDraft) { toast = $0 }
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
+                    ProfileNameEditor(auth: auth, initialDraft: initialNameDraft) {
+                        // Close first: the toast is an overlay on this screen, so it is
+                        // only readable once the sheet is out of the way.
+                        showEditProfile = false
+                        toast = MonacoToast(message: "Name updated.", isSuccess: true)
+                    }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
                 }
                 .monacoFormScreen()
                 .navigationTitle("Edit profile")
@@ -148,7 +155,10 @@ struct ProfileTabView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, MonacoTheme.Space.m)
-        .accessibilityElement(children: .combine)
+        // `.contain`, not `.combine`: the header holds two buttons (change photo, edit
+        // name). Combining collapsed them into one element that VoiceOver could only
+        // activate one way, and hid both identifiers from UI tests.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("profile-header")
     }
 
@@ -259,13 +269,31 @@ struct ProfileTabView: View {
                 .accessibilityIdentifier("profile-advanced-link")
             }
 
+            // Signing out costs a fresh code by text to get back in, and the button sits
+            // right under the Advanced row at the end of a scroll. Ask first, and keep it
+            // disabled afterwards so a second tap can't start a second logout.
             Button("Sign out") {
-                Task { await auth.logout() }
+                confirmSignOut = true
             }
             .buttonStyle(.monacoDestructive)
             .frame(maxWidth: .infinity)
             .padding(.top, MonacoTheme.Space.s)
+            .disabled(isSigningOut)
             .accessibilityIdentifier("profile-sign-out")
+            .confirmationDialog("Sign out of Monaco?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+                Button("Sign out", role: .destructive) {
+                    guard !isSigningOut else { return }
+                    isSigningOut = true
+                    Task {
+                        await auth.logout()
+                        isSigningOut = false
+                    }
+                }
+                .accessibilityIdentifier("profile-sign-out-confirm")
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Your money stays where it is. You'll need a new code by text to sign back in.")
+            }
         }
     }
 }

@@ -5,12 +5,15 @@ import UIKit
 
 /// Debug-only: renders Profile from canned `AppSessionStore` data so QA can screenshot
 /// each state without Privy or a backend. Launch with
-/// `-MonacoProfileSample <placeholder|photo|validation|cabals|empty|loading|error>`.
+/// `-MonacoProfileSample <placeholder|photo|validation|saveFailure|cabals|empty|loading|error>`.
 /// `cabals` and `empty` open scrolled to the bottom so the cabal list is on screen.
 enum ProfileSampleScenario: String, CaseIterable {
     case placeholder
     case photo
     case validation
+    /// Edit profile open on a valid new name. There is no session here, so tapping Save is
+    /// a rejected save — which is how the failure is meant to be readable inside the sheet.
+    case saveFailure
     case cabals
     case empty
     case loading
@@ -40,12 +43,22 @@ struct ProfileSampleHarness: View {
         NavigationStack {
             ProfileTabView(
                 auth: auth,
-                initialNameDraft: scenario == .validation ? "Logan Norman of the Weekend Investors" : nil,
-                initiallyShowEditProfile: scenario == .validation
+                initialNameDraft: Self.nameDraft(for: scenario),
+                initiallyShowEditProfile: scenario == .validation || scenario == .saveFailure
             )
         }
         .defaultScrollAnchor(scenario == .cabals || scenario == .empty ? .bottom : .top)
         .environment(session)
+    }
+
+    private static func nameDraft(for scenario: ProfileSampleScenario) -> String? {
+        switch scenario {
+        // Over the 32-character limit: the field shows the broken rule and Save stays off.
+        case .validation: return "Logan Norman of the Weekend Investors"
+        // Valid and different from the saved name, so Save is live and can be rejected.
+        case .saveFailure: return "Logan N"
+        default: return nil
+        }
     }
 
     private static func makeSession(for scenario: ProfileSampleScenario) -> AppSessionStore {
