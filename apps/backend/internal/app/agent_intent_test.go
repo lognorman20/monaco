@@ -1,6 +1,7 @@
 package app
 
-// #202 demo coverage: the key is shown to the proposer exactly once, a buy intent within
+// #202 demo coverage: the key is shown to the proposer on the proposal for the reveal window and
+// to cabal members on the agent view until the bot is removed, a buy intent within
 // budget executes end to end through the fake Jupiter/Privy providers, a second intent that
 // would breach the allocation is rejected without touching the swap path, and the
 // pause/resume/revoke lifecycle gates intents the way the operator runbook promises.
@@ -78,7 +79,7 @@ func addAgentAndReveal(t *testing.T, h governanceHarness, groupID, proposerID st
 	return proposal.ID, key
 }
 
-func TestAgentKeyReveal_shownOnceToProposerOnly(t *testing.T) {
+func TestAgentKeyReveal_proposerWindowThenMembersOnly(t *testing.T) {
 	h := integrationGovernanceApp(t)
 	proposer := openTestSession(t, h.ISO, h.Sessions, h.Privy, "key-proposer", "Key Proposer")
 	other := openTestSession(t, h.ISO, h.Sessions, h.Privy, "key-bystander", "Key Bystander")
@@ -152,6 +153,23 @@ func TestAgentKeyReveal_shownOnceToProposerOnly(t *testing.T) {
 	if ok || gone != "" {
 		t.Fatalf("key still readable after purge: ok=%v key=%q", ok, gone)
 	}
+
+	// The proposal reveal closing does not take the key away from the cabal: members still read
+	// it from the agent view, and a non-member never does.
+	memberView, err := h.Governance.GetGroupAgentViewForMember(context.Background(), created.GroupID, proposer.UserID)
+	if err != nil {
+		t.Fatalf("GetGroupAgentViewForMember(member): %v", err)
+	}
+	if memberView == nil || memberView.APIKey != key {
+		t.Fatalf("member agent view = %+v, want key %q", memberView, key)
+	}
+	bystanderView, err := h.Governance.GetGroupAgentViewForMember(context.Background(), created.GroupID, other.UserID)
+	if err != nil {
+		t.Fatalf("GetGroupAgentViewForMember(bystander): %v", err)
+	}
+	if bystanderView != nil && bystanderView.APIKey != "" {
+		t.Fatalf("bystander agent view leaked key %q", bystanderView.APIKey)
+	}
 }
 
 func TestAgentIntent_buyExecutesThenEnforcesBudgetCap(t *testing.T) {
@@ -224,7 +242,7 @@ func TestAgentLifecycle_pauseBlocksIntentsResumeRestoresRevokeInvalidatesKey(t *
 	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 10_000_000)
 	registerAgentBuyFill(t, h.Jupiter, h.XStocks, h.ISO.Suffix(), "AAPLx", 1_000_000)
 
-	_, key := addAgentAndReveal(t, h, created.GroupID, proposer.UserID, 5_000_000)
+	installProposalID, key := addAgentAndReveal(t, h, created.GroupID, proposer.UserID, 5_000_000)
 	intents := NewAgentIntentService(h.Store, h.Swap, h.Symbols)
 
 	// Vote to pause: same key, but every intent now comes back as paused (403-equivalent).
@@ -278,5 +296,31 @@ func TestAgentLifecycle_pauseBlocksIntentsResumeRestoresRevokeInvalidatesKey(t *
 		GroupID: created.GroupID, AgentKey: key, Side: domain.AgentIntentBuy, Symbol: "AAPLx", UsdcMicros: 1_000_000,
 	}); !errors.Is(err, ErrInvalidAgentAPIKey) {
 		t.Fatalf("expected ErrInvalidAgentAPIKey after revoke, got %v", err)
+	}
+
+	// A removed bot leaves no readable plaintext behind: not in group_agents, not in the
+	// still-open proposer reveal, not on the member agent view.
+	var storedKeys int
+	if err := h.DB.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM group_agents WHERE group_id = $1 AND (api_key IS NOT NULL OR api_key_hash IS NOT NULL)`,
+		created.GroupID).Scan(&storedKeys); err != nil {
+		t.Fatalf("count stored agent keys: %v", err)
+	}
+	if storedKeys != 0 {
+		t.Fatalf("revoked agent still has %d stored key(s)", storedKeys)
+	}
+	revealed, ok, err := h.Governance.RevealAgentKeyForProposer(context.Background(), installProposalID, proposer.UserID, proposer.UserID, ProposalPassed)
+	if err != nil {
+		t.Fatalf("RevealAgentKeyForProposer(after revoke): %v", err)
+	}
+	if ok || revealed != "" {
+		t.Fatalf("revoked key still revealed: ok=%v key=%q", ok, revealed)
+	}
+	agentView, err := h.Governance.GetGroupAgentViewForMember(context.Background(), created.GroupID, proposer.UserID)
+	if err != nil {
+		t.Fatalf("GetGroupAgentViewForMember(after revoke): %v", err)
+	}
+	if agentView != nil && agentView.APIKey != "" {
+		t.Fatalf("revoked agent view still carries key %q", agentView.APIKey)
 	}
 }

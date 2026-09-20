@@ -73,7 +73,11 @@ func (p *JupiterCatalogRoutabilityProber) IsRoutable(ctx context.Context, asset 
 		USDCAmount: CatalogRoutabilityProbeMicros,
 	})
 	if err != nil {
-		return false
+		// Catalog probes are advisory. A Jupiter rate limit, timeout, or
+		// below-minimum probe must not make a buyable stock look disabled.
+		// Keep only an explicit no-route response as a definitive negative;
+		// the real buy amount is checked again by StartBuy.
+		return !errors.Is(err, jupiter.ErrNoRoute)
 	}
 	return quote.Routable
 }

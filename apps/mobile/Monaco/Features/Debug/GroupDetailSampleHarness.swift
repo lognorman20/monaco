@@ -166,7 +166,7 @@ enum GroupDetailSampleData {
             LeaderboardRowDTO(rank: 5, userId: "u5", displayName: "Sam Okafor", percentReturn: nil, dollarPnl: "+0.00"),
         ],
         proposals: nil,
-        agent: GroupAgentDTO(id: "a1", status: "active", agentDisplayName: "Scout", allocationUsdcMicros: "100000000")
+        agent: GroupAgentDTO(id: "a1", status: "active", agentDisplayName: "Scout", allocationUsdcMicros: "100000000", apiKey: "scout")
     )
 
     static let emptyView = GroupViewDTO(

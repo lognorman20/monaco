@@ -46,6 +46,16 @@ final class GroupViewDTOTests: XCTestCase {
         XCTAssertEqual(row.tokenAmount, "50000000")
     }
 
+    func testGroupAgentDTO_decodesApiKey() throws {
+        let json = """
+        {"id":"a1","status":"active","agentDisplayName":"Scout","allocationUsdcMicros":"100000000","apiKey":"scout"}
+        """
+
+        let agent = try JSONDecoder().decode(GroupAgentDTO.self, from: Data(json.utf8))
+
+        XCTAssertEqual(agent.apiKey, "scout")
+    }
+
     func testBoardCells_renderServerRankOrder_withoutResortingByDollars() {
         // Arrange
         let members = [

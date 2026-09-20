@@ -60,6 +60,10 @@ struct FundCabalView: View {
                     cabalPicker
                 }
 
+                if let balance {
+                    PlatformBalanceCard(balance: balance)
+                }
+
                 if isLoadingBalance {
                     ProgressView()
                         .tint(MonacoTheme.accent)
@@ -113,6 +117,7 @@ struct FundCabalView: View {
             if selectedGroupId == nil {
                 selectedGroupId = preselectedGroupId ?? joinedCabals.first?.groupId
             }
+            await pollBalanceWhileVisible()
         }
     }
 
@@ -212,17 +217,65 @@ struct FundCabalView: View {
         isSubmitting = true
         defer { isSubmitting = false }
 
+        let fundedAmountLabel = AmountEntryText.display(amountText)
         do {
-            _ = try await apiClient.fundGroup(accessToken: token, groupId: groupId, amount: micros)
+            let fund = try await apiClient.fundGroup(accessToken: token, groupId: groupId, amount: micros)
             Haptics.success()
             let name = selectedCabalName ?? "your cabal"
-            toast = MonacoToast(message: "Added \(AmountEntryText.display(amountText)) to \(name).", isSuccess: true)
+            toast = MonacoToast(message: "Adding \(fundedAmountLabel) to \(name)…", isSuccess: true)
             amountText = ""
             await loadBalance()
             await onFunded()
+            trackFundSweep(depositId: fund.depositId, cabalName: name, amountLabel: fundedAmountLabel)
         } catch {
             if error.isRequestCancellation { return }
             toast = MonacoToast(message: MoneyFlowCopy.fundCabalFailure(FlowErrorInput(error)).summary, isSuccess: false)
+        }
+    }
+
+    private func pollBalanceWhileVisible() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: DepositPolling.balanceInterval)
+            guard !Task.isCancelled else { return }
+            await refreshBalanceIfChanged()
+        }
+    }
+
+    private func refreshBalanceIfChanged() async {
+        guard let token = auth.accessToken else { return }
+        guard let fresh = try? await apiClient.getPlatformBalance(accessToken: token) else { return }
+        let previous = balance?.availableUsdcMicros ?? 0
+        balance = fresh
+        if previous == 0, fresh.availableUsdcMicros > 0 {
+            toast = MonacoToast(message: "USDC arrived. You can fund your cabal now.", isSuccess: true)
+        }
+    }
+
+    private func trackFundSweep(depositId: String, cabalName: String, amountLabel: String) {
+        Task {
+            await pollFundSweep(depositId: depositId, cabalName: cabalName, amountLabel: amountLabel)
+        }
+    }
+
+    private func pollFundSweep(depositId: String, cabalName: String, amountLabel: String) async {
+        guard let token = auth.accessToken else { return }
+        var machine = DepositPollStateMachine()
+        let phase = await machine.pollUntilTerminal {
+            let deposit = try await apiClient.getDeposit(accessToken: token, depositId: depositId)
+            return deposit.status
+        }
+        switch phase {
+        case .credited:
+            toast = MonacoToast(message: "Added \(amountLabel) to \(cabalName).", isSuccess: true)
+            await onFunded()
+        case .failed:
+            toast = MonacoToast(message: "Couldn't add money to the cabal. Try again.", isSuccess: false)
+            await onFunded()
+        case .idle, .awaitingSweep:
+            toast = MonacoToast(
+                message: "Still adding \(amountLabel) to \(cabalName). Check activity for updates.",
+                isSuccess: true
+            )
         }
     }
 }

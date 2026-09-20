@@ -84,17 +84,21 @@ public struct GroupAgentDTO: Codable, Equatable, Sendable {
     public let status: String
     public let agentDisplayName: String
     public let allocationUsdcMicros: String
+    /// Plaintext bot key for cabal members; omitted for spectators and revoked agents.
+    public let apiKey: String?
 
     public init(
         id: String,
         status: String,
         agentDisplayName: String,
-        allocationUsdcMicros: String
+        allocationUsdcMicros: String,
+        apiKey: String? = nil
     ) {
         self.id = id
         self.status = status
         self.agentDisplayName = agentDisplayName
         self.allocationUsdcMicros = allocationUsdcMicros
+        self.apiKey = apiKey
     }
 }
 

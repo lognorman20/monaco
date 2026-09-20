@@ -152,7 +152,6 @@ struct ProposeBuyView: View {
                     ProposeStockRow(stock: stock, isLast: isLast)
                 }
                 .buttonStyle(.monacoRow)
-                .disabled(!stock.isTradable)
                 .accessibilityIdentifier("proposal-asset-\(stock.symbol)")
                 .onAppear {
                     if paginates, isLast, hasMore { Task { await search(reset: false) } }
@@ -183,7 +182,6 @@ struct ProposeBuyView: View {
     // MARK: Actions
 
     private func pick(_ stock: ProposeStock) {
-        guard stock.isTradable else { return }
         Haptics.tap()
         picked = stock
     }
@@ -263,8 +261,8 @@ struct ProposeStockRow: View {
     var body: some View {
         MonacoRow(
             title: stock.name,
-            subtitle: stock.isTradable ? stock.ticker : ProposeFlowCopy.cantBuy,
-            chevron: stock.isTradable,
+            subtitle: stock.ticker,
+            chevron: true,
             isLast: isLast
         ) {
             StockMark(symbol: stock.symbol)
@@ -276,6 +274,5 @@ struct ProposeStockRow: View {
                 }
             }
         }
-        .opacity(stock.isTradable ? 1 : 0.45)
     }
 }

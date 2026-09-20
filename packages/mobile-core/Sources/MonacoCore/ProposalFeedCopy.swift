@@ -277,7 +277,11 @@ public enum ProposeFlowCopy {
     public static let botNamePlaceholder = "Bot name"
     public static let botBudgetHelper = "Budget from the pot"
     public static let botExplainer = "Your cabal votes first. Once it passes, you'll get a key to paste into your bot."
-    public static let botKeyExplainer = "Paste this key into your bot. It stays here for 15 minutes, then it\u{2019}s gone for good."
+    public static let botKeyExplainer = "Paste this key into your bot. It stays here for 15 minutes. After that, anyone in the cabal can copy it from the bot\u{2019}s screen."
+    public static let agentKeyExplainer = "Paste this key into your bot. Anyone in the cabal can copy it here until the bot is removed."
+    public static let agentDetailTitle = "Trading bot"
+    public static let agentKeySection = "Bot key"
+    public static let agentKeyMissing = "No key on file. If this bot was added before keys were saved, remove it and add a new bot."
     public static let copyKey = "Copy key"
     public static let keyCopied = "Key copied"
     public static func lifecycleTitle(kind: String) -> String {
@@ -306,7 +310,7 @@ public enum ProposeFlowCopy {
         proposalSentGeneric, priceCheckFailed, cantBuyStock("Apple"), changeAmount, sendFailed, noConnection,
         sellTitle, holdingsTitle, sellTooSmall, sellNoLongerAvailable,
         sellSummary(amount: "$139", name: "Apple", shares: "0.6 shares"), sellHelper("$278.47"), overHoldings,
-        addBotTitle, botNamePlaceholder, botBudgetHelper, botExplainer, botKeyExplainer, copyKey, keyCopied,
+        addBotTitle, botNamePlaceholder, botBudgetHelper, botExplainer, botKeyExplainer, agentKeyExplainer, agentDetailTitle, agentKeySection, agentKeyMissing, copyKey, keyCopied,
         lifecycleTitle(kind: "pause_agent"), lifecycleTitle(kind: "resume_agent"), lifecycleTitle(kind: "revoke_agent"),
         lifecycleMessage(kind: "pause_agent", botName: "Scout"), lifecycleMessage(kind: "resume_agent", botName: "Scout"),
         lifecycleMessage(kind: "revoke_agent", botName: "Scout"),

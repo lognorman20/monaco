@@ -422,10 +422,11 @@ type groupViewMemberRowResponse struct {
 }
 
 type groupViewAgentResponse struct {
-	ID                   string   `json:"id"`
-	Status               string   `json:"status"`
-	AgentDisplayName     string   `json:"agentDisplayName"`
+	ID                   string `json:"id"`
+	Status               string `json:"status"`
+	AgentDisplayName     string `json:"agentDisplayName"`
 	AllocationUsdcMicros string `json:"allocationUsdcMicros"`
+	APIKey               string `json:"apiKey,omitempty"`
 }
 
 type groupViewResponse struct {
@@ -497,12 +498,16 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 
 	var agentResp *groupViewAgentResponse
 	if h.Governance != nil {
-		if agentView, err := h.Governance.GetGroupAgentView(ctx, groupID); err == nil && agentView != nil {
-			agentResp = &groupViewAgentResponse{
-				ID:                   agentView.ID,
-				Status:               string(agentView.Status),
-				AgentDisplayName:     agentView.AgentDisplayName,
-				AllocationUsdcMicros: strconv.FormatInt(agentView.AllocationUsdcMicros, 10),
+		viewerID, viewerErr := h.Governance.AuthorizeGroupReader(ctx, token, groupID)
+		if viewerErr == nil {
+			if agentView, err := h.Governance.GetGroupAgentViewForMember(ctx, groupID, viewerID); err == nil && agentView != nil {
+				agentResp = &groupViewAgentResponse{
+					ID:                   agentView.ID,
+					Status:               string(agentView.Status),
+					AgentDisplayName:     agentView.AgentDisplayName,
+					AllocationUsdcMicros: strconv.FormatInt(agentView.AllocationUsdcMicros, 10),
+					APIKey:               agentView.APIKey,
+				}
 			}
 		}
 	}

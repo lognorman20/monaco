@@ -4,15 +4,27 @@ import SwiftUI
 /// The cabal's trading bot, when it has one: name, budget, and whether it's trading.
 struct AgentSectionView: View {
     let agent: GroupAgentDTO
+    var onCopiedKey: () -> Void = {}
 
     var body: some View {
-        MonacoGroupedList {
-            MonacoRow(title: agent.agentDisplayName, subtitle: subtitle, isLast: true) {
-                StockMark(systemImage: "cpu")
-            } trailing: {
-                AgentStatusText(status: agent.status)
+        NavigationLink {
+            AgentDetailView(agent: agent, onCopied: onCopiedKey)
+        } label: {
+            MonacoGroupedList {
+                MonacoRow(title: agent.agentDisplayName, subtitle: subtitle, isLast: true) {
+                    StockMark(systemImage: "cpu")
+                } trailing: {
+                    HStack(spacing: MonacoTheme.Space.xs) {
+                        AgentStatusText(status: agent.status)
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(MonacoTheme.tertiaryText)
+                            .accessibilityHidden(true)
+                    }
+                }
             }
         }
+        .buttonStyle(.monacoRow)
         .accessibilityIdentifier("group-agent-card")
     }
 

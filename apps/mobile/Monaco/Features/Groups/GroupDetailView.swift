@@ -55,7 +55,9 @@ struct GroupDetailView: View {
     @State private var refreshGate = RefreshGate()
 
     /// Votes land and swaps settle in seconds; a quiet cabal only needs its balances kept current.
+    /// A deposit on its way into the pot is watched at the sweep cadence so the pot updates as it lands.
     private var pollInterval: Duration {
+        if activityHasPendingDeposits { return DepositPolling.sweepStatusInterval }
         let swapInFlight = activityItems.contains { $0.status.lowercased() == "pending" }
         return hasOpenVotes || swapInFlight ? LiveRefreshCadence.inPlay : LiveRefreshCadence.resting
     }
@@ -348,6 +350,12 @@ struct GroupDetailView: View {
         }
     }
 
+    private var activityHasPendingDeposits: Bool {
+        activityItems.contains { item in
+            item.kind.lowercased() == "deposit" && DepositStatusNormalizer.isPending(item.status)
+        }
+    }
+
     /// Background re-read of the cabal and its activity: the pot, the member's slice, holdings,
     /// the leaderboard, and swaps settling. Writes only what changed and never a loading or error
     /// state; a throw leaves the screen as it is and lets the loop back off.
@@ -552,7 +560,9 @@ struct GroupDetailContent: View {
                 }
 
                 if let agent = view.agent {
-                    AgentSectionView(agent: agent)
+                    AgentSectionView(agent: agent) {
+                        onToast(MonacoToast(message: ProposeFlowCopy.keyCopied, isSuccess: true))
+                    }
                 }
 
                 MemberBoardSection(members: view.members, currentUserId: currentUserId)

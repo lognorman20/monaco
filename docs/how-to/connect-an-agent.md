@@ -1,7 +1,7 @@
 # Connect an agent to a cabal
 
 A 10-minute demo of #202: a cabal votes in a trading bot with a USDC budget, the app hands
-back a one-time API key, and the bot trades by POSTing intents. No real money moves in this
+back an API key, and the bot trades by POSTing intents. No real money moves in this
 walkthrough — use `--dry-run` or point `--api` at a local/staging backend only.
 
 ## In the app
@@ -10,8 +10,9 @@ walkthrough — use `--dry-run` or point `--api` at a local/staging backend only
 2. Tap **Add a trading bot**.
 3. Enter a bot name and a budget (this is the USDC allocation from the pot), then tap **Send to cabal**.
 4. Once the cabal votes yes, open the passed proposal. The bot's key appears on the
-   proposal, for the proposer only, for 15 minutes after the vote passes. Tap **Copy key**
-   — after the window it is purged and cannot be shown again.
+   proposal, for the proposer only, for 15 minutes after the vote passes. Tap **Copy key**.
+   After the window the proposal no longer shows it; any cabal member can still copy it from
+   the bot's detail screen (tap the bot on the cabal page) until the bot is removed.
 5. Store the key in your bot's secret manager as `MONACO_AGENT_KEY`. Never log it.
 6. To manage the bot later, use the same **Propose** sheet: **Pause the trading bot**,
    **Turn the trading bot back on**, or **Remove the trading bot** — each is a cabal vote.
@@ -92,8 +93,10 @@ against `httptest` servers).
 
 - **A vote, not a form.** Adding a bot is a cabal proposal like any buy or sell — same
   quorum, same "the group decides" model, extended to an autonomous trader.
-- **The key is shown to the proposer only**, in the app, for 15 minutes after the vote
-  passes — then the plaintext is purged. Never emailed; the server keeps only a hash.
+- **The key never leaves the app.** The proposer sees it on the passed proposal for 15
+  minutes; after that, cabal members (and nobody else) can copy it from the bot's detail
+  screen. Never emailed. Bots authenticate against a SHA-256 hash; the server also keeps the
+  plaintext so members can retrieve it, and wipes both when the cabal votes the bot out.
 - **The budget is enforced server-side.** The bot can't spend past its allocation; a request
   that would exceed it comes back rejected, not silently capped.
 - **Guessing the key is throttled.** After 10 wrong keys for a cabal (or from one address)

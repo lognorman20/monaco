@@ -8,18 +8,28 @@ struct DepositView: View {
     var joinedCabals: [HomeGroupBoardRowDTO] = []
     var preselectedGroupId: String?
 
+    @Environment(AppSessionStore.self) private var session
+
     private let apiClient = MonacoAPIClient()
 
     @State private var depositAddress: String?
     @State private var errorMessage: String?
     @State private var isLoading = true
+    @State private var lastSeenBalanceMicros: Int64?
     @State private var toast: MonacoToast?
 
     var body: some View {
         Form {
             Section {
-                Text("Send USDC on the Solana network only. It shows up in your account balance in about a minute.")
+                Text("Send USDC on the Solana network only. Your account balance updates within a few seconds after it lands on chain.")
                     .monacoSecondaryCaption()
+            }
+
+            if let balance = session.platformBalance {
+                Section("Account balance") {
+                    MoneyText(micros: balance.availableUsdcMicros, style: .row)
+                        .accessibilityIdentifier("deposit-screen-balance-value")
+                }
             }
 
             Section("Your deposit address") {
@@ -78,6 +88,10 @@ struct DepositView: View {
         .monacoToast($toast)
         .task(id: auth.accessToken) {
             await loadDepositAddress()
+        }
+        .task(id: depositAddress) {
+            guard depositAddress != nil else { return }
+            await pollPlatformBalanceWhileVisible()
         }
     }
 
@@ -146,6 +160,23 @@ struct DepositView: View {
         }
 
         isLoading = false
+    }
+
+    /// Refreshes platform balance while the deposit screen is open so inbound USDC shows quickly.
+    private func pollPlatformBalanceWhileVisible() async {
+        lastSeenBalanceMicros = session.platformBalance?.availableUsdcMicros
+        while !Task.isCancelled {
+            guard let token = auth.accessToken else { return }
+            if let balance = try? await apiClient.getPlatformBalance(accessToken: token) {
+                let previous = lastSeenBalanceMicros
+                session.platformBalance = balance
+                if let previous, balance.availableUsdcMicros > previous {
+                    toast = MonacoToast(message: "USDC arrived in your account balance.", isSuccess: true)
+                }
+                lastSeenBalanceMicros = balance.availableUsdcMicros
+            }
+            try? await Task.sleep(for: DepositPolling.balanceInterval)
+        }
     }
 }
 
