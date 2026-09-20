@@ -169,16 +169,16 @@ public enum GroupChatCopy {
         case GroupChatDraft.Problem.tooLong:
             return "Messages can be up to \(GroupChatDraft.maxCharacters) characters."
         // 429 arrives as its own case with the server's Retry-After, never as httpStatus.
-        case MonacoAPIError.rateLimited(let retryAfterSeconds):
+        case MonacoAPIError.rateLimited(let retryAfterSeconds, _):
             guard let seconds = retryAfterSeconds, seconds > 0 else {
                 return "You're sending messages fast. Wait a moment and try again."
             }
             return "You're sending messages fast. Try again in \(seconds) second\(seconds == 1 ? "" : "s")."
         // 4xx bodies carry the API's own reason; show it when it was written for members.
-        case MonacoAPIError.rejected(let status, let message):
+        case MonacoAPIError.rejected(let status, let message, _):
             if let memberFacing = MoneyFlowCopy.memberFacingMessage(message) { return memberFacing }
             return sendFailure(MonacoAPIError.httpStatus(status))
-        case MonacoAPIError.httpStatus(let code):
+        case MonacoAPIError.httpStatus(let code, _):
             switch code {
             case 401: return "Your session expired. Sign in again to chat."
             case 403: return "Only members of this cabal can chat here."
@@ -236,7 +236,7 @@ public enum GroupChatCopy {
     }
 
     public static func loadFailure(_ error: Error) -> String {
-        if case MonacoAPIError.httpStatus(403) = error {
+        if case MonacoAPIError.httpStatus(403, _) = error {
             return "Only members of this cabal can read the chat."
         }
         return "Couldn't load messages. Pull to try again."

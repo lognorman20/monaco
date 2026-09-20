@@ -247,7 +247,7 @@ final class GroupsTabAPITests: XCTestCase {
         do {
             _ = try await client.searchGroups(query: "weekend", limit: 20, cursor: nil)
             XCTFail("Expected httpStatus(401) to be thrown")
-        } catch let MonacoAPIError.httpStatus(code) {
+        } catch let MonacoAPIError.httpStatus(code, _) {
             XCTAssertEqual(code, 401)
         }
     }

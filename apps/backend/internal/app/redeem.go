@@ -10,6 +10,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -214,6 +215,15 @@ func (r *RedeemService) WithdrawToBalance(ctx context.Context, req WithdrawToBal
 
 // Redeem verifies payout proof, debits share units first, sells slice if needed, and pays USDC.
 func (r *RedeemService) Redeem(ctx context.Context, req RedeemRequest) (RedeemJobView, error) {
+	view, err := r.redeem(ctx, req)
+	if err != nil {
+		// Success is counted where the payout settles, which resumed jobs also reach.
+		telemetry.MoneyEvent(telemetry.EventRedeem, moneyOutcome(err))
+	}
+	return view, err
+}
+
+func (r *RedeemService) redeem(ctx context.Context, req RedeemRequest) (RedeemJobView, error) {
 	if req.ResumeJobID != "" {
 		return r.resumeRedeemJob(ctx, req.ResumeJobID, req.PayoutProof)
 	}
@@ -626,6 +636,7 @@ func (r *RedeemService) payRedeemSlice(ctx context.Context, view RedeemJobView, 
 	view.WithdrawalID = withdrawal.ID
 	view.Position = positionFromRowPostgres(position)
 	logRedeemSettled(view.ID, view.UserID, view.GroupID, withdrawal.ID, view.SliceUsdc)
+	telemetry.MoneyMoved(telemetry.EventRedeem, view.SliceUsdc)
 	return view, nil
 }
 

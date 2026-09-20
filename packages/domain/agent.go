@@ -59,10 +59,10 @@ type AgentIntentRequest struct {
 
 // AgentTreasurySnapshot is treasury state for intent validation.
 type AgentTreasurySnapshot struct {
-	TreasuryUsdcMicros   int64
-	AgentSpentUsdcMicros int64
+	TreasuryUsdcMicros     int64
+	AgentSpentUsdcMicros   int64
 	PendingAgentUsdcMicros int64
-	TokenHoldingsBySymbol map[string]int64
+	TokenHoldingsBySymbol  map[string]int64
 }
 
 // ValidateIntent rejects intents that breach agent status or allocation.
@@ -82,7 +82,10 @@ func ValidateIntent(agent GroupAgent, intent AgentIntentRequest, snap AgentTreas
 		if intent.UsdcMicros <= 0 {
 			return fmt.Errorf("usdc amount must be positive")
 		}
-		available := agent.AllocationUsdcMicros - snap.AgentSpentUsdcMicros - snap.PendingAgentUsdcMicros
+		available, err := agentAvailableUsdcMicros(agent, snap)
+		if err != nil {
+			return err
+		}
 		if intent.UsdcMicros > available {
 			return fmt.Errorf("trade exceeds agent allocation")
 		}
@@ -101,4 +104,24 @@ func ValidateIntent(agent GroupAgent, intent AgentIntentRequest, snap AgentTreas
 		return fmt.Errorf("invalid intent side")
 	}
 	return nil
+}
+
+// agentAvailableUsdcMicros returns allocation − executed − pending, floored at zero.
+// Operands must be non-negative so each subtraction is ordered and cannot wrap:
+// unchecked, 0 − MaxInt64 − MaxInt64 wraps to +2 and would approve a buy.
+func agentAvailableUsdcMicros(agent GroupAgent, snap AgentTreasurySnapshot) (int64, error) {
+	if agent.AllocationUsdcMicros < 0 {
+		return 0, fmt.Errorf("agent allocation must be non-negative")
+	}
+	if snap.AgentSpentUsdcMicros < 0 || snap.PendingAgentUsdcMicros < 0 {
+		return 0, fmt.Errorf("agent spent and pending usdc must be non-negative")
+	}
+	if snap.AgentSpentUsdcMicros >= agent.AllocationUsdcMicros {
+		return 0, nil
+	}
+	remaining := agent.AllocationUsdcMicros - snap.AgentSpentUsdcMicros
+	if snap.PendingAgentUsdcMicros >= remaining {
+		return 0, nil
+	}
+	return remaining - snap.PendingAgentUsdcMicros, nil
 }

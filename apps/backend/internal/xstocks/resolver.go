@@ -9,13 +9,15 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 const (
-	defaultBaseURL  = "https://api.xstocks.fi"
-	solanaNetwork   = "Solana"
-	assetsPath      = "/api/v2/public/assets/"
-	defaultTimeout  = 15 * time.Second
+	defaultBaseURL = "https://api.xstocks.fi"
+	solanaNetwork  = "Solana"
+	assetsPath     = "/api/v2/public/assets/"
+	defaultTimeout = 15 * time.Second
 )
 
 // Resolver resolves an xStock symbol to its Solana mint address.
@@ -33,9 +35,9 @@ type HTTPResolver struct {
 func NewHTTPResolver() *HTTPResolver {
 	return &HTTPResolver{
 		baseURL: defaultBaseURL,
-		httpClient: &http.Client{
+		httpClient: telemetry.InstrumentClient(telemetry.UpstreamXStocks, &http.Client{
 			Timeout: defaultTimeout,
-		},
+		}),
 	}
 }
 
@@ -46,7 +48,7 @@ func NewHTTPResolverWithClient(baseURL string, httpClient *http.Client) *HTTPRes
 	}
 	return &HTTPResolver{
 		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: httpClient,
+		httpClient: telemetry.InstrumentClient(telemetry.UpstreamXStocks, httpClient),
 	}
 }
 

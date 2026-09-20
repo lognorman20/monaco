@@ -12,7 +12,9 @@ struct MonacoApp: App {
     @StateObject private var auth = PrivyAuthService()
 
     init() {
-        // Resolve the API environment before any UI so a misconfigured build fails at launch.
+        APITelemetryRegistry.shared.register(APILogTelemetry())
+        DiagnosticsSubscriber.shared.start()
+        // Resolve the API environment before any request so a misconfigured build fails at launch.
         let api = Config.api
         AppLogger.session.info("API environment: \(api.debugSummary, privacy: .public)")
         MonacoAppearance.configureUIKit()

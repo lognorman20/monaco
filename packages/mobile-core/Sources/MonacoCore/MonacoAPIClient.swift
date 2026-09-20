@@ -9,14 +9,46 @@ public enum LeaveGroupBlockReason: String, Equatable {
     case unknown
 }
 
+/// Failures the API answered with carry the `X-Request-Id` the request was sent under,
+/// so an error state can show a support reference that matches the server logs.
 public enum MonacoAPIError: Error, Equatable {
     case invalidResponse
-    case httpStatus(Int)
+    case httpStatus(Int, requestID: String? = nil)
     case leaveBlocked(LeaveGroupBlockReason)
     /// 4xx with a server `{"error": "..."}` message meant for the user.
-    case rejected(status: Int, message: String)
+    case rejected(status: Int, message: String, requestID: String? = nil)
     /// 429. `retryAfterSeconds` comes from the `Retry-After` header when present.
-    case rateLimited(retryAfterSeconds: Int?)
+    case rateLimited(retryAfterSeconds: Int?, requestID: String? = nil)
+
+    public var requestID: String? {
+        switch self {
+        case .httpStatus(_, let requestID),
+             .rejected(_, _, let requestID),
+             .rateLimited(_, let requestID):
+            return requestID
+        case .invalidResponse, .leaveBlocked:
+            return nil
+        }
+    }
+
+    /// Two errors are equal when they describe the same failure. The request id names
+    /// one attempt, not the failure, so it is left out.
+    public static func == (lhs: MonacoAPIError, rhs: MonacoAPIError) -> Bool {
+        switch (lhs, rhs) {
+        case (.invalidResponse, .invalidResponse):
+            return true
+        case (.httpStatus(let a, _), .httpStatus(let b, _)):
+            return a == b
+        case (.leaveBlocked(let a), .leaveBlocked(let b)):
+            return a == b
+        case (.rejected(let aStatus, let aMessage, _), .rejected(let bStatus, let bMessage, _)):
+            return aStatus == bStatus && aMessage == bMessage
+        case (.rateLimited(let a, _), .rateLimited(let b, _)):
+            return a == b
+        default:
+            return false
+        }
+    }
 }
 
 public typealias AccessTokenProvider = @Sendable () async throws -> String?
@@ -28,14 +60,17 @@ public final class MonacoAPIClient: @unchecked Sendable {
     private let session: MonacoHTTPTransport
     private let accessTokenProvider: AccessTokenProvider?
 
+    /// - Parameter telemetry: receives one event per request; defaults to whatever is
+    ///   registered in `APITelemetryRegistry.shared`.
     public convenience init(
         baseURL: URL = MonacoConfig.apiBaseURL,
         session: URLSession = .shared,
-        accessTokenProvider: AccessTokenProvider? = nil
+        accessTokenProvider: AccessTokenProvider? = nil,
+        telemetry: APITelemetry? = nil
     ) {
         self.init(
             baseURL: baseURL,
-            transport: MonacoHTTPTransport(session: session),
+            transport: MonacoHTTPTransport(session: session, telemetry: telemetry),
             accessTokenProvider: accessTokenProvider
         )
     }
@@ -56,14 +91,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(PlatformBalanceDTO.self, from: data)
+        let response = try await send(request, route: "/v1/me/balance")
+        return try JSONDecoder().decode(PlatformBalanceDTO.self, from: response.data)
     }
 
     public func fundGroup(groupId: String, amount: Int64) async throws -> FundGroupResponseDTO {
@@ -74,14 +103,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = try JSONEncoder().encode(FundGroupRequestDTO(amount: amount))
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(FundGroupResponseDTO.self, from: data)
+        let response = try await send(request, route: "/v1/groups/{id}/fund")
+        return try JSONDecoder().decode(FundGroupResponseDTO.self, from: response.data)
     }
 
     public func createPlatformWithdrawal(
@@ -97,14 +120,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
             CreatePlatformWithdrawalRequestDTO(amount: amount, toAddress: toAddress)
         )
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(PlatformWithdrawalResponseDTO.self, from: data)
+        let response = try await send(request, route: "/v1/me/withdrawals")
+        return try JSONDecoder().decode(PlatformWithdrawalResponseDTO.self, from: response.data)
     }
 
     public func me() async throws -> MeDTO {
@@ -113,14 +130,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(MeDTO.self, from: data)
+        let response = try await send(request, route: "/v1/me")
+        return try JSONDecoder().decode(MeDTO.self, from: response.data)
     }
 
     /// `PATCH /v1/me` — set the signed-in user's display name.
@@ -132,9 +143,9 @@ public final class MonacoAPIClient: @unchecked Sendable {
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = try JSONEncoder().encode(UpdateProfileRequestDTO(displayName: displayName))
 
-        let (data, response) = try await session.data(for: request)
-        try Self.requireOK(response, data: data)
-        return try JSONDecoder().decode(MeDTO.self, from: data)
+        let response = try await session.send(request, route: "/v1/me")
+        try Self.requireOK(response)
+        return try JSONDecoder().decode(MeDTO.self, from: response.data)
     }
 
     /// `POST /v1/me/profile-photo` — multipart field `photo`; jpeg, png, or webp up to 2MB.
@@ -147,27 +158,45 @@ public final class MonacoAPIClient: @unchecked Sendable {
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = ProfilePhotoMultipart.body(imageData: imageData, mimeType: mimeType, boundary: boundary)
 
-        let (data, response) = try await session.data(for: request)
-        try Self.requireOK(response, data: data)
-        return try JSONDecoder().decode(MeDTO.self, from: data)
+        let response = try await session.send(request, route: "/v1/me/profile-photo")
+        try Self.requireOK(response)
+        return try JSONDecoder().decode(MeDTO.self, from: response.data)
     }
 
     /// Maps non-200 responses to `MonacoAPIError`, keeping server copy for 4xx.
-    static func requireOK(_ response: URLResponse, data: Data) throws {
-        guard let http = response as? HTTPURLResponse else {
+    static func requireOK(_ response: MonacoHTTPResponse) throws {
+        guard let http = response.response as? HTTPURLResponse else {
             throw MonacoAPIError.invalidResponse
         }
         guard http.statusCode != 200 else { return }
+        let requestID = response.requestID
         if http.statusCode == 429 {
             let retryAfter = http.value(forHTTPHeaderField: "Retry-After").flatMap { Int($0) }
-            throw MonacoAPIError.rateLimited(retryAfterSeconds: retryAfter)
+            throw MonacoAPIError.rateLimited(retryAfterSeconds: retryAfter, requestID: requestID)
         }
         if (400..<500).contains(http.statusCode), http.statusCode != 401,
-           let body = try? JSONDecoder().decode(APIErrorBody.self, from: data),
+           let body = try? JSONDecoder().decode(APIErrorBody.self, from: response.data),
            !body.error.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw MonacoAPIError.rejected(status: http.statusCode, message: body.error)
+            throw MonacoAPIError.rejected(status: http.statusCode, message: body.error, requestID: requestID)
         }
-        throw MonacoAPIError.httpStatus(http.statusCode)
+        throw MonacoAPIError.httpStatus(http.statusCode, requestID: requestID)
+    }
+
+    /// Sends `request` under its route template and returns the response when the status
+    /// is in `accepting`. Any other status throws `.httpStatus` carrying the request id.
+    private func send(
+        _ request: URLRequest,
+        route: String,
+        accepting: Set<Int> = [200]
+    ) async throws -> MonacoHTTPResponse {
+        let response = try await session.send(request, route: route)
+        guard let status = response.statusCode else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard accepting.contains(status) else {
+            throw MonacoAPIError.httpStatus(status, requestID: response.requestID)
+        }
+        return response
     }
 
     private struct APIErrorBody: Decodable {
@@ -180,14 +209,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(HomeViewDTO.self, from: data)
+        let response = try await send(request, route: "/v1/home")
+        return try JSONDecoder().decode(HomeViewDTO.self, from: response.data)
     }
 
     public func getHomeDashboard(leaderboardRange: HomeLeaderboardRange = .all) async throws -> HomeDashboardDTO {
@@ -205,14 +228,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try monacoISO8601JSONDecoder().decode(HomeDashboardDTO.self, from: data)
+        let response = try await send(request, route: "/v1/home/dashboard")
+        return try monacoISO8601JSONDecoder().decode(HomeDashboardDTO.self, from: response.data)
     }
 
     public func getHomePnLSeries(range: HomeLeaderboardRange = .oneHour) async throws -> HomePnLSeriesDTO {
@@ -230,14 +247,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try monacoISO8601JSONDecoder().decode(HomePnLSeriesDTO.self, from: data)
+        let response = try await send(request, route: "/v1/home/pnl-series")
+        return try monacoISO8601JSONDecoder().decode(HomePnLSeriesDTO.self, from: response.data)
     }
 
     public func getHomeMissedProposals() async throws -> HomeMissedProposalsDTO {
@@ -246,14 +257,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try monacoISO8601JSONDecoder().decode(HomeMissedProposalsDTO.self, from: data)
+        let response = try await send(request, route: "/v1/home/missed-proposals")
+        return try monacoISO8601JSONDecoder().decode(HomeMissedProposalsDTO.self, from: response.data)
     }
 
     public func searchAssets(
@@ -279,14 +284,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(SearchAssetsResponseDTO.self, from: data)
+        let response = try await send(request, route: "/v1/groups/{id}/assets")
+        return try JSONDecoder().decode(SearchAssetsResponseDTO.self, from: response.data)
     }
 
     public func listMarketAssets(
@@ -311,14 +310,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(ListMarketAssetsResponseDTO.self, from: data)
+        let response = try await send(request, route: "/v1/assets")
+        return try JSONDecoder().decode(ListMarketAssetsResponseDTO.self, from: response.data)
     }
 
     public func getPopularAssets(limit: Int = 10) async throws -> PopularAssetsResponseDTO {
@@ -337,14 +330,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(PopularAssetsResponseDTO.self, from: data)
+        let response = try await send(request, route: "/v1/assets/popular")
+        return try JSONDecoder().decode(PopularAssetsResponseDTO.self, from: response.data)
     }
 
     public func getMarketAsset(symbol: String) async throws -> AssetDetailDTO {
@@ -353,14 +340,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(AssetDetailDTO.self, from: data)
+        let response = try await send(request, route: "/v1/assets/{symbol}")
+        return try JSONDecoder().decode(AssetDetailDTO.self, from: response.data)
     }
 
     public func getMarketAssetChart(
@@ -382,14 +363,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(AssetChartDTO.self, from: data)
+        let response = try await send(request, route: "/v1/assets/{symbol}/chart")
+        return try JSONDecoder().decode(AssetChartDTO.self, from: response.data)
     }
 
     public func postQuote(
@@ -408,14 +383,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
             QuoteRequestDTO(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount)
         )
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(BuyQuoteDTO.self, from: data)
+        let response = try await send(request, route: "/v1/groups/{id}/quotes")
+        return try JSONDecoder().decode(BuyQuoteDTO.self, from: response.data)
     }
 
     public func createProposal(
@@ -435,14 +404,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
             ProposalRequestDTO(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount, thesis: thesis)
         )
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(CreateProposalResponseDTO.self, from: data)
+        let response = try await send(request, route: "/v1/groups/{id}/proposals")
+        return try JSONDecoder().decode(CreateProposalResponseDTO.self, from: response.data)
     }
 
     public func castVote(proposalId: String, choice: String) async throws {
@@ -453,13 +416,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = try JSONEncoder().encode(VoteRequestDTO(choice: choice))
 
-        let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 || http.statusCode == 204 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
+        _ = try await send(request, route: "/v1/proposals/{id}/votes", accepting: [200, 204])
     }
 
     public func listGroupProposals(groupId: String, tab: ProposalFeedTab) async throws -> ProposalListResponseDTO {
@@ -476,14 +433,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(ProposalListResponseDTO.self, from: data)
+        let response = try await send(request, route: "/v1/groups/{id}/proposals")
+        return try JSONDecoder().decode(ProposalListResponseDTO.self, from: response.data)
     }
 
     public func getProposalDetail(proposalId: String) async throws -> ProposalDTO {
@@ -492,14 +443,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(ProposalDTO.self, from: data)
+        let response = try await send(request, route: "/v1/proposals/{id}")
+        return try JSONDecoder().decode(ProposalDTO.self, from: response.data)
     }
 
     public func listProposalComments(proposalId: String) async throws -> ProposalCommentsResponseDTO {
@@ -508,14 +453,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(ProposalCommentsResponseDTO.self, from: data)
+        let response = try await send(request, route: "/v1/proposals/{id}/comments")
+        return try JSONDecoder().decode(ProposalCommentsResponseDTO.self, from: response.data)
     }
 
     /// Posts a top-level comment, or a reply when `parentId` is set. Server trims and validates the body.
@@ -527,14 +466,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = try JSONEncoder().encode(CommentRequestDTO(body: body, parentId: parentId))
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 201 || http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(ProposalCommentDTO.self, from: data)
+        let response = try await send(request, route: "/v1/proposals/{id}/comments", accepting: [200, 201])
+        return try JSONDecoder().decode(ProposalCommentDTO.self, from: response.data)
     }
 
     public func leaveGroup(groupId: String, withdrawStake: Bool = false) async throws {
@@ -544,12 +477,9 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = try JSONEncoder().encode(LeaveGroupRequestDTO(withdrawStake: withdrawStake))
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
-        switch http.statusCode {
-        case 204: return
-        case 409: throw MonacoAPIError.leaveBlocked(parseLeaveConflict(from: data))
-        default: throw MonacoAPIError.httpStatus(http.statusCode)
+        let response = try await send(request, route: "/v1/groups/{id}/leave", accepting: [204, 409])
+        if response.statusCode == 409 {
+            throw MonacoAPIError.leaveBlocked(parseLeaveConflict(from: response.data))
         }
     }
 
@@ -560,10 +490,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = try JSONEncoder().encode(WithdrawToBalanceRequestDTO(shareAmountMicros: shareAmountMicros))
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw MonacoAPIError.invalidResponse }
-        guard http.statusCode == 200 else { throw MonacoAPIError.httpStatus(http.statusCode) }
-        return try JSONDecoder().decode(WithdrawToBalanceJobDTO.self, from: data)
+        let response = try await send(request, route: "/v1/groups/{id}/withdraw-to-balance")
+        return try JSONDecoder().decode(WithdrawToBalanceJobDTO.self, from: response.data)
     }
 
     public func getGroupView(groupId: String) async throws -> GroupViewDTO {
@@ -572,14 +500,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(GroupViewDTO.self, from: data)
+        let response = try await send(request, route: "/v1/groups/{id}/view")
+        return try JSONDecoder().decode(GroupViewDTO.self, from: response.data)
     }
 
     // MARK: Groups tab (#148)
@@ -595,13 +517,14 @@ public final class MonacoAPIClient: @unchecked Sendable {
         if let cursor {
             items.append(URLQueryItem(name: "cursor", value: cursor))
         }
-        return try await getJSON(path: "v1/groups/search", queryItems: items, as: GroupSearchResponseDTO.self)
+        return try await getJSON(path: "v1/groups/search", route: "/v1/groups/search", queryItems: items, as: GroupSearchResponseDTO.self)
     }
 
     /// Platform-wide cabals ranked by percent return (server caps limit at 50).
     public func groupLeaderboard(limit: Int = 20) async throws -> GroupLeaderboardResponseDTO {
         try await getJSON(
             path: "v1/groups/leaderboard",
+            route: "/v1/groups/leaderboard",
             queryItems: [URLQueryItem(name: "limit", value: String(limit))],
             as: GroupLeaderboardResponseDTO.self
         )
@@ -611,6 +534,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
     public func myGroupsPnLHistory(range: GroupPnLRange = .oneMonth) async throws -> MyGroupsPnLHistoryDTO {
         try await getJSON(
             path: "v1/groups/pnl-history",
+            route: "/v1/groups/pnl-history",
             queryItems: [URLQueryItem(name: "range", value: range.rawValue)],
             as: MyGroupsPnLHistoryDTO.self
         )
@@ -620,12 +544,18 @@ public final class MonacoAPIClient: @unchecked Sendable {
     public func groupPnLHistory(groupId: String, range: GroupPnLRange = .oneMonth) async throws -> GroupPnLSeriesDTO {
         try await getJSON(
             path: "v1/groups/\(groupId)/pnl-history",
+            route: "/v1/groups/{id}/pnl-history",
             queryItems: [URLQueryItem(name: "range", value: range.rawValue)],
             as: GroupPnLSeriesDTO.self
         )
     }
 
-    private func getJSON<T: Decodable>(path: String, queryItems: [URLQueryItem], as type: T.Type) async throws -> T {
+    private func getJSON<T: Decodable>(
+        path: String,
+        route: String,
+        queryItems: [URLQueryItem],
+        as type: T.Type
+    ) async throws -> T {
         var components = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)!
         components.queryItems = queryItems
         guard let url = components.url else {
@@ -635,14 +565,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try monacoISO8601JSONDecoder().decode(T.self, from: data)
+        let response = try await send(request, route: route)
+        return try monacoISO8601JSONDecoder().decode(T.self, from: response.data)
     }
 
     public func postRedeem(
@@ -664,14 +588,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
             )
         )
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(RedeemJobDTO.self, from: data)
+        let response = try await send(request, route: "/v1/groups/{id}/redeems")
+        return try JSONDecoder().decode(RedeemJobDTO.self, from: response.data)
     }
 
     public func devBuy(groupId: String, symbol: String, usdc: Int64) async throws -> DevBuyResponseDTO {
@@ -682,14 +600,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = try JSONEncoder().encode(DevBuyRequestDTO(symbol: symbol, usdc: usdc))
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(DevBuyResponseDTO.self, from: data)
+        let response = try await send(request, route: "/v1/dev/groups/{id}/buy")
+        return try JSONDecoder().decode(DevBuyResponseDTO.self, from: response.data)
     }
 
     private struct QuoteRequestDTO: Encodable {
@@ -776,14 +688,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(GroupMessagesPageDTO.self, from: data)
+        let response = try await send(request, route: "/v1/groups/{id}/messages")
+        return try JSONDecoder().decode(GroupMessagesPageDTO.self, from: response.data)
     }
 
     /// `POST /v1/groups/{id}/messages` — returns the stored message (201).
@@ -795,14 +701,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = try JSONEncoder().encode(GroupMessageRequestDTO(body: body))
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 201 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
-        return try JSONDecoder().decode(GroupMessageDTO.self, from: data)
+        let response = try await send(request, route: "/v1/groups/{id}/messages", accepting: [201])
+        return try JSONDecoder().decode(GroupMessageDTO.self, from: response.data)
     }
 
     private struct GroupMessageRequestDTO: Encodable {

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 const (
@@ -77,9 +79,9 @@ type HTTPClient struct {
 func NewHTTPClient() *HTTPClient {
 	return &HTTPClient{
 		baseURL: defaultBaseURL,
-		httpClient: wrapHTTPClientForTests(&http.Client{
+		httpClient: wrapHTTPClientForTests(telemetry.InstrumentClient(telemetry.UpstreamJupiter, &http.Client{
 			Timeout: defaultTimeout,
-		}),
+		})),
 	}
 }
 
@@ -98,7 +100,7 @@ func NewHTTPClientWithBaseURL(baseURL string, httpClient *http.Client) *HTTPClie
 	}
 	return &HTTPClient{
 		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: wrapHTTPClientForTests(httpClient),
+		httpClient: wrapHTTPClientForTests(telemetry.InstrumentClient(telemetry.UpstreamJupiter, httpClient)),
 	}
 }
 
