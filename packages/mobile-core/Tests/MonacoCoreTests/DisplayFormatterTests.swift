@@ -122,9 +122,11 @@ final class DisplayFormatterTests: XCTestCase {
 
     func testPercentFormatters_rejectValuesThatAreNotNumbers() {
         // A NaN or infinite ratio from the API must read as no figure, not "+nan%".
+        // Both of them: returning the raw string just moved the garbage, so a slice read
+        // "nan" where the return next to it read "—".
         for raw in ["nan", "-nan", "inf", "-infinity"] {
             XCTAssertEqual(PercentReturnFormatter.format(raw), "—", raw)
-            XCTAssertEqual(SlicePercentFormatter.format(raw), raw, raw)
+            XCTAssertEqual(SlicePercentFormatter.format(raw), "—", raw)
         }
     }
 

@@ -40,8 +40,11 @@ public enum DollarPnlFormatter {
 }
 
 public enum SlicePercentFormatter {
+    /// A NaN or infinite ratio reads as no figure, the same as `PercentReturnFormatter`.
+    /// Returning the raw string just moved the garbage: the member read "nan" in place of
+    /// "nan%".
     public static func format(_ raw: String) -> String {
-        guard let value = Double(raw), value.isFinite else { return raw }
+        guard let value = Double(raw), value.isFinite else { return "—" }
         return String(format: "%.1f%%", value * 100)
     }
 }
