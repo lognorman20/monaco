@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -64,6 +66,9 @@ type Intent struct {
 	Symbol      string `json:"symbol"`
 	UsdcMicros  int64  `json:"usdcMicros,omitempty"`
 	TokenAmount int64  `json:"tokenAmount,omitempty"`
+	// IdempotencyKey makes a resend safe: the server answers a key it has already seen
+	// with the first intent's outcome instead of trading again.
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
 }
 
 // IntentResult is the server's answer for an executed intent.
@@ -121,8 +126,24 @@ func (c *MonacoClient) Assets(ctx context.Context, query string, limit int) ([]A
 	return out.Assets, nil
 }
 
-// SubmitIntent posts one trade. It is not idempotent and is never retried here:
-// a request that fails after it was sent may still have executed.
+// NewIdempotencyKey returns 128 random bits as hex, one per trade decision.
+func NewIdempotencyKey() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("idempotency key: %w", err)
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+// UnsettledError is a 2xx answer for an intent that did not execute: the replay of an
+// intent whose swap failed on the server.
+type UnsettledError struct{ Status string }
+
+func (e *UnsettledError) Error() string { return "intent " + e.Status }
+
+// SubmitIntent posts one trade and never retries on its own. A request that fails after
+// it was sent may still have executed, so only resend an intent that carries an
+// IdempotencyKey, and resend it unchanged.
 func (c *MonacoClient) SubmitIntent(ctx context.Context, intent Intent) (IntentResult, error) {
 	body, err := json.Marshal(intent)
 	if err != nil {
@@ -137,6 +158,9 @@ func (c *MonacoClient) SubmitIntent(ctx context.Context, intent Intent) (IntentR
 	var out IntentResult
 	if err := c.do(req, &out); err != nil {
 		return IntentResult{}, err
+	}
+	if out.Status != "executed" {
+		return out, &UnsettledError{Status: out.Status}
 	}
 	return out, nil
 }

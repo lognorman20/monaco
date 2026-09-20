@@ -15,6 +15,10 @@ const (
 	// How long to stand down after a 403 before asking again. Resuming takes a cabal
 	// vote, so there is no point asking faster.
 	pausedWait = time.Minute
+	// An intent with no clear answer (timeout, dropped connection, 5xx, still executing) is
+	// resent under its idempotency key, which the server answers with the first outcome.
+	maxResends = 2
+	resendWait = 5 * time.Second
 )
 
 // Config is everything the run loop needs. The agent key is deliberately not here.
@@ -203,8 +207,14 @@ func (b *Bot) trade(ctx context.Context, s reading) error {
 		return nil
 	}
 
+	key, err := NewIdempotencyKey()
+	if err != nil {
+		return err
+	}
+	intent.IdempotencyKey = key
+
 	b.out.action(b.now(), "→ %s", what)
-	result, err := b.monaco.SubmitIntent(ctx, intent)
+	result, err := b.submit(ctx, intent)
 	now := b.now()
 	var rejected *RejectedError
 	var throttled *ThrottledError
@@ -231,9 +241,9 @@ func (b *Bot) trade(ctx context.Context, s reading) error {
 		b.blocked = now.Add(throttled.RetryAfter)
 		b.out.warn(now, "✗ throttled by Monaco, standing down for %s", short(throttled.RetryAfter))
 	default:
-		// Timeout, Ctrl-C mid-request, dropped connection or 5xx: the swap may have gone through. Assume it
-		// did, so the cap errs on the safe side, and never resend.
-		b.out.warn(now, "✗ no clear answer from Monaco (%v). Not retrying; check the cabal's activity feed.", err)
+		// Still no clear answer after the resends, or Monaco says the swap failed: the trade may
+		// have gone through all the same. Assume it did, so the cap errs on the safe side.
+		b.out.warn(now, "✗ no clear answer from Monaco (%v). Giving up on this one; check the cabal's activity feed.", err)
 		if s.action == Buy {
 			b.budget.Record(intent.UsdcMicros)
 			b.out.warn(now, "  counting %s against the cap anyway (%s of %s)", usd(intent.UsdcMicros), usd(b.budget.Spent()), usd(b.budget.Max()))
@@ -242,6 +252,33 @@ func (b *Bot) trade(ctx context.Context, s reading) error {
 		}
 	}
 	return nil
+}
+
+// submit posts an intent and resends it, unchanged and under the same idempotency key,
+// while the outcome is unclear. Any clear answer, good or bad, ends it.
+func (b *Bot) submit(ctx context.Context, intent Intent) (IntentResult, error) {
+	for resends := 0; ; resends++ {
+		result, err := b.monaco.SubmitIntent(ctx, intent)
+		if !unclearOutcome(err) || resends == maxResends {
+			return result, err
+		}
+		b.out.warn(b.now(), "  no clear answer from Monaco (%v); asking again in %s under the same idempotency key", err, short(resendWait))
+		if b.sleep(ctx, resendWait) != nil {
+			return result, err
+		}
+	}
+}
+
+// unclearOutcome reports whether err leaves open whether the trade happened. Every answer
+// the bot has a reaction for is clear; so is a 2xx that says the intent did not execute.
+func unclearOutcome(err error) bool {
+	if err == nil || errors.Is(err, ErrBadKey) || errors.Is(err, ErrPaused) {
+		return false
+	}
+	var rejected *RejectedError
+	var throttled *ThrottledError
+	var unsettled *UnsettledError
+	return !errors.As(err, &rejected) && !errors.As(err, &throttled) && !errors.As(err, &unsettled)
 }
 
 // settle updates the bot's books after a fill (or a simulated one in dry run).
