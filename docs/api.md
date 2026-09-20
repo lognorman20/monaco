@@ -17,6 +17,16 @@ A blocked `POST /v1/groups/{id}/leave` is `409` with the same shape plus a machi
 
 **Money.** USDC is integer micros (1 USDC = 1,000,000). Timestamps are UTC RFC 3339.
 
+**Market data.** The asset routes carry a `market` object — `session`
+(`pre_market | open | after_hours | closed`), `isOpen`, `afterHours`, `nextSession`,
+`nextTransition`, and `holiday` / `earlyClose` when they apply. It is computed from the
+NYSE/Nasdaq calendar, so it is one fact about the exchange and lives on the envelope
+rather than on each asset. Anything a vendor could not supply is **omitted, never
+substituted**: a stats cell with no source is absent, and a price feed that is missing,
+unentitled or down comes back as `status: "unavailable"` with a `reason`, not as a
+number borrowed from somewhere else. A feed that has stopped publishing is
+`status: "stale"` with the `publishedAt` it froze at.
+
 **Rate limits.** Per process, non-GET only. Over budget is `429` with `Retry-After`.
 "Per user" is the verified Privy user, so refreshing a token does not reset it (agent
 callers: per agent key). A bearer token that fails verification is limited per IP only.
@@ -89,10 +99,10 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/groups/{id}/cost-basis/{symbol}` | Fill-derived cost basis for one symbol. |
 | `POST /v1/groups/{id}/withdraw-to-balance` ● | Cash out a slice of the cabal to the account balance. |
 | `GET /v1/groups/{id}/assets` | Tradable catalog for a cabal. Bearer or agent key. |
-| `GET /v1/assets` | Catalog search with prices. |
-| `GET /v1/assets/popular` | Popular assets with prices. |
-| `GET /v1/assets/{symbol}` | Asset detail. |
-| `GET /v1/assets/{symbol}/chart` | Price history. |
+| `GET /v1/assets` | Catalog search with prices and the market session. |
+| `GET /v1/assets/popular` | Popular assets with prices and the market session. |
+| `GET /v1/assets/{symbol}` | Asset detail: price, liquidity, market session, the stats grid, and the underlying equity against the token (`stockVsToken`). |
+| `GET /v1/assets/{symbol}/chart` | Price history. `range` is `1D`, `1W`, `1M`, `3M`, `1Y` or `ALL` (default `1D`); the response echoes the range, names its `source`, and carries the `previousCloseUsdcMicros` baseline. |
 | `POST /v1/groups/{id}/quotes` | Check that a buy or sell can route, and at what price. |
 | `GET /v1/groups/{id}/proposals` | List proposals. |
 | `POST /v1/groups/{id}/proposals` ● | Open a proposal: buy, sell, or add, pause, resume, revoke an agent. |
