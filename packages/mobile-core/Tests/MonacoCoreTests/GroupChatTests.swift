@@ -364,7 +364,7 @@ final class GroupChatAPITests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? MonacoAPIError, .rejected(status: 403, message: "not a group member"))
             XCTAssertEqual((error as? MonacoAPIError)?.statusCode, 403)
-            XCTAssertEqual(GroupChatCopy.loadFailure(error), "Only members of this cabal can read the chat.")
+            XCTAssertEqual(GroupChatCopy.loadFailure(error), "You're no longer in this cabal, so its chat is closed to you.")
         }
     }
 
