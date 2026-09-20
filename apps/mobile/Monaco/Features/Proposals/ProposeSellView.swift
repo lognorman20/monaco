@@ -285,7 +285,8 @@ struct ProposeSellAmountView: View {
             )
         } catch {
             if error.isRequestCancellation { return }
-            errorMessage = ProposeErrorCopy.sell(error)
+            // Nothing has been sent yet, so this is a failed price check, not a failed proposal.
+            errorMessage = ProposeErrorCopy.quote(error)
             Haptics.warning()
         }
     }
@@ -410,7 +411,7 @@ struct ProposeSellReviewView: View {
             onProposed(id)
         } catch {
             if error.isRequestCancellation { return }
-            errorMessage = ProposeErrorCopy.sell(error)
+            errorMessage = ProposeErrorCopy.propose(error, isSell: true)
             Haptics.warning()
         }
     }
