@@ -95,7 +95,7 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `POST /v1/proposals/{id}/comments` | Add a comment or reply. |
 | `GET /v1/groups/{id}/messages` | A page of cabal chat. |
 | `POST /v1/groups/{id}/messages` | Post a chat message. |
-| `GET /v1/transactions/{id}` | One swap. |
-| `POST /v1/transactions/{id}/retry` ● | Retry a failed swap. |
+| `GET /v1/transactions/{id}` | One swap. `404 transaction not found` for an unknown id and for a club you cannot read alike. |
+| `POST /v1/transactions/{id}/retry` ● | Retry a failed swap. Members only; a non-member gets the same `404` as an unknown id. |
 | `POST /v1/groups/{id}/agents/intents` | An agent submits a trade. Agent key only. See [agent trading](agent-trading.md). |
 | `POST /v1/dev/faker` | Seed demo data. Only with `FAKER_ENABLED`, from loopback, on a local database. |
