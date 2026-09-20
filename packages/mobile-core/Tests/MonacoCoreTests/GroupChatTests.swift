@@ -210,8 +210,41 @@ final class GroupChatCopyTests: XCTestCase {
         XCTAssertEqual(GroupChatCopy.sendFailure(MonacoAPIError.rateLimited(retryAfterSeconds: nil)), "You're sending messages fast. Wait a moment and try again.")
         XCTAssertEqual(GroupChatCopy.sendFailure(MonacoAPIError.rejected(status: 403, message: "not a group member")), "Only members of this cabal can chat here.")
         XCTAssertEqual(GroupChatCopy.sendFailure(URLError(.notConnectedToInternet)), "You're offline. Message not sent.")
-        XCTAssertEqual(GroupChatCopy.sendFailure(URLError(.timedOut)), "Message not sent. Check your connection and try again.")
         XCTAssertEqual(GroupChatCopy.sendFailure(GroupChatDraft.Problem.tooLong(count: 2001)), "Messages can be up to 2000 characters.")
+    }
+
+    /// A failure the device can only have seen after the request went out must not promise the
+    /// message didn't arrive: sending has no idempotency key, so acting on that promise
+    /// double-posts, and chat has no delete.
+    func testSendFailure_doesNotClaimNotSentWhenTheRequestMayHaveLanded() {
+        for code in [URLError.Code.timedOut, .networkConnectionLost, .cannotParseResponse, .badServerResponse] {
+            XCTAssertFalse(
+                FlowErrorInput.neverSentURLErrorCodes.contains(code),
+                "URLError.\(code) interrupts a request already in flight"
+            )
+            XCTAssertEqual(GroupChatCopy.sendFailure(URLError(code)), GroupChatCopy.sendUnconfirmed)
+        }
+        XCTAssertEqual(GroupChatCopy.sendFailure(MonacoAPIError.httpStatus(500)), GroupChatCopy.sendUnconfirmed)
+        XCTAssertEqual(GroupChatCopy.sendFailure(MonacoAPIError.httpStatus(504)), GroupChatCopy.sendUnconfirmed)
+        XCTAssertEqual(GroupChatCopy.sendFailure(MonacoAPIError.invalidResponse), GroupChatCopy.sendUnconfirmed)
+        // A 201 we can't decode is a message the API stored.
+        XCTAssertEqual(GroupChatCopy.sendFailure(DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: ""))), GroupChatCopy.sendUnconfirmed)
+        XCTAssertFalse(GroupChatCopy.sendUnconfirmed.localizedCaseInsensitiveContains("not sent"))
+
+        // Nothing left the device, so these are promises we can keep.
+        XCTAssertEqual(GroupChatCopy.sendFailure(URLError(.notConnectedToInternet)), "You're offline. Message not sent.")
+        for code in FlowErrorInput.neverSentURLErrorCodes where code != .notConnectedToInternet {
+            XCTAssertEqual(
+                GroupChatCopy.sendFailure(URLError(code)),
+                "Message not sent. Check your connection and try again.",
+                "URLError.\(code) is raised before any byte reaches the API"
+            )
+        }
+        // A rejection is the API declining the message, not losing it.
+        XCTAssertEqual(
+            GroupChatCopy.sendFailure(MonacoAPIError.httpStatus(400)),
+            "That message couldn't be sent. Check the text and try again."
+        )
     }
 
     func testTitle_usesCabalNameWithFallback() {
