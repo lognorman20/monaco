@@ -91,6 +91,8 @@ struct ProfileSampleHarness: View {
             myGroups: joined ? [
                 HomeMyGroupRowDTO(groupId: "g1", name: "Weekend investors", equityUsd: "311.50", slicePercent: "0.568", dollarPnl: "+27.40", percentReturn: "0.096"),
                 HomeMyGroupRowDTO(groupId: "g2", name: "Semis or bust", equityUsd: "400.05", slicePercent: "0.173", dollarPnl: "-15.00", percentReturn: "-0.036"),
+                // Flat P&L: the row must still show the $120.00 the member has in it.
+                HomeMyGroupRowDTO(groupId: "g3", name: "Index huggers", equityUsd: "120.00", slicePercent: "1.0", dollarPnl: "+0.00", percentReturn: nil),
             ] : [],
             pnlSeries1H: [],
             leaderboard: HomeLeaderboardSectionDTO(range: "ALL", people: []),
