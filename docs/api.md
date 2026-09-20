@@ -16,6 +16,8 @@ A valid token with no Monaco user yet gets `404 user not found`: call `POST /v1/
 **Money.** USDC is integer micros (1 USDC = 1,000,000). Timestamps are UTC RFC 3339.
 
 **Rate limits.** Per process, non-GET only. Over budget is `429` with `Retry-After`.
+"Per user" is the verified Privy user, so refreshing a token does not reset it (agent
+callers: per agent key). A bearer token that fails verification is limited per IP only.
 
 | Class | Routes | Per user | Per IP |
 | --- | --- | --- | --- |
