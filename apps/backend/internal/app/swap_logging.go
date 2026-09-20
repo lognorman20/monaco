@@ -18,7 +18,7 @@ func logSwapExecuteSubmit(groupID, userID, symbol, txHash, executeRequestID stri
 		"symbol", symbol,
 	}
 	if txHash != "" {
-		args = append(args, "tx_signature", txHash)
+		args = append(args, "tx_hash", txHash)
 	}
 	if executeRequestID != "" {
 		args = append(args, "execute_request_id", executeRequestID)
@@ -36,7 +36,7 @@ func logSwapPollTransition(groupID, userID, symbol, txHash, fromStatus, toStatus
 		"code", code,
 	}
 	if txHash != "" {
-		args = append(args, "tx_signature", txHash)
+		args = append(args, "tx_hash", txHash)
 	}
 	slog.Info("swap poll transition", args...)
 }

@@ -22,7 +22,7 @@ final class RedeemTests: XCTestCase {
         XCTAssertTrue(atOk)
     }
 
-    func testAPIClient_postRedeem_includesPayoutProofPayload() async throws {
+    func testRedeemRequest_hasNoPayoutFields() async throws {
         // Arrange
         let token = TestFixtures.fixtureSessionToken
         var capturedBody: Data?
@@ -50,15 +50,14 @@ final class RedeemTests: XCTestCase {
         // Act
         _ = try await client.postRedeem(
             groupId: "grp-1",
-            shareUnits: "500000",
-            payoutAddress: "PayoutAddr1111111111111111111111111111",
-            payoutProof: "signed-proof-base64"
+            shareUnits: "500000"
         )
 
         // Assert
         let json = try JSONSerialization.jsonObject(with: XCTUnwrap(capturedBody)) as? [String: Any]
-        XCTAssertEqual(json?["payoutProof"] as? String, "signed-proof-base64")
-        XCTAssertEqual(json?["payoutAddress"] as? String, "PayoutAddr1111111111111111111111111111")
+        XCTAssertEqual(json?["shareUnits"] as? String, "500000")
+        XCTAssertNil(json?["payoutProof"])
+        XCTAssertNil(json?["payoutAddress"])
     }
 
     func testAPIClient_afterRedeemSuccess_refreshesGroupAndHome() async throws {
@@ -95,9 +94,7 @@ final class RedeemTests: XCTestCase {
         // Act
         _ = try await client.postRedeem(
             groupId: "g1",
-            shareUnits: "1000000",
-            payoutAddress: "addr",
-            payoutProof: "proof"
+            shareUnits: "1000000"
         )
         if plan.refreshGroup {
             _ = try await client.getGroupView(groupId: "g1")

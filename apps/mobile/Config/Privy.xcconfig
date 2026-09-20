@@ -1,3 +1,0 @@
-// Privy settings for Monaco iOS (M1). Values come from repo-root .env.local via
-// scripts/ensure-ios-privy-config.sh → Config/Privy.local.xcconfig (gitignored).
-#include "Privy.local.xcconfig"

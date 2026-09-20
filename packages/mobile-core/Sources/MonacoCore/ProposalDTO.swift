@@ -126,7 +126,7 @@ public struct ProposalVoteSummaryDTO: Codable, Equatable, Sendable {
 
 public struct ProposalExecutionDTO: Codable, Equatable, Sendable {
     public let state: String
-    public let txSignature: String?
+    public let txHash: String?
     public let transactionId: String?
     public let executeRequestId: String?
     public let executedAt: String?
@@ -134,14 +134,14 @@ public struct ProposalExecutionDTO: Codable, Equatable, Sendable {
 
     public init(
         state: String,
-        txSignature: String? = nil,
+        txHash: String? = nil,
         transactionId: String? = nil,
         executeRequestId: String? = nil,
         executedAt: String? = nil,
         failureReason: String? = nil
     ) {
         self.state = state
-        self.txSignature = txSignature
+        self.txHash = txHash
         self.transactionId = transactionId
         self.executeRequestId = executeRequestId
         self.executedAt = executedAt

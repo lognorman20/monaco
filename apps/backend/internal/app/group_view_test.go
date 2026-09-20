@@ -1,17 +1,16 @@
 package app
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/evm"
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"fmt"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"testing"
 
+	"github.com/monaco/monaco/apps/backend/internal/chainlink"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/chainlink"
-	"github.com/monaco/monaco/apps/backend/internal/marks"
 )
 
 func TestGetGroupView_afterUSDCtoAAPLxSwap_potTotalUnchanged(t *testing.T) {
@@ -57,9 +56,9 @@ func TestGetGroupView_afterUSDCtoAAPLxSwap_potTotalUnchanged(t *testing.T) {
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      testTxHash(h.ISO, "buy-aapl"),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           testTxHash(h.ISO, "buy-aapl"),
 		ExecuteRequestID: testRequestID(h.ISO, "buy-aapl"),
 		CostBasisPrice:   swappedUSDC,
 		CostBasisAmount:  aaplAtomics,
@@ -78,7 +77,7 @@ func TestGetGroupView_afterUSDCtoAAPLxSwap_potTotalUnchanged(t *testing.T) {
 		TreasuryUsdc: remainingUSDC,
 		Holdings: []marks.MarkedHolding{{
 			Symbol:    "AAPLx",
-			Token:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+			Token:     "0xb200000000000000000000c2e324d24d7eecd1fb",
 			Units:     aaplAtomics,
 			MarkUsdc:  2_000_000,
 			CostBasis: swappedUSDC,
@@ -152,9 +151,9 @@ func TestComputeGroupPotView_costBasisFallback_withoutPyth(t *testing.T) {
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      testTxHash(h.ISO, "cb-buy"),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           testTxHash(h.ISO, "cb-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "cb-buy"),
 		CostBasisPrice:   swappedUSDC,
 		CostBasisAmount:  aaplAtomics,
@@ -216,9 +215,9 @@ func TestGetHome_pythError_stillSucceeds(t *testing.T) {
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      testTxHash(h.ISO, "pyth-err-buy"),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           testTxHash(h.ISO, "pyth-err-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "pyth-err-buy"),
 		CostBasisPrice:   swappedUSDC,
 		CostBasisAmount:  aaplAtomics,
@@ -294,9 +293,9 @@ func TestGetGroupView_pythError_stillSucceeds(t *testing.T) {
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      testTxHash(h.ISO, "view-pyth-buy"),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           testTxHash(h.ISO, "view-pyth-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "view-pyth-buy"),
 		CostBasisPrice:   swappedUSDC,
 		CostBasisAmount:  aaplAtomics,
@@ -362,9 +361,9 @@ func TestGetGroupView_perAssetDollarPnL_gainAndLoss(t *testing.T) {
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      testTxHash(h.ISO, "pot-pnl-buy"),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           testTxHash(h.ISO, "pot-pnl-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "pot-pnl-buy"),
 		CostBasisPrice:   swappedUSDC,
 		CostBasisAmount:  aaplAtomics,
@@ -383,7 +382,7 @@ func TestGetGroupView_perAssetDollarPnL_gainAndLoss(t *testing.T) {
 		TreasuryUsdc: remainingUSDC,
 		Holdings: []marks.MarkedHolding{{
 			Symbol:    "AAPLx",
-			Token:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+			Token:     "0xb200000000000000000000c2e324d24d7eecd1fb",
 			Units:     aaplAtomics,
 			MarkUsdc:  2_400_000,
 			CostBasis: swappedUSDC,
@@ -442,9 +441,9 @@ func TestGetGroupView_TSLAxBuy_potRowShowsTickerNotMint(t *testing.T) {
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           swappedUSDC,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb2000000000000000000000000000000000004",
-		TxHash:      testTxHash(h.ISO, "buy-tsla"),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb2000000000000000000000000000000000004",
+		TxHash:           testTxHash(h.ISO, "buy-tsla"),
 		ExecuteRequestID: testRequestID(h.ISO, "buy-tsla"),
 		CostBasisPrice:   swappedUSDC,
 		CostBasisAmount:  tslaAtomics,
@@ -463,7 +462,7 @@ func TestGetGroupView_TSLAxBuy_potRowShowsTickerNotMint(t *testing.T) {
 		TreasuryUsdc: remainingUSDC,
 		Holdings: []marks.MarkedHolding{{
 			Symbol:    "TSLAx",
-			Token:      "0xb2000000000000000000000000000000000004",
+			Token:     "0xb2000000000000000000000000000000000004",
 			Units:     tslaAtomics,
 			MarkUsdc:  3_630_000,
 			CostBasis: swappedUSDC,

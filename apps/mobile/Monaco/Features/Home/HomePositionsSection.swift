@@ -2,7 +2,7 @@ import MonacoCore
 import SwiftUI
 
 struct HomePositionsSection: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let rows: [HomeMyGroupRowDTO]
     /// Pot value per cabal from `/v1/home`, which lands after the dashboard; rows show their
     /// "Pot …" subtitle once it has.

@@ -10,11 +10,11 @@ import (
 
 // Treasury is a row in treasuries.
 type Treasury struct {
-	ID            string
-	GroupID       string
-	WalletID string
-	Address string
-	CreatedAt     time.Time
+	ID        string
+	GroupID   string
+	WalletID  string
+	Address   string
+	CreatedAt time.Time
 }
 
 // InsertTreasury persists a treasury wallet row for a group.

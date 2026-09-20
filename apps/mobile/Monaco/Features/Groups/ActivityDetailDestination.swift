@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Routes activity row to transaction or proposal detail when ids overlap.
 struct ActivityDetailDestination: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let activityItem: GroupActivityItemDTO
     let onRetry: ((GroupActivityItemDTO) -> Void)?
     let isRetrying: Bool

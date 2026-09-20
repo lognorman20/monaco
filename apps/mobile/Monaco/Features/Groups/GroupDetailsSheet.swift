@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// "Cabal details" from the group toolbar: the cabal's account on Solana, its invite code, and Leave.
+/// "Cabal details" from the group toolbar: the cabal account, its invite code, and Leave.
 /// Kept off the main screen on purpose: a raw address is the most "crypto" thing in the app.
 struct GroupDetailsSheet: View {
     let groupId: String
@@ -19,22 +19,12 @@ struct GroupDetailsSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     if let treasuryAddress, !treasuryAddress.isEmpty {
-                        field(title: "Cabal account on Solana") {
+                        field(title: "Cabal account") {
                             MonacoWalletAddressText(address: treasuryAddress, textStyle: .footnote)
                                 .accessibilityIdentifier("group-treasury-address-value")
                             HStack(spacing: 20) {
                                 copyButton(.address, value: treasuryAddress)
                                     .accessibilityIdentifier("group-treasury-copy-button")
-                                if let url = URL(string: "https://solscan.io/account/\(treasuryAddress)") {
-                                    Link(destination: url) {
-                                        Label("View on Solscan", systemImage: "arrow.up.right")
-                                            .labelStyle(TrailingIconLabelStyle())
-                                    }
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(MonacoTheme.ink)
-                                    .frame(minHeight: 44)
-                                    .accessibilityIdentifier("group-treasury-solscan")
-                                }
                             }
                         }
                         .accessibilityIdentifier("group-treasury-address-block")

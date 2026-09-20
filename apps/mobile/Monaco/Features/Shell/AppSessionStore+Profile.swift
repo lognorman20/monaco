@@ -18,7 +18,7 @@ extension AppSessionStore {
     /// tabs mid-request and bounce them back out on a rejection.
     func updateDisplayName(
         _ draft: String,
-        auth: PrivyAuthService,
+        auth: DynamicAuthService,
         optimistic: Bool = true
     ) async -> ProfileSaveOutcome {
         guard let current = me else {
@@ -56,7 +56,7 @@ extension AppSessionStore {
     }
 
     /// Uploads an already-prepared photo (see `ProfilePhotoUploadPreparer`).
-    func uploadProfilePhoto(_ imageData: Data, mimeType: String, auth: PrivyAuthService) async -> ProfileSaveOutcome {
+    func uploadProfilePhoto(_ imageData: Data, mimeType: String, auth: DynamicAuthService) async -> ProfileSaveOutcome {
         guard let client = profileClient(auth: auth) else {
             return .failed("Sign in again to change your photo.")
         }
@@ -69,12 +69,12 @@ extension AppSessionStore {
         return .saved
     }
 
-    private func profileClient(auth: PrivyAuthService) -> MonacoCore.MonacoAPIClient? {
+    private func profileClient(auth: DynamicAuthService) -> MonacoCore.MonacoAPIClient? {
         guard let token = auth.accessToken, !token.isEmpty else { return nil }
         return MonacoCore.MonacoAPIClient(baseURL: Config.apiBaseURL, accessTokenProvider: { token })
     }
 
-    private func failure(for error: Error, auth: PrivyAuthService, fallback: String) async -> ProfileSaveOutcome {
+    private func failure(for error: Error, auth: DynamicAuthService, fallback: String) async -> ProfileSaveOutcome {
         if case MonacoCore.MonacoAPIError.httpStatus(401) = error {
             await auth.signOutAfterRejectedSession()
             return .failed(LoginFailureCopy.sessionExpired)

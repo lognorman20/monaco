@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
 

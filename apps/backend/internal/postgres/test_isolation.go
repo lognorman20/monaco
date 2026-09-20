@@ -142,7 +142,6 @@ func deleteTrackedGroups(ctx context.Context, db *sql.DB, groupIDs []string) err
 		`DELETE FROM group_agents WHERE group_id = ANY($1::uuid[])`,
 		`DELETE FROM proposals WHERE group_id = ANY($1::uuid[])`,
 		`DELETE FROM redeem_jobs WHERE group_id = ANY($1::uuid[])`,
-		`DELETE FROM payout_proofs WHERE group_id = ANY($1::uuid[])`,
 		`DELETE FROM nav_snapshots WHERE group_id = ANY($1::uuid[])`,
 		`DELETE FROM group_voters WHERE group_id = ANY($1::uuid[])`,
 		`DELETE FROM group_members WHERE group_id = ANY($1::uuid[])`,

@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Opens the backend session, then first run or the tab shell.
 struct SessionGateView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     @State private var session = AppSessionStore()
 
     private var destination: FirstRunDestination {
@@ -65,7 +65,7 @@ struct SessionGateView: View {
 }
 
 #Preview {
-    SessionGateView(auth: PrivyAuthService())
+    SessionGateView(auth: DynamicAuthService())
 }
 
 /// App-shaped placeholder while the session opens: hero figure, a pill, three rows, a tab bar.

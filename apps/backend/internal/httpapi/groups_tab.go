@@ -3,13 +3,13 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // GroupsTabHandlers serves the Groups tab discovery routes:

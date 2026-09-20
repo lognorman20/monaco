@@ -12,17 +12,17 @@ import (
 
 // AgentIntentRow is a row in agent_intents.
 type AgentIntentRow struct {
-	ID           string
-	GroupAgentID string
-	GroupID      string
-	Side         domain.AgentIntentSide
-	Symbol       string
-	UsdcMicros   sql.NullInt64
-	TokenAmount  sql.NullInt64
-	Status       string
-	RejectReason sql.NullString
+	ID            string
+	GroupAgentID  string
+	GroupID       string
+	Side          domain.AgentIntentSide
+	Symbol        string
+	UsdcMicros    sql.NullInt64
+	TokenAmount   sql.NullInt64
+	Status        string
+	RejectReason  sql.NullString
 	TransactionID sql.NullString
-	CreatedAt    time.Time
+	CreatedAt     time.Time
 }
 
 const agentIntentSelectColumns = `id, group_agent_id, group_id, side, symbol, usdc_micros, token_amount, status, reject_reason, transaction_id, created_at`

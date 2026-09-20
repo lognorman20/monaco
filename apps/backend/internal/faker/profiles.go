@@ -8,7 +8,7 @@
 //     proposals, votes, and a week of NAV snapshots.
 //
 // Every seeded row is flagged (users.is_faker / groups.is_faker) so product code keeps it away
-// from Privy, Solana RPC, and Jupiter. Seeding is idempotent: users are keyed by privy_user_id,
+// from Privy, Solana RPC, and Jupiter. Seeding is idempotent: users are keyed by dynamic_user_id,
 // scale clubs by groups.faker_key, and each run replaces the faker-owned child rows.
 // All timestamps are UTC and spread over the last week relative to the seed time.
 package faker

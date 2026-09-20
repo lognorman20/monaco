@@ -34,7 +34,7 @@ struct ProposeSheet: View {
 
     @State private var detents = ProposeSheetDetents()
 
-    init(auth: PrivyAuthService, groupId: String, groupView: GroupViewDTO, onProposed: ((_ proposalId: String) -> Void)? = nil) {
+    init(auth: DynamicAuthService, groupId: String, groupView: GroupViewDTO, onProposed: ((_ proposalId: String) -> Void)? = nil) {
         self.init(service: LiveProposeService(auth: auth), groupId: groupId, groupView: groupView, onProposed: onProposed)
     }
 
@@ -66,7 +66,7 @@ struct ProposeChooserView: View {
     private let detents: Binding<ProposeSheetDetents>?
 
     init(
-        auth: PrivyAuthService,
+        auth: DynamicAuthService,
         groupId: String,
         groupView: GroupViewDTO,
         onProposed: ((_ proposalId: String) -> Void)? = nil,

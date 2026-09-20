@@ -3,7 +3,7 @@ import Foundation
 import MonacoCore
 import SwiftUI
 
-/// Debug-only in-memory proposal backend for simulator QA without a Privy session.
+/// Debug-only in-memory proposal backend for simulator QA without an auth session.
 /// Launch with `-MonacoProposalFeedSample` to open the feed on sample data (see docs/qa/149).
 @MainActor
 final class SampleProposalFeedService: ProposalFeedService {

@@ -14,7 +14,6 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
-	"github.com/monaco/monaco/apps/backend/internal/evm"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
@@ -30,6 +29,7 @@ type governanceHarness struct {
 	Privy      wallets.Client
 	Jupiter    dex.Client
 	XStocks    b20.Catalog
+	Catalog    b20.Catalog
 	Swap       *SwapService
 	Symbols    *SymbolResolver
 	ISO        *postgres.TestIsolation
@@ -39,7 +39,7 @@ func integrationGovernanceApp(t *testing.T) governanceHarness {
 	t.Helper()
 
 	h := integrationApp(t)
-	buy := NewBuyService(h.Jupiter, h.XStocks)
+	buy := NewBuyService(h.Jupiter, h.Catalog)
 	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
 	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetBuyService(buy)
@@ -54,7 +54,8 @@ func integrationGovernanceApp(t *testing.T) governanceHarness {
 		Wallets:    h.Wallets,
 		Privy:      h.Privy,
 		Jupiter:    h.Jupiter,
-		XStocks:    h.XStocks,
+		XStocks:    h.Catalog,
+		Catalog:    h.Catalog,
 		Swap:       h.Swap,
 		Symbols:    h.Symbols,
 		ISO:        h.ISO,
@@ -86,7 +87,7 @@ func TestPOST_proposals_happyPath_createsOpenProposalWithExpiry(t *testing.T) {
 	}
 	h.ISO.TrackGroup(created.GroupID)
 	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 10_000_000)
-	registerRoutableQuote(t, h.Jupiter, h.XStocks, "AAPLx", 2_000_000)
+	registerRoutableQuote(t, h.Jupiter, h.Catalog, "AAPLx", 2_000_000)
 	fixedNow := time.Unix(1_700_000_000, 0).UTC()
 	h.Governance.SetClock(func() time.Time { return fixedNow })
 
@@ -130,7 +131,7 @@ func TestCreateProposal_jupiterTakerOrderFails_priceOnlyQuoteCreates(t *testing.
 	}
 	h.ISO.TrackGroup(created.GroupID)
 	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, treasuryUSDC)
-	registerRoutableQuote(t, h.Jupiter, h.XStocks, "AAPLx", usdcMicros)
+	registerRoutableQuote(t, h.Jupiter, h.Catalog, "AAPLx", usdcMicros)
 
 	proposal, err := h.Governance.CreateProposal(context.Background(), CreateProposalInput{
 		GroupID:    created.GroupID,
@@ -156,7 +157,7 @@ func TestCreateProposal_treasurySurplusOnChain_allowsAfterReconcile(t *testing.T
 	}
 	h.ISO.TrackGroup(created.GroupID)
 	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 5_000_000)
-	registerRoutableQuote(t, h.Jupiter, h.XStocks, "AAPLx", 2_000_000)
+	registerRoutableQuote(t, h.Jupiter, h.Catalog, "AAPLx", 2_000_000)
 
 	proposal, err := h.Governance.CreateProposal(context.Background(), CreateProposalInput{
 		GroupID:    created.GroupID,
@@ -190,7 +191,7 @@ func TestCreateProposal_exceedsTreasuryUSDC_rejected(t *testing.T) {
 	}
 	h.ISO.TrackGroup(created.GroupID)
 	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 1_000_000)
-	registerRoutableQuote(t, h.Jupiter, h.XStocks, "AAPLx", 2_000_000)
+	registerRoutableQuote(t, h.Jupiter, h.Catalog, "AAPLx", 2_000_000)
 
 	_, err = h.Governance.CreateProposal(context.Background(), CreateProposalInput{
 		GroupID:    created.GroupID,
@@ -238,7 +239,7 @@ func TestTallyProposal_expiredOpenProposal_failsWithoutSwap(t *testing.T) {
 	}
 	h.ISO.TrackGroup(created.GroupID)
 	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 10_000_000)
-	registerRoutableQuote(t, h.Jupiter, h.XStocks, "TSLAx", 1_000_000)
+	registerRoutableQuote(t, h.Jupiter, h.Catalog, "TSLAx", 1_000_000)
 	start := time.Unix(1_700_100_000, 0).UTC()
 	h.Governance.SetClock(func() time.Time { return start })
 	proposal, err := h.Governance.CreateProposal(context.Background(), CreateProposalInput{
@@ -297,7 +298,7 @@ func TestPOST_vote_nonVoterSetMember_returns403(t *testing.T) {
 		t.Fatalf("commit member: %v", err)
 	}
 
-	registerRoutableQuote(t, h.Jupiter, h.XStocks, "NVDAx", 500_000)
+	registerRoutableQuote(t, h.Jupiter, h.Catalog, "NVDAx", 500_000)
 	proposal, err := h.Governance.CreateProposal(context.Background(), CreateProposalInput{
 		GroupID:    created.GroupID,
 		ProposerID: creator.UserID,
@@ -335,7 +336,7 @@ func TestPOST_vote_doubleVoteSameMember_isIdempotentOrRejected(t *testing.T) {
 	}
 	h.ISO.TrackGroup(created.GroupID)
 	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 10_000_000)
-	registerRoutableQuote(t, h.Jupiter, h.XStocks, "MSFTx", 750_000)
+	registerRoutableQuote(t, h.Jupiter, h.Catalog, "MSFTx", 750_000)
 	proposal, err := h.Governance.CreateProposal(context.Background(), CreateProposalInput{
 		GroupID:    created.GroupID,
 		ProposerID: userID.UserID,
@@ -388,7 +389,7 @@ func TestPOST_vote_concurrentDoubleVote_recordsOneBallot(t *testing.T) {
 	}
 	h.ISO.TrackGroup(created.GroupID)
 	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 10_000_000)
-	registerRoutableQuote(t, h.Jupiter, h.XStocks, "GOOGx", 900_000)
+	registerRoutableQuote(t, h.Jupiter, h.Catalog, "GOOGx", 900_000)
 	proposal, err := h.Governance.CreateProposal(context.Background(), CreateProposalInput{
 		GroupID:    created.GroupID,
 		ProposerID: userID.UserID,
@@ -442,11 +443,11 @@ func TestCreateProposal_sellHeldAmount_createsOpenProposal(t *testing.T) {
 	h.ISO.TrackGroup(created.GroupID)
 
 	const held = int64(50_000_000)
-	registerTestB20Asset(h.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	registerTestB20Asset(h.Catalog, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
 	_, _, err = h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          created.GroupID,
 		Amount:           2_000_000,
-		InputToken:       evm.USDCAddress,
+		InputToken:       dex.USDCAddress(),
 		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
 		TxHash:           testTxHash(h.ISO, "sell-prop-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "sell-prop-buy"),
@@ -486,7 +487,7 @@ func TestCreateProposal_sellExceedsHolding_rejected(t *testing.T) {
 		t.Fatalf("create group: %v", err)
 	}
 	h.ISO.TrackGroup(created.GroupID)
-	registerTestB20Asset(h.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	registerTestB20Asset(h.Catalog, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
 
 	_, err = h.Governance.CreateProposal(ctx, CreateProposalInput{
 		GroupID:     created.GroupID,

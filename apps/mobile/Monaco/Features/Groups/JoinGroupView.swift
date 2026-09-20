@@ -4,7 +4,7 @@ import SwiftUI
 /// Join a cabal by pasted ID, or from a search/board row that already knows
 /// the cabal's name and join policy.
 struct JoinGroupView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     /// Present inside the signed-in shell; refreshed after a join so every tab updates.
     @Environment(AppSessionStore.self) private var session: AppSessionStore?
     private let apiClient = MonacoAPIClient()
@@ -16,7 +16,7 @@ struct JoinGroupView: View {
     @State private var isJoining = false
     @State private var toast: MonacoToast?
 
-    init(auth: PrivyAuthService, groupId: String = "", groupName: String? = nil, joinMode: GroupJoinMode? = nil) {
+    init(auth: DynamicAuthService, groupId: String = "", groupName: String? = nil, joinMode: GroupJoinMode? = nil) {
         self.auth = auth
         self.groupName = groupName
         self.joinMode = joinMode
@@ -102,6 +102,6 @@ struct JoinGroupView: View {
 
 #Preview {
     NavigationStack {
-        JoinGroupView(auth: PrivyAuthService(), groupId: "g1", groupName: "Weekend investors", joinMode: .request)
+        JoinGroupView(auth: DynamicAuthService(), groupId: "g1", groupName: "Weekend investors", joinMode: .request)
     }
 }

@@ -28,7 +28,7 @@ enum GroupDetailSampleScenario: String, CaseIterable {
 
 struct GroupDetailSampleHarness: View {
     let scenario: GroupDetailSampleScenario
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
 
     @State private var session: AppSessionStore = {
         let session = AppSessionStore()
@@ -195,27 +195,27 @@ enum GroupDetailSampleData {
         let iso = ISO8601DateFormatter()
         func ago(_ minutes: Double) -> String { iso.string(from: Date().addingTimeInterval(-minutes * 60)) }
         return [
-            GroupActivityItemDTO(id: "t1", kind: "buy", status: "pending", symbol: "AAPLx", amountMicros: 50_000_000, createdAt: ago(3), txSignature: "5h1Xk", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
-            GroupActivityItemDTO(id: "t2", kind: "deposit", status: "confirmed", symbol: nil, amountMicros: 100_000_000, createdAt: ago(55), txSignature: nil, tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: nil, agentDisplayName: nil),
-            GroupActivityItemDTO(id: "t3", kind: "sell", status: "failed", symbol: "TSLAx", amountMicros: 0, createdAt: ago(180), txSignature: nil, tokenAmount: "25000000", proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
-            GroupActivityItemDTO(id: "t4", kind: "buy", status: "confirmed", symbol: "NVDAx", amountMicros: 194_710_000, createdAt: ago(60 * 26), txSignature: "3kQp", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "agent", agentDisplayName: "Scout"),
-            GroupActivityItemDTO(id: "t5", kind: "buy", status: "confirmed", symbol: "AAPLx", amountMicros: 250_000_000, createdAt: ago(60 * 50), txSignature: "4mZa", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
-            GroupActivityItemDTO(id: "t6", kind: "deposit", status: "confirmed", symbol: nil, amountMicros: 300_000_000, createdAt: ago(60 * 74), txSignature: nil, tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: nil, agentDisplayName: nil),
+            GroupActivityItemDTO(id: "t1", kind: "buy", status: "pending", symbol: "AAPLx", amountMicros: 50_000_000, createdAt: ago(3), txHash: "5h1Xk", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
+            GroupActivityItemDTO(id: "t2", kind: "deposit", status: "confirmed", symbol: nil, amountMicros: 100_000_000, createdAt: ago(55), txHash: nil, tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: nil, agentDisplayName: nil),
+            GroupActivityItemDTO(id: "t3", kind: "sell", status: "failed", symbol: "TSLAx", amountMicros: 0, createdAt: ago(180), txHash: nil, tokenAmount: "25000000", proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
+            GroupActivityItemDTO(id: "t4", kind: "buy", status: "confirmed", symbol: "NVDAx", amountMicros: 194_710_000, createdAt: ago(60 * 26), txHash: "3kQp", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "agent", agentDisplayName: "Scout"),
+            GroupActivityItemDTO(id: "t5", kind: "buy", status: "confirmed", symbol: "AAPLx", amountMicros: 250_000_000, createdAt: ago(60 * 50), txHash: "4mZa", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
+            GroupActivityItemDTO(id: "t6", kind: "deposit", status: "confirmed", symbol: nil, amountMicros: 300_000_000, createdAt: ago(60 * 74), txHash: nil, tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: nil, agentDisplayName: nil),
         ]
     }
 
     static let boughtApple = TransactionDetailDTO(
         transactionId: "t5", groupId: "g1", action: "buy", status: "confirmed", amountMicros: 250_000_000,
-        inputMint: nil, outputMint: nil, inputSymbol: "USDC", outputSymbol: "AAPLx",
-        txSignature: "4mZaQ8nJv2kPp7sWfLr3bXy9TcHd6eUoGi1AqRsNmVtK", executeRequestId: nil, proposalId: "p1",
+        inputToken: nil, outputToken: nil, inputSymbol: "USDC", outputSymbol: "AAPLx",
+        txHash: "4mZaQ8nJv2kPp7sWfLr3bXy9TcHd6eUoGi1AqRsNmVtK", executeRequestId: nil, proposalId: "p1",
         costBasisPrice: 250_000_000, costBasisAmount: 108_034_000, createdAt: "2026-09-16T14:02:00Z",
         confirmedAt: "2026-09-16T14:02:09Z", failureReason: nil, proceedsUsdcMicros: nil
     )
 
     static let failedSell = TransactionDetailDTO(
         transactionId: "t3", groupId: "g1", action: "sell", status: "failed", amountMicros: 25_000_000,
-        inputMint: nil, outputMint: nil, inputSymbol: "TSLAx", outputSymbol: "USDC",
-        txSignature: nil, executeRequestId: nil, proposalId: "p2",
+        inputToken: nil, outputToken: nil, inputSymbol: "TSLAx", outputSymbol: "USDC",
+        txHash: nil, executeRequestId: nil, proposalId: "p2",
         costBasisPrice: nil, costBasisAmount: nil, createdAt: "2026-09-18T11:40:00Z",
         confirmedAt: nil, failureReason: "slippage", proceedsUsdcMicros: nil
     )

@@ -3,7 +3,7 @@ import MonacoCore
 import SwiftUI
 
 /// Debug-only: renders the first-run name screen against canned data so QA can screenshot
-/// it and XCUITests can drive it without Privy or a backend. Launch with
+/// it and XCUITests can drive it without Dynamic or a backend. Launch with
 /// `-MonacoOnboardingSample [fresh|photo|invalid|failure]`; the bare flag means `fresh`.
 ///
 /// The save is canned, not real: `fresh`/`photo` accept after a short delay, `failure`
@@ -38,10 +38,10 @@ enum OnboardingSampleScenario: String, CaseIterable {
 
 struct OnboardingSampleHarness: View {
     let scenario: OnboardingSampleScenario
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     @State private var session: AppSessionStore
 
-    init(scenario: OnboardingSampleScenario, auth: PrivyAuthService) {
+    init(scenario: OnboardingSampleScenario, auth: DynamicAuthService) {
         self.scenario = scenario
         self.auth = auth
         _session = State(initialValue: Self.makeSession(for: scenario))

@@ -1,8 +1,8 @@
 package httpapi
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"encoding/json"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,7 +32,8 @@ func newFakerTestEnv(t *testing.T) fakerTestEnv {
 			Enabled:     true,
 			DatabaseURL: localTestDBURL,
 			Store:       store,
-			Privy:       privyClient,
+			Auth:        authHandlers.Verifier,
+			Wallets:     privyClient,
 			Seeder:      faker.NewSeeder(store, nil).WithPrefix("test-" + iso.Suffix() + "-"),
 		},
 		groups: groupHandlers,

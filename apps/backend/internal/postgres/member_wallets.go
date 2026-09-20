@@ -10,11 +10,11 @@ import (
 
 // MemberWallet is a row in member_wallets.
 type MemberWallet struct {
-	ID            string
-	UserID        string
-	WalletID string
-	Address string
-	CreatedAt     time.Time
+	ID        string
+	UserID    string
+	WalletID  string
+	Address   string
+	CreatedAt time.Time
 }
 
 // GetMemberWalletByUserID returns the member wallet for userID, or false if none exists.

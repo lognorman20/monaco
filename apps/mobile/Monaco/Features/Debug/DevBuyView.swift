@@ -2,7 +2,7 @@ import SwiftUI
 
 /// M3 debug control: POST /v1/dev/groups/{id}/buy for stub AAPLx buy (backend-only Jupiter).
 struct DevBuyView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let groupId: String
 
     private let apiClient = MonacoAPIClient()
@@ -47,8 +47,8 @@ struct DevBuyView: View {
                     detailRow(title: "Status", value: result.status)
                     detailRow(title: "Symbol", value: result.symbol)
                     detailRow(title: "Created", value: result.created ? "yes" : "no (idempotent)")
-                    if let txSignature = result.txSignature, !txSignature.isEmpty {
-                        detailRow(title: "Tx signature", value: txSignature, monospaced: true)
+                    if let txHash = result.txHash, !txHash.isEmpty {
+                        detailRow(title: "Tx signature", value: txHash, monospaced: true)
                     }
                 }
             } else if let errorMessage {
@@ -83,7 +83,7 @@ struct DevBuyView: View {
 
     private func executeDevBuy() async {
         guard let accessToken = auth.accessToken else {
-            errorMessage = "Missing Privy access token."
+            errorMessage = "Missing access token."
             return
         }
 
@@ -111,6 +111,6 @@ struct DevBuyView: View {
 
 #Preview {
     NavigationStack {
-        DevBuyView(auth: PrivyAuthService(), groupId: "00000000-0000-0000-0000-000000000001")
+        DevBuyView(auth: DynamicAuthService(), groupId: "00000000-0000-0000-0000-000000000001")
     }
 }

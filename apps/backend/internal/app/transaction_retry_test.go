@@ -5,12 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
-	"github.com/monaco/monaco/apps/backend/internal/evm"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 func registerHappySell(t *testing.T, client dex.Client, inputMint string, amount int64) {
@@ -33,9 +30,9 @@ func TestRetryFailedSwap_rejectsNonFailedTransaction(t *testing.T) {
 	confirmed, _, err := h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           1_000_000,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      testTxHash(h.ISO, "confirmed-other"),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           testTxHash(h.ISO, "confirmed-other"),
 		ExecuteRequestID: testRequestID(h.ISO, "confirmed-other"),
 		CostBasisPrice:   1_000_000,
 		CostBasisAmount:  500_000,
@@ -68,16 +65,16 @@ func TestRetryFailedSwap_buySuccessCreatesNewConfirmedRow(t *testing.T) {
 	const usdcAmount int64 = 2_000_000
 	requestID := testRequestID(h.ISO, "retry-buy")
 	signature := testTxHash(h.ISO, "retry-buy")
-	registerHappyBuy(h.Jupiter, h.XStocks, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcAmount, requestID, signature)
+	registerHappyBuy(h.Jupiter, h.Catalog, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcAmount, requestID, signature)
 
-	treasury, err := h.Privy.EnsureTreasury(ctx, wallets.GroupID(group.GroupID))
+	treasury, err := h.Wallets.EnsureTreasury(ctx, wallets.GroupID(group.GroupID))
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
 	h.Swap.SetTreasuryBalances(treasury.Address, TreasuryBalances{USDC: 5_000_000})
 	wallets.SetTreasuryUSDCBalance(h.Privy, treasury.Address, 5_000_000)
 
-	failed, err := h.Store.InsertFailedTransaction(ctx, group.GroupID, postgres.TransactionActionBuy, evm.USDCAddress, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcAmount, testRequestID(h.ISO, "buy-failed"))
+	failed, err := h.Store.InsertFailedTransaction(ctx, group.GroupID, postgres.TransactionActionBuy, dex.USDCAddress(), "0xb200000000000000000000c2e324d24d7eecd1fb", usdcAmount, testRequestID(h.ISO, "buy-failed"))
 	if err != nil {
 		t.Fatalf("insert failed buy: %v", err)
 	}
@@ -119,13 +116,13 @@ func TestRetryFailedSwap_sellSuccessCreatesNewConfirmedRow(t *testing.T) {
 	_ = requestID
 	_ = signature
 
-	treasury, err := h.Privy.EnsureTreasury(ctx, wallets.GroupID(group.GroupID))
+	treasury, err := h.Wallets.EnsureTreasury(ctx, wallets.GroupID(group.GroupID))
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
 	h.Swap.SetTreasuryBalances(treasury.Address, TreasuryBalances{Token: 2_000_000})
 
-	failed, err := h.Store.InsertFailedTransaction(ctx, group.GroupID, postgres.TransactionActionSell, "0xb200000000000000000000c2e324d24d7eecd1fb", evm.USDCAddress, amount, testRequestID(h.ISO, "sell-failed"))
+	failed, err := h.Store.InsertFailedTransaction(ctx, group.GroupID, postgres.TransactionActionSell, "0xb200000000000000000000c2e324d24d7eecd1fb", dex.USDCAddress(), amount, testRequestID(h.ISO, "sell-failed"))
 	if err != nil {
 		t.Fatalf("insert failed sell: %v", err)
 	}
@@ -151,14 +148,14 @@ func TestRetryFailedSwap_idempotentWhenProposalAlreadyConfirmed(t *testing.T) {
 	sessions := NewSessionService(h.Store, h.Auth, h.Wallets)
 	session := openTestSession(t, h.ISO, sessions, h.Auth, "retry-idem", "Retry Idem")
 	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
-	governance.SetBuyService(NewBuyService(h.Jupiter, h.XStocks))
+	governance.SetBuyService(NewBuyService(h.Jupiter, h.Catalog))
 	group, err := governance.CreateGroupWithRules(ctx, h.ISO.UniqueToken("retry-idem"), testGroupName(h.ISO, "retry-idem"), DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
 	h.ISO.TrackGroup(group.GroupID)
-	registerRoutableQuote(t, h.Jupiter, h.XStocks, "AAPLx", 2_000_000)
-	treasury, err := h.Privy.EnsureTreasury(ctx, wallets.GroupID(group.GroupID))
+	registerRoutableQuote(t, h.Jupiter, h.Catalog, "AAPLx", 2_000_000)
+	treasury, err := h.Wallets.EnsureTreasury(ctx, wallets.GroupID(group.GroupID))
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
@@ -176,9 +173,9 @@ func TestRetryFailedSwap_idempotentWhenProposalAlreadyConfirmed(t *testing.T) {
 	confirmed, _, err := h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           2_000_000,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      testTxHash(h.ISO, "already-confirmed"),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           testTxHash(h.ISO, "already-confirmed"),
 		ExecuteRequestID: testRequestID(h.ISO, "already-confirmed"),
 		CostBasisPrice:   2_000_000,
 		CostBasisAmount:  1_000_000,
@@ -196,8 +193,8 @@ func TestRetryFailedSwap_idempotentWhenProposalAlreadyConfirmed(t *testing.T) {
 		GroupID:          group.GroupID,
 		ProposalID:       proposalID,
 		Action:           postgres.TransactionActionBuy,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Amount:           2_000_000,
 		ExecuteRequestID: executeRequestID,
 	})

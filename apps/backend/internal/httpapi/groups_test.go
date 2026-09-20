@@ -1,10 +1,10 @@
 package httpapi
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"database/sql"
 	"encoding/json"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,12 +20,12 @@ func integrationGroupApp(t *testing.T) (*GroupHandlers, *AuthHandlers, wallets.C
 
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
-	groups := app.NewGroupService(store, privyClient)
-	governance := app.NewGovernanceService(store, privyClient)
+	groups := app.NewGroupService(store, authHandlers.Verifier, privyClient)
+	governance := app.NewGovernanceService(store, authHandlers.Verifier, privyClient)
 	symbols := app.NewSymbolResolver(nil)
-	deposits := app.NewDepositService(store, privyClient, nil, symbols)
-	home := app.NewHomeService(store, privyClient, nil, deposits, symbols)
-	redeem := app.NewRedeemService(store, privyClient, nil, nil, nil, app.NewFakePrivyTreasurySigner())
+	deposits := app.NewDepositService(store, authHandlers.Verifier, privyClient, nil, symbols)
+	home := app.NewHomeService(store, authHandlers.Verifier, privyClient, nil, deposits, symbols)
+	redeem := app.NewRedeemService(store, privyClient, authHandlers.Verifier, nil, nil, nil)
 	governance.SetRedeemService(redeem)
 	return &GroupHandlers{Groups: groups, Governance: governance, Home: home, Redeem: redeem}, authHandlers, privyClient, db, iso
 }
@@ -132,11 +132,11 @@ func TestCreateGroup_provisionsTreasuryViaPrivyClient(t *testing.T) {
 
 	ctx := context.Background()
 	var privyWalletID string
-	if err := db.QueryRowContext(ctx, "SELECT privy_wallet_id FROM treasuries WHERE group_id = $1", payload.GroupID).Scan(&privyWalletID); err != nil {
-		t.Fatalf("select treasury privy_wallet_id: %v", err)
+	if err := db.QueryRowContext(ctx, "SELECT wallet_id FROM treasuries WHERE group_id = $1", payload.GroupID).Scan(&privyWalletID); err != nil {
+		t.Fatalf("select treasury wallet_id: %v", err)
 	}
 	if privyWalletID != expectedTreasury.WalletID {
-		t.Fatalf("privy_wallet_id = %q, want %q", privyWalletID, expectedTreasury.WalletID)
+		t.Fatalf("wallet_id = %q, want %q", privyWalletID, expectedTreasury.WalletID)
 	}
 }
 
@@ -437,10 +437,14 @@ func TestPOST_join_requestGroup_createsPendingRequest(t *testing.T) {
 	joinReq.SetPathValue("id", created.GroupID)
 	joinReq.Header.Set("Authorization", "Bearer "+string(joinerToken))
 	groupHandlers.JoinGroupHandler(joinRec, joinReq)
-	if joinRec.Code != http.StatusAccepted { t.Fatalf("join status = %d, want 202", joinRec.Code) }
+	if joinRec.Code != http.StatusAccepted {
+		t.Fatalf("join status = %d, want 202", joinRec.Code)
+	}
 	var pendingCount int
 	_ = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM group_join_requests WHERE group_id = $1 AND status = 'pending'", created.GroupID).Scan(&pendingCount)
-	if pendingCount != 1 { t.Fatalf("expected 1 pending join request, got %d", pendingCount) }
+	if pendingCount != 1 {
+		t.Fatalf("expected 1 pending join request, got %d", pendingCount)
+	}
 }
 
 func TestPOST_join_requestGroup_adminApproveAddsMember(t *testing.T) {
@@ -467,10 +471,14 @@ func TestPOST_join_requestGroup_adminApproveAddsMember(t *testing.T) {
 	approveReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
 	approveRec := httptest.NewRecorder()
 	groupHandlers.ApproveJoinRequestHandler(approveRec, approveReq)
-	if approveRec.Code != http.StatusNoContent { t.Fatalf("approve status = %d, want 204", approveRec.Code) }
+	if approveRec.Code != http.StatusNoContent {
+		t.Fatalf("approve status = %d, want 204", approveRec.Code)
+	}
 	var memberCount int
 	_ = db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM group_members WHERE group_id = $1", created.GroupID).Scan(&memberCount)
-	if memberCount != 2 { t.Fatalf("expected 2 members after approval, got %d", memberCount) }
+	if memberCount != 2 {
+		t.Fatalf("expected 2 members after approval, got %d", memberCount)
+	}
 }
 
 func TestGET_groupActivity_returnsMixedStatuses(t *testing.T) {
@@ -505,8 +513,8 @@ func TestGET_groupActivity_returnsMixedStatuses(t *testing.T) {
 	if _, _, err := store.InsertPendingTransaction(ctx, postgres.InsertPendingTransactionParams{
 		GroupID:          created.GroupID,
 		Action:           postgres.TransactionActionSell,
-		InputToken:        "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
-		OutputToken:       "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+		InputToken:       "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+		OutputToken:      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 		Amount:           500_000,
 		ExecuteRequestID: "req-pending-" + iso.Suffix(),
 	}); err != nil {

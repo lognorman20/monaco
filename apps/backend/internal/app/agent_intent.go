@@ -163,7 +163,7 @@ func (s *AgentIntentService) executeIntent(ctx context.Context, accepted postgre
 		result, err := s.swap.SellToUSDC(ctx, SellToUSDCRequest{
 			GroupID:       in.GroupID,
 			Symbol:        in.Symbol,
-			InputToken:     inputMint,
+			InputToken:    inputMint,
 			Amount:        in.TokenAmount,
 			AgentIntentID: accepted.ID,
 			InitiatedBy:   "agent",

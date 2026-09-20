@@ -5,7 +5,7 @@ Optional upload path for hackathon demo builds. Requires Apple Developer account
 ## Prerequisites
 
 - Xcode signed in with team that owns bundle ID `com.monaco.app`
-- Privy iOS client includes `com.monaco.app` (OTP `sendCode` otherwise returns 403)
+- Dynamic iOS client includes `com.monaco.app`
 - Wave 4 green: `just test mobile` and `just build mobile`
 
 ## Build archive

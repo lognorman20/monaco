@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Every funded cabal on Monaco, ranked by percent return.
 struct CabalsLeaderboardSection: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let model: CabalsTabModel
     var onChanged: () async -> Void
 
@@ -135,7 +135,7 @@ private struct RankedCabalMark: View {
 /// Where a discovery row leads: the cabal itself for members, otherwise the
 /// join flow for that cabal's join policy.
 struct CabalDiscoveryDestinationView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let groupId: String
     let name: String
     let destination: GroupDiscoveryDestination

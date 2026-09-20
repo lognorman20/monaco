@@ -76,7 +76,7 @@ enum MonacoAppearance {
         UITableView.appearance().separatorColor = hairline
         UITableViewCell.appearance().backgroundColor = surface
 
-        // No global UITextField / UISegmentedControl appearance: it leaked into Privy's sheets.
+        // No global UITextField / UISegmentedControl appearance: it leaked into auth SDK sheets.
         // Use MonacoTextField and MonacoSegmented instead.
     }
 }

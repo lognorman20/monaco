@@ -4,7 +4,7 @@ import SwiftUI
 /// Account balance pill with the two money-movement actions: Add money (deposit into a
 /// cabal) and Cash out (withdraw idle balance to an external address).
 struct HomeBalanceRowSection: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let balance: PlatformBalanceDTO?
     let isBalanceLoading: Bool
     let joinedCabals: [HomeGroupBoardRowDTO]

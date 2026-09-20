@@ -4,7 +4,7 @@ import SwiftUI
 /// Inline display-name editor: validates as you type with the server's rules and saves
 /// through `AppSessionStore.updateDisplayName` (optimistic, rolled back on failure).
 struct ProfileNameEditor: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     @Environment(AppSessionStore.self) private var session
 
     var onResult: (MonacoToast) -> Void
@@ -13,7 +13,7 @@ struct ProfileNameEditor: View {
     @State private var isSaving = false
     @FocusState private var isFocused: Bool
 
-    init(auth: PrivyAuthService, initialDraft: String? = nil, onResult: @escaping (MonacoToast) -> Void) {
+    init(auth: DynamicAuthService, initialDraft: String? = nil, onResult: @escaping (MonacoToast) -> Void) {
         self.auth = auth
         self.onResult = onResult
         _draft = State(initialValue: initialDraft ?? "")

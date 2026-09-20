@@ -8,8 +8,9 @@ public enum ProductBoundaryScanner {
         "jupiter",
         "hermes.pyth.network",
         "pyth.network",
-        "mainnet-beta.solana.com",
-        "solana-mainnet",
+        "mainnet-beta",
+        "basescan.org",
+        "etherscan.io",
     ]
 
     public static func containsForbiddenHost(_ text: String) -> Bool {
@@ -17,7 +18,18 @@ public enum ProductBoundaryScanner {
         return forbiddenHostFragments.contains { lowered.contains($0) }
     }
 
+    public static func containsForbiddenEVMAddress(_ text: String) -> Bool {
+        let pattern = #"0x[0-9a-fA-F]{40}"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.firstMatch(in: text, range: range) != nil
+    }
+
     public static func featureSourcesAreClean(_ sources: [String]) -> Bool {
         sources.allSatisfy { !containsForbiddenHost($0) }
+    }
+
+    public static func mainFlowCopyIsClean(_ text: String) -> Bool {
+        !containsForbiddenHost(text) && !containsForbiddenEVMAddress(text)
     }
 }

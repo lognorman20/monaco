@@ -3,7 +3,7 @@ import MonacoCore
 import SwiftUI
 
 struct AssetDetailView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let symbol: String
 
     private let apiClient = MonacoAPIClient()

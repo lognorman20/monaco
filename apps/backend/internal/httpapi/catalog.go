@@ -27,10 +27,10 @@ type CatalogHandlers struct {
 }
 
 type catalogAssetResponse struct {
-	Symbol     string `json:"symbol"`
-	Name       string `json:"name"`
+	Symbol       string `json:"symbol"`
+	Name         string `json:"name"`
 	TokenAddress string `json:"tokenAddress"`
-	Routable   bool   `json:"routable"`
+	Routable     bool   `json:"routable"`
 }
 
 type searchAssetsResponse struct {
@@ -88,10 +88,10 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 	}
 	for _, asset := range page.Assets {
 		resp.Assets = append(resp.Assets, catalogAssetResponse{
-			Symbol:     asset.Symbol,
-			Name:       asset.Name,
+			Symbol:       asset.Symbol,
+			Name:         asset.Name,
 			TokenAddress: asset.TokenAddress,
-			Routable:   asset.Routable,
+			Routable:     asset.Routable,
 		})
 	}
 

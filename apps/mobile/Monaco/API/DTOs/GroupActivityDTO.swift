@@ -7,7 +7,7 @@ struct GroupActivityItemDTO: Codable, Equatable, Identifiable {
     let symbol: String?
     let amountMicros: Int64
     let createdAt: String
-    let txSignature: String?
+    let txHash: String?
     let tokenAmount: String?
     let proceedsUsdcMicros: String?
     let initiatedBy: String?
@@ -23,5 +23,5 @@ struct RetryTransactionResponse: Codable, Equatable {
     let groupId: String
     let action: String
     let status: String
-    let txSignature: String?
+    let txHash: String?
 }

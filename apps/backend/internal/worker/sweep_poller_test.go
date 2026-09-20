@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
@@ -23,7 +24,7 @@ func TestSweepPoller_submitSweepFailure_marksDepositFailed(t *testing.T) {
 	ctx := context.Background()
 	deposit, memberAddress, _ := seedPendingDeposit(t, testApp)
 	wallets.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
-	privy.SetRejectSubmitSweep(testApp.Privy, true, fmt.Errorf("%w: relayer key invalid", privy.ErrAPI))
+	wallets.SetRejectSubmitSweep(testApp.Privy, true, fmt.Errorf("%w: relayer key invalid", wallets.ErrAPI))
 
 	// Act
 	if err := poller.Tick(ctx); err != nil {
@@ -38,7 +39,7 @@ func TestSweepPoller_submitSweepFailure_marksDepositFailed(t *testing.T) {
 	if updated.Status != "failed: submit_sweep" {
 		t.Fatalf("status = %q, want failed: submit_sweep", updated.Status)
 	}
-	if _, ok := privy.LastSweepRequest(testApp.Privy); ok {
+	if _, ok := wallets.LastSweepRequest(testApp.Privy); ok {
 		t.Fatal("expected no successful SubmitSweep")
 	}
 }
@@ -49,7 +50,7 @@ func TestSweepPoller_submitSweepFailure_surfacesInGroupActivity(t *testing.T) {
 	ctx := context.Background()
 	deposit, memberAddress, token := seedPendingDepositWithToken(t, testApp)
 	wallets.SetMemberUSDCBalance(testApp.Privy, memberAddress, 2_000_000)
-	privy.SetRejectSubmitSweep(testApp.Privy, true, fmt.Errorf("%w: relayer key invalid", privy.ErrAPI))
+	wallets.SetRejectSubmitSweep(testApp.Privy, true, fmt.Errorf("%w: relayer key invalid", wallets.ErrAPI))
 	tx, err := testApp.Store.BeginTx(ctx)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
@@ -66,7 +67,7 @@ func TestSweepPoller_submitSweepFailure_surfacesInGroupActivity(t *testing.T) {
 		t.Fatalf("Tick: %v", err)
 	}
 
-	home := app.NewHomeService(testApp.Store, testApp.Privy, nil, testApp.Deposits, app.NewSymbolResolver(nil))
+	home := app.NewHomeService(testApp.Store, testApp.Auth, testApp.Privy, nil, testApp.Deposits, app.NewSymbolResolver(nil))
 	items, err := home.ListGroupActivity(ctx, token, deposit.GroupID)
 	if err != nil {
 		t.Fatalf("ListGroupActivity: %v", err)
@@ -101,7 +102,7 @@ func TestSweepPoller_memberBalanceCoversIntent_triggersSubmitSweep(t *testing.T)
 	}
 
 	// Assert
-	last, ok := privy.LastSweepRequest(testApp.Privy)
+	last, ok := wallets.LastSweepRequest(testApp.Privy)
 	if !ok {
 		t.Fatal("expected SubmitSweep call")
 	}
@@ -130,7 +131,7 @@ func TestSweepPoller_afterBroadcast_observeSweepRunsWhenBalanceBelowIntent(t *te
 		t.Fatalf("GetDepositByID: found=%v err=%v", found, err)
 	}
 	if !updated.TxHash.Valid || updated.TxHash.String == "" {
-		t.Fatal("expected broadcast tx_signature persisted on pending deposit")
+		t.Fatal("expected broadcast tx_hash persisted on pending deposit")
 	}
 	if updated.Status != "pending" {
 		t.Fatalf("status = %q, want pending after broadcast", updated.Status)
@@ -175,7 +176,7 @@ func TestSweepPoller_memberBalanceBelowIntent_doesNotSweep(t *testing.T) {
 	}
 
 	// Assert
-	if _, ok := privy.LastSweepRequest(testApp.Privy); ok {
+	if _, ok := wallets.LastSweepRequest(testApp.Privy); ok {
 		t.Fatal("expected no SubmitSweep call")
 	}
 }
@@ -193,7 +194,7 @@ func TestSweepPoller_memberBalanceBelowIntent_doesNotSweepPartialAmount(t *testi
 	}
 
 	// Assert
-	if _, ok := privy.LastSweepRequest(testApp.Privy); ok {
+	if _, ok := wallets.LastSweepRequest(testApp.Privy); ok {
 		t.Fatal("expected no SubmitSweep call for partial balance")
 	}
 	updated, found, err := testApp.Store.GetDepositByID(ctx, deposit.ID)
@@ -214,14 +215,14 @@ func TestSweepPoller_scanDoesNotCreateDepositWithoutUserIntent(t *testing.T) {
 	ctx := context.Background()
 	privyUserID := testApp.ISO.UniqueDynamicID("scan")
 	token := auth.AccessToken(testApp.ISO.UniqueToken("scan"))
-	auth.RegisterToken(testApp.Privy, token, auth.Identity{PrivyUserID: privyUserID, DisplayName: "Scanner"})
-	sessions := app.NewSessionService(testApp.Store, auth.NewFakeVerifier(), testApp.Privy)
+	auth.RegisterToken(testApp.Auth, token, auth.Identity{DynamicUserID: privyUserID, DisplayName: "Scanner"})
+	sessions := app.NewSessionService(testApp.Store, testApp.Auth, testApp.Privy)
 	session, err := sessions.OpenSession(ctx, string(token))
 	if err != nil {
 		t.Fatalf("OpenSession: %v", err)
 	}
 	testApp.ISO.TrackUser(session.UserID)
-	groups := app.NewGroupService(testApp.Store, testApp.Privy)
+	groups := app.NewGroupService(testApp.Store, testApp.Auth, testApp.Privy)
 	group, err := groups.CreateGroup(ctx, string(token), "Scan Fund "+testApp.ISO.Suffix())
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -247,7 +248,7 @@ func TestSweepPoller_scanDoesNotCreateDepositWithoutUserIntent(t *testing.T) {
 	if hasPending {
 		t.Fatal("expected no pending deposit from wallet scan")
 	}
-	if _, ok := privy.LastSweepRequest(testApp.Privy); ok {
+	if _, ok := wallets.LastSweepRequest(testApp.Privy); ok {
 		t.Fatal("expected no SubmitSweep call from wallet scan")
 	}
 }

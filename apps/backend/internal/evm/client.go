@@ -9,8 +9,8 @@ import (
 // Log is a simplified transaction log for receipt parsing.
 type Log struct {
 	Address string
- Topics  []string
- Data    []byte
+	Topics  []string
+	Data    []byte
 }
 
 // Receipt is an EVM transaction receipt.

@@ -3,7 +3,7 @@ import SwiftUI
 
 /// M1 post-login proof screen: opens backend session then loads GET /v1/me.
 struct MeScreenView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
 
     private let apiClient = MonacoAPIClient()
 
@@ -62,7 +62,7 @@ struct MeScreenView: View {
                 MonacoWalletAddressText(address: profile.memberWalletAddress)
             }
 
-            Label("Connected Solana address from GET /v1/me", systemImage: "checkmark.seal.fill")
+            Label("Connected Base address from GET /v1/me", systemImage: "checkmark.seal.fill")
                 .font(.footnote)
                 .foregroundStyle(MonacoTheme.success)
         }
@@ -83,7 +83,7 @@ struct MeScreenView: View {
     private func loadProfile() async {
         guard let accessToken = auth.accessToken else {
             profile = nil
-            errorMessage = "Missing Privy access token."
+            errorMessage = "Missing access token."
             isLoading = false
             return
         }
@@ -106,5 +106,5 @@ struct MeScreenView: View {
 }
 
 #Preview {
-    MeScreenView(auth: PrivyAuthService())
+    MeScreenView(auth: DynamicAuthService())
 }

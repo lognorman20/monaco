@@ -19,19 +19,15 @@ private extension XCUIApplication {
 
 final class MonacoUITests: XCTestCase {
 
-    private func privyLaunchEnvironment() -> [String: String] {
+    private func authLaunchEnvironment() -> [String: String] {
         let keys = [
-            "PRIVY_APP_ID",
-            "PRIVY_APP_CLIENT_ID",
-            "PRIVY_SMS_LOGIN_ENABLED",
-            "PRIVY_EMAIL_LOGIN_ENABLED",
-            "PRIVY_AUTHORIZATION_KEY_ID",
+            "DYNAMIC_ENVIRONMENT_ID",
+            "AUTH_SMS_LOGIN_ENABLED",
+            "AUTH_EMAIL_LOGIN_ENABLED",
         ]
         let defaults: [String: String] = [
-            "PRIVY_APP_ID": "cmu26uw5s00mp0cl81v6dud1n",
-            "PRIVY_APP_CLIENT_ID": "client-WY6dnErYgTBNFxTtjREKwCSYjwu5mecwunVjEndGhLy12",
-            "PRIVY_SMS_LOGIN_ENABLED": "true",
-            "PRIVY_EMAIL_LOGIN_ENABLED": "true",
+            "AUTH_SMS_LOGIN_ENABLED": "true",
+            "AUTH_EMAIL_LOGIN_ENABLED": "true",
         ]
         let process = ProcessInfo.processInfo.environment
         var env: [String: String] = [:]
@@ -60,7 +56,7 @@ final class MonacoUITests: XCTestCase {
     @MainActor
     func testM1CreateGroupShowsTreasury() throws {
         let app = XCUIApplication()
-        app.launchEnvironment = privyLaunchEnvironment()
+        app.launchEnvironment = authLaunchEnvironment()
         app.launch()
 
         let phoneField = app.textFields["Phone number"]
@@ -137,7 +133,7 @@ final class MonacoUITests: XCTestCase {
     @MainActor
     func testAssetsTabBrowseSearchDetailAndBuyPicker() throws {
         let app = XCUIApplication()
-        app.launchEnvironment = privyLaunchEnvironment()
+        app.launchEnvironment = authLaunchEnvironment()
         app.launch()
         loginIfNeeded(app)
 
@@ -163,7 +159,7 @@ final class MonacoUITests: XCTestCase {
 
         XCTAssertTrue(
             app.buttons["asset-detail-buy"].waitForExistence(timeout: 25)
-                || app.staticTexts["Via Jupiter"].waitForExistence(timeout: 8)
+                || app.staticTexts["Via Kyber"].waitForExistence(timeout: 8)
                 || app.otherElements["asset-detail-root"].waitForExistence(timeout: 8)
                 || app.staticTexts["No route for this stock right now."].waitForExistence(timeout: 5),
             "asset detail"
@@ -173,7 +169,7 @@ final class MonacoUITests: XCTestCase {
                 || app.staticTexts["Price history is not available yet."].waitForExistence(timeout: 8)
         )
         XCTAssertTrue(app.otherElements["asset-detail-jupiter"].waitForExistence(timeout: 8)
-            || app.staticTexts["Via Jupiter"].waitForExistence(timeout: 8))
+            || app.staticTexts["Via Kyber"].waitForExistence(timeout: 8))
         attachScreenshot(app, name: "issue-156-asset-detail")
 
         let buy = app.buttons["asset-detail-buy"]
@@ -228,7 +224,7 @@ final class MonacoUITests: XCTestCase {
     @MainActor
     func testCreateCabalUsesCanvas() throws {
         let app = XCUIApplication()
-        app.launchEnvironment = privyLaunchEnvironment()
+        app.launchEnvironment = authLaunchEnvironment()
         app.launch()
         loginIfNeeded(app)
 
@@ -248,7 +244,7 @@ final class MonacoUITests: XCTestCase {
     @MainActor
     func testFourTabShell() throws {
         let app = XCUIApplication()
-        app.launchEnvironment = privyLaunchEnvironment()
+        app.launchEnvironment = authLaunchEnvironment()
         app.launch()
         loginIfNeeded(app)
 
@@ -318,7 +314,7 @@ final class MonacoUITests: XCTestCase {
     @MainActor
     func testM2DepositLinkReachable() throws {
         let app = XCUIApplication()
-        app.launchEnvironment = privyLaunchEnvironment()
+        app.launchEnvironment = authLaunchEnvironment()
         app.launch()
 
         loginIfNeeded(app)
@@ -362,7 +358,7 @@ final class MonacoUITests: XCTestCase {
     @MainActor
     func testM2DepositLive() throws {
         let app = XCUIApplication()
-        app.launchEnvironment = privyLaunchEnvironment()
+        app.launchEnvironment = authLaunchEnvironment()
         app.launch()
 
         loginIfNeeded(app)
@@ -414,7 +410,7 @@ final class MonacoUITests: XCTestCase {
     @MainActor
     func testAlfredEmailLoginMigratesSigner() throws {
         let app = XCUIApplication()
-        app.launchEnvironment = privyLaunchEnvironment()
+        app.launchEnvironment = authLaunchEnvironment()
         app.launch()
 
         if app.buttons["Sign out"].waitForExistence(timeout: 5) {
@@ -428,7 +424,7 @@ final class MonacoUITests: XCTestCase {
         let emailField = app.textFields["Email address"]
         XCTAssertTrue(emailField.waitForExistence(timeout: 15))
         emailField.tap()
-        emailField.typeText("test-8081@privy.io")
+        emailField.typeText("test-8081@example.com")
 
         app.buttons["Send code"].tap()
 

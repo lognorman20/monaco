@@ -4,14 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math/big"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
+	"github.com/monaco/monaco/apps/backend/internal/chainlink"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 // #153: faker rows must never reach Privy, Solana RPC, or Jupiter. These tests seed faker rows
@@ -23,7 +26,7 @@ type recordingPrivy struct {
 	memberBalance   []string
 	treasuryBalance []string
 	ensureTreasury  []string
-	sweeps          []privy.SweepRequest
+	sweeps          []wallets.SweepRequest
 }
 
 func (r *recordingPrivy) MemberUSDCBalance(ctx context.Context, address string) (int64, error) {
@@ -47,7 +50,7 @@ func (r *recordingPrivy) EnsureTreasury(ctx context.Context, groupID wallets.Gro
 	return r.Client.EnsureTreasury(ctx, groupID)
 }
 
-func (r *recordingPrivy) SubmitSweep(ctx context.Context, req privy.SweepRequest) (privy.SweepResult, error) {
+func (r *recordingPrivy) SubmitSweep(ctx context.Context, req wallets.SweepRequest) (wallets.SweepResult, error) {
 	r.mu.Lock()
 	r.sweeps = append(r.sweeps, req)
 	r.mu.Unlock()
@@ -73,30 +76,25 @@ type recordingJupiter struct {
 	calls []string
 }
 
-func (r *recordingJupiter) record(op, groupID string) {
+func (r *recordingJupiter) record(op, token string) {
 	r.mu.Lock()
-	r.calls = append(r.calls, op+":"+groupID)
+	r.calls = append(r.calls, op+":"+token)
 	r.mu.Unlock()
 }
 
-func (r *recordingJupiter) QuoteBuy(ctx context.Context, p jupiter.QuoteBuyParams) (jupiter.BuyQuote, error) {
-	r.record("quote_buy", p.GroupID)
-	return r.Client.QuoteBuy(ctx, p)
+func (r *recordingJupiter) QuoteBuy(ctx context.Context, tokenOut string, usdcIn *big.Int) (dex.Quote, error) {
+	r.record("quote_buy", tokenOut)
+	return r.Client.QuoteBuy(ctx, tokenOut, usdcIn)
 }
 
-func (r *recordingJupiter) OrderBuy(ctx context.Context, p jupiter.OrderBuyParams) (jupiter.BuyOrder, error) {
-	r.record("order_buy", p.GroupID)
-	return r.Client.OrderBuy(ctx, p)
+func (r *recordingJupiter) QuoteSell(ctx context.Context, tokenIn string, amountIn *big.Int) (dex.Quote, error) {
+	r.record("quote_sell", tokenIn)
+	return r.Client.QuoteSell(ctx, tokenIn, amountIn)
 }
 
-func (r *recordingJupiter) ExecuteBuy(ctx context.Context, p jupiter.ExecuteBuyParams) (jupiter.ExecuteResult, error) {
-	r.record("execute_buy", p.GroupID)
-	return r.Client.ExecuteBuy(ctx, p)
-}
-
-func (r *recordingJupiter) SellToUSDC(ctx context.Context, p jupiter.SellToUSDCParams) (jupiter.ExecuteResult, error) {
-	r.record("sell", p.GroupID)
-	return r.Client.SellToUSDC(ctx, p)
+func (r *recordingJupiter) BuildSwap(ctx context.Context, q dex.Quote, sender, recipient string) (dex.SwapCall, error) {
+	r.record("build_swap", q.TokenOut)
+	return r.Client.BuildSwap(ctx, q, sender, recipient)
 }
 
 // fakerFixture is a hand-built faker world: one real operator club with a ghost member and one
@@ -153,15 +151,15 @@ func seedFakerFixture(t *testing.T, testApp *workerTestApp, privyClient wallets.
 
 	// Real operator club through the normal service path (fake Privy treasury).
 	token := auth.AccessToken(testApp.ISO.UniqueToken("operator"))
-	auth.RegisterToken(privyClient, token, auth.Identity{PrivyUserID: testApp.ISO.UniqueDynamicID("operator"), DisplayName: "Operator"})
-	session, err := app.NewSessionService(testApp.Store, auth.NewFakeVerifier(), privyClient).OpenSession(ctx, string(token))
+	auth.RegisterToken(testApp.Auth, token, auth.Identity{DynamicUserID: testApp.ISO.UniqueDynamicID("operator"), DisplayName: "Operator"})
+	session, err := app.NewSessionService(testApp.Store, testApp.Auth, privyClient).OpenSession(ctx, string(token))
 	if err != nil {
 		t.Fatalf("OpenSession: %v", err)
 	}
 	testApp.ISO.TrackUser(session.UserID)
 	fx.operatorID = session.UserID
 	fx.operatorToken = string(token)
-	governance := app.NewGovernanceService(testApp.Store, privyClient)
+	governance := app.NewGovernanceService(testApp.Store, testApp.Auth, privyClient)
 	group, err := governance.CreateGroupWithRules(ctx, string(token), "Operator Club "+sfx, app.DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("CreateGroupWithRules: %v", err)
@@ -171,9 +169,9 @@ func seedFakerFixture(t *testing.T, testApp *workerTestApp, privyClient wallets.
 	fx.realTreasury = group.TreasuryAddress
 
 	// Faker users.
-	fx.ghostID = mustQueryID(t, db, `INSERT INTO users (privy_user_id, display_name, is_faker) VALUES ($1, 'Maya Ghost', true) RETURNING id`, "faker:user:test-"+sfx+"-ghost")
+	fx.ghostID = mustQueryID(t, db, `INSERT INTO users (dynamic_user_id, display_name, is_faker) VALUES ($1, 'Maya Ghost', true) RETURNING id`, "faker:user:test-"+sfx+"-ghost")
 	testApp.ISO.TrackUser(fx.ghostID)
-	fx.fakerMemberID = mustQueryID(t, db, `INSERT INTO users (privy_user_id, display_name, is_faker) VALUES ($1, 'Scale Member', true) RETURNING id`, "faker:user:test-"+sfx+"-member")
+	fx.fakerMemberID = mustQueryID(t, db, `INSERT INTO users (dynamic_user_id, display_name, is_faker) VALUES ($1, 'Scale Member', true) RETURNING id`, "faker:user:test-"+sfx+"-member")
 	testApp.ISO.TrackUser(fx.fakerMemberID)
 
 	// Ghost member inside the real club: pending deposit, display position, passed proposal (no swap).
@@ -185,12 +183,12 @@ func seedFakerFixture(t *testing.T, testApp *workerTestApp, privyClient wallets.
 	// Wholly fake scale club with a dummy (non-Privy, non-FAKE*) treasury.
 	fx.fakerGroupID = mustQueryID(t, db, `INSERT INTO groups (name, creator_user_id, is_faker, faker_key) VALUES ($1, $2, true, $3) RETURNING id`, "Scale Club "+sfx, fx.fakerMemberID, "test:"+sfx)
 	testApp.ISO.TrackGroup(fx.fakerGroupID)
-	mustExec(t, db, `INSERT INTO treasuries (group_id, privy_wallet_id, solana_address) VALUES ($1, $2, $3)`, fx.fakerGroupID, "faker:treasury:"+sfx, fx.fakerTreasury)
+	mustExec(t, db, `INSERT INTO treasuries (group_id, wallet_id, address) VALUES ($1, $2, $3)`, fx.fakerGroupID, "faker:treasury:"+sfx, fx.fakerTreasury)
 	mustExec(t, db, `INSERT INTO group_members (group_id, user_id) VALUES ($1, $2)`, fx.fakerGroupID, fx.fakerMemberID)
 	mustExec(t, db, `INSERT INTO positions (user_id, group_id, share_units, amount_deposited) VALUES ($1, $2, $3, 9000000)`, fx.fakerMemberID, fx.fakerGroupID, fx.fakerGroupShares)
 	fx.fakerDepositIDs = append(fx.fakerDepositIDs,
 		mustQueryID(t, db, `INSERT INTO deposits (user_id, group_id, amount, from_address, status) VALUES ($1, $2, 1000000, $3, 'pending') RETURNING id`, fx.fakerMemberID, fx.fakerGroupID, fx.fakerAddress),
-		mustQueryID(t, db, `INSERT INTO deposits (user_id, group_id, amount, from_address, status, tx_signature) VALUES ($1, $2, 2000000, $3, 'pending', $4) RETURNING id`, fx.fakerMemberID, fx.fakerGroupID, fx.fakerAddress, fx.fakerBroadcast),
+		mustQueryID(t, db, `INSERT INTO deposits (user_id, group_id, amount, from_address, status, tx_hash) VALUES ($1, $2, 2000000, $3, 'pending', $4) RETURNING id`, fx.fakerMemberID, fx.fakerGroupID, fx.fakerAddress, fx.fakerBroadcast),
 	)
 	fx.fakerProposalID = mustQueryID(t, db, `INSERT INTO proposals (group_id, proposer_id, symbol, usdc_micros, status, expires_at) VALUES ($1, $2, 'AAPLx', 1000000, 'passed', now() - interval '1 hour') RETURNING id`, fx.fakerGroupID, fx.fakerMemberID)
 	return fx
@@ -221,7 +219,7 @@ func TestFakerSkip_sweepPollerNeverTouchesFakerRows(t *testing.T) {
 	wallets.SetMemberUSDCBalance(testApp.Privy, fx.ghostAddress, 5_000_000)
 	wallets.SetMemberUSDCBalance(testApp.Privy, fx.fakerAddress, 5_000_000)
 	rpc := &recordingRPC{inner: NewFakeConfirmer()}
-	deposits := app.NewDepositService(testApp.Store, rec, nil, app.NewSymbolResolver(nil))
+	deposits := app.NewDepositService(testApp.Store, testApp.Auth, rec, chainlink.NewFakeClient(), app.NewSymbolResolver(nil))
 	poller := NewSweepPoller(testApp.Store, rec, rpc, deposits, "relayer-key", NewStubClock(testApp.Now))
 
 	if err := poller.Tick(ctx); err != nil {
@@ -397,7 +395,7 @@ func TestFakerSkip_executeOnPassRefusesFakerProposals(t *testing.T) {
 
 	jup := &recordingJupiter{Client: dex.NewFakeClient()}
 	buy := app.NewBuyService(jup, b20.NewFakeCatalog())
-	swap := app.NewSwapService(testApp.Store, buy, jup, rec, app.NewFakePrivyTreasurySigner(), "", app.NewSymbolResolver(nil))
+	swap := app.NewSwapService(testApp.Store, buy, jup, rec, nil, app.NewSymbolResolver(nil))
 	exec := app.NewExecuteOnPassService(swap, testApp.Store)
 
 	// Poller tick: faker proposals are never listed, so nothing executes.

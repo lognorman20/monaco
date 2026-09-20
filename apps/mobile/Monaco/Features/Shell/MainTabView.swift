@@ -7,7 +7,7 @@ enum MainTab: Hashable {
 
 /// Post-auth frame. Tab chrome only — screens live in their feature folders.
 struct MainTabView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     @State private var selectedTab: MainTab = .home
 
     var body: some View {

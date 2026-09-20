@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 func TestPOST_proposals_happyPath_returnsProposalID(t *testing.T) {
@@ -21,12 +21,12 @@ func TestPOST_proposals_happyPath_returnsProposalID(t *testing.T) {
 	proposalHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, resolver, iso := integrationProposalsApp(t)
 	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
 	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
-	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, jupiter.BuyQuote{
-		Routable:   true,
-		InputToken:  evm.USDCAddress,
+	dex.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, dex.BuyQuote{
+		Routable:    true,
+		InputToken:  dex.USDCAddress(),
 		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
-		InAmount:   "5000000",
-		OutAmount:  "2500000",
+		InAmount:    "5000000",
+		OutAmount:   "2500000",
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/groups/"+groupID+"/proposals", strings.NewReader(`{"symbol":"AAPLx","usdc":5000000}`))
@@ -61,12 +61,12 @@ func TestPOST_proposals_exceedsTreasuryUSDC_returns400(t *testing.T) {
 	}
 	wallets.SetTreasuryUSDCBalance(privyClient, treasury.Address, 1_000_000)
 	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
-	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, jupiter.BuyQuote{
-		Routable:   true,
-		InputToken:  evm.USDCAddress,
+	dex.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, dex.BuyQuote{
+		Routable:    true,
+		InputToken:  dex.USDCAddress(),
 		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
-		InAmount:   "5000000",
-		OutAmount:  "2500000",
+		InAmount:    "5000000",
+		OutAmount:   "2500000",
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/groups/"+groupID+"/proposals", strings.NewReader(`{"symbol":"AAPLx","usdc":5000000}`))
@@ -87,12 +87,12 @@ func TestPOST_quotes_routable_returnsOutputAndPrice(t *testing.T) {
 	quoteHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, resolver, iso := integrationQuotesApp(t)
 	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
 	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
-	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, jupiter.BuyQuote{
-		Routable:   true,
-		InputToken:  evm.USDCAddress,
+	dex.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, dex.BuyQuote{
+		Routable:    true,
+		InputToken:  dex.USDCAddress(),
 		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
-		InAmount:   "5000000",
-		OutAmount:  "2500000",
+		InAmount:    "5000000",
+		OutAmount:   "2500000",
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/groups/"+groupID+"/quotes", strings.NewReader(`{"symbol":"AAPLx","usdc":5000000}`))
@@ -128,12 +128,12 @@ func TestGET_groupProposals_openTab_returnsCreatedProposal(t *testing.T) {
 	proposalHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, resolver, iso := integrationProposalsApp(t)
 	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
 	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
-	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, jupiter.BuyQuote{
-		Routable:   true,
-		InputToken:  evm.USDCAddress,
+	dex.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, dex.BuyQuote{
+		Routable:    true,
+		InputToken:  dex.USDCAddress(),
 		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
-		InAmount:   "5000000",
-		OutAmount:  "2500000",
+		InAmount:    "5000000",
+		OutAmount:   "2500000",
 	})
 
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+groupID+"/proposals", strings.NewReader(`{"symbol":"AAPLx","usdc":5000000}`))
@@ -182,12 +182,12 @@ func TestGET_proposalDetail_returnsProposerAndVotes(t *testing.T) {
 	proposalHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, resolver, iso := integrationProposalsApp(t)
 	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
 	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
-	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, jupiter.BuyQuote{
-		Routable:   true,
-		InputToken:  evm.USDCAddress,
+	dex.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, dex.BuyQuote{
+		Routable:    true,
+		InputToken:  dex.USDCAddress(),
 		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
-		InAmount:   "5000000",
-		OutAmount:  "2500000",
+		InAmount:    "5000000",
+		OutAmount:   "2500000",
 	})
 
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+groupID+"/proposals", strings.NewReader(`{"symbol":"AAPLx","usdc":5000000}`))
@@ -242,12 +242,12 @@ func TestPOST_proposals_withThesis_roundTripsOnListAndDetail(t *testing.T) {
 	proposalHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, resolver, iso := integrationProposalsApp(t)
 	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
 	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
-	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, jupiter.BuyQuote{
-		Routable:   true,
-		InputToken:  evm.USDCAddress,
+	dex.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, dex.BuyQuote{
+		Routable:    true,
+		InputToken:  dex.USDCAddress(),
 		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
-		InAmount:   "5000000",
-		OutAmount:  "2500000",
+		InAmount:    "5000000",
+		OutAmount:   "2500000",
 	})
 
 	createReq := httptest.NewRequest(
@@ -337,7 +337,8 @@ func integrationProposalsApp(t *testing.T) (*ProposalHandlers, *GroupHandlers, *
 	groupHandlers.Governance.SetBuyService(quoteHandlers.Buy)
 	return &ProposalHandlers{
 		Store:      quoteHandlers.Store,
-		Privy:      quoteHandlers.Privy,
+		Auth:       authHandlers.Verifier,
+		Wallets:    quoteHandlers.Wallets,
 		Governance: groupHandlers.Governance,
 	}, groupHandlers, authHandlers, privyClient, jupiterClient, resolver, iso
 }

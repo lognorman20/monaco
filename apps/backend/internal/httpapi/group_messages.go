@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 )
 
 // groupMessageTimeLayout is fixed-width RFC3339 with microseconds in UTC, so clients can

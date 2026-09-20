@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/monaco/monaco/apps/backend/internal/evm"
 	"github.com/monaco/monaco/apps/backend/internal/b20"
+	"github.com/monaco/monaco/apps/backend/internal/evm"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 )
 
@@ -344,7 +344,7 @@ RETURNING id`, club.Name, ids[club.Creator.Slug], fakerKey, createdAt).Scan(&gro
 	}
 
 	// Dummy treasury: schema needs one, but it is never a Privy wallet and never a FAKE* address.
-	if _, err := tx.ExecContext(ctx, `INSERT INTO treasuries (group_id, privy_wallet_id, solana_address, created_at) VALUES ($1, $2, $3, $4)`,
+	if _, err := tx.ExecContext(ctx, `INSERT INTO treasuries (group_id, wallet_id, address, created_at) VALUES ($1, $2, $3, $4)`,
 		groupID, "faker:treasury:"+s.prefix+club.Key, "faker-treasury-"+s.prefix+club.Key, createdAt); err != nil {
 		return ScaleClub{}, fmt.Errorf("insert dummy treasury: %w", err)
 	}
@@ -390,9 +390,9 @@ func (s *Seeder) upsertPeople(ctx context.Context, tx *sql.Tx, people []person, 
 		}
 		var id string
 		err := tx.QueryRowContext(ctx, `
-INSERT INTO users (privy_user_id, display_name, is_faker, created_at, profile_photo_url)
+INSERT INTO users (dynamic_user_id, display_name, is_faker, created_at, profile_photo_url)
 VALUES ($1, $2, true, $3, $4)
-ON CONFLICT (privy_user_id) DO UPDATE
+ON CONFLICT (dynamic_user_id) DO UPDATE
   SET display_name = EXCLUDED.display_name, profile_photo_url = EXCLUDED.profile_photo_url
   WHERE users.is_faker
 RETURNING id`, s.privyID(p.Slug), p.Name, createdAt, photo).Scan(&id)
@@ -460,7 +460,6 @@ func deleteFakerGroupChildren(ctx context.Context, tx *sql.Tx, groupID string) e
 		`DELETE FROM group_agents WHERE group_id = $1`,
 		`DELETE FROM proposals WHERE group_id = $1`,
 		`DELETE FROM redeem_jobs WHERE group_id = $1`,
-		`DELETE FROM payout_proofs WHERE group_id = $1`,
 		`DELETE FROM nav_snapshots WHERE group_id = $1`,
 		`DELETE FROM group_join_requests WHERE group_id = $1`,
 		`DELETE FROM group_voters WHERE group_id = $1`,
@@ -493,7 +492,7 @@ func insertDepositsAndPositions(ctx context.Context, tx *sql.Tx, groupID, sigKey
 		}
 		amount := d.USDC * usdc
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO deposits (user_id, group_id, amount, from_address, status, tx_signature, created_at)
+INSERT INTO deposits (user_id, group_id, amount, from_address, status, tx_hash, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7)`, ids[d.Who], groupID, amount, "faker-wallet-"+d.Who, status, sig, hoursAgo(now, d.HoursAgo)); err != nil {
 			return fmt.Errorf("insert faker deposit: %w", err)
 		}
@@ -583,8 +582,8 @@ func insertSwaps(ctx context.Context, tx *sql.Tx, groupID, sigKey string, club c
 	tokens := tokenAtomics(spent, costPx)
 	confirmed := hoursAgo(now, buy.HoursAgo-2)
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO transactions (group_id, proposal_id, amount, action, input_mint, output_mint, status,
-                          tx_signature, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at)
+INSERT INTO transactions (group_id, proposal_id, amount, action, input_token, output_token, status,
+                          tx_hash, execute_request_id, cost_basis_price, cost_basis_amount, created_at, confirmed_at)
 VALUES ($1, $2, $3, 'buy', $4, $5, 'confirmed', $6, $7, $3, $8, $9, $9)`,
 		groupID, pids[buy.Key], spent, evm.USDCAddress, club.BuyMint,
 		"faker-"+sigKey+"-buy", "faker-"+sigKey+"-buy-req", tokens, confirmed); err != nil {
@@ -615,8 +614,8 @@ VALUES ($1, $2, $3, 'sell', $4, 'passed', $5, $6) RETURNING id`,
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO transactions (group_id, proposal_id, amount, action, input_mint, output_mint, status,
-                          tx_signature, execute_request_id, cost_basis_amount, created_at, confirmed_at)
+INSERT INTO transactions (group_id, proposal_id, amount, action, input_token, output_token, status,
+                          tx_hash, execute_request_id, cost_basis_amount, created_at, confirmed_at)
 VALUES ($1, $2, $3, 'sell', $4, $5, 'confirmed', $6, $7, $8, $9, $9)`,
 		groupID, sellProposalID, sold, club.BuyMint, evm.USDCAddress,
 		"faker-"+sigKey+"-sell", "faker-"+sigKey+"-sell-req", proceeds, soldAt); err != nil {

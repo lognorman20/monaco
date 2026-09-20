@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Monaco iOS compile with Privy xcconfig. Uses SimSlim gold when ready, else stock sim.
+# Monaco iOS compile with Dynamic xcconfig. Uses SimSlim gold when ready, else stock sim.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-./scripts/ensure-ios-privy-config.sh generate
+./scripts/ensure-ios-dynamic-config.sh generate
 udid="$(./scripts/resolve-ios-sim.sh)"
 
 # Ad-hoc sign the sim build (see docs/how-to/local-simulator.md#signing): an unsigned
 # build (CODE_SIGNING_ALLOWED=NO) can't hold a keychain-access-group entitlement, so the
-# Privy session is silently dropped on every relaunch or reinstall. Automatic signing needs
+# auth session is silently dropped on every relaunch or reinstall. Automatic signing needs
 # the team's own certificate, which not every contributor's machine has; "-" self-signs
 # locally without one.
 xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \

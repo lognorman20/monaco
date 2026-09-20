@@ -59,7 +59,7 @@ func (c *pinnedCatalog) ResolveTokenAddress(ctx context.Context, symbol string) 
 	_ = ctx
 	a, ok := c.bySymbol[strings.ToUpper(strings.TrimSpace(symbol))]
 	if !ok {
-		return "", fmt.Errorf("unknown symbol %q", symbol)
+		return "", fmt.Errorf("%w: unknown symbol %q", ErrNotFound, symbol)
 	}
 	return a.TokenAddress, nil
 }
@@ -106,7 +106,7 @@ func (c *pinnedCatalog) Feed(ctx context.Context, symbol string) (string, error)
 	_ = ctx
 	a, ok := c.bySymbol[strings.ToUpper(strings.TrimSpace(symbol))]
 	if !ok {
-		return "", fmt.Errorf("unknown symbol %q", symbol)
+		return "", fmt.Errorf("%w: unknown symbol %q", ErrNotFound, symbol)
 	}
 	return a.FeedAddress, nil
 }

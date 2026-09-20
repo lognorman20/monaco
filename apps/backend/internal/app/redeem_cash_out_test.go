@@ -1,10 +1,9 @@
 package app
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/evm"
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"errors"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/dex"
@@ -16,12 +15,8 @@ import (
 // registerSellFill wires a routable sell quote for redeem cash-out tests.
 func registerSellFill(t *testing.T, h integrationHarness, _ /* label */, treasuryAddress string, sellAmount, proceeds int64) {
 	t.Helper()
+	_ = treasuryAddress
 	registerDexSellQuote(t, h.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", sellAmount, proceeds)
-	current, err := h.Wallets.TreasuryUSDCBalance(context.Background(), treasuryAddress)
-	if err != nil {
-		t.Fatalf("treasury balance: %v", err)
-	}
-	wallets.SetTreasuryUSDCBalance(h.Wallets, treasuryAddress, current+proceeds)
 }
 
 // seedStakeAndHoldings gives userID shareUnits in the group and puts a confirmed buy of
@@ -47,9 +42,9 @@ func seedStakeAndHoldings(t *testing.T, h integrationHarness, userID, groupID, l
 	if _, _, err := h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          groupID,
 		Amount:           stockAtomics,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      testTxHash(h.ISO, label+"-buy"),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           testTxHash(h.ISO, label+"-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, label+"-buy"),
 		CostBasisPrice:   stockAtomics,
 		CostBasisAmount:  stockAtomics,
@@ -140,7 +135,7 @@ func TestWithdrawToBalance_potHoldsStock_sellsThenPaysNoMoreThanTreasuryUsdc(t *
 		t.Fatalf("payout amount = %d, want %d", payout.Amount, proceeds)
 	}
 
-	treasuryUsdc, err := h.Privy.TreasuryUSDCBalance(ctx, group.TreasuryAddress)
+	treasuryUsdc, err := h.Wallets.TreasuryUSDCBalance(ctx, group.TreasuryAddress)
 	if err != nil {
 		t.Fatalf("TreasuryUSDCBalance: %v", err)
 	}
@@ -191,6 +186,7 @@ func TestWithdrawToBalance_recoversJobWedgedInPaying_repricesInflatedSlice(t *te
 
 	const proceeds = int64(495_000)
 	registerSellFill(t, h, "cashout-wedged-sell", group.TreasuryAddress, 505_001, proceeds)
+	registerSellFill(t, h, "cashout-wedged-sell-prorata", group.TreasuryAddress, 500_000, proceeds)
 
 	job, err := h.Redeem.WithdrawToBalance(ctx, WithdrawToBalanceRequest{
 		AccessToken: string(token),

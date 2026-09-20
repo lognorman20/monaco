@@ -181,7 +181,7 @@ func logProposalExecuteSuccess(proposalID, transactionID, txHash string, created
 	slog.Info("proposal execute success",
 		"proposal_id", proposalID,
 		"transaction_id", transactionID,
-		"tx_signature", txHash,
+		"tx_hash", txHash,
 		"created", created,
 	)
 }

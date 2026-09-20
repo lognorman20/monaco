@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Search results replace the tab content while a query is typed.
 struct CabalsSearchResultsSection: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let model: CabalsTabModel
     var onChanged: () async -> Void
 

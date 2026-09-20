@@ -17,7 +17,7 @@ type DepositRow struct {
 	Amount      int64
 	FromAddress string
 	Status      string
-	TxHash sql.NullString
+	TxHash      sql.NullString
 	CreatedAt   time.Time
 }
 

@@ -9,6 +9,7 @@ type Asset struct {
 	TokenAddress string
 	FeedAddress  string
 	Decimals     int
+	Routable     bool
 }
 
 // SearchPage is one page of catalog search results.

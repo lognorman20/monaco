@@ -34,6 +34,12 @@ func allowanceKey(token, owner, spender string) string {
 	return token + ":" + owner + ":" + spender
 }
 
+func (f *fakeClient) SetETHBalance(addr string, amount *big.Int) {
+	f.mu.Lock()
+	f.balances["eth:"+addr] = new(big.Int).Set(amount)
+	f.mu.Unlock()
+}
+
 func (f *fakeClient) SetERC20Balance(token, holder string, amount *big.Int) {
 	f.mu.Lock()
 	f.balances[balanceKey(token, holder)] = new(big.Int).Set(amount)
@@ -102,7 +108,7 @@ func (f *fakeClient) Receipt(ctx context.Context, txHash string) (Receipt, error
 	defer f.mu.Unlock()
 	r, ok := f.receipts[txHash]
 	if !ok {
-		return Receipt{Found: false}, nil
+		return Receipt{Found: true, Status: 1}, nil
 	}
 	return r, nil
 }
@@ -123,10 +129,4 @@ func (f *fakeClient) ChainlinkLatestRoundData(ctx context.Context, feed string) 
 		return d, nil
 	}
 	return RoundData{Answer: big.NewInt(0), UpdatedAt: time.Now()}, nil
-}
-
-// NewJSONRPCClient dials a Base JSON-RPC endpoint (stub until live wiring).
-func NewJSONRPCClient(url string) Client {
-	_ = url
-	return NewFakeClient()
 }

@@ -3,7 +3,7 @@ import MonacoCore
 import SwiftUI
 
 /// Debug-only: renders Home from canned `AppSessionStore` data so QA can screenshot
-/// each state without Privy or a backend. Launch with
+/// each state without auth or a backend. Launch with
 /// `-MonacoHomeSample <populated|empty|loading|missedVote>`.
 enum HomeSampleScenario: String, CaseIterable {
     case populated
@@ -22,11 +22,11 @@ enum HomeSampleScenario: String, CaseIterable {
 
 struct HomeSampleHarness: View {
     let scenario: HomeSampleScenario
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     @State private var session: AppSessionStore
     @State private var selectedTab: MainTab = .home
 
-    init(scenario: HomeSampleScenario, auth: PrivyAuthService) {
+    init(scenario: HomeSampleScenario, auth: DynamicAuthService) {
         self.scenario = scenario
         self.auth = auth
         _session = State(initialValue: Self.makeSession(for: scenario))

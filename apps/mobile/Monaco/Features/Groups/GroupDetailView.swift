@@ -13,7 +13,7 @@ enum GroupDetailRoute: Hashable {
 /// Group screen: hero, action row, open votes, holdings, leaderboard, and activity.
 /// Owns loading, polling, leave, retry, and join-request state; `GroupDetailContent` is the layout.
 struct GroupDetailView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let groupId: String
     let groupName: String?
     let initialView: GroupViewDTO?
@@ -61,7 +61,7 @@ struct GroupDetailView: View {
     }
 
     init(
-        auth: PrivyAuthService,
+        auth: DynamicAuthService,
         groupId: String,
         groupName: String? = nil,
         initialView: GroupViewDTO? = nil,
@@ -501,7 +501,7 @@ private struct DismissWhenActive: View {
 
 /// Scrollable layout of the group screen. Pure: data in, actions out.
 struct GroupDetailContent: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let view: GroupViewDTO
     let currentUserId: String?
     let proposalService: ProposalFeedService

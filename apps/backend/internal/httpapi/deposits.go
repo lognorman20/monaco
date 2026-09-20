@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 )
 
 // DepositHandlers serves deposit HTTP routes.
@@ -34,7 +34,7 @@ type getDepositResponse struct {
 	Amount      int64  `json:"amount"`
 	Status      string `json:"status"`
 	FromAddress string `json:"fromAddress,omitempty"`
-	TxHash string `json:"txHash,omitempty"`
+	TxHash      string `json:"txHash,omitempty"`
 	ShareUnits  int64  `json:"shareUnits"`
 	CreatedAt   string `json:"createdAt"`
 }
@@ -210,7 +210,7 @@ func (h *DepositHandlers) GetDepositHandler(w http.ResponseWriter, r *http.Reque
 		Amount:      deposit.Amount,
 		Status:      string(deposit.Status),
 		FromAddress: deposit.FromAddress,
-		TxHash: deposit.TxHash,
+		TxHash:      deposit.TxHash,
 		ShareUnits:  position.ShareUnits,
 		CreatedAt:   deposit.CreatedAt.UTC().Format(time.RFC3339),
 	})

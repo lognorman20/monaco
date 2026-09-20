@@ -1,13 +1,13 @@
 {
-  "originHash" : "d2dc53affa9e73e5a47d89115ae40261f21168fe4be2e12afdff0f2712fcf344",
+  "originHash" : "a9277e83c826f5420d21d03e5e450656917ef1b90212fdb1ccf9eed35ef51abb",
   "pins" : [
     {
-      "identity" : "privy-ios",
+      "identity" : "swift-sdk-and-sample-app",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/privy-io/privy-ios",
+      "location" : "https://github.com/dynamic-labs/swift-sdk-and-sample-app.git",
       "state" : {
-        "revision" : "71dd5fe9eb20a8dfaa411b219f856c108473f909",
-        "version" : "2.16.2"
+        "revision" : "60b0c457786d9bb713d54691ab5f39f7192fa5f5",
+        "version" : "1.5.1"
       }
     }
   ],

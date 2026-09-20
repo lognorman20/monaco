@@ -1,15 +1,21 @@
 import SwiftUI
 
 struct AuthGateView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
-            if Config.privy.isConfigured {
+            if Config.dynamic.isConfigured {
                 if hasLoginMethod {
                     if isAuthenticated {
-                        SessionGateView(auth: auth)
+                        if auth.needsDeviceRegistration {
+                            DeviceRegistrationView(auth: auth)
+                        } else if auth.needsStepUp {
+                            StepUpAuthView(auth: auth)
+                        } else {
+                            SessionGateView(auth: auth)
+                        }
                     } else if auth.phase == .restoring {
                         restoringView
                     } else if case .restoreFailed(let message) = auth.phase {
@@ -31,15 +37,11 @@ struct AuthGateView: View {
             await auth.restoreSessionIfNeeded()
         }
         .onChange(of: scenePhase) { _, newPhase in
-            // Coming back to the app (e.g. after turning Wi-Fi on) retries a restore
-            // that failed offline. A no-op in every other phase.
             guard newPhase == .active else { return }
             Task { await auth.restoreSessionIfNeeded() }
         }
     }
 
-    /// Shown while a saved sign-in is being restored, so a returning user never
-    /// sees the login form flash before the app opens.
     private var restoringView: some View {
         VStack(spacing: MonacoTheme.Space.l) {
             MonacoMark(size: 88)
@@ -76,16 +78,16 @@ struct AuthGateView: View {
     }
 
     private var hasLoginMethod: Bool {
-        Config.privy.smsLoginEnabled || Config.privy.emailLoginEnabled
+        Config.dynamic.smsLoginEnabled || Config.dynamic.emailLoginEnabled
     }
 
     private var missingConfigView: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Privy not configured", systemImage: "key.fill")
+            Label("Sign-in is not configured", systemImage: "key.fill")
                 .font(.headline)
                 .foregroundStyle(MonacoTheme.primaryText)
 
-            Text("Set PRIVY_APP_ID and PRIVY_APP_CLIENT_ID in your Xcode scheme or shell env. Copy values from `.env.example`.")
+            Text("Set DYNAMIC_ENVIRONMENT_ID in your Xcode scheme or shell env. Copy values from `.env.example`.")
                 .authSecondaryCaption()
         }
     }
@@ -96,12 +98,12 @@ struct AuthGateView: View {
                 .font(.headline)
                 .foregroundStyle(MonacoTheme.primaryText)
 
-            Text("Enable PRIVY_SMS_LOGIN_ENABLED and/or PRIVY_EMAIL_LOGIN_ENABLED, or turn SMS/email on in Privy dashboard Login Methods.")
+            Text("Enable AUTH_SMS_LOGIN_ENABLED and/or AUTH_EMAIL_LOGIN_ENABLED.")
                 .authSecondaryCaption()
         }
     }
 }
 
 #Preview {
-    AuthGateView(auth: PrivyAuthService())
+    AuthGateView(auth: DynamicAuthService())
 }

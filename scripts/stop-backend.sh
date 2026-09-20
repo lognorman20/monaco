@@ -21,6 +21,10 @@ api_port() {
 
 port="$(api_port)"
 "$root/scripts/kill-listeners.sh" "$port"
+"$root/scripts/kill-listeners.sh" 8081
+if pkill -f '[n]pm run dev' 2>/dev/null; then
+  echo "stopped signer npm run dev"
+fi
 
 if pkill -f '[g]o run ./cmd/api' 2>/dev/null; then
   echo "stopped go run ./cmd/api"

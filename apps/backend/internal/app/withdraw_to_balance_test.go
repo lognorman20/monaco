@@ -1,10 +1,9 @@
 package app
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/evm"
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"errors"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/dex"
@@ -77,7 +76,7 @@ func TestWithdrawToBalance_fullStake_paysMemberWallet(t *testing.T) {
 		t.Fatalf("payout amount = %d, want %d", payout.Amount, treasuryUSDC)
 	}
 
-	balance, err := h.Privy.MemberUSDCBalance(ctx, wallet.Address)
+	balance, err := h.Wallets.MemberUSDCBalance(ctx, wallet.Address)
 	if err != nil {
 		t.Fatalf("MemberUSDCBalance: %v", err)
 	}
@@ -237,9 +236,9 @@ func TestWithdrawToBalance_halfNAV_withStockHoldings(t *testing.T) {
 	if _, _, err := h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           500_000,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      testTxHash(h.ISO, "withdraw-half-buy"),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           testTxHash(h.ISO, "withdraw-half-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "withdraw-half-buy"),
 		CostBasisPrice:   500_000,
 		CostBasisAmount:  500_000,
@@ -356,9 +355,9 @@ func TestWithdrawToBalance_abortsStuckDebitedJob_allowsRetry(t *testing.T) {
 	if _, _, err := h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           500_000,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      testTxHash(h.ISO, "withdraw-stuck-buy"),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           testTxHash(h.ISO, "withdraw-stuck-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "withdraw-stuck-buy"),
 		CostBasisPrice:   500_000,
 		CostBasisAmount:  500_000,
@@ -458,9 +457,9 @@ func TestWithdrawToBalance_partialUsdcOnly_skipsStockSell(t *testing.T) {
 	if _, _, err := h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          group.GroupID,
 		Amount:           500_000,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      testTxHash(h.ISO, "withdraw-usdc-only-buy"),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           testTxHash(h.ISO, "withdraw-usdc-only-buy"),
 		ExecuteRequestID: testRequestID(h.ISO, "withdraw-usdc-only-buy"),
 		CostBasisPrice:   500_000,
 		CostBasisAmount:  500_000,

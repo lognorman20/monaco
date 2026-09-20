@@ -12,14 +12,14 @@ struct CabalsTabView: View {
         var id: Self { self }
     }
 
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     @Environment(AppSessionStore.self) private var session
     @State private var model: CabalsTabModel
     @State private var searchText = ""
     @State private var showNewCabalSheet = false
     @State private var discoveryRoute: DiscoveryRoute?
 
-    init(auth: PrivyAuthService, dataSource: CabalsTabDataSource? = nil) {
+    init(auth: DynamicAuthService, dataSource: CabalsTabDataSource? = nil) {
         self.auth = auth
         _model = State(initialValue: CabalsTabModel(dataSource: dataSource ?? LiveCabalsTabDataSource(auth: auth)))
     }
@@ -158,7 +158,7 @@ private struct NewCabalSheet: View {
     let session = AppSessionStore()
     session.home = CabalsTabSampleData.home
     return NavigationStack {
-        CabalsTabView(auth: PrivyAuthService(), dataSource: CabalsTabSampleData.DataSource())
+        CabalsTabView(auth: DynamicAuthService(), dataSource: CabalsTabSampleData.DataSource())
             .environment(session)
             .monacoRootAppearance()
     }

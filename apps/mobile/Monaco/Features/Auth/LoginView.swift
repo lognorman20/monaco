@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Brand block, then SMS or email one-time-code sign-in.
 struct LoginView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
 
     @State private var selectedMethod: LoginMethod
 
@@ -13,9 +13,9 @@ struct LoginView: View {
         var id: String { rawValue }
     }
 
-    init(auth: PrivyAuthService) {
+    init(auth: DynamicAuthService) {
         self.auth = auth
-        let settings = Config.privy
+        let settings = Config.dynamic
         if settings.smsLoginEnabled {
             _selectedMethod = State(initialValue: .sms)
         } else {
@@ -70,10 +70,10 @@ struct LoginView: View {
 
     private var availableMethods: [LoginMethod] {
         var methods: [LoginMethod] = []
-        if Config.privy.smsLoginEnabled {
+        if Config.dynamic.smsLoginEnabled {
             methods.append(.sms)
         }
-        if Config.privy.emailLoginEnabled {
+        if Config.dynamic.emailLoginEnabled {
             methods.append(.email)
         }
         return methods
@@ -92,5 +92,5 @@ struct LoginView: View {
 }
 
 #Preview {
-    LoginView(auth: PrivyAuthService())
+    LoginView(auth: DynamicAuthService())
 }

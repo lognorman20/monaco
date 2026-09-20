@@ -23,7 +23,7 @@ func NewStore(db *sql.DB) *Store {
 // User is a row in users.
 type User struct {
 	ID              string
-	DynamicUserID     string
+	DynamicUserID   string
 	DisplayName     sql.NullString
 	ProfilePhotoURL sql.NullString
 	CreatedAt       time.Time

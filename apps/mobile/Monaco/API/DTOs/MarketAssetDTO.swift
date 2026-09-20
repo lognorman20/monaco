@@ -3,7 +3,7 @@ import Foundation
 struct MarketAssetDTO: Codable, Equatable, Identifiable {
     let symbol: String
     let name: String
-    let solanaMint: String
+    let tokenAddress: String
     let routable: Bool
     let priceUsdcMicros: Int64?
     let change24h: String?
@@ -33,7 +33,7 @@ struct AssetLiquidityDTO: Codable, Equatable {
 struct AssetDetailDTO: Codable, Equatable {
     let symbol: String
     let name: String
-    let solanaMint: String
+    let tokenAddress: String
     let routable: Bool
     let priceUsdcMicros: Int64?
     let change24h: String?

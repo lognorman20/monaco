@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,7 +24,6 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/evm"
 	"github.com/monaco/monaco/apps/backend/internal/faker"
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
-	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/signer"
@@ -126,11 +127,18 @@ func boot(ctx context.Context) (*bootResult, error) {
 
 	store := postgres.NewStore(db)
 	signerHTTP := signer.NewHTTPClient(cfg.SignerURL, cfg.SignerSharedSecret)
-	walletClient := wallets.NewSignerClient(signerHTTP, chain, store, nil, relayer.Address())
+	if _, err := signerHTTP.Health(ctx); err != nil {
+		return nil, fmt.Errorf("signer health: %w", err)
+	}
+	sharesKey, err := parseSharesKey(cfg.WalletSharesKey)
+	if err != nil {
+		return nil, err
+	}
+	walletClient := wallets.NewSignerClient(signerHTTP, chain, wallets.AdaptPostgresStore(store), sharesKey, relayer.Address())
 	authVerifier := auth.NewDynamicVerifier(cfg.DynamicEnvironmentID, http.DefaultClient)
 	catalog := b20.NewPinnedCatalog()
 	dexClient := dex.NewKyberClient(http.DefaultClient, cfg.KyberClientID)
-	marksClient := chainlink.NewClient(chain, catalog)
+	marksClient := chainlink.NewClient(chain, catalog, time.Now)
 	var hermes *pyth.HermesClient
 	if cfg.PythAPIKey != "" {
 		hermes, err = pyth.NewHermesClientFromConfig(cfg)
@@ -165,7 +173,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	swap := app.NewSwapService(store, buy, dexClient, walletClient, chain, symbols)
 	redeem := app.NewRedeemService(store, walletClient, authVerifier, marksClient, dexClient, swap)
 	governance.SetRedeemService(redeem)
-	auth := &httpapi.AuthHandlers{Sessions: sessions}
+	auth := &httpapi.AuthHandlers{Sessions: sessions, Verifier: authVerifier}
 	me := &httpapi.MeHandlers{Sessions: sessions, ProfilePhoto: profilePhotos}
 	homeHandlers := &httpapi.HomeHandlers{Home: home}
 	groupHandlers := &httpapi.GroupHandlers{Groups: groups, Governance: governance, Home: home, Redeem: redeem}
@@ -176,6 +184,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	governance.SetSwapService(swap)
 	transactionHandlers := &httpapi.TransactionHandlers{
 		Store:   store,
+		Auth:    authVerifier,
 		Wallets: walletClient,
 		Catalog: catalog,
 		Swap:    swap,
@@ -203,12 +212,14 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}
 	quoteHandlers := &httpapi.QuoteHandlers{
 		Store:      store,
+		Auth:       authVerifier,
 		Wallets:    walletClient,
 		Buy:        buy,
 		Governance: governance,
 	}
 	proposalHandlers := &httpapi.ProposalHandlers{
 		Store:      store,
+		Auth:       authVerifier,
 		Wallets:    walletClient,
 		Governance: governance,
 	}
@@ -226,6 +237,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Enabled:     config.FakerEnabled(),
 		DatabaseURL: cfg.DatabaseURL,
 		Store:       store,
+		Auth:        authVerifier,
 		Wallets:     walletClient,
 		Seeder:      faker.NewSeeder(store, faker.MarksSource(marksClient)),
 	}
@@ -292,7 +304,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	routes := registerDevFakerRoute(mux, fakerHandlers, apiRoutes)
 	logRoutesReady(routes)
 
-	poller := worker.NewSweepPoller(store, walletClient, confirmer, deposits, nil)
+	poller := worker.NewSweepPoller(store, walletClient, confirmer, deposits, "", nil)
 	pollerCtx, stopPoller := context.WithCancel(context.Background())
 	go worker.Run(pollerCtx, poller, worker.DefaultPollInterval)
 	slog.Info("sweep poller started")
@@ -377,4 +389,17 @@ func registerDevFakerRoute(mux *http.ServeMux, h *httpapi.DevFakerHandlers, rout
 	}
 	mux.HandleFunc("POST /v1/dev/faker", h.FakerHandler)
 	return append(append([]string(nil), routes...), "POST /v1/dev/faker")
+}
+
+func parseSharesKey(raw string) ([]byte, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return make([]byte, 32), nil
+	}
+	raw = strings.TrimPrefix(raw, "0x")
+	b, err := hex.DecodeString(raw)
+	if err != nil || len(b) != 32 {
+		return nil, fmt.Errorf("WALLET_SHARES_KEY must be 32-byte hex")
+	}
+	return b, nil
 }

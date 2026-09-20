@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
@@ -19,7 +20,8 @@ import (
 // ProposalHandlers serves proposal create and vote HTTP routes.
 type ProposalHandlers struct {
 	Store      *postgres.Store
-	Privy      wallets.Client
+	Auth       auth.Verifier
+	Wallets    wallets.Client
 	Governance *app.GovernanceService
 }
 
@@ -218,7 +220,7 @@ type proposalVoteSummaryResponse struct {
 
 type proposalExecutionResponse struct {
 	State            string `json:"state"`
-	TxHash      string `json:"txHash,omitempty"`
+	TxHash           string `json:"txHash,omitempty"`
 	TransactionID    string `json:"transactionId,omitempty"`
 	ExecuteRequestID string `json:"executeRequestId,omitempty"`
 	ExecutedAt       string `json:"executedAt,omitempty"`
@@ -437,7 +439,7 @@ func (h *ProposalHandlers) GetProposalDetailHandler(w http.ResponseWriter, r *ht
 }
 
 func (h *ProposalHandlers) authorizeUser(ctx context.Context, accessToken string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := h.Auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return "", auth.ErrUnauthorized

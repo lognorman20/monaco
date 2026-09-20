@@ -11,7 +11,7 @@ import SwiftUI
 /// The screen owns no data. `SessionGateView` hands it the real save and sign-out; the
 /// debug harness hands it canned ones, which is why QA can screenshot it without a backend.
 struct OnboardingNameView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
 
     /// Persists the name. Returning `.saved` is what lets `FirstRunGate` move on, so it
     /// must only succeed once the server has the name.

@@ -1,6 +1,6 @@
 # Monaco
 
-iOS app: friends pool USDC and buy tokenized US stocks on Solana. Product rules: [`docs/product.md`](docs/product.md). Milestone backlog: [`docs/index.md`](docs/index.md).
+iOS app: friends pool USDC and buy tokenized US stocks on Base. Product rules: [`docs/product.md`](docs/product.md). Milestone backlog: [`docs/index.md`](docs/index.md).
 
 Monaco lets you create a hedge fund with friends by pooling money to buy stocks together. Members propose and vote on trades, and approved trades execute for the group; as the pool profits, each member’s stake increases in value through NAV. You can even add an agent to your cabal to trade on your behalf. Built as a social trading app, Monaco turns investing into an easy group game anyone can join simply by depositing money.
 
@@ -12,35 +12,35 @@ macOS, Xcode (iOS 18+ simulator), Docker, Go 1.23+, [just](https://github.com/ca
 
 1. Clone this repo. `cd` into the clone. Do not hard-code another machine's home path.
 2. Place gitignored `.env.keys` in the repo root if a teammate encrypted `.env.local` for you. Also place that `.env.local`. dotenvx reads both from the clone root.
-3. If you have no `.env.local` yet, copy `.env.example` to `.env.local` and set Privy plus relayer values with `dotenvx set KEY value -f .env.local`.
+3. If you have no `.env.local` yet, copy `.env.example` to `.env.local` and set Dynamic plus relayer values with `dotenvx set KEY value -f .env.local`.
 4. Run `./scripts/install-dev.sh` (or `just install`). It asks before each install (Go, just, dotenvx, optional SimSlim). `just install --check` only reports.
-5. `just run` starts Postgres, the API, and the iOS app. Privy is injected via `scripts/ensure-ios-privy-config.sh` and `SIMCTL_CHILD_*`. If SimSlim is missing, the scripts warn and boot a stock simulator.
+5. `just run` starts Postgres, the API, and the iOS app. Dynamic is injected via `scripts/ensure-ios-dynamic-config.sh` and `SIMCTL_CHILD_*`. If SimSlim is missing, the scripts warn and boot a stock simulator.
 
 Do not wrap `just` with `dotenvx run` yourself. Recipes that need secrets re-exec under `scripts/with-dotenv-local.sh`.
 
 Local DB is Docker Compose Postgres only (`monaco`, host port `54322`). Never point `just run` / `just test backend` at hosted or production Supabase.
 
-## Privy test logins
+## Dynamic test logins
 
-Fixed OTP. Dashboard Login Methods must have **Email** and **SMS** on. Product path is OTP, not a password field. iOS bundle `com.monaco.app` must be on the Privy iOS client or `sendCode` returns 403 `invalid_native_app_id`. Sign out in-app to switch users.
+Fixed OTP. Dashboard Login Methods must have **Email** and **SMS** on. Product path is OTP, not a password field. iOS bundle `com.monaco.app` must be on the Dynamic iOS client or `sendCode` returns 403 `invalid_native_app_id`. Sign out in-app to switch users.
 
 | Name        | Phone Number       | Login                                     | OTP      |
 | ----------- | ------------ | ----------------------------------------- | -------- |
-| Alfred      | `+1 555 555 7177` | `test-8081@privy.io` | `465354` |
-| Bartholomez | `+1 555 555 9638` | `test-4952@privy.io` | `648588` |
-| Cayman      | `+1 555 555 8215` | `test-3510@privy.io` | `115543` |
+| Alfred      | `+1 555 555 7177` | `test-8081@dynamic.io` | `465354` |
+| Bartholomez | `+1 555 555 9638` | `test-4952@dynamic.io` | `648588` |
+| Cayman      | `+1 555 555 8215` | `test-3510@dynamic.io` | `115543` |
 
 ## Deposits
 
-You can fund a group from **personal Phantom** (iOS app or browser extension). That is your wallet, not the [agent MCP wallet](#agent-qa-phantom-mcp). No Cursor or coding agent required.
+You can fund a group from **personal external wallet** (iOS app or browser extension). That is your wallet, not the [agent MCP wallet](#agent-qa-phantom-mcp). No Cursor or coding agent required.
 
 1. `just run`. Sign in (OTP above).
-2. Join or create a group → **Add money**. Copy the **Privy member** deposit address (deposit inbox). Not the group treasury.
-3. In Phantom, send **USDC on Solana mainnet**. Mint must be `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. USDC on Ethereum or Base is a different token; the poller will not see it.
+2. Join or create a group → **Add money**. Copy the **Dynamic member** deposit address (deposit inbox). Not the group treasury.
+3. In external wallet, send **USDC on Base**. Mint must be `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. USDC on Ethereum or Base is a different token; the poller will not see it.
 4. The backend poller detects USDC in the member wallet, **sweeps** it into the group treasury, then credits share units. Watch API logs or the group view. Do not treat USDC sitting only in the member wallet as credited pot — wait for sweep confirm.
-5. Member wallet and vault do not need SOL (relayer pays fees).
+5. Member wallet and vault do not need ETH (relayer pays fees).
 
-To pull leftover QA cash back out, use in-app **redeem** (Phantom cannot spend Privy wallets). Agent-driven deposit and refund: [Agent QA: Phantom MCP](#agent-qa-phantom-mcp).
+To pull leftover QA cash back out, use in-app **redeem** (external wallet cannot spend Dynamic wallets). Agent-driven deposit and refund: [Agent QA: agent wallet](#agent-qa-phantom-mcp).
 
 ## Commands
 
@@ -50,9 +50,9 @@ To pull leftover QA cash back out, use in-app **redeem** (Phantom cannot spend P
 | `just encrypt`               | `dotenvx encrypt` on `.env.local` (and `.env.production` if present)                                                                                                   |
 | `just decrypt`               | `dotenvx decrypt` on `.env.local` (and `.env.production` if present)                                                                                                   |
 | `just show-env`              | Print decrypted `.env.local` keys/values via dotenvx (`export KEY='value'` lines; `.env.production` omitted). Needs `.env.local`, dotenvx, and `.env.keys` or Keychain |
-| `just run`                   | Full stack: Postgres + API + iOS app (dotenvx re-exec, Privy on sim)                                                                                                   |
+| `just run`                   | Full stack: Postgres + API + iOS app (dotenvx re-exec, Dynamic on sim)                                                                                                   |
 | `just run backend`           | API only (dotenvx)                                                                                                                                                     |
-| `just run mobile`            | iOS with Privy xcconfig + `SIMCTL_CHILD_*` via `./scripts/ios-sim`                                                                                                     |
+| `just run mobile`            | iOS with Dynamic xcconfig + `SIMCTL_CHILD_*` via `./scripts/ios-sim`                                                                                                     |
 | Logs                         | `just run*` tee stdout/stderr to `.logs/<timestamp>/` (`backend.log`, `mobile.log`)                                                                                    |
 | `just stop`                  | Stop API + iOS app (kill port 8080, `simctl terminate` on the resolved sim)                                                                                            |
 | `just stop backend`          | Stop API only                                                                                                                                                          |
@@ -65,11 +65,11 @@ To pull leftover QA cash back out, use in-app **redeem** (Phantom cannot spend P
 | `just test backend`          | Go tests + local DB smoke (dotenvx)                                                                                                                                    |
 | `just test mobile`           | Host `swift test` in `packages/mobile-core` — fast, no secrets                                                                                                         |
 | `just build backend`         | `go build` only — no dotenvx                                                                                                                                           |
-| `just build mobile`          | Privy xcconfig, then `xcodebuild` on the resolved sim                                                                                                                  |
-| `just relayer balance`       | Fee payer pubkey + mainnet SOL and USDC (dotenvx; no private key)                                                                                                      |
-| `./scripts/ios-sim`          | Monaco run with Privy env. Falls back to a stock sim if slim is missing                                                                                                |
-| `./scripts/ios-build`        | Monaco compile with Privy xcconfig                                                                                                                                     |
-| `./scripts/sweep-wallets.sh` | **Ops.** Sweep USDC out of Privy wallets. See **[Ops: sweep USDC](#ops-sweep-usdc-out-of-privy-wallets)**                                                              |
+| `just build mobile`          | Dynamic xcconfig, then `xcodebuild` on the resolved sim                                                                                                                  |
+| `just relayer balance`       | Fee payer pubkey + mainnet ETH and USDC (dotenvx; no private key)                                                                                                      |
+| `./scripts/ios-sim`          | Monaco run with Dynamic env. Falls back to a stock sim if slim is missing                                                                                                |
+| `./scripts/ios-build`        | Monaco compile with Dynamic xcconfig                                                                                                                                     |
+| `./scripts/sweep-wallets.sh` | **Ops.** Sweep USDC out of Dynamic wallets. See **[Ops: sweep USDC](#ops-sweep-usdc-out-of-dynamic-wallets)**                                                              |
 
 Simulator UDID is **per machine**. Never commit one. Recipes call `scripts/resolve-ios-sim.sh`.
 
@@ -88,7 +88,7 @@ Or `curl -sfS https://dotenvx.sh | sh`. See [install docs](https://dotenvx.com/d
 3. Inspect: `just show-env` prints decrypted `.env.local` as `export KEY='value'` lines via dotenvx (`.env.production` omitted). Needs `.env.local`, dotenvx, and `.env.keys` or Keychain.
 4. Set values: `dotenvx set KEY value -f .env.local` (encrypts by default; `--plain` for non-secrets).
 
-Justfile `dotenv-load` only reads plain `.env` — not dotenvx ciphertext. Recipes that need secrets re-exec once under `dotenvx run -f .env.local` (via `scripts/with-dotenv-local.sh`). Mobile Privy uses `scripts/ensure-ios-privy-config.sh` (xcconfig) + `SIMCTL_CHILD_*` at sim launch.
+Justfile `dotenv-load` only reads plain `.env` — not dotenvx ciphertext. Recipes that need secrets re-exec once under `dotenvx run -f .env.local` (via `scripts/with-dotenv-local.sh`). Mobile Dynamic uses `scripts/ensure-ios-dynamic-config.sh` (xcconfig) + `SIMCTL_CHILD_*` at sim launch.
 
 Private keys: `DOTENV_PRIVATE_KEY` for `.env` / `.env.local`; `DOTENV_PRIVATE_KEY_PRODUCTION` for `.env.production`. On macOS, new keys often land in Keychain, not `.env.keys`. Export with `dotenvx native pull` or `dotenvx keypair -f .env.local`.
 
@@ -98,16 +98,16 @@ A pre-commit hook checks **staged** `.env*` files only (not `.worktrees` or the 
 
 ## Relayer (fee payer)
 
-The app **fee payer** is a dedicated Solana keypair from `RELAYER_PRIVATE_KEY` (base58 secret in `.env.local`). Not a Privy wallet. Clones that decrypt the same shared env share the same fee payer. Never commit or log the private key.
+The app **fee payer** is a dedicated Base keypair from `RELAYER_PRIVATE_KEY` (base58 secret in `.env.local`). Not a Dynamic wallet. Clones that decrypt the same shared env share the same fee payer. Never commit or log the private key.
 
 At API startup the backend derives the public key and refuses to boot unless that address holds **more than 0.001 SOL** on mainnet.
 
 | Item            | Value                                                                                                                    |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Env (secret)    | `RELAYER_PRIVATE_KEY` — base58 Solana secret key (not a JSON `[1,2,...]` array)                                          |
+| Env (secret)    | `RELAYER_PRIVATE_KEY` — base58 Base secret key (not a JSON `[1,2,...]` array)                                          |
 | Pubkey          | Derived at startup from the secret; logged as `pubkey=` on boot (no private key)                                         |
-| Role            | Jupiter swap `payer`; relayer on deposit sweeps (Privy `SubmitSweep`)                                                    |
-| SOL requirement | Balance **> 0.001 SOL** (`1_000_000` lamports). Fund on [Solana mainnet](https://solscan.io/) before `just run backend`. |
+| Role            | Kyber swap `payer`; relayer on deposit sweeps (Dynamic `SubmitSweep`)                                                    |
+| ETH requirement | Balance **> 0.001 SOL** (`1_000_000` lamports). Fund on [Base](https://solscan.io/) before `just run backend`. |
 
 ```bash
 just relayer balance
@@ -124,7 +124,7 @@ usdc     0.00
 ## Demo data (faker seed)
 
 Seeds fake-but-realistic data so Home, Groups, proposals, and activity look alive without a
-full Privy setup. Local Postgres only. It never calls Privy, Solana RPC, or Jupiter.
+full Dynamic setup. Local Postgres only. It never calls Dynamic, Base RPC, or Kyber.
 
 Two profiles:
 
@@ -185,13 +185,13 @@ for faker users.
 
 ## Simulator
 
-Slim is **not** required. `just run`, `just run mobile`, and `./scripts/ios-sim` warn and use a stock Xcode simulator when SimSlim is missing or `SIMSLIM_UDID` is unset. Privy xcconfig and `SIMCTL_CHILD_*` still apply.
+Slim is **not** required. `just run`, `just run mobile`, and `./scripts/ios-sim` warn and use a stock Xcode simulator when SimSlim is missing or `SIMSLIM_UDID` is unset. Dynamic xcconfig and `SIMCTL_CHILD_*` still apply.
 
 `just test mobile` never boots a sim (host `swift test` in `packages/mobile-core`).
 
 Fail only if no iOS Simulator exists: Xcode → Settings → Platforms, download an iOS 18+ runtime, create an iPhone sim.
 
-Xcode Cmd+R also works after `./scripts/ensure-ios-privy-config.sh generate`. Without that file the app shows “Privy not configured”.
+Xcode Cmd+R also works after `./scripts/ensure-ios-dynamic-config.sh generate`. Without that file the app shows “Dynamic not configured”.
 
 Never `simctl erase` a sim you later want as gold. Never commit a UDID. Never target by device name (`iPhone 17`).
 
@@ -229,40 +229,40 @@ Never `simctl erase` a sim you later want as gold. Never commit a UDID. Never ta
 
    `except` in a profile means **keep** that daemon category on. Monaco product smoke is tabs + HTTP; base-slim is enough.
 
-Repo `./scripts/ios-sim` and `./scripts/ios-build` call `xcodebuild` and `simctl` after Privy injection. Optional PATH wrappers in `~/.local/bin` are **not** in git and **not** required.
+Repo `./scripts/ios-sim` and `./scripts/ios-build` call `xcodebuild` and `simctl` after Dynamic injection. Optional PATH wrappers in `~/.local/bin` are **not** in git and **not** required.
 
 Keep gold **booted** between agent sessions when you can. Clone gold after slim-once if you need a second sim.
 
-## Agent QA: Phantom MCP
+## Agent QA: agent wallet
 
-Use this when a coding agent (or you, in Cursor chat) must move **real Solana mainnet** USDC into a sim user’s member wallet, then pull leftover cash out of the group vault when the run is done.
+Use this when a coding agent (or you, in Cursor chat) must move **real Base** USDC into a sim user’s member wallet, then pull leftover cash out of the group vault when the run is done.
 
 Keep the agent wallet thin. Preview software. Do not park rent money here.
 
 Three wallets people mix up:
 
-1. **Personal Phantom** (iOS / Android / browser extension). Your money. Create it yourself (below).
-2. **Agent Phantom** (MCP). New dedicated wallet the first time the agent signs in. Empty until you fund it. QA faucet and refund target.
-3. **Privy product wallets.** Member inbox + group vault. Phantom MCP **cannot** spend these. The agent can only **send USDC to** the copyable member address, then **receive USDC back** when you redeem to the agent address.
+1. **Personal external wallet** (iOS / Android / browser extension). Your money. Create it yourself (below).
+2. **Agent external wallet** (MCP). New dedicated wallet the first time the agent signs in. Empty until you fund it. QA faucet and refund target.
+3. **Dynamic product wallets.** Member inbox + group vault. agent wallet **cannot** spend these. The agent can only **send USDC to** the copyable member address, then **receive USDC back** when you redeem to the agent address.
 
 Do not put `PHANTOM_APP_ID` in Monaco `.env.local`. If a Cursor plugin still wants it, put it in Cursor MCP env only. Current `@phantom/mcp-server` device-code login does not require a Portal app id.
 
 Never insert `FAKE*` wallet rows in local Postgres. The poller will break.
 
-### Create a Phantom wallet
+### Create a external wallet wallet
 
 Personal wallet first — that is how you buy SOL/USDC and top up the agent address.
 
-1. Download only from [phantom.com/download](https://phantom.com/download) (iOS, Android, Chrome, Brave, Firefox, Edge). App Store: [Phantom](https://apps.apple.com/us/app/phantom-trade-markets/id1598432977). Play: [Phantom](https://play.google.com/store/apps/details?id=app.phantom).
-2. Follow [How to create a new Phantom wallet](https://phantom.com/learn/guides/how-to-create-a-new-wallet): Create a New Wallet → Google or Apple, or a secret recovery phrase.
+1. Download only from [phantom.com/download](https://phantom.com/download) (iOS, Android, Chrome, Brave, Firefox, Edge). App Store: [external wallet](https://apps.apple.com/us/app/phantom-trade-markets/id1598432977). Play: [external wallet](https://play.google.com/store/apps/details?id=app.phantom).
+2. Follow [How to create a new external wallet wallet](https://phantom.com/learn/guides/how-to-create-a-new-wallet): Create a New Wallet → Google or Apple, or a secret recovery phrase.
 3. Write down the recovery phrase / PIN. Never paste it into git, tickets, or chat.
 4. Overview: [Get started](https://phantom.com/get-started). Help: [help.phantom.com](https://help.phantom.com).
 
-### Install the Phantom MCP (agent wallet)
+### Install the agent wallet (agent wallet)
 
 This is the **wallet MCP** (`@phantom/mcp-server`): sign, transfer, swap. It is not the docs-only MCP at `https://docs.phantom.com/mcp`.
 
-Docs: [Phantom MCP server](https://docs.phantom.com/phantom-mcp-server) · [Setup](https://docs.phantom.com/phantom-mcp-server/setup) · npm `[@phantom/mcp-server](https://www.npmjs.com/package/@phantom/mcp-server)` · [Cursor MCP](https://cursor.com/docs/context/mcp)
+Docs: [agent wallet server](https://docs.phantom.com/phantom-mcp-server) · [Setup](https://docs.phantom.com/phantom-mcp-server/setup) · npm `[@phantom/mcp-server](https://www.npmjs.com/package/@phantom/mcp-server)` · [Cursor MCP](https://cursor.com/docs/context/mcp)
 
 **Cursor plugin (easiest):** marketplace search `phantom-connect` / Add Plugin. Bundles wallet MCP + docs MCP. See [AI-assisted development](https://docs.phantom.com/developer-powertools/ai-tools).
 
@@ -283,69 +283,69 @@ Restart Cursor. First wallet tool call opens a browser for Google/Apple device-c
 
 **Claude Code:** `claude mcp add phantom -- npx -y @phantom/mcp-server@latest`
 
-On auth, Phantom mints a **new agent wallet**. It is not your extension wallet. Ask the agent for Solana addresses (`wallet_addresses` / `get_wallet_addresses`). Copy the Solana pubkey. That string is the refund target for leftover QA USDC. Each developer has their own; do not hardcode someone else’s address in the repo.
+On auth, external wallet mints a **new agent wallet**. It is not your extension wallet. Ask the agent for Base addresses (`wallet_addresses` / `get_wallet_addresses`). Copy the Base pubkey. That string is the refund target for leftover QA USDC. Each developer has their own; do not hardcode someone else’s address in the repo.
 
-### Fund the agent wallet (~$1 SOL + ~$4 USDC on Solana)
+### Fund the agent wallet (~$1 ETH + ~$4 USDC on Base)
 
 The agent cannot transact on an empty wallet.
 
 | Asset                     | Why                                                                                                 | Ballpark            |
 | ------------------------- | --------------------------------------------------------------------------------------------------- | ------------------- |
-| SOL on **Solana mainnet** | Fees when the agent sends USDC to a member inbox (and ATA rent if the dest has no USDC account yet) | about **$1** of SOL |
-| USDC on **Solana**        | What the app actually credits after sweep                                                           | about **$4**        |
+| ETH on **Base** | Fees when the agent sends USDC to a member inbox (and ATA rent if the dest has no USDC account yet) | about **$1** of ETH |
+| USDC on **Base**        | What the app actually credits after sweep                                                           | about **$4**        |
 
-Buy or swap inside personal Phantom, then send **SOL** and **Solana USDC** to the **agent** Solana address. Confirm mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. Ask the agent for `wallet_balances` before the first transfer.
+Buy or swap inside personal external wallet, then send **SOL** and **Base USDC** to the **agent** Base address. Confirm mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. Ask the agent for `wallet_balances` before the first transfer.
 
-Product path does **not** need SOL on the member wallet or vault (relayer pays). The **agent** still needs SOL because the agent is the sender.
+Product path does **not** need ETH on the member wallet or vault (relayer pays). The **agent** still needs ETH because the agent is the sender.
 
 ### Send USDC into Monaco (member inbox → vault)
 
-Same deposit path from **personal Phantom** works without MCP; see [Deposits](#deposits).
+Same deposit path from **personal external wallet** works without MCP; see [Deposits](#deposits).
 
 1. `just run` (API + sim). Sign in (SMS or email OTP).
-2. Join or create a group → Add money. Copy the **Privy member** address (deposit inbox). Not the group treasury.
-3. In Cursor: transfer **small** USDC on `solana:mainnet` to that address, mint above. MCP `transfer` / `transfer_tokens` simulates first; approve only if dest matches the copied inbox.
+2. Join or create a group → Add money. Copy the **Dynamic member** address (deposit inbox). Not the group treasury.
+3. In Cursor: transfer **small** USDC on `base:mainnet` to that address, mint above. MCP `transfer` / `transfer_tokens` simulates first; approve only if dest matches the copied inbox.
 4. Poller detects member USDC, **sweeps** to the group treasury, then credits shares. Watch API logs / group view. Do not treat member-wallet balance as credited pot.
 5. Explorer: [solscan.io](https://solscan.io) on the sweep signature.
 
-### Sweep leftover back to the agent wallet (vault → Phantom)
+### Sweep leftover back to the agent wallet (vault → external wallet)
 
-Phantom MCP cannot pull from Privy. Reverse of deposit is **in-app redeem** to the agent Solana address.
+agent wallet cannot pull from Dynamic. Reverse of deposit is **in-app redeem** to the agent Base address.
 
-1. Agent: print Solana address again. Confirm it is **your** MCP wallet.
-2. Group screen → redeem leftover equity (slider at max if you want the pot empty). Payout address = that agent Solana address.
+1. Agent: print Base address again. Confirm it is **your** MCP wallet.
+2. Group screen → redeem leftover equity (slider at max if you want the pot empty). Payout address = that agent Base address.
 3. Wait for payout confirm. Agent: `wallet_balances` — USDC should be back. Treasury USDC for that test should be ~0 (dust from swaps possible).
-4. If USDC is still sitting **only** in the member inbox (sweep not confirmed): do not “withdraw with Phantom.” Wait for sweep, then redeem. Or stop funding that inbox.
-5. If the pot holds xStocks, redeem sells that slice to USDC first, then pays USDC. Tiny leftover stock/USDC dust can remain; keep QA notionals small.
+4. If USDC is still sitting **only** in the member inbox (sweep not confirmed): do not “withdraw with external wallet.” Wait for sweep, then redeem. Or stop funding that inbox.
+5. If the pot holds B20, redeem sells that slice to USDC first, then pays USDC. Tiny leftover stock/USDC dust can remain; keep QA notionals small.
 
-After a funding run, leftover **agent-test USDC belongs on the agent Phantom**, not in a group vault and not in a sim user’s inbox.
+After a funding run, leftover **agent-test USDC belongs on the agent external wallet**, not in a group vault and not in a sim user’s inbox.
 
-## Sweep USDC out of Privy wallets
+## Sweep USDC out of Dynamic wallets
 
-Product path is poller member-inbox → treasury, then **in-app redeem**. Use this script only when USDC is stuck in Privy (inbox or treasury) and you must send it to a known Solana address (usually the agent Phantom).
+Product path is poller member-inbox → treasury, then **in-app redeem**. Use this script only when USDC is stuck in Dynamic (inbox or treasury) and you must send it to a known Base address (usually the agent external wallet).
 
-**Danger.** Mainnet USDC. Wrong `DATABASE_URL` or `--all` against the prod Privy app can empty live pots and break share credits. Relayer still pays SOL fees.
+**Danger.** Mainnet USDC. Wrong `DATABASE_URL` or `--all` against the prod Dynamic app can empty live pots and break share credits. Relayer still pays ETH fees.
 
 ```bash
 # One wallet (or list). Always dry-run first.
-./scripts/sweep-wallets.sh --destination <solana_address> --source <wallet> --dry-run
-./scripts/sweep-wallets.sh --destination <solana_address> --source <wallet_a> --source <wallet_b> --dry-run
+./scripts/sweep-wallets.sh --destination <base_address> --source <wallet> --dry-run
+./scripts/sweep-wallets.sh --destination <base_address> --source <wallet_a> --source <wallet_b> --dry-run
 
-# --all = every Solana wallet Privy returns for this app (not just local DB rows).
-./scripts/sweep-wallets.sh --destination <solana_address> --all --dry-run
+# --all = every Base wallet Dynamic returns for this app (not just local DB rows).
+./scripts/sweep-wallets.sh --destination <base_address> --all --dry-run
 
 # Live: same flags without --dry-run. Type exactly:
 #   I UNDERSTAND THIS MAY MESS WITH PROD
 # then paste the destination address again.
-./scripts/sweep-wallets.sh --destination <solana_address> --source <wallet>
-./scripts/sweep-wallets.sh --destination <solana_address> --all
+./scripts/sweep-wallets.sh --destination <base_address> --source <wallet>
+./scripts/sweep-wallets.sh --destination <base_address> --all
 ```
 
 | Flag               | Meaning                                                                                  |
 | ------------------ | ---------------------------------------------------------------------------------------- |
 | `--destination`    | Required. Receives all swept USDC.                                                       |
 | `--source`         | Drain only listed wallet(s). Repeatable; comma-separate in one value. Do not mix with `--all`. |
-| `--all`            | Source of truth = Privy `GET /v1/wallets?chain_type=solana` (paginated). Skips Postgres. |
+| `--all`            | Source of truth = Dynamic `GET /v1/wallets?chain_type=base` (paginated). Skips Postgres. |
 | *(omit both)*      | Source = local `member_wallets` + `treasuries` for the `DATABASE_URL` in `.env.local`.   |
 | `--dry-run`        | Print balances and `would sweep` lines. No txs. No confirm prompt.                       |
 
@@ -365,7 +365,7 @@ Learned prefs and durable facts live in [`AGENTS.md`](AGENTS.md). Skills are the
 | **worktree-orchestrate** | [`.cursor/skills/worktree-orchestrate/SKILL.md`](.cursor/skills/worktree-orchestrate/SKILL.md) | Parallel milestone work. Parent stays on the integration branch (`milestone-N`). Implementers ship in git worktrees on `feat/*`. Default implementer model is Composer 2.5. One light review, then merge. Do not nest another orchestrator. Split mobile vs backend to separate agents. Kickoff templates: [`prompts.md`](.cursor/skills/worktree-orchestrate/prompts.md). |
 | **ios-simslim-fast-qa** | [`.cursor/skills/ios-simslim-fast-qa/SKILL.md`](.cursor/skills/ios-simslim-fast-qa/SKILL.md) | Agent sim smoke / tap-through. Unit tests first (`just test mobile`, no sim). Then one gold slim sim. Never `simctl erase`. Never destination by device name. XcodeBuildMCP needs `--simulator-id` from `scripts/gold-sim-udid.sh` (`SIMSLIM_UDID` required). Human `just run` uses stock-sim fallback instead. |
 | **anti-ai-slop** | [`.cursor/skills/anti-ai-slop/SKILL.md`](.cursor/skills/anti-ai-slop/SKILL.md) | Any UI, SwiftUI, empty states, onboarding, or marketing copy. Banlist for purple gradients, emoji-as-icons, Inter/system-ui-as-brand, glassmorphism, generic SaaS card grids. Product copy stays social-investing language (no wallets/gas/mint in the UI). |
-| **testing-expert** | [`.cursor/skills/testing-expert/SKILL.md`](.cursor/skills/testing-expert/SKILL.md) | How to write tests: small surface, deterministic, realistic data. This copy is TS/Jest-oriented; Monaco still follows the same bar in Go and Swift. `just test mobile` is host `swift test`. `just test backend` uses stubs — never hit live Jupiter. Skip property tests that run longer than ~2 minutes. |
+| **testing-expert** | [`.cursor/skills/testing-expert/SKILL.md`](.cursor/skills/testing-expert/SKILL.md) | How to write tests: small surface, deterministic, realistic data. This copy is TS/Jest-oriented; Monaco still follows the same bar in Go and Swift. `just test mobile` is host `swift test`. `just test backend` uses stubs — never hit live Kyber. Skip property tests that run longer than ~2 minutes. |
 
 Do not copy these skills into another machine's home path. Clone the repo; Cursor sees `.cursor/skills/` from the workspace.
 
@@ -394,8 +394,8 @@ API_ADDR=0.0.0.0:8080 MIGRATIONS_DIR=/path/to/supabase/migrations ./bin/monaco-a
 ```
 
 - Migrations in `supabase/migrations` are applied at boot, in filename order, before the server listens. `go run ./cmd/migrate` (from `apps/backend`) applies them without starting the API.
-- Required env: `DATABASE_URL`, `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `RELAYER_PRIVATE_KEY`. The full list with comments is in `.env.example`. Use separate Privy apps, relayer keys and databases per environment; production values go in `.env.production` (dotenvx-encrypted), never in the image.
-- The relayer address must hold more than 0.001 SOL or the API exits at boot. See [Relayer](#relayer-fee-payer).
+- Required env: `DATABASE_URL`, `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `RELAYER_PRIVATE_KEY`. The full list with comments is in `.env.example`. Use separate Dynamic apps, relayer keys and databases per environment; production values go in `.env.production` (dotenvx-encrypted), never in the image.
+- The relayer address must hold more than 0.001 ETH or the API exits at boot. See [Relayer](#relayer-fee-payer).
 - The API listens on `API_ADDR` (default `127.0.0.1:8080`). `GET /health` returns `{"status":"ok"}` once it is up; it does not probe Postgres or upstream APIs.
 - The deposit sweep poller and the execute-on-pass poller run inside the API process. Running more than one instance has not been tested.
 

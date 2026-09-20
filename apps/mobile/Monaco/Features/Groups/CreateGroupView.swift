@@ -61,7 +61,7 @@ enum VoteExpiryOption: Int64, CaseIterable, Identifiable {
 
 /// Product create-group flow: join policy, voter set, threshold, and vote expiry.
 struct CreateGroupView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     /// Present inside the signed-in shell; lightweight session patch after create.
     @Environment(AppSessionStore.self) private var session: AppSessionStore?
 
@@ -231,6 +231,6 @@ struct CreateGroupView: View {
 
 #Preview {
     NavigationStack {
-        CreateGroupView(auth: PrivyAuthService())
+        CreateGroupView(auth: DynamicAuthService())
     }
 }

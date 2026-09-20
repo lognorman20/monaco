@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Group screen: the latest five things that happened to the pot, with "See all".
 struct GroupActivitySection: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let items: [GroupActivityItemDTO]
     let isLoading: Bool
     let errorMessage: String?
@@ -56,7 +56,7 @@ struct GroupActivitySection: View {
 
 /// Rows of activity inside one surface, each pushing its receipt.
 struct GroupActivityList: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let items: [GroupActivityItemDTO]
     let retryingTransactionIDs: Set<String>
     let onRetry: (GroupActivityItemDTO) -> Void
@@ -192,7 +192,7 @@ enum GroupActivityRules {
         }
         return ["buy", "sell"].contains(item.kind.lowercased())
             && item.status.lowercased() == "pending"
-            && (item.txSignature ?? "").isEmpty
+            && (item.txHash ?? "").isEmpty
     }
 
     static func isAgentGovernanceKind(_ kind: String) -> Bool {

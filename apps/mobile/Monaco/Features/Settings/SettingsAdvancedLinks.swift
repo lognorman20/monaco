@@ -9,14 +9,14 @@ struct SettingsExplorerLink: Identifiable, Equatable {
 enum SettingsAdvancedLinks {
     static let explorerLinks: [SettingsExplorerLink] = [
         SettingsExplorerLink(
-            id: "solscan",
-            title: "Solscan explorer",
-            url: URL(string: "https://solscan.io")!
+            id: "basescan-address",
+            title: "View on Basescan",
+            url: URL(string: "https://basescan.org/address/")!
         ),
         SettingsExplorerLink(
-            id: "solana-fm",
-            title: "Solana FM explorer",
-            url: URL(string: "https://solana.fm")!
+            id: "basescan-tx",
+            title: "View on Basescan",
+            url: URL(string: "https://basescan.org/tx/")!
         ),
     ]
 }

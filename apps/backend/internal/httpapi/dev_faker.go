@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/config"
 	"github.com/monaco/monaco/apps/backend/internal/faker"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
@@ -28,7 +29,8 @@ type DevFakerHandlers struct {
 	Enabled     bool
 	DatabaseURL string
 	Store       *postgres.Store
-	Privy       wallets.Client
+	Auth        auth.Verifier
+	Wallets     wallets.Client
 	Seeder      *faker.Seeder
 }
 
@@ -150,7 +152,7 @@ func (h *DevFakerHandlers) FakerHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *DevFakerHandlers) authorizeUser(ctx context.Context, token string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, auth.AccessToken(token))
+	identity, err := h.Auth.VerifySession(ctx, auth.AccessToken(token))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return "", auth.ErrUnauthorized

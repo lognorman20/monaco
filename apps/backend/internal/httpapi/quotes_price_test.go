@@ -3,7 +3,7 @@ package httpapi
 import (
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 func TestQuotePriceUsdcMicros_usesXStockEightDecimals(t *testing.T) {

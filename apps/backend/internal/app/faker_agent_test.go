@@ -32,7 +32,7 @@ func TestFakerAgentTrading_scaleClubIsReadOnly(t *testing.T) {
 	execSQL(t, fx.h.DB, `INSERT INTO group_agents (group_id, status, agent_display_name, allocation_usdc_micros, api_key_hash, api_key_prefix)
 VALUES ($1, 'active', 'Demo Bot', 5000000, $2, 'abc')`, fx.fakerGroupID, HashAgentAPIKey(key))
 
-	intents := NewAgentIntentService(fx.h.Store, NewSwapService(fx.h.Store, NewBuyService(fx.h.Jupiter, fx.h.XStocks), fx.h.Jupiter, fx.h.Wallets, nil, fx.h.Symbols), fx.h.Symbols)
+	intents := NewAgentIntentService(fx.h.Store, NewSwapService(fx.h.Store, NewBuyService(fx.h.Jupiter, fx.h.Catalog), fx.h.Jupiter, fx.h.Wallets, nil, fx.h.Symbols), fx.h.Symbols)
 	for _, in := range []SubmitAgentIntentInput{
 		{GroupID: fx.fakerGroupID, AgentKey: key, Side: domain.AgentIntentBuy, Symbol: "AAPLx", UsdcMicros: 1_000_000},
 		{GroupID: fx.fakerGroupID, AgentKey: key, Side: domain.AgentIntentSell, Symbol: "AAPLx", TokenAmount: 1_000},

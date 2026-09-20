@@ -238,7 +238,7 @@ func (p *SweepPoller) confirmAndObserveSweep(ctx context.Context, deposit postgr
 	}
 	if !confirmed {
 		logSweepDepositSkipped(deposit.ID, deposit.GroupID, "awaiting_confirmation",
-			"tx_signature", txHash,
+			"tx_hash", txHash,
 		)
 		return nil
 	}
@@ -246,7 +246,7 @@ func (p *SweepPoller) confirmAndObserveSweep(ctx context.Context, deposit postgr
 	logSweepConfirm(deposit.GroupID, deposit.UserID, deposit.ID, txHash)
 
 	_, err = p.deposits.ObserveSweep(ctx, app.ObservedSweep{
-		TxHash: txHash,
+		TxHash:      txHash,
 		FromAddress: deposit.FromAddress,
 		ToAddress:   treasuryAddress,
 		Amount:      deposit.Amount,
@@ -258,7 +258,7 @@ func (p *SweepPoller) confirmAndObserveSweep(ctx context.Context, deposit postgr
 		slog.Warn("deposit observe sweep failed; will retry on next tick",
 			"deposit_id", deposit.ID,
 			"group_id", deposit.GroupID,
-			"tx_signature", txHash,
+			"tx_hash", txHash,
 			"err", err,
 		)
 		return nil

@@ -1,13 +1,12 @@
 package app
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"testing"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 func TestParseHomeLeaderboardRange_acceptsKnownValues(t *testing.T) {

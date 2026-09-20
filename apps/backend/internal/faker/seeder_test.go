@@ -8,9 +8,10 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
+	"github.com/monaco/monaco/apps/backend/internal/chainlink"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/pyth"
 )
 
 type seedEnv struct {
@@ -29,30 +30,31 @@ func newSeedEnv(t *testing.T) seedEnv {
 	db := postgres.OpenTestDB(t)
 	iso := postgres.PrepareTestDB(t, db)
 	store := postgres.NewStore(db)
-	privyClient := wallets.NewFakeClient()
+	walletClient := wallets.NewFakeClient()
+	verifier := auth.NewFakeVerifier()
 	ctx := context.Background()
 
 	token := iso.UniqueToken("operator")
-	auth.RegisterToken(privyClient, auth.AccessToken(token), auth.Identity{PrivyUserID: iso.UniqueDynamicID("operator"), DisplayName: "Operator"})
-	session, err := app.NewSessionService(store, auth.NewFakeVerifier(), privyClient).OpenSession(ctx, token)
+	auth.RegisterToken(verifier, auth.AccessToken(token), auth.Identity{DynamicUserID: iso.UniqueDynamicID("operator"), DisplayName: "Operator"})
+	session, err := app.NewSessionService(store, verifier, walletClient).OpenSession(ctx, token)
 	if err != nil {
 		t.Fatalf("OpenSession: %v", err)
 	}
 	iso.TrackUser(session.UserID)
-	group, err := app.NewGovernanceService(store, privyClient).CreateGroupWithRules(ctx, token, "Operator Club "+iso.Suffix(), app.DefaultGroupRules())
+	group, err := app.NewGovernanceService(store, verifier, walletClient).CreateGroupWithRules(ctx, token, "Operator Club "+iso.Suffix(), app.DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("CreateGroupWithRules: %v", err)
 	}
 	iso.TrackGroup(group.GroupID)
 
 	symbols := app.NewSymbolResolver(nil)
-	pythClient := chainlink.NewFakeClient()
-	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
+	marksClient := chainlink.NewFakeClient()
+	deposits := app.NewDepositService(store, verifier, walletClient, marksClient, symbols)
 	fixed := time.Date(2026, 9, 18, 15, 0, 0, 0, time.UTC)
 	return seedEnv{
-		store: store, iso: iso, privy: privyClient,
+		store: store, iso: iso, privy: walletClient,
 		seeder:   NewSeeder(store, nil).WithPrefix("test-" + iso.Suffix() + "-").WithClock(func() time.Time { return fixed }),
-		home:     app.NewHomeService(store, privyClient, pythClient, deposits, symbols),
+		home:     app.NewHomeService(store, verifier, walletClient, marksClient, deposits, symbols),
 		token:    token,
 		operator: session.UserID,
 		groupID:  group.GroupID,
@@ -108,7 +110,7 @@ func TestSeedMixedAndScale_idempotentAndInert(t *testing.T) {
 			clubIDs = append(clubIDs, c.GroupID)
 		}
 		return [6]int{
-			countRows(t, e, `SELECT count(*) FROM users WHERE privy_user_id LIKE $1`, "faker:user:test-"+e.iso.Suffix()+"-%"),
+			countRows(t, e, `SELECT count(*) FROM users WHERE dynamic_user_id LIKE $1`, "faker:user:test-"+e.iso.Suffix()+"-%"),
 			countRows(t, e, `SELECT count(*) FROM groups WHERE faker_key LIKE $1`, "scale:test-"+e.iso.Suffix()+"-%"),
 			countRows(t, e, `SELECT count(*) FROM deposits WHERE group_id = ANY($1::uuid[]) OR group_id = $2`, clubIDs, e.groupID),
 			countRows(t, e, `SELECT count(*) FROM proposals WHERE group_id = ANY($1::uuid[]) OR group_id = $2`, clubIDs, e.groupID),
@@ -154,7 +156,7 @@ func TestSeedMixedAndScale_idempotentAndInert(t *testing.T) {
 	if n := countRows(t, e, `SELECT count(*) FROM member_wallets w JOIN users u ON u.id = w.user_id WHERE u.is_faker`); n != 0 {
 		t.Errorf("faker member_wallets = %d, want 0", n)
 	}
-	if n := countRows(t, e, `SELECT count(*) FROM treasuries t JOIN groups g ON g.id = t.group_id WHERE g.is_faker AND t.solana_address LIKE 'FAKE%'`); n != 0 {
+	if n := countRows(t, e, `SELECT count(*) FROM treasuries t JOIN groups g ON g.id = t.group_id WHERE g.is_faker AND t.address LIKE 'FAKE%'`); n != 0 {
 		t.Errorf("FAKE* faker treasuries = %d, want 0", n)
 	}
 	// No faker transactions in the mixed (real) club.

@@ -12,16 +12,16 @@ import (
 
 // RedeemJobRow is a row in redeem_jobs.
 type RedeemJobRow struct {
-	ID             string
-	GroupID        string
-	UserID         string
-	ShareUnits     int64
-	SliceUsdc      int64
-	PayoutAddress  string
-	Status         string
-	WithdrawalID   sql.NullString
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID            string
+	GroupID       string
+	UserID        string
+	ShareUnits    int64
+	SliceUsdc     int64
+	PayoutAddress string
+	Status        string
+	WithdrawalID  sql.NullString
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 const (

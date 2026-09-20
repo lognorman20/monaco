@@ -89,11 +89,11 @@ func (s *SwapService) RetryFailedSwap(ctx context.Context, req RetryFailedSwapRe
 			return RetryFailedSwapResult{}, fmt.Errorf("unsupported input mint for retry")
 		}
 		result, err := s.SellToUSDC(ctx, SellToUSDCRequest{
-			GroupID:   tx.GroupID,
-			UserID:    req.UserID,
-			Symbol:    symbol,
+			GroupID:    tx.GroupID,
+			UserID:     req.UserID,
+			Symbol:     symbol,
 			InputToken: tx.InputToken,
-			Amount:    tx.Amount,
+			Amount:     tx.Amount,
 		})
 		if err != nil {
 			return RetryFailedSwapResult{}, err

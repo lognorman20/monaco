@@ -55,6 +55,7 @@ func normalizeSymbol(symbol string) string {
 // Verified via Pyth MCP get_symbols: AAPLx -> Equity.US.AAPL/USD.
 func EquityQuerySymbol(symbol string) string {
 	base := normalizeSymbol(symbol)
+	base = strings.TrimSuffix(base, "C")
 	base = strings.TrimSuffix(base, "X")
 	return fmt.Sprintf("Equity.US.%s/USD", base)
 }

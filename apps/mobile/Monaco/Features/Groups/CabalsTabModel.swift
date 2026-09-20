@@ -13,10 +13,10 @@ protocol CabalsTabDataSource {
 
 @MainActor
 struct LiveCabalsTabDataSource: CabalsTabDataSource {
-    let auth: PrivyAuthService
+    let auth: DynamicAuthService
     private let apiClient = MonacoAPIClient()
 
-    init(auth: PrivyAuthService) {
+    init(auth: DynamicAuthService) {
         self.auth = auth
     }
 

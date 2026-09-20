@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Monaco iOS sim launch with Privy env from dotenvx .env.local.
+# Monaco iOS sim launch with Dynamic env from dotenvx .env.local.
 # Prefers SimSlim gold when SIMSLIM_UDID exists and simslim is ready.
 # Otherwise warns and boots a stock Xcode simulator. Does not require ~/.local/bin/ios-sim.
 set -euo pipefail
@@ -7,8 +7,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-if [[ "${MONACO_PRIVY_ENV:-}" != "1" ]]; then
-  exec "$repo_root/scripts/with-ios-privy-env.sh" "$0" "$@"
+if [[ "${MONACO_DYNAMIC_ENV:-}" != "1" ]]; then
+  exec "$repo_root/scripts/with-ios-dynamic-env.sh" "$0" "$@"
 fi
 
 bundle_id="com.monaco.app"
@@ -38,7 +38,7 @@ _ios_clipboard_bridge() {
 }
 _ios_clipboard_bridge start
 
-# Ad-hoc sign the sim build (see docs/how-to/local-simulator.md#signing) so the Privy
+# Ad-hoc sign the sim build (see docs/how-to/local-simulator.md#signing) so the Dynamic
 # session's keychain entry survives relaunch/reinstall instead of being dropped by an
 # unsigned build.
 xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco \

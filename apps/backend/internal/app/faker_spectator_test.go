@@ -83,7 +83,7 @@ func newSpectatorFixture(t *testing.T) spectatorFixture {
 	deposits := NewDepositService(h.Store, h.Auth, rec, h.Pyth, h.Symbols)
 	home := NewHomeService(h.Store, h.Auth, rec, h.Pyth, deposits, h.Symbols)
 	governance := NewGovernanceService(h.Store, h.Auth, rec)
-	governance.SetBuyService(NewBuyService(h.Jupiter, h.XStocks))
+	governance.SetBuyService(NewBuyService(h.Jupiter, h.Catalog))
 	governance.SetHomeService(home)
 
 	fx := spectatorFixture{h: h, privy: rec, home: home, governance: governance, fakerTreasury: "faker-treasury-" + sfx}

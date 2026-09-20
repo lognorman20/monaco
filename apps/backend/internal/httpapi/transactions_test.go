@@ -8,10 +8,10 @@ import (
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 func integrationTransactionHandlers(t *testing.T) (*TransactionHandlers, *AuthHandlers, wallets.Client, dex.Client, *postgres.TestIsolation) {
@@ -20,21 +20,20 @@ func integrationTransactionHandlers(t *testing.T) (*TransactionHandlers, *AuthHa
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
 	jupiterClient := dex.NewFakeClient()
-	xstocksResolver := b20.NewFakeCatalog()
-	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	catalog := b20.NewFakeCatalog()
+	buy := app.NewBuyService(jupiterClient, catalog)
 	b20.RegisterCatalogAsset(catalog, b20.Asset{
-		Symbol:     "AAPLx",
-		Name:       "Apple",
+		Symbol:       "AAPLx",
+		Name:         "Apple",
 		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 	})
 	symbols := app.NewSymbolResolver(catalog)
-	signer := app.NewFakePrivyTreasurySigner()
-	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, "", symbols)
+	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, nil, symbols)
 	return &TransactionHandlers{
 		Store:   store,
-		Privy:   privyClient,
-		XStocks: xstocksResolver,
+		Auth:    authHandlers.Verifier,
+		Wallets: privyClient,
+		Catalog: catalog,
 		Swap:    swap,
 		Symbols: symbols,
 	}, authHandlers, privyClient, jupiterClient, iso
@@ -45,7 +44,7 @@ func TestRetryTransactionHandler_failedBuy_returnsConfirmed(t *testing.T) {
 	ctx := context.Background()
 	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "retry-http", "Retry HTTP")
 
-	governance := app.NewGovernanceService(handlers.Store, handlers.Privy)
+	governance := app.NewGovernanceService(handlers.Store, handlers.Auth, handlers.Wallets)
 	created, err := governance.CreateGroupWithRules(ctx, string(token), "Retry Club "+iso.Suffix(), app.DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -55,27 +54,27 @@ func TestRetryTransactionHandler_failedBuy_returnsConfirmed(t *testing.T) {
 	const usdcAmount int64 = 2_000_000
 	requestID := "req-retry-http-" + iso.Suffix()
 	signature := "sig-retry-http-" + iso.Suffix()
-	b20.RegisterTokenAddress(handlers.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
-	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcAmount, jupiter.BuyQuote{
-		Routable:   true,
-		InputToken:  evm.USDCAddress,
+	b20.RegisterTokenAddress(handlers.Catalog, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
+	dex.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcAmount, dex.BuyQuote{
+		Routable:    true,
+		InputToken:  dex.USDCAddress(),
 		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
-		InAmount:   "2000000",
-		OutAmount:  "1000000",
-		RequestID:  requestID,
+		InAmount:    "2000000",
+		OutAmount:   "1000000",
+		RequestID:   requestID,
 	})
-	jupiter.RegisterBuyOrder(jupiterClient, requestID, jupiter.BuyOrder{
+	dex.RegisterBuyOrder(jupiterClient, requestID, dex.BuyOrder{
 		RequestID:   requestID,
 		Transaction: "unsigned-buy-tx",
 		InAmount:    "2000000",
 		OutAmount:   "1000000",
-		InputToken:   evm.USDCAddress,
-		OutputToken:  "0xb200000000000000000000c2e324d24d7eecd1fb",
+		InputToken:  dex.USDCAddress(),
+		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 	})
-	jupiter.RegisterExecutePoll(jupiterClient, requestID, []jupiter.ExecuteResult{
-		{Status: jupiter.ExecuteStatusPending, Code: -1},
+	dex.RegisterExecutePoll(jupiterClient, requestID, []dex.ExecuteResult{
+		{Status: dex.ExecuteStatusPending, Code: -1},
 		{
-			Status:             jupiter.ExecuteStatusSuccess,
+			Status:             dex.ExecuteStatusSuccess,
 			Code:               0,
 			Signature:          signature,
 			InputAmountResult:  "2000000",
@@ -90,7 +89,7 @@ func TestRetryTransactionHandler_failedBuy_returnsConfirmed(t *testing.T) {
 	handlers.Swap.SetTreasuryBalances(treasury.Address, app.TreasuryBalances{USDC: 5_000_000})
 	wallets.SetTreasuryUSDCBalance(privyClient, treasury.Address, 5_000_000)
 
-	failed, err := handlers.Store.InsertFailedTransaction(ctx, created.GroupID, postgres.TransactionActionBuy, evm.USDCAddress, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcAmount, "req-failed-"+iso.Suffix())
+	failed, err := handlers.Store.InsertFailedTransaction(ctx, created.GroupID, postgres.TransactionActionBuy, dex.USDCAddress(), "0xb200000000000000000000c2e324d24d7eecd1fb", usdcAmount, "req-failed-"+iso.Suffix())
 	if err != nil {
 		t.Fatalf("insert failed buy: %v", err)
 	}
@@ -122,7 +121,7 @@ func TestGetTransactionHandler_returnsFullDetail(t *testing.T) {
 	ctx := context.Background()
 	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "get-tx", "Get Tx")
 
-	governance := app.NewGovernanceService(handlers.Store, handlers.Privy)
+	governance := app.NewGovernanceService(handlers.Store, handlers.Auth, handlers.Wallets)
 	created, err := governance.CreateGroupWithRules(ctx, string(token), "Get Tx Club "+iso.Suffix(), app.DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -132,9 +131,9 @@ func TestGetTransactionHandler_returnsFullDetail(t *testing.T) {
 	confirmed, _, err := handlers.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          created.GroupID,
 		Amount:           2_000_000,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      "sig-get-tx-" + iso.Suffix(),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           "sig-get-tx-" + iso.Suffix(),
 		ExecuteRequestID: "req-get-tx-" + iso.Suffix(),
 		CostBasisPrice:   2_000_000,
 		CostBasisAmount:  1_000_000,
@@ -185,7 +184,7 @@ func TestRetryTransactionHandler_confirmedBuy_returns409(t *testing.T) {
 	ctx := context.Background()
 	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "retry-409", "Retry 409")
 
-	governance := app.NewGovernanceService(handlers.Store, handlers.Privy)
+	governance := app.NewGovernanceService(handlers.Store, handlers.Auth, handlers.Wallets)
 	created, err := governance.CreateGroupWithRules(ctx, string(token), "Retry 409 Club "+iso.Suffix(), app.DefaultGroupRules())
 	if err != nil {
 		t.Fatalf("create group: %v", err)
@@ -195,9 +194,9 @@ func TestRetryTransactionHandler_confirmedBuy_returns409(t *testing.T) {
 	confirmed, _, err := handlers.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          created.GroupID,
 		Amount:           1_000_000,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      "sig-confirmed-" + iso.Suffix(),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           "sig-confirmed-" + iso.Suffix(),
 		ExecuteRequestID: "req-confirmed-" + iso.Suffix(),
 		CostBasisPrice:   1_000_000,
 		CostBasisAmount:  500_000,

@@ -33,7 +33,7 @@ final class AppSessionStore {
         (home?.groups ?? []).filter(\.isJoined)
     }
 
-    func bootstrap(auth: PrivyAuthService) async {
+    func bootstrap(auth: DynamicAuthService) async {
         guard let token = auth.accessToken else {
             home = nil
             me = nil
@@ -67,11 +67,11 @@ final class AppSessionStore {
     }
 
     /// A 401 here means the backend would not accept the access token. Tokens last about
-    /// an hour, so first ask Privy for a fresh one: if that yields a different token the
-    /// gate re-runs `bootstrap` with it. Only when Privy has nothing newer is the token
-    /// really bad — most often a Privy app-id / verification-key mismatch between the app
+    /// an hour, so first ask Dynamic for a fresh one: if that yields a different token the
+    /// gate re-runs `bootstrap` with it. Only when Dynamic has nothing newer is the token
+    /// really bad — most often an environment-id / verification-key mismatch between the app
     /// build and the backend env — and we sign out, saying *why* on the login screen.
-    private func handleSessionOpenFailure(_ error: Error, rejectedToken: String, auth: PrivyAuthService) async {
+    private func handleSessionOpenFailure(_ error: Error, rejectedToken: String, auth: DynamicAuthService) async {
         var failure = error
         if case MonacoAPIError.httpStatus(401) = error {
             do {
@@ -80,7 +80,7 @@ final class AppSessionStore {
                     return
                 }
             } catch {
-                // Couldn't reach Privy to refresh. That's a connection problem, not a bad session.
+                // Couldn't reach Dynamic to refresh. That's a connection problem, not a bad session.
                 failure = error
             }
         }
@@ -101,7 +101,7 @@ final class AppSessionStore {
     }
 
     func refresh(
-        auth: PrivyAuthService,
+        auth: DynamicAuthService,
         accessToken: String? = nil,
         leaderboardRange: HomeLeaderboardRange = .all
     ) async {
@@ -161,7 +161,7 @@ final class AppSessionStore {
     ///
     /// Throws when the dashboard read fails so the caller's poll loop can back off. That includes
     /// a 401: signing the member out is for a request they made, not one they never saw.
-    func pollLive(auth: PrivyAuthService) async throws {
+    func pollLive(auth: DynamicAuthService) async throws {
         guard let token = auth.accessToken else { return }
         let generation = refreshGeneration
         let leaderboardRange = dashboardLeaderboardRange
@@ -186,7 +186,7 @@ final class AppSessionStore {
     }
 
     /// Legacy home boards + popular strip. Does not block Home first paint.
-    func refreshDeferredHomePayloads(auth: PrivyAuthService, accessToken: String? = nil) async {
+    func refreshDeferredHomePayloads(auth: DynamicAuthService, accessToken: String? = nil) async {
         await refreshHomeBoards(accessToken: accessToken ?? auth.accessToken)
         await refreshPopular(auth: auth)
     }
@@ -205,7 +205,7 @@ final class AppSessionStore {
     }
 
     /// GET /v1/home/pnl-series for the Home chart. Does not block login or dashboard shell.
-    func refreshHomePnLSeries(auth: PrivyAuthService, accessToken: String? = nil) async {
+    func refreshHomePnLSeries(auth: DynamicAuthService, accessToken: String? = nil) async {
         let token = accessToken ?? auth.accessToken
         guard let token else { return }
         isHomePnLSeriesLoading = homePnLSeries == nil
@@ -223,7 +223,7 @@ final class AppSessionStore {
 
     /// After POST /v1/groups: patch joined cabals locally, then refresh home/dashboard
     /// in the background. Skips popular assets so create does not stampede Jupiter.
-    func refreshAfterCreate(auth: PrivyAuthService, created: CreateGroupResponse) {
+    func refreshAfterCreate(auth: DynamicAuthService, created: CreateGroupResponse) {
         insertJoinedCabal(from: created)
         Task { await deferredRefreshAfterCreate(auth: auth) }
     }
@@ -245,7 +245,7 @@ final class AppSessionStore {
         }
     }
 
-    private func deferredRefreshAfterCreate(auth: PrivyAuthService) async {
+    private func deferredRefreshAfterCreate(auth: DynamicAuthService) async {
         guard let token = auth.accessToken else { return }
         do {
             async let homeLoad = apiClient.getHome(accessToken: token)
@@ -264,7 +264,7 @@ final class AppSessionStore {
         }
     }
 
-    func refreshPopular(auth: PrivyAuthService) async {
+    func refreshPopular(auth: DynamicAuthService) async {
         guard let token = auth.accessToken else { return }
         do {
             let popular = try await apiClient.getPopularAssets(accessToken: token, limit: 10)
@@ -277,7 +277,7 @@ final class AppSessionStore {
         }
     }
 
-    func refreshDashboard(auth: PrivyAuthService, leaderboardRange: HomeLeaderboardRange) async {
+    func refreshDashboard(auth: DynamicAuthService, leaderboardRange: HomeLeaderboardRange) async {
         guard let token = auth.accessToken else { return }
         do {
             dashboard = try await apiClient.getHomeDashboard(accessToken: token, leaderboardRange: leaderboardRange)

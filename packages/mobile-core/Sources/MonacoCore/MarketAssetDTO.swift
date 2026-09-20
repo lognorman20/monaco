@@ -3,7 +3,7 @@ import Foundation
 public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
     public let symbol: String
     public let name: String
-    public let solanaMint: String
+    public let tokenAddress: String
     public let routable: Bool
     public let priceUsdcMicros: Int64?
     public let change24h: String?
@@ -13,14 +13,14 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
     public init(
         symbol: String,
         name: String,
-        solanaMint: String,
+        tokenAddress: String,
         routable: Bool,
         priceUsdcMicros: Int64? = nil,
         change24h: String? = nil
     ) {
         self.symbol = symbol
         self.name = name
-        self.solanaMint = solanaMint
+        self.tokenAddress = tokenAddress
         self.routable = routable
         self.priceUsdcMicros = priceUsdcMicros
         self.change24h = change24h
@@ -76,7 +76,7 @@ public struct AssetLiquidityDTO: Codable, Equatable, Sendable {
 public struct AssetDetailDTO: Codable, Equatable, Sendable {
     public let symbol: String
     public let name: String
-    public let solanaMint: String
+    public let tokenAddress: String
     public let routable: Bool
     public let priceUsdcMicros: Int64?
     public let change24h: String?
@@ -85,7 +85,7 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
     public init(
         symbol: String,
         name: String,
-        solanaMint: String,
+        tokenAddress: String,
         routable: Bool,
         priceUsdcMicros: Int64? = nil,
         change24h: String? = nil,
@@ -93,7 +93,7 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
     ) {
         self.symbol = symbol
         self.name = name
-        self.solanaMint = solanaMint
+        self.tokenAddress = tokenAddress
         self.routable = routable
         self.priceUsdcMicros = priceUsdcMicros
         self.change24h = change24h

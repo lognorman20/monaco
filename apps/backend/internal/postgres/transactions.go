@@ -24,10 +24,10 @@ type TransactionRow struct {
 	ProposalID       sql.NullString
 	Amount           int64
 	Action           string
-	InputToken        string
-	OutputToken       string
+	InputToken       string
+	OutputToken      string
 	Status           string
-	TxHash      sql.NullString
+	TxHash           sql.NullString
 	ExecuteRequestID sql.NullString
 	CostBasisPrice   sql.NullInt64
 	CostBasisAmount  sql.NullInt64
@@ -40,9 +40,9 @@ type TransactionRow struct {
 type ConfirmBuyTransactionParams struct {
 	GroupID          string
 	Amount           int64
-	InputToken        string
-	OutputToken       string
-	TxHash      string
+	InputToken       string
+	OutputToken      string
+	TxHash           string
 	ExecuteRequestID string
 	CostBasisPrice   int64
 	CostBasisAmount  int64
@@ -53,9 +53,9 @@ type ConfirmBuyTransactionParams struct {
 type ConfirmSellTransactionParams struct {
 	GroupID          string
 	Amount           int64
-	InputToken        string
-	OutputToken       string
-	TxHash      string
+	InputToken       string
+	OutputToken      string
+	TxHash           string
 	ExecuteRequestID string
 	ProceedsUSDC     int64
 }
@@ -67,8 +67,8 @@ type InsertPendingTransactionParams struct {
 	AgentIntentID    string
 	InitiatedBy      string
 	Action           string
-	InputToken        string
-	OutputToken       string
+	InputToken       string
+	OutputToken      string
 	Amount           int64
 	ExecuteRequestID string
 }

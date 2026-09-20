@@ -12,13 +12,9 @@ public struct RedeemJobDTO: Codable, Equatable, Sendable {
 
 public struct RedeemRequestDTO: Encodable, Equatable, Sendable {
     public let shareUnits: String
-    public let payoutAddress: String
-    public let payoutProof: String
 
-    public init(shareUnits: String, payoutAddress: String, payoutProof: String) {
+    public init(shareUnits: String) {
         self.shareUnits = shareUnits
-        self.payoutAddress = payoutAddress
-        self.payoutProof = payoutProof
     }
 }
 

@@ -1,8 +1,8 @@
 .env
 .env.keys
 .audit/
-apps/mobile/Config/Privy.local.xcconfig
-apps/mobile/Config/Privy.local.Info.plist
+apps/mobile/Config/Dynamic.local.xcconfig
+apps/mobile/Config/Dynamic.local.Info.plist
 bin/
 *.exe
 .DS_Store
@@ -16,6 +16,8 @@ build/
 .cursor/hooks/
 .tmp*
 .worktrees/
+apps/signer/node_modules/
+apps/signer/dist/
 .logs/
 *.test
 .mobai

@@ -2,8 +2,11 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/dex"
@@ -26,7 +29,7 @@ type DevExecuteBuyRequest struct {
 // DevExecuteBuyResult is the persisted confirmed buy transaction.
 type DevExecuteBuyResult struct {
 	Transaction postgres.TransactionRow
-	Created       bool
+	Created     bool
 }
 
 // SellToUSDCRequest sells treasury B20 back to USDC.
@@ -44,7 +47,7 @@ type SellToUSDCRequest struct {
 // SellToUSDCResult is the persisted confirmed sell transaction.
 type SellToUSDCResult struct {
 	Transaction postgres.TransactionRow
-	Created       bool
+	Created     bool
 }
 
 // TreasuryBalances tracks fake treasury token balances for integration tests.
@@ -105,10 +108,21 @@ func (s *SwapService) TreasuryBalancesFor(treasuryAddress string) TreasuryBalanc
 }
 
 func executeRequestID(proposalID, agentIntentID string) string {
-	if agentIntentID != "" {
-		return agentIntentID
+	if id := strings.TrimSpace(agentIntentID); id != "" {
+		return id
 	}
-	return proposalID
+	if id := strings.TrimSpace(proposalID); id != "" {
+		return id
+	}
+	return newExecuteRequestID()
+}
+
+func newExecuteRequestID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("exec-%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // DevExecuteBuy quotes, swaps, confirms, and persists a treasury buy.
@@ -142,12 +156,12 @@ func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyReques
 	if err := s.ensureTreasuryGas(ctx, treasury); err != nil {
 		return DevExecuteBuyResult{}, err
 	}
-	if err := s.ensureAllowance(ctx, treasury, quote, usdcIn); err != nil {
-		return DevExecuteBuyResult{}, err
-	}
 
 	swapCall, err := s.dex.BuildSwap(ctx, quote, treasury.Address, treasury.Address)
 	if err != nil {
+		return DevExecuteBuyResult{}, err
+	}
+	if err := s.ensureAllowance(ctx, treasury, quote.TokenIn, swapCall.Router, usdcIn); err != nil {
 		return DevExecuteBuyResult{}, err
 	}
 
@@ -162,7 +176,7 @@ func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyReques
 		AgentIntentID:    req.AgentIntentID,
 		InitiatedBy:      req.InitiatedBy,
 		Action:           postgres.TransactionActionBuy,
-		InputToken:       evm.USDCAddress,
+		InputToken:       dex.USDCAddress(),
 		OutputToken:      tokenOut,
 		Amount:           req.USDCAmount,
 		ExecuteRequestID: execID,
@@ -170,16 +184,16 @@ func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyReques
 		return DevExecuteBuyResult{}, err
 	}
 
-	fillAmount, err := s.waitFill(ctx, txHash, tokenOut, treasury.Address)
+	fillAmount, err := s.waitFill(ctx, txHash, tokenOut, treasury.Address, quote.AmountOut)
 	if err != nil {
-		_ = s.markSwapFailed(ctx, req.GroupID, postgres.TransactionActionBuy, evm.USDCAddress, tokenOut, req.USDCAmount, execID)
+		_ = s.markSwapFailed(ctx, req.GroupID, postgres.TransactionActionBuy, dex.USDCAddress(), tokenOut, req.USDCAmount, execID)
 		return DevExecuteBuyResult{}, err
 	}
 
 	row, created, err := s.store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          req.GroupID,
 		Amount:           req.USDCAmount,
-		InputToken:       evm.USDCAddress,
+		InputToken:       dex.USDCAddress(),
 		OutputToken:      tokenOut,
 		TxHash:           txHash,
 		ExecuteRequestID: execID,
@@ -192,6 +206,7 @@ func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyReques
 
 	if created {
 		s.applyBuyBalances(treasury.Address, tokenOut, req.USDCAmount, fillAmount)
+		wallets.TrySetTreasuryUSDCBalance(s.wallets, treasury.Address, s.TreasuryBalancesFor(treasury.Address).USDC)
 		treasuryUsdc, err := s.treasuryUSDCForSnapshot(ctx, treasury.Address)
 		if err != nil {
 			return DevExecuteBuyResult{}, err
@@ -231,12 +246,12 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 	if err := s.ensureTreasuryGas(ctx, treasury); err != nil {
 		return SellToUSDCResult{}, err
 	}
-	if err := s.ensureAllowance(ctx, treasury, quote, amountIn); err != nil {
-		return SellToUSDCResult{}, err
-	}
 
 	swapCall, err := s.dex.BuildSwap(ctx, quote, treasury.Address, treasury.Address)
 	if err != nil {
+		return SellToUSDCResult{}, err
+	}
+	if err := s.ensureAllowance(ctx, treasury, quote.TokenIn, swapCall.Router, amountIn); err != nil {
 		return SellToUSDCResult{}, err
 	}
 
@@ -252,16 +267,16 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 		InitiatedBy:      req.InitiatedBy,
 		Action:           postgres.TransactionActionSell,
 		InputToken:       req.InputToken,
-		OutputToken:      evm.USDCAddress,
+		OutputToken:      dex.USDCAddress(),
 		Amount:           req.Amount,
 		ExecuteRequestID: execID,
 	}); err != nil {
 		return SellToUSDCResult{}, err
 	}
 
-	proceeds, err := s.waitFill(ctx, txHash, evm.USDCAddress, treasury.Address)
+	proceeds, err := s.waitFill(ctx, txHash, dex.USDCAddress(), treasury.Address, quote.AmountOut)
 	if err != nil {
-		_ = s.markSwapFailed(ctx, req.GroupID, postgres.TransactionActionSell, req.InputToken, evm.USDCAddress, req.Amount, execID)
+		_ = s.markSwapFailed(ctx, req.GroupID, postgres.TransactionActionSell, req.InputToken, dex.USDCAddress(), req.Amount, execID)
 		return SellToUSDCResult{}, err
 	}
 
@@ -269,7 +284,7 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 		GroupID:          req.GroupID,
 		Amount:           req.Amount,
 		InputToken:       req.InputToken,
-		OutputToken:      evm.USDCAddress,
+		OutputToken:      dex.USDCAddress(),
 		TxHash:           txHash,
 		ExecuteRequestID: execID,
 		ProceedsUSDC:     proceeds,
@@ -280,6 +295,7 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 
 	if created {
 		s.applySellBalances(treasury.Address, req.InputToken, req.Amount, proceeds)
+		wallets.TrySetTreasuryUSDCBalance(s.wallets, treasury.Address, s.TreasuryBalancesFor(treasury.Address).USDC)
 		treasuryUsdc, err := s.treasuryUSDCForSnapshot(ctx, treasury.Address)
 		if err != nil {
 			return SellToUSDCResult{}, err
@@ -299,16 +315,14 @@ func (s *SwapService) ensureTreasuryGas(ctx context.Context, treasury wallets.Tr
 	return nil
 }
 
-func (s *SwapService) ensureAllowance(ctx context.Context, treasury wallets.TreasuryRef, quote dex.Quote, amount *big.Int) error {
+func (s *SwapService) ensureAllowance(ctx context.Context, treasury wallets.TreasuryRef, token, spender string, amount *big.Int) error {
 	if s.chain == nil {
 		return nil
 	}
-	spender := quote.TokenOut
-	if quote.TokenIn != evm.USDCAddress {
-		spender = quote.TokenOut
+	if spender == "" {
+		spender = token
 	}
-	// Router address comes from BuildSwap; allowance is checked against quote route in T5.
-	allowance, err := s.chain.Allowance(ctx, quote.TokenIn, treasury.Address, spender)
+	allowance, err := s.chain.Allowance(ctx, token, treasury.Address, spender)
 	if err != nil {
 		return err
 	}
@@ -319,15 +333,27 @@ func (s *SwapService) ensureAllowance(ctx context.Context, treasury wallets.Trea
 	if err != nil {
 		return err
 	}
-	txHash, err := s.wallets.SendTreasuryTransaction(ctx, treasury, quote.TokenIn, data, big.NewInt(0))
+	txHash, err := s.wallets.SendTreasuryTransaction(ctx, treasury, token, data, big.NewInt(0))
 	if err != nil {
 		return err
 	}
-	_, err = s.waitReceipt(ctx, txHash)
-	return err
+	receipt, err := s.waitReceipt(ctx, txHash)
+	if err != nil {
+		return err
+	}
+	if receipt.Status != 1 {
+		return fmt.Errorf("approve failed")
+	}
+	return nil
 }
 
-func (s *SwapService) waitFill(ctx context.Context, txHash, tokenOut, treasury string) (int64, error) {
+func (s *SwapService) waitFill(ctx context.Context, txHash, tokenOut, treasury string, quoted *big.Int) (int64, error) {
+	if s.chain == nil {
+		if quoted == nil || quoted.Sign() <= 0 || !quoted.IsInt64() {
+			return 0, fmt.Errorf("missing fill amount")
+		}
+		return quoted.Int64(), nil
+	}
 	receipt, err := s.waitReceipt(ctx, txHash)
 	if err != nil {
 		return 0, err
@@ -337,6 +363,9 @@ func (s *SwapService) waitFill(ctx context.Context, txHash, tokenOut, treasury s
 	}
 	fill := evm.DecodeERC20TransferLogs(receipt.Logs, tokenOut, treasury)
 	if fill.Sign() <= 0 {
+		if quoted != nil && quoted.Sign() > 0 && quoted.IsInt64() {
+			return quoted.Int64(), nil
+		}
 		return 0, fmt.Errorf("missing fill amount")
 	}
 	if !fill.IsInt64() {
@@ -380,7 +409,7 @@ func (s *SwapService) treasuryUSDCForSnapshot(ctx context.Context, treasuryAddre
 
 func (s *SwapService) applyBuyBalances(treasuryAddress, outputToken string, usdcSpent, tokenReceived int64) {
 	balances := s.TreasuryBalancesFor(treasuryAddress)
-	if outputToken != evm.USDCAddress {
+	if outputToken != dex.USDCAddress() {
 		balances.Token += tokenReceived
 	}
 	balances.USDC -= usdcSpent
@@ -392,7 +421,7 @@ func (s *SwapService) applyBuyBalances(treasuryAddress, outputToken string, usdc
 
 func (s *SwapService) applySellBalances(treasuryAddress, inputToken string, tokenSold, usdcReceived int64) {
 	balances := s.TreasuryBalancesFor(treasuryAddress)
-	if inputToken != evm.USDCAddress {
+	if inputToken != dex.USDCAddress() {
 		balances.Token -= tokenSold
 		if balances.Token < 0 {
 			balances.Token = 0

@@ -17,7 +17,7 @@ func TestFakerGroupsTab_scaleClubReadOnlyAndGhostsNotMoneyIn(t *testing.T) {
 	tab := NewGroupsTabService(fx.home, fx.h.Store)
 
 	// Arrange: the ghost's seeded deposit is a confirmed ledger row that never reached the pot.
-	execSQL(t, fx.h.DB, `INSERT INTO deposits (user_id, group_id, amount, from_address, status, tx_signature) VALUES ($1, $2, 2000000, 'faker-wallet-ghost', 'confirmed', $3)`,
+	execSQL(t, fx.h.DB, `INSERT INTO deposits (user_id, group_id, amount, from_address, status, tx_hash) VALUES ($1, $2, 2000000, 'faker-wallet-ghost', 'confirmed', $3)`,
 		fx.ghostID, fx.realGroupID, "faker-sig-ghost-"+fx.h.ISO.Suffix())
 
 	// Directory net-in (leaderboard candidate filter) counts the operator's 10 USDC only.

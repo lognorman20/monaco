@@ -1,0 +1,3 @@
+// Dynamic settings for Monaco iOS. Values come from repo-root .env.local via
+// scripts/ensure-ios-dynamic-config.sh → Config/Dynamic.local.xcconfig (gitignored).
+#include "Dynamic.local.xcconfig"

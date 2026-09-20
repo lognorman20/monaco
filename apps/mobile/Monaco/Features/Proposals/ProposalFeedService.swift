@@ -19,12 +19,12 @@ protocol ProposalFeedService: AnyObject {
     func postComment(proposalId: String, body: String, parentId: String?) async throws -> ProposalCommentDTO
 }
 
-/// Live service over the MonacoCore API client, authenticated with the Privy session token.
+/// Live service over the MonacoCore API client, authenticated with the session token.
 @MainActor
 final class LiveProposalFeedService: ProposalFeedService {
     private let client: MonacoCore.MonacoAPIClient
 
-    init(auth: PrivyAuthService, baseURL: URL = Config.apiBaseURL) {
+    init(auth: DynamicAuthService, baseURL: URL = Config.apiBaseURL) {
         client = MonacoCore.MonacoAPIClient(
             baseURL: baseURL,
             accessTokenProvider: { [weak auth] in

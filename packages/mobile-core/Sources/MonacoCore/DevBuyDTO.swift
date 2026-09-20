@@ -15,6 +15,6 @@ public struct DevBuyResponseDTO: Decodable, Sendable {
     public let groupId: String
     public let symbol: String
     public let status: String
-    public let txSignature: String?
+    public let txHash: String?
     public let created: Bool
 }

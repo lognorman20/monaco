@@ -1,10 +1,10 @@
 package httpapi
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,10 +12,11 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/chainlink"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/pyth"
 )
 
 type groupsTabHarness struct {
@@ -34,12 +35,12 @@ func newGroupsTabHarness(t *testing.T) groupsTabHarness {
 	store := postgres.NewStore(db)
 	pythClient := chainlink.NewFakeClient()
 	symbols := app.NewSymbolResolver(nil)
-	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
-	home := app.NewHomeService(store, privyClient, pythClient, deposits, symbols)
+	deposits := app.NewDepositService(store, authHandlers.Verifier, privyClient, pythClient, symbols)
+	home := app.NewHomeService(store, authHandlers.Verifier, privyClient, pythClient, deposits, symbols)
 	return groupsTabHarness{
 		tab:    &GroupsTabHandlers{GroupsTab: app.NewGroupsTabService(home, store)},
 		auth:   authHandlers,
-		groups: &GroupHandlers{Groups: app.NewGroupService(store, privyClient), Governance: app.NewGovernanceService(store, privyClient)},
+		groups: &GroupHandlers{Groups: app.NewGroupService(store, authHandlers.Verifier, privyClient), Governance: app.NewGovernanceService(store, authHandlers.Verifier, privyClient)},
 		privy:  privyClient,
 		pyth:   pythClient,
 		store:  store,
@@ -353,7 +354,7 @@ func TestGET_groupsLeaderboard_pythOutageValuesStockAtCostBasis(t *testing.T) {
 	g := h.createGroup(t, token, "lbpyth"+h.iso.Suffix(), "open")
 	h.fundUSDCOnly(t, ada.UserID, g, 100_000_000, 100_000_000, 40_000_000)
 	if _, _, err := h.store.ConfirmBuyTransaction(context.Background(), postgres.ConfirmBuyTransactionParams{
-		GroupID: g.GroupID, Amount: 60_000_000, InputToken: evm.USDCAddress, OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
+		GroupID: g.GroupID, Amount: 60_000_000, InputToken: dex.USDCAddress(), OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		TxHash: "sig-lbpyth-" + h.iso.Suffix(), ExecuteRequestID: "req-lbpyth-" + h.iso.Suffix(),
 		CostBasisPrice: 60_000_000, CostBasisAmount: 30_000_000,
 	}); err != nil {
@@ -444,7 +445,7 @@ func TestGET_groupPnLHistory_fundBuyPriceMoveWithdrawal(t *testing.T) {
 
 	const aaplAtomics = 30_000_000 // 0.3 share at 8 decimals
 	if _, _, err := h.store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
-		GroupID: g.GroupID, Amount: 60_000_000, InputToken: evm.USDCAddress, OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
+		GroupID: g.GroupID, Amount: 60_000_000, InputToken: dex.USDCAddress(), OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		TxHash: "sig-buy-" + sfx, ExecuteRequestID: "req-buy-" + sfx,
 		CostBasisPrice: 60_000_000, CostBasisAmount: aaplAtomics,
 	}); err != nil {
@@ -472,7 +473,7 @@ func TestGET_groupPnLHistory_fundBuyPriceMoveWithdrawal(t *testing.T) {
 	wallets.SetTreasuryUSDCBalance(h.privy, g.TreasuryAddress, 17_000_000)
 	chainlink.RegisterMarkedPot(h.pyth, marks.TreasuryRef{GroupID: g.GroupID}, marks.NavInput{
 		Holdings: []marks.MarkedHolding{{
-			Symbol: "AAPLx", Mint: "0xb200000000000000000000c2e324d24d7eecd1fb", Units: aaplAtomics, MarkUsdc: 250_000_000, CostBasis: 60_000_000,
+			Symbol: "AAPLx", Token: "0xb200000000000000000000c2e324d24d7eecd1fb", Units: aaplAtomics, MarkUsdc: 250_000_000, CostBasis: 60_000_000,
 		}},
 	})
 

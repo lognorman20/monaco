@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Email OTP sign-in via Privy — kept for internal testers.
+/// Email OTP sign-in via email OTP — kept for internal testers.
 struct EmailLoginView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
 
     @State private var emailAddress = ""
     @State private var otpCode = ""
@@ -162,5 +162,5 @@ struct EmailLoginView: View {
 }
 
 #Preview {
-    EmailLoginView(auth: PrivyAuthService())
+    EmailLoginView(auth: DynamicAuthService())
 }

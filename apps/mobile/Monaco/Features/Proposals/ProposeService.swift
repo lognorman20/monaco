@@ -99,10 +99,10 @@ protocol ProposeService: AnyObject {
 
 @MainActor
 final class LiveProposeService: ProposeService {
-    private weak var auth: PrivyAuthService?
+    private weak var auth: DynamicAuthService?
     private let client = MonacoAPIClient()
 
-    init(auth: PrivyAuthService) {
+    init(auth: DynamicAuthService) {
         self.auth = auth
     }
 

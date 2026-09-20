@@ -44,11 +44,11 @@ public enum SlicePercentFormatter {
 }
 
 public enum AssetSymbolFormatter {
-    /// User-facing ticker; never show raw Solana mint as primary label.
+    /// User-facing ticker; never show a raw token address as primary label.
     public static func format(_ symbol: String) -> String {
         let trimmed = symbol.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return trimmed }
-        if looksLikeSolanaMint(trimmed) {
+        if looksLikeTokenAddress(trimmed) {
             return "Unknown stock"
         }
         return trimmed
@@ -58,17 +58,17 @@ public enum AssetSymbolFormatter {
     /// Keep the raw symbol for API calls.
     public static func display(_ symbol: String) -> String {
         let formatted = format(symbol)
-        guard formatted.count >= 2, formatted.count <= 7, formatted.last == "x" else { return formatted }
+        guard formatted.count >= 2, formatted.count <= 7, let last = formatted.last, last == "x" || last == "c" else { return formatted }
         let body = formatted.dropLast()
         let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ.")
         guard body.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return formatted }
         return String(body)
     }
 
-    private static func looksLikeSolanaMint(_ value: String) -> Bool {
-        guard (32...44).contains(value.count) else { return false }
-        let base58 = CharacterSet(charactersIn: "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
-        return value.unicodeScalars.allSatisfy { base58.contains($0) }
+    private static func looksLikeTokenAddress(_ value: String) -> Bool {
+        let lowered = value.lowercased()
+        guard lowered.hasPrefix("0x"), lowered.count == 42 else { return false }
+        return lowered.dropFirst(2).allSatisfy { $0.isHexDigit }
     }
 }
 

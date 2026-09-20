@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Receipt for one activity row: deposit, buy, or sell. Loads the detail, then renders `TransactionReceiptView`.
 struct TransactionDetailView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let activityItem: GroupActivityItemDTO
     let onRetry: ((GroupActivityItemDTO) -> Void)?
     let isRetrying: Bool
@@ -125,13 +125,13 @@ struct TransactionReceipt: Equatable {
         status = Self.status(deposit.status)
         rows = [Row(label: "Date", value: Self.date(deposit.createdAt))]
         failureMessage = status == .failed ? "The transfer didn't go through" : nil
-        signature = deposit.txSignature
+        signature = deposit.txHash
     }
 
     init(transaction: TransactionDetailDTO) {
         let action = transaction.action.lowercased()
         status = Self.status(transaction.status)
-        signature = transaction.txSignature
+        signature = transaction.txHash
         let dateRow = Row(label: "Date", value: Self.date(transaction.confirmedAt ?? transaction.createdAt))
 
         switch action {
@@ -194,13 +194,6 @@ struct TransactionReceipt: Equatable {
         failureMessage = status == .failed ? "It didn't go through. Nothing left the pot." : nil
     }
 
-    /// Solscan only for real signatures (base58); seeded rows carry placeholders.
-    var solscanURL: URL? {
-        guard let signature, !signature.isEmpty,
-              signature.allSatisfy({ $0.isLetter || $0.isNumber }) else { return nil }
-        return URL(string: "https://solscan.io/tx/\(signature)")
-    }
-
     var statusLabel: String {
         switch status {
         case .confirmed: "Confirmed"
@@ -231,7 +224,7 @@ struct TransactionReceipt: Equatable {
     }
 }
 
-/// Receipt layout: glyph, what happened, the amount, status, a few facts, Solscan.
+/// Receipt layout: glyph, what happened, the amount, status, a few facts.
 struct TransactionReceiptView: View {
     let receipt: TransactionReceipt
     var isRetrying = false
@@ -295,27 +288,11 @@ struct TransactionReceiptView: View {
                         .padding(.horizontal, MonacoTheme.Space.m)
                         .frame(minHeight: 52)
                         .overlay(alignment: .bottom) {
-                            if row.id != receipt.rows.last?.id || receipt.solscanURL != nil {
+                            if row.id != receipt.rows.last?.id {
                                 Rectangle().fill(MonacoTheme.hairline).frame(height: 1).padding(.leading, MonacoTheme.Space.m)
                             }
                         }
                         .accessibilityElement(children: .combine)
-                    }
-                    if let url = receipt.solscanURL {
-                        Link(destination: url) {
-                            HStack {
-                                Text("View on Solscan")
-                                Spacer()
-                                Image(systemName: "arrow.up.right")
-                                    .imageScale(.small)
-                            }
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(MonacoTheme.ink)
-                            .padding(.horizontal, 16)
-                            .frame(minHeight: 52)
-                            .contentShape(Rectangle())
-                        }
-                        .accessibilityIdentifier("transaction-detail-solscan")
                     }
                 }
 

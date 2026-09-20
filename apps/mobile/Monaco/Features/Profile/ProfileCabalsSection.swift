@@ -41,7 +41,7 @@ struct ProfileCabalRow: Identifiable, Equatable {
 }
 
 struct ProfileCabalsSection: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let rows: [ProfileCabalRow]
     var onLeft: () async -> Void = {}
 

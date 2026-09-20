@@ -10,6 +10,6 @@ struct DevBuyResponse: Decodable {
     let groupId: String
     let symbol: String
     let status: String
-    let txSignature: String?
+    let txHash: String?
     let created: Bool
 }

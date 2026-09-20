@@ -19,7 +19,7 @@ import (
 // buy, so DevExecuteBuy runs to completion against the fake Jupiter client instead of failing
 // on "missing fill amount" (the default fake execute result carries no fill amounts). label
 // must be unique per call (e.g. the test isolation suffix) so its execute request id and
-// tx_signature never collide with another test's confirmed transaction in the shared test DB.
+// tx_hash never collide with another test's confirmed transaction in the shared test DB.
 func registerAgentBuyFill(t *testing.T, dexClient dex.Client, resolver b20.Catalog, _ /* label */, symbol string, usdc int64) {
 	t.Helper()
 	registerRoutableQuote(t, dexClient, resolver, symbol, usdc)
@@ -144,7 +144,7 @@ func TestAgentIntent_buyExecutesThenEnforcesBudgetCap(t *testing.T) {
 	}
 	h.ISO.TrackGroup(created.GroupID)
 	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 10_000_000)
-	registerAgentBuyFill(t, h.Jupiter, h.XStocks, h.ISO.Suffix(), "AAPLx", 3_000_000)
+	registerAgentBuyFill(t, h.Jupiter, h.Catalog, h.ISO.Suffix(), "AAPLx", 3_000_000)
 
 	_, key := addAgentAndReveal(t, h, created.GroupID, proposer.UserID, 5_000_000)
 
@@ -202,7 +202,7 @@ func TestAgentLifecycle_pauseBlocksIntentsResumeRestoresRevokeInvalidatesKey(t *
 	}
 	h.ISO.TrackGroup(created.GroupID)
 	seedTestTreasuryUSDC(t, h.Privy, created.TreasuryAddress, 10_000_000)
-	registerAgentBuyFill(t, h.Jupiter, h.XStocks, h.ISO.Suffix(), "AAPLx", 1_000_000)
+	registerAgentBuyFill(t, h.Jupiter, h.Catalog, h.ISO.Suffix(), "AAPLx", 1_000_000)
 
 	_, key := addAgentAndReveal(t, h, created.GroupID, proposer.UserID, 5_000_000)
 	intents := NewAgentIntentService(h.Store, h.Swap, h.Symbols)

@@ -27,7 +27,7 @@ final class DevBuyAPITests: XCTestCase {
               "groupId": "\(groupId)",
               "symbol": "AAPLx",
               "status": "confirmed",
-              "txSignature": "sig-abc",
+              "txHash": "sig-abc",
               "created": true
             }
             """
@@ -71,7 +71,7 @@ final class DevBuyAPITests: XCTestCase {
         XCTAssertEqual(result.groupId, groupId)
         XCTAssertEqual(result.symbol, "AAPLx")
         XCTAssertEqual(result.status, "confirmed")
-        XCTAssertEqual(result.txSignature, "sig-abc")
+        XCTAssertEqual(result.txHash, "sig-abc")
         XCTAssertTrue(result.created)
     }
 

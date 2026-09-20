@@ -271,4 +271,3 @@ func formatShareFractionDecimal(memberShares, totalShares domain.ShareUnits) str
 	fraction := new(big.Rat).Quo(member, total)
 	return strings.TrimRight(strings.TrimRight(fraction.FloatString(6), "0"), ".")
 }
-

@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Market browse: pinned search, one scrolling grid. Search replaces Popular.
 struct AssetsTabView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     @Environment(AppSessionStore.self) private var session
 
     private let apiClient = MonacoAPIClient()

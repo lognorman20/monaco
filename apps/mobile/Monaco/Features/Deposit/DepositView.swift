@@ -4,7 +4,7 @@ import UIKit
 
 /// Deposit — inbound USDC lands in account balance; fund a cabal separately.
 struct DepositView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     var joinedCabals: [HomeGroupBoardRowDTO] = []
     var preselectedGroupId: String?
 
@@ -18,7 +18,7 @@ struct DepositView: View {
     var body: some View {
         Form {
             Section {
-                Text("Send USDC on the Solana network only. It shows up in your account balance in about a minute.")
+                Text("Send USDC on Base to this address")
                     .monacoSecondaryCaption()
             }
 
@@ -52,7 +52,7 @@ struct DepositView: View {
             }
 
             Section("How it works") {
-                stepRow(number: 1, text: "Send USDC on Solana to the address above.")
+                stepRow(number: 1, text: "Send USDC on Base to this address")
                 stepRow(number: 2, text: "Your account balance updates when USDC arrives.")
                 stepRow(number: 3, text: "Fund a cabal to move USDC into the pot and credit your share.")
             }
@@ -151,6 +151,6 @@ struct DepositView: View {
 
 #Preview {
     NavigationStack {
-        DepositView(auth: PrivyAuthService())
+        DepositView(auth: DynamicAuthService())
     }
 }

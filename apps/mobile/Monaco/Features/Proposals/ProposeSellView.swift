@@ -17,7 +17,7 @@ struct ProposeSellView: View {
     @State private var didApplyInitialSymbol = false
 
     /// Entry from Stock detail's cabal picker.
-    init(auth: PrivyAuthService, groupId: String, holdings: [PotRowDTO], initialSymbol: String? = nil, onProposed: ((_ proposalId: String) -> Void)? = nil) {
+    init(auth: DynamicAuthService, groupId: String, holdings: [PotRowDTO], initialSymbol: String? = nil, onProposed: ((_ proposalId: String) -> Void)? = nil) {
         self.service = LiveProposeService(auth: auth)
         self.groupId = groupId
         self.holdings = holdings

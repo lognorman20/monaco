@@ -232,7 +232,7 @@ func (s *ExecuteOnPassService) executeSellOnPass(ctx context.Context, proposal P
 		GroupID:    proposal.GroupID,
 		UserID:     proposal.ProposerID,
 		Symbol:     proposal.Symbol,
-		InputToken:  inputMint,
+		InputToken: inputMint,
 		Amount:     proposal.TokenAmount,
 		ProposalID: proposal.ID,
 	})

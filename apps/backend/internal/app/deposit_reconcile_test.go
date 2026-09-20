@@ -1,8 +1,8 @@
 package app
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"

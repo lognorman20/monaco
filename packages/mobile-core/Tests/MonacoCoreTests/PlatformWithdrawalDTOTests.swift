@@ -9,7 +9,7 @@ final class PlatformWithdrawalDTOTests: XCTestCase {
           "amount": 3000000,
           "toAddress": "11111111111111111111111111111112",
           "status": "confirmed",
-          "txSignature": "sig-abc",
+          "txHash": "sig-abc",
           "createdAt": "2026-03-18T12:00:00Z"
         }
         """
@@ -18,6 +18,6 @@ final class PlatformWithdrawalDTOTests: XCTestCase {
         XCTAssertEqual(dto.amount, 3_000_000)
         XCTAssertEqual(dto.toAddress, "11111111111111111111111111111112")
         XCTAssertEqual(dto.status, "confirmed")
-        XCTAssertEqual(dto.txSignature, "sig-abc")
+        XCTAssertEqual(dto.txHash, "sig-abc")
     }
 }

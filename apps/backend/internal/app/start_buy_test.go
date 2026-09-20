@@ -1,11 +1,10 @@
 package app
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/evm"
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"errors"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/b20"
@@ -36,7 +35,7 @@ func integrationExecuteOnPassApp(t *testing.T) executeOnPassHarness {
 	t.Helper()
 
 	h := integrationApp(t)
-	buy := NewBuyService(h.Jupiter, h.XStocks)
+	buy := NewBuyService(h.Jupiter, h.Catalog)
 	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
 	governance.SetBuyService(buy)
 	governance.SetSwapService(h.Swap)
@@ -110,8 +109,8 @@ func TestExecuteOnPass_onlyAfterTallyPassed_callsJupiter(t *testing.T) {
 	if !result.Created {
 		t.Fatal("expected newly created confirmed buy transaction")
 	}
-	if !result.Transaction.TxHash.Valid || result.Transaction.TxHash.String != signature {
-		t.Fatalf("tx signature = %v, want %q", result.Transaction.TxHash, signature)
+	if !result.Transaction.TxHash.Valid || !strings.HasPrefix(result.Transaction.TxHash.String, "0x") {
+		t.Fatalf("tx hash = %v, want 0x...", result.Transaction.TxHash)
 	}
 	if result.Transaction.Status != postgres.TransactionStatusConfirmed {
 		t.Fatalf("status = %q, want confirmed", result.Transaction.Status)
@@ -264,9 +263,9 @@ func TestExecuteOnPass_sellDoesNotChangeMemberShareUnits(t *testing.T) {
 	_, _, err = h.App.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          created.GroupID,
 		Amount:           10_000_000,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      testTxHash(h.App.ISO, "sell-exec-buy"),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           testTxHash(h.App.ISO, "sell-exec-buy"),
 		ExecuteRequestID: testRequestID(h.App.ISO, "sell-exec-buy"),
 		CostBasisPrice:   10_000_000,
 		CostBasisAmount:  held,

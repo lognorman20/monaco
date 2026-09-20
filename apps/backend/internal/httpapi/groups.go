@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 )
 
 // GroupHandlers serves group HTTP routes.
@@ -304,8 +304,12 @@ func (h *GroupHandlers) ListJoinRequestsHandler(w http.ResponseWriter, r *http.R
 	logJSONOK(ctx, log, "ok", "group_id", groupID, "count", len(respItems))
 }
 
-func (h *GroupHandlers) ApproveJoinRequestHandler(w http.ResponseWriter, r *http.Request) { h.decideJoinRequest(w, r, true) }
-func (h *GroupHandlers) DenyJoinRequestHandler(w http.ResponseWriter, r *http.Request)   { h.decideJoinRequest(w, r, false) }
+func (h *GroupHandlers) ApproveJoinRequestHandler(w http.ResponseWriter, r *http.Request) {
+	h.decideJoinRequest(w, r, true)
+}
+func (h *GroupHandlers) DenyJoinRequestHandler(w http.ResponseWriter, r *http.Request) {
+	h.decideJoinRequest(w, r, false)
+}
 
 func (h *GroupHandlers) decideJoinRequest(w http.ResponseWriter, r *http.Request, approve bool) {
 	ctx := r.Context()
@@ -422,9 +426,9 @@ type groupViewMemberRowResponse struct {
 }
 
 type groupViewAgentResponse struct {
-	ID                   string   `json:"id"`
-	Status               string   `json:"status"`
-	AgentDisplayName     string   `json:"agentDisplayName"`
+	ID                   string `json:"id"`
+	Status               string `json:"status"`
+	AgentDisplayName     string `json:"agentDisplayName"`
 	AllocationUsdcMicros string `json:"allocationUsdcMicros"`
 }
 
@@ -538,7 +542,7 @@ type groupActivityItemResponse struct {
 	TokenAmount        string `json:"tokenAmount,omitempty"`
 	ProceedsUsdcMicros string `json:"proceedsUsdcMicros,omitempty"`
 	CreatedAt          string `json:"createdAt"`
-	TxHash        string `json:"txHash,omitempty"`
+	TxHash             string `json:"txHash,omitempty"`
 	InitiatedBy        string `json:"initiatedBy,omitempty"`
 	AgentDisplayName   string `json:"agentDisplayName,omitempty"`
 }
@@ -587,8 +591,8 @@ func (h *GroupHandlers) ListGroupActivityHandler(w http.ResponseWriter, r *http.
 			Symbol:           item.Symbol,
 			AmountMicros:     item.AmountMicros,
 			CreatedAt:        item.CreatedAt.UTC().Format(time.RFC3339),
-			TxHash:      item.TxHash,
-			InitiatedBy:        item.InitiatedBy,
+			TxHash:           item.TxHash,
+			InitiatedBy:      item.InitiatedBy,
 			AgentDisplayName: item.AgentDisplayName,
 		}
 		if item.TokenAmount > 0 {

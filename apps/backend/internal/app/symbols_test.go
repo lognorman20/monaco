@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
@@ -13,8 +12,8 @@ func TestSymbolResolver_TSLAxMint_returnsTickerNotPubkey(t *testing.T) {
 
 	catalog := b20.NewFakeCatalog()
 	b20.RegisterAsset(catalog, b20.Asset{
-		Symbol:     "TSLAx",
-		Name:       "Tesla",
+		Symbol:       "TSLAx",
+		Name:         "Tesla",
 		TokenAddress: "0xb2000000000000000000000000000000000004",
 	})
 	resolver := NewSymbolResolver(catalog)

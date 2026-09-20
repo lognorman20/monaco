@@ -1,20 +1,21 @@
 package httpapi
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/chainlink"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/pyth"
 )
 
 func integrationHomeApp(t *testing.T) (*HomeHandlers, *AuthHandlers, *GroupHandlers, wallets.Client, *postgres.Store, *postgres.TestIsolation) {
@@ -38,11 +39,14 @@ func integrationHomeAppWithPyth(t *testing.T, pythClient marks.Client) (*HomeHan
 
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
-	groups := app.NewGroupService(store, privyClient)
-	governance := app.NewGovernanceService(store, privyClient)
+	if pythClient == nil {
+		pythClient = chainlink.NewFakeClient()
+	}
+	groups := app.NewGroupService(store, authHandlers.Verifier, privyClient)
+	governance := app.NewGovernanceService(store, authHandlers.Verifier, privyClient)
 	symbols := app.NewSymbolResolver(nil)
-	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
-	home := app.NewHomeService(store, privyClient, pythClient, deposits, symbols)
+	deposits := app.NewDepositService(store, authHandlers.Verifier, privyClient, pythClient, symbols)
+	home := app.NewHomeService(store, authHandlers.Verifier, privyClient, pythClient, deposits, symbols)
 	return &HomeHandlers{Home: home}, authHandlers, &GroupHandlers{Groups: groups, Governance: governance}, privyClient, store, iso
 }
 
@@ -317,9 +321,9 @@ func TestGET_home_pythError_returns200(t *testing.T) {
 	_, _, err = store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          created.GroupID,
 		Amount:           swappedUSDC,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      fmt.Sprintf("sig-%s-buy", iso.Suffix()),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           fmt.Sprintf("sig-%s-buy", iso.Suffix()),
 		ExecuteRequestID: fmt.Sprintf("req-%s-buy", iso.Suffix()),
 		CostBasisPrice:   swappedUSDC,
 		CostBasisAmount:  aaplAtomics,

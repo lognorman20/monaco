@@ -10,6 +10,6 @@ struct PlatformWithdrawalDTO: Decodable, Equatable {
     let amount: Int64
     let toAddress: String
     let status: String
-    let txSignature: String?
+    let txHash: String?
     let createdAt: String
 }

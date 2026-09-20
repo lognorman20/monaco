@@ -14,12 +14,12 @@ public struct SettingsExplorerLinkDTO: Equatable {
 
 public enum SettingsAdvancedCatalog {
     public static let explorerLinks: [SettingsExplorerLinkDTO] = [
-        SettingsExplorerLinkDTO(id: "solscan", title: "Solscan explorer", urlString: "https://solscan.io"),
-        SettingsExplorerLinkDTO(id: "solana-fm", title: "Solana FM explorer", urlString: "https://solana.fm"),
+        SettingsExplorerLinkDTO(id: "basescan-address", title: "View on Basescan", urlString: "https://basescan.org/address/"),
+        SettingsExplorerLinkDTO(id: "basescan-tx", title: "View on Basescan", urlString: "https://basescan.org/tx/"),
     ]
 
     public static func containsExplorerLinksOnly() -> Bool {
-        let allowedHosts = Set(["solscan.io", "solana.fm", "www.solscan.io"])
+        let allowedHosts = Set(["basescan.org", "www.basescan.org"])
         return explorerLinks.allSatisfy { link in
             guard let host = URL(string: link.urlString)?.host?.lowercased() else { return false }
             return allowedHosts.contains(host)

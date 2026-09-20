@@ -10,16 +10,18 @@ import (
 	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 // QuoteHandlers serves buy quote HTTP routes.
 type QuoteHandlers struct {
 	Store      *postgres.Store
-	Privy      wallets.Client
+	Auth       auth.Verifier
+	Wallets    wallets.Client
 	Buy        *app.BuyService
 	Governance *app.GovernanceService
 }
@@ -211,7 +213,7 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 		Symbol:       req.Symbol,
 		USDCMicros:   strconv.FormatInt(req.USDC, 10),
 		Routable:     result.Quote.Routable,
-		OutputAmount: strings.TrimSpace(result.Quote.OutAmount),
+		OutputAmount: quoteAmountOut(result.Quote),
 	}
 	if price, ok := quotePriceUsdcMicros(req.USDC, resp.OutputAmount); ok {
 		resp.PriceUsdcMicros = strconv.FormatInt(price, 10)
@@ -229,6 +231,13 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
+func quoteAmountOut(q dex.Quote) string {
+	if q.AmountOut == nil {
+		return ""
+	}
+	return strings.TrimSpace(q.AmountOut.String())
+}
+
 func quotePriceUsdcMicros(usdcMicros int64, outputAmount string) (int64, bool) {
 	outputAmount = strings.TrimSpace(outputAmount)
 	if usdcMicros <= 0 || outputAmount == "" {
@@ -243,7 +252,7 @@ func quotePriceUsdcMicros(usdcMicros int64, outputAmount string) (int64, bool) {
 }
 
 func (h *QuoteHandlers) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := h.Auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return "", auth.ErrUnauthorized

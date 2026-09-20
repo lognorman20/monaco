@@ -31,7 +31,7 @@ enum GroupNavSampleEntry: String, CaseIterable {
 
 struct GroupNavSampleHarness: View {
     let entry: GroupNavSampleEntry
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
 
     @State private var session: AppSessionStore = {
         let session = AppSessionStore()

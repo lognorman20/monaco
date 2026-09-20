@@ -5,36 +5,32 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	solanakey "github.com/monaco/monaco/apps/backend/internal/solana/key"
 )
+
+const testRelayerKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efc684173c51d714e00"
 
 func clearAPIEnv(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
-	t.Setenv("PRIVY_APP_ID", "")
-	t.Setenv("PRIVY_APP_SECRET", "")
+	t.Setenv("DYNAMIC_ENVIRONMENT_ID", "")
 	t.Setenv("RELAYER_PRIVATE_KEY", "")
 }
 
 func setValidAPIEnv(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://monaco:monaco@localhost:54322/monaco?sslmode=disable")
-	t.Setenv("PRIVY_APP_ID", "test-privy-app-id")
-	t.Setenv("PRIVY_APP_SECRET", "test-privy-app-secret")
-	t.Setenv("RELAYER_PRIVATE_KEY", solanakey.TestPrivateKeyBase58())
+	t.Setenv("DYNAMIC_ENVIRONMENT_ID", "test-dynamic-env")
+	t.Setenv("RELAYER_PRIVATE_KEY", testRelayerKey)
+	t.Setenv("SIGNER_SHARED_SECRET", "test-signer-secret")
 }
 
 func TestAPIServer_missingRelayerKey_failsStartup(t *testing.T) {
-	// Arrange
 	clearAPIEnv(t)
 	setValidAPIEnv(t)
 	t.Setenv("RELAYER_PRIVATE_KEY", "")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Act
 	_, err := boot(ctx)
 
-	// Assert
 	if err == nil {
 		t.Fatal("expected boot to fail without RELAYER_PRIVATE_KEY")
 	}

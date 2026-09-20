@@ -12,7 +12,7 @@ import (
 
 // GroupService orchestrates group create flows.
 type GroupService struct {
-	store *postgres.Store
+	store   *postgres.Store
 	auth    auth.Verifier
 	wallets wallets.Client
 }
@@ -20,8 +20,8 @@ type GroupService struct {
 // NewGroupService wires group dependencies.
 func NewGroupService(store *postgres.Store, verifier auth.Verifier, walletClient wallets.Client) *GroupService {
 	return &GroupService{
-		store: store,
-		auth: verifier,
+		store:   store,
+		auth:    verifier,
 		wallets: walletClient,
 	}
 }

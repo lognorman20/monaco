@@ -108,7 +108,7 @@ enum CabalsTabSampleData {
 
 /// Root view for `-MonacoCabalsTabSample`: the Cabals tab on sample data.
 struct CabalsTabSampleHarness: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     @State private var session: AppSessionStore = {
         let session = AppSessionStore()
         session.home = CabalsTabSampleData.home

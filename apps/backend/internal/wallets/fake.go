@@ -12,24 +12,25 @@ import (
 type fakeClient struct {
 	mu sync.Mutex
 
-	memberWallets        map[UserID]WalletRef
-	dynamicUserWallets   map[string]WalletRef
-	treasuries           map[GroupID]TreasuryRef
-	memberBalances       map[string]int64
-	treasuryBalances     map[string]int64
-	lastSweep            SweepRequest
-	sweepCount           int
-	lastTransfer         TransferRequest
-	transferCount        int
-	rejectSubmitTransfer bool
+	memberWallets           map[UserID]WalletRef
+	dynamicUserWallets      map[string]WalletRef
+	treasuries              map[GroupID]TreasuryRef
+	memberBalances          map[string]int64
+	treasuryBalances        map[string]int64
+	lastSweep               SweepRequest
+	sweepCount              int
+	lastTransfer            TransferRequest
+	transferCount           int
+	rejectSubmitTransfer    bool
 	rejectSubmitTransferErr error
-	forcedTransferHash   string
-	lastPayout           PayUSDCRequest
-	payoutCount          int
-	rejectSubmitSweep    bool
-	rejectSubmitSweepErr error
-	treasuryTxCount      int
-	lastTreasuryTx       treasuryTxRecord
+	forcedTransferHash      string
+	lastPayout              PayUSDCRequest
+	payoutCount             int
+	rejectSubmitSweep       bool
+	rejectSubmitSweepErr    error
+	treasuryTxCount         int
+	lastTreasuryTx          treasuryTxRecord
+	nextTxHashes            []string
 }
 
 type treasuryTxRecord struct {
@@ -196,6 +197,11 @@ func (f *fakeClient) SendTreasuryTransaction(ctx context.Context, treasury Treas
 	defer f.mu.Unlock()
 	f.treasuryTxCount++
 	f.lastTreasuryTx = treasuryTxRecord{treasury: treasury, to: to, data: data, valueWei: valueWei}
+	if len(f.nextTxHashes) > 0 {
+		hash := f.nextTxHashes[0]
+		f.nextTxHashes = f.nextTxHashes[1:]
+		return hash, nil
+	}
 	hash := deterministicTxHash(treasury.Address, to, int64(len(data)), f.treasuryTxCount)
 	return hash, nil
 }
@@ -214,6 +220,17 @@ func SetTreasuryUSDCBalance(client Client, address string, amount int64) {
 	f, ok := client.(*fakeClient)
 	if !ok {
 		panic("wallets: SetTreasuryUSDCBalance requires NewFakeClient")
+	}
+	f.mu.Lock()
+	f.treasuryBalances[address] = amount
+	f.mu.Unlock()
+}
+
+// TrySetTreasuryUSDCBalance updates fake treasury USDC; no-op for live clients.
+func TrySetTreasuryUSDCBalance(client Client, address string, amount int64) {
+	f, ok := client.(*fakeClient)
+	if !ok {
+		return
 	}
 	f.mu.Lock()
 	f.treasuryBalances[address] = amount
@@ -278,6 +295,25 @@ func LastTransferRequest(client Client) (TransferRequest, bool) {
 	return f.lastTransfer, true
 }
 
+func TreasuryTxCount(client Client) int {
+	f, ok := client.(*fakeClient)
+	if !ok {
+		return 0
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.treasuryTxCount
+}
+
+func SetNextTreasuryTxHashes(client Client, hashes ...string) {
+	f, ok := client.(*fakeClient)
+	if !ok {
+		panic("wallets: SetNextTreasuryTxHashes requires NewFakeClient")
+	}
+	f.mu.Lock()
+	f.nextTxHashes = append([]string(nil), hashes...)
+	f.mu.Unlock()
+}
 func LastSweepRequest(client Client) (SweepRequest, bool) {
 	f, ok := client.(*fakeClient)
 	if !ok {

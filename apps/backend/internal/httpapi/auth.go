@@ -12,6 +12,7 @@ import (
 // AuthHandlers serves auth HTTP routes.
 type AuthHandlers struct {
 	Sessions *app.SessionService
+	Verifier auth.Verifier
 }
 
 type authSessionRequest struct {

@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B463064130590361008E7964 /* Privy in Frameworks */ = {isa = PBXBuildFile; productRef = B463064030590361008E7964 /* Privy */; };
+		B463064130590361008E7964 /* DynamicSDKSwift in Frameworks */ = {isa = PBXBuildFile; productRef = B463064030590361008E7964 /* DynamicSDKSwift */; };
 		C0DE000330590361008E7964 /* MonacoCore in Frameworks */ = {isa = PBXBuildFile; productRef = C0DE000230590361008E7964 /* MonacoCore */; };
 /* End PBXBuildFile section */
 
@@ -32,7 +32,7 @@
 		B46306133059035D008E7964 /* Monaco.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Monaco.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B463062030590360008E7964 /* MonacoTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MonacoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B463062A30590360008E7964 /* MonacoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MonacoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		B463064230590362008E7964 /* Privy.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Privy.xcconfig; sourceTree = "<group>"; };
+		B463064230590362008E7964 /* Dynamic.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Dynamic.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -58,7 +58,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B463064130590361008E7964 /* Privy in Frameworks */,
+				B463064130590361008E7964 /* DynamicSDKSwift in Frameworks */,
 				C0DE000330590361008E7964 /* MonacoCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -104,7 +104,7 @@
 		B463064330590362008E7964 /* Config */ = {
 			isa = PBXGroup;
 			children = (
-				B463064230590362008E7964 /* Privy.xcconfig */,
+				B463064230590362008E7964 /* Dynamic.xcconfig */,
 			);
 			path = Config;
 			sourceTree = "<group>";
@@ -129,7 +129,7 @@
 			);
 			name = Monaco;
 			packageProductDependencies = (
-				B463064030590361008E7964 /* Privy */,
+				B463064030590361008E7964 /* DynamicSDKSwift */,
 				C0DE000230590361008E7964 /* MonacoCore */,
 			);
 			productName = Monaco;
@@ -215,7 +215,7 @@
 			mainGroup = B463060A3059035D008E7964;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				B463063F30590361008E7964 /* XCRemoteSwiftPackageReference "privy-ios" */,
+				B463063F30590361008E7964 /* XCRemoteSwiftPackageReference "swift-sdk-and-sample-app" */,
 				C0DE000130590361008E7964 /* XCLocalSwiftPackageReference "../../packages/mobile-core" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -415,7 +415,7 @@
 		};
 		B463063530590360008E7964 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = B463064230590362008E7964 /* Privy.xcconfig */;
+			baseConfigurationReference = B463064230590362008E7964 /* Dynamic.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -424,7 +424,7 @@
 				DEVELOPMENT_TEAM = JSF53DFS29;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Config/Privy.local.Info.plist;
+				INFOPLIST_FILE = Config/Dynamic.local.Info.plist;
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -450,7 +450,7 @@
 		};
 		B463063630590360008E7964 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = B463064230590362008E7964 /* Privy.xcconfig */;
+			baseConfigurationReference = B463064230590362008E7964 /* Dynamic.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -459,7 +459,7 @@
 				DEVELOPMENT_TEAM = JSF53DFS29;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Config/Privy.local.Info.plist;
+				INFOPLIST_FILE = Config/Dynamic.local.Info.plist;
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -616,21 +616,21 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		B463063F30590361008E7964 /* XCRemoteSwiftPackageReference "privy-ios" */ = {
+		B463063F30590361008E7964 /* XCRemoteSwiftPackageReference "swift-sdk-and-sample-app" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/privy-io/privy-ios";
+			repositoryURL = "https://github.com/dynamic-labs/swift-sdk-and-sample-app.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 2.16.2;
+				minimumVersion = 1.3.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		B463064030590361008E7964 /* Privy */ = {
+		B463064030590361008E7964 /* DynamicSDKSwift */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = B463063F30590361008E7964 /* XCRemoteSwiftPackageReference "privy-ios" */;
-			productName = Privy;
+			package = B463063F30590361008E7964 /* XCRemoteSwiftPackageReference "swift-sdk-and-sample-app" */;
+			productName = DynamicSDKSwift;
 		};
 		C0DE000230590361008E7964 /* MonacoCore */ = {
 			isa = XCSwiftPackageProductDependency;

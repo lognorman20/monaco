@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -22,7 +22,8 @@ func integrationCatalogApp(t *testing.T) (*CatalogHandlers, *GroupHandlers, *Aut
 	catalog := b20.NewFakeCatalog()
 	return &CatalogHandlers{
 		Store:   quoteHandlers.Store,
-		Privy:   quoteHandlers.Privy,
+		Auth:    authHandlers.Verifier,
+		Wallets: quoteHandlers.Wallets,
 		Catalog: catalog,
 	}, groupHandlers, authHandlers, privyClient, iso
 }
@@ -31,11 +32,11 @@ func TestGET_assets_paginatesCatalogResults(t *testing.T) {
 	t.Parallel()
 
 	catalogHandlers, groupHandlers, authHandlers, _, iso := integrationCatalogApp(t)
-	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Privy)
+	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Wallets)
 	for i := 0; i < 3; i++ {
 		b20.RegisterCatalogAsset(catalogHandlers.Catalog, b20.Asset{
-			Symbol:     "SYM" + string(rune('A'+i)) + "x",
-			Name:       "Stock " + string(rune('A'+i)),
+			Symbol:       "SYM" + string(rune('A'+i)) + "x",
+			Name:         "Stock " + string(rune('A'+i)),
 			TokenAddress: "Mint" + string(rune('A'+i)),
 		})
 	}
@@ -66,7 +67,7 @@ func TestGET_assets_allowsNonCreatorMember(t *testing.T) {
 	t.Parallel()
 
 	catalogHandlers, groupHandlers, authHandlers, privyClient, iso := integrationCatalogApp(t)
-	_, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Privy)
+	_, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Wallets)
 	_, joinerToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "catalog-joiner", "Catalog Joiner")
 	joinReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+groupID+"/join", strings.NewReader(`{}`))
 	joinReq.SetPathValue("id", groupID)
@@ -79,8 +80,8 @@ func TestGET_assets_allowsNonCreatorMember(t *testing.T) {
 	}
 
 	b20.RegisterCatalogAsset(catalogHandlers.Catalog, b20.Asset{
-		Symbol:     "AAPLx",
-		Name:       "Apple",
+		Symbol:       "AAPLx",
+		Name:         "Apple",
 		TokenAddress: "MintAAPL",
 	})
 
@@ -99,7 +100,7 @@ func TestGET_assets_acceptsAgentAPIKey(t *testing.T) {
 	t.Parallel()
 
 	catalogHandlers, groupHandlers, authHandlers, _, iso := integrationCatalogApp(t)
-	token, groupID, creatorID := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Privy)
+	token, groupID, creatorID := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Wallets)
 	_ = token
 
 	governance := groupHandlers.Governance
@@ -131,13 +132,13 @@ func TestGET_assets_acceptsAgentAPIKey(t *testing.T) {
 	}
 
 	b20.RegisterCatalogAsset(catalogHandlers.Catalog, b20.Asset{
-		Symbol:     "AAPLx",
-		Name:       "Apple",
+		Symbol:       "AAPLx",
+		Name:         "Apple",
 		TokenAddress: "MintAAPL",
 	})
 	b20.RegisterCatalogAsset(catalogHandlers.Catalog, b20.Asset{
-		Symbol:     "TSLAx",
-		Name:       "Tesla",
+		Symbol:       "TSLAx",
+		Name:         "Tesla",
 		TokenAddress: "MintTSLA",
 	})
 
@@ -164,11 +165,12 @@ func TestGET_assets_includesRoutableField(t *testing.T) {
 	t.Parallel()
 
 	catalogHandlers, groupHandlers, authHandlers, _, iso := integrationCatalogApp(t)
-	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Privy)
+	token, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Wallets)
 	b20.RegisterCatalogAsset(catalogHandlers.Catalog, b20.Asset{
-		Symbol:     "AAPLx",
-		Name:       "Apple",
+		Symbol:       "AAPLx",
+		Name:         "Apple",
 		TokenAddress: "MintAAPL",
+		Routable:     true,
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/groups/"+groupID+"/assets?limit=5", nil)

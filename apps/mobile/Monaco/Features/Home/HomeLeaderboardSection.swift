@@ -2,7 +2,7 @@ import MonacoCore
 import SwiftUI
 
 struct HomeLeaderboardSection: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     @Binding var range: HomeLeaderboardRange
     let people: [HomePeopleBoardRowDTO]
 

@@ -177,7 +177,7 @@ final class ProposalsAPITests: XCTestCase {
         XCTAssertFalse(maySubmit)
     }
 
-    func testProductFeatures_noDirectXStocksJupiterPythOrSolanaRpcUrls() {
+    func testProductFeatures_noDirectExternalMarketHosts() {
         // Arrange
         let featureSources = ProductFeatureSourceManifest.sampleFeatureSources
 

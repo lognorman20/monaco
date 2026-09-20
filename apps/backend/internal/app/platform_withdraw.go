@@ -29,13 +29,13 @@ const (
 
 // PlatformWithdrawal is a user-initiated USDC send from member wallet to an external address.
 type PlatformWithdrawal struct {
-	ID          string
-	UserID      string
-	Amount      int64
-	ToAddress   string
-	Status      PlatformWithdrawalStatus
-	TxHash string
-	CreatedAt   time.Time
+	ID        string
+	UserID    string
+	Amount    int64
+	ToAddress string
+	Status    PlatformWithdrawalStatus
+	TxHash    string
+	CreatedAt time.Time
 }
 
 // ErrPlatformWithdrawalNotFound means the platform withdrawal row does not exist.
@@ -52,10 +52,10 @@ var ErrWithdrawToMemberWallet = errors.New("cannot withdraw to member wallet")
 
 // PlatformWithdrawService orchestrates member-wallet USDC withdrawals.
 type PlatformWithdrawService struct {
-	store      *postgres.Store
-	auth    auth.Verifier
-	wallets wallets.Client
-	deposits   *DepositService
+	store     *postgres.Store
+	auth      auth.Verifier
+	wallets   wallets.Client
+	deposits  *DepositService
 	confirmer Confirmer
 }
 
@@ -164,7 +164,7 @@ func (s *PlatformWithdrawService) CreatePlatformWithdrawal(ctx context.Context, 
 		"user_id", user.ID,
 		"amount", amount,
 		"to_address", toAddress,
-		"tx_signature", result.TxHash,
+		"tx_hash", result.TxHash,
 		"withdrawal_id", row.ID,
 	)
 
@@ -243,7 +243,7 @@ func (s *PlatformWithdrawService) refreshConfirmation(ctx context.Context, withd
 			"user_id", row.UserID,
 			"amount", row.Amount,
 			"to_address", row.ToAddress,
-			"tx_signature", txHash,
+			"tx_hash", txHash,
 			"withdrawal_id", row.ID,
 		)
 	}

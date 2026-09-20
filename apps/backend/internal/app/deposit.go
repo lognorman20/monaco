@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/auth"
+	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/marks"
 )
 
 // DepositStatus is the lifecycle state of a deposit intent.
@@ -30,7 +30,7 @@ type Deposit struct {
 	Amount      int64
 	FromAddress string
 	Status      DepositStatus
-	TxHash string
+	TxHash      string
 	CreatedAt   time.Time
 }
 
@@ -45,7 +45,7 @@ type Position struct {
 
 // ObservedSweep is a confirmed on-chain USDC transfer from member wallet to group treasury.
 type ObservedSweep struct {
-	TxHash string
+	TxHash      string
 	FromAddress string
 	ToAddress   string
 	Amount      int64
@@ -367,7 +367,7 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 	}
 
 	if existing, found, err := d.store.GetDepositByTxHash(ctx, sweep.TxHash); err != nil {
-		logDepositBranchError("deposit observe sweep lookup by signature failed", err, "deposit_id", sweep.DepositID, "tx_signature", sweep.TxHash)
+		logDepositBranchError("deposit observe sweep lookup by signature failed", err, "deposit_id", sweep.DepositID, "tx_hash", sweep.TxHash)
 		return ObserveSweepResult{}, err
 	} else if found {
 		logDepositObserveSweepIdempotent(sweep.DepositID, sweep.TxHash)
@@ -426,7 +426,7 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 	confirmed, newlyConfirmed, err := d.store.ConfirmDepositTx(ctx, tx, sweep.DepositID, sweep.TxHash)
 	if err != nil {
 		logDepositBranchError("deposit observe sweep confirm deposit failed", err,
-			"deposit_id", sweep.DepositID, "group_id", sweep.GroupID, "tx_signature", sweep.TxHash)
+			"deposit_id", sweep.DepositID, "group_id", sweep.GroupID, "tx_hash", sweep.TxHash)
 		return ObserveSweepResult{}, err
 	}
 
@@ -462,7 +462,7 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 			"group_id", sweep.GroupID,
 			"user_id", sweep.UserID,
 			"deposit_id", sweep.DepositID,
-			"tx_signature", sweep.TxHash,
+			"tx_hash", sweep.TxHash,
 			"share_units", positionRow.ShareUnits,
 			"amount_deposited", positionRow.AmountDeposited,
 		)

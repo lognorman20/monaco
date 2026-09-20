@@ -95,7 +95,7 @@ func logSweepBroadcastSubmitted(depositID, groupID, txHash, treasuryAddress stri
 	slog.Info("sweep broadcast submitted",
 		"deposit_id", depositID,
 		"group_id", groupID,
-		"tx_signature", txHash,
+		"tx_hash", txHash,
 		"treasury_address", treasuryAddress,
 	)
 }
@@ -104,7 +104,7 @@ func logSweepDepositResuming(depositID, groupID, txHash string) {
 	slog.Info("sweep deposit resuming broadcast",
 		"deposit_id", depositID,
 		"group_id", groupID,
-		"tx_signature", txHash,
+		"tx_hash", txHash,
 	)
 }
 
@@ -112,14 +112,14 @@ func logSweepConfirmationCheck(depositID, txHash string, confirmed bool, err err
 	if err != nil {
 		slog.Warn("sweep confirmation check failed",
 			"deposit_id", depositID,
-			"tx_signature", txHash,
+			"tx_hash", txHash,
 			"err", err,
 		)
 		return
 	}
 	slog.Info("sweep confirmation check",
 		"deposit_id", depositID,
-		"tx_signature", txHash,
+		"tx_hash", txHash,
 		"confirmed", confirmed,
 	)
 }
@@ -129,7 +129,7 @@ func logSweepConfirm(groupID, userID, depositID, txHash string) {
 		"group_id", groupID,
 		"user_id", userID,
 		"deposit_id", depositID,
-		"tx_signature", txHash,
+		"tx_hash", txHash,
 	)
 }
 
@@ -138,20 +138,20 @@ func logSweepDepositCredited(depositID, groupID, userID, txHash string) {
 		"deposit_id", depositID,
 		"group_id", groupID,
 		"user_id", userID,
-		"tx_signature", txHash,
+		"tx_hash", txHash,
 	)
 }
 
 func logConfirmerConfirmationCheck(txHash string, confirmed bool, confirmationStatus string, err error) {
 	if err != nil {
 		slog.Warn("solana rpc confirmation check failed",
-			"tx_signature", txHash,
+			"tx_hash", txHash,
 			"err", err,
 		)
 		return
 	}
 	args := []any{
-		"tx_signature", txHash,
+		"tx_hash", txHash,
 		"confirmed", confirmed,
 	}
 	if confirmationStatus != "" {

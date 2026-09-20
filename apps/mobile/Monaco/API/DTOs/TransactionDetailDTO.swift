@@ -6,11 +6,11 @@ struct TransactionDetailDTO: Codable, Equatable {
     let action: String
     let status: String
     let amountMicros: Int64
-    let inputMint: String?
-    let outputMint: String?
+    let inputToken: String?
+    let outputToken: String?
     let inputSymbol: String?
     let outputSymbol: String?
-    let txSignature: String?
+    let txHash: String?
     let executeRequestId: String?
     let proposalId: String?
     let costBasisPrice: Int64?

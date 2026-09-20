@@ -21,7 +21,7 @@ type GroupActivityItem struct {
 	TokenAmount        int64
 	ProceedsUsdcMicros int64
 	CreatedAt          time.Time
-	TxHash        string
+	TxHash             string
 	InitiatedBy        string
 	AgentDisplayName   string
 }

@@ -5,7 +5,7 @@ import SwiftUI
 /// carries no amount or tally, so this only ever routes to the real detail screen.
 /// The section is not rendered at all when `rows` is empty — no "caught up" card.
 struct HomeMissedVotesSection: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let rows: [HomeMissedProposalRowDTO]
 
     var body: some View {

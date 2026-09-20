@@ -10,14 +10,14 @@ import (
 
 // WithdrawalRow is a row in withdrawals.
 type WithdrawalRow struct {
-	ID          string
-	UserID      string
-	GroupID     string
-	Amount      int64
-	ToAddress   string
-	Status      string
-	TxHash sql.NullString
-	CreatedAt   time.Time
+	ID        string
+	UserID    string
+	GroupID   string
+	Amount    int64
+	ToAddress string
+	Status    string
+	TxHash    sql.NullString
+	CreatedAt time.Time
 }
 
 // InsertWithdrawalTx inserts a pending withdrawal row within a transaction.

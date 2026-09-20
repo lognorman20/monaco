@@ -5,7 +5,7 @@ import SwiftUI
 /// Avatar that opens the photo library on tap and uploads the pick for the signed-in
 /// user. The one place profile photos are changed; Profile embeds it.
 struct ProfilePhotoPicker: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     @Environment(AppSessionStore.self) private var session
 
     var size: CGFloat = 96

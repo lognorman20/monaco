@@ -48,9 +48,9 @@ type TransferResult struct {
 
 // PayUSDCRequest pays USDC from a treasury to a recipient (treasury pays gas).
 type PayUSDCRequest struct {
-	TreasuryRef    TreasuryRef
-	ToAddress      string
-	Amount         int64
+	TreasuryRef     TreasuryRef
+	ToAddress       string
+	Amount          int64
 	TreasuryAddress string // legacy callers; prefer TreasuryRef.Address
 }
 

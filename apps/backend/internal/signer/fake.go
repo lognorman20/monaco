@@ -10,8 +10,9 @@ import (
 )
 
 type fakeClient struct {
-	mu sync.Mutex
-	seq int
+	mu           sync.Mutex
+	seq          int
+	relayerSends []RelayerSendRequest
 }
 
 // NewFakeClient returns a complete in-memory signer for tests.
@@ -39,8 +40,12 @@ func (f *fakeClient) CreateWallet(ctx context.Context) (CreatedWallet, error) {
 
 func (f *fakeClient) SignTypedData(ctx context.Context, req SignRequest) (string, error) {
 	_ = ctx
-	_ = req
-	return "0x01", nil
+	sum := sha256.Sum256(append([]byte("sig:"), req.KeyShares...))
+	sig := make([]byte, 65)
+	copy(sig, sum[:])
+	copy(sig[32:], sum[:])
+	sig[64] = 27
+	return "0x" + hex.EncodeToString(sig), nil
 }
 
 func (f *fakeClient) SendTransaction(ctx context.Context, req SendRequest) (string, error) {
@@ -57,9 +62,20 @@ func (f *fakeClient) RelayerSend(ctx context.Context, req RelayerSendRequest) (s
 	f.mu.Lock()
 	f.seq++
 	n := f.seq
+	f.relayerSends = append(f.relayerSends, req)
 	f.mu.Unlock()
-	_ = req
 	return "0x" + hex.EncodeToString(sha256Sum(fmt.Sprintf("relay:%d", n))[:20]), nil
+}
+
+// RelayerSendCount returns how many relayer sends the fake recorded.
+func RelayerSendCount(c Client) int {
+	f, ok := c.(*fakeClient)
+	if !ok {
+		return 0
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.relayerSends)
 }
 
 func sha256Sum(s string) []byte {

@@ -33,7 +33,7 @@ struct ProposalDetailView: View {
     }
 
     /// Entry point for screens outside the feed (Home "Needs your vote", activity rows).
-    init(auth: PrivyAuthService, proposalId: String) {
+    init(auth: DynamicAuthService, proposalId: String) {
         self.init(service: LiveProposalFeedService(auth: auth), proposalId: proposalId)
     }
 

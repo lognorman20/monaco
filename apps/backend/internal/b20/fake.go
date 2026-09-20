@@ -5,14 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 )
 
 type fakeCatalog struct {
-	mu      sync.Mutex
-	assets  map[string]Asset
-	byAddr  map[string]Asset
+	mu     sync.Mutex
+	assets map[string]Asset
+	byAddr map[string]Asset
 }
 
 // NewFakeCatalog returns an in-memory B20 catalog for tests.
@@ -21,6 +22,16 @@ func NewFakeCatalog() Catalog {
 		assets: make(map[string]Asset),
 		byAddr: make(map[string]Asset),
 	}
+}
+
+// RegisterTokenAddress registers a symbol → token mapping on a fake catalog.
+func RegisterTokenAddress(c Catalog, symbol, addr string) {
+	RegisterAsset(c, Asset{Symbol: symbol, Name: symbol, TokenAddress: addr, Decimals: 8})
+}
+
+// RegisterCatalogAsset is an alias for RegisterAsset.
+func RegisterCatalogAsset(c Catalog, asset Asset) {
+	RegisterAsset(c, asset)
 }
 
 // RegisterAsset adds an asset to the fake catalog.
@@ -41,7 +52,7 @@ func (f *fakeCatalog) ResolveTokenAddress(ctx context.Context, symbol string) (s
 	defer f.mu.Unlock()
 	a, ok := f.assets[strings.ToUpper(strings.TrimSpace(symbol))]
 	if !ok {
-		return "", fmt.Errorf("unknown symbol %q", symbol)
+		return "", fmt.Errorf("%w: unknown symbol %q", ErrNotFound, symbol)
 	}
 	return a.TokenAddress, nil
 }
@@ -57,6 +68,7 @@ func (f *fakeCatalog) Search(ctx context.Context, query string, limit, offset in
 			all = append(all, a)
 		}
 	}
+	sort.Slice(all, func(i, j int) bool { return all[i].Symbol < all[j].Symbol })
 	if offset >= len(all) {
 		return SearchPage{}, nil
 	}

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject private var auth: PrivyAuthService
+    @EnvironmentObject private var auth: DynamicAuthService
 
     var body: some View {
         root
@@ -38,5 +38,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .environmentObject(PrivyAuthService())
+        .environmentObject(DynamicAuthService())
 }

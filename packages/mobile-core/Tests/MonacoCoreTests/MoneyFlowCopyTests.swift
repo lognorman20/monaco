@@ -12,7 +12,7 @@ final class MoneyFlowCopyTests: XCTestCase {
         let badAddress = MoneyFlowCopy.cashOutFailure(
             FlowErrorInput(status: 400, serverMessage: " Invalid destination address\n")
         )
-        XCTAssertEqual(badAddress.message, "That destination isn't a Solana wallet address.")
+        XCTAssertEqual(badAddress.message, "That destination isn't a Base address.")
 
         let ownAddress = MoneyFlowCopy.cashOutFailure(
             FlowErrorInput(status: 400, serverMessage: "cannot withdraw to your deposit address")

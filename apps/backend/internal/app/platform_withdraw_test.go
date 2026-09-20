@@ -1,9 +1,9 @@
 package app
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"errors"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
@@ -47,7 +47,7 @@ func TestCreatePlatformWithdrawal_success(t *testing.T) {
 	}
 	wallets.SetMemberUSDCBalance(h.Privy, wallet.Address, 3_000_000)
 
-	dest := "11111111111111111111111111111112"
+	dest := "0x000000000000000000000000000000000000dEaD"
 	result, err := svc.CreatePlatformWithdrawal(ctx, string(token), 1_000_000, dest)
 	if err != nil {
 		t.Fatalf("CreatePlatformWithdrawal: %v", err)
@@ -90,7 +90,7 @@ func TestCreatePlatformWithdrawal_rejectsOverBalance(t *testing.T) {
 	}
 	wallets.SetMemberUSDCBalance(h.Privy, wallet.Address, 500_000)
 
-	_, err = svc.CreatePlatformWithdrawal(ctx, string(token), 750_000, "11111111111111111111111111111112")
+	_, err = svc.CreatePlatformWithdrawal(ctx, string(token), 750_000, "0x000000000000000000000000000000000000dEaD")
 	if !errors.Is(err, ErrInsufficientPlatformBalance) {
 		t.Fatalf("err = %v, want ErrInsufficientPlatformBalance", err)
 	}
@@ -122,7 +122,7 @@ func TestCreatePlatformWithdrawal_idempotentOnTxHash(t *testing.T) {
 	}
 	wallets.SetMemberUSDCBalance(h.Privy, wallet.Address, 2_000_000)
 
-	dest := "11111111111111111111111111111112"
+	dest := "0x000000000000000000000000000000000000dEaD"
 	first, err := svc.CreatePlatformWithdrawal(ctx, string(token), 500_000, dest)
 	if err != nil {
 		t.Fatalf("first CreatePlatformWithdrawal: %v", err)
@@ -165,7 +165,7 @@ func TestCreatePlatformWithdrawal_failsPendingRowWhenPersistSignatureFails(t *te
 		h.Store.SetFailPlatformWithdrawalBroadcastSignatureForTests(false, nil)
 	})
 
-	dest := "11111111111111111111111111111112"
+	dest := "0x000000000000000000000000000000000000dEaD"
 	_, err = svc.CreatePlatformWithdrawal(ctx, string(token), 500_000, dest)
 	if err == nil {
 		t.Fatal("expected persist signature error")
@@ -202,7 +202,7 @@ func TestCreatePlatformWithdrawal_failsDuplicatePendingRowOnExistingSignature(t 
 	}
 	wallets.SetMemberUSDCBalance(h.Privy, wallet.Address, 3_000_000)
 
-	dest := "11111111111111111111111111111112"
+	dest := "0x000000000000000000000000000000000000dEaD"
 	first, err := svc.CreatePlatformWithdrawal(ctx, string(token), 500_000, dest)
 	if err != nil {
 		t.Fatalf("first CreatePlatformWithdrawal: %v", err)

@@ -10,9 +10,9 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/ratelimit"
 	"github.com/monaco/monaco/apps/backend/internal/storage"
+	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 const maxProfilePhotoBytes = 2 << 20

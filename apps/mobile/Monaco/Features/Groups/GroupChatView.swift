@@ -305,8 +305,8 @@ struct GroupChatView: View {
 }
 
 extension GroupChatView {
-    /// Chat screen wired to the live API using the current Privy session token.
-    init(auth: PrivyAuthService, groupId: String, groupName: String?) {
+    /// Chat screen wired to the live API using the current session token.
+    init(auth: DynamicAuthService, groupId: String, groupName: String?) {
         self.init(groupId: groupId, groupName: groupName) { [weak auth] in
             guard let token = auth?.accessToken, !token.isEmpty else { return nil }
             return MonacoCore.MonacoAPIClient(baseURL: Config.apiBaseURL, accessTokenProvider: { token })

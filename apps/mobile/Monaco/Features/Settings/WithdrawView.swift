@@ -1,9 +1,9 @@
 import MonacoCore
 import SwiftUI
 
-/// Send available account USDC to an external Solana wallet.
+/// Send available account USDC to an external Base address.
 struct WithdrawView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
 
     private let apiClient = MonacoAPIClient()
 
@@ -30,14 +30,14 @@ struct WithdrawView: View {
         return false
     }
 
-    private var addressValidation: Result<String, SolanaAddressProblem> {
-        SolanaAddress.validate(destinationAddress, ownDepositAddress: balance?.memberWalletAddress)
+    private var addressValidation: Result<String, EVMAddressProblem> {
+        EVMAddress.validate(destinationAddress, ownDepositAddress: balance?.memberWalletAddress)
     }
 
     /// Nothing while the field is empty; otherwise why the pasted address can't be used.
     private var addressProblemMessage: String? {
         guard case .failure(let problem) = addressValidation, problem != .empty else { return nil }
-        return SolanaAddress.message(for: problem)
+        return EVMAddress.message(for: problem)
     }
 
     var body: some View {
@@ -58,7 +58,7 @@ struct WithdrawView: View {
 
                     VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
                         MonacoSectionHeader("Destination")
-                        MonacoTextField("USDC address on Solana", text: $destinationAddress, keyboard: .asciiCapable)
+                        MonacoTextField("USDC address on Base", text: $destinationAddress, keyboard: .asciiCapable)
                             .accessibilityIdentifier("withdraw-address-field")
                         if let addressProblemMessage {
                             Text(addressProblemMessage)

@@ -5,7 +5,7 @@ import UIKit
 /// Signed-in self-profile: centred identity, a 3-stat row, account balance with money
 /// actions, and joined cabals. Reads `AppSessionStore`; no extra fetches.
 struct ProfileTabView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     @Environment(AppSessionStore.self) private var session
 
     /// Debug sample harness only: prefill the name field in the edit sheet.

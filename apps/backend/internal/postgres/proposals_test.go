@@ -207,8 +207,8 @@ func TestListPassedProposalsPendingExecute_failedBuyStillListed(t *testing.T) {
 		GroupID:          groupID,
 		ProposalID:       buy.ID,
 		Action:           TransactionActionBuy,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		InputToken:       evm.USDCAddress,
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Amount:           2_000_000,
 		ExecuteRequestID: fmt.Sprintf("fail-buy-%s", buy.ID),
 	})
@@ -267,8 +267,8 @@ func TestListPassedProposalsPendingExecute_failedSellNotListed(t *testing.T) {
 		GroupID:          groupID,
 		ProposalID:       sell.ID,
 		Action:           TransactionActionSell,
-		InputToken:        "0xb200000000000000000000c2e324d24d7eecd1fb",
-		OutputToken:       evm.USDCAddress,
+		InputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		OutputToken:      evm.USDCAddress,
 		Amount:           50_000_000,
 		ExecuteRequestID: reqID,
 	})
@@ -303,9 +303,9 @@ func TestGetFillDerivedCostBasis_afterPartialSellReturnsRemainingBasis(t *testin
 	_, _, err := store.ConfirmBuyTransaction(ctx, ConfirmBuyTransactionParams{
 		GroupID:          groupID,
 		Amount:           buyUSDC,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      fmt.Sprintf("sig-%s-basis-buy", iso.Suffix()),
+		InputToken:       evm.USDCAddress,
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           fmt.Sprintf("sig-%s-basis-buy", iso.Suffix()),
 		ExecuteRequestID: fmt.Sprintf("req-%s-basis-buy", iso.Suffix()),
 		CostBasisPrice:   buyUSDC,
 		CostBasisAmount:  buyTokens,
@@ -316,9 +316,9 @@ func TestGetFillDerivedCostBasis_afterPartialSellReturnsRemainingBasis(t *testin
 	_, _, err = store.ConfirmSellTransaction(ctx, ConfirmSellTransactionParams{
 		GroupID:          groupID,
 		Amount:           sellTokens,
-		InputToken:        "0xb200000000000000000000c2e324d24d7eecd1fb",
-		OutputToken:       evm.USDCAddress,
-		TxHash:      fmt.Sprintf("sig-%s-basis-sell", iso.Suffix()),
+		InputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
+		OutputToken:      evm.USDCAddress,
+		TxHash:           fmt.Sprintf("sig-%s-basis-sell", iso.Suffix()),
 		ExecuteRequestID: fmt.Sprintf("req-%s-basis-sell", iso.Suffix()),
 		ProceedsUSDC:     2_500_000,
 	})

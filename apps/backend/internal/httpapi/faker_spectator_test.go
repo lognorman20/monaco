@@ -31,7 +31,7 @@ func TestFakerScaleClub_viewIs200AndJoinIs403(t *testing.T) {
 	if err := tx.QueryRowContext(ctx, `INSERT INTO groups (name, creator_user_id, is_faker, faker_key) VALUES ($1, $2, true, $3) RETURNING id`, "Scale "+sfx, fakerUser.ID, "test:"+sfx).Scan(&groupID); err != nil {
 		t.Fatalf("insert faker group: %v", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO treasuries (group_id, privy_wallet_id, solana_address) VALUES ($1, $2, $3)`, groupID, "faker:treasury:"+sfx, "faker-treasury-"+sfx); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO treasuries (group_id, wallet_id, address) VALUES ($1, $2, $3)`, groupID, "faker:treasury:"+sfx, "faker-treasury-"+sfx); err != nil {
 		t.Fatalf("insert faker treasury: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO group_members (group_id, user_id) VALUES ($1, $2)`, groupID, fakerUser.ID); err != nil {

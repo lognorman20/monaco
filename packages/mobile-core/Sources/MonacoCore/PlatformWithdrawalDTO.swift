@@ -15,7 +15,7 @@ public struct PlatformWithdrawalResponseDTO: Decodable, Equatable, Sendable {
     public let amount: Int64
     public let toAddress: String
     public let status: String
-    public let txSignature: String?
+    public let txHash: String?
     public let createdAt: String
 
     public init(
@@ -23,14 +23,14 @@ public struct PlatformWithdrawalResponseDTO: Decodable, Equatable, Sendable {
         amount: Int64,
         toAddress: String,
         status: String,
-        txSignature: String?,
+        txHash: String?,
         createdAt: String
     ) {
         self.withdrawalId = withdrawalId
         self.amount = amount
         self.toAddress = toAddress
         self.status = status
-        self.txSignature = txSignature
+        self.txHash = txHash
         self.createdAt = createdAt
     }
 }

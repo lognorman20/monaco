@@ -4,7 +4,7 @@ import SwiftUI
 import UIKit
 
 /// Debug-only: renders Profile from canned `AppSessionStore` data so QA can screenshot
-/// each state without Privy or a backend. Launch with
+/// each state without auth or a backend. Launch with
 /// `-MonacoProfileSample <placeholder|photo|validation|cabals|empty|loading|error>`.
 /// `cabals` and `empty` open scrolled to the bottom so the cabal list is on screen.
 enum ProfileSampleScenario: String, CaseIterable {
@@ -27,10 +27,10 @@ enum ProfileSampleScenario: String, CaseIterable {
 
 struct ProfileSampleHarness: View {
     let scenario: ProfileSampleScenario
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     @State private var session: AppSessionStore
 
-    init(scenario: ProfileSampleScenario, auth: PrivyAuthService) {
+    init(scenario: ProfileSampleScenario, auth: DynamicAuthService) {
         self.scenario = scenario
         self.auth = auth
         _session = State(initialValue: Self.makeSession(for: scenario))

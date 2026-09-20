@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/monaco/monaco/apps/backend/internal/evm"
 )
 
 func TestFormatUSDCAtomic(t *testing.T) {
@@ -23,9 +25,9 @@ func TestFormatUSDCAtomic(t *testing.T) {
 }
 
 func TestFormatAddress(t *testing.T) {
-	addr := "EfFBEMVogFPxpTNvfVFxdYc89KojsRNDzHDuuoKwqtrF"
+	addr := "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
 	got := formatAddress(addr)
-	want := "EfFB…qtrF"
+	want := "0x83…2913"
 	if got != want {
 		t.Fatalf("formatAddress() = %q, want %q", got, want)
 	}
@@ -42,12 +44,12 @@ func TestFormatActionLine(t *testing.T) {
 			action: sweepAction{
 				kind:      "usdc-sweep",
 				label:     "USDC",
-				mint:      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+				mint:      evm.USDCAddress,
 				rawAmount: 2_000_000,
 				status:    actionOK,
-				txSig:     "5kLmNopQrStUvWxYzAbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGh",
+				txSig:     "0xabcdefffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
 			},
-			want: "ok usdc-sweep USDC mint=EPjFWd…Dt1v amount=2.000000 USDC (2000000 raw) tx=5kLm…EfGh",
+			want: "ok usdc-sweep USDC mint=0x8335…2913 amount=2.000000 USDC (2000000 raw) tx=0xab…ffff",
 		},
 		{
 			name: "fail jupiter sell",
@@ -66,12 +68,12 @@ func TestFormatActionLine(t *testing.T) {
 			action: sweepAction{
 				kind:      "usdc-sweep",
 				label:     "USDC",
-				mint:      "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+				mint:      evm.USDCAddress,
 				rawAmount: 0,
 				status:    actionSkipped,
 				note:      "zero USDC balance",
 			},
-			want: "skipped usdc-sweep USDC mint=EPjFWd…Dt1v amount=0.000000 USDC (0 raw) (zero USDC balance)",
+			want: "skipped usdc-sweep USDC mint=0x8335…2913 amount=0.000000 USDC (0 raw) (zero USDC balance)",
 		},
 		{
 			name: "dry-run jupiter sell",

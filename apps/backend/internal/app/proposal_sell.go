@@ -132,7 +132,7 @@ type SellQuoteRequest struct {
 // SellQuoteResult is a routable or refused sell quote.
 type SellQuoteResult struct {
 	InputToken string
-	Quote     dex.Quote
+	Quote      dex.Quote
 }
 
 // QuoteSell resolves the mint, enforces the confirmed holding ceiling, and quotes without a taker.

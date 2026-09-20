@@ -3,12 +3,12 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // HomeHandlers serves GET /v1/home.

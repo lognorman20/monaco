@@ -23,7 +23,7 @@ func TestAgentKeyGuard_throttlesWrongKeysPerGroupAndAddress(t *testing.T) {
 
 	catalogHandlers, groupHandlers, authHandlers, _, iso := integrationCatalogApp(t)
 	catalogHandlers.KeyGuard = NewAgentKeyGuard()
-	_, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Privy)
+	_, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Wallets)
 
 	for i := 0; i < agentKeyFailureBurst; i++ {
 		rec := httptest.NewRecorder()
@@ -56,7 +56,7 @@ func TestAgentKeyGuard_validKeyNeverSpendsAndMismatchLooksLikeUnknownKey(t *test
 
 	catalogHandlers, groupHandlers, authHandlers, _, iso := integrationCatalogApp(t)
 	catalogHandlers.KeyGuard = NewAgentKeyGuard()
-	token, groupID, creatorID := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Privy)
+	token, groupID, creatorID := createGroupForQuotes(t, iso, groupHandlers, authHandlers, catalogHandlers.Wallets)
 
 	governance := groupHandlers.Governance
 	proposal, err := governance.CreateProposal(context.Background(), app.CreateProposalInput{

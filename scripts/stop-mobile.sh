@@ -17,7 +17,7 @@ else
       echo "terminated ${bundle_id} on ${udid}"
     fi
     if xcrun simctl uninstall "$udid" "$bundle_id" 2>/dev/null; then
-      echo "uninstalled ${bundle_id} on ${udid} (cleared app container + Privy session)"
+      echo "uninstalled ${bundle_id} on ${udid} (cleared app container + auth session)"
     fi
   done <<<"$udids"
 fi

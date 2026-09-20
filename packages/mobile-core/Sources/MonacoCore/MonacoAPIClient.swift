@@ -647,9 +647,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
 
     public func postRedeem(
         groupId: String,
-        shareUnits: String,
-        payoutAddress: String,
-        payoutProof: String
+        shareUnits: String
     ) async throws -> RedeemJobDTO {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/redeems")
         var request = URLRequest(url: url)
@@ -657,11 +655,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = try JSONEncoder().encode(
-            RedeemRequestDTO(
-                shareUnits: shareUnits,
-                payoutAddress: payoutAddress,
-                payoutProof: payoutProof
-            )
+            RedeemRequestDTO(shareUnits: shareUnits)
         )
 
         let (data, response) = try await session.data(for: request)

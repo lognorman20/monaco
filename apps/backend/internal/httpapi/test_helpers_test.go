@@ -1,9 +1,9 @@
 package httpapi
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"database/sql"
 	"encoding/json"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -27,20 +27,22 @@ func integrationApp(t *testing.T) (*AuthHandlers, wallets.Client, *sql.DB, *post
 	db := postgres.OpenTestDB(t)
 	iso := postgres.PrepareTestDB(t, db)
 	store := postgres.NewStore(db)
-	privyClient := wallets.NewFakeClient()
-	sessions := app.NewSessionService(store, auth.NewFakeVerifier(), privyClient)
-	return &AuthHandlers{Sessions: sessions}, privyClient, db, iso
+	walletClient := wallets.NewFakeClient()
+	verifier := auth.NewFakeVerifier()
+	sessions := app.NewSessionService(store, verifier, walletClient)
+	return &AuthHandlers{Sessions: sessions, Verifier: verifier}, walletClient, db, iso
 }
 
-func seedAuthenticatedUser(t *testing.T, iso *postgres.TestIsolation, handlers *AuthHandlers, privyClient wallets.Client, label string, displayName string) (authSessionResponse, auth.AccessToken) {
+func seedAuthenticatedUser(t *testing.T, iso *postgres.TestIsolation, handlers *AuthHandlers, walletClient wallets.Client, label string, displayName string) (authSessionResponse, auth.AccessToken) {
 	t.Helper()
+	_ = walletClient
 
 	token := auth.AccessToken(iso.UniqueToken(label))
 	identity := auth.Identity{
-		PrivyUserID: iso.UniqueDynamicID(label),
-		DisplayName: displayName,
+		DynamicUserID: iso.UniqueDynamicID(label),
+		DisplayName:   displayName,
 	}
-	auth.RegisterToken(privyClient, token, identity)
+	auth.RegisterToken(handlers.Verifier, token, identity)
 	req := httptest.NewRequest(http.MethodPost, "/v1/auth/session", strings.NewReader(`{"accessToken":"`+string(token)+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

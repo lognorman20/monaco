@@ -1,10 +1,10 @@
 package httpapi
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,11 +13,12 @@ import (
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
+	"github.com/monaco/monaco/apps/backend/internal/chainlink"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/pyth"
-	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 // multiUserApp wires every HTTP surface a club member touches against one real test
@@ -69,25 +70,25 @@ func newMultiUserApp(t *testing.T) *multiUserApp {
 	catalog := b20.NewFakeCatalog()
 	symbols := app.NewSymbolResolver(catalog)
 
-	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
-	home := app.NewHomeService(store, privyClient, pythClient, deposits, symbols)
+	deposits := app.NewDepositService(store, authHandlers.Verifier, privyClient, pythClient, symbols)
+	home := app.NewHomeService(store, authHandlers.Verifier, privyClient, pythClient, deposits, symbols)
 	buy := app.NewBuyService(jupiterClient, resolver)
-	governance := app.NewGovernanceService(store, privyClient)
+	governance := app.NewGovernanceService(store, authHandlers.Verifier, privyClient)
 	governance.SetBuyService(buy)
 	governance.SetHomeService(home)
 
 	return &multiUserApp{
 		Auth: authHandlers,
 		Groups: &GroupHandlers{
-			Groups:     app.NewGroupService(store, privyClient),
+			Groups:     app.NewGroupService(store, authHandlers.Verifier, privyClient),
 			Governance: governance,
 			Home:       home,
 		},
 		Home:           &HomeHandlers{Home: home},
 		Deposits:       &DepositHandlers{Deposits: deposits},
-		Proposals:      &ProposalHandlers{Store: store, Privy: privyClient, Governance: governance},
-		Quotes:         &QuoteHandlers{Store: store, Privy: privyClient, Buy: buy},
-		Catalog:        &CatalogHandlers{Store: store, Privy: privyClient, Catalog: catalog},
+		Proposals:      &ProposalHandlers{Store: store, Auth: authHandlers.Verifier, Wallets: privyClient, Governance: governance},
+		Quotes:         &QuoteHandlers{Store: store, Auth: authHandlers.Verifier, Wallets: privyClient, Buy: buy},
+		Catalog:        &CatalogHandlers{Store: store, Auth: authHandlers.Verifier, Wallets: privyClient, Catalog: catalog},
 		DepositService: deposits,
 		Store:          store,
 		Privy:          privyClient,
@@ -198,7 +199,7 @@ func (a *multiUserApp) landSweepInTreasury(t *testing.T, member clubMember, c cl
 func (a *multiUserApp) confirmSweep(t *testing.T, member clubMember, c club, intent createDepositResponse) {
 	t.Helper()
 	result, err := a.DepositService.ObserveSweep(context.Background(), app.ObservedSweep{
-		TxHash: fmt.Sprintf("sig-%s-%s", a.ISO.Suffix(), intent.DepositID),
+		TxHash:      fmt.Sprintf("sig-%s-%s", a.ISO.Suffix(), intent.DepositID),
 		FromAddress: intent.FromAddress,
 		ToAddress:   c.TreasuryAddress,
 		Amount:      intent.Amount,
@@ -233,9 +234,9 @@ func (a *multiUserApp) buyAAPLxAtMark(t *testing.T, c club, usdcSpent, aaplShare
 	if _, _, err := a.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          c.ID,
 		Amount:           usdcSpent,
-		InputToken:        evm.USDCAddress,
-		OutputToken:       "0xb200000000000000000000c2e324d24d7eecd1fb",
-		TxHash:      fmt.Sprintf("sig-%s-buy-%s", a.ISO.Suffix(), c.ID),
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+		TxHash:           fmt.Sprintf("sig-%s-buy-%s", a.ISO.Suffix(), c.ID),
 		ExecuteRequestID: fmt.Sprintf("req-%s-buy-%s", a.ISO.Suffix(), c.ID),
 		CostBasisPrice:   usdcSpent,
 		CostBasisAmount:  aaplAtomics,
@@ -252,7 +253,7 @@ func (a *multiUserApp) buyAAPLxAtMark(t *testing.T, c club, usdcSpent, aaplShare
 		TreasuryUsdc: remaining,
 		Holdings: []marks.MarkedHolding{{
 			Symbol:    "AAPLx",
-			Mint:      "0xb200000000000000000000c2e324d24d7eecd1fb",
+			Token:     "0xb200000000000000000000c2e324d24d7eecd1fb",
 			Units:     aaplAtomics,
 			MarkUsdc:  markUsdcPerShare,
 			CostBasis: usdcSpent,
@@ -263,12 +264,12 @@ func (a *multiUserApp) buyAAPLxAtMark(t *testing.T, c club, usdcSpent, aaplShare
 // registerRoutableAAPLx makes POST /quotes and POST /proposals routable for usdcMicros.
 func (a *multiUserApp) registerRoutableAAPLx(usdcMicros int64) {
 	b20.RegisterTokenAddress(a.XStocks, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
-	jupiter.RegisterQuoteBuy(a.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcMicros, jupiter.BuyQuote{
-		Routable:   true,
-		InputToken:  evm.USDCAddress,
+	dex.RegisterQuoteBuy(a.Jupiter, "0xb200000000000000000000c2e324d24d7eecd1fb", usdcMicros, dex.BuyQuote{
+		Routable:    true,
+		InputToken:  dex.USDCAddress(),
 		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
-		InAmount:   strconv.FormatInt(usdcMicros, 10),
-		OutAmount:  strconv.FormatInt(usdcMicros/2, 10),
+		InAmount:    strconv.FormatInt(usdcMicros, 10),
+		OutAmount:   strconv.FormatInt(usdcMicros/2, 10),
 	})
 }
 

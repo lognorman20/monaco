@@ -11,13 +11,13 @@ import (
 
 // PlatformWithdrawalRow is a row in platform_withdrawals.
 type PlatformWithdrawalRow struct {
-	ID          string
-	UserID      string
-	Amount      int64
-	ToAddress   string
-	Status      string
-	TxHash sql.NullString
-	CreatedAt   time.Time
+	ID        string
+	UserID    string
+	Amount    int64
+	ToAddress string
+	Status    string
+	TxHash    sql.NullString
+	CreatedAt time.Time
 }
 
 // InsertPlatformWithdrawal inserts a pending platform withdrawal row.

@@ -1,19 +1,19 @@
 package httpapi
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"encoding/json"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 func integrationQuotesApp(t *testing.T) (*QuoteHandlers, *GroupHandlers, *AuthHandlers, wallets.Client, dex.Client, b20.Catalog, *postgres.TestIsolation) {
@@ -25,17 +25,18 @@ func integrationQuotesApp(t *testing.T) (*QuoteHandlers, *GroupHandlers, *AuthHa
 	xstocksResolver := b20.NewFakeCatalog()
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	quoteHandlers := &QuoteHandlers{
-		Store: store,
-		Privy: privyClient,
-		Buy:   buy,
+		Store:   store,
+		Auth:    authHandlers.Verifier,
+		Wallets: privyClient,
+		Buy:     buy,
 	}
-	deposits := app.NewDepositService(store, privyClient, nil, app.NewSymbolResolver(b20.NewFakeCatalog()))
-	home := app.NewHomeService(store, privyClient, nil, deposits, app.NewSymbolResolver(b20.NewFakeCatalog()))
-	governance := app.NewGovernanceService(store, privyClient)
+	deposits := app.NewDepositService(store, authHandlers.Verifier, privyClient, nil, app.NewSymbolResolver(b20.NewFakeCatalog()))
+	home := app.NewHomeService(store, authHandlers.Verifier, privyClient, nil, deposits, app.NewSymbolResolver(b20.NewFakeCatalog()))
+	governance := app.NewGovernanceService(store, authHandlers.Verifier, privyClient)
 	governance.SetBuyService(buy)
 	governance.SetHomeService(home)
 	groupHandlers := &GroupHandlers{
-		Groups:     app.NewGroupService(store, privyClient),
+		Groups:     app.NewGroupService(store, authHandlers.Verifier, privyClient),
 		Governance: governance,
 		Home:       home,
 	}

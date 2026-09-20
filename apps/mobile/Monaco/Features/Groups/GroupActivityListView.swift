@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Every activity row for one cabal, pushed from the group screen's "See all".
 struct GroupActivityListView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let items: [GroupActivityItemDTO]
     let retryingTransactionIDs: Set<String>
     let onRetry: (GroupActivityItemDTO) -> Void

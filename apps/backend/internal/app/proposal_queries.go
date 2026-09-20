@@ -52,7 +52,7 @@ type ProposalVoteSummary struct {
 // ProposalExecutionDetail is on-chain swap status for a proposal.
 type ProposalExecutionDetail struct {
 	State            string
-	TxHash      string
+	TxHash           string
 	TransactionID    string
 	ExecuteRequestID string
 	ExecutedAt       *time.Time

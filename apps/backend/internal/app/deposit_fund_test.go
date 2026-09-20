@@ -1,9 +1,9 @@
 package app
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"errors"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
@@ -109,7 +109,7 @@ func TestFundGroup_creditsPositionAfterConfirmedSweep(t *testing.T) {
 
 	sig := testTxHash(h.ISO, "fund-credit")
 	observe, err := h.Deposits.ObserveSweep(ctx, ObservedSweep{
-		TxHash: sig,
+		TxHash:      sig,
 		FromAddress: wallet.Address,
 		ToAddress:   treasury.Address,
 		Amount:      amount,

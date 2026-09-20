@@ -9,17 +9,17 @@ import (
 	"sync"
 
 	"github.com/monaco/monaco/apps/backend/internal/auth"
+	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/packages/domain"
 )
 
 // HomeService builds app-home board projections.
 type HomeService struct {
 	store    *postgres.Store
-	auth    auth.Verifier
-	wallets wallets.Client
+	auth     auth.Verifier
+	wallets  wallets.Client
 	pyth     marks.Client
 	deposits *DepositService
 	symbols  *SymbolResolver

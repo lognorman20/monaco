@@ -5,7 +5,7 @@ import SwiftUI
 /// "Your cabals" → chart (if ≥ 3 points) → "Top investors". The hero is the title —
 /// no large nav title competes with it.
 struct HomeView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     @Binding var selectedTab: MainTab
     @Environment(AppSessionStore.self) private var session
 
@@ -191,7 +191,7 @@ private struct HomeSkeletonView: View {
         missedProposals: []
     )
     return NavigationStack {
-        HomeView(auth: PrivyAuthService(), selectedTab: .constant(.home))
+        HomeView(auth: DynamicAuthService(), selectedTab: .constant(.home))
             .environment(session)
             .monacoRootAppearance()
     }

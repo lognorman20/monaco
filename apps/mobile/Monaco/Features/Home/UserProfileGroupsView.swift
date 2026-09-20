@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Profile list of cabals shared with a people-board row member.
 struct UserProfileGroupsView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let userId: String
     let displayName: String
     var profilePhotoUrl: String? = nil

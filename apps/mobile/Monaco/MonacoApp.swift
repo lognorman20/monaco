@@ -1,17 +1,16 @@
-//
-//  MonacoApp.swift
-//  Monaco
-//
-
+import DynamicSDKSwift
 import SwiftUI
 
 @main
 struct MonacoApp: App {
-    @StateObject private var auth = PrivyAuthService()
+    @StateObject private var auth = DynamicAuthService()
 
     init() {
         MonacoAppearance.configureUIKit()
         MonacoLaunchTrace.markSceneReady()
+        if Config.dynamic.isConfigured {
+            _ = DynamicAuthService.ensureSDK(environmentID: Config.dynamic.environmentID)
+        }
     }
 
     var body: some Scene {

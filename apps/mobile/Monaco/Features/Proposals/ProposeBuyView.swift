@@ -29,7 +29,7 @@ struct ProposeBuyView: View {
 
     /// Entry from Stock detail's cabal picker (no chooser sheet): on success the flow pops back
     /// here and confirms with a toast.
-    init(auth: PrivyAuthService, groupId: String, initialSymbol: String? = nil, onProposed: ((_ proposalId: String) -> Void)? = nil) {
+    init(auth: DynamicAuthService, groupId: String, initialSymbol: String? = nil, onProposed: ((_ proposalId: String) -> Void)? = nil) {
         self.init(service: LiveProposeService(auth: auth), groupId: groupId, pot: nil, initialSymbol: initialSymbol, onProposed: onProposed)
     }
 

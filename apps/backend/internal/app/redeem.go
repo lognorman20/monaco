@@ -7,11 +7,11 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/auth"
-	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -97,7 +97,6 @@ func (r *RedeemService) WithdrawToBalance(ctx context.Context, req WithdrawToBal
 	if err := rejectFakerGroup(ctx, r.store, req.GroupID); err != nil {
 		return RedeemJobView{}, err
 	}
-
 
 	identity, err := r.auth.VerifySession(ctx, auth.AccessToken(req.AccessToken))
 	if err != nil {
@@ -224,7 +223,6 @@ func (r *RedeemService) Redeem(ctx context.Context, req RedeemRequest) (RedeemJo
 	if err := rejectFakerGroup(ctx, r.store, req.GroupID); err != nil {
 		return RedeemJobView{}, err
 	}
-
 
 	identity, err := r.auth.VerifySession(ctx, auth.AccessToken(req.AccessToken))
 	if err != nil {
@@ -528,11 +526,11 @@ func (r *RedeemService) sellRedeemShortfall(ctx context.Context, view *RedeemJob
 		}
 		symbol := symbolForOutputToken(ctx, r.swap.symbols, holding.Mint)
 		if _, err := r.swap.SellToUSDC(ctx, SellToUSDCRequest{
-			GroupID:   view.GroupID,
-			UserID:    view.UserID,
-			Symbol:    symbol,
+			GroupID:    view.GroupID,
+			UserID:     view.UserID,
+			Symbol:     symbol,
 			InputToken: holding.Mint,
-			Amount:    sellAmount,
+			Amount:     sellAmount,
 		}); err != nil {
 			if errors.Is(err, ErrQuoteNotRoutable) {
 				return fmt.Errorf("%w: stock sell below swap minimum; try a larger amount or wait for more USDC in the pot", ErrQuoteNotRoutable)

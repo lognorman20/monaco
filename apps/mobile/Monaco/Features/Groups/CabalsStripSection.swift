@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Horizontal strip of the viewer's cabals: tinted tile, name, pot, P&L. Tap opens the cabal.
 struct CabalsStripSection: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let rows: [HomeGroupBoardRowDTO]
     var onChanged: () async -> Void
 

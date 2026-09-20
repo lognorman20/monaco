@@ -228,7 +228,7 @@ final class MonacoAPIClientTests: XCTestCase {
         )
         let detail = try await client.getMarketAsset(symbol: "AAPLx")
         XCTAssertEqual(capturedPath, "/v1/assets/AAPLx")
-        XCTAssertEqual(detail.liquidity.label, "Via Jupiter")
+        XCTAssertEqual(detail.liquidity.label, "Via Kyber")
     }
 
     func testAPIClient_getMarketAssetChart_callsV1AssetsChart() async throws {

@@ -1,7 +1,7 @@
 import XCTest
 
 /// Drives the proposal feed on in-memory sample data (`-MonacoProposalFeedSample`, Debug only):
-/// vote from a card, open the thread, post a comment, reply. No Privy session or backend needed.
+/// vote from a card, open the thread, post a comment, reply. No Dynamic session or backend needed.
 /// Set `MONACO_QA_SCREENSHOT_DIR` (via `TEST_RUNNER_MONACO_QA_SCREENSHOT_DIR`) to save PNGs for docs/qa.
 final class ProposalFeedSampleUITests: XCTestCase {
     private var app: XCUIApplication!

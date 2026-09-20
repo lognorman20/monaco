@@ -3,77 +3,40 @@ import Foundation
 enum Config {
     static let apiBaseURL = URL(string: "http://localhost:8080")!
 
-    /// Privy credentials and login flags for M1 auth (T9/T10).
-    static let privy = PrivyAuthSettings.current
+    static let dynamic = DynamicAuthSettings.current
 }
 
-struct PrivyAuthSettings: Equatable {
-    let appID: String
-    let appClientID: String
+struct DynamicAuthSettings: Equatable {
+    let environmentID: String
     let smsLoginEnabled: Bool
     let emailLoginEnabled: Bool
 
     var isConfigured: Bool {
-        !appID.isEmpty && !appClientID.isEmpty
+        !environmentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    static var current: PrivyAuthSettings {
+    static var current: DynamicAuthSettings {
         let environment = ProcessInfo.processInfo.environment
-        return PrivyAuthSettings(
-            appID: resolvedAppID(from: environment),
-            appClientID: resolvedClientID(from: environment),
+        return DynamicAuthSettings(
+            environmentID: firstNonEmpty(
+                trimmed(environment["DYNAMIC_ENVIRONMENT_ID"]),
+                plistString("DYNAMIC_ENVIRONMENT_ID")
+            ) ?? "",
             smsLoginEnabled: parseBool(
                 firstNonEmpty(
-                    trimmed(environment["PRIVY_SMS_LOGIN_ENABLED"]),
-                    plistString("PRIVY_SMS_LOGIN_ENABLED")
+                    trimmed(environment["AUTH_SMS_LOGIN_ENABLED"]),
+                    plistString("AUTH_SMS_LOGIN_ENABLED")
                 ),
                 defaultValue: true
             ),
             emailLoginEnabled: parseBool(
                 firstNonEmpty(
-                    trimmed(environment["PRIVY_EMAIL_LOGIN_ENABLED"]),
-                    plistString("PRIVY_EMAIL_LOGIN_ENABLED")
+                    trimmed(environment["AUTH_EMAIL_LOGIN_ENABLED"]),
+                    plistString("AUTH_EMAIL_LOGIN_ENABLED")
                 ),
                 defaultValue: true
             )
         )
-    }
-
-    private static func resolvedAppID(from environment: [String: String]) -> String {
-        let envAppID = trimmed(environment["PRIVY_APP_ID"])
-        if !envAppID.isEmpty {
-            return envAppID
-        }
-        return plistString("PRIVY_APP_ID")
-    }
-
-    private static func resolvedClientID(from environment: [String: String]) -> String {
-        let envClientID = trimmed(environment["PRIVY_APP_CLIENT_ID"])
-        if isValidPrivyIOSClientID(envClientID) {
-            return envClientID
-        }
-        let envAuthID = trimmed(environment["PRIVY_AUTH_ID"])
-        if isValidPrivyIOSClientID(envAuthID) {
-            return envAuthID
-        }
-        let plistClientID = plistString("PRIVY_APP_CLIENT_ID")
-        if isValidPrivyIOSClientID(plistClientID) {
-            return plistClientID
-        }
-        return ""
-    }
-
-    private static func isValidPrivyIOSClientID(_ value: String) -> Bool {
-        !value.isEmpty && value.hasPrefix("client-")
-    }
-
-    /// Process env (simctl / Xcode scheme) wins; Info.plist from xcconfig is fallback.
-    private static func value(for key: String, environment: [String: String]) -> String {
-        let fromEnvironment = trimmed(environment[key])
-        if !fromEnvironment.isEmpty {
-            return fromEnvironment
-        }
-        return plistString(key)
     }
 
     private static func plistString(_ key: String) -> String {

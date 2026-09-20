@@ -68,7 +68,7 @@ public enum MoneyFlowCopy {
             )
         case 400 where matches(input, "invalid destination address"):
             return FlowFailure(
-                message: "That destination isn't a Solana wallet address.",
+                message: "That destination isn't a Base address.",
                 isRetryable: false,
                 nextStep: "Paste the address again — it should be 32 to 44 characters."
             )

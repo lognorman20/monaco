@@ -11,19 +11,19 @@ import (
 )
 
 const (
-	envDatabaseURL           = "DATABASE_URL"
-	envDynamicEnvironmentID  = "DYNAMIC_ENVIRONMENT_ID"
-	envDynamicAPIToken       = "DYNAMIC_API_TOKEN"
-	envDynamicWalletPassword = "DYNAMIC_WALLET_PASSWORD"
-	envWalletSharesKey       = "WALLET_SHARES_KEY"
-	envSignerURL             = "SIGNER_URL"
-	envSignerSharedSecret    = "SIGNER_SHARED_SECRET"
-	envBaseRPCURL            = "BASE_RPC_URL"
-	envRelayerPrivateKey     = "RELAYER_PRIVATE_KEY"
-	envKyberClientID         = "KYBER_CLIENT_ID"
-	envPythAPIKey            = "PYTH_API_KEY"
-	envPythHermesBaseURL     = "PYTH_HERMES_BASE_URL"
-	envSupabaseURL           = "SUPABASE_URL"
+	envDatabaseURL            = "DATABASE_URL"
+	envDynamicEnvironmentID   = "DYNAMIC_ENVIRONMENT_ID"
+	envDynamicAPIToken        = "DYNAMIC_API_TOKEN"
+	envDynamicWalletPassword  = "DYNAMIC_WALLET_PASSWORD"
+	envWalletSharesKey        = "WALLET_SHARES_KEY"
+	envSignerURL              = "SIGNER_URL"
+	envSignerSharedSecret     = "SIGNER_SHARED_SECRET"
+	envBaseRPCURL             = "BASE_RPC_URL"
+	envRelayerPrivateKey      = "RELAYER_PRIVATE_KEY"
+	envKyberClientID          = "KYBER_CLIENT_ID"
+	envPythAPIKey             = "PYTH_API_KEY"
+	envPythHermesBaseURL      = "PYTH_HERMES_BASE_URL"
+	envSupabaseURL            = "SUPABASE_URL"
 	envSupabaseServiceRoleKey = "SUPABASE_SERVICE_ROLE_KEY"
 )
 
@@ -33,19 +33,19 @@ const defaultKyberClientID = "monaco"
 
 // Config holds runtime credentials for the Monaco API.
 type Config struct {
-	DatabaseURL           string
-	DynamicEnvironmentID  string
-	DynamicAPIToken       string
-	DynamicWalletPassword string
-	WalletSharesKey       string
-	SignerURL             string
-	SignerSharedSecret    string
-	BaseRPCURL            string
-	RelayerPrivateKey     string
-	KyberClientID         string
-	PythAPIKey            string
-	PythHermesBaseURL     string
-	SupabaseURL           string
+	DatabaseURL            string
+	DynamicEnvironmentID   string
+	DynamicAPIToken        string
+	DynamicWalletPassword  string
+	WalletSharesKey        string
+	SignerURL              string
+	SignerSharedSecret     string
+	BaseRPCURL             string
+	RelayerPrivateKey      string
+	KyberClientID          string
+	PythAPIKey             string
+	PythHermesBaseURL      string
+	SupabaseURL            string
 	SupabaseServiceRoleKey string
 }
 

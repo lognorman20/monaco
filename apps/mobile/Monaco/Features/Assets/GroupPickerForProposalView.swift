@@ -10,7 +10,7 @@ enum ProposalPickKind: String, Hashable, Identifiable {
 
 /// Choose a joined cabal, then open propose buy or sell with the stock set.
 struct GroupPickerForProposalView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     @Environment(AppSessionStore.self) private var session
     let symbol: String
     let kind: ProposalPickKind
@@ -70,7 +70,7 @@ struct GroupPickerForProposalView: View {
 }
 
 struct ProposeSellFromAssetView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let groupId: String
     let symbol: String
 

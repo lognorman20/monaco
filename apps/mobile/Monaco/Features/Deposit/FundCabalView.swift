@@ -4,7 +4,7 @@ import UIKit
 
 /// Move USDC from account balance into a joined cabal's pot.
 struct FundCabalView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let joinedCabals: [HomeGroupBoardRowDTO]
     var preselectedGroupId: String?
     var onFunded: () async -> Void = {}
@@ -133,7 +133,7 @@ struct FundCabalView: View {
     private var depositPrompt: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             MonacoSectionHeader("Add USDC first")
-            Text("Send USDC on Solana to your deposit address. Your account balance updates when it arrives, then you can fund this cabal.")
+            Text("Send USDC on Base to this address. Your account balance updates when it arrives, then you can fund this cabal.")
                 .font(MonacoTheme.Typo.callout)
                 .foregroundStyle(MonacoTheme.muted)
             if let address = validDepositAddress {

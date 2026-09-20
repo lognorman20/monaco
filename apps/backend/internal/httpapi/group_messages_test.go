@@ -1,10 +1,10 @@
 package httpapi
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"database/sql"
 	"encoding/json"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -38,7 +38,7 @@ func integrationChatApp(t *testing.T, limiter *app.KeyedRateLimiter) chatTestApp
 	if limiter == nil {
 		limiter = app.NewKeyedRateLimiter(1000, time.Millisecond, nil)
 	}
-	chat := &GroupMessageHandlers{Chat: app.NewGroupChatServiceWithLimiter(store, privyClient, limiter)}
+	chat := &GroupMessageHandlers{Chat: app.NewGroupChatServiceWithLimiter(store, authHandlers.Verifier, privyClient, limiter)}
 	owner, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
 	return chatTestApp{
 		chat:    chat,

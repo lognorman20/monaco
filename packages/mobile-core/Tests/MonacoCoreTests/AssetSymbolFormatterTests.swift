@@ -8,12 +8,13 @@ final class AssetSymbolFormatterTests: XCTestCase {
     }
 
     func testFormat_rawMint_returnsUnknownStock() {
-        let mint = "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"
+        let mint = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
         XCTAssertEqual(AssetSymbolFormatter.format(mint), "Unknown stock")
     }
 
     func testDisplay_stripsXStocksSuffix() {
         XCTAssertEqual(AssetSymbolFormatter.display("AAPLx"), "AAPL")
+        XCTAssertEqual(AssetSymbolFormatter.display("AAPLc"), "AAPL")
         XCTAssertEqual(AssetSymbolFormatter.display("NVDAx"), "NVDA")
         XCTAssertEqual(AssetSymbolFormatter.display("BRK.Bx"), "BRK.B")
         XCTAssertEqual(AssetSymbolFormatter.display("Vx"), "V")
@@ -30,7 +31,7 @@ final class AssetSymbolFormatterTests: XCTestCase {
     }
 
     func testDisplay_rawMint_returnsUnknownStock() {
-        XCTAssertEqual(AssetSymbolFormatter.display("XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB"), "Unknown stock")
+        XCTAssertEqual(AssetSymbolFormatter.display("0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"), "Unknown stock")
     }
 
     func testAssetDisplayNames_resolvesDemoTickers() {

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"math/big"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -32,7 +32,7 @@ type AssetsHandlers struct {
 type marketAssetResponse struct {
 	Symbol          string  `json:"symbol"`
 	Name            string  `json:"name"`
-	TokenAddress      string  `json:"tokenAddress"`
+	TokenAddress    string  `json:"tokenAddress"`
 	Routable        bool    `json:"routable"`
 	PriceUsdcMicros *int64  `json:"priceUsdcMicros,omitempty"`
 	Change24h       *string `json:"change24h,omitempty"`
@@ -60,7 +60,7 @@ type assetLiquidityResponse struct {
 type assetDetailResponse struct {
 	Symbol          string                 `json:"symbol"`
 	Name            string                 `json:"name"`
-	TokenAddress      string                 `json:"tokenAddress"`
+	TokenAddress    string                 `json:"tokenAddress"`
 	Routable        bool                   `json:"routable"`
 	PriceUsdcMicros *int64                 `json:"priceUsdcMicros,omitempty"`
 	Change24h       *string                `json:"change24h,omitempty"`
@@ -297,7 +297,7 @@ func marketAssetResponseFor(asset b20.Asset, prices map[string]assetPriceSnapsho
 		Symbol:       asset.Symbol,
 		Name:         asset.Name,
 		TokenAddress: asset.TokenAddress,
-		Routable:     false,
+		Routable:     asset.Routable,
 	}
 	if price, ok := prices[asset.TokenAddress]; ok && price.PriceUsdcMicros > 0 {
 		resp.PriceUsdcMicros = &price.PriceUsdcMicros
@@ -308,10 +308,10 @@ func marketAssetResponseFor(asset b20.Asset, prices map[string]assetPriceSnapsho
 
 func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset b20.Asset) assetDetailResponse {
 	detail := assetDetailResponse{
-		Symbol:     asset.Symbol,
-		Name:       asset.Name,
+		Symbol:       asset.Symbol,
+		Name:         asset.Name,
 		TokenAddress: asset.TokenAddress,
-		Liquidity:  h.liquiditySnippet(ctx, asset, nil),
+		Liquidity:    h.liquiditySnippet(ctx, asset, nil),
 	}
 	prices := h.fetchPrices(ctx, []b20.Asset{asset})
 	if price, ok := prices[asset.TokenAddress]; ok && price.PriceUsdcMicros > 0 {

@@ -16,14 +16,14 @@ import (
 )
 
 type GovernanceService struct {
-	store  *postgres.Store
+	store   *postgres.Store
 	auth    auth.Verifier
 	wallets wallets.Client
-	buy    *BuyService
-	swap   *SwapService
-	home   *HomeService
-	redeem *RedeemService
-	now    func() time.Time
+	buy     *BuyService
+	swap    *SwapService
+	home    *HomeService
+	redeem  *RedeemService
+	now     func() time.Time
 }
 
 func NewGovernanceService(store *postgres.Store, verifier auth.Verifier, walletClient wallets.Client) *GovernanceService {

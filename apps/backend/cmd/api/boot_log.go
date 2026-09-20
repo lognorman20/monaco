@@ -10,9 +10,9 @@ import (
 
 func logConfigLoaded(cfg *config.Config) {
 	attrs := []any{
-		"solana_cluster", cfg.SolanaCluster,
-		"privy_app_id", cfg.PrivyAppID,
-		"privy_authorization_configured", cfg.PrivyAuthorizationPrivateKey != "",
+		"dynamic_environment_id", cfg.DynamicEnvironmentID,
+		"base_rpc_url", cfg.BaseRPCURL,
+		"signer_url", cfg.SignerURL,
 		"pyth_configured", cfg.PythAPIKey != "",
 	}
 	attrs = append(attrs, databaseLogAttrs(cfg.DatabaseURL)...)

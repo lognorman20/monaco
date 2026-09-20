@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"io"
 	"math"
 	"net/http"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // maxPatchMeBodyBytes bounds PATCH /v1/me bodies. A 32-character name is at most

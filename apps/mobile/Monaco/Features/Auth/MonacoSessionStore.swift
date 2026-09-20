@@ -1,6 +1,6 @@
 import Foundation
 
-/// Persists Monaco backend session markers so Privy restore cannot bypass login after logout or DB reset.
+/// Persists Monaco backend session markers so session restore cannot bypass login after logout or DB reset.
 struct MonacoSessionStore {
     private enum Keys {
         static let monacoUserId = "monaco.session.userId"

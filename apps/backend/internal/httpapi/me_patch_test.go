@@ -1,9 +1,9 @@
 package httpapi
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"context"
 	"encoding/json"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -13,7 +13,6 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/ratelimit"
 	"github.com/monaco/monaco/apps/backend/internal/storage"
 )
@@ -267,7 +266,7 @@ func TestPATCH_me_rateLimited_returns429PerUser(t *testing.T) {
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
 	limiter := ratelimit.New(2, time.Minute)
-	sessions := app.NewSessionService(store, auth.NewFakeVerifier(), privyClient).WithDisplayNameLimiter(limiter)
+	sessions := app.NewSessionService(store, authHandlers.Verifier, privyClient).WithDisplayNameLimiter(limiter)
 	meHandlers := &MeHandlers{Sessions: sessions}
 	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "patch-limit", "Alfred")
 	_, otherToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "patch-limit-other", "Bartholomez")
@@ -328,8 +327,8 @@ func TestUploadProfilePhotoHandler_rateLimited_returns429(t *testing.T) {
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
 	fakeStorage := storage.NewFakeClient("https://example.supabase.co")
-	photos := app.NewProfilePhotoService(store, privyClient, fakeStorage).WithUploadLimiter(ratelimit.New(1, time.Minute))
-	meHandlers := &MeHandlers{Sessions: app.NewSessionService(store, auth.NewFakeVerifier(), privyClient), ProfilePhoto: photos}
+	photos := app.NewProfilePhotoService(store, authHandlers.Verifier, privyClient, fakeStorage).WithUploadLimiter(ratelimit.New(1, time.Minute))
+	meHandlers := &MeHandlers{Sessions: authHandlers.Sessions, ProfilePhoto: photos}
 	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "photo-limit", "Uploader")
 
 	uploadPhoto(t, meHandlers, token)
@@ -395,13 +394,13 @@ func TestPATCH_me_nameAndPhotoShowOnBoards(t *testing.T) {
 	authHandlers, privyClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
 	fakeStorage := storage.NewFakeClient("https://example.supabase.co")
-	sessions := app.NewSessionService(store, auth.NewFakeVerifier(), privyClient)
-	meHandlers := &MeHandlers{Sessions: sessions, ProfilePhoto: app.NewProfilePhotoService(store, privyClient, fakeStorage)}
-	groups := app.NewGroupService(store, privyClient)
-	governance := app.NewGovernanceService(store, privyClient)
+	sessions := app.NewSessionService(store, authHandlers.Verifier, privyClient)
+	meHandlers := &MeHandlers{Sessions: sessions, ProfilePhoto: app.NewProfilePhotoService(store, authHandlers.Verifier, privyClient, fakeStorage)}
+	groups := app.NewGroupService(store, authHandlers.Verifier, privyClient)
+	governance := app.NewGovernanceService(store, authHandlers.Verifier, privyClient)
 	symbols := app.NewSymbolResolver(nil)
-	deposits := app.NewDepositService(store, privyClient, nil, symbols)
-	home := app.NewHomeService(store, privyClient, nil, deposits, symbols)
+	deposits := app.NewDepositService(store, authHandlers.Verifier, privyClient, nil, symbols)
+	home := app.NewHomeService(store, authHandlers.Verifier, privyClient, nil, deposits, symbols)
 	groupHandlers := &GroupHandlers{Groups: groups, Governance: governance, Home: home}
 	homeHandlers := &HomeHandlers{Home: home}
 

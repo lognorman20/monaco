@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// SMS OTP sign-in via Privy — primary demo path.
+/// SMS OTP sign-in — primary demo path.
 struct SMSLoginView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
 
     @State private var phoneNumber = ""
     @State private var otpCode = ""
@@ -183,5 +183,5 @@ struct SMSLoginView: View {
 }
 
 #Preview {
-    SMSLoginView(auth: PrivyAuthService())
+    SMSLoginView(auth: DynamicAuthService())
 }

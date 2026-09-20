@@ -35,18 +35,13 @@ func (r *SymbolResolver) SymbolForMint(ctx context.Context, token string) string
 			return strings.TrimSpace(asset.Symbol)
 		}
 	}
-	if strings.HasPrefix(strings.ToLower(token), "0x") {
-		return unknownStockSymbol
-	}
-	return token
+	return unknownStockSymbol
 }
 
 func knownTokenSymbol(token string) (string, bool) {
 	switch strings.ToLower(token) {
 	case evm.USDCAddress:
 		return "USDC", true
-	case "0xb200000000000000000000c2e324d24d7eecd1fb":
-		return "AAPLc", true
 	default:
 		return "", false
 	}

@@ -10,16 +10,18 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
+	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
-	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
 // TransactionHandlers serves transaction HTTP routes.
 type TransactionHandlers struct {
 	Store   *postgres.Store
-	Privy   wallets.Client
-	XStocks b20.Catalog
+	Auth    auth.Verifier
+	Wallets wallets.Client
+	Catalog b20.Catalog
 	Swap    *app.SwapService
 	Symbols *app.SymbolResolver
 }
@@ -30,11 +32,11 @@ type getTransactionResponse struct {
 	Action           string `json:"action"`
 	Status           string `json:"status"`
 	AmountMicros     int64  `json:"amountMicros"`
-	InputToken        string `json:"inputMint,omitempty"`
-	OutputToken       string `json:"outputMint,omitempty"`
+	InputToken       string `json:"inputToken,omitempty"`
+	OutputToken      string `json:"outputToken,omitempty"`
 	InputSymbol      string `json:"inputSymbol,omitempty"`
 	OutputSymbol     string `json:"outputSymbol,omitempty"`
-	TxHash      string `json:"txHash,omitempty"`
+	TxHash           string `json:"txHash,omitempty"`
 	ExecuteRequestID string `json:"executeRequestId,omitempty"`
 	ProposalID       string `json:"proposalId,omitempty"`
 	CostBasisPrice   int64  `json:"costBasisPrice,omitempty"`
@@ -46,7 +48,7 @@ type getTransactionResponse struct {
 
 type treasuryTokenBalance struct {
 	Symbol string `json:"symbol,omitempty"`
-	Mint   string `json:"mint"`
+	Mint   string `json:"tokenAddress"`
 	Amount int64  `json:"amount"`
 }
 
@@ -175,8 +177,8 @@ func (h *TransactionHandlers) transactionRowToResponse(ctx context.Context, row 
 		Action:        row.Action,
 		Status:        row.Status,
 		AmountMicros:  row.Amount,
-		InputToken:     row.InputToken,
-		OutputToken:    row.OutputToken,
+		InputToken:    row.InputToken,
+		OutputToken:   row.OutputToken,
 		InputSymbol:   h.symbolForMint(ctx, row.InputToken),
 		OutputSymbol:  h.symbolForMint(ctx, row.OutputToken),
 		CreatedAt:     row.CreatedAt.UTC().Format(time.RFC3339),
@@ -228,7 +230,7 @@ func (h *TransactionHandlers) GetTreasuryTokenBalancesHandler(w http.ResponseWri
 		return
 	}
 
-	usdcBalance, err := h.Privy.TreasuryUSDCBalance(ctx, treasuryAddress)
+	usdcBalance, err := h.Wallets.TreasuryUSDCBalance(ctx, treasuryAddress)
 	if err != nil {
 		logJSONError(ctx, log, "treasury_usdc_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
 		return
@@ -287,7 +289,7 @@ func (h *TransactionHandlers) GetCostBasisBySymbolHandler(w http.ResponseWriter,
 		return
 	}
 
-	outputMint, err := h.XStocks.ResolveTokenAddress(ctx, symbol)
+	outputMint, err := h.Catalog.ResolveTokenAddress(ctx, symbol)
 	if err != nil {
 		logJSONError(ctx, log, "symbol_not_found", w, http.StatusNotFound, "symbol not found", "group_id", groupID, "symbol", symbol)
 		return
@@ -331,7 +333,7 @@ func (h *TransactionHandlers) getTransactionForMember(ctx context.Context, acces
 }
 
 func (h *TransactionHandlers) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := h.Auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return "", auth.ErrUnauthorized
@@ -374,7 +376,7 @@ func (h *TransactionHandlers) authorizeGroupMember(ctx context.Context, accessTo
 }
 
 func (h *TransactionHandlers) authorizeGroupMemberForTransaction(ctx context.Context, accessToken, groupID string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := h.Auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return "", auth.ErrUnauthorized
@@ -401,7 +403,7 @@ func (h *TransactionHandlers) authorizeGroupMemberForTransaction(ctx context.Con
 }
 
 func (h *TransactionHandlers) authorizeGroupReaderForTransaction(ctx context.Context, accessToken, groupID string) (string, error) {
-	identity, err := h.Privy.VerifySession(ctx, auth.AccessToken(accessToken))
+	identity, err := h.Auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
 		if errors.Is(err, auth.ErrUnauthorized) {
 			return "", auth.ErrUnauthorized

@@ -66,14 +66,16 @@ build app:
         fi
         mkdir -p bin
         (cd apps/backend && go build -o ../../bin/monaco-api ./cmd/api)
+        if [[ -f apps/signer/package.json ]]; then
+          (cd apps/signer && if [[ ! -d node_modules ]]; then npm ci; fi && npm run build)
+        fi
         ;;
       mobile)
         if [[ ! -d apps/mobile ]]; then
           echo "error: apps/mobile is not scaffolded yet (M0-T4)."
           exit 1
         fi
-        # ensure-ios-privy-config reads .env.local via dotenvx get → Privy.local.xcconfig
-        ./scripts/ensure-ios-privy-config.sh generate
+        ./scripts/ensure-ios-dynamic-config.sh generate
         ./scripts/ios-build
         ;;
       *)
@@ -103,6 +105,9 @@ test app:
         fi
         if [[ "${SKIP_SCRIPTS_TESTS:-}" != "1" && -f scripts/go.mod ]]; then
           (cd scripts && go test -short ./...)
+        fi
+        if [[ -f apps/signer/package.json ]]; then
+          (cd apps/signer && if [[ ! -d node_modules ]]; then npm ci; fi && npm test)
         fi
         ;;
       mobile)
@@ -165,7 +170,12 @@ run *app:
       }
       # INT/TERM only — ios-sim exits after launch; do not kill API on mobile recipe return.
       trap cleanup INT TERM
-      echo "Starting backend (background) and mobile (foreground)..."
+      echo "Starting signer, backend (background) and mobile (foreground)..."
+      if [[ -f apps/signer/package.json ]]; then
+        (cd apps/signer && if [[ ! -d node_modules ]]; then npm ci; fi)
+        (cd apps/signer && npm run dev) 2>&1 | tee -a "${MONACO_LOG_DIR}/signer.log" &
+        sleep 1
+      fi
       (cd apps/backend && go run ./cmd/api) 2>&1 | tee -a "${MONACO_LOG_DIR}/backend.log" &
       backend_pid=$!
       if ! kill -0 "${backend_pid}" 2>/dev/null; then
@@ -195,6 +205,11 @@ run *app:
         echo ""
         source ./scripts/run-with-logs.sh
         monaco_init_logs
+        if [[ -f apps/signer/package.json ]]; then
+          (cd apps/signer && if [[ ! -d node_modules ]]; then npm ci; fi)
+          (cd apps/signer && npm run dev) 2>&1 | tee -a "${MONACO_LOG_DIR}/signer.log" &
+          sleep 1
+        fi
         if [[ -f apps/backend/go.mod ]]; then
           (cd apps/backend && go run ./cmd/api) 2>&1 | tee -a "${MONACO_LOG_DIR}/backend.log"
         else
@@ -210,7 +225,7 @@ run *app:
           echo "error: apps/mobile is not scaffolded yet (M0-T4)."
           exit 1
         fi
-        # Privy: xcconfig + SIMCTL_CHILD_* via with-ios-privy-env, then scripts/ios-sim
+        # Dynamic xcconfig + SIMCTL_CHILD_* via with-ios-dynamic-env, then scripts/ios-sim
         source ./scripts/run-with-logs.sh
         monaco_init_logs
         ./scripts/ios-sim 2>&1 | tee -a "${MONACO_LOG_DIR}/mobile.log"
@@ -286,7 +301,7 @@ reset *target:
 
 # Seed #153 demo data into local Postgres: `just faker scale`, `just faker mixed <group_id>`,
 # `just faker all <group_id>`, `just faker demo <group_id> [proposal_id]` (recording variant).
-# Local DATABASE_URL only; never calls Privy/RPC/Jupiter. Refresh path: `just reset db` then `just faker ...`.
+# Local DATABASE_URL only; never calls live RPC or the DEX. Refresh path: `just reset db` then `just faker ...`.
 faker profile *ids:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -338,3 +353,4 @@ killports:
       fi
     fi
     ./scripts/kill-listeners.sh "$port"
+    ./scripts/kill-listeners.sh 8081

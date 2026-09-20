@@ -10,11 +10,11 @@ import (
 const ackPhrase = "I UNDERSTAND THIS MAY MESS WITH PROD"
 
 type confirmOpts struct {
-	dest         string
-	databaseURL  string
-	sourceNote   string
-	dryRun       bool
-	sources      []sweepSource
+	dest        string
+	databaseURL string
+	sourceNote  string
+	dryRun      bool
+	sources     []sweepSource
 }
 
 func confirmSweep(in io.Reader, out io.Writer, opts confirmOpts) error {

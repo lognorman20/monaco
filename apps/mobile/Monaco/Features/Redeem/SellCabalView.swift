@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Cash out: sell part (or all) of your slice back to your account balance. You stay in the cabal.
 struct SellCabalView: View {
-    @ObservedObject var auth: PrivyAuthService
+    @ObservedObject var auth: DynamicAuthService
     let groupId: String
     let maxShareUnits: Int64
     let equityUsd: String

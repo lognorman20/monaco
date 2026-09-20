@@ -26,14 +26,14 @@ func logDepositObserveSweepStart(depositID, groupID, userID string, amount int64
 		"group_id", groupID,
 		"user_id", userID,
 		"amount", amount,
-		"tx_signature", txHash,
+		"tx_hash", txHash,
 	)
 }
 
 func logDepositObserveSweepIdempotent(depositID, txHash string) {
 	slog.Info("deposit observe sweep idempotent",
 		"deposit_id", depositID,
-		"tx_signature", txHash,
+		"tx_hash", txHash,
 	)
 }
 
@@ -42,7 +42,7 @@ func logDepositObserveSweepConfirmed(depositID, groupID, userID, txHash string, 
 		"deposit_id", depositID,
 		"group_id", groupID,
 		"user_id", userID,
-		"tx_signature", txHash,
+		"tx_hash", txHash,
 		"credited", credited,
 	)
 }

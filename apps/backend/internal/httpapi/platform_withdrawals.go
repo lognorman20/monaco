@@ -3,12 +3,12 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
 )
 
 // PlatformWithdrawHandlers serves platform withdrawal HTTP routes.
@@ -26,7 +26,7 @@ type platformWithdrawalResponse struct {
 	Amount       int64  `json:"amount"`
 	ToAddress    string `json:"toAddress"`
 	Status       string `json:"status"`
-	TxHash  string `json:"txHash,omitempty"`
+	TxHash       string `json:"txHash,omitempty"`
 	CreatedAt    string `json:"createdAt"`
 }
 
@@ -88,7 +88,7 @@ func (h *PlatformWithdrawHandlers) CreatePlatformWithdrawalHandler(w http.Respon
 		"withdrawal_id", result.ID,
 		"amount", result.Amount,
 		"to_address", result.ToAddress,
-		"tx_signature", result.TxHash,
+		"tx_hash", result.TxHash,
 	)
 }
 
@@ -135,7 +135,7 @@ func platformWithdrawalResponseFromApp(withdrawal app.PlatformWithdrawal) platfo
 		Amount:       withdrawal.Amount,
 		ToAddress:    withdrawal.ToAddress,
 		Status:       string(withdrawal.Status),
-		TxHash:  withdrawal.TxHash,
+		TxHash:       withdrawal.TxHash,
 		CreatedAt:    withdrawal.CreatedAt.UTC().Format(time.RFC3339),
 	}
 }

@@ -91,7 +91,7 @@ private struct WalletAddressTextView: UIViewRepresentable {
 }
 
 extension View {
-    /// Form field for entering a Solana wallet address.
+    /// Form field for entering a Base address.
     func monacoWalletAddressField() -> some View {
         font(.body.monospaced())
             .textInputAutocapitalization(.never)

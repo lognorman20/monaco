@@ -111,18 +111,6 @@ if ! have simslim; then
   fi
 fi
 
-# --- optional agent Phantom wallet ---
-if [[ "$check_only" -eq 0 ]]; then
-  say "A Phantom MCP wallet is optional. Use it only if a coding agent must send mainnet USDC during QA."
-  if ask_yes "Print Phantom MCP setup steps (no install)?"; then
-    say ""
-    say "1. In Cursor, install the phantom-connect plugin (marketplace), or add @phantom/mcp-server to mcp.json."
-    say "2. Docs: https://docs.phantom.com/phantom-mcp-server/setup"
-    say "3. Do not put PHANTOM_APP_ID in .env.local. Agent wallet is separate from Privy product wallets."
-    say "4. Fund the agent address on Solana mainnet only when you need live deposit QA. Refund leftover USDC when done."
-    say ""
-  fi
-fi
 
 # --- git hook ---
 if [[ -d .git && ! -f .git/hooks/pre-commit ]]; then
@@ -137,7 +125,7 @@ fi
 if [[ ! -f .env.local ]]; then
   missing_required=1
   err ".env.local is missing."
-  say "Put an encrypted .env.local next to .env.keys (from a teammate), or copy .env.example to .env.local and fill Privy + relayer values with dotenvx set."
+  say "Put an encrypted .env.local next to .env.keys (from a teammate), or copy .env.example to .env.local and fill Dynamic + relayer values with dotenvx set."
   if [[ "$check_only" -eq 0 ]] && ask_yes "Copy .env.example to .env.local now (you still must set secrets)?"; then
     cp .env.example .env.local
     say "wrote .env.local from .env.example"

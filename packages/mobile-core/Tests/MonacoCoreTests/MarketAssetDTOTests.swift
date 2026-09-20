@@ -2,6 +2,18 @@ import XCTest
 @testable import MonacoCore
 
 final class MarketAssetDTOTests: XCTestCase {
+    func testMarketAssetDTO_decodesTokenAddress() throws {
+        let fixtureURL = try XCTUnwrap(
+            Bundle.module.url(forResource: "market_assets", withExtension: "json")
+        )
+        let dto = try JSONDecoder().decode(
+            ListMarketAssetsResponseDTO.self,
+            from: Data(contentsOf: fixtureURL)
+        )
+        XCTAssertNotNil(dto.assets[0].tokenAddress)
+        XCTAssertFalse(dto.assets[0].tokenAddress.isEmpty)
+    }
+
     func testListMarketAssets_decodesCatalogPage() throws {
         let fixtureURL = try XCTUnwrap(
             Bundle.module.url(forResource: "market_assets", withExtension: "json")
@@ -13,6 +25,7 @@ final class MarketAssetDTOTests: XCTestCase {
 
         XCTAssertEqual(dto.assets.count, 1)
         XCTAssertEqual(dto.assets[0].symbol, "AAPLx")
+        XCTAssertFalse(dto.assets[0].tokenAddress.isEmpty)
         XCTAssertEqual(dto.assets[0].priceUsdcMicros, 185_000_000)
         XCTAssertTrue(dto.hasMore)
     }
@@ -23,7 +36,7 @@ final class MarketAssetDTOTests: XCTestCase {
         )
         let dto = try JSONDecoder().decode(AssetDetailDTO.self, from: Data(contentsOf: fixtureURL))
 
-        XCTAssertEqual(dto.liquidity.label, "Via Jupiter")
+        XCTAssertEqual(dto.liquidity.label, "Via Kyber")
         XCTAssertEqual(dto.liquidity.buyProbeOutAmount, "100000000")
         XCTAssertEqual(dto.liquidity.spreadBps, 12)
         XCTAssertTrue(dto.routable)

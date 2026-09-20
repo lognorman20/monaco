@@ -1,16 +1,15 @@
 package httpapi
 
 import (
-	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"encoding/json"
+	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/monaco/monaco/apps/backend/internal/dex"
-	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/b20"
+	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -31,12 +30,12 @@ func newCommentFixture(t *testing.T) commentFixture {
 	proposalHandlers, groupHandlers, authHandlers, privyClient, jupiterClient, resolver, iso := integrationProposalsApp(t)
 	adaToken, groupID, _ := createGroupForQuotes(t, iso, groupHandlers, authHandlers, privyClient)
 	b20.RegisterTokenAddress(resolver, "AAPLx", "0xb200000000000000000000c2e324d24d7eecd1fb")
-	jupiter.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, jupiter.BuyQuote{
-		Routable:   true,
-		InputToken:  evm.USDCAddress,
+	dex.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 5_000_000, dex.BuyQuote{
+		Routable:    true,
+		InputToken:  dex.USDCAddress(),
 		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
-		InAmount:   "5000000",
-		OutAmount:  "2500000",
+		InAmount:    "5000000",
+		OutAmount:   "2500000",
 	})
 
 	_, benToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "ben", "Ben Ortiz")
