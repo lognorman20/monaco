@@ -87,7 +87,6 @@ func TestRetryTransactionHandler_failedBuy_returnsConfirmed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
-	handlers.Swap.SetTreasuryBalances(treasury.SolanaAddress, app.TreasuryBalances{USDC: 5_000_000})
 	privy.SetTreasuryUSDCBalance(privyClient, treasury.SolanaAddress, 5_000_000)
 
 	failed, err := handlers.Store.InsertFailedTransaction(ctx, created.GroupID, postgres.TransactionActionBuy, jupiter.USDCMint, jupiter.AAPLxMint, usdcAmount, "req-failed-"+iso.Suffix())

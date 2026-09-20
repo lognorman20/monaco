@@ -3,7 +3,8 @@ package app
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
+	"crypto/sha512"
+	"encoding/base64"
 	"fmt"
 
 	"github.com/monaco/monaco/apps/backend/internal/privy"
@@ -53,8 +54,25 @@ func (f *fakePrivyTreasurySigner) SignTreasuryTransaction(ctx context.Context, w
 	if walletID == "" || unsignedTxBase64 == "" {
 		return "", fmt.Errorf("wallet id and unsigned transaction are required")
 	}
-	sum := sha256.Sum256([]byte("signed:" + walletID + ":" + unsignedTxBase64))
-	return "SIGNED" + hex.EncodeToString(sum[:16]), nil
+	return base64.StdEncoding.EncodeToString(fakeSignedTransaction(walletID, unsignedTxBase64)), nil
+}
+
+// fakeSignedTransaction returns a well-formed, fully signed legacy Solana transaction derived
+// from its inputs: one signature, one account key, a recent blockhash, no instructions. Swap
+// code reads the transaction id and blockhash off signed bytes, so the fake has to parse.
+func fakeSignedTransaction(walletID, unsignedTxBase64 string) []byte {
+	signature := sha512.Sum512([]byte("signed:" + walletID + ":" + unsignedTxBase64))
+	account := sha256.Sum256([]byte("account:" + walletID))
+	blockhash := sha256.Sum256([]byte("blockhash:" + unsignedTxBase64))
+
+	tx := []byte{1}
+	tx = append(tx, signature[:]...)
+	tx = append(tx, 1, 0, 0) // message header: one required signer
+	tx = append(tx, 1)       // account key count
+	tx = append(tx, account[:]...)
+	tx = append(tx, blockhash[:]...)
+	tx = append(tx, 0) // instruction count
+	return tx
 }
 
 // SignTreasuryMessage returns a deterministic 64-byte stand-in for an Ed25519 signature.

@@ -36,6 +36,7 @@ async with a bounded queue, so a slow or dead webhook never blocks a money path.
 | Kind | Severity | Means | Do |
 | --- | --- | --- | --- |
 | `redeem_wedged` | critical | A cash out burnt share units but the USDC payout could not be verified on chain. Nothing automatic is safe. | Look up `job_id` in `redeem_jobs`, check the treasury's transfers on an explorer, then settle or roll back by hand. |
+| `swap_unresolved` | critical | A treasury swap was handed to the venue 30+ minutes ago and neither the venue nor the chain can say whether it landed. The row stays `pending` and its proposal is not retried, so nothing is bought or sold twice. | Look up `tx_signature` on an explorer (Jupiter) or the order in the Flash dashboard (`request_id`). Landed: set the row `confirmed` with the fill amounts. Never landed: set it `failed`; the execute poller retries the proposal. |
 | `relayer_low_balance` | critical | The fee-paying relayer is at or under 0.001 SOL. At zero, every sweep, trade and cash out fails, and the API will not boot. | Send SOL to `relayer_pubkey`. |
 | `poller_panic` | critical | A background poller tick panicked. The loop survives and keeps ticking; the stack is in the log and Sentry. | Read the stack. A repeat every tick means one poisoned row. |
 | `price_source_down` | warning | The Jupiter price breaker opened. Pots fall back to cost basis, so P&L stops moving until it recovers. | Check Jupiter status and `JUPITER_API_KEY` rate limits. |
@@ -67,7 +68,7 @@ never raw paths, so ids do not become time series.
 | --- | --- | --- |
 | `monaco_http_requests_total` | `route`, `method`, `status` | Error rate per route. |
 | `monaco_http_request_duration_seconds` | `route`, `method` | Latency. Trade and cash out routes confirm on chain inside the request, so tens of seconds is normal there. |
-| `monaco_money_events_total` | `event`, `outcome` | `event`: `deposit_sweep`, `swap_buy`, `swap_sell`, `redeem`, `redeem_recovery`, `agent_intent`. `outcome`: `ok`, `rejected` (caller's fault: bad input, over budget, paused bot), `error` (ours or an upstream's), `canceled`, `replayed` (idempotent retry of a swap that already landed). `deposit_sweep` also reports why a fund intent did not land: `rejected` (Privy refused the sweep before broadcast), `failed_on_chain`, `dropped` (blockhash expired unseen; the sweep is re-submitted), `expired` (dropped too many times; deposit failed) and `retries_exhausted` (upstream kept erroring before anything was broadcast; deposit failed). |
+| `monaco_money_events_total` | `event`, `outcome` | `event`: `deposit_sweep`, `swap_buy`, `swap_sell`, `redeem`, `redeem_recovery`, `agent_intent`. `outcome`: `ok`, `rejected` (caller's fault: bad input, over budget, paused bot), `error` (ours or an upstream's), `canceled`, `replayed` (idempotent retry of a swap that already landed), `pending` (swap submitted but not observed; the swap reconcile poller counts it as `ok` or `error` when it settles). `deposit_sweep` also reports why a fund intent did not land: `rejected` (Privy refused the sweep before broadcast), `failed_on_chain`, `dropped` (blockhash expired unseen; the sweep is re-submitted), `expired` (dropped too many times; deposit failed) and `retries_exhausted` (upstream kept erroring before anything was broadcast; deposit failed). |
 | `monaco_money_volume_usdc_micros_total` | `event` | USDC moved by successful events. Replays are not counted. |
 | `monaco_upstream_requests_total` | `service`, `outcome` | `service`: `jupiter`, `pyth`, `privy`, `solana_rpc`, `xstocks`, `flash`, `supabase_storage`. `outcome`: `ok`, `client_error`, `rate_limited` (429), `server_error`, `transport_error`. |
 | `monaco_upstream_request_duration_seconds` | `service` | Upstream latency. |
@@ -76,7 +77,7 @@ never raw paths, so ids do not become time series.
 | `monaco_poller_tick_duration_seconds` | `poller` | Tick cost. |
 | `monaco_relayer_balance_lamports` | | Updated on each `/health` probe round. |
 | `monaco_pending_deposits`, `monaco_pending_deposit_oldest_age_seconds` | | Deposits waiting for their sweep to confirm, and the age of the oldest. |
-| `monaco_pending_swaps`, `monaco_pending_swap_oldest_age_seconds` | | Treasury swaps still `pending`. |
+| `monaco_pending_swaps`, `monaco_pending_swap_oldest_age_seconds` | | Treasury swaps still `pending`. A swap is recorded before it is submitted, so this counts every swap in flight plus any whose outcome was not observed; the swap reconcile poller settles those within a few minutes. |
 | `monaco_redeem_jobs`, `monaco_redeem_job_oldest_age_seconds` | `status` | Unsettled cash out jobs by `debited`, `selling`, `paying`; time since the longest-waiting one last changed status. |
 | `monaco_backlog_up` | | 0 when the backlog query failed on this scrape. The gauges above are then omitted, not zeroed. |
 | `go_sql_*` | `db_name` | `database/sql` pool stats: `go_sql_in_use_connections`, `go_sql_wait_count_total`. |
@@ -111,7 +112,7 @@ monaco_pending_deposit_oldest_age_seconds > 600
 # A cash out burnt share units and has not paid: the recovery poller retries from 10 minutes
 monaco_redeem_job_oldest_age_seconds{status="paying"} > 900
 
-# A treasury trade was recorded and never confirmed or failed
+# A treasury trade was recorded and the swap reconcile poller has not confirmed or failed it
 monaco_pending_swap_oldest_age_seconds > 600
 
 # Members are seeing 5xx

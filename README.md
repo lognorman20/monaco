@@ -136,6 +136,16 @@ First Flash trade of a token per treasury also needs an onchain setup: create th
 
 Get a key at [app.definitive.fi](https://app.definitive.fi) → More → Flash → Create Flash Key, then set `SWAP_PROVIDER=flash` and `FLASH_API_KEY` in `.env.local`. `FLASH_MAX_SLIPPAGE` (default `0.01`) bounds executed vs quoted output. Unset `SWAP_PROVIDER` to go back to Jupiter; no data migration either way.
 
+### Exactly-once execution
+
+A swap is recorded before it is sent. `SwapService` quotes and signs (`Prepare*`), writes a `pending` row in `transactions` with the provider, the venue request id and, for Jupiter, the signed transaction's signature and blockhash, and only then submits. Migration `000020` allows one `pending` or `confirmed` swap per proposal and side, so a second executor (another API instance, a rolling deploy, a retry) is stopped at that insert.
+
+A swap is marked `failed` only when no funds can have moved: Flash refused the order or closed it with nothing filled, the Solana transaction errored on chain, or its blockhash expired as of the finalized bank and the signature is still not found. A poll timeout, a venue error after submit, a crash, or Jupiter reporting `Failed` leaves the row `pending`; the proposal is not retried while it is.
+
+The swap reconcile poller (every 30s, rows older than 2 minutes) settles `pending` rows: Jupiter swaps from Solana itself (`getSignatureStatuses` with full history, `isBlockhashValid` at `finalized`, fill amounts from the treasury's token balance changes in `getTransaction`), Flash swaps from `GET /orders/{orderId}`. It reads the same endpoint as every other Solana RPC client (`config.SolanaRPCEndpoint()`: `SOLANA_RPC_URL`, else the cluster's public endpoint). A Flash order whose id was never recorded (the process died inside `POST /order`) cannot be looked up and stays `pending`; `swap unresolved` is logged at error level for any swap still unknown after 30 minutes and needs a human.
+
+Passed proposals are claimed in Postgres (`proposals.execute_next_attempt_at`, `FOR UPDATE SKIP LOCKED`, 5 minute lease) and retry backoff after a failed attempt is stored there too (`execute_attempts`, `execute_last_error`), so it survives restarts and is shared by every instance.
+
 Every treasury swap follows the flag, including the sells a cash-out triggers (`RedeemService` calls `SwapService.SellToUSDC`). Still on Jupiter regardless: the price quotes shown in the app, catalog routability probes, and `cmd/sweep-member-to-address`.
 
 ## Demo data (faker seed)
@@ -433,7 +443,7 @@ API_ADDR=0.0.0.0:8080 MIGRATIONS_DIR=/path/to/supabase/migrations ./bin/monaco-a
 - The relayer address must hold more than 0.001 SOL or the API exits at boot. See [Relayer](#relayer-fee-payer).
 - The API listens on `API_ADDR` (default `127.0.0.1:8080`). `GET /health` probes Postgres and the access-token verifier (critical, `503` when down), Solana RPC, the relayer's SOL balance, poller liveness, Privy and the price API, and reports `ok`, `degraded` or `down`.
 - Metrics are at `GET /metrics` (Prometheus; bearer `METRICS_TOKEN`, or loopback only when unset). Set `SENTRY_DSN` and `ALERT_WEBHOOK_URL` so panics and money alerts reach a person. What is recorded and what to alert on: [`docs/ops-observability.md`](docs/ops-observability.md).
-- The deposit sweep, execute-on-pass and redeem recovery pollers run inside the API process. A panic in a tick is recovered, alerted and counted; the loop keeps running. The deposit sweep poller is safe to run in several instances: it leases each deposit (`FOR UPDATE SKIP LOCKED`) and records the sweep signature before broadcasting, so a crash or a second instance never sweeps a deposit twice. The other two pollers have not been tested with more than one instance.
+- The deposit sweep, execute-on-pass, swap reconcile and redeem recovery pollers run inside the API process. A panic in a tick is recovered, alerted and counted; the loop keeps running. The deposit sweep poller is safe to run in several instances: it leases each deposit (`FOR UPDATE SKIP LOCKED`) and records the sweep signature before broadcasting, so a crash or a second instance never sweeps a deposit twice. Execute-on-pass and swap reconcile are safe on several instances too (see [Exactly-once execution](#exactly-once-execution)). The redeem recovery poller has not been tested with more than one instance.
 
 **iOS.** Archive and upload steps are in [`apps/mobile/TestFlight.md`](apps/mobile/TestFlight.md).
 

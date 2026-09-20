@@ -50,11 +50,12 @@ type SellToUSDCResult struct {
 	ProceedsUSDC int64
 }
 
-// TreasuryBalances tracks fake treasury token balances for integration tests.
-type TreasuryBalances struct {
-	USDC   int64
-	XStock int64
-}
+// ErrSwapOutcomeUnknown means the swap was handed to the venue but its result was not observed.
+// The transaction row stays pending until the swap reconciler resolves it; callers must not retry.
+var ErrSwapOutcomeUnknown = errors.New("swap outcome unknown; left pending for reconcile")
+
+// ErrSwapInFlight means the proposal already has a pending swap whose outcome is not known yet.
+var ErrSwapInFlight = errors.New("swap already in flight for proposal")
 
 // usdcDecimals is the on-chain decimal count for mainnet USDC.
 const usdcDecimals = 6
@@ -69,9 +70,13 @@ type SwapService struct {
 	privy      privy.Client
 	signer     TreasurySigner
 	relayerKey string
-	balances   map[string]TreasuryBalances
 	pollConfig jupiter.PollConfig
 	symbols    *SymbolResolver
+
+	jupiterProvider *jupiter.SwapProvider
+	// providers holds every configured venue by name so a pending swap is always resolved by
+	// the venue that took it, whichever one executes new swaps.
+	providers map[string]swapprovider.Provider
 }
 
 // NewSwapService wires swap dependencies.
@@ -91,10 +96,11 @@ func NewSwapService(
 		privy:      privyClient,
 		signer:     signer,
 		relayerKey: relayerKey,
-		balances:   make(map[string]TreasuryBalances),
 		symbols:    symbols,
 	}
-	s.provider = jupiter.NewSwapProvider(jupiterClient, swapTransactionSigner{swap: s})
+	s.jupiterProvider = jupiter.NewSwapProvider(jupiterClient, swapTransactionSigner{swap: s})
+	s.provider = s.jupiterProvider
+	s.providers = map[string]swapprovider.Provider{s.jupiterProvider.Name(): s.jupiterProvider}
 	return s
 }
 
@@ -102,7 +108,14 @@ func NewSwapService(
 func (s *SwapService) SetSwapProvider(provider swapprovider.Provider) {
 	if provider != nil {
 		s.provider = provider
+		s.providers[provider.Name()] = provider
 	}
+}
+
+// SetChainReader wires the Solana reader that decides Jupiter swaps whose outcome was not
+// observed. Until it is set those swaps stay pending.
+func (s *SwapService) SetChainReader(chain swapprovider.ChainReader) {
+	s.jupiterProvider.SetChainReader(chain)
 }
 
 // SwapProviderName reports which venue executes treasury swaps.
@@ -129,19 +142,6 @@ func (s *SwapService) symbolForMint(ctx context.Context, mint string) string {
 		return s.symbols.SymbolForMint(ctx, mint)
 	}
 	return symbolForOutputMint(ctx, nil, mint)
-}
-
-// SetTreasuryBalances seeds treasury token balances for integration tests.
-func (s *SwapService) SetTreasuryBalances(treasuryAddress string, balances TreasuryBalances) {
-	s.balances[treasuryAddress] = balances
-}
-
-// TreasuryBalancesFor returns tracked treasury balances for tests.
-func (s *SwapService) TreasuryBalancesFor(treasuryAddress string) TreasuryBalances {
-	if balances, ok := s.balances[treasuryAddress]; ok {
-		return balances
-	}
-	return TreasuryBalances{}
 }
 
 // DevExecuteBuy quotes, signs, executes, polls, and persists a treasury buy.
@@ -185,74 +185,15 @@ func (s *SwapService) executeBuy(ctx context.Context, req DevExecuteBuyRequest) 
 		Amount:         req.USDCAmount,
 		Wallet:         swapprovider.Wallet{PrivyWalletID: treasury.PrivyWalletID, SolanaAddress: treasury.SolanaAddress},
 	}
-	sub, err := s.provider.SubmitBuy(ctx, swapReq)
-	if err != nil {
-		if errors.Is(err, swapprovider.ErrNotRoutable) {
-			logSwapRefusal(req.GroupID, req.UserID, req.Symbol, err.Error())
-			return DevExecuteBuyResult{}, ErrQuoteNotRoutable
-		}
-		stage, requestID := swapprovider.StageOf(err, "submit_buy")
-		logSwapBranchError("swap buy submit failed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
-			"provider", s.provider.Name(), "stage", stage, "request_id", requestID,
-			"taker", treasury.SolanaAddress, "output_mint", outputMint, "usdc_amount", req.USDCAmount)
-		return DevExecuteBuyResult{}, err
-	}
-	logSwapExecuteSubmit(req.GroupID, req.UserID, req.Symbol, "", sub.RequestID)
-	if _, _, err := s.store.InsertPendingTransaction(ctx, postgres.InsertPendingTransactionParams{
-		GroupID:          req.GroupID,
-		ProposalID:       req.ProposalID,
-		AgentIntentID:    req.AgentIntentID,
-		InitiatedBy:      req.InitiatedBy,
-		Action:           postgres.TransactionActionBuy,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       outputMint,
-		Amount:           req.USDCAmount,
-		ExecuteRequestID: sub.RequestID,
-	}); err != nil {
-		return DevExecuteBuyResult{}, err
-	}
-
-	fill, err := s.provider.AwaitFill(ctx, sub, s.pollConfig)
-	if err != nil {
-		logSwapBranchError("swap buy poll failed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
-			"provider", s.provider.Name(), "stage", "poll_confirm", "request_id", sub.RequestID,
-			"status", fill.Status, "code", fill.Code)
-		// A confirmed swap whose fill amounts are unreadable moved funds: leave it pending for reconcile.
-		if !fill.Confirmed {
-			_ = s.markSwapFailed(ctx, req.GroupID, postgres.TransactionActionBuy, jupiter.USDCMint, outputMint, req.USDCAmount, sub.RequestID)
-		}
-		return DevExecuteBuyResult{}, err
-	}
-	logSwapPollTransition(req.GroupID, req.UserID, req.Symbol, fill.Signature, jupiter.ExecuteStatusPending, fill.Status, fill.Code)
-
-	costBasisAmount := fill.OutputAmount
-	costBasisPrice := fill.InputAmount
-
-	row, created, err := s.store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
-		GroupID:          req.GroupID,
-		Amount:           req.USDCAmount,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       outputMint,
-		TxSignature:      fill.Signature,
-		ExecuteRequestID: sub.RequestID,
-		CostBasisPrice:   costBasisPrice,
-		CostBasisAmount:  costBasisAmount,
+	row, created, err := s.executeSwap(ctx, swapExecution{
+		req:           swapReq,
+		action:        postgres.TransactionActionBuy,
+		proposalID:    req.ProposalID,
+		agentIntentID: req.AgentIntentID,
+		initiatedBy:   req.InitiatedBy,
 	})
 	if err != nil {
 		return DevExecuteBuyResult{}, err
-	}
-
-	if created {
-		s.applyBuyBalances(treasury.SolanaAddress, outputMint, req.USDCAmount, costBasisAmount)
-		treasuryUsdc, err := s.treasuryUSDCForSnapshot(ctx, treasury.SolanaAddress)
-		if err != nil {
-			return DevExecuteBuyResult{}, err
-		}
-		if err := s.store.WriteNavSnapshotOnTransactionConfirm(ctx, req.GroupID, treasuryUsdc); err != nil {
-			return DevExecuteBuyResult{}, err
-		}
 	}
 
 	logSwapBuySuccess(req.GroupID, req.UserID, req.Symbol, row.ID, created)
@@ -295,110 +236,182 @@ func (s *SwapService) executeSell(ctx context.Context, req SellToUSDCRequest) (S
 		Amount:         req.Amount,
 		Wallet:         swapprovider.Wallet{PrivyWalletID: treasury.PrivyWalletID, SolanaAddress: treasury.SolanaAddress},
 	}
-	sub, err := s.provider.SubmitSell(ctx, swapReq)
-	if err != nil {
-		if errors.Is(err, swapprovider.ErrNotRoutable) {
-			logSwapRefusal(req.GroupID, req.UserID, req.Symbol, err.Error())
-			return SellToUSDCResult{}, ErrQuoteNotRoutable
-		}
-		stage, requestID := swapprovider.StageOf(err, "submit_sell")
-		logSwapBranchError("swap sell submit failed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
-			"provider", s.provider.Name(), "stage", stage, "request_id", requestID,
-			"taker", treasury.SolanaAddress, "input_mint", req.InputMint, "amount", req.Amount)
-		return SellToUSDCResult{}, err
-	}
-	logSwapExecuteSubmit(req.GroupID, req.UserID, req.Symbol, "", sub.RequestID)
-	if _, _, err := s.store.InsertPendingTransaction(ctx, postgres.InsertPendingTransactionParams{
-		GroupID:          req.GroupID,
-		ProposalID:       req.ProposalID,
-		AgentIntentID:    req.AgentIntentID,
-		InitiatedBy:      req.InitiatedBy,
-		Action:           postgres.TransactionActionSell,
-		InputMint:        req.InputMint,
-		OutputMint:       jupiter.USDCMint,
-		Amount:           req.Amount,
-		ExecuteRequestID: sub.RequestID,
-	}); err != nil {
-		return SellToUSDCResult{}, err
-	}
-
-	fill, err := s.provider.AwaitFill(ctx, sub, s.pollConfig)
-	if err != nil {
-		logSwapBranchError("swap sell poll failed", err,
-			"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
-			"provider", s.provider.Name(), "stage", "poll_confirm", "request_id", sub.RequestID,
-			"status", fill.Status, "code", fill.Code)
-		if !fill.Confirmed {
-			_ = s.markSwapFailed(ctx, req.GroupID, postgres.TransactionActionSell, req.InputMint, jupiter.USDCMint, req.Amount, sub.RequestID)
-		}
-		return SellToUSDCResult{}, err
-	}
-	logSwapPollTransition(req.GroupID, req.UserID, req.Symbol, fill.Signature, jupiter.ExecuteStatusPending, fill.Status, fill.Code)
-
-	proceeds := fill.OutputAmount
-
-	row, created, err := s.store.ConfirmSellTransaction(ctx, postgres.ConfirmSellTransactionParams{
-		GroupID:          req.GroupID,
-		Amount:           req.Amount,
-		InputMint:        req.InputMint,
-		OutputMint:       jupiter.USDCMint,
-		TxSignature:      fill.Signature,
-		ExecuteRequestID: sub.RequestID,
-		ProceedsUSDC:     proceeds,
+	row, created, err := s.executeSwap(ctx, swapExecution{
+		req:           swapReq,
+		action:        postgres.TransactionActionSell,
+		proposalID:    req.ProposalID,
+		agentIntentID: req.AgentIntentID,
+		initiatedBy:   req.InitiatedBy,
 	})
 	if err != nil {
 		return SellToUSDCResult{}, err
 	}
 
-	if created {
-		s.applySellBalances(treasury.SolanaAddress, req.InputMint, req.Amount, proceeds)
-		treasuryUsdc, err := s.treasuryUSDCForSnapshot(ctx, treasury.SolanaAddress)
-		if err != nil {
-			return SellToUSDCResult{}, err
-		}
-		if err := s.store.WriteNavSnapshotOnTransactionConfirm(ctx, req.GroupID, treasuryUsdc); err != nil {
-			return SellToUSDCResult{}, err
-		}
-	}
-
 	logSwapSellSuccess(req.GroupID, req.UserID, req.Symbol, row.ID, created)
-	return SellToUSDCResult{Transaction: row, Created: created, ProceedsUSDC: proceeds}, nil
+	// A confirmed sell row stores its USDC proceeds in cost_basis_amount.
+	return SellToUSDCResult{Transaction: row, Created: created, ProceedsUSDC: row.CostBasisAmount.Int64}, nil
 }
 
-func (s *SwapService) treasuryUSDCForSnapshot(ctx context.Context, treasuryAddress string) (int64, error) {
-	if balances, ok := s.balances[treasuryAddress]; ok {
-		return balances.USDC, nil
+// swapExecution is one treasury swap plus the ledger links its transaction row carries.
+type swapExecution struct {
+	req           swapprovider.Request
+	action        string
+	proposalID    string
+	agentIntentID string
+	initiatedBy   string
+}
+
+// executeSwap runs one swap exactly once. The pending row is written before anything is
+// submitted, so a crash or timeout after submit leaves a row the reconciler can resolve, and
+// the row is marked failed only when the venue guarantees no funds moved. For a proposal the
+// row also takes the proposal's single execution slot, so a concurrent executor stops here.
+func (s *SwapService) executeSwap(ctx context.Context, exec swapExecution) (postgres.TransactionRow, bool, error) {
+	req := exec.req
+	logAttrs := []any{
+		"group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol,
+		"provider", s.provider.Name(), "side", string(req.Side), "amount", req.Amount,
 	}
+
+	if exec.proposalID != "" {
+		if row, done, err := s.activeProposalSwap(ctx, exec.proposalID, exec.action); err != nil || done {
+			return row, false, err
+		}
+	}
+
+	var prepared swapprovider.Prepared
+	var err error
+	if req.Side == swapprovider.SideSell {
+		prepared, err = s.provider.PrepareSell(ctx, req)
+	} else {
+		prepared, err = s.provider.PrepareBuy(ctx, req)
+	}
+	if err != nil {
+		if errors.Is(err, swapprovider.ErrNotRoutable) {
+			logSwapRefusal(req.GroupID, req.UserID, req.Symbol, err.Error())
+			return postgres.TransactionRow{}, false, ErrQuoteNotRoutable
+		}
+		stage, requestID := swapprovider.StageOf(err, "prepare_"+string(req.Side))
+		logSwapBranchError("swap prepare failed", err, append(logAttrs,
+			"stage", stage, "request_id", requestID, "taker", req.Wallet.SolanaAddress,
+			"input_mint", req.InputMint, "output_mint", req.OutputMint)...)
+		return postgres.TransactionRow{}, false, err
+	}
+
+	intent, err := s.store.InsertSwapIntent(ctx, postgres.InsertSwapIntentParams{
+		GroupID:           req.GroupID,
+		ProposalID:        exec.proposalID,
+		AgentIntentID:     exec.agentIntentID,
+		InitiatedBy:       exec.initiatedBy,
+		Action:            exec.action,
+		InputMint:         req.InputMint,
+		OutputMint:        req.OutputMint,
+		Amount:            req.Amount,
+		Provider:          s.provider.Name(),
+		ExecuteRequestID:  prepared.RequestID,
+		SignedTxSignature: prepared.TxSignature,
+		SignedTxBlockhash: prepared.Blockhash,
+		SubmitExpiresAt:   prepared.ExpiresAt,
+	})
+	if errors.Is(err, postgres.ErrActiveSwapExists) {
+		// Another executor took the proposal's slot between the check above and this insert.
+		// Nothing was submitted here; the signed payload is simply dropped.
+		row, _, err := s.activeProposalSwap(ctx, exec.proposalID, exec.action)
+		if err == nil && row.ID == "" {
+			err = ErrSwapInFlight
+		}
+		return row, false, err
+	}
+	if err != nil {
+		logSwapBranchError("swap intent insert failed", err, append(logAttrs, "stage", "record_intent", "request_id", prepared.RequestID)...)
+		return postgres.TransactionRow{}, false, err
+	}
+	logAttrs = append(logAttrs, "transaction_id", intent.ID)
+
+	sub, err := s.provider.Submit(ctx, prepared)
+	if err != nil {
+		stage, requestID := swapprovider.StageOf(err, "submit_"+string(req.Side))
+		logSwapBranchError("swap submit failed", err, append(logAttrs, "stage", stage, "request_id", requestID)...)
+		if errors.Is(err, swapprovider.ErrNotSubmitted) {
+			s.failPendingSwap(ctx, intent.ID, err.Error(), logAttrs)
+			return postgres.TransactionRow{}, false, err
+		}
+		return postgres.TransactionRow{}, false, fmt.Errorf("%w: %w", ErrSwapOutcomeUnknown, err)
+	}
+	logSwapExecuteSubmit(req.GroupID, req.UserID, req.Symbol, prepared.TxSignature, sub.RequestID)
+	if err := s.store.MarkSwapSubmitted(ctx, intent.ID, sub.RequestID); err != nil {
+		// The swap is live; keep going so an inline fill still lands in the ledger.
+		logSwapBranchError("swap mark submitted failed", err, append(logAttrs, "stage", "mark_submitted", "request_id", sub.RequestID)...)
+	}
+
+	fill, err := s.provider.AwaitFill(ctx, sub, s.pollConfig)
+	if err != nil {
+		logSwapBranchError("swap poll failed", err, append(logAttrs,
+			"stage", "poll_confirm", "request_id", sub.RequestID, "status", fill.Status, "code", fill.Code,
+			"confirmed", fill.Confirmed, "rejected", fill.Rejected)...)
+		if fill.Rejected && !fill.Confirmed {
+			s.failPendingSwap(ctx, intent.ID, err.Error(), logAttrs)
+			return postgres.TransactionRow{}, false, err
+		}
+		// Timeout, poll error, or a confirmed fill with unreadable amounts: funds may have moved.
+		return postgres.TransactionRow{}, false, fmt.Errorf("%w: %w", ErrSwapOutcomeUnknown, err)
+	}
+	logSwapPollTransition(req.GroupID, req.UserID, req.Symbol, fill.Signature, jupiter.ExecuteStatusPending, fill.Status, fill.Code)
+
+	return s.confirmSwap(ctx, intent.ID, req, fill)
+}
+
+// activeProposalSwap reports whether the proposal's execution slot is taken. done is true with
+// the confirmed row when the swap already landed; a pending row returns ErrSwapInFlight.
+func (s *SwapService) activeProposalSwap(ctx context.Context, proposalID, action string) (postgres.TransactionRow, bool, error) {
+	active, found, err := s.store.GetActiveSwapByProposalAndAction(ctx, proposalID, action)
+	if err != nil || !found {
+		return postgres.TransactionRow{}, false, err
+	}
+	if active.Status == postgres.TransactionStatusConfirmed {
+		return active, true, nil
+	}
+	return postgres.TransactionRow{}, false, fmt.Errorf("%w: transaction %s", ErrSwapInFlight, active.ID)
+}
+
+// confirmSwap records the fill on the pending row and snapshots NAV from the on-chain balance.
+func (s *SwapService) confirmSwap(ctx context.Context, transactionID string, req swapprovider.Request, fill swapprovider.Fill) (postgres.TransactionRow, bool, error) {
+	row, created, err := s.store.ConfirmPendingSwap(ctx, transactionID, postgres.SwapFill{
+		TxSignature:  fill.Signature,
+		InputAmount:  fill.InputAmount,
+		OutputAmount: fill.OutputAmount,
+	})
+	if err != nil {
+		logSwapBranchError("swap confirm failed", err,
+			"group_id", req.GroupID, "transaction_id", transactionID, "tx_signature", fill.Signature, "stage", "record_fill")
+		return postgres.TransactionRow{}, false, err
+	}
+	if created {
+		treasuryUsdc, err := s.treasuryUSDCForSnapshot(ctx, req.Wallet.SolanaAddress)
+		if err != nil {
+			return postgres.TransactionRow{}, false, err
+		}
+		if err := s.store.WriteNavSnapshotOnTransactionConfirm(ctx, req.GroupID, treasuryUsdc); err != nil {
+			return postgres.TransactionRow{}, false, err
+		}
+	}
+	return row, created, nil
+}
+
+func (s *SwapService) failPendingSwap(ctx context.Context, transactionID, reason string, logAttrs []any) {
+	if _, _, err := s.store.FailPendingSwap(ctx, transactionID, reason); err != nil {
+		// The row stays pending, which blocks a retry: safe, and the reconciler will look again.
+		logSwapBranchError("swap mark failed failed", err, append(logAttrs, "stage", "mark_failed")...)
+	}
+}
+
+// treasuryUSDCForSnapshot reads the treasury's USDC from the chain. Swaps move it, so nothing
+// remembered in process is ever a substitute.
+func (s *SwapService) treasuryUSDCForSnapshot(ctx context.Context, treasuryAddress string) (int64, error) {
 	balance, err := s.privy.TreasuryUSDCBalance(ctx, treasuryAddress)
 	if err != nil {
 		return 0, fmt.Errorf("treasury usdc balance: %w", err)
 	}
 	return balance, nil
-}
-
-func (s *SwapService) applyBuyBalances(treasuryAddress, outputMint string, usdcSpent, xStockReceived int64) {
-	balances := s.TreasuryBalancesFor(treasuryAddress)
-	if outputMint == jupiter.AAPLxMint || outputMint != jupiter.USDCMint {
-		balances.XStock += xStockReceived
-	}
-	balances.USDC -= usdcSpent
-	if balances.USDC < 0 {
-		balances.USDC = 0
-	}
-	s.balances[treasuryAddress] = balances
-}
-
-func (s *SwapService) applySellBalances(treasuryAddress, inputMint string, xStockSold, usdcReceived int64) {
-	balances := s.TreasuryBalancesFor(treasuryAddress)
-	if inputMint == jupiter.AAPLxMint || inputMint != jupiter.USDCMint {
-		balances.XStock -= xStockSold
-		if balances.XStock < 0 {
-			balances.XStock = 0
-		}
-	}
-	balances.USDC += usdcReceived
-	s.balances[treasuryAddress] = balances
 }
 
 func (s *SwapService) signSwapTransaction(ctx context.Context, walletID, unsignedTx string) (string, error) {
@@ -411,17 +424,4 @@ func (s *SwapService) signSwapTransaction(ctx context.Context, walletID, unsigne
 		}
 	}
 	return s.signer.SignTreasuryTransaction(ctx, walletID, tx)
-}
-
-func (s *SwapService) markSwapFailed(ctx context.Context, groupID, action, inputMint, outputMint string, amount int64, executeRequestID string) error {
-	if executeRequestID == "" {
-		return nil
-	}
-	if _, ok, err := s.store.FailTransactionByExecuteRequestID(ctx, executeRequestID); err != nil {
-		return err
-	} else if ok {
-		return nil
-	}
-	_, err := s.store.InsertFailedTransaction(ctx, groupID, action, inputMint, outputMint, amount, executeRequestID)
-	return err
 }

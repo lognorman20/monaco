@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/monaco/monaco/packages/domain"
@@ -436,8 +437,23 @@ LIMIT 100`
 	return collectProposalRows(rows, "scan proposal")
 }
 
-// ListPassedProposalsPendingExecute returns passed proposals without a confirmed buy row.
+// passedProposalNeedsExecuteSQL matches passed buy/sell proposals (alias p) with no pending or
+// confirmed swap on their side. A pending swap has an unknown outcome and belongs to the swap
+// reconciler; only a definitively failed swap leaves the proposal executable again.
 // Faker proposers and faker groups (#153) are excluded so seeded proposals never reach Jupiter.
+const passedProposalNeedsExecuteSQL = `
+p.status = 'passed'
+  AND p.kind IN ('buy', 'sell')
+  AND NOT EXISTS (SELECT 1 FROM users fu WHERE fu.id = p.proposer_id AND fu.is_faker)
+  AND NOT EXISTS (SELECT 1 FROM groups fg WHERE fg.id = p.group_id AND fg.is_faker)
+  AND NOT EXISTS (
+    SELECT 1 FROM transactions t
+    WHERE t.proposal_id = p.id
+      AND t.action = p.kind
+      AND t.status IN ('pending', 'confirmed')
+  )`
+
+// ListPassedProposalsPendingExecute returns passed proposals without a pending or confirmed swap.
 func (s *Store) ListPassedProposalsPendingExecute(ctx context.Context, limit int) ([]ProposalRow, error) {
 	if limit <= 0 {
 		limit = 20
@@ -446,29 +462,7 @@ func (s *Store) ListPassedProposalsPendingExecute(ctx context.Context, limit int
 	selectSQL := `
 SELECT ` + proposalSelectColumns + `
 FROM proposals p
-WHERE p.status = 'passed'
-  AND NOT EXISTS (SELECT 1 FROM users fu WHERE fu.id = p.proposer_id AND fu.is_faker)
-  AND NOT EXISTS (SELECT 1 FROM groups fg WHERE fg.id = p.group_id AND fg.is_faker)
-  AND (
-    (
-      p.kind = 'buy'
-      AND NOT EXISTS (
-        SELECT 1 FROM transactions t
-        WHERE t.proposal_id = p.id
-          AND t.action = 'buy'
-          AND t.status = 'confirmed'
-      )
-    )
-    OR
-    (
-      p.kind = 'sell'
-      AND NOT EXISTS (
-        SELECT 1 FROM transactions t
-        WHERE t.proposal_id = p.id
-          AND t.action = 'sell'
-      )
-    )
-  )
+WHERE ` + passedProposalNeedsExecuteSQL + `
 ORDER BY p.created_at ASC
 LIMIT $1`
 
@@ -478,6 +472,102 @@ LIMIT $1`
 	}
 	defer rows.Close()
 	return collectProposalRows(rows, "scan passed proposal pending execute")
+}
+
+// ClaimedProposalRow is a passed proposal this caller now holds the execute claim on.
+type ClaimedProposalRow struct {
+	Proposal ProposalRow
+	// ExecuteAttempts counts claims including this one.
+	ExecuteAttempts int
+}
+
+// ClaimPassedProposalsForExecute atomically claims passed proposals that are due for execution.
+// A claim pushes execute_next_attempt_at to now+lease, so no other instance (or a restart of
+// this one) picks the proposal up until the lease or a recorded backoff runs out. Rows locked
+// by a concurrent claimer are skipped.
+func (s *Store) ClaimPassedProposalsForExecute(ctx context.Context, now time.Time, lease time.Duration, limit int) ([]ClaimedProposalRow, error) {
+	if lease <= 0 {
+		return nil, fmt.Errorf("lease must be positive")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	claimSQL := `
+UPDATE proposals
+SET execute_attempts = execute_attempts + 1,
+    execute_next_attempt_at = $2
+WHERE id IN (
+  SELECT p.id
+  FROM proposals p
+  WHERE ` + passedProposalNeedsExecuteSQL + `
+    AND (p.execute_next_attempt_at IS NULL OR p.execute_next_attempt_at <= $1)
+  ORDER BY p.created_at ASC
+  LIMIT $3
+  FOR UPDATE OF p SKIP LOCKED
+)
+RETURNING ` + proposalSelectColumns + `, execute_attempts`
+
+	rows, err := s.db.QueryContext(ctx, claimSQL, now.UTC(), now.Add(lease).UTC(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("claim passed proposals for execute: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ClaimedProposalRow
+	for rows.Next() {
+		var claimed ClaimedProposalRow
+		row, err := scanProposalRow(trailingScanner{inner: rows, extra: []any{&claimed.ExecuteAttempts}})
+		if err != nil {
+			return nil, fmt.Errorf("scan claimed proposal: %w", err)
+		}
+		claimed.Proposal = row
+		out = append(out, claimed)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate claimed proposals: %w", err)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Proposal.CreatedAt.Before(out[j].Proposal.CreatedAt) })
+	return out, nil
+}
+
+// trailingScanner scans extra destinations after the columns its caller asks for.
+type trailingScanner struct {
+	inner interface{ Scan(dest ...any) error }
+	extra []any
+}
+
+func (t trailingScanner) Scan(dest ...any) error {
+	return t.inner.Scan(append(dest, t.extra...)...)
+}
+
+// RecordProposalExecuteFailure persists the backoff deadline and cause after a failed execute
+// attempt, so every instance and every restart honours it.
+func (s *Store) RecordProposalExecuteFailure(ctx context.Context, proposalID string, nextAttemptAt time.Time, lastError string) error {
+	if proposalID == "" {
+		return fmt.Errorf("proposal_id is required")
+	}
+	const updateSQL = `
+UPDATE proposals
+SET execute_next_attempt_at = $2, execute_last_error = $3
+WHERE id = $1`
+	if _, err := s.db.ExecContext(ctx, updateSQL, proposalID, nextAttemptAt.UTC(), lastError); err != nil {
+		return fmt.Errorf("record proposal execute failure: %w", err)
+	}
+	return nil
+}
+
+// GetProposalExecuteAttempts returns how many times proposalID has been claimed for execution.
+func (s *Store) GetProposalExecuteAttempts(ctx context.Context, proposalID string) (int, error) {
+	if proposalID == "" {
+		return 0, fmt.Errorf("proposal_id is required")
+	}
+	var attempts int
+	err := s.db.QueryRowContext(ctx, `SELECT execute_attempts FROM proposals WHERE id = $1`, proposalID).Scan(&attempts)
+	if err != nil {
+		return 0, fmt.Errorf("get proposal execute attempts: %w", err)
+	}
+	return attempts, nil
 }
 
 // ListPassedProposalsAwaitingExecuteByGroupID returns passed proposals with no linked swap row yet.

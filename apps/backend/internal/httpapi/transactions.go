@@ -114,6 +114,8 @@ func (h *TransactionHandlers) RetryTransactionHandler(w http.ResponseWriter, r *
 			logJSONError(ctx, log, "transaction_not_retryable", w, http.StatusConflict, "transaction not retryable", "transaction_id", transactionID)
 		case errors.Is(err, app.ErrTransactionNotFound):
 			logJSONError(ctx, log, "transaction_not_found", w, http.StatusNotFound, "transaction not found", "transaction_id", transactionID)
+		case errors.Is(err, app.ErrSwapInFlight), errors.Is(err, app.ErrSwapOutcomeUnknown):
+			logJSONError(ctx, log, "swap_pending", w, http.StatusConflict, "swap is still settling", "transaction_id", transactionID, "err", err.Error())
 		default:
 			logJSONError(ctx, log, "retry_transaction_failed", w, http.StatusInternalServerError, "internal server error", "transaction_id", transactionID, "err", err.Error())
 		}

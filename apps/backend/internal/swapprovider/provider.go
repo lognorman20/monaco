@@ -49,6 +49,22 @@ type Request struct {
 	Wallet         Wallet
 }
 
+// Prepared is a quoted and signed swap that has NOT been sent to the venue yet. Callers
+// persist it before Submit so a crash or timeout after submit can still be resolved.
+type Prepared struct {
+	// RequestID is the venue id known before submit (Jupiter requestId, Flash quoteId).
+	RequestID string
+	// TxSignature and Blockhash identify the signed Solana transaction when the venue
+	// broadcasts the transaction we signed. Empty when the venue settles with its own.
+	TxSignature string
+	Blockhash   string
+	// ExpiresAt is when the venue stops accepting the signed payload. Zero when unknown.
+	ExpiresAt time.Time
+	// Payload is provider-private state Submit needs (opaque to callers).
+	Payload string
+	Request Request
+}
+
 // Submission identifies a swap the provider has accepted for execution.
 type Submission struct {
 	// RequestID is the provider's id for the swap, persisted as execute_request_id.
@@ -58,11 +74,14 @@ type Submission struct {
 	Request Request
 }
 
-// Fill is the terminal result of a swap. Amounts are atomic units of the input and output mints.
+// Fill is the result of a swap. Amounts are atomic units of the input and output mints.
 // Confirmed is true once the venue reports the swap landed, even if AwaitFill then
-// fails to read the fill amounts; callers must not mark a confirmed swap as failed.
+// fails to read the fill amounts. Rejected is true only when the venue guarantees no
+// funds moved. Neither set means the outcome is unknown: callers must leave the swap
+// pending for Resolve and must not retry it.
 type Fill struct {
 	Confirmed    bool
+	Rejected     bool
 	Signature    string
 	Status       string
 	Code         int
@@ -76,13 +95,73 @@ type PollConfig struct {
 	Interval    time.Duration
 }
 
-// Provider submits treasury swaps to one venue and waits for their fills.
-// Submit* covers quote, signing, and submission; AwaitFill polls to a terminal state.
+// ErrNotSubmitted wraps a Submit error when the venue definitively did not accept the swap.
+// Any other Submit error leaves the outcome unknown.
+var ErrNotSubmitted = errors.New("swap: not submitted")
+
+// Outcome is the resolved state of a swap whose result was not observed inline.
+type Outcome string
+
+const (
+	// OutcomeUnknown means the swap may still land; ask again later.
+	OutcomeUnknown Outcome = "unknown"
+	// OutcomeFilled means funds moved and Fill carries the amounts.
+	OutcomeFilled Outcome = "filled"
+	// OutcomeFailed means the swap definitively did not and can no longer move funds.
+	OutcomeFailed Outcome = "failed"
+)
+
+// PendingSwap is a persisted swap intent handed back to the provider for resolution.
+type PendingSwap struct {
+	Request Request
+	// RequestID is the persisted execute_request_id: Submission.RequestID once Submitted,
+	// otherwise Prepared.RequestID.
+	RequestID   string
+	Submitted   bool
+	TxSignature string
+	Blockhash   string
+	ExpiresAt   time.Time
+}
+
+// Resolution is the provider's verdict on a PendingSwap.
+type Resolution struct {
+	Outcome Outcome
+	Fill    Fill
+	Reason  string
+}
+
+// Provider runs treasury swaps on one venue. Prepare* covers quote and signing and sends
+// nothing; Submit hands the signed swap to the venue; AwaitFill polls to a terminal state;
+// Resolve decides the outcome of a persisted swap after a crash, timeout, or poll error.
 type Provider interface {
 	Name() string
-	SubmitBuy(ctx context.Context, req Request) (Submission, error)
-	SubmitSell(ctx context.Context, req Request) (Submission, error)
+	PrepareBuy(ctx context.Context, req Request) (Prepared, error)
+	PrepareSell(ctx context.Context, req Request) (Prepared, error)
+	Submit(ctx context.Context, prepared Prepared) (Submission, error)
 	AwaitFill(ctx context.Context, sub Submission, cfg PollConfig) (Fill, error)
+	Resolve(ctx context.Context, pending PendingSwap) (Resolution, error)
+}
+
+// SignatureStatus is the chain's view of one transaction signature.
+type SignatureStatus struct {
+	// Found is false when no ledger entry exists for the signature.
+	Found bool
+	// Finalized is true once the transaction can no longer be rolled back.
+	Finalized bool
+	// Failed is true when the transaction landed but its instructions errored.
+	Failed bool
+	Err    string
+}
+
+// ChainReader answers, from Solana itself, whether a signed swap transaction landed.
+type ChainReader interface {
+	// SignatureStatus searches full ledger history for signature.
+	SignatureStatus(ctx context.Context, signature string) (SignatureStatus, error)
+	// IsBlockhashValid reports whether blockhash can still land as of the finalized bank.
+	IsBlockhashValid(ctx context.Context, blockhash string) (bool, error)
+	// TokenBalanceChanges returns post-minus-pre token balances per mint for owner in the
+	// finalized transaction signature.
+	TokenBalanceChanges(ctx context.Context, signature, owner string) (map[string]int64, error)
 }
 
 // TransactionSigner signs a base64 Solana transaction with the treasury wallet.

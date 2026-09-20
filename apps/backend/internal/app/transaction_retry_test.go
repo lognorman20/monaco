@@ -89,7 +89,6 @@ func TestRetryFailedSwap_buySuccessCreatesNewConfirmedRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
-	h.Swap.SetTreasuryBalances(treasury.SolanaAddress, TreasuryBalances{USDC: 5_000_000})
 	privy.SetTreasuryUSDCBalance(h.Privy, treasury.SolanaAddress, 5_000_000)
 
 	failed, err := h.Store.InsertFailedTransaction(ctx, group.GroupID, postgres.TransactionActionBuy, jupiter.USDCMint, jupiter.AAPLxMint, usdcAmount, testRequestID(h.ISO, "buy-failed"))
@@ -136,7 +135,7 @@ func TestRetryFailedSwap_sellSuccessCreatesNewConfirmedRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureTreasury: %v", err)
 	}
-	h.Swap.SetTreasuryBalances(treasury.SolanaAddress, TreasuryBalances{XStock: 2_000_000})
+	privy.SetTreasuryUSDCBalance(h.Privy, treasury.SolanaAddress, 0)
 
 	failed, err := h.Store.InsertFailedTransaction(ctx, group.GroupID, postgres.TransactionActionSell, jupiter.AAPLxMint, jupiter.USDCMint, amount, testRequestID(h.ISO, "sell-failed"))
 	if err != nil {
@@ -194,22 +193,6 @@ func TestRetryFailedSwap_idempotentWhenProposalAlreadyConfirmed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
 	}
-	confirmed, _, err := h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
-		GroupID:          group.GroupID,
-		Amount:           2_000_000,
-		InputMint:        jupiter.USDCMint,
-		OutputMint:       jupiter.AAPLxMint,
-		TxSignature:      testTxSignature(h.ISO, "already-confirmed"),
-		ExecuteRequestID: testRequestID(h.ISO, "already-confirmed"),
-		CostBasisPrice:   2_000_000,
-		CostBasisAmount:  1_000_000,
-	})
-	if err != nil {
-		t.Fatalf("confirm buy: %v", err)
-	}
-	if _, _, err := h.Store.SetTransactionProposalID(ctx, confirmed.ID, proposal.ID); err != nil {
-		t.Fatalf("link proposal: %v", err)
-	}
 	proposalID := proposal.ID
 
 	executeRequestID := testRequestID(h.ISO, "failed-with-proposal")
@@ -231,6 +214,25 @@ func TestRetryFailedSwap_idempotentWhenProposalAlreadyConfirmed(t *testing.T) {
 	}
 	if failed.ID != pending.ID {
 		t.Fatalf("failed id = %q, want pending %q", failed.ID, pending.ID)
+	}
+
+	// The earlier attempt failed for good and a later one confirmed: a proposal never holds a
+	// pending and a confirmed swap at once.
+	confirmed, _, err := h.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
+		GroupID:          group.GroupID,
+		Amount:           2_000_000,
+		InputMint:        jupiter.USDCMint,
+		OutputMint:       jupiter.AAPLxMint,
+		TxSignature:      testTxSignature(h.ISO, "already-confirmed"),
+		ExecuteRequestID: testRequestID(h.ISO, "already-confirmed"),
+		CostBasisPrice:   2_000_000,
+		CostBasisAmount:  1_000_000,
+	})
+	if err != nil {
+		t.Fatalf("confirm buy: %v", err)
+	}
+	if _, _, err := h.Store.SetTransactionProposalID(ctx, confirmed.ID, proposal.ID); err != nil {
+		t.Fatalf("link proposal: %v", err)
 	}
 
 	result, err := h.Swap.RetryFailedSwap(ctx, RetryFailedSwapRequest{

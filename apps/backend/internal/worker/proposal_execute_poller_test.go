@@ -12,8 +12,7 @@ import (
 )
 
 func TestProposalExecutePoller_executesPassedProposal(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: a tick claims every due proposal in the database, including another test's.
 	testApp := integrationWorkerApp(t)
 	store := testApp.Store
 	jupiterClient := jupiter.NewFakeClient()

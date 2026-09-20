@@ -147,8 +147,10 @@ type ExecuteOnPassResult struct {
 	Created     bool
 }
 
-// ExecuteOnPass builds, signs, POSTs Jupiter execute, polls Success code 0, and persists the buy.
-// Only proposals with status passed may execute. Idempotency on proposal id is wired for M4-T21.
+// ExecuteOnPass builds, signs, POSTs Jupiter execute, polls Success code 0, and persists the swap.
+// Only proposals with status passed may execute. A proposal executes at most once: the swap row
+// written before submit holds its only execution slot until that swap definitively fails, so a
+// swap whose outcome is unknown returns ErrSwapOutcomeUnknown or ErrSwapInFlight, never a retry.
 func (s *ExecuteOnPassService) ExecuteOnPass(ctx context.Context, proposal Proposal) (ExecuteOnPassResult, error) {
 	kind := proposal.Kind
 	if kind == "" {
@@ -241,11 +243,6 @@ func (s *ExecuteOnPassService) executeSellOnPass(ctx context.Context, proposal P
 	} else if found {
 		logExecuteOnPassIdempotent(proposal.ID, existing.ID)
 		return ExecuteOnPassResult{Transaction: existing, Created: false}, nil
-	}
-	if latest, found, err := s.store.GetLatestTransactionByProposalAndAction(ctx, proposal.ID, postgres.TransactionActionSell); err != nil {
-		return ExecuteOnPassResult{}, err
-	} else if found && (latest.Status == postgres.TransactionStatusFailed || latest.Status == postgres.TransactionStatusPending) {
-		return ExecuteOnPassResult{}, fmt.Errorf("sell execute already attempted")
 	}
 
 	inputMint, err := s.swap.buy.ResolveOutputMint(ctx, proposal.Symbol)

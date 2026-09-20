@@ -88,12 +88,14 @@ func (s *SwapService) RetryFailedSwap(ctx context.Context, req RetryFailedSwapRe
 		if symbol == "" || symbol == unknownStockSymbol {
 			return RetryFailedSwapResult{}, fmt.Errorf("unsupported input mint for retry")
 		}
+		// The proposal id keeps a manual retry and the execute poller on the same execution slot.
 		result, err := s.SellToUSDC(ctx, SellToUSDCRequest{
-			GroupID:   tx.GroupID,
-			UserID:    req.UserID,
-			Symbol:    symbol,
-			InputMint: tx.InputMint,
-			Amount:    tx.Amount,
+			GroupID:    tx.GroupID,
+			UserID:     req.UserID,
+			Symbol:     symbol,
+			InputMint:  tx.InputMint,
+			Amount:     tx.Amount,
+			ProposalID: proposalID,
 		})
 		if err != nil {
 			return RetryFailedSwapResult{}, err

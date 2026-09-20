@@ -17,6 +17,9 @@ func moneyOutcome(err error) string {
 		return telemetry.OutcomeOK
 	case errors.Is(err, context.Canceled):
 		return "canceled"
+	case errors.Is(err, ErrSwapOutcomeUnknown), errors.Is(err, ErrSwapInFlight):
+		// Submitted but not observed: the swap reconciler counts it when it settles.
+		return "pending"
 	case errors.Is(err, ErrAgentIntentRejected),
 		errors.Is(err, ErrAgentPaused),
 		errors.Is(err, ErrInvalidAgentAPIKey),
