@@ -2,12 +2,21 @@ import Foundation
 
 /// What the screen should offer after a money request failed.
 public enum FlowRecovery: Equatable, Sendable {
-    /// Nothing moved. Sending again is a fresh submission and is safe.
+    /// Sending again is a fresh submission. Either the request provably never ran, or the
+    /// backend has released its idempotency key and a retry will reach the handler again.
     case retry
     /// The outcome is unknown: the request may be running or may already have finished.
-    /// Sending the same payload again is safe — it goes out under the pending idempotency
-    /// key, so the backend replays its answer instead of moving the money a second time.
-    /// Changing the amount or the address is not: that is a second submission.
+    /// Resending the *same* payload is the safest move available — it goes out under the
+    /// pending idempotency key, so a backend that is still holding that key replays its
+    /// answer or reports the attempt as in progress rather than moving the money again.
+    /// Changing the amount or the address is worse: that mints a new key, which is a second
+    /// submission.
+    ///
+    /// It is not an absolute guarantee of single execution, and copy must not promise one:
+    /// the backend abandons an `in_progress` claim after 5 minutes (`idempotencyAbandonedAfter`
+    /// in `httpapi/idempotency.go`), which is exactly the process-died case where the money
+    /// state is genuinely unknown, and a payload derived from live data can change the
+    /// fingerprint with no member action at all. Tell the member to check the balance.
     case resendSame
     /// The same request would fail the same way (bad address, not a member, signed out).
     case none
@@ -127,6 +136,15 @@ public enum MoneyFlowCopy {
         if input.isSignInUnavailable { return signInUnavailableFailure(action: "add that money") }
         if input.isOffline { return offlineFailure(action: "add that money") }
         switch input.status {
+        // The deposit the member already sent is still running under its idempotency key.
+        // Reported as a flat failure this reads as "nothing happened", while the money may
+        // be landing; the retry has to go back under the same key.
+        case 409:
+            return FlowFailure(
+                message: "Your last deposit is still finishing.",
+                recovery: .resendSame,
+                nextStep: "Give it a minute, then check the cabal's balance."
+            )
         case 400 where matches(input, "amount exceeds available platform balance"):
             return FlowFailure(
                 message: "That's more than your account balance.",
@@ -152,11 +170,12 @@ public enum MoneyFlowCopy {
         if input.isSignInUnavailable { return signInUnavailableFailure(action: "cash out") }
         if input.isOffline { return offlineFailure(action: "cash out") }
         switch input.status {
+        // Still running, under the key the app already sent: not a fresh submission.
         case 409:
             return FlowFailure(
                 message: "Your last cash out is still finishing.",
-                isRetryable: true,
-                nextStep: "Give it a minute, then try again."
+                recovery: .resendSame,
+                nextStep: "Give it a minute, then check your balance."
             )
         case 404:
             return FlowFailure(message: "You're not a member of this cabal.", isRetryable: false)
@@ -212,28 +231,45 @@ public enum MoneyFlowCopy {
                 nextStep: "Sign in again to \(action)."
             )
         }
+        // A 409 on a money route means the idempotency key the app just sent is still
+        // claimed by an attempt that has not finished. That attempt may well be landing the
+        // money, so this is never a fresh submission: the retry has to ride the same key.
+        if input.status == 409 {
+            return FlowFailure(
+                message: "Your last request is still finishing.",
+                recovery: .resendSame,
+                nextStep: "Give it a minute, then check your balance."
+            )
+        }
         if let status = input.status, (400..<500).contains(status),
            let message = memberFacingMessage(input.serverMessage) {
             return FlowFailure(message: message, isRetryable: false)
         }
-        guard let status = input.status else { return unconfirmed }
-        // A 5xx is as unknown as a timeout: the backend never stores the result of one,
-        // so the same submission has to go back under the same key.
+        guard input.status != nil else { return unconfirmed }
+        // A 5xx is not an unknown outcome held under the key: the backend deliberately
+        // RELEASES the key on 5xx and panics (see `Idempotency.run` in httpapi), so the
+        // retry reaches the handler again as a fresh run. Calling it `.resendSame` would
+        // promise a replay that the server has already thrown away.
         return FlowFailure(
             message: "We couldn't \(action).",
-            recovery: status >= 500 ? .resendSame : .retry,
+            recovery: .retry,
             nextStep: "Try again in a moment."
         )
     }
 
     /// No status at all (timeout, dropped connection, unreadable reply): the request may
-    /// have gone through. Sending the same amount again is still safe — it carries the
-    /// same idempotency key, so the backend answers with the first result instead of
-    /// moving the money twice. Changing the amount first is what would move it twice.
+    /// have gone through. Resending the same amount is the safest way on — it carries the
+    /// pending idempotency key, so a backend still holding that key answers with the first
+    /// result instead of moving the money again. Changing the amount first is what would
+    /// certainly move it twice.
+    ///
+    /// The next step deliberately stops short of promising single execution, and sends the
+    /// member to their balance first: see `FlowRecovery.resendSame` for the cases where the
+    /// key no longer protects the retry.
     public static let unconfirmed = FlowFailure(
         message: "We couldn't confirm that went through.",
         recovery: .resendSame,
-        nextStep: "Try again with the same amount — it can only go through once."
+        nextStep: "Check your balance first — if it didn't arrive, send the same amount again."
     )
 
     private static func matches(_ input: FlowErrorInput, _ expected: String) -> Bool {

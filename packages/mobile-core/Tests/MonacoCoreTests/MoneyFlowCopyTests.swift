@@ -51,12 +51,47 @@ final class MoneyFlowCopyTests: XCTestCase {
         XCTAssertEqual(MoneyFlowCopy.sellStakeFailure(FlowErrorInput()), MoneyFlowCopy.unconfirmed)
     }
 
-    func testServerError_isRetryableWithoutClaimingNothingMoved() {
+    func testServerError_isAFreshTry_becauseTheBackendReleasedTheKey() {
         let failure = MoneyFlowCopy.fundCabalFailure(FlowErrorInput(status: 502, serverMessage: "bad gateway"))
         XCTAssertEqual(failure.message, "We couldn't add that money.")
         XCTAssertTrue(failure.isRetryable)
-        // A 5xx is never stored by the backend, so it is as unknown as a timeout.
-        XCTAssertEqual(failure.recovery, .resendSame)
+        // `Idempotency.run` releases the key on 5xx so the retry reaches the handler again.
+        // Calling this `.resendSame` would promise a replay the server has thrown away.
+        XCTAssertEqual(failure.recovery, .retry)
+        XCTAssertFalse(failure.mustResendSameSubmission)
+        XCTAssertEqual(MoneyFlowCopy.cashOutFailure(FlowErrorInput(status: 500)).recovery, .retry)
+    }
+
+    /// A 409 on a money route means an attempt is still holding the key the app just sent,
+    /// and that attempt may be landing the money. It is never a fresh submission.
+    func testConflict_isAReplayOnEveryMoneyFlow_neverAFreshSubmission() {
+        for failure in [
+            MoneyFlowCopy.fundCabalFailure(FlowErrorInput(status: 409)),
+            MoneyFlowCopy.sellStakeFailure(FlowErrorInput(status: 409)),
+        ] {
+            XCTAssertEqual(failure.recovery, .resendSame)
+            XCTAssertTrue(failure.mustResendSameSubmission)
+        }
+        // Fund used to fall through to generic(), which worded an in-flight deposit as a
+        // flat failure and offered a fresh send while the key was still pending.
+        let fund = MoneyFlowCopy.fundCabalFailure(FlowErrorInput(status: 409))
+        XCTAssertEqual(fund.message, "Your last deposit is still finishing.")
+        XCTAssertNotEqual(fund.message, "We couldn't add that money.")
+        XCTAssertEqual(
+            MoneyFlowCopy.sellStakeFailure(FlowErrorInput(status: 409)).message,
+            "Your last cash out is still finishing."
+        )
+    }
+
+    /// The copy must not promise that a retry can only ever go through once: the backend
+    /// abandons an in-progress claim after 5 minutes, and a payload derived from live
+    /// equity can change its own fingerprint. It sends the member to their balance instead.
+    func testUnconfirmed_doesNotPromiseSingleExecution_andKeepsTheBalanceCheck() {
+        let nextStep = try? XCTUnwrap(MoneyFlowCopy.unconfirmed.nextStep)
+        let step = nextStep ?? ""
+        XCTAssertTrue(step.lowercased().contains("balance"), "lost the balance check: \(step)")
+        XCTAssertFalse(step.lowercased().contains("only go through once"), "promises single execution: \(step)")
+        XCTAssertFalse(step.lowercased().contains("can only"), "promises single execution: \(step)")
     }
 
     func testSignInUnavailable_saysNothingWasSent_andStaysRetryable() {
@@ -74,7 +109,7 @@ final class MoneyFlowCopyTests: XCTestCase {
     func testRecovery_separatesAFreshTryFromAReplay() {
         XCTAssertEqual(MoneyFlowCopy.fundCabalFailure(.offline()).recovery, .retry)
         XCTAssertEqual(MoneyFlowCopy.fundCabalFailure(FlowErrorInput(status: 429)).recovery, .retry)
-        XCTAssertEqual(MoneyFlowCopy.sellStakeFailure(FlowErrorInput(status: 409)).recovery, .retry)
+        XCTAssertEqual(MoneyFlowCopy.sellStakeFailure(FlowErrorInput(status: 409)).recovery, .resendSame)
         XCTAssertEqual(MoneyFlowCopy.cashOutFailure(FlowErrorInput(status: 401)).recovery, .none)
         XCTAssertEqual(MoneyFlowCopy.fundCabalFailure(FlowErrorInput(status: 404)).recovery, .none)
     }
@@ -108,6 +143,36 @@ final class MoneyFlowCopyTests: XCTestCase {
             "Cash out at least $0.10."
         )
         XCTAssertTrue(MoneyFlowCopy.sellStakeFailure(FlowErrorInput(status: 409)).isRetryable)
+    }
+
+    /// The sequence the new copy will most often produce: a money POST times out, the
+    /// member sends the same amount again under the pending key, and the backend answers
+    /// 409 `in_progress`. Both steps have to keep a way forward and keep the same key.
+    func testTimeoutThenInProgressConflict_staysAReplayThroughout() {
+        let timedOut = MoneyFlowCopy.fundCabalFailure(FlowErrorInput())
+        XCTAssertEqual(timedOut.recovery, .resendSame)
+
+        let submission = IdempotentSubmission { "key-1" }
+        var request = URLRequest(url: URL(string: "https://api.test/v1/groups/g1/fund")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data(#"{"amount":1}"#.utf8)
+        let first = submission.key(for: request)
+        XCTAssertTrue(submission.hasPendingKey, "a timeout leaves the key pending")
+
+        // The 409 must not clear the key, or the next attempt mints a second submission.
+        let conflict = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 409,
+            httpVersion: nil,
+            headerFields: [IdempotentSubmission.statusHeader: IdempotentSubmission.inProgressStatus]
+        )!
+        submission.record(response: conflict, forKey: first)
+        XCTAssertTrue(submission.hasPendingKey)
+        XCTAssertEqual(submission.key(for: request), first, "the retry must ride the same key")
+
+        let stillRunning = MoneyFlowCopy.fundCabalFailure(FlowErrorInput(status: 409))
+        XCTAssertEqual(stillRunning.recovery, .resendSame)
+        XCTAssertTrue(stillRunning.isRetryable)
     }
 
     func testGeneric_sessionExpiredAndRateLimited() {
