@@ -16,6 +16,7 @@ struct ProposeBuyView: View {
 
     @State private var pot: ProposePot?
     @State private var potLoadFailed = false
+    @State private var isLoadingPot = false
     @State private var query = ""
     @State private var popular: [ProposeStock] = []
     @State private var popularLoadFailed = false
@@ -84,12 +85,15 @@ struct ProposeBuyView: View {
         }
         .monacoToast($toast)
         .task {
-            // The pot is the buy ceiling, so this screen loads it once for the whole flow. Jumping
-            // straight to a stock waits for it, so the amount step never opens without one.
+            // A stock the member already chose is honoured on the first frame, before anything is
+            // awaited: the list below is live while the pot and the popular stocks load, so a tap
+            // on it during those round trips would otherwise be overwritten by this. The amount
+            // step still waits for the pot — `ProposePotUnavailable` stands in until it lands.
+            applyInitialSymbolIfNeeded()
+            // The pot is the buy ceiling, so this screen loads it once for the whole flow.
             async let stocks: Void = loadPopular(force: true)
             await loadPot()
             await stocks
-            applyInitialSymbolIfNeeded()
         }
         .task(id: trimmedQuery) {
             guard !trimmedQuery.isEmpty else {
@@ -219,8 +223,11 @@ struct ProposeBuyView: View {
     }
 
     private func loadPot() async {
-        guard pot == nil else { return }
+        // Two quick taps on the retry used to fire two group-view reads.
+        guard pot == nil, !isLoadingPot else { return }
+        isLoadingPot = true
         potLoadFailed = false
+        defer { isLoadingPot = false }
         do {
             pot = try await service.pot(groupId: groupId)
         } catch {
