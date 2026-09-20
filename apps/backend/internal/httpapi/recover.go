@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime"
+
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 // panicStackBytes bounds the stack captured for a panic log line.
@@ -39,6 +41,11 @@ func Recover() Middleware {
 					"panic", fmt.Sprintf("%v", rec),
 					"stack", string(stack),
 				)
+				telemetry.CapturePanic(rec, stack, map[string]string{
+					"method":     r.Method,
+					"route":      r.Pattern,
+					"request_id": RequestIDFromContext(ctx),
+				})
 
 				if recorder.wrote {
 					// Headers are already on the wire; the client sees a truncated

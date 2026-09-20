@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 const (
@@ -51,7 +53,7 @@ func newHermesClient(baseURL string, httpClient *http.Client, apiKey string) *He
 	}
 	return &HermesClient{
 		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: httpClient,
+		httpClient: telemetry.InstrumentClient(telemetry.UpstreamPyth, httpClient),
 		apiKey:     strings.TrimSpace(apiKey),
 		chartCache: NewChartSeriesCache(DefaultChartSeriesCacheTTL),
 	}

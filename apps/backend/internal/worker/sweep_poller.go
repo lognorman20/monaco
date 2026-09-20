@@ -9,6 +9,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 // Clock provides time for poller ticks in tests.
@@ -98,6 +99,7 @@ func Run(ctx context.Context, poller *SweepPoller, interval time.Duration, wake 
 	}
 
 	logSweepPollerStarted(interval)
+	telemetry.RegisterPoller(PollerSweep, interval)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -105,11 +107,14 @@ func Run(ctx context.Context, poller *SweepPoller, interval time.Duration, wake 
 
 	runTick := func() {
 		tickCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		err := poller.Tick(tickCtx)
-		cancel()
-		if err != nil && ctx.Err() == nil {
-			slog.Error("sweep poller tick failed", "err", err)
-		}
+		defer cancel()
+		telemetry.GuardTick(ctx, PollerSweep, func() error {
+			err := poller.Tick(tickCtx)
+			if err != nil && ctx.Err() == nil {
+				slog.Error("sweep poller tick failed", "err", err)
+			}
+			return err
+		})
 	}
 
 	for {

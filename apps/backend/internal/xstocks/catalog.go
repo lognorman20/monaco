@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 // CatalogAsset is a backend-resolved xStock catalog row for mobile search.
@@ -46,9 +48,9 @@ type HTTPCatalogSearcher struct {
 func NewHTTPCatalogSearcher() *HTTPCatalogSearcher {
 	return &HTTPCatalogSearcher{
 		baseURL: defaultBaseURL,
-		httpClient: &http.Client{
+		httpClient: telemetry.InstrumentClient(telemetry.UpstreamXStocks, &http.Client{
 			Timeout: defaultTimeout,
-		},
+		}),
 		mintIndex: mintIndex{byMint: make(map[string]CatalogAsset)},
 	}
 }
@@ -65,7 +67,7 @@ func NewHTTPCatalogSearcherWithClient(baseURL string, httpClient *http.Client) *
 	}
 	return &HTTPCatalogSearcher{
 		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: httpClient,
+		httpClient: telemetry.InstrumentClient(telemetry.UpstreamXStocks, httpClient),
 		mintIndex:  mintIndex{byMint: make(map[string]CatalogAsset)},
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/solana/txsign"
 	"github.com/monaco/monaco/apps/backend/internal/swapprovider"
+	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
 // DevExecuteBuyRequest is input for the M3 dev-only buy execute path.
@@ -45,6 +46,8 @@ type SellToUSDCRequest struct {
 type SellToUSDCResult struct {
 	Transaction postgres.TransactionRow
 	Created       bool
+	// ProceedsUSDC is the USDC the fill raised, in micros.
+	ProceedsUSDC int64
 }
 
 // TreasuryBalances tracks fake treasury token balances for integration tests.
@@ -143,6 +146,12 @@ func (s *SwapService) TreasuryBalancesFor(treasuryAddress string) TreasuryBalanc
 
 // DevExecuteBuy quotes, signs, executes, polls, and persists a treasury buy.
 func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyRequest) (DevExecuteBuyResult, error) {
+	result, err := s.executeBuy(ctx, req)
+	recordSwap(telemetry.EventSwapBuy, req.USDCAmount, result.Created, err)
+	return result, err
+}
+
+func (s *SwapService) executeBuy(ctx context.Context, req DevExecuteBuyRequest) (DevExecuteBuyResult, error) {
 	logSwapBuyStart(req.GroupID, req.UserID, req.Symbol, req.USDCAmount)
 
 	// Faker scale clubs (#153) have a dummy treasury: never reach Privy or Jupiter for them.
@@ -253,6 +262,13 @@ func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyReques
 // SellToUSDC quotes, signs, executes, polls, and persists a treasury sell.
 // Confirmed sells are idempotent on tx_signature via postgres.ConfirmSellTransaction.
 func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (SellToUSDCResult, error) {
+	result, err := s.executeSell(ctx, req)
+	// A sell is sized in token units; the USDC it raised is on the confirmed transaction.
+	recordSwap(telemetry.EventSwapSell, result.ProceedsUSDC, result.Created, err)
+	return result, err
+}
+
+func (s *SwapService) executeSell(ctx context.Context, req SellToUSDCRequest) (SellToUSDCResult, error) {
 	logSwapSellStart(req.GroupID, req.UserID, req.Symbol, req.Amount)
 
 	if err := rejectFakerGroup(ctx, s.store, req.GroupID); err != nil {
@@ -347,7 +363,7 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 	}
 
 	logSwapSellSuccess(req.GroupID, req.UserID, req.Symbol, row.ID, created)
-	return SellToUSDCResult{Transaction: row, Created: created}, nil
+	return SellToUSDCResult{Transaction: row, Created: created, ProceedsUSDC: proceeds}, nil
 }
 
 func (s *SwapService) treasuryUSDCForSnapshot(ctx context.Context, treasuryAddress string) (int64, error) {

@@ -46,6 +46,7 @@ type bootResult struct {
 
 var apiRoutes = []string{
 	"GET /health",
+	"GET /metrics",
 	"POST /v1/auth/session",
 	"GET /v1/me",
 	"PATCH /v1/me",
@@ -266,6 +267,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux := http.NewServeMux()
 	health := &httpapi.HealthHandlers{Checks: healthChecks(db, solanaRPC, relayer.PublicKey(), jupiterPriceClient)}
 	mux.HandleFunc("GET /health", health.HealthHandler)
+	mux.Handle("GET /metrics", metricsHandler())
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
 	mux.HandleFunc("PATCH /v1/me", me.PatchMeHandler)
@@ -364,12 +366,21 @@ func main() {
 	}
 	defer closeLog()
 
+	flushTelemetry, err := setupTelemetry()
+	if err != nil {
+		slog.Error("telemetry setup failed", "err", err)
+		closeLog()
+		os.Exit(1)
+	}
+	defer flushTelemetry()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	result, err := boot(ctx)
 	if err != nil {
 		slog.Error("boot failed", "err", err)
+		flushTelemetry()
 		closeLog()
 		os.Exit(1)
 	}
@@ -391,6 +402,7 @@ func main() {
 	case err := <-serverErr:
 		if err != nil {
 			slog.Error("server error", "err", err)
+			flushTelemetry()
 			closeLog()
 			os.Exit(1)
 		}
