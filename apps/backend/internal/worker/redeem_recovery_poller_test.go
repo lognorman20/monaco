@@ -127,6 +127,23 @@ func TestRedeemRecoveryPoller_busyJob_isRetriedNextTickWithoutBackoff(t *testing
 	}
 }
 
+func TestRedeemRecoveryPoller_pendingPayout_isRecheckedNextTickWithoutBackoff(t *testing.T) {
+	// Arrange
+	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	store := &fakeStaleRedeemJobs{jobs: []postgres.RedeemJobRow{staleJob("job-1", now.Add(-time.Hour))}}
+	redeem := &fakeRedeemRecoverer{outcome: app.RedeemRecoveryPending}
+	poller := NewRedeemRecoveryPoller(store, redeem, NewStubClock(now))
+
+	// Act
+	poller.tick(context.Background())
+	poller.tick(context.Background())
+
+	// Assert
+	if len(redeem.calls) != 2 || len(poller.backoff) != 0 {
+		t.Fatalf("recover calls = %d backoff = %v, want 2 calls and no backoff", len(redeem.calls), poller.backoff)
+	}
+}
+
 func TestRedeemRecoveryPoller_listFailure_doesNotRecover(t *testing.T) {
 	// Arrange
 	redeem := &fakeRedeemRecoverer{}

@@ -670,6 +670,24 @@ func (h *GroupHandlers) WithdrawToBalanceHandler(w http.ResponseWriter, r *http.
 			logJSONError(ctx, log, "redeem_in_progress", w, http.StatusConflict, "withdraw already in progress", "group_id", groupID)
 			return
 		}
+		if errors.Is(err, app.ErrRedeemPayoutPending) {
+			logJSONError(ctx, log, "redeem_payout_pending", w, http.StatusConflict,
+				"Your cash out was sent and is still confirming on Solana. Check back in a minute.",
+				"group_id", groupID, "err", err.Error())
+			return
+		}
+		if errors.Is(err, app.ErrRedeemPayoutDropped) || errors.Is(err, app.ErrRedeemPayoutFailed) {
+			logJSONError(ctx, log, "redeem_payout_not_sent", w, http.StatusBadGateway,
+				"The cash out did not go through on Solana. Nothing was paid and your shares are back. Try again.",
+				"group_id", groupID, "err", err.Error())
+			return
+		}
+		if errors.Is(err, app.ErrRedeemPayoutUnverified) {
+			logJSONError(ctx, log, "redeem_payout_unverified", w, http.StatusConflict,
+				"An earlier cash out is being reviewed. We'll sort it out before you can cash out again.",
+				"group_id", groupID, "err", err.Error())
+			return
+		}
 		if errors.Is(err, app.ErrQuoteNotRoutable) {
 			logJSONError(ctx, log, "quote_not_routable", w, http.StatusBadRequest,
 				"That amount is too small to sell the pot's stock. Try a larger amount, or wait until the pot holds more USDC.",

@@ -69,8 +69,9 @@ func seedStakeAndHoldings(t *testing.T, h integrationHarness, userID, groupID, l
 	registerLiveAAPLxMark(h, groupID, jupiter.XStockAtomicScale)
 }
 
-// wedgeRedeemJobInPaying reproduces the production wedge: share units already burnt and a job
-// parked in `paying` carrying the slice it was quoted.
+// wedgeRedeemJobInPaying reproduces the production wedge left by the old sign-and-send payout:
+// share units already burnt and a job parked in `paying` carrying the slice it was quoted,
+// with no payout signature on record.
 func wedgeRedeemJobInPaying(t *testing.T, h integrationHarness, userID, groupID, payoutAddress string, shareUnits, sliceUsdc int64) string {
 	t.Helper()
 	ctx := context.Background()
@@ -95,9 +96,21 @@ func wedgeRedeemJobInPaying(t *testing.T, h integrationHarness, userID, groupID,
 	return job.ID
 }
 
+// wedgeRedeemJobInSelling leaves a job where a request died after its sells and before
+// anything was signed: share units burnt, no payout on record.
+func wedgeRedeemJobInSelling(t *testing.T, h integrationHarness, userID, groupID, payoutAddress string, shareUnits, sliceUsdc int64) string {
+	t.Helper()
+	jobID := wedgeRedeemJobInPaying(t, h, userID, groupID, payoutAddress, shareUnits, sliceUsdc)
+	if err := h.Store.UpdateRedeemJobStatus(context.Background(), jobID, string(domain.RedeemJobSelling)); err != nil {
+		t.Fatalf("UpdateRedeemJobStatus: %v", err)
+	}
+	return jobID
+}
+
 // A pot that spent its cash on stock must sell before paying, and must never broadcast a
 // transfer larger than the USDC the sale actually realised: an SPL transfer for more than the
-// token account holds fails simulation with Custom:1 and 500s the cash out.
+// token account holds fails simulation with Custom:1 and 500s the cash out. A payout short of
+// the slice only burns the share units it pays for; the member keeps the rest.
 func TestWithdrawToBalance_potHoldsStock_sellsThenPaysNoMoreThanTreasuryUsdc(t *testing.T) {
 	t.Parallel()
 
@@ -163,14 +176,19 @@ func TestWithdrawToBalance_potHoldsStock_sellsThenPaysNoMoreThanTreasuryUsdc(t *
 	if err != nil {
 		t.Fatalf("GetPosition: %v", err)
 	}
-	if position.ShareUnits != totalShares-redeemShares {
-		t.Fatalf("share_units = %d, want %d", position.ShareUnits, totalShares-redeemShares)
+	// 480_000 paid against a 500_000 slice retires 480_000 of the 500_000 share units.
+	const burned = int64(480_000)
+	if job.ShareUnits != burned {
+		t.Fatalf("job share_units = %d, want %d (only the paid fraction burnt)", job.ShareUnits, burned)
+	}
+	if position.ShareUnits != totalShares-burned {
+		t.Fatalf("share_units = %d, want %d (unpaid share units returned)", position.ShareUnits, totalShares-burned)
 	}
 }
 
-// A job wedged in `paying` carries the slice it was quoted against a stale treasury read. On the
-// next attempt it must be re-priced against the real pot, raise the cash, and settle.
-func TestWithdrawToBalance_recoversJobWedgedInPaying_repricesInflatedSlice(t *testing.T) {
+// A job left in `selling` carries the slice it was quoted against a stale treasury read. On the
+// next attempt it must be re-priced against the real pot and settle for what the pot can pay.
+func TestWithdrawToBalance_resumesJobLeftInSelling_repricesInflatedSlice(t *testing.T) {
 	t.Parallel()
 
 	h := integrationApp(t)
@@ -186,9 +204,11 @@ func TestWithdrawToBalance_recoversJobWedgedInPaying_repricesInflatedSlice(t *te
 	}
 	h.ISO.TrackGroup(group.GroupID)
 
+	// The dead request already sold 500_000 of stock for 495_000 USDC.
 	const totalShares = int64(2_000_000)
-	seedStakeAndHoldings(t, h, session.UserID, group.GroupID, "cashout-wedged", totalShares, 2_000_000)
-	seedTestTreasuryUSDC(t, h.Privy, group.TreasuryAddress, 0)
+	const proceeds = int64(495_000)
+	seedStakeAndHoldings(t, h, session.UserID, group.GroupID, "cashout-wedged", totalShares, 1_500_000)
+	seedTestTreasuryUSDC(t, h.Privy, group.TreasuryAddress, proceeds)
 
 	wallet, found, err := h.Store.GetMemberWalletByUserID(ctx, session.UserID)
 	if err != nil || !found {
@@ -198,10 +218,7 @@ func TestWithdrawToBalance_recoversJobWedgedInPaying_repricesInflatedSlice(t *te
 	// The wedged slice double-counted the USDC the pot had already spent on stock.
 	const redeemShares = int64(500_000)
 	const inflatedSlice = int64(999_500)
-	jobID := wedgeRedeemJobInPaying(t, h, session.UserID, group.GroupID, wallet.SolanaAddress, redeemShares, inflatedSlice)
-
-	const proceeds = int64(495_000)
-	registerSellFill(t, h, "cashout-wedged-sell", group.TreasuryAddress, 505_001, proceeds)
+	jobID := wedgeRedeemJobInSelling(t, h, session.UserID, group.GroupID, wallet.SolanaAddress, redeemShares, inflatedSlice)
 
 	job, err := h.Redeem.WithdrawToBalance(ctx, WithdrawToBalanceRequest{
 		AccessToken: string(token),
@@ -231,13 +248,15 @@ func TestWithdrawToBalance_recoversJobWedgedInPaying_repricesInflatedSlice(t *te
 		t.Fatalf("payout amount = %d, want %d", payout.Amount, proceeds)
 	}
 
-	// The wedge burnt the shares once; recovery must not burn them again.
+	// The pot is worth 1_995_000, so the 500_000 share units are owed 498_750. The 495_000 the
+	// pot can pay retires ceil(500_000 * 495_000 / 498_750) of them; the rest go back.
+	const burned = int64(496_241)
 	position, _, err := h.Store.GetPosition(ctx, session.UserID, group.GroupID)
 	if err != nil {
 		t.Fatalf("GetPosition: %v", err)
 	}
-	if position.ShareUnits != totalShares-redeemShares {
-		t.Fatalf("share_units = %d, want %d", position.ShareUnits, totalShares-redeemShares)
+	if position.ShareUnits != totalShares-burned {
+		t.Fatalf("share_units = %d, want %d", position.ShareUnits, totalShares-burned)
 	}
 
 	stored, found, err := h.Store.GetRedeemJobByID(ctx, jobID)
@@ -277,7 +296,7 @@ func TestWithdrawToBalance_potCannotRaiseCash_rollsBackBurntShares(t *testing.T)
 	}
 
 	const redeemShares = int64(500_000)
-	jobID := wedgeRedeemJobInPaying(t, h, session.UserID, group.GroupID, wallet.SolanaAddress, redeemShares, 500_000)
+	jobID := wedgeRedeemJobInSelling(t, h, session.UserID, group.GroupID, wallet.SolanaAddress, redeemShares, 500_000)
 
 	_, err = h.Redeem.WithdrawToBalance(ctx, WithdrawToBalanceRequest{
 		AccessToken: string(token),

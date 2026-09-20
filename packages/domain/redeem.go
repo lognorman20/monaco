@@ -96,3 +96,26 @@ func ShareUnitsMicrosForDollarTarget(target USDCMicros, navPerShare USDCMicros) 
 	}
 	return micros, nil
 }
+
+// ShareUnitsForPartialPayout returns how many of shareUnits a payout of paid retires when the
+// whole claim was worth owed. A member who is paid less than their slice only gives up the
+// share units that payment covers and keeps the rest. The share units handed back for the
+// unpaid remainder are floored, like every other amount that leaves the pot, so rounding
+// never favours the redeemer over the members who stay.
+func ShareUnitsForPartialPayout(shareUnits int64, owed, paid USDCMicros) (int64, error) {
+	if shareUnits <= 0 {
+		return 0, fmt.Errorf("share units must be positive")
+	}
+	if owed <= 0 || paid <= 0 {
+		return 0, fmt.Errorf("owed and paid must be positive")
+	}
+	if paid >= owed {
+		return shareUnits, nil
+	}
+
+	returned, err := MulDivFloor(shareUnits, int64(owed-paid), int64(owed))
+	if err != nil {
+		return 0, fmt.Errorf("partial payout share units: %w", err)
+	}
+	return shareUnits - returned, nil
+}

@@ -46,8 +46,16 @@ func (c *failingEnsureTreasuryClient) VerifyPayoutProof(ctx context.Context, use
 	return c.inner.VerifyPayoutProof(ctx, userID, proof)
 }
 
-func (c *failingEnsureTreasuryClient) PayUSDC(ctx context.Context, req privy.PayUSDCRequest) (privy.PayUSDCResult, error) {
-	return c.inner.PayUSDC(ctx, req)
+func (c *failingEnsureTreasuryClient) PrepareUSDCPayout(ctx context.Context, req privy.PayUSDCRequest) (privy.PreparedPayout, error) {
+	return c.inner.PrepareUSDCPayout(ctx, req)
+}
+
+func (c *failingEnsureTreasuryClient) BroadcastUSDCPayout(ctx context.Context, payout privy.PreparedPayout) error {
+	return c.inner.BroadcastUSDCPayout(ctx, payout)
+}
+
+func (c *failingEnsureTreasuryClient) USDCPayoutStatus(ctx context.Context, payout privy.PreparedPayout) (privy.PayoutStatus, error) {
+	return c.inner.USDCPayoutStatus(ctx, payout)
 }
 
 func TestCreateGroup_privyTreasuryFailure_rollsBackGroupRow(t *testing.T) {
