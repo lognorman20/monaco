@@ -65,19 +65,31 @@ func logJSONError(ctx context.Context, log *requestLog, branch string, w http.Re
 }
 
 // errorResponse is the single error shape every API route returns: a human
-// message plus the correlation id a client can quote in a bug report.
+// message plus the correlation id a client can quote in a bug report. Reason is
+// the optional machine-readable code for routes whose client branches on why
+// the request was refused (leave-cabal 409).
 type errorResponse struct {
 	Error     string `json:"error"`
 	RequestID string `json:"requestId,omitempty"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 func writeJSONError(ctx context.Context, w http.ResponseWriter, status int, message string) {
+	writeErrorResponse(ctx, w, status, errorResponse{Error: message})
+}
+
+// logJSONErrorWithReason is logJSONError for an error that also carries a
+// machine-readable reason; the reason lands in both the body and the log line.
+func logJSONErrorWithReason(ctx context.Context, log *requestLog, branch string, w http.ResponseWriter, status int, message, reason string, attrs ...any) {
+	log.done(ctx, branch, status, append(attrs, "reason", reason)...)
+	writeErrorResponse(ctx, w, status, errorResponse{Error: message, Reason: reason})
+}
+
+func writeErrorResponse(ctx context.Context, w http.ResponseWriter, status int, body errorResponse) {
+	body.RequestID = RequestIDFromContext(ctx)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(errorResponse{
-		Error:     message,
-		RequestID: RequestIDFromContext(ctx),
-	})
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 func logNoContent(ctx context.Context, log *requestLog, branch string, attrs ...any) {

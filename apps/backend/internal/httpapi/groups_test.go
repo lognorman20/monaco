@@ -619,9 +619,23 @@ func TestPOST_leave_withShareUnits_returns409(t *testing.T) {
 	leaveReq := httptest.NewRequest(http.MethodPost, "/v1/groups/"+created.GroupID+"/leave", nil)
 	leaveReq.SetPathValue("id", created.GroupID)
 	leaveReq.Header.Set("Authorization", "Bearer "+string(joinerToken))
-	groupHandlers.LeaveGroupHandler(leaveRec, leaveReq)
+	Chain(http.HandlerFunc(groupHandlers.LeaveGroupHandler), RequestID()).ServeHTTP(leaveRec, leaveReq)
 	if leaveRec.Code != http.StatusConflict {
 		t.Fatalf("leave status = %d, want 409", leaveRec.Code)
+	}
+	// The 409 is the shared error shape plus the machine-readable reason the app switches on.
+	var payload map[string]string
+	if err := json.Unmarshal(leaveRec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode leave conflict: %v; body = %s", err, leaveRec.Body.String())
+	}
+	if payload["reason"] != "share_units_remaining" {
+		t.Fatalf("reason = %q, want share_units_remaining", payload["reason"])
+	}
+	if payload["error"] == "" {
+		t.Fatalf("error message missing; body = %s", leaveRec.Body.String())
+	}
+	if payload["requestId"] == "" || payload["requestId"] != leaveRec.Header().Get(RequestIDHeader) {
+		t.Fatalf("requestId = %q, want the %s header %q", payload["requestId"], RequestIDHeader, leaveRec.Header().Get(RequestIDHeader))
 	}
 }
 

@@ -12,6 +12,8 @@ A valid token with no Monaco user yet gets `404 user not found`: call `POST /v1/
 
 **Errors.** `{ "error": "message", "requestId": "…" }`. Send your own `X-Request-Id` (1–64 of
 `A-Z a-z 0-9 - _`) or the API mints one; it is echoed on the response and stamped on log lines.
+A blocked `POST /v1/groups/{id}/leave` is `409` with the same shape plus a machine-readable `reason`
+(for example `share_units_remaining`, `creator_must_transfer`).
 
 **Money.** USDC is integer micros (1 USDC = 1,000,000). Timestamps are UTC RFC 3339.
 
