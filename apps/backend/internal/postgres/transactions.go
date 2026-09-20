@@ -930,6 +930,16 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		&row.CreatedAt,
 		&row.ConfirmedAt,
 	)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Another executor or the reconciler resolved the row first.
+		existing, found, lookupErr := s.GetConfirmedTransactionBySignature(ctx, params.TxSignature)
+		if lookupErr != nil {
+			return TransactionRow{}, false, lookupErr
+		}
+		if found {
+			return existing, false, nil
+		}
+	}
 	if err != nil {
 		return TransactionRow{}, false, fmt.Errorf("confirm pending buy transaction: %w", err)
 	}
@@ -972,6 +982,16 @@ RETURNING id, group_id, proposal_id, amount, action, input_mint, output_mint, st
 		&row.CreatedAt,
 		&row.ConfirmedAt,
 	)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Another executor or the reconciler resolved the row first.
+		existing, found, lookupErr := s.GetConfirmedTransactionBySignature(ctx, params.TxSignature)
+		if lookupErr != nil {
+			return TransactionRow{}, false, lookupErr
+		}
+		if found {
+			return existing, false, nil
+		}
+	}
 	if err != nil {
 		return TransactionRow{}, false, fmt.Errorf("confirm pending sell transaction: %w", err)
 	}

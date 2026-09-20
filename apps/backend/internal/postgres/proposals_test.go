@@ -234,7 +234,7 @@ func TestListPassedProposalsPendingExecute_failedBuyStillListed(t *testing.T) {
 	}
 }
 
-func TestListPassedProposalsPendingExecute_failedSellNotListed(t *testing.T) {
+func TestListPassedProposalsPendingExecute_pendingSellHeldThenFailedSellListed(t *testing.T) {
 	ctx := context.Background()
 	db := integrationDB(t)
 	iso := prepareIsolation(t, db)
@@ -275,18 +275,32 @@ func TestListPassedProposalsPendingExecute_failedSellNotListed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InsertPendingTransaction: %v", err)
 	}
+	isListed := func() bool {
+		t.Helper()
+		listed, err := store.ListPassedProposalsPendingExecute(ctx, 500)
+		if err != nil {
+			t.Fatalf("ListPassedProposalsPendingExecute: %v", err)
+		}
+		for _, row := range listed {
+			if row.ID == sell.ID {
+				return true
+			}
+		}
+		return false
+	}
+
+	// A pending swap has an unknown outcome: executing again could sell twice.
+	if isListed() {
+		t.Fatal("sell with a pending swap must not be listed for execute")
+	}
+
 	if _, ok, err := store.FailTransactionByExecuteRequestID(ctx, reqID); err != nil || !ok {
 		t.Fatalf("FailTransaction: %v ok=%v", err, ok)
 	}
 
-	listed, err := store.ListPassedProposalsPendingExecute(ctx, 50)
-	if err != nil {
-		t.Fatalf("ListPassedProposalsPendingExecute: %v", err)
-	}
-	for _, row := range listed {
-		if row.ID == sell.ID {
-			t.Fatal("failed sell should not be pending automatic execute")
-		}
+	// Only a definitively failed swap frees the proposal for another attempt.
+	if !isListed() {
+		t.Fatal("sell whose only swap failed should be listed for execute")
 	}
 }
 
