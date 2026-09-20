@@ -347,7 +347,7 @@ func TestListContributionEventsAfter_signsDepositsPositiveAndPayoutsNegative(t *
 	if _, err := store.IncrementPositionTx(ctx, tx, userID, groupID, 40_000_000, 40_000_000); err != nil {
 		t.Fatalf("IncrementPositionTx: %v", err)
 	}
-	if _, _, err := store.ConfirmWithdrawalPayoutTx(ctx, tx, withdrawal.ID, "sig-wd-"+iso.Suffix(), 25_000_000); err != nil {
+	if _, _, err := store.ConfirmWithdrawalPayoutTx(ctx, tx, withdrawal.ID, "sig-wd-"+iso.Suffix(), NavSnapshotValues{PotNavMicros: 25_000_000, NavPerShareMicros: 625_000, TotalShares: 40_000_000}); err != nil {
 		t.Fatalf("ConfirmWithdrawalPayoutTx: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

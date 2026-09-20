@@ -476,21 +476,20 @@ func (r *RedeemService) repriceRedeemJob(ctx context.Context, view RedeemJobView
 		return 0, 0, fmt.Errorf("treasury usdc balance: %w", err)
 	}
 
-	// The job's shares are already debited, so add them back: the pot still owes them.
-	navVals, err := r.store.ComputeNavSnapshotValuesWithShareBase(ctx, view.GroupID, cash, view.ShareUnits)
+	// The job's shares are already debited; the valuation's share base still counts them,
+	// because the pot owes them until the payout lands.
+	valuation, err := r.valuePotForRedeem(ctx, view.GroupID, treasuryAddress, cash)
 	if err != nil {
 		return 0, 0, err
 	}
-	totalSharesMicro, err := r.store.SumShareUnitsByGroup(ctx, view.GroupID)
-	if err != nil {
-		return 0, 0, err
+	if valuation.PotNavMicros <= 0 {
+		return 0, 0, fmt.Errorf("%w: the pot holds nothing to pay a %d share-unit claim from", ErrRedeemPotIlliquid, view.ShareUnits)
 	}
-	totalSharesMicro += view.ShareUnits
 
 	slice, err := domain.ComputeRedeemSlice(domain.RedeemSliceInput{
 		SharesRedeemedMicros: view.ShareUnits,
-		TotalSharesMicros:    totalSharesMicro,
-		PotNav:               domain.USDCMicros(navVals.PotNavMicros),
+		TotalSharesMicros:    valuation.ShareBaseMicros,
+		PotNav:               domain.USDCMicros(valuation.PotNavMicros),
 	})
 	if err != nil {
 		return 0, 0, err
@@ -516,11 +515,18 @@ func (r *RedeemService) sellRedeemShortfall(ctx context.Context, view *RedeemJob
 	}
 
 	// Marked value of everything the pot holds that is not already cash.
-	navVals, err := r.store.ComputeNavSnapshotValuesWithShareBase(ctx, view.GroupID, cash, view.ShareUnits)
+	treasury, found, err := r.store.GetTreasuryByGroupID(ctx, view.GroupID)
 	if err != nil {
 		return err
 	}
-	stockValue := navVals.PotNavMicros - cash
+	if !found {
+		return ErrGroupNotFound
+	}
+	valuation, err := r.valuePotForRedeem(ctx, view.GroupID, treasury.SolanaAddress, cash)
+	if err != nil {
+		return err
+	}
+	stockValue := valuation.HoldingsMicros
 	if stockValue <= 0 {
 		slog.Info("redeem sell slice skipped", "job_id", view.ID, "reason", "no marked stock value")
 		return nil
@@ -609,7 +615,11 @@ func (r *RedeemService) payRedeemSlice(ctx context.Context, view RedeemJobView, 
 		}
 	}
 
-	confirmed, newlyPaid, err := r.store.ConfirmWithdrawalPayoutTx(ctx, tx, withdrawal.ID, payout.TxSignature, treasuryUsdc)
+	navAfterPayout, err := r.navSnapshotAfterPayout(ctx, view, treasury.SolanaAddress, treasuryUsdc)
+	if err != nil {
+		return view, err
+	}
+	confirmed, newlyPaid, err := r.store.ConfirmWithdrawalPayoutTx(ctx, tx, withdrawal.ID, payout.TxSignature, navAfterPayout)
 	if err != nil {
 		return view, err
 	}
@@ -678,24 +688,11 @@ func (r *RedeemService) resolveWithdrawShares(ctx context.Context, req WithdrawT
 		return 0, 0, 0, fmt.Errorf("%w: no share units to withdraw", ErrInvalidRedeemRequest)
 	}
 
-	totalShares, err = r.store.SumShareUnitsByGroup(ctx, req.GroupID)
+	valuation, err := r.quotePotForRedeem(ctx, req.GroupID, treasuryAddress)
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	if totalShares <= 0 {
-		return 0, 0, 0, fmt.Errorf("%w: no shares outstanding", ErrInvalidRedeemRequest)
-	}
-
-	treasuryUsdc, err := r.privy.TreasuryUSDCBalance(ctx, treasuryAddress)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("treasury usdc balance: %w", err)
-	}
-
-	navVals, err := r.store.ComputeNavSnapshotValues(ctx, req.GroupID, treasuryUsdc)
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	potNav = navVals.PotNavMicros
+	potNav, totalShares = valuation.PotNavMicros, valuation.ShareBaseMicros
 
 	switch {
 	case req.ShareAmountMicros != nil:
@@ -711,24 +708,15 @@ func (r *RedeemService) resolveWithdrawShares(ctx context.Context, req WithdrawT
 }
 
 func (r *RedeemService) resolveRedeemShares(ctx context.Context, req RedeemRequest, treasuryAddress string) (shareUnits int64, potNav int64, totalShares int64, err error) {
-	totalShares, err = r.store.SumShareUnitsByGroup(ctx, req.GroupID)
+	valuation, err := r.quotePotForRedeem(ctx, req.GroupID, treasuryAddress)
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	if totalShares <= 0 {
-		return 0, 0, 0, fmt.Errorf("%w: no shares outstanding", ErrInvalidRedeemRequest)
-	}
-
-	treasuryUsdc, err := r.privy.TreasuryUSDCBalance(ctx, treasuryAddress)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("treasury usdc balance: %w", err)
-	}
-
-	navVals, err := r.store.ComputeNavSnapshotValues(ctx, req.GroupID, treasuryUsdc)
+	potNav, totalShares = valuation.PotNavMicros, valuation.ShareBaseMicros
+	navVals, err := valuation.navSnapshotValues()
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	potNav = navVals.PotNavMicros
 
 	switch {
 	case req.ShareAmountMicros != nil:
@@ -746,6 +734,57 @@ func (r *RedeemService) resolveRedeemShares(ctx context.Context, req RedeemReque
 		return 0, 0, 0, fmt.Errorf("%w: share amount out of range", ErrInvalidRedeemRequest)
 	}
 	return shareUnits, potNav, totalShares, nil
+}
+
+// quotePotForRedeem reads the treasury balance and values the pot for a new redeem quote.
+func (r *RedeemService) quotePotForRedeem(ctx context.Context, groupID, treasuryAddress string) (potValuation, error) {
+	treasuryUsdc, err := r.privy.TreasuryUSDCBalance(ctx, treasuryAddress)
+	if err != nil {
+		return potValuation{}, fmt.Errorf("treasury usdc balance: %w", err)
+	}
+	valuation, err := r.valuePotForRedeem(ctx, groupID, treasuryAddress, treasuryUsdc)
+	if err != nil {
+		return potValuation{}, err
+	}
+	if valuation.ShareBaseMicros <= 0 {
+		return potValuation{}, fmt.Errorf("%w: no shares outstanding", ErrInvalidRedeemRequest)
+	}
+	return valuation, nil
+}
+
+// valuePotForRedeem is the shared pot valuation with live marks required: a payout is never
+// sized from cost basis. ErrPotMarkUnavailable leaves the member's shares where they were.
+func (r *RedeemService) valuePotForRedeem(ctx context.Context, groupID, treasuryAddress string, treasuryUsdc int64) (potValuation, error) {
+	valuation, err := valuePot(ctx, r.store, r.pyth, r.redeemSymbols(), nil, groupID, treasuryAddress, treasuryUsdc, potMarksLiveOnly)
+	if err != nil {
+		if errors.Is(err, ErrPotMarkUnavailable) {
+			logPotMarkUnavailable(groupID, "redeem", err)
+		}
+		return potValuation{}, err
+	}
+	return valuation, nil
+}
+
+// navSnapshotAfterPayout values the pot for the NAV history row written with a confirmed
+// payout. The USDC has already left, so history takes the best available mark rather than
+// failing; the paid job's units stop counting as a claim in the same transaction.
+func (r *RedeemService) navSnapshotAfterPayout(ctx context.Context, view RedeemJobView, treasuryAddress string, treasuryUsdc int64) (postgres.NavSnapshotValues, error) {
+	valuation, err := valuePot(ctx, r.store, r.pyth, r.redeemSymbols(), nil, view.GroupID, treasuryAddress, treasuryUsdc, potMarksBestAvailable)
+	if err != nil {
+		return postgres.NavSnapshotValues{}, err
+	}
+	shareBase := valuation.ShareBaseMicros - view.ShareUnits
+	if shareBase < 0 {
+		shareBase = 0
+	}
+	return navSnapshotValuesFor(valuation.PotNavMicros, shareBase)
+}
+
+func (r *RedeemService) redeemSymbols() *SymbolResolver {
+	if r.swap == nil {
+		return nil
+	}
+	return r.swap.symbols
 }
 
 // reconcileActiveRedeemBeforeWithdraw clears stuck debited jobs or resumes in-flight payout work.

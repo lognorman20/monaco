@@ -191,6 +191,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	signer := app.NewPrivyTreasurySigner(privyClient)
 	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, relayer.PrivateKey(), symbols)
+	swap.SetPriceClient(pythClient)
 	if cfg.SwapProvider == swapprovider.NameFlash {
 		swap.SetSwapProvider(flash.NewSwapProvider(
 			flash.NewHTTPClient(cfg.FlashAPIKey),

@@ -76,7 +76,7 @@ func (s *Store) InsertWithdrawal(ctx context.Context, userID, groupID string, am
 }
 
 // ConfirmWithdrawalPayoutTx marks a withdrawal settled, increments amount_withdrawn, and writes NAV snapshot once.
-func (s *Store) ConfirmWithdrawalPayoutTx(ctx context.Context, tx *sql.Tx, withdrawalID, txSignature string, treasuryUSDC int64) (WithdrawalRow, bool, error) {
+func (s *Store) ConfirmWithdrawalPayoutTx(ctx context.Context, tx *sql.Tx, withdrawalID, txSignature string, nav NavSnapshotValues) (WithdrawalRow, bool, error) {
 	if withdrawalID == "" || txSignature == "" {
 		return WithdrawalRow{}, false, fmt.Errorf("withdrawal id and tx signature are required")
 	}
@@ -102,7 +102,7 @@ RETURNING id, user_id, group_id, amount, to_address, status, tx_signature, creat
 		if _, err := s.IncrementAmountWithdrawnTx(ctx, tx, row.UserID, row.GroupID, row.Amount); err != nil {
 			return WithdrawalRow{}, false, err
 		}
-		if err := s.WriteNavSnapshotOnWithdrawalPayoutTx(ctx, tx, row.GroupID, treasuryUSDC); err != nil {
+		if err := s.WriteNavSnapshotOnWithdrawalPayoutTx(ctx, tx, row.GroupID, nav); err != nil {
 			return WithdrawalRow{}, false, err
 		}
 		return row, true, nil

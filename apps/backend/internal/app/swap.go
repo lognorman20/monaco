@@ -8,6 +8,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/solana/txsign"
 	"github.com/monaco/monaco/apps/backend/internal/swapprovider"
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
@@ -72,6 +73,7 @@ type SwapService struct {
 	balances   map[string]TreasuryBalances
 	pollConfig jupiter.PollConfig
 	symbols    *SymbolResolver
+	pyth       pyth.Client
 }
 
 // NewSwapService wires swap dependencies.
@@ -103,6 +105,11 @@ func (s *SwapService) SetSwapProvider(provider swapprovider.Provider) {
 	if provider != nil {
 		s.provider = provider
 	}
+}
+
+// SetPriceClient wires the price chain used to mark holdings in post-swap NAV snapshots.
+func (s *SwapService) SetPriceClient(client pyth.Client) {
+	s.pyth = client
 }
 
 // SwapProviderName reports which venue executes treasury swaps.
@@ -246,11 +253,11 @@ func (s *SwapService) executeBuy(ctx context.Context, req DevExecuteBuyRequest) 
 
 	if created {
 		s.applyBuyBalances(treasury.SolanaAddress, outputMint, req.USDCAmount, costBasisAmount)
-		treasuryUsdc, err := s.treasuryUSDCForSnapshot(ctx, treasury.SolanaAddress)
+		navVals, err := s.navSnapshotAfterSwap(ctx, req.GroupID, treasury.SolanaAddress)
 		if err != nil {
 			return DevExecuteBuyResult{}, err
 		}
-		if err := s.store.WriteNavSnapshotOnTransactionConfirm(ctx, req.GroupID, treasuryUsdc); err != nil {
+		if err := s.store.WriteNavSnapshotOnTransactionConfirm(ctx, req.GroupID, navVals); err != nil {
 			return DevExecuteBuyResult{}, err
 		}
 	}
@@ -353,17 +360,32 @@ func (s *SwapService) executeSell(ctx context.Context, req SellToUSDCRequest) (S
 
 	if created {
 		s.applySellBalances(treasury.SolanaAddress, req.InputMint, req.Amount, proceeds)
-		treasuryUsdc, err := s.treasuryUSDCForSnapshot(ctx, treasury.SolanaAddress)
+		navVals, err := s.navSnapshotAfterSwap(ctx, req.GroupID, treasury.SolanaAddress)
 		if err != nil {
 			return SellToUSDCResult{}, err
 		}
-		if err := s.store.WriteNavSnapshotOnTransactionConfirm(ctx, req.GroupID, treasuryUsdc); err != nil {
+		if err := s.store.WriteNavSnapshotOnTransactionConfirm(ctx, req.GroupID, navVals); err != nil {
 			return SellToUSDCResult{}, err
 		}
 	}
 
 	logSwapSellSuccess(req.GroupID, req.UserID, req.Symbol, row.ID, created)
 	return SellToUSDCResult{Transaction: row, Created: created, ProceedsUSDC: proceeds}, nil
+}
+
+// navSnapshotAfterSwap values the pot for the NAV history row written after a confirmed swap.
+// The swap already moved funds, so a missing live mark must not fail it: history takes the
+// best available mark.
+func (s *SwapService) navSnapshotAfterSwap(ctx context.Context, groupID, treasuryAddress string) (postgres.NavSnapshotValues, error) {
+	treasuryUsdc, err := s.treasuryUSDCForSnapshot(ctx, treasuryAddress)
+	if err != nil {
+		return postgres.NavSnapshotValues{}, err
+	}
+	valuation, err := valuePot(ctx, s.store, s.pyth, s.symbols, nil, groupID, treasuryAddress, treasuryUsdc, potMarksBestAvailable)
+	if err != nil {
+		return postgres.NavSnapshotValues{}, err
+	}
+	return valuation.navSnapshotValues()
 }
 
 func (s *SwapService) treasuryUSDCForSnapshot(ctx context.Context, treasuryAddress string) (int64, error) {

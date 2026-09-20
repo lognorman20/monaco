@@ -100,10 +100,7 @@ func (h *HomeService) GetGroupView(ctx context.Context, accessToken, groupID str
 	potNavMicros := potView.PotNavMicros
 	potRows := potView.Rows
 
-	totalSharesMicro, err := h.store.SumShareUnitsByGroup(ctx, groupID)
-	if err != nil {
-		return GroupViewResult{}, err
-	}
+	totalSharesMicro := potView.ShareBaseMicros
 
 	totalShares, err := domain.ShareUnitsMicrosToDomain(totalSharesMicro)
 	if err != nil {

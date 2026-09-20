@@ -42,7 +42,7 @@ func TestGetGroupView_afterUSDCtoAAPLxSwap_potTotalUnchanged(t *testing.T) {
 	if _, err := h.Store.IncrementPositionTx(ctx, tx, session.UserID, group.GroupID, depositMicros, depositMicros); err != nil {
 		t.Fatalf("IncrementPositionTx: %v", err)
 	}
-	if err := h.Store.WriteNavSnapshotOnDepositConfirmTx(ctx, tx, group.GroupID, depositMicros); err != nil {
+	if err := h.Store.WriteNavSnapshotOnDepositConfirmTx(ctx, tx, group.GroupID, postgres.NavSnapshotValues{PotNavMicros: depositMicros, NavPerShareMicros: 1_000_000, TotalShares: depositMicros}); err != nil {
 		t.Fatalf("WriteNavSnapshotOnDepositConfirmTx: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
