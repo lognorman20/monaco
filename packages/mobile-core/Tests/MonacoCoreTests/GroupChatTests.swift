@@ -51,6 +51,115 @@ final class GroupChatDTOTests: XCTestCase {
     }
 }
 
+final class GroupChatDatesTests: XCTestCase {
+    private let wholeSecond = ISO8601DateFormatter().date(from: "2026-09-18T15:04:05Z")!.timeIntervalSince1970
+
+    func testParse_microseconds_isTheFormatTheAPISends() throws {
+        let date = try XCTUnwrap(GroupChatDates.parse("2026-09-18T15:04:05.123456Z"))
+        XCTAssertEqual(date.timeIntervalSince1970, wholeSecond + 0.123, accuracy: 0.001)
+    }
+
+    func testParse_milliseconds() throws {
+        let date = try XCTUnwrap(GroupChatDates.parse("2026-09-18T15:04:05.123Z"))
+        XCTAssertEqual(date.timeIntervalSince1970, wholeSecond + 0.123, accuracy: 0.001)
+    }
+
+    func testParse_noFraction() throws {
+        let date = try XCTUnwrap(GroupChatDates.parse("2026-09-18T15:04:05Z"))
+        XCTAssertEqual(date.timeIntervalSince1970, wholeSecond, accuracy: 0.0001)
+    }
+
+    func testParse_offsetIsConvertedToUTC() throws {
+        let date = try XCTUnwrap(GroupChatDates.parse("2026-09-18T17:04:05.123456+02:00"))
+        XCTAssertEqual(date.timeIntervalSince1970, wholeSecond + 0.123, accuracy: 0.001)
+    }
+
+    func testParse_invalid_isNil() {
+        for raw in ["", "yesterday", "2026-09-18", "2026-09-18T15:04:05.Z", "2026-13-40T99:99:99.000000Z", "1758207845"] {
+            XCTAssertNil(GroupChatDates.parse(raw), "parsed \(raw)")
+        }
+    }
+
+    func testDecodedMessage_carriesTheParsedDate_andReencodesWithoutIt() throws {
+        // Arrange
+        let json = #"{"id":"m1","groupId":"g1","authorId":"u1","authorName":"Ana","body":"hi","createdAt":"2026-09-18T15:04:05.123456Z","mine":false}"#
+
+        // Act
+        let decoded = try JSONDecoder().decode(GroupMessageDTO.self, from: Data(json.utf8))
+        let reencoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(decoded)) as? [String: Any]
+
+        // Assert: the wire shape is unchanged; the Date is derived, not sent.
+        XCTAssertEqual(decoded.createdAtDate, GroupChatDates.parse("2026-09-18T15:04:05.123456Z"))
+        XCTAssertEqual(reencoded?["createdAt"] as? String, "2026-09-18T15:04:05.123456Z")
+        XCTAssertNil(reencoded?["createdAtDate"])
+    }
+
+    func testDecodedMessage_unparseableTimestamp_stillDecodesWithNilDate() throws {
+        let json = #"{"id":"m1","groupId":"g1","authorId":"u1","authorName":"Ana","body":"hi","createdAt":"soon","mine":false}"#
+        let decoded = try JSONDecoder().decode(GroupMessageDTO.self, from: Data(json.utf8))
+        XCTAssertNil(decoded.createdAtDate)
+    }
+}
+
+/// What the thread costs to draw. SwiftUI re-runs this for every visible bubble on each pass.
+final class GroupChatHotPathTests: XCTestCase {
+    func testOnePassOverFiftyMessages_doesNoDateParsing() {
+        // Arrange: a page and a half of history, stamped the way the API stamps it.
+        let messages = (0..<50).map { index in
+            message("m\(index)", at: String(format: "2026-09-18T15:%02d:05.123456Z", index))
+        }
+
+        // Act: the four date reads the thread used to make per bubble (its own separator, the
+        // next bubble's separator, the run check, the VoiceOver label). Fastest of several
+        // passes: a shared CI runner can stall any single pass, but it cannot make one faster.
+        let clock = ContinuousClock()
+        let fastest = (0..<10).map { _ in
+            clock.measure {
+                for message in messages {
+                    for _ in 0..<4 { _ = message.createdAtDate }
+                }
+            }
+        }.min()!
+        let fastestMilliseconds = Double(fastest.components.attoseconds) / 1e15
+            + Double(fastest.components.seconds) * 1000
+
+        // Assert: parsing on every read took ~15ms here on a fast Mac, most of a 60Hz frame.
+        XCTAssertLessThan(fastestMilliseconds, 1)
+    }
+
+    func testRows_carryEverythingTheThreadDraws() {
+        // Arrange
+        var timeline = GroupChatTimeline()
+
+        // Act: Ana twice within a minute, then Ben twenty minutes later.
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [
+            message("m3", at: "2026-09-18T15:21:00.000000Z", author: "ben"),
+            message("m2", at: "2026-09-18T15:00:30.000000Z", author: "ana"),
+            message("m1", at: "2026-09-18T15:00:00.000000Z", author: "ana"),
+        ]))
+
+        // Assert
+        let rows = timeline.rows
+        XCTAssertEqual(rows.map(\.id), ["m1", "m2", "m3"])
+        XCTAssertEqual(rows.map { $0.separatorDate != nil }, [true, false, true])
+        XCTAssertEqual(rows.map(\.startsRun), [true, false, true])
+        XCTAssertEqual(rows.map(\.endsRun), [false, true, true])
+        XCTAssertEqual(rows[0].separatorDate, rows[0].date)
+        XCTAssertTrue(rows.allSatisfy { $0.delivery == .delivered })
+    }
+
+    func testRows_sameAuthorAcrossATimeSeparator_startsANewRun() {
+        var timeline = GroupChatTimeline()
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [
+            message("m2", at: "2026-09-18T15:30:00.000000Z", author: "ana"),
+            message("m1", at: "2026-09-18T15:00:00.000000Z", author: "ana"),
+        ]))
+
+        XCTAssertEqual(timeline.rows.map(\.endsRun), [true, true])
+        XCTAssertEqual(timeline.rows.map(\.startsRun), [true, true])
+    }
+}
+
 final class GroupChatDraftTests: XCTestCase {
     func testValidate_trimsWhitespace() {
         XCTAssertEqual(try GroupChatDraft.validate("  hi cabal \n").get(), "hi cabal")
@@ -186,19 +295,234 @@ final class GroupChatTimelineTests: XCTestCase {
         XCTAssertEqual(timeline.olderCursor, "before-m5")
     }
 
-    func testAppendSent_thenPollReturnsSameMessage_noDuplicate() {
-        // Arrange
+}
+
+final class GroupChatOptimisticSendTests: XCTestCase {
+    private let now = ISO8601DateFormatter().date(from: "2026-09-18T15:00:10Z")!
+
+    private func loadedTimeline() -> GroupChatTimeline {
         var timeline = GroupChatTimeline()
-        timeline.mergeNewest(GroupMessagesPageDTO(messages: []))
-        let sent = message("mine-1", at: "2026-09-18T15:00:01.000000Z", mine: true)
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [message("m1", at: "2026-09-18T15:00:01.000000Z")]))
+        return timeline
+    }
+
+    func testBeginSend_showsTheMessageStraightAwayAsSending() {
+        // Arrange
+        var timeline = loadedTimeline()
 
         // Act
-        timeline.appendSent(sent)
-        let added = timeline.mergeNewest(GroupMessagesPageDTO(messages: [sent]))
+        timeline.beginSend(clientId: "c1", body: "buy apple?", at: now)
+
+        // Assert
+        XCTAssertEqual(timeline.rows.map(\.id), ["m1", "c1"])
+        let row = timeline.rows[1]
+        XCTAssertEqual(row.body, "buy apple?")
+        XCTAssertTrue(row.mine)
+        XCTAssertEqual(row.delivery, .sending)
+        XCTAssertNil(row.serverId)
+        XCTAssertEqual(row.date, now)
+        XCTAssertEqual(timeline.messages.map(\.id), ["m1"], "nothing is a server message until the server says so")
+    }
+
+    func testBeginSend_sameClientIdTwice_addsOneRow() {
+        var timeline = loadedTimeline()
+        timeline.beginSend(clientId: "c1", body: "hi", at: now)
+        timeline.beginSend(clientId: "c1", body: "hi", at: now)
+        XCTAssertEqual(timeline.rows.map(\.id), ["m1", "c1"])
+    }
+
+    func testConfirmSent_swapsInTheServerRow_keepingTheBubbleIdentity() {
+        // Arrange
+        var timeline = loadedTimeline()
+        timeline.beginSend(clientId: "c1", body: "hi", at: now)
+        let server = message("m2", at: "2026-09-18T15:00:10.500000Z", mine: true, body: "hi")
+
+        // Act
+        timeline.confirmSent(clientId: "c1", message: server)
+
+        // Assert
+        XCTAssertTrue(timeline.pending.isEmpty)
+        XCTAssertEqual(timeline.messages.map(\.id), ["m1", "m2"])
+        XCTAssertEqual(timeline.rows.map(\.id), ["m1", "c1"], "same id, so SwiftUI updates the bubble instead of replacing it")
+        XCTAssertEqual(timeline.rows[1].serverId, "m2")
+        XCTAssertEqual(timeline.rows[1].delivery, .delivered)
+        XCTAssertEqual(timeline.rows[1].date, server.createdAtDate)
+    }
+
+    func testConfirmSent_thenPollReturnsSameMessage_noDuplicate() {
+        // Arrange
+        var timeline = loadedTimeline()
+        timeline.beginSend(clientId: "c1", body: "hi", at: now)
+        let server = message("m2", at: "2026-09-18T15:00:10.500000Z", mine: true, body: "hi")
+        timeline.confirmSent(clientId: "c1", message: server)
+
+        // Act
+        let added = timeline.mergeNewest(GroupMessagesPageDTO(messages: [server, message("m1", at: "2026-09-18T15:00:01.000000Z")]))
 
         // Assert
         XCTAssertEqual(added, [])
-        XCTAssertEqual(timeline.messages, [sent])
+        XCTAssertEqual(timeline.rows.map(\.id), ["m1", "c1"])
+    }
+
+    func testPollArrivesBeforePostResponse_showsTheMessageOnce_thenConfirmChangesNothing() {
+        // Arrange
+        var timeline = loadedTimeline()
+        timeline.beginSend(clientId: "c1", body: "hi", at: now)
+        let server = message("m2", at: "2026-09-18T15:00:10.500000Z", mine: true, body: "hi")
+
+        // Act: the poll wins the race.
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [server]))
+
+        // Assert: one bubble, already delivered, under the identity it had while sending.
+        XCTAssertEqual(timeline.rows.map(\.id), ["m1", "c1"])
+        XCTAssertEqual(timeline.rows[1].delivery, .delivered)
+        XCTAssertEqual(timeline.rows[1].serverId, "m2")
+
+        // Act: then the POST answers.
+        let rowsBefore = timeline.rows
+        timeline.confirmSent(clientId: "c1", message: server)
+
+        // Assert
+        XCTAssertEqual(timeline.rows, rowsBefore)
+        XCTAssertTrue(timeline.pending.isEmpty)
+    }
+
+    func testPollArrivesBeforePostResponse_thenPostFails_countsAsDelivered() {
+        // Arrange: the message landed but the response was lost (timeout).
+        var timeline = loadedTimeline()
+        timeline.beginSend(clientId: "c1", body: "hi", at: now)
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [message("m2", at: "2026-09-18T15:00:10.500000Z", mine: true, body: "hi")]))
+
+        // Act
+        let outcome = timeline.failSend(clientId: "c1")
+
+        // Assert: nothing to retry, so a retry cannot post it twice.
+        XCTAssertEqual(outcome, .alreadyDelivered)
+        XCTAssertTrue(timeline.pending.isEmpty)
+        XCTAssertEqual(timeline.rows.map(\.delivery), [.delivered, .delivered])
+    }
+
+    func testPostFailsFirst_thenPollDeliversIt_clearsTheFailedBubble() {
+        // Arrange
+        var timeline = loadedTimeline()
+        timeline.beginSend(clientId: "c1", body: "hi", at: now)
+        XCTAssertEqual(timeline.failSend(clientId: "c1"), .markedFailed)
+
+        // Act
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [message("m2", at: "2026-09-18T15:00:10.500000Z", mine: true, body: "hi")]))
+
+        // Assert
+        XCTAssertTrue(timeline.pending.isEmpty)
+        XCTAssertEqual(timeline.rows.map(\.id), ["m1", "c1"])
+        XCTAssertNil(timeline.retrySend(clientId: "c1"))
+    }
+
+    func testPollMatch_wasAnotherDevicesMessage_confirmShowsBoth() {
+        // Arrange: the same text sent from a second device lands while this send is in flight.
+        var timeline = loadedTimeline()
+        timeline.beginSend(clientId: "c1", body: "hi", at: now)
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [message("other", at: "2026-09-18T15:00:10.400000Z", mine: true, body: "hi")]))
+
+        // Act: the POST answers with its own, different row.
+        timeline.confirmSent(clientId: "c1", message: message("m2", at: "2026-09-18T15:00:10.500000Z", mine: true, body: "hi"))
+
+        // Assert: both messages exist on the server, so both show, with distinct ids.
+        XCTAssertEqual(timeline.rows.map(\.id), ["m1", "other", "c1"])
+        XCTAssertEqual(timeline.rows.map(\.serverId), ["m1", "other", "m2"])
+    }
+
+    func testPoll_doesNotMatchOtherPeoplesOrOlderOrDifferentMessages() {
+        // Arrange
+        var timeline = loadedTimeline()
+        timeline.beginSend(clientId: "c1", body: "hi", at: now)
+
+        // Act: same text from someone else, different text from me, and my same text from before the send.
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [
+            message("theirs", at: "2026-09-18T15:00:11.000000Z", mine: false, body: "hi"),
+            message("mine-other", at: "2026-09-18T15:00:11.500000Z", mine: true, body: "hello"),
+        ]))
+        timeline.mergeOlder(GroupMessagesPageDTO(messages: [
+            message("mine-old", at: "2026-09-18T14:00:00.000000Z", mine: true, body: "hi"),
+        ]))
+
+        // Assert: still sending.
+        XCTAssertEqual(timeline.rows.map(\.id), ["mine-old", "m1", "theirs", "mine-other", "c1"])
+        XCTAssertEqual(timeline.rows.last?.delivery, .sending)
+    }
+
+    func testSendBeforeFirstPageLoads_firstPageNeverSwallowsIt() {
+        // Arrange: the viewer types "gm" and sends before history arrives.
+        var timeline = GroupChatTimeline()
+        timeline.beginSend(clientId: "c1", body: "gm", at: now)
+
+        // Act: history holds yesterday's "gm".
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [message("old", at: "2026-09-17T09:00:00.000000Z", mine: true, body: "gm")]))
+
+        // Assert
+        XCTAssertEqual(timeline.rows.map(\.id), ["old", "c1"])
+        XCTAssertEqual(timeline.rows[1].delivery, .sending)
+    }
+
+    func testTwoIdenticalSends_pollMatchesOneEach() {
+        // Arrange
+        var timeline = loadedTimeline()
+        timeline.beginSend(clientId: "c1", body: "+1", at: now)
+        timeline.beginSend(clientId: "c2", body: "+1", at: now.addingTimeInterval(1))
+
+        // Act
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [
+            message("m3", at: "2026-09-18T15:00:11.600000Z", mine: true, body: "+1"),
+            message("m2", at: "2026-09-18T15:00:10.500000Z", mine: true, body: "+1"),
+        ]))
+
+        // Assert: two bubbles, not four, oldest send matched to the oldest row.
+        XCTAssertEqual(timeline.rows.map(\.id), ["m1", "c1", "c2"])
+        XCTAssertEqual(timeline.rows.map(\.serverId), ["m1", "m2", "m3"])
+    }
+
+    func testFailSend_marksFailed_retrySendsTheSameBody_discardRemovesIt() {
+        // Arrange
+        var timeline = loadedTimeline()
+        timeline.beginSend(clientId: "c1", body: "hi", at: now)
+
+        // Act + Assert: failure keeps the text on screen.
+        XCTAssertEqual(timeline.failSend(clientId: "c1"), .markedFailed)
+        XCTAssertEqual(timeline.rows.last?.delivery, .failed)
+        XCTAssertEqual(timeline.rows.last?.body, "hi")
+
+        // Retry puts the same bubble back to sending.
+        XCTAssertEqual(timeline.retrySend(clientId: "c1"), "hi")
+        XCTAssertEqual(timeline.rows.map(\.id), ["m1", "c1"])
+        XCTAssertEqual(timeline.rows.last?.delivery, .sending)
+        XCTAssertNil(timeline.retrySend(clientId: "c1"), "a message already sending is not sent again")
+
+        // A sending message cannot be discarded from under its request; a failed one can.
+        timeline.discardFailed(clientId: "c1")
+        XCTAssertEqual(timeline.rows.count, 2)
+        timeline.failSend(clientId: "c1")
+        timeline.discardFailed(clientId: "c1")
+        XCTAssertEqual(timeline.rows.map(\.id), ["m1"])
+    }
+
+    func testFailSend_unknownClientId_isIgnored() {
+        var timeline = loadedTimeline()
+        XCTAssertEqual(timeline.failSend(clientId: "nope"), .unknown)
+        XCTAssertEqual(timeline.rows.map(\.id), ["m1"])
+    }
+
+    func testPendingRows_joinTheViewersRun_andStayBelowServerMessages() {
+        // Arrange
+        var timeline = GroupChatTimeline()
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [message("m1", at: "2026-09-18T15:00:01.000000Z", mine: true)]))
+        timeline.beginSend(clientId: "c1", body: "and another thing", at: now)
+        XCTAssertEqual(timeline.rows.map(\.startsRun), [true, false])
+
+        // Act: someone else's message arrives while mine is still sending.
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [message("m2", at: "2026-09-18T15:00:12.000000Z")]))
+
+        // Assert
+        XCTAssertEqual(timeline.rows.map(\.id), ["m1", "m2", "c1"])
+        XCTAssertEqual(timeline.rows.map(\.startsRun), [true, true, true])
     }
 }
 
@@ -265,6 +589,10 @@ final class GroupChatCopyTests: XCTestCase {
             GroupChatCopy.emptyState,
             GroupChatCopy.composerPlaceholder,
             GroupChatCopy.loadEarlier,
+            GroupChatCopy.sending,
+            GroupChatCopy.notSent,
+            GroupChatCopy.tryAgain,
+            GroupChatCopy.deleteUnsent,
             GroupChatCopy.sendFailure(MonacoAPIError.httpStatus(403)),
             GroupChatCopy.loadFailure(MonacoAPIError.httpStatus(403)),
         ]))
@@ -434,6 +762,12 @@ final class GroupChatAPITests: XCTestCase {
     }
 }
 
-private func message(_ id: String, at createdAt: String, mine: Bool = false) -> GroupMessageDTO {
-    GroupMessageDTO(id: id, groupId: "g1", authorId: "u1", authorName: "Ana", body: "text \(id)", createdAt: createdAt, mine: mine)
+private func message(
+    _ id: String,
+    at createdAt: String,
+    mine: Bool = false,
+    body: String? = nil,
+    author: String = "u1"
+) -> GroupMessageDTO {
+    GroupMessageDTO(id: id, groupId: "g1", authorId: author, authorName: "Ana", body: body ?? "text \(id)", createdAt: createdAt, mine: mine)
 }
