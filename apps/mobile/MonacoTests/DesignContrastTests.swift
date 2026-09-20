@@ -6,8 +6,15 @@ import UIKit
 /// WCAG 2.1 contrast over resolved design tokens.
 ///
 /// Tokens are role-based, so repointing one (for example `primaryButtonFill` to the electric-blue
-/// brand) can silently push an unrelated pair below AA. This table is the guard: every pair the
-/// app actually draws is listed here with the surfaces it sits on.
+/// brand) can silently push an unrelated pair below AA. This table is the guard.
+///
+/// It is not exhaustive, and should not be read as a claim that it is. It covers the text, glyph
+/// and mark pairs the design system defines roles for; a screen that invents a new combination out
+/// of existing tokens is not caught until its pair is added here. One known gap on purpose:
+/// `brand` as *text* is only 4.09:1 on `surfaceSunken` in dark. Nothing draws it there today —
+/// `brand` is a fill and a tint, and `brandOnWash` is the token for brand-coloured text — so
+/// asserting it would fail on a combination the app does not use. If a call site ever does draw
+/// brand text on a sunken surface, this is where it will need a token of its own.
 enum WCAGContrast {
     struct RGBA {
         var red: Double
@@ -80,8 +87,16 @@ struct MonacoContrastTests {
         for surface in surfaces {
             pairs.append(Pair("primaryText", MonacoTheme.primaryText, on: [surface]))
             pairs.append(Pair("secondaryText", MonacoTheme.secondaryText, on: [surface]))
-            // Timestamps, field placeholders and every disabled button label.
+            // Timestamps and other quiet real content. Disabled labels and placeholders are
+            // deliberately *not* this token any more — see `disabledLabelStaysQuieterThanContent`.
             pairs.append(Pair("tertiaryText", MonacoTheme.tertiaryText, on: [surface]))
+            // Amounts that neither gained nor lost, and their badge.
+            pairs.append(Pair("flat", PnLTone.flat.color, on: [surface]))
+            pairs.append(Pair("flat on wash", PnLTone.flat.washColor, on: [surface, PnLTone.flat.wash]))
+            // Warnings in banners and rows.
+            pairs.append(Pair("warning", MonacoTheme.warning, on: [surface]))
+            // `destructive` aliases `loss`; listed under its own role so repointing it is caught.
+            pairs.append(Pair("destructive", MonacoTheme.destructive, on: [surface]))
             // PnLBadge: signed text on its own wash.
             pairs.append(Pair("profitOnWash", MonacoTheme.profitOnWash, on: [surface, MonacoTheme.profitWash]))
             pairs.append(Pair("lossOnWash", MonacoTheme.lossOnWash, on: [surface, MonacoTheme.lossWash]))
@@ -106,17 +121,36 @@ struct MonacoContrastTests {
             MonacoTheme.lossOnHero,
             on: [MonacoTheme.heroInk, MonacoTheme.lossWashOnHero]
         ))
+        // A flat figure on the hero card, over its own wash.
+        pairs.append(Pair("flat on hero", PnLTone.flat.inkCardColor, on: [MonacoTheme.heroInk]))
+        pairs.append(Pair(
+            "flat on hero wash",
+            PnLTone.flat.inkCardColor,
+            on: [MonacoTheme.heroInk, PnLTone.flat.inkCardWash]
+        ))
         // The toast.
         pairs.append(Pair("toastLabel", MonacoTheme.toastLabel, on: [MonacoTheme.toastFill]))
         return pairs
     }
 
-    /// Glyphs are graphical objects: WCAG 1.4.11 asks for 3:1.
+    /// Graphical objects and large bold text: WCAG 1.4.11 / 1.4.3 ask for 3:1.
+    ///
+    /// The toast glyphs are held to 4.5 rather than 3 even though they are graphical. They are the
+    /// only thing distinguishing a failure toast from a success one for a member who does not read
+    /// the copy, they sit over money screens, and they have the headroom — the nearest is 6.2:1.
+    /// At a 3:1 bar a retune could halve their contrast and still pass.
     private static var glyphPairs: [Pair] {
-        [
-            Pair("toastSuccessGlyph", MonacoTheme.toastSuccessGlyph, on: [MonacoTheme.toastFill], minimum: 3),
-            Pair("toastErrorGlyph", MonacoTheme.toastErrorGlyph, on: [MonacoTheme.toastFill], minimum: 3),
+        var pairs: [Pair] = [
+            Pair("toastSuccessGlyph", MonacoTheme.toastSuccessGlyph, on: [MonacoTheme.toastFill], minimum: 4.5),
+            Pair("toastErrorGlyph", MonacoTheme.toastErrorGlyph, on: [MonacoTheme.toastFill], minimum: 4.5),
         ]
+        for tint in MonacoTheme.CabalTint.allCases {
+            // Bold tile initials, 15pt and up: the large-text bar, not the body one.
+            pairs.append(Pair("\(tint) onFill", tint.onFill, on: [tint.fill], minimum: 3))
+            // The same mark on a deep ink hero card.
+            pairs.append(Pair("\(tint) onInk", tint.onInk, on: [MonacoTheme.heroInk], minimum: 3))
+        }
+        return pairs
     }
 
     @Test func adaptiveTokensActuallyResolvePerScheme() {
@@ -153,6 +187,46 @@ struct MonacoContrastTests {
                     "\(pair.label) in \(scheme == .light ? "light" : "dark") is \(ratio), below \(pair.minimum)"
                 )
             }
+        }
+    }
+
+    /// `disabledLabel` is the one token held *below* AA on purpose, so it needs a two-sided guard:
+    /// AA-or-better makes an unavailable control read as a live one, and too low makes it
+    /// unreadable. The upper bound is expressed against `tertiaryText` rather than a bare number,
+    /// so the two cannot quietly converge back into the single token this split undid.
+    @Test func disabledLabelStaysQuieterThanContent() {
+        for surface in Self.surfaces {
+            for scheme in [UIUserInterfaceStyle.light, .dark] {
+                let disabled = WCAGContrast.ratio(MonacoTheme.disabledLabel, on: [surface], scheme)
+                let content = WCAGContrast.ratio(MonacoTheme.tertiaryText, on: [surface], scheme)
+                #expect(disabled < 4.5, "disabledLabel is \(disabled): a disabled control reads as live")
+                #expect(disabled >= 2.5, "disabledLabel is \(disabled): unavailable is not the same as invisible")
+                #expect(
+                    content - disabled > 1,
+                    "tertiaryText (\(content)) and disabledLabel (\(disabled)) have converged"
+                )
+            }
+        }
+    }
+
+    /// The toast panel is dark in both schemes, so its glyphs are fixed colours. Aliasing them to
+    /// the scheme-adaptive `profitVivid` / `lossVivid` — whose documented job is chart strokes on
+    /// paper — is the `primaryButtonFill = brandFill` pattern from #309: the alias looks harmless
+    /// until the borrowed token is retuned for the background it was actually written for.
+    /// Caught structurally, because a ratio check passes right up until the day it does not.
+    @Test func toastGlyphsDoNotFollowTheScheme() {
+        for (name, glyph) in [
+            ("toastSuccessGlyph", MonacoTheme.toastSuccessGlyph),
+            ("toastErrorGlyph", MonacoTheme.toastErrorGlyph),
+        ] {
+            let light = WCAGContrast.resolve(glyph, .light)
+            let dark = WCAGContrast.resolve(glyph, .dark)
+            #expect(
+                abs(light.red - dark.red) < 0.001
+                    && abs(light.green - dark.green) < 0.001
+                    && abs(light.blue - dark.blue) < 0.001,
+                "\(name) resolves differently per scheme: it is following a paper token again"
+            )
         }
     }
 
