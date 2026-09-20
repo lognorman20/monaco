@@ -25,8 +25,21 @@ final class MoneyFlowErrorInputTests: XCTestCase {
             FlowErrorInput(MonacoCore.MonacoAPIError.rejected(status: 400, message: "invalid destination address")),
             FlowErrorInput(status: 400, serverMessage: "invalid destination address")
         )
+        // The server's Retry-After rides along instead of being dropped here: chat showed a
+        // countdown off this same response while the money flows said "a moment".
         XCTAssertEqual(
             FlowErrorInput(MonacoCore.MonacoAPIError.rateLimited(retryAfterSeconds: 30)),
+            FlowErrorInput(status: 429, retryAfterSeconds: 30)
+        )
+        XCTAssertEqual(
+            MoneyFlowCopy.cashOutFailure(
+                FlowErrorInput(MonacoCore.MonacoAPIError.rateLimited(retryAfterSeconds: 30))
+            ).nextStep,
+            "Try again in 30 seconds."
+        )
+        // A 429 with no header keeps the generic wording.
+        XCTAssertEqual(
+            FlowErrorInput(MonacoCore.MonacoAPIError.rateLimited(retryAfterSeconds: nil)),
             FlowErrorInput(status: 429)
         )
     }
