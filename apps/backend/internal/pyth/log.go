@@ -33,3 +33,18 @@ func logChartSeries(symbol string, chartRange ChartRange, requested, failed, poi
 		"point_count", pointCount,
 	)
 }
+
+// logSeriesSource records a one-call history source failing over to the Hermes
+// sampler. Charts keep working either way, so this log is the only place the
+// switch is visible.
+func logSeriesSource(symbol string, chartRange ChartRange, err error) {
+	slog.Warn("pyth series source failed, falling back to hermes samples",
+		"symbol", symbol,
+		"range", chartRange,
+		"err", err,
+	)
+}
+
+func logReferenceQuotes(symbol string, equityStatus, tokenStatus QuoteStatus) {
+	slog.Info("pyth reference quotes", "symbol", symbol, "equity", equityStatus, "token", tokenStatus)
+}

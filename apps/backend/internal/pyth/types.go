@@ -30,6 +30,10 @@ const (
 // EquityMark is one Hermes equity mark plus the freshness metadata around it.
 type EquityMark struct {
 	PriceUsdcMicros int64
+	// ConfUsdcMicros is Pyth's confidence interval around the mark, in USDC micros.
+	// Zero means Hermes did not publish one. Display only — valuation does not
+	// widen or narrow a mark by it.
+	ConfUsdcMicros int64
 	// PublishedAt is Hermes publish_time in UTC; zero when Hermes omits it.
 	PublishedAt time.Time
 	MarketOpen  bool

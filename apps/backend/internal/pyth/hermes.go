@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
@@ -26,6 +27,13 @@ type HermesClient struct {
 	httpClient *http.Client
 	apiKey     string
 	chartCache *ChartSeriesCache
+	// seriesSource serves a whole chart range in one call (Pyth Benchmarks). Nil
+	// falls back to sampling the Hermes historical endpoint point by point.
+	seriesSource  SeriesSource
+	seriesBreaker *seriesBreaker
+
+	quoteCacheMu sync.RWMutex
+	quoteCache   map[string]referenceQuoteEntry
 }
 
 // NewHermesClient returns a production Hermes client authenticated with a Pyth API key.
@@ -52,11 +60,20 @@ func newHermesClient(baseURL string, httpClient *http.Client, apiKey string) *He
 		httpClient = &http.Client{Timeout: defaultTimeout}
 	}
 	return &HermesClient{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: telemetry.InstrumentClient(telemetry.UpstreamPyth, httpClient),
-		apiKey:     strings.TrimSpace(apiKey),
-		chartCache: NewChartSeriesCache(DefaultChartSeriesCacheTTL),
+		baseURL:       strings.TrimRight(baseURL, "/"),
+		httpClient:    telemetry.InstrumentClient(telemetry.UpstreamPyth, httpClient),
+		apiKey:        strings.TrimSpace(apiKey),
+		chartCache:    NewChartSeriesCache(DefaultChartSeriesCacheTTL),
+		seriesBreaker: newSeriesBreaker(defaultSeriesBreakerCooldown),
+		quoteCache:    make(map[string]referenceQuoteEntry),
 	}
+}
+
+// WithSeriesSource points chart history at a one-call source such as Pyth
+// Benchmarks. The Hermes per-sample path stays as the fallback behind a breaker.
+func (c *HermesClient) WithSeriesSource(source SeriesSource) *HermesClient {
+	c.seriesSource = source
+	return c
 }
 
 func (c *HermesClient) setHermesAuth(req *http.Request) error {
@@ -68,8 +85,13 @@ func (c *HermesClient) setHermesAuth(req *http.Request) error {
 }
 
 type priceFeedResponse struct {
-	ID          string      `json:"id"`
-	MarketHours marketHours `json:"market_hours"`
+	ID          string         `json:"id"`
+	Attributes  feedAttributes `json:"attributes"`
+	MarketHours marketHours    `json:"market_hours"`
+}
+
+type feedAttributes struct {
+	Symbol string `json:"symbol"`
 }
 
 type marketHours struct {
@@ -87,7 +109,11 @@ type parsedPriceUpdate struct {
 }
 
 type priceUpdate struct {
-	Price       string `json:"price"`
+	Price string `json:"price"`
+	// Conf is Pyth's confidence interval around Price, in the same exponent. It is
+	// the vendor's own statement of how sure it is, and the only honest way to show
+	// "price certainty" on the stats grid.
+	Conf        string `json:"conf"`
 	Expo        int32  `json:"expo"`
 	PublishTime int64  `json:"publish_time"`
 }
@@ -136,21 +162,28 @@ func (c *HermesClient) markHolding(ctx context.Context, holding CostBasis) (Mark
 
 // resolveFeedSession returns a cached feed id and a fresh market_hours.is_open value.
 func (c *HermesClient) resolveFeedSession(ctx context.Context, symbol string) (feedID string, isOpen bool, err error) {
-	feed, err := c.fetchPriceFeedBySymbol(ctx, symbol)
+	return c.resolveFeedByQuery(ctx, symbol, EquityQuerySymbol(symbol))
+}
+
+func (c *HermesClient) resolveFeedByQuery(ctx context.Context, symbol, query string) (feedID string, isOpen bool, err error) {
+	feed, err := c.fetchPriceFeedByQuery(ctx, symbol, query)
 	if err != nil {
 		return "", false, err
 	}
 
-	if cachedID, ok := lookupFeedID(symbol); ok && cachedID != "" {
+	if cachedID, ok := lookupFeedID(query); ok && cachedID != "" {
 		return cachedID, feed.MarketHours.IsOpen, nil
 	}
 
-	registerFeedID(symbol, feed.ID)
+	registerFeedID(query, feed.ID)
 	return feed.ID, feed.MarketHours.IsOpen, nil
 }
 
 func (c *HermesClient) fetchPriceFeedBySymbol(ctx context.Context, symbol string) (priceFeedResponse, error) {
-	query := EquityQuerySymbol(symbol)
+	return c.fetchPriceFeedByQuery(ctx, symbol, EquityQuerySymbol(symbol))
+}
+
+func (c *HermesClient) fetchPriceFeedByQuery(ctx context.Context, symbol, query string) (priceFeedResponse, error) {
 	endpoint := fmt.Sprintf("%s/v2/price_feeds?query=%s", c.baseURL, url.QueryEscape(query))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -185,13 +218,38 @@ func (c *HermesClient) fetchPriceFeedBySymbol(ctx context.Context, symbol string
 		logFeedLookup(symbol, "", lookupErr)
 		return priceFeedResponse{}, lookupErr
 	}
-	if len(feeds) == 0 || feeds[0].ID == "" {
-		lookupErr := fmt.Errorf("pyth feed not found for %s", symbol)
+	feed, found := selectFeed(feeds, query)
+	if !found {
+		lookupErr := fmt.Errorf("%w: %s (%s)", ErrFeedNotFound, symbol, query)
 		logFeedLookup(symbol, "", lookupErr)
 		return priceFeedResponse{}, lookupErr
 	}
-	logFeedLookup(symbol, feeds[0].ID, nil)
-	return feeds[0], nil
+	logFeedLookup(symbol, feed.ID, nil)
+	return feed, nil
+}
+
+// selectFeed picks the feed whose own symbol equals the query. The Hermes search is
+// a substring match, so "Crypto.AAPLX/USD" can come back alongside other feeds; the
+// first result is not necessarily the one asked for, and pricing the wrong feed is
+// the kind of mistake nobody notices until it is on a chart.
+func selectFeed(feeds []priceFeedResponse, query string) (priceFeedResponse, bool) {
+	normalizedQuery := normalizeSymbol(query)
+	for _, feed := range feeds {
+		if feed.ID != "" && normalizeSymbol(feed.Attributes.Symbol) == normalizedQuery {
+			return feed, true
+		}
+	}
+	// Older Hermes payloads omit attributes entirely; fall back to the first result
+	// only when no feed in the page claims a symbol at all.
+	for _, feed := range feeds {
+		if strings.TrimSpace(feed.Attributes.Symbol) != "" {
+			return priceFeedResponse{}, false
+		}
+	}
+	if len(feeds) > 0 && feeds[0].ID != "" {
+		return feeds[0], true
+	}
+	return priceFeedResponse{}, false
 }
 
 func (c *HermesClient) fetchLatestPrice(ctx context.Context, feedID string) (parsedPriceUpdate, error) {
