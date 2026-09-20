@@ -17,8 +17,11 @@ public enum PercentReturnFormatter {
             }
             return trimmed
         }
-        guard let value = Double(trimmed.replacingOccurrences(of: typographicMinus, with: "-")) else {
-            return trimmed
+        guard let value = Double(trimmed.replacingOccurrences(of: typographicMinus, with: "-")),
+              value.isFinite
+        else {
+            // "nan" and "inf" parse as Doubles. Neither is a return anyone can read.
+            return "—"
         }
         let pct = value * 100
         let magnitude = String(format: "%.1f", abs(pct))
@@ -29,7 +32,7 @@ public enum PercentReturnFormatter {
 
 public enum DollarPnlFormatter {
     public static func format(_ raw: String) -> String {
-        if raw.hasPrefix("-") {
+        if raw.hasPrefix("-") || raw.hasPrefix(typographicMinus) {
             return "\(raw) loss"
         }
         return raw
@@ -38,7 +41,7 @@ public enum DollarPnlFormatter {
 
 public enum SlicePercentFormatter {
     public static func format(_ raw: String) -> String {
-        guard let value = Double(raw) else { return raw }
+        guard let value = Double(raw), value.isFinite else { return raw }
         return String(format: "%.1f%%", value * 100)
     }
 }
@@ -163,9 +166,14 @@ public enum UsdAmountFormatter {
         var rounded = Decimal()
         var source = decimal
         NSDecimalRound(&rounded, &source, 2, .plain)
-        let number = rounded as NSDecimalNumber
+        let isNegative = rounded < 0
+        let magnitude = isNegative ? -rounded : rounded
+        let number = magnitude as NSDecimalNumber
         let body = twoDecimalFormatter.string(from: number) ?? number.stringValue
-        return "$\(body)"
+        // A negative amount reads "−$12.50", the way `compact` already writes one: the sign
+        // goes in front of the dollar sign, and it is a typographic minus, never "$-12.50".
+        guard isNegative, body != "0.00" else { return "$\(body)" }
+        return "\(typographicMinus)$\(body)"
     }
 
     /// Built once: this runs for every money label on every body pass.
