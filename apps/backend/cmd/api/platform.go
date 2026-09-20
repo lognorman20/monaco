@@ -69,11 +69,16 @@ func setupLogging() (func(), error) {
 	}, nil
 }
 
+// trustProxyHeaders reports whether per-address limits may key on X-Forwarded-For.
+func trustProxyHeaders() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv(envTrustProxyHeaders)), "true")
+}
+
 // platformHandler wraps the route mux with the cross-cutting middleware. Order matters:
 // the request id is set first so every later log line and error body carries it, and
 // Recover sits outside everything that can panic.
 func platformHandler(mux http.Handler) http.Handler {
-	trustProxy := strings.EqualFold(strings.TrimSpace(os.Getenv(envTrustProxyHeaders)), "true")
+	trustProxy := trustProxyHeaders()
 	origins := strings.Split(os.Getenv(envCORSAllowedOrigins), ",")
 	return httpapi.Chain(mux,
 		httpapi.RequestID(),

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"math"
-	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -20,39 +19,54 @@ const (
 	agentKeyFailureInterval = time.Minute
 )
 
-// AgentKeyGuard throttles wrong X-Monaco-Agent-Key guesses. Agent keys are short so a
-// cabal can read one off a phone; the guard is what makes guessing one impractical.
-// Failures count against both the target group and the caller's address, so neither
-// spreading guesses over groups nor over addresses gets an unthrottled path. Valid
-// calls never spend from the limit.
+// AgentKeyGuard throttles wrong X-Monaco-Agent-Key guesses. Only failed attempts spend from
+// it, and they count against both the target group and the caller's address.
+//
+// An address that has spent its allowance is refused before its key is looked at: answering
+// its right guess with a 200 would turn the throttle into an oracle. The group allowance is
+// different. Anyone can spend it by aiming ten bad keys at a group, so refusing on it would
+// let a stranger lock a cabal's real bot out. Current keys carry ~158 bits and cannot be
+// guessed, so a presented key of that shape is never refused on the group allowance. Keys
+// minted before that format are five characters; for those the group allowance is what keeps
+// guessing spread over many addresses impractical, so it still applies to them. A cabal on an
+// old key gets out of that trade-off by voting the bot out and back in.
 type AgentKeyGuard struct {
 	failures *ratelimit.Limiter
+	// trustProxyHeaders matches RateLimiter: key on X-Forwarded-For only behind a proxy that
+	// overwrites it. Behind such a proxy RemoteAddr is the proxy, shared by every caller.
+	trustProxyHeaders bool
 }
 
 // NewAgentKeyGuard allows agentKeyFailureBurst wrong keys per group and per address,
 // then one more per agentKeyFailureInterval.
-func NewAgentKeyGuard() *AgentKeyGuard {
-	return &AgentKeyGuard{failures: ratelimit.New(agentKeyFailureBurst, agentKeyFailureInterval)}
-}
-
-func agentKeyGuardKeys(r *http.Request, groupID string) []string {
-	// RemoteAddr only: forwarding headers are caller-controlled.
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
+func NewAgentKeyGuard(trustProxyHeaders bool) *AgentKeyGuard {
+	return &AgentKeyGuard{
+		failures:          ratelimit.New(agentKeyFailureBurst, agentKeyFailureInterval),
+		trustProxyHeaders: trustProxyHeaders,
 	}
-	return []string{"group:" + groupID, "addr:" + host}
 }
 
-// blocked reports whether this caller or group has used up its wrong-key allowance.
-// A nil guard never blocks.
-func (g *AgentKeyGuard) blocked(r *http.Request, groupID string) (bool, time.Duration) {
+func (g *AgentKeyGuard) groupKey(groupID string) string {
+	return "group:" + groupID
+}
+
+func (g *AgentKeyGuard) addressKey(r *http.Request) string {
+	return "addr:" + clientIP(r, g.trustProxyHeaders)
+}
+
+// blocked reports whether a call presenting agentKey must be refused before the key is
+// checked. A nil guard never blocks.
+func (g *AgentKeyGuard) blocked(r *http.Request, groupID, agentKey string) (bool, time.Duration) {
 	if g == nil {
 		return false, 0
 	}
+	keys := []string{g.addressKey(r)}
+	if !app.IsCurrentAgentKeyFormat(agentKey) {
+		keys = append(keys, g.groupKey(groupID))
+	}
 	var longest time.Duration
 	isBlocked := false
-	for _, key := range agentKeyGuardKeys(r, groupID) {
+	for _, key := range keys {
 		if over, wait := g.failures.Blocked(key); over {
 			isBlocked = true
 			longest = max(longest, wait)
@@ -66,9 +80,8 @@ func (g *AgentKeyGuard) recordFailure(r *http.Request, groupID string, err error
 	if g == nil || !isAgentAuthFailure(err) {
 		return
 	}
-	for _, key := range agentKeyGuardKeys(r, groupID) {
-		g.failures.Allow(key)
-	}
+	g.failures.Allow(g.groupKey(groupID))
+	g.failures.Allow(g.addressKey(r))
 }
 
 func isAgentAuthFailure(err error) bool {

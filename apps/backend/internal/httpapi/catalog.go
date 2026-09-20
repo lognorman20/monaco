@@ -53,7 +53,7 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 
 	agentKey := strings.TrimSpace(r.Header.Get(agentKeyHeader))
 	if agentKey != "" {
-		if over, wait := h.KeyGuard.blocked(r, groupID); over {
+		if over, wait := h.KeyGuard.blocked(r, groupID, agentKey); over {
 			writeAgentKeyThrottled(ctx, log, w, wait, groupID)
 			return
 		}

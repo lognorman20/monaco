@@ -50,7 +50,7 @@ func (h *AgentHandlers) SubmitAgentIntentHandler(w http.ResponseWriter, r *http.
 		logJSONError(ctx, log, "missing_agent_key", w, http.StatusUnauthorized, "missing agent api key", "group_id", groupID)
 		return
 	}
-	if over, wait := h.KeyGuard.blocked(r, groupID); over {
+	if over, wait := h.KeyGuard.blocked(r, groupID, agentKey); over {
 		writeAgentKeyThrottled(ctx, log, w, wait, groupID)
 		return
 	}

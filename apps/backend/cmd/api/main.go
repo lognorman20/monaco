@@ -212,7 +212,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Swap:    swap,
 		Symbols: symbols,
 	}
-	agentKeyGuard := httpapi.NewAgentKeyGuard()
+	agentKeyGuard := httpapi.NewAgentKeyGuard(trustProxyHeaders())
 	catalogHandlers := &httpapi.CatalogHandlers{
 		Store:    store,
 		Privy:    privyClient,
