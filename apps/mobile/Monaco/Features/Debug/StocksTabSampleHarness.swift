@@ -1,0 +1,107 @@
+#if DEBUG
+import MonacoCore
+import SwiftUI
+
+/// Debug-only: the Stocks tab on canned market data, no sign-in and no backend.
+/// Launch with `-MonacoStocksTabSample <scenario>`.
+///
+/// Every state the four sections can be in is reachable from here, so each one can
+/// be screenshotted: the whole tab populated, a member whose cabals own nothing,
+/// a cabal read that failed while the market is still live, a catalogue that would
+/// not load at all, symbols with no day series, and the session moon on the rows.
+///
+/// `MarketSampleData` in MonacoCore is the data; this is the wiring.
+enum StocksTabSampleScenario: String, CaseIterable {
+    /// All four sections, with the awkward rows in them: a faller, a stock that
+    /// did not move, one with no day change and one with no series.
+    case full
+    /// Signed in, in no cabals, or in cabals that have bought nothing.
+    case noCabals
+    /// The cabal read failed; the catalogue did not. The market stays live.
+    case cabalsFailed
+    /// The catalogue would not load. Nothing else can be shown.
+    case popularFailed
+    /// Nothing has answered yet: the skeleton.
+    case loading
+    /// A catalogue with no day series at all — rows without sparklines.
+    case noSeries
+    /// After the bell: the rows carry the moon.
+    case afterHours
+
+    static let launchArgument = "-MonacoStocksTabSample"
+
+    static var requested: StocksTabSampleScenario? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flag = arguments.firstIndex(of: launchArgument), arguments.indices.contains(flag + 1) else { return nil }
+        return StocksTabSampleScenario(rawValue: arguments[flag + 1])
+    }
+}
+
+struct StocksTabSampleHarness: View {
+    let scenario: StocksTabSampleScenario
+    @ObservedObject var auth: PrivyAuthService
+    @State private var session = AppSessionStore()
+
+    var body: some View {
+        NavigationStack {
+            AssetsTabView(auth: auth, dataSource: StocksTabSampleDataSource(scenario: scenario))
+        }
+        .environment(session)
+        .tint(MonacoTheme.ink)
+    }
+}
+
+/// Canned answers for the three reads the tab makes. `loading` never returns,
+/// which is how the skeleton is screenshotted.
+private struct StocksTabSampleDataSource: StocksTabDataSource {
+    let scenario: StocksTabSampleScenario
+
+    private var market: MarketStatusDTO {
+        scenario == .afterHours ? MarketSampleData.sessionAfterHours : MarketSampleData.sessionOpen
+    }
+
+    private var assets: [MarketAssetDTO] {
+        guard scenario == .noSeries else { return MarketSampleData.popularAssets }
+        return MarketSampleData.popularAssets.map { asset in
+            MarketAssetDTO(
+                symbol: asset.symbol,
+                name: asset.name,
+                solanaMint: asset.solanaMint,
+                routable: asset.routable,
+                priceUsdcMicros: asset.priceUsdcMicros,
+                change24h: asset.change24h,
+                sparkUsdcMicros: [],
+                logoUrl: asset.logoUrl
+            )
+        }
+    }
+
+    func search(query: String, offset: Int, limit: Int) async throws -> ListMarketAssetsResponse {
+        if scenario == .loading { try await Task.sleep(for: .seconds(3600)) }
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let matches = assets.filter {
+            needle.isEmpty
+                || $0.symbol.lowercased().contains(needle)
+                || $0.name.lowercased().contains(needle)
+        }
+        return ListMarketAssetsResponse(assets: matches, hasMore: false, market: market)
+    }
+
+    func popular(limit: Int) async throws -> PopularAssetsResponse {
+        if scenario == .loading { try await Task.sleep(for: .seconds(3600)) }
+        if scenario == .popularFailed { throw SampleStocksFailure() }
+        return PopularAssetsResponse(assets: Array(assets.prefix(limit)), market: market)
+    }
+
+    func held() async throws -> HeldAssetsResponse {
+        if scenario == .loading { try await Task.sleep(for: .seconds(3600)) }
+        if scenario == .cabalsFailed { throw SampleStocksFailure() }
+        if scenario == .noCabals || scenario == .popularFailed {
+            return HeldAssetsResponse(held: [], upForVote: [], market: market)
+        }
+        return MarketSampleData.heldAssetsResponse(market: market)
+    }
+}
+
+private struct SampleStocksFailure: Error {}
+#endif
