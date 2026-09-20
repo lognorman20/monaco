@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"math"
+	"strings"
 	"testing"
 
 	"github.com/monaco/monaco/packages/domain"
@@ -63,16 +65,32 @@ func TestAgentAPIKey_mintAndHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	if len(plaintext) != agentKeyLength {
-		t.Fatalf("expected %d-char key, got %q", agentKeyLength, plaintext)
+	secret, ok := strings.CutPrefix(plaintext, AgentKeyPrefix)
+	if !ok || len(secret) != agentKeySecretLength {
+		t.Fatalf("expected %q + %d chars, got %q", AgentKeyPrefix, agentKeySecretLength, plaintext)
 	}
-	if prefix != plaintext {
-		t.Fatalf("prefix should be full key, got %q", prefix)
+	// At least 128 bits of crypto/rand: log2(31) * 32 chars is ~158.
+	if bits := float64(agentKeySecretLength) * math.Log2(float64(len(agentKeyAlphabet))); bits < 128 {
+		t.Fatalf("key carries %.1f bits, want >= 128", bits)
 	}
-	for _, c := range plaintext {
+	if !IsCurrentAgentKeyFormat(plaintext) {
+		t.Fatalf("minted key %q is not recognised as the current format", plaintext)
+	}
+	// The stored prefix tells keys apart without being the key.
+	if !strings.HasPrefix(plaintext, prefix) || len(prefix) >= len(plaintext)/2 {
+		t.Fatalf("prefix %q should be a short head of the key", prefix)
+	}
+	for _, c := range secret {
 		if !containsRune(agentKeyAlphabet, c) {
 			t.Fatalf("key contains ambiguous or invalid char %q in %q", c, plaintext)
 		}
+	}
+	another, _, _, err := MintAgentAPIKey()
+	if err != nil {
+		t.Fatalf("mint again: %v", err)
+	}
+	if another == plaintext {
+		t.Fatal("two mints returned the same key")
 	}
 	if HashAgentAPIKey(plaintext) != hash {
 		t.Fatal("hash mismatch")

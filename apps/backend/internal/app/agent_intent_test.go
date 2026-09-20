@@ -124,8 +124,8 @@ func TestAgentKeyReveal_proposerWindowThenMembersOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RevealAgentKeyForProposer(proposer): %v", err)
 	}
-	if !ok || len(key) != 5 {
-		t.Fatalf("expected a 5-char key on first reveal, got ok=%v key=%q", ok, key)
+	if !ok || !IsCurrentAgentKeyFormat(key) {
+		t.Fatalf("expected a current-format key on first reveal, got ok=%v key=%q", ok, key)
 	}
 
 	// The detail screen refetches (after a vote, on every poll), so a second read inside the
