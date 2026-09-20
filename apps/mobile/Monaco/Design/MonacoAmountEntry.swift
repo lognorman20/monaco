@@ -232,14 +232,31 @@ enum AmountEntryText {
         return result
     }
 
-    /// A comma is grouping here far more often than it is a decimal point: the figure over the pad
-    /// renders "$1,250.50", and that is what gets copied and pasted back in. Treating every comma
-    /// as a decimal point turned a pasted "$1,250.50" into $1.25 — a thousandfold error on a money
-    /// screen. A single comma that is *not* followed by exactly three digits can only be a decimal
-    /// separator, which is what a decimal pad types in a comma-decimal locale, so that still works.
+    /// Which separator in the text is the decimal point, and which is grouping.
+    ///
+    /// The figure over the pad renders "$1,250.50", and that is what gets copied and pasted back
+    /// in. Treating every comma as a decimal point turned a pasted "$1,250.50" into $1.25 — a
+    /// thousandfold error on a money screen.
+    ///
+    /// - Both separators present: only a paste can produce that, and the one that comes last is
+    ///   the decimal point. "1,250.50" and "1.250,50" are both 1250.50.
+    /// - Only commas: a single comma with at most two digits after it is a decimal point, which is
+    ///   what a decimal pad types in a comma-decimal locale ("12,", "12,5"). Anything else is
+    ///   grouping ("1,250", "1,250,000").
+    /// - Only dots: left alone. `sanitize` keeps the first and ignores the rest, which is what
+    ///   typing needs — "1.2" plus another "." must stay 1.2, not become 12.
     private static func normalisingSeparators(_ raw: String) -> String {
-        guard raw.contains(",") else { return raw }
-        if !raw.contains("."), commaIsDecimalSeparator(raw) {
+        let hasComma = raw.contains(",")
+        guard hasComma else { return raw }
+
+        if let lastComma = raw.lastIndex(of: ","), let lastDot = raw.lastIndex(of: ".") {
+            if lastComma > lastDot {
+                return raw.replacingOccurrences(of: ".", with: "").replacingOccurrences(of: ",", with: ".")
+            }
+            return raw.replacingOccurrences(of: ",", with: "")
+        }
+
+        if commaIsDecimalSeparator(raw) {
             return raw.replacingOccurrences(of: ",", with: ".")
         }
         return raw.replacingOccurrences(of: ",", with: "")
@@ -248,7 +265,7 @@ enum AmountEntryText {
     private static func commaIsDecimalSeparator(_ raw: String) -> Bool {
         let parts = raw.split(separator: ",", omittingEmptySubsequences: false)
         guard parts.count == 2 else { return false }
-        return parts[1].filter { $0.isASCII && $0.isNumber }.count != 3
+        return parts[1].filter { $0.isASCII && $0.isNumber }.count <= 2
     }
 
     static func decimal(_ text: String) -> Decimal? {

@@ -99,6 +99,8 @@ struct AmountEntryTextTests {
         ("$1,250.50", "1250.50"),
         ("1,250", "1250"),
         ("1,250,000", "1250000"),
+        // Both separators present: the one that comes last is the decimal point.
+        ("1.250,50", "1250.50"),
     ])
     func pastedGroupingKeepsItsValue(raw: String, expected: String) {
         #expect(AmountEntryText.sanitize(raw) == expected)
