@@ -186,6 +186,8 @@ The user picks how many dollars (or how many shares) to take, from a dust minimu
 1. **Debit share units** first (row-locked in Postgres).
 2. Compute the member's slice of the pot (`shares redeemed / total shares × pot NAV`). If the treasury holds stock, **sell that slice to USDC** on Jupiter first.
 3. Send USDC only to a **payout address the user proved they own** (signed message). The proof is required on every redeem, including partials. Reject attacker-supplied pubkeys.
+4. **Settle on chain, exactly once.** The signed transfer and its signature are stored before the transfer is broadcast, and the redeem only settles (withdrawal row, NAV snapshot) once Solana confirms that signature. A transfer that fails on chain or expires without landing returns the share units. A redeem never signs a second transfer, so a retry can only finish the first one.
+5. If the sale raises less USDC than the slice, the payout is what the treasury holds and **only the share units that payout covers are burned**. The member keeps the rest and can redeem them later.
 
 They receive USDC equal to their redeemed fraction of the pot at that moment, not a refund of dollars they put in. That group's member board, the global group board, and the global people board all recompute from the new net-USDC-in figure.
 
