@@ -91,8 +91,15 @@ struct MonacoRow<Leading: View, Trailing: View>: View {
     }
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body)
+    private var titleWidthFloor: CGFloat = MonacoRowLayout.baseMinimumTitleWidth
 
-    private var layout: MonacoRowLayout { MonacoRowLayout(dynamicTypeSize: dynamicTypeSize) }
+    /// True for the `Trailing == EmptyView` overload, where there are no figures to lay out.
+    private var hasTrailing: Bool { Trailing.self != EmptyView.self }
+
+    private var layout: MonacoRowLayout {
+        MonacoRowLayout(dynamicTypeSize: dynamicTypeSize, scaledTitleWidthFloor: titleWidthFloor)
+    }
 
     private var labels: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -131,10 +138,14 @@ struct MonacoRow<Leading: View, Trailing: View>: View {
                         labels
                         if chevron { chevronGlyph }
                     }
-                    VStack(alignment: .leading, spacing: 2) {
-                        trailing
+                    // Chevron-only rows have no second line to drop below the labels; an empty
+                    // column would still spend the stack's spacing.
+                    if hasTrailing {
+                        VStack(alignment: .leading, spacing: 2) {
+                            trailing
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
                 HStack(spacing: MonacoTheme.Space.sm) {
@@ -179,10 +190,18 @@ struct MonacoRow<Leading: View, Trailing: View>: View {
 /// title zero width (an ellipsis) and stopped `MoneyText`'s `minimumScaleFactor` from ever
 /// applying. Rows now stack at accessibility sizes, and the figures shrink at normal sizes.
 struct MonacoRowLayout: Equatable {
-    let isStacked: Bool
+    /// Floor for the label column at the default text size.
+    static let baseMinimumTitleWidth: CGFloat = 96
 
-    init(dynamicTypeSize: DynamicTypeSize) {
+    let isStacked: Bool
+    private let scaledTitleWidthFloor: CGFloat
+
+    init(
+        dynamicTypeSize: DynamicTypeSize,
+        scaledTitleWidthFloor: CGFloat = MonacoRowLayout.baseMinimumTitleWidth
+    ) {
         isStacked = dynamicTypeSize.isAccessibilitySize
+        self.scaledTitleWidthFloor = scaledTitleWidthFloor
     }
 
     /// A stacked row gives the title room for two lines; an inline row still truncates at one.
@@ -190,8 +209,10 @@ struct MonacoRowLayout: Equatable {
 
     var subtitleLineLimit: Int { isStacked ? 2 : 1 }
 
-    /// Floor for the label column in the inline layout, so the figures give way first.
-    var minimumTitleWidth: CGFloat? { isStacked ? nil : 96 }
+    /// Floor for the label column in the inline layout, so the figures give way first. It scales
+    /// with the title: the title grows up to xxxLarge while the row is still inline, and a fixed
+    /// 96pt is about five characters at that size, so a row with a wide figure went on truncating.
+    var minimumTitleWidth: CGFloat? { isStacked ? nil : scaledTitleWidthFloor }
 
     /// The separator lines up under the labels in the inline layout, and runs the full width
     /// of a stacked row, where the figures sit below the mark.
