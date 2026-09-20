@@ -18,6 +18,9 @@ struct ProposalFeedView: View {
     /// Bumped by every load the member caused, so a background poll that was already in flight
     /// does not write its older answer over theirs.
     @State private var loadGeneration = 0
+    /// A proposal has left the Open list and the Closed tab has not been re-read since. Held
+    /// across ticks so a closed read that throws does not lose the one signal that it changed.
+    @State private var closedIsStale = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -123,17 +126,24 @@ struct ProposalFeedView: View {
         let previousOpen = proposals[.open]
         let open = try await service.listProposals(groupId: groupId, tab: .open)
         guard generation == loadGeneration, votingIDs.isEmpty, !Task.isCancelled else { return }
+        // Remember the departure before acting on it. The fresh Open list is about to become
+        // `previousOpen`, so if the closed read below throws, the next tick can no longer see that
+        // a proposal left, and the Closed tab and its count stay wrong until the member switches
+        // tabs or pulls to refresh.
+        if ProposalFeedPolling.openListLostAProposal(previousOpen: previousOpen, freshOpen: open) {
+            closedIsStale = true
+        }
         apply(open, to: .open)
 
         guard ProposalFeedPolling.shouldReloadClosed(
-            previousOpen: previousOpen,
-            freshOpen: open,
             visibleTab: tab,
-            hasClosed: proposals[.closed] != nil
+            hasClosed: proposals[.closed] != nil,
+            closedIsStale: closedIsStale
         ) else { return }
         let closed = try await service.listProposals(groupId: groupId, tab: .closed)
         guard generation == loadGeneration, votingIDs.isEmpty, !Task.isCancelled else { return }
         apply(closed, to: .closed)
+        closedIsStale = false
     }
 
     private func apply(_ fresh: [ProposalDTO], to tab: ProposalFeedTab) {
@@ -152,6 +162,7 @@ struct ProposalFeedView: View {
                 proposals[tab] = loaded
             }
             failedTabs.remove(tab)
+            if tab == .closed { closedIsStale = false }
         } catch is CancellationError {
             return
         } catch {
@@ -187,17 +198,19 @@ struct ProposalFeedView: View {
 /// and its count are now wrong — and while Closed is the tab the member is reading, where another
 /// member's deciding vote or a new comment count shows up.
 enum ProposalFeedPolling {
-    static func shouldReloadClosed(
-        previousOpen: [ProposalDTO]?,
-        freshOpen: [ProposalDTO],
-        visibleTab: ProposalFeedTab,
-        hasClosed: Bool
-    ) -> Bool {
-        if !hasClosed { return true }
-        if visibleTab == .closed { return true }
+    /// A proposal that was open on the last tick is not on this one: it settled, so the Closed tab
+    /// and its count are now wrong. Split out from the decision below so the call site can record
+    /// it before it acts on it — the signal only exists for the one tick that sees it.
+    static func openListLostAProposal(previousOpen: [ProposalDTO]?, freshOpen: [ProposalDTO]) -> Bool {
         guard let previousOpen else { return false }
         let fresh = Set(freshOpen.map(\.id))
         return previousOpen.contains { !fresh.contains($0.id) }
+    }
+
+    static func shouldReloadClosed(visibleTab: ProposalFeedTab, hasClosed: Bool, closedIsStale: Bool) -> Bool {
+        if !hasClosed { return true }
+        if visibleTab == .closed { return true }
+        return closedIsStale
     }
 }
 
