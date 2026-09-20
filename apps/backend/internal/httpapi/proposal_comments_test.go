@@ -281,7 +281,6 @@ func TestPOST_proposalComments_invalidBodies_return400(t *testing.T) {
 		{name: "whitespace only", body: jsonCommentBody(t, " \n\t ", "")},
 		{name: "missing body field", body: `{}`},
 		{name: "one rune over limit", body: jsonCommentBody(t, strings.Repeat("é", domain.MaxProposalCommentRunes+1), "")},
-		{name: "request larger than byte cap", body: jsonCommentBody(t, strings.Repeat("x", maxCommentRequestBytes), "")},
 		{name: "nul character", body: `{"body":"hi\u0000there"}`},
 		{name: "malformed json", body: `{"body":`},
 		{name: "malformed parent id", body: jsonCommentBody(t, "Reply to nothing.", "not-a-uuid")},
@@ -303,6 +302,25 @@ func TestPOST_proposalComments_invalidBodies_return400(t *testing.T) {
 	list := f.listComments(t, f.benToken, f.proposalID)
 	if strings.TrimSpace(list.Body.String()) != `{"comments":[]}` {
 		t.Fatalf("rejected comments were stored: %s", list.Body.String())
+	}
+}
+
+func TestPOST_proposalComments_bodyOverByteCap_returns413(t *testing.T) {
+	t.Parallel()
+	// Arrange: the route's byte cap trips before the comment can be measured.
+	f := newCommentFixture(t)
+	body := jsonCommentBody(t, strings.Repeat("x", maxCommentRequestBytes), "")
+
+	// Act
+	rec := f.postComment(t, f.benToken, f.proposalID, body)
+
+	// Assert
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body = %s", rec.Code, rec.Body.String())
+	}
+	list := f.listComments(t, f.benToken, f.proposalID)
+	if strings.TrimSpace(list.Body.String()) != `{"comments":[]}` {
+		t.Fatalf("rejected comment was stored: %s", list.Body.String())
 	}
 }
 

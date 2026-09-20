@@ -83,8 +83,7 @@ func (h *DevFakerHandlers) FakerHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req devFakerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
+	if !decodeJSONBody(ctx, log, w, r, &req) {
 		return
 	}
 	profile := strings.ToLower(strings.TrimSpace(req.Profile))

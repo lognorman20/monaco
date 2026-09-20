@@ -18,6 +18,8 @@ A blocked `POST /v1/groups/{id}/leave` is `409` with the same shape plus a machi
 **Money.** USDC is integer micros (1 USDC = 1,000,000). Timestamps are UTC RFC 3339.
 
 **Rate limits.** Per process, non-GET only. Over budget is `429` with `Retry-After`.
+"Per user" is the verified Privy user, so refreshing a token does not reset it (agent
+callers: per agent key). A bearer token that fails verification is limited per IP only.
 
 | Class | Routes | Per user | Per IP |
 | --- | --- | --- | --- |
@@ -39,7 +41,9 @@ Set `TRUST_PROXY_HEADERS=true` only behind a proxy that overwrites `X-Forwarded-
 Agent intents do not accept it. A bot must never resend an intent after a timeout or `5xx`
 ([agent trading](agent-trading.md)).
 
-**Limits.** JSON bodies are capped at 64 KiB (profile photo 2 MB). The server write timeout is
+**Limits.** JSON bodies are capped at 64 KiB (chat and comments 16 KiB, `PATCH /v1/me` 4 KiB,
+profile photo 2 MB). Over the cap is `413` on every route; a body that fits but cannot be parsed
+is `400`, as is a message or comment over its character limit. The server write timeout is
 3 minutes because cash out, withdraw, retry and agent intents confirm a Solana transaction
 inside the request; give clients the same patience. Browser origins are refused unless listed in
 `CORS_ALLOWED_ORIGINS`.
@@ -59,7 +63,7 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/me/withdrawals/{id}` | One withdrawal. |
 | `GET /v1/home` | Group and people boards. |
 | `GET /v1/home/dashboard` | Net worth, the caller's cabals, a 1H series, leaderboard and missed proposals in one call. |
-| `GET /v1/home/pnl-series` | The caller's equity series. `range` = `1H`, `1D`, `1W`, `1M`. |
+| `GET /v1/home/pnl-series` | The caller's equity series. `range` = `1H`, `1D`, `1W`, `1M`. At most one point per second, so `ts` is unique at second precision. |
 | `GET /v1/home/missed-proposals` | Proposals the caller missed. |
 | `GET /v1/users/{id}/groups` | Cabals the caller shares with another user. |
 | `POST /v1/groups` | Create a cabal and its treasury. |
@@ -97,7 +101,7 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `POST /v1/proposals/{id}/comments` | Add a comment or reply. |
 | `GET /v1/groups/{id}/messages` | A page of cabal chat. |
 | `POST /v1/groups/{id}/messages` | Post a chat message. |
-| `GET /v1/transactions/{id}` | One swap. |
-| `POST /v1/transactions/{id}/retry` ● | Retry a failed swap. |
+| `GET /v1/transactions/{id}` | One swap. `404 transaction not found` for an unknown id and for a club you cannot read alike. |
+| `POST /v1/transactions/{id}/retry` ● | Retry a failed swap. Members only; a non-member gets the same `404` as an unknown id. |
 | `POST /v1/groups/{id}/agents/intents` | An agent submits a trade. Agent key only. See [agent trading](agent-trading.md). |
 | `POST /v1/dev/faker` | Seed demo data. Only with `FAKER_ENABLED`, from loopback, on a local database. |

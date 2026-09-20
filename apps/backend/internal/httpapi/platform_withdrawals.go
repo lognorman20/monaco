@@ -42,8 +42,7 @@ func (h *PlatformWithdrawHandlers) CreatePlatformWithdrawalHandler(w http.Respon
 	}
 
 	var req createPlatformWithdrawalRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
+	if !decodeJSONBody(ctx, log, w, r, &req) {
 		return
 	}
 	if req.Amount <= 0 {

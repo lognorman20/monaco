@@ -161,7 +161,10 @@ func metricsHandler() http.Handler {
 // mux sets, and for the answers that never reach the mux it fills the pattern in from the
 // mux's own route table. Being inside the rate limiter and body cap also means a key is only
 // spent on a request that was let through, against a size-capped body.
-func platformHandler(mux *http.ServeMux, idempotency *httpapi.Idempotency) http.Handler {
+//
+// sessions lets the rate limiter key its per-user buckets on the verified Privy subject.
+// It is called on every limited request, so it must verify tokens without a network call.
+func platformHandler(mux *http.ServeMux, sessions httpapi.SessionVerifier, idempotency *httpapi.Idempotency) http.Handler {
 	idempotency.WithRoutePattern(func(r *http.Request) string {
 		_, pattern := mux.Handler(r)
 		return pattern
@@ -172,7 +175,7 @@ func platformHandler(mux *http.ServeMux, idempotency *httpapi.Idempotency) http.
 		httpapi.RequestID(),
 		httpapi.Recover(),
 		httpapi.CORS(origins),
-		httpapi.NewRateLimiter(trustProxy).Middleware(),
+		httpapi.NewRateLimiter(sessions, trustProxy).Middleware(),
 		httpapi.LimitRequestBody(httpapi.DefaultMaxRequestBytes),
 		httpapi.Metrics(),
 		idempotency.Middleware(),

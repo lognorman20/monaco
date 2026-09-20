@@ -364,8 +364,8 @@ func TestUploadProfilePhotoHandler_rejectsOversizedPhoto(t *testing.T) {
 	rec := httptest.NewRecorder()
 	meHandlers.UploadProfilePhotoHandler(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body = %s", rec.Code, rec.Body.String())
 	}
 	if len(fakeStorage.Uploads) != 0 {
 		t.Fatalf("storage uploads = %d, want 0", len(fakeStorage.Uploads))

@@ -3,7 +3,6 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -77,8 +76,7 @@ func (h *GroupHandlers) CreateGroupHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req createGroupRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
+	if !decodeJSONBody(ctx, log, w, r, &req) {
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
@@ -197,18 +195,8 @@ func (h *GroupHandlers) LeaveGroupHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var leaveReq leaveGroupRequest
-	if r.Body != nil {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
-			return
-		}
-		if len(body) > 0 {
-			if err := json.Unmarshal(body, &leaveReq); err != nil {
-				logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
-				return
-			}
-		}
+	if !decodeOptionalJSONBody(ctx, log, w, r, &leaveReq) {
+		return
 	}
 	err := h.Governance.LeaveGroup(ctx, app.LeaveGroupRequest{
 		AccessToken:   token,
@@ -624,18 +612,8 @@ func (h *GroupHandlers) WithdrawToBalanceHandler(w http.ResponseWriter, r *http.
 	}
 
 	var req withdrawToBalanceRequest
-	if r.Body != nil {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
-			return
-		}
-		if len(body) > 0 {
-			if err := json.Unmarshal(body, &req); err != nil {
-				logJSONError(ctx, log, "invalid_body", w, http.StatusBadRequest, "invalid request body")
-				return
-			}
-		}
+	if !decodeOptionalJSONBody(ctx, log, w, r, &req) {
+		return
 	}
 
 	job, err := h.Redeem.WithdrawToBalance(ctx, app.WithdrawToBalanceRequest{

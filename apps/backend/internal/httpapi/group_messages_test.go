@@ -289,12 +289,11 @@ func TestPOST_groupMessages_invalidBodies_return400(t *testing.T) {
 	// Arrange
 	a := integrationChatApp(t, nil)
 	cases := map[string]string{
-		"blank":           messageBody(" \n\t "),
-		"empty":           messageBody(""),
-		"missing field":   `{}`,
-		"too long":        messageBody(strings.Repeat("a", app.GroupMessageMaxChars+1)),
-		"malformed json":  `{"body":`,
-		"oversize stream": `{"body":"` + strings.Repeat("a", maxGroupMessageRequestBytes+1) + `"}`,
+		"blank":          messageBody(" \n\t "),
+		"empty":          messageBody(""),
+		"missing field":  `{}`,
+		"too long":       messageBody(strings.Repeat("a", app.GroupMessageMaxChars+1)),
+		"malformed json": `{"body":`,
 	}
 
 	for name, raw := range cases {
@@ -307,6 +306,24 @@ func TestPOST_groupMessages_invalidBodies_return400(t *testing.T) {
 				t.Fatalf("status = %d, want 400; body = %s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+	if n := countGroupMessages(t, a.db, a.groupID); n != 0 {
+		t.Fatalf("stored messages = %d, want 0", n)
+	}
+}
+
+func TestPOST_groupMessages_bodyOverByteCap_returns413(t *testing.T) {
+	t.Parallel()
+	// Arrange: the route's byte cap trips before the message can be measured.
+	a := integrationChatApp(t, nil)
+	raw := `{"body":"` + strings.Repeat("a", maxGroupMessageRequestBytes+1) + `"}`
+
+	// Act
+	rec := a.post(a.owner, a.groupID, raw)
+
+	// Assert
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body = %s", rec.Code, rec.Body.String())
 	}
 	if n := countGroupMessages(t, a.db, a.groupID); n != 0 {
 		t.Fatalf("stored messages = %d, want 0", n)
