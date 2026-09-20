@@ -133,6 +133,14 @@ Worked numbers (ignore Jupiter slippage for the story):
 5. Blair deposits $110. She gets `110 / 1.10 = 100` shares. Pot $220. Total shares 200. Each still owns half.
 6. Blair redeems 50 shares. That is `50 / 200` of the pot = $55 USDC. She keeps 50 shares. Alex still has 100.
 
+**One valuation.** Deposit credit, redeem quote and payout, the surplus reconcile, NAV snapshots, and the group screens all read the same pot valuation (`valuePot` in `apps/backend/internal/app/pot_valuation.go`):
+
+- Pot NAV is treasury USDC that the group's ledger accounts for (net contributed − confirmed buys + confirmed sells) plus holdings at their mark. On-chain USDC above the ledger has landed without being credited yet and is nobody's gain.
+- Total shares is every outstanding claim: position share units plus units already debited by a redeem that has not paid out.
+- Shares mint 1:1 only while no shares are outstanding. After that every pot, cash-only or not, mints `amount × total shares / pre-credit NAV`. Mints and payouts round down, in favour of the pool.
+- Anything that mints shares or pays USDC needs a live mark (Pyth, then Jupiter). With none, the deposit stays pending and is retried, and the redeem fails with the shares returned. Cost basis is never used as a price for money movement; screens and NAV snapshots may fall back to it so they keep rendering.
+- The surplus reconcile only credits USDC the ledger cannot explain (a transfer straight to the treasury address). Realized gains stay P&L, and USDC owed to an in-flight redeem stays owed.
+
 Marks: Jupiter fill price is cost basis. Ongoing P&L may use Pyth equity feeds. If the token still trades on-chain after the cash equity market closes, show an after-hours label.
 
 **UI copy.** Do not say "NAV" to users. Say the pot value, their slice, and gain or loss in dollars.
