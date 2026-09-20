@@ -96,7 +96,7 @@ func (h *AgentHandlers) SubmitAgentIntentHandler(w http.ResponseWriter, r *http.
 	})
 	if err != nil {
 		h.KeyGuard.recordFailure(r, groupID, err)
-		writeAgentIntentError(r.Context(), log, w, err, groupID)
+		writeAgentIntentError(ctx, log, w, result, err, groupID)
 		return
 	}
 
@@ -111,10 +111,14 @@ func (h *AgentHandlers) SubmitAgentIntentHandler(w http.ResponseWriter, r *http.
 	logJSONOK(ctx, log, "ok", "group_id", groupID, "intent_id", result.IntentID, "status", result.Status)
 }
 
-func writeAgentIntentError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, groupID string) {
+func writeAgentIntentError(ctx context.Context, log *requestLog, w http.ResponseWriter, result app.SubmitAgentIntentResult, err error, groupID string) {
 	if writeFakerReadOnly(ctx, log, w, err, "group_id", groupID) {
 		return
 	}
+	// Whatever the service knows about the intent travels with the refusal, so the bot can
+	// tell over budget from a failed swap and quote the intent id. Auth failures and errors
+	// from before the intent was decided carry no outcome and keep the plain error shape.
+	intent := agentIntentErrorDetail(result)
 	switch {
 	case errors.Is(err, app.ErrInvalidAgentAPIKey):
 		logJSONError(ctx, log, "invalid_agent_key", w, http.StatusUnauthorized, "invalid agent api key", "group_id", groupID)
@@ -122,12 +126,24 @@ func writeAgentIntentError(ctx context.Context, log *requestLog, w http.Response
 		// Same response as an unknown key: a distinct one would confirm the key is live elsewhere.
 		logJSONError(ctx, log, "agent_group_mismatch", w, http.StatusUnauthorized, "invalid agent api key", "group_id", groupID)
 	case errors.Is(err, app.ErrAgentPaused):
-		logJSONError(ctx, log, "agent_paused", w, http.StatusForbidden, "agent is paused", "group_id", groupID)
+		logJSONIntentError(ctx, log, "agent_paused", w, http.StatusForbidden, "agent is paused", intent, "group_id", groupID)
 	case errors.Is(err, app.ErrAgentIntentInFlight):
-		logJSONError(ctx, log, "intent_in_flight", w, http.StatusConflict, "intent with this idempotencyKey is still executing", "group_id", groupID)
+		logJSONIntentError(ctx, log, "intent_in_flight", w, http.StatusConflict, "intent with this idempotencyKey is still executing", intent, "group_id", groupID)
 	case errors.Is(err, app.ErrAgentIntentRejected):
-		logJSONError(ctx, log, "intent_rejected", w, http.StatusUnprocessableEntity, err.Error(), "group_id", groupID)
+		logJSONIntentError(ctx, log, "intent_rejected", w, http.StatusUnprocessableEntity, err.Error(), intent, "group_id", groupID)
 	default:
-		logJSONError(ctx, log, "intent_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "err", err.Error())
+		logJSONIntentError(ctx, log, "intent_failed", w, http.StatusInternalServerError, "internal server error", intent, "group_id", groupID, "err", err.Error())
+	}
+}
+
+// agentIntentErrorDetail is nil when the service returned no outcome with its error.
+func agentIntentErrorDetail(result app.SubmitAgentIntentResult) *intentErrorDetail {
+	if result.IntentID == "" && result.Status == "" {
+		return nil
+	}
+	return &intentErrorDetail{
+		IntentID:     result.IntentID,
+		Status:       result.Status,
+		RejectReason: result.RejectReason,
 	}
 }

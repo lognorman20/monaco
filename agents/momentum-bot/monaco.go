@@ -29,10 +29,20 @@ var (
 )
 
 // RejectedError is a 422: the server understood the intent and refused it
-// (over budget, treasury short of USDC, selling more than the cabal holds).
-type RejectedError struct{ Reason string }
+// (over budget, treasury short of USDC, selling more than the cabal holds). Reason is the
+// body's rejectReason. IntentID is the rejected intent in the cabal's audit trail; it is
+// empty when Monaco refused the intent before recording it.
+type RejectedError struct {
+	Reason   string
+	IntentID string
+}
 
-func (e *RejectedError) Error() string { return "intent rejected: " + e.Reason }
+func (e *RejectedError) Error() string {
+	if e.IntentID == "" {
+		return "intent rejected: " + e.Reason
+	}
+	return fmt.Sprintf("intent %s rejected: %s", e.IntentID, e.Reason)
+}
 
 // ThrottledError is a 429 with the server's Retry-After.
 type ThrottledError struct{ RetryAfter time.Duration }
@@ -41,14 +51,21 @@ func (e *ThrottledError) Error() string {
 	return fmt.Sprintf("throttled, retry after %s", e.RetryAfter)
 }
 
-// StatusError is any other non-2xx response.
+// StatusError is any other non-2xx response. IntentID and IntentStatus are set when the
+// body names the intent: "failed" on a 5xx whose swap failed, "accepted" on the 409 for a
+// resend that arrived while the first request was still executing.
 type StatusError struct {
-	Status  int
-	Message string
+	Status       int
+	Message      string
+	IntentID     string
+	IntentStatus string
 }
 
 func (e *StatusError) Error() string {
-	return fmt.Sprintf("monaco api status %d: %s", e.Status, e.Message)
+	if e.IntentID == "" {
+		return fmt.Sprintf("monaco api status %d: %s", e.Status, e.Message)
+	}
+	return fmt.Sprintf("monaco api status %d: %s (intent %s %s)", e.Status, e.Message, e.IntentID, e.IntentStatus)
 }
 
 // Asset is one tradable xStock from the cabal's catalog.
@@ -71,7 +88,8 @@ type Intent struct {
 	IdempotencyKey string `json:"idempotencyKey,omitempty"`
 }
 
-// IntentResult is the server's answer for an executed intent.
+// IntentResult is the server's 2xx answer. An intent that was refused or failed comes back
+// as a non-2xx with the same intentId, status and rejectReason next to the error message.
 type IntentResult struct {
 	IntentID      string `json:"intentId"`
 	Status        string `json:"status"`
@@ -184,35 +202,47 @@ func (c *MonacoClient) do(req *http.Request, out any) error {
 		return nil
 	}
 
-	message := errorMessage(body)
+	payload := parseErrorBody(body)
+	message := payload.Error
 	switch resp.StatusCode {
 	case http.StatusUnauthorized:
 		return ErrBadKey
 	case http.StatusForbidden:
 		return ErrPaused
 	case http.StatusUnprocessableEntity:
-		return &RejectedError{Reason: strings.TrimPrefix(message, "agent intent rejected: ")}
+		reason := payload.RejectReason
+		if reason == "" {
+			reason = strings.TrimPrefix(message, "agent intent rejected: ")
+		}
+		return &RejectedError{Reason: reason, IntentID: payload.IntentID}
 	case http.StatusTooManyRequests:
 		return &ThrottledError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
 	default:
-		return &StatusError{Status: resp.StatusCode, Message: message}
+		return &StatusError{Status: resp.StatusCode, Message: message, IntentID: payload.IntentID, IntentStatus: payload.Status}
 	}
 }
 
-// errorMessage pulls {"error": "..."} out of an API error body, falling back to a
-// short prefix of whatever came back (a proxy's HTML page, say).
-func errorMessage(body []byte) string {
-	var payload struct {
-		Error string `json:"error"`
-	}
+// errorBody is Monaco's error shape. The intent fields are only present on the intents
+// route, and only once the server had an outcome for the intent.
+type errorBody struct {
+	Error        string `json:"error"`
+	IntentID     string `json:"intentId"`
+	Status       string `json:"status"`
+	RejectReason string `json:"rejectReason"`
+}
+
+// parseErrorBody reads an API error body. Anything that is not Monaco's JSON (a proxy's
+// HTML page, say) becomes a short prefix of whatever came back, as the message.
+func parseErrorBody(body []byte) errorBody {
+	var payload errorBody
 	if err := json.Unmarshal(body, &payload); err == nil && payload.Error != "" {
-		return payload.Error
+		return payload
 	}
 	text := strings.TrimSpace(string(body))
 	if len(text) > 120 {
 		text = text[:120]
 	}
-	return text
+	return errorBody{Error: text}
 }
 
 // parseRetryAfter reads delta-seconds. A missing or malformed header falls back to a

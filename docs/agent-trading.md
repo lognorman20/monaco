@@ -83,7 +83,7 @@ An intent settles a swap before it answers, so a timeout tells you nothing about
 | First intent | Answer to the resend |
 |------|---------|
 | executed | **200**, same `intentId` and `transactionId` |
-| rejected | **422**, same reason |
+| rejected | **422**, same body: same `intentId`, `status` and `rejectReason` (only `requestId` is per request) |
 | still executing | **409**; ask again shortly |
 | failed | **200** with `"status": "failed"`; check cabal activity before trading again |
 
@@ -98,8 +98,30 @@ The same key with a different side, symbol or amount is a **422**. Keys are scop
 | **409** | An intent with this `idempotencyKey` is still executing |
 | **422** | Over allocation, unknown symbol, insufficient treasury, selling more than the agent bought, `idempotencyKey` reused for a different intent |
 | **429** | Too many wrong keys from this address (or, for a five-character key, for this cabal); wait `Retry-After` seconds |
+| **5xx** | Monaco or the swap failed. With `"status": "failed"` the intent was accepted and its swap failed |
 
-**Never resend an intent.** Intents take no idempotency key, and the swap runs inside the request: after a timeout or `5xx` it may already have filled, and sending it again can trade twice. Check the cabal's holdings first.
+Every error body is `{ "error", "requestId" }`. When Monaco had an outcome for the intent, the body also carries it, under the same names as the success answer:
+
+```json
+{
+  "error": "agent intent rejected: trade exceeds agent allocation",
+  "requestId": "…",
+  "intentId": "…",
+  "status": "rejected",
+  "rejectReason": "trade exceeds agent allocation"
+}
+```
+
+| HTTP | `status` | `rejectReason` | `intentId` |
+|------|----------|----------------|------------|
+| **422** | `rejected` | why, e.g. `trade exceeds agent allocation`, `unknown symbol`, `sell exceeds agent position` | yes; absent only when the `idempotencyKey` itself was refused (reused for a different intent) |
+| **403** | `rejected` | `agent is paused` | no: a paused agent's intent is not recorded |
+| **409** | `accepted` | none | yes, the intent still executing |
+| **5xx** after the intent was accepted | `failed` | `execution failed` (the internal error is not exposed) | yes |
+
+Branch on `status` and `rejectReason`, not on the `error` text, and quote `intentId` and `requestId` when reporting a problem. **401**, **429** and a **5xx** from before the intent was decided carry only `error` and `requestId`.
+
+**Only resend with the same `idempotencyKey`.** The swap runs inside the request, so after a timeout or `5xx` it may already have filled. A resend under the same key returns the first outcome; without a key it is a new trade.
 
 ## Pause / resume / revoke
 

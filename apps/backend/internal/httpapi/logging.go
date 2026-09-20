@@ -64,14 +64,34 @@ func logJSONError(ctx context.Context, log *requestLog, branch string, w http.Re
 	writeJSONError(ctx, w, status, message)
 }
 
+// logJSONIntentError is logJSONError for a refusal that has an agent intent outcome to report.
+func logJSONIntentError(ctx context.Context, log *requestLog, branch string, w http.ResponseWriter, status int, message string, intent *intentErrorDetail, attrs ...any) {
+	if intent != nil {
+		attrs = append(attrs, "intent_id", intent.IntentID, "intent_status", intent.Status)
+	}
+	log.done(ctx, branch, status, attrs...)
+	writeErrorResponse(ctx, w, status, errorResponse{Error: message, intentErrorDetail: intent})
+}
+
 // errorResponse is the single error shape every API route returns: a human
 // message plus the correlation id a client can quote in a bug report. Reason is
 // the optional machine-readable code for routes whose client branches on why
-// the request was refused (leave-cabal 409).
+// the request was refused (leave-cabal 409). The agent intent route adds the
+// intent's outcome as extra top-level fields; every other route leaves it nil.
 type errorResponse struct {
 	Error     string `json:"error"`
 	RequestID string `json:"requestId,omitempty"`
 	Reason    string `json:"reason,omitempty"`
+	*intentErrorDetail
+}
+
+// intentErrorDetail is what a refused agent intent adds to the error shape, under the names
+// the 200 answer uses, so a bot reads one set of fields whatever the HTTP status. IntentID
+// is empty when the intent was refused before it was recorded.
+type intentErrorDetail struct {
+	IntentID     string `json:"intentId,omitempty"`
+	Status       string `json:"status,omitempty"`
+	RejectReason string `json:"rejectReason,omitempty"`
 }
 
 func writeJSONError(ctx context.Context, w http.ResponseWriter, status int, message string) {
@@ -85,6 +105,7 @@ func logJSONErrorWithReason(ctx context.Context, log *requestLog, branch string,
 	writeErrorResponse(ctx, w, status, errorResponse{Error: message, Reason: reason})
 }
 
+// writeErrorResponse is the one place an error body is encoded; it stamps the request id.
 func writeErrorResponse(ctx context.Context, w http.ResponseWriter, status int, body errorResponse) {
 	body.RequestID = RequestIDFromContext(ctx)
 	w.Header().Set("Content-Type", "application/json")

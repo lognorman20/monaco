@@ -83,7 +83,8 @@ How it behaves:
   buys returned, net of its own sells.
 - **`401` stops it.** Retrying a bad key only trips the wrong-key throttle. **`403`** (paused
   by vote) and **`429`** (honours `Retry-After`) make it stand down and keep watching.
-  **`422`** prints the server's reason; "exceeds agent allocation" ends buying for the run.
+  **`422`** prints the body's `rejectReason` and `intentId`; "exceeds agent allocation" ends
+  buying for the run. A `5xx` or `409` that names an intent prints its `intentId` and `status`.
 - **An intent is only resent under its idempotency key.** Every trade decision gets a fresh
   random `idempotencyKey`. On a timeout, a `5xx` or a `409` the swap may have gone through,
   so the bot resends the identical intent twice, five seconds apart; the server answers a

@@ -41,9 +41,8 @@ const (
 )
 
 // idempotentPathSuffixes are the user-initiated POST routes that move or commit USDC.
-// Agent intents authenticate with an agent key and are not covered: the intent id is minted
-// server-side, so nothing dedupes a resent intent. A bot must never resend one after a
-// timeout or 5xx (docs/agent-trading.md).
+// Agent intents authenticate with an agent key, not a user, so this middleware does not
+// cover them: they dedupe on the idempotencyKey field in their own body (AgentIntentService).
 var idempotentPathSuffixes = []string{
 	"/fund",
 	"/withdraw-to-balance",

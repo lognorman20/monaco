@@ -228,7 +228,11 @@ func (b *Bot) trade(ctx context.Context, s reading) error {
 		b.blocked = now.Add(pausedWait)
 		b.out.warn(now, "✗ the cabal has paused this agent; still watching, will ask again in %s", short(pausedWait))
 	case errors.As(err, &rejected):
-		b.out.warn(now, "✗ rejected by Monaco: %s", rejected.Reason)
+		if rejected.IntentID != "" {
+			b.out.warn(now, "✗ rejected by Monaco: %s  intent %s", rejected.Reason, rejected.IntentID)
+		} else {
+			b.out.warn(now, "✗ rejected by Monaco: %s", rejected.Reason)
+		}
 		if strings.Contains(rejected.Reason, "allocation") {
 			// The voted budget is spent. Sells can still go through.
 			b.budget.Exhaust()

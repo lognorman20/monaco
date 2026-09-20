@@ -22,6 +22,10 @@ const (
 	// process died before the swap was recorded ever reaches it.
 	agentIntentAbandonedAfter = 15 * time.Minute
 
+	// agentIntentFailedReason is the reject reason a bot sees for a failed intent, on the first
+	// answer and on every replay. The real error is internal and stays in the audit row and logs.
+	agentIntentFailedReason = "execution failed"
+
 	agentIntentStatusWriteAttempts = 3
 	agentIntentStatusWriteTimeout  = 5 * time.Second
 	agentIntentStatusWriteBackoff  = 200 * time.Millisecond
@@ -96,7 +100,7 @@ func (s *AgentIntentService) submitAgentIntent(ctx context.Context, in SubmitAge
 		return SubmitAgentIntentResult{}, ErrInvalidAgentAPIKey
 	}
 	if len(in.IdempotencyKey) > MaxAgentIdempotencyKeyLength {
-		return SubmitAgentIntentResult{}, fmt.Errorf("%w: idempotency key is longer than %d characters", ErrAgentIntentRejected, MaxAgentIdempotencyKeyLength)
+		return refusedAgentIntent(fmt.Sprintf("idempotency key is longer than %d characters", MaxAgentIdempotencyKeyLength))
 	}
 
 	accepted, answer, err := s.reserveIntent(ctx, agentRow.ID, keyHash, in)
@@ -106,19 +110,28 @@ func (s *AgentIntentService) submitAgentIntent(ctx context.Context, in SubmitAge
 
 	execResult, execErr := s.executeIntent(ctx, accepted, in)
 	if execErr != nil {
-		status := "failed"
+		// The audit row keeps the real error. The answer only does for a rejection: a failure's
+		// error is internal, so the bot gets the same fixed reason a replay gives it.
+		status, reason := "failed", agentIntentFailedReason
 		if errors.Is(execErr, ErrAgentIntentRejected) {
-			status = "rejected"
+			status, reason = "rejected", execErr.Error()
 		}
 		s.recordIntentStatus(accepted.ID, status, execErr.Error(), execResult.TransactionID)
 		return SubmitAgentIntentResult{
 			IntentID:     accepted.ID,
 			Status:       status,
-			RejectReason: execErr.Error(),
+			RejectReason: reason,
 		}, execErr
 	}
 	s.recordIntentStatus(accepted.ID, "executed", "", execResult.TransactionID)
 	return execResult, nil
+}
+
+// refusedAgentIntent is the answer for an intent refused before it was recorded. There is no
+// row, so no intent id, but the caller still gets a status and a reason to act on.
+func refusedAgentIntent(reason string) (SubmitAgentIntentResult, error) {
+	return SubmitAgentIntentResult{Status: "rejected", RejectReason: reason},
+		fmt.Errorf("%w: %s", ErrAgentIntentRejected, reason)
 }
 
 // reserveIntent decides one intent under the agent's row lock. When it returns an accepted
@@ -185,10 +198,11 @@ func (s *AgentIntentService) reserveIntent(ctx context.Context, agentID, keyHash
 	}
 
 	if agentRow.Status == domain.AgentStatusPaused {
-		return none, SubmitAgentIntentResult{}, ErrAgentPaused
+		return none, SubmitAgentIntentResult{Status: "rejected", RejectReason: ErrAgentPaused.Error()}, ErrAgentPaused
 	}
 	if agentRow.Status != domain.AgentStatusActive {
-		return none, SubmitAgentIntentResult{}, ErrAgentIntentRejected
+		answer, err := refusedAgentIntent("agent is not active")
+		return none, answer, err
 	}
 
 	agent := groupAgentFromRow(agentRow)
@@ -242,7 +256,7 @@ func (s *AgentIntentService) reserveIntent(ctx context.Context, agentID, keyHash
 func replayAgentIntent(earlier postgres.AgentIntentRow, in SubmitAgentIntentInput) (SubmitAgentIntentResult, error) {
 	if earlier.Side != in.Side || earlier.Symbol != in.Symbol ||
 		earlier.UsdcMicros != nullInt64(in.UsdcMicros) || earlier.TokenAmount != nullInt64(in.TokenAmount) {
-		return SubmitAgentIntentResult{}, fmt.Errorf("%w: idempotency key was already used for a different intent", ErrAgentIntentRejected)
+		return refusedAgentIntent("idempotency key was already used for a different intent")
 	}
 	answer := SubmitAgentIntentResult{
 		IntentID:      earlier.ID,
@@ -257,7 +271,7 @@ func replayAgentIntent(earlier postgres.AgentIntentRow, in SubmitAgentIntentInpu
 		return answer, ErrAgentIntentInFlight
 	case "failed":
 		// The stored reason is an internal error; the first answer did not expose it either.
-		answer.RejectReason = "execution failed"
+		answer.RejectReason = agentIntentFailedReason
 	}
 	return answer, nil
 }

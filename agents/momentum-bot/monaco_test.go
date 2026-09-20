@@ -90,6 +90,35 @@ func TestSubmitIntent_errorStatuses(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 	})
+	t.Run("422 reads rejectReason and intentId from the body", func(t *testing.T) {
+		client := newTestClient(t, respond(422, "", `{"error":"agent intent rejected: trade exceeds agent allocation","requestId":"r1","intentId":"intent-7","status":"rejected","rejectReason":"trade exceeds agent allocation"}`))
+		_, err := client.SubmitIntent(context.Background(), Intent{Side: "buy", Symbol: "X", UsdcMicros: 1})
+		var rejected *RejectedError
+		if !errors.As(err, &rejected) || rejected.Reason != "trade exceeds agent allocation" || rejected.IntentID != "intent-7" {
+			t.Fatalf("got %#v", err)
+		}
+		if !strings.Contains(err.Error(), "intent-7") {
+			t.Fatalf("error does not quote the intent id: %v", err)
+		}
+	})
+	t.Run("500 for a failed swap carries the intent id and status", func(t *testing.T) {
+		client := newTestClient(t, respond(500, "", `{"error":"internal server error","requestId":"r1","intentId":"intent-8","status":"failed","rejectReason":"execution failed"}`))
+		_, err := client.SubmitIntent(context.Background(), Intent{Side: "buy", Symbol: "X", UsdcMicros: 1})
+		var status *StatusError
+		if !errors.As(err, &status) || status.Status != 500 || status.IntentID != "intent-8" || status.IntentStatus != "failed" {
+			t.Fatalf("got %#v", err)
+		}
+		if !strings.Contains(err.Error(), "intent-8") {
+			t.Fatalf("error does not quote the intent id: %v", err)
+		}
+	})
+	t.Run("403 with intent fields is still paused", func(t *testing.T) {
+		client := newTestClient(t, respond(403, "", `{"error":"agent is paused","status":"rejected","rejectReason":"agent is paused"}`))
+		_, err := client.SubmitIntent(context.Background(), Intent{Side: "buy", Symbol: "X", UsdcMicros: 1})
+		if !errors.Is(err, ErrPaused) {
+			t.Fatalf("got %v", err)
+		}
+	})
 	t.Run("429 carries Retry-After", func(t *testing.T) {
 		client := newTestClient(t, respond(429, "42", `{"error":"too many requests"}`))
 		_, err := client.SubmitIntent(context.Background(), Intent{Side: "buy", Symbol: "X", UsdcMicros: 1})

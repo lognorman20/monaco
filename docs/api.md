@@ -38,8 +38,9 @@ Set `TRUST_PROXY_HEADERS=true` only behind a proxy that overwrites `X-Forwarded-
 - Same key, different route or body: `422`.
 - A `5xx` releases the key, so the retry runs again.
 
-Agent intents do not accept it. A bot must never resend an intent after a timeout or `5xx`
-([agent trading](agent-trading.md)).
+Agent intents do not read the header. They take an `idempotencyKey` field in the body with
+the same replay rules, scoped per agent ([agent trading](agent-trading.md)). Without it, a
+resent intent is a new trade.
 
 **Limits.** JSON bodies are capped at 64 KiB (chat and comments 16 KiB, `PATCH /v1/me` 4 KiB,
 profile photo 2 MB). Over the cap is `413` on every route; a body that fits but cannot be parsed
