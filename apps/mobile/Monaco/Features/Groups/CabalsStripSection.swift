@@ -1,11 +1,23 @@
 import MonacoCore
 import SwiftUI
 
+/// Whether the viewer's cabals are known yet. An empty list only means "no
+/// cabals" once the server has answered; before that it means "not loaded".
+enum CabalsStripState {
+    /// The list is on its way.
+    case loading
+    /// The server answered; an empty list is genuinely empty.
+    case loaded
+    /// We have no list and nothing is in flight — the load did not land.
+    case unavailable
+}
+
 /// Horizontal strip of the viewer's cabals: tinted tile, name, pot, P&L. Tap opens the cabal.
 struct CabalsStripSection: View {
-    @ObservedObject var auth: PrivyAuthService
     let rows: [HomeGroupBoardRowDTO]
-    var onChanged: () async -> Void
+    var state: CabalsStripState = .loaded
+    var onSelect: (CabalsRoute) -> Void
+    var onRetry: () -> Void = {}
 
     private static let cardSize = CGSize(width: 176, height: 148)
 
@@ -13,37 +25,80 @@ struct CabalsStripSection: View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             MonacoSectionHeader("Your cabals")
 
-            if rows.isEmpty {
-                EmptyState(
-                    title: "No cabals yet",
-                    message: "Search above or start one with the + button."
-                )
-                .accessibilityIdentifier("cabals-strip-empty")
+            if !rows.isEmpty {
+                strip
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: MonacoTheme.Space.s) {
-                        ForEach(rows) { row in
-                            NavigationLink {
-                                GroupDetailView(auth: auth, groupId: row.groupId, groupName: row.name, onLeft: onChanged)
-                            } label: {
-                                CabalStripCard(row: row, size: Self.cardSize)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("cabals-strip-card-\(row.groupId)")
-                        }
-                        NavigationLink {
-                            CreateGroupView(auth: auth)
-                        } label: {
-                            NewCabalStripCard(size: Self.cardSize)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("cabals-strip-new")
-                    }
-                    .padding(.vertical, 2)
+                switch state {
+                case .loading:
+                    placeholderStrip
+                case .unavailable:
+                    EmptyState(
+                        title: "Couldn't load your cabals",
+                        message: "Check your connection and try again.",
+                        actionTitle: "Try again",
+                        action: onRetry
+                    )
+                    .accessibilityIdentifier("cabals-strip-error")
+                case .loaded:
+                    EmptyState(
+                        title: "No cabals yet",
+                        message: "Search above or start one with the + button."
+                    )
+                    .accessibilityIdentifier("cabals-strip-empty")
                 }
-                .accessibilityIdentifier("cabals-strip")
             }
         }
+    }
+
+    private var strip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: MonacoTheme.Space.s) {
+                ForEach(rows) { row in
+                    Button {
+                        onSelect(.cabal(id: row.groupId, name: row.name))
+                    } label: {
+                        CabalStripCard(row: row, size: Self.cardSize)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("cabals-strip-card-\(row.groupId)")
+                }
+                Button {
+                    onSelect(.create)
+                } label: {
+                    NewCabalStripCard(size: Self.cardSize)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("cabals-strip-new")
+            }
+            .padding(.vertical, 2)
+        }
+        .accessibilityIdentifier("cabals-strip")
+    }
+
+    /// Two cards in the real shape while the list loads, so the section does not
+    /// jump from a message to content.
+    private var placeholderStrip: some View {
+        HStack(spacing: MonacoTheme.Space.s) {
+            ForEach(0..<2, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                    SkeletonBlock(width: 36, height: 36, radius: MonacoTheme.Radius.card)
+                    SkeletonBlock(width: 104, height: 14)
+                    Spacer(minLength: 0)
+                    SkeletonBlock(width: 84, height: 20)
+                    SkeletonBlock(width: 64, height: 12)
+                }
+                .padding(MonacoTheme.Space.m)
+                .frame(width: Self.cardSize.width, height: Self.cardSize.height, alignment: .topLeading)
+                .background(
+                    MonacoTheme.surface,
+                    in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
+                )
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Loading your cabals")
+        .accessibilityIdentifier("cabals-strip-loading")
     }
 }
 
