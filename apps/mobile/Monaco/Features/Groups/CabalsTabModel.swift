@@ -62,8 +62,13 @@ final class CabalsTabModel {
 
     private(set) var range: GroupPnLRange = .oneMonth
     private(set) var series: [GroupPnLSeriesDTO] = []
-    /// The range a load is in flight for, or nil. A superseded load can no
-    /// longer clear a newer load's spinner.
+    /// The range the drawn lines belong to, or nil when nothing is drawn. A
+    /// failed range switch must not leave the previous range's lines under a
+    /// newly highlighted chip.
+    private(set) var seriesRange: GroupPnLRange?
+    /// The range a load is in flight for, or nil. Cleared by the load that set
+    /// it and only while that load is still the newest one — see
+    /// `chartGeneration`.
     private(set) var loadingRange: GroupPnLRange?
     private(set) var chartFailed = false
     /// Some range has drawn a real chart in this session, so the section has
@@ -95,6 +100,14 @@ final class CabalsTabModel {
     private var searchGeneration = 0
     /// Bumped on every board load, so a slow response cannot overwrite a newer one.
     private var leaderboardGeneration = 0
+    /// Bumped on every chart load. A load identifies itself by this token, not
+    /// by the range it asked for: two loads of the *same* range overlap on
+    /// every cold start, and a range cannot tell them apart.
+    private var chartGeneration = 0
+    /// Cabals the viewer joined in this session. Re-applied after every board
+    /// and search load, because the read that follows a join can be served from
+    /// before it and would otherwise flip the row back to "Open".
+    private var locallyJoined: Set<String> = []
 
     init(dataSource: CabalsTabDataSource) {
         self.dataSource = dataSource
@@ -117,6 +130,18 @@ final class CabalsTabModel {
         return !series.isEmpty && loadingRange == range
     }
 
+    /// Whether the chart section exists at all — a different question from
+    /// whether the *selected* range has enough history. Once any range has drawn
+    /// a real chart the section stays put, so tapping 1D on young cabals shows a
+    /// note inside the card instead of deleting the section and its range
+    /// picker. Lives here, not in the view, so a test can pin it directly.
+    func showsChartSection(hasCabals: Bool) -> Bool {
+        guard hasCabals else { return false }
+        if isChartLoading { return true }
+        if chartFailed, series.isEmpty { return true }
+        return Self.isChartable(series) || hasChartableHistory
+    }
+
     // MARK: Chart + board
 
     /// Reloads the chart and the board. Cancel-and-replace: a reload started
@@ -136,7 +161,14 @@ final class CabalsTabModel {
             _ = await (chart, board)
         }
         reloadTask = task
-        await task.value
+        // `Task.value` on a non-throwing task is not a cancellation point and
+        // does not pass cancellation on, so tearing down the tab's `.task` used
+        // to leave both reads running and still writing the model. Forward it.
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     func selectRange(_ newRange: GroupPnLRange) {
@@ -149,22 +181,41 @@ final class CabalsTabModel {
     /// `requested` is captured by the caller rather than read here, so a task
     /// that starts after a newer range was picked still knows which range it is
     /// the load for.
+    ///
+    /// Identity is the generation token, not the range. Keying the spinner on
+    /// the range meant two loads for the same range — `.task` calling `reload()`
+    /// and `onChange(of: joinedIDs)` calling it again the moment `/v1/home`
+    /// lands, which is every cold start — each answered to `.oneMonth`, so
+    /// whichever exited first cleared the other's flag while it was still out.
     func loadChart(_ requested: GroupPnLRange? = nil) async {
         let requested = requested ?? range
+        chartGeneration += 1
+        let generation = chartGeneration
         loadingRange = requested
         defer {
-            // Only the newest load clears the flag; a superseded one leaves it be.
-            if loadingRange == requested { loadingRange = nil }
+            if generation == chartGeneration { loadingRange = nil }
         }
         do {
             let history = try await dataSource.pnlHistory(range: requested)
-            guard requested == range, !Task.isCancelled else { return }
+            guard generation == chartGeneration, !Task.isCancelled else { return }
             series = history.series
+            seriesRange = requested
             hasChartableHistory = hasChartableHistory || Self.isChartable(history.series)
             chartFailed = false
         } catch {
-            guard requested == range, !Task.isCancelled else { return }
-            handle(error) { chartFailed = true }
+            guard generation == chartGeneration, !Task.isCancelled else { return }
+            handle(error) {
+                // A range switch that failed: the lines on screen are the range
+                // the member just left. Leaving them under a newly highlighted
+                // chip is exactly the disagreement the dimming was added for, so
+                // drop them and let the card say the load failed. A failed
+                // refresh of the range already drawn keeps what it has.
+                if seriesRange != requested {
+                    series = []
+                    seriesRange = nil
+                }
+                chartFailed = true
+            }
         }
     }
 
@@ -178,7 +229,7 @@ final class CabalsTabModel {
         do {
             let rows = try await dataSource.leaderboard().groups
             guard generation == leaderboardGeneration, !Task.isCancelled else { return }
-            leaderboard = rows
+            leaderboard = rows.map { applyingLocalJoins($0) }
             leaderboardFailed = false
         } catch {
             guard generation == leaderboardGeneration, !Task.isCancelled else { return }
@@ -186,12 +237,27 @@ final class CabalsTabModel {
         }
     }
 
-    /// The viewer just joined this cabal. Patches the rows on screen so the
-    /// board and the search results say "You're in" straight away, instead of
-    /// waiting for the next reload — or, for search, for the member to retype.
+    /// The viewer just joined this cabal. The rows on screen say "You're in"
+    /// straight away instead of waiting for the next reload — or, for search,
+    /// for the member to retype.
+    ///
+    /// Remembered rather than painted on once: the join triggers a session
+    /// refresh, which reloads the board, and a board query served from before
+    /// the write would otherwise flip the row back to "· Open" a second later.
     func markJoined(groupID: String) {
-        leaderboard = leaderboard.map { $0.groupID == groupID ? $0.markingJoined() : $0 }
-        results = results.map { $0.groupID == groupID ? $0.markingJoined() : $0 }
+        locallyJoined.insert(groupID)
+        leaderboard = leaderboard.map { applyingLocalJoins($0) }
+        results = results.map { applyingLocalJoins($0) }
+    }
+
+    private func applyingLocalJoins(_ row: GroupLeaderboardRowDTO) -> GroupLeaderboardRowDTO {
+        guard !row.isJoined, locallyJoined.contains(row.groupID) else { return row }
+        return row.markingJoined()
+    }
+
+    private func applyingLocalJoins(_ row: GroupDiscoveryRowDTO) -> GroupDiscoveryRowDTO {
+        guard !row.isJoined, locallyJoined.contains(row.groupID) else { return row }
+        return row.markingJoined()
     }
 
     // MARK: Search
@@ -256,7 +322,7 @@ final class CabalsTabModel {
         do {
             let page = try await dataSource.search(query: normalized, cursor: nil)
             guard !Task.isCancelled, generation == searchGeneration else { return }
-            results = page.groups
+            results = page.groups.map { applyingLocalJoins($0) }
             nextCursor = page.nextCursor
             searchState = page.groups.isEmpty ? .empty : .results
         } catch {
@@ -288,7 +354,9 @@ final class CabalsTabModel {
             // comes back must still be the page we are waiting for.
             guard !Task.isCancelled, generation == searchGeneration, nextCursor == cursor else { return }
             let known = Set(results.map(\.groupID))
-            results += page.groups.filter { !known.contains($0.groupID) }
+            results += page.groups
+                .filter { !known.contains($0.groupID) }
+                .map { applyingLocalJoins($0) }
             nextCursor = page.nextCursor
         } catch {
             guard !Task.isCancelled, generation == searchGeneration else { return }
