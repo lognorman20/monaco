@@ -41,6 +41,7 @@ type RedeemRecoveryPoller struct {
 	staleAfter time.Duration
 	backoff    map[string]time.Time
 	attempts   map[string]int
+	observer   TickObserver
 }
 
 // NewRedeemRecoveryPoller wires redeem recovery dependencies.
@@ -57,6 +58,11 @@ func NewRedeemRecoveryPoller(store StaleRedeemJobLister, redeem RedeemJobRecover
 		backoff:    make(map[string]time.Time),
 		attempts:   make(map[string]int),
 	}
+}
+
+// SetTickObserver reports every tick to observer. Call it before the poller runs.
+func (p *RedeemRecoveryPoller) SetTickObserver(observer TickObserver) {
+	p.observer = observer
 }
 
 // RunRedeemRecoveryPoller ticks until ctx is cancelled.
@@ -79,30 +85,35 @@ func RunRedeemRecoveryPoller(ctx context.Context, poller *RedeemRecoveryPoller, 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			tickCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			poller.tick(tickCtx)
-			cancel()
+			observeTick(poller.observer, NameRedeemRecovery, func() error {
+				tickCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				defer cancel()
+				return poller.tick(tickCtx)
+			})
 		}
 	}
 }
 
-func (p *RedeemRecoveryPoller) tick(ctx context.Context) {
+// tick returns the last failure of the round so the tick observer can count it; each failure
+// is already logged with its job where it happens.
+func (p *RedeemRecoveryPoller) tick(ctx context.Context) error {
 	if p == nil || p.store == nil || p.redeem == nil {
-		return
+		return nil
 	}
 
 	now := p.clock.Now()
 	jobs, err := p.store.ListStaleActiveRedeemJobs(ctx, now.Add(-p.staleAfter), p.limit)
 	if err != nil {
 		slog.Error("redeem recovery poller list stale jobs failed", "err", err)
-		return
+		return err
 	}
 	p.forgetResolved(jobs)
 	if len(jobs) == 0 {
-		return
+		return nil
 	}
 
 	slog.Warn("redeem recovery poller found abandoned jobs", "count", len(jobs))
+	var tickErr error
 	for _, job := range jobs {
 		if next, ok := p.backoff[job.ID]; ok && now.Before(next) {
 			continue
@@ -122,10 +133,12 @@ func (p *RedeemRecoveryPoller) tick(ctx context.Context) {
 		outcome, err := p.redeem.RecoverStaleRedeemJob(ctx, job.ID)
 		switch {
 		case errors.Is(err, app.ErrRedeemPayoutUnverified):
+			tickErr = err
 			// Nothing automatic is safe here; keep saying so until a person resolves it.
 			p.recordAttempt(job.ID, attempt, now)
 			slog.Error("redeem job wedged in paying: payout unverified, share units burnt, needs manual review", attrs...)
 		case err != nil:
+			tickErr = err
 			p.recordAttempt(job.ID, attempt, now)
 			slog.Error("redeem recovery failed", append(attrs, "err", err)...)
 		case outcome == app.RedeemRecoveryBusy:
@@ -135,6 +148,7 @@ func (p *RedeemRecoveryPoller) tick(ctx context.Context) {
 			slog.Warn("redeem recovery resolved job", append(attrs, "outcome", string(outcome))...)
 		}
 	}
+	return tickErr
 }
 
 func (p *RedeemRecoveryPoller) recordAttempt(jobID string, attempt int, now time.Time) {
