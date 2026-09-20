@@ -14,6 +14,7 @@ struct E164PhoneNumberTests {
     @Test func contactsInvisibleMarksAreStripped() {
         // Contacts wraps numbers in bidi marks when the device language is right-to-left.
         #expect(E164PhoneNumber("\u{202A}+1 (555) 123-4567\u{202C}")?.value == "+15551234567")
+        #expect(E164PhoneNumber("\u{202A}+44 20 7946 0958\u{202C}")?.value == "+442079460958")
         #expect(E164PhoneNumber("+1\u{00A0}555\u{00A0}123\u{00A0}4567")?.value == "+15551234567")
     }
 
@@ -26,6 +27,8 @@ struct E164PhoneNumberTests {
         #expect(E164PhoneNumber("") == nil)
         #expect(E164PhoneNumber("555") == nil)
         #expect(E164PhoneNumber("call me") == nil)
+        #expect(E164PhoneNumber("1-800-CALL-NOW") == nil)
+        #expect(E164PhoneNumber("+1+5551234567") == nil)
         // No country code, and not a US-shaped number.
         #expect(E164PhoneNumber("2079460958123") == nil)
         #expect(E164PhoneNumber("+0123456789") == nil)

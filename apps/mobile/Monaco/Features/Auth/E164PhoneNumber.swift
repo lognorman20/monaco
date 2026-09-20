@@ -16,14 +16,26 @@ struct E164PhoneNumber: Equatable {
     /// A bare 10-digit number, or 11 starting with 1, is taken as US. Everything else needs
     /// its country code, written either as "+44…" or as "0044…".
     init?(_ input: String) {
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Contacts and paste bring invisible direction marks with them.
-        let digits = String(trimmed.unicodeScalars.filter { CharacterSet.asciiDigits.contains($0) })
+        var digits = ""
+        var leadsWithPlus = false
+        for scalar in input.unicodeScalars {
+            if CharacterSet.asciiDigits.contains(scalar) {
+                digits.unicodeScalars.append(scalar)
+            } else if scalar == "+" {
+                // A "+" is a country-code marker only at the front, and only once.
+                guard digits.isEmpty, !leadsWithPlus else { return nil }
+                leadsWithPlus = true
+            } else if CharacterSet.letters.contains(scalar) || CharacterSet.decimalDigits.contains(scalar) {
+                // Letters, and digits in other scripts, are not something to guess at.
+                return nil
+            }
+            // Anything else — spaces, brackets, dashes, the direction marks Contacts adds —
+            // is formatting.
+        }
         guard !digits.isEmpty else { return nil }
 
-        let hasCountryCode = trimmed.hasPrefix("+") || digits.hasPrefix("00")
         let national: String
-        if trimmed.hasPrefix("+") {
+        if leadsWithPlus {
             national = digits
         } else if digits.hasPrefix("00") {
             national = String(digits.dropFirst(2))
@@ -32,13 +44,11 @@ struct E164PhoneNumber: Equatable {
         } else if digits.count == 11, digits.hasPrefix("1") {
             national = digits
         } else {
+            // No country code, and not a US-shaped number: we'd only be guessing.
             return nil
         }
 
-        guard Self.isValid(national) else { return nil }
-        // "+0…" is not a country code, and neither is a bare 12-digit string someone typed
-        // without one.
-        guard hasCountryCode || national.hasPrefix("1") else { return nil }
+        guard (8...15).contains(national.count), !national.hasPrefix("0") else { return nil }
         value = "+" + national
     }
 
@@ -48,11 +58,6 @@ struct E164PhoneNumber: Equatable {
         guard digits.hasPrefix("1"), digits.count == 11 else { return value }
         let d = Array(digits.dropFirst())
         return "(\(String(d[0..<3]))) \(String(d[3..<6]))-\(String(d[6..<10]))"
-    }
-
-    private static func isValid(_ digits: String) -> Bool {
-        guard (8...15).contains(digits.count) else { return false }
-        return digits.first != "0"
     }
 }
 
