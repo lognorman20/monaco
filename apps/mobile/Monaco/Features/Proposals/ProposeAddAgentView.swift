@@ -13,6 +13,8 @@ struct ProposeAddAgentView: View {
     @State private var name = ""
     @State private var amountText = ""
     @State private var isSending = false
+    /// Idempotency key for the proposal being sent; a retry after a lost response reuses it.
+    @State private var proposeSubmission = IdempotentSubmission()
     @State private var errorMessage: String?
 
     init(service: ProposeService, groupId: String, pot: ProposePot?, onProposed: ((_ proposalId: String) -> Void)? = nil) {
@@ -101,7 +103,7 @@ struct ProposeAddAgentView: View {
         errorMessage = nil
         defer { isSending = false }
         do {
-            let id = try await service.propose(groupId: groupId, draft: .addAgent(name: trimmedName, allocationMicros: budgetMicros))
+            let id = try await service.propose(groupId: groupId, draft: .addAgent(name: trimmedName, allocationMicros: budgetMicros), submission: proposeSubmission)
             if let onProposed {
                 onProposed(id)
             } else {
@@ -127,6 +129,8 @@ struct ProposeAgentLifecycleView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var isSending = false
+    /// Idempotency key for the proposal being sent; a retry after a lost response reuses it.
+    @State private var proposeSubmission = IdempotentSubmission()
     @State private var errorMessage: String?
 
     init(service: ProposeService, groupId: String, kind: String, botName: String, onProposed: ((_ proposalId: String) -> Void)? = nil) {
@@ -191,7 +195,7 @@ struct ProposeAgentLifecycleView: View {
         errorMessage = nil
         defer { isSending = false }
         do {
-            let id = try await service.propose(groupId: groupId, draft: .agentLifecycle(kind: kind))
+            let id = try await service.propose(groupId: groupId, draft: .agentLifecycle(kind: kind), submission: proposeSubmission)
             if let onProposed {
                 onProposed(id)
             } else {

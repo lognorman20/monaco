@@ -16,6 +16,8 @@ struct FundCabalView: View {
     @State private var amountText = ""
     @State private var isLoadingBalance = true
     @State private var isSubmitting = false
+    /// Idempotency key for the fund request in flight; a retry after a lost response reuses it.
+    @State private var fundSubmission = IdempotentSubmission()
     @State private var errorMessage: String?
     @State private var toast: MonacoToast?
 
@@ -219,7 +221,7 @@ struct FundCabalView: View {
 
         let fundedAmountLabel = AmountEntryText.display(amountText)
         do {
-            let fund = try await apiClient.fundGroup(accessToken: token, groupId: groupId, amount: micros)
+            let fund = try await apiClient.fundGroup(accessToken: token, groupId: groupId, amount: micros, submission: fundSubmission)
             Haptics.success()
             let name = selectedCabalName ?? "your cabal"
             toast = MonacoToast(message: "Adding \(fundedAmountLabel) to \(name)…", isSuccess: true)
