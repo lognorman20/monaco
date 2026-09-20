@@ -118,6 +118,11 @@ func setupLogging() (func(), error) {
 	}, nil
 }
 
+// trustProxyHeaders reports whether per-address limits may key on X-Forwarded-For.
+func trustProxyHeaders() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv(envTrustProxyHeaders)), "true")
+}
+
 // setupTelemetry starts error reporting and alert delivery. The returned func flushes both;
 // call it on shutdown and before a fatal exit.
 func setupTelemetry() (func(), error) {
@@ -169,7 +174,7 @@ func platformHandler(mux *http.ServeMux, sessions httpapi.SessionVerifier, idemp
 		_, pattern := mux.Handler(r)
 		return pattern
 	})
-	trustProxy := strings.EqualFold(strings.TrimSpace(os.Getenv(envTrustProxyHeaders)), "true")
+	trustProxy := trustProxyHeaders()
 	origins := strings.Split(os.Getenv(envCORSAllowedOrigins), ",")
 	return httpapi.Chain(mux,
 		httpapi.RequestID(),

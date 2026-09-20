@@ -391,3 +391,17 @@ func logSwapBranchError(msg string, err error, attrs ...any) {
 	args := append([]any{"err", err}, attrs...)
 	slog.Error(msg, args...)
 }
+
+// --- agent intents ---
+
+// logAgentIntentStatusWriteFailed records an intent whose final status could not be saved,
+// so the audit trail still says "accepted". The next intent of the same agent repairs it
+// from the ledger; this line is what to alert on until then.
+func logAgentIntentStatusWriteFailed(intentID, status, transactionID string, err error) {
+	slog.Error("agent intent status write failed",
+		"intent_id", intentID,
+		"status", status,
+		"transaction_id", transactionID,
+		"err", err,
+	)
+}

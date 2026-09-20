@@ -4,8 +4,8 @@
 # depends entirely on which --api URL you point it at and which cabal's key you use.
 #
 # Usage:
-#   MONACO_AGENT_KEY=k7m2p ./scripts/demo/agent-intent.sh buy  AAPLx 10  --group <group-id>
-#   MONACO_AGENT_KEY=k7m2p ./scripts/demo/agent-intent.sh sell AAPLx 0.5 --group <group-id>
+#   MONACO_AGENT_KEY=monaco_ak_... ./scripts/demo/agent-intent.sh buy  AAPLx 10  --group <group-id>
+#   MONACO_AGENT_KEY=monaco_ak_... ./scripts/demo/agent-intent.sh sell AAPLx 0.5 --group <group-id>
 #
 # Args:
 #   buy|sell   Trade side.
@@ -20,7 +20,7 @@
 #   -h, --help     Show this help.
 #
 # Env:
-#   MONACO_AGENT_KEY   The 5-character key revealed once in the app after the cabal's
+#   MONACO_AGENT_KEY   The monaco_ak_... key revealed once in the app after the cabal's
 #                      add-agent vote passes. Required. Never printed by this script.
 #   MONACO_GROUP_ID    Default --group value if the flag is omitted.
 set -euo pipefail

@@ -226,6 +226,8 @@ func FuzzValidateIntent(f *testing.F) {
 	f.Add("active", buy, "AAPLx", int64(1), int64(-3), int64(math.MaxInt64), int64(0), int64(math.MaxInt64), int64(0))
 	f.Add("active", buy, "AAPLx", int64(1), int64(500_000), int64(math.MinInt64), int64(0), int64(1_000_000), int64(0))
 	f.Add("active", sell, "AAPLx", int64(1_000_000), int64(0), int64(0), int64(0), int64(0), int64(1_000_000))
+	f.Add("active", sell, "AAPLx", int64(1_000_000), int64(0), int64(0), int64(0), int64(1_000_000), int64(1_000_000))
+	f.Add("active", sell, "AAPLx", int64(600_001), int64(0), int64(0), int64(0), int64(600_000), int64(1_000_000))
 	f.Add("active", sell, "AAPLx", int64(1_000_001), int64(0), int64(0), int64(0), int64(0), int64(1_000_000))
 	f.Add("active", sell, "", int64(1), int64(0), int64(0), int64(0), int64(0), int64(1_000_000))
 	f.Add("paused", buy, "AAPLx", int64(1), int64(500_000), int64(0), int64(0), int64(1_000_000), int64(0))
@@ -242,6 +244,9 @@ func FuzzValidateIntent(f *testing.F) {
 			AgentSpentUsdcMicros:   spent,
 			PendingAgentUsdcMicros: pending,
 			TokenHoldingsBySymbol:  map[string]int64{symbol: held},
+			// A sell never reads the treasury's USDC, so that input doubles as the agent's own
+			// position. It keeps the fuzz signature, and with it the saved corpus, unchanged.
+			AgentTokenHoldingsBySymbol: map[string]int64{symbol: treasury},
 		}
 		intent := AgentIntentRequest{Side: AgentIntentSell, Symbol: symbol, TokenAmount: amount}
 		if isBuy {
@@ -267,8 +272,8 @@ func FuzzValidateIntent(f *testing.F) {
 			if big.NewInt(amount).Cmp(available) <= 0 && amount <= treasury {
 				t.Fatalf("refused buy %d within headroom %s and treasury %d: %v", amount, available, treasury, err)
 			}
-		} else if amount <= held {
-			t.Fatalf("refused sell %d with %d held: %v", amount, held, err)
+		} else if held >= 0 && treasury >= 0 && amount <= held && amount <= treasury {
+			t.Fatalf("refused sell %d with %d held and %d bought by the agent: %v", amount, held, treasury, err)
 		}
 	})
 }

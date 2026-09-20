@@ -92,8 +92,9 @@ func buildActiveAgent(overrides func(*GroupAgent)) GroupAgent {
 // buildTreasurySnapshot returns a $1,000 treasury with nothing spent or pending.
 func buildTreasurySnapshot(overrides func(*AgentTreasurySnapshot)) AgentTreasurySnapshot {
 	snap := AgentTreasurySnapshot{
-		TreasuryUsdcMicros:    1_000_000_000,
-		TokenHoldingsBySymbol: map[string]int64{"AAPLx": 1_000_000},
+		TreasuryUsdcMicros:         1_000_000_000,
+		TokenHoldingsBySymbol:      map[string]int64{"AAPLx": 1_000_000},
+		AgentTokenHoldingsBySymbol: map[string]int64{"AAPLx": 1_000_000},
 	}
 	if overrides != nil {
 		overrides(&snap)

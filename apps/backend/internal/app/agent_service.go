@@ -20,6 +20,8 @@ var (
 	ErrAgentGroupMismatch  = errors.New("agent key does not match group")
 	ErrAgentPaused         = errors.New("agent is paused")
 	ErrAgentIntentRejected = errors.New("agent intent rejected")
+	// ErrAgentIntentInFlight answers a resend whose first request is still executing.
+	ErrAgentIntentInFlight = errors.New("agent intent is still executing")
 )
 
 // CreateAgentProposalInput is input for agent lifecycle proposals.

@@ -78,11 +78,16 @@ How it behaves:
   per process: it resets on restart, the server's count does not.
 - **One trade per tick, one per symbol per lookback.** Sells go before buys, then the biggest move wins.
 - **Sells are sized from its own buys.** The API has no holdings endpoint for agents, so the
-  bot estimates what each buy returned (less 2%) and sells that. It never sells what members bought.
+  bot estimates what each buy returned (less 2%) and sells that. It never sells what members
+  bought, and the server would refuse it if it tried: an agent can only sell what its own
+  buys returned, net of its own sells.
 - **`401` stops it.** Retrying a bad key only trips the wrong-key throttle. **`403`** (paused
   by vote) and **`429`** (honours `Retry-After`) make it stand down and keep watching.
   **`422`** prints the server's reason; "exceeds agent allocation" ends buying for the run.
-- **An intent is never resent.** On a timeout or `5xx` the swap may have gone through, so the
+- **An intent is only resent under its idempotency key.** Every trade decision gets a fresh
+  random `idempotencyKey`. On a timeout, a `5xx` or a `409` the swap may have gone through,
+  so the bot resends the identical intent twice, five seconds apart; the server answers a
+  key it has seen with the first outcome and never trades twice. Still no clear answer: the
   bot counts the buy against its cap and points you at the activity feed.
 - **The key is never printed**, in the banner, the log, or an error.
 
@@ -98,11 +103,17 @@ against `httptest` servers).
   screen. Never emailed. Bots authenticate against a SHA-256 hash; the server also keeps the
   plaintext so members can retrieve it, and wipes both when the cabal votes the bot out.
 - **The budget is enforced server-side.** The bot can't spend past its allocation; a request
-  that would exceed it comes back rejected, not silently capped.
-- **Guessing the key is throttled.** After 10 wrong keys for a cabal (or from one address)
-  the API answers `429` with `Retry-After` and allows one more try per minute. Calls with
-  the right key are never throttled, and a key sent to the wrong cabal gets the same `401`
-  as an unknown key.
+  that would exceed it comes back rejected, not silently capped. Intents are decided one at
+  a time per bot and reserve their amount before the swap, so firing them in parallel does
+  not get past the cap. The budget is a lifetime spend cap: selling does not refill it.
+- **The bot can only sell what it bought.** Positions the cabal voted in are out of its
+  reach; the server checks every sell against the bot's own buys in the ledger.
+- **The key cannot be guessed.** It is `monaco_ak_` plus 32 random characters, about 158
+  bits. Wrong keys are still throttled: after 10 from one address the API answers that
+  address `429` with `Retry-After` and allows one more try per minute. Wrong keys aimed at a
+  cabal from elsewhere do not lock its bot out, and a key sent to the wrong cabal gets the
+  same `401` as an unknown key. (Five-character keys from before this format still work and
+  are also throttled per cabal; re-add the bot to get a long one.)
 - **The cabal keeps control after install.** Pause, resume, and revoke are each their own
   vote — pausing keeps the key valid but blocks trades, revoking kills the key outright.
 - **Same execution path as a member's vote.** Agent trades settle through the identical

@@ -42,6 +42,9 @@ func assertIntentAcceptanceIsSafe(t *testing.T, agent GroupAgent, intent AgentIn
 		if held := snap.TokenHoldingsBySymbol[intent.Symbol]; intent.TokenAmount > held {
 			t.Fatalf("accepted sell of %d %s with %d held", intent.TokenAmount, intent.Symbol, held)
 		}
+		if own := snap.AgentTokenHoldingsBySymbol[intent.Symbol]; intent.TokenAmount > own {
+			t.Fatalf("accepted sell of %d %s with only %d bought by the agent", intent.TokenAmount, intent.Symbol, own)
+		}
 	default:
 		t.Fatalf("accepted intent with side %q", intent.Side)
 	}
@@ -80,6 +83,7 @@ func TestValidateIntent_randomInputs_acceptedIntentsRespectEveryLimit(t *testing
 			s.AgentSpentUsdcMicros = randomAmount(rng)
 			s.PendingAgentUsdcMicros = randomAmount(rng)
 			s.TokenHoldingsBySymbol = map[string]int64{"AAPLx": randomAmount(rng)}
+			s.AgentTokenHoldingsBySymbol = map[string]int64{"AAPLx": randomAmount(rng)}
 		})
 		intent := AgentIntentRequest{
 			Side:        sides[rng.Intn(len(sides))],
@@ -159,13 +163,17 @@ func TestValidateIntent_buyAboveTreasury_rejectedEvenWithinAllocation(t *testing
 
 func TestValidateIntent_sellBoundaries(t *testing.T) {
 	cases := []struct {
-		name    string
-		symbol  string
-		amount  int64
-		wantErr bool
+		name   string
+		symbol string
+		amount int64
+		// agentOwn overrides how much of the holding the agent bought; zero keeps the factory's all of it.
+		agentOwn int64
+		wantErr  bool
 	}{
 		{name: "exactly held", symbol: "AAPLx", amount: 1_000_000, wantErr: false},
 		{name: "one above held", symbol: "AAPLx", amount: 1_000_001, wantErr: true},
+		{name: "one above the agent's own position", symbol: "AAPLx", amount: 600_001, agentOwn: 600_000, wantErr: true},
+		{name: "exactly the agent's own position", symbol: "AAPLx", amount: 600_000, agentOwn: 600_000, wantErr: false},
 		{name: "symbol not held", symbol: "TSLAx", amount: 1, wantErr: true},
 		{name: "zero amount", symbol: "AAPLx", amount: 0, wantErr: true},
 		{name: "negative amount", symbol: "AAPLx", amount: -1, wantErr: true},
@@ -176,7 +184,11 @@ func TestValidateIntent_sellBoundaries(t *testing.T) {
 			intent := AgentIntentRequest{Side: AgentIntentSell, Symbol: tc.symbol, TokenAmount: tc.amount}
 
 			// Act
-			err := ValidateIntent(buildActiveAgent(nil), intent, buildTreasurySnapshot(nil))
+			err := ValidateIntent(buildActiveAgent(nil), intent, buildTreasurySnapshot(func(s *AgentTreasurySnapshot) {
+				if tc.agentOwn != 0 {
+					s.AgentTokenHoldingsBySymbol = map[string]int64{"AAPLx": tc.agentOwn}
+				}
+			}))
 
 			// Assert
 			if (err != nil) != tc.wantErr {

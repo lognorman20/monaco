@@ -248,19 +248,79 @@ func TestBot_throttleAndPauseStandDownThenResume(t *testing.T) {
 	}
 }
 
-func TestBot_unknownOutcomeCountsAgainstTheCapAndIsNotRetried(t *testing.T) {
+func TestBot_unknownOutcomeIsResentOnlyUnderTheSameIdempotencyKey(t *testing.T) {
 	prices := &scriptedPrices{ticks: []map[string]float64{flat(100, 200), flat(100, 200), flat(101, 200), flat(102, 200)}}
 	h := newHarness(t, true, prices, NewBudget(1_000_000, 5_000_000))
 	h.server.respond = func(w http.ResponseWriter, _ int) { w.WriteHeader(http.StatusBadGateway) }
 	h.ticks(t, 4)
-	if len(h.server.intents) != 1 {
-		t.Fatalf("posted %d intents, want no resend", len(h.server.intents))
+	if len(h.server.intents) != 1+maxResends {
+		t.Fatalf("posted %d intents, want 1 and %d resends", len(h.server.intents), maxResends)
+	}
+	first := h.server.intents[0]
+	if first.IdempotencyKey == "" {
+		t.Fatal("intent sent without an idempotency key")
+	}
+	for i, resent := range h.server.intents[1:] {
+		if resent != first {
+			t.Fatalf("resend %d = %+v, want the first intent unchanged %+v", i+1, resent, first)
+		}
 	}
 	if h.bot.budget.Spent() != 1_000_000 {
 		t.Fatalf("spent %d, want the unconfirmed buy counted", h.bot.budget.Spent())
 	}
 	if h.bot.positions["GOOGLx"] != 0 {
 		t.Fatal("an unconfirmed buy must not become a sellable position")
+	}
+}
+
+func TestBot_resendThatFindsTheFillSettlesItOnce(t *testing.T) {
+	prices := &scriptedPrices{ticks: []map[string]float64{flat(100, 200), flat(100, 200), flat(101, 200)}}
+	h := newHarness(t, true, prices, NewBudget(1_000_000, 5_000_000))
+	// The first answer is lost; the replay under the same key reports the original fill.
+	h.server.respond = func(w http.ResponseWriter, n int) {
+		if n == 1 {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			return
+		}
+		_, _ = w.Write([]byte(`{"intentId":"intent-1","status":"executed","transactionId":"tx-1"}`))
+	}
+	h.ticks(t, 3)
+	if len(h.server.intents) != 2 || h.server.intents[0] != h.server.intents[1] {
+		t.Fatalf("intents = %+v, want one resend of the same intent", h.server.intents)
+	}
+	if h.bot.budget.Spent() != 1_000_000 {
+		t.Fatalf("spent %d, want the fill counted once", h.bot.budget.Spent())
+	}
+	if h.bot.positions["GOOGLx"] == 0 {
+		t.Fatal("the recovered fill should be a sellable position")
+	}
+}
+
+func TestBot_eachDecisionGetsItsOwnIdempotencyKey(t *testing.T) {
+	prices := &scriptedPrices{ticks: []map[string]float64{flat(100, 200), flat(100, 200), flat(101, 200), flat(101, 202)}}
+	h := newHarness(t, true, prices, NewBudget(1_000_000, 5_000_000))
+	h.ticks(t, 4)
+	if len(h.server.intents) != 2 {
+		t.Fatalf("posted %d intents, want 2", len(h.server.intents))
+	}
+	a, b := h.server.intents[0].IdempotencyKey, h.server.intents[1].IdempotencyKey
+	if a == "" || b == "" || a == b {
+		t.Fatalf("idempotency keys %q and %q, want two distinct keys", a, b)
+	}
+}
+
+func TestBot_failedReplayIsNotResentAndCountsAgainstTheCap(t *testing.T) {
+	prices := &scriptedPrices{ticks: []map[string]float64{flat(100, 200), flat(100, 200), flat(101, 200)}}
+	h := newHarness(t, true, prices, NewBudget(1_000_000, 5_000_000))
+	h.server.respond = func(w http.ResponseWriter, _ int) {
+		_, _ = w.Write([]byte(`{"intentId":"intent-1","status":"failed","rejectReason":"execution failed"}`))
+	}
+	h.ticks(t, 3)
+	if len(h.server.intents) != 1 {
+		t.Fatalf("posted %d intents, want no resend of a clear answer", len(h.server.intents))
+	}
+	if h.bot.budget.Spent() != 1_000_000 || h.bot.positions["GOOGLx"] != 0 {
+		t.Fatalf("spent %d, position %d; want the buy counted and no position", h.bot.budget.Spent(), h.bot.positions["GOOGLx"])
 	}
 }
 

@@ -59,10 +59,16 @@ type AgentIntentRequest struct {
 
 // AgentTreasurySnapshot is treasury state for intent validation.
 type AgentTreasurySnapshot struct {
-	TreasuryUsdcMicros     int64
-	AgentSpentUsdcMicros   int64
+	TreasuryUsdcMicros int64
+	// AgentSpentUsdcMicros is the agent's confirmed buys. Sells do not reduce it: the
+	// allocation is a lifetime spend cap.
+	AgentSpentUsdcMicros int64
+	// PendingAgentUsdcMicros is every buy still reserved: accepted and in flight, or pending
+	// on the ledger.
 	PendingAgentUsdcMicros int64
 	TokenHoldingsBySymbol  map[string]int64
+	// AgentTokenHoldingsBySymbol is what the agent itself bought, net of its own sells.
+	AgentTokenHoldingsBySymbol map[string]int64
 }
 
 // ValidateIntent rejects intents that breach agent status or allocation.
@@ -96,9 +102,17 @@ func ValidateIntent(agent GroupAgent, intent AgentIntentRequest, snap AgentTreas
 		if intent.TokenAmount <= 0 {
 			return fmt.Errorf("token amount must be positive")
 		}
-		held := snap.TokenHoldingsBySymbol[intent.Symbol]
+		held, own, err := agentSellableTokenAmounts(intent.Symbol, snap)
+		if err != nil {
+			return err
+		}
 		if intent.TokenAmount > held {
 			return fmt.Errorf("insufficient treasury holding")
+		}
+		// An agent trades without a vote, so it may only unwind what it bought itself.
+		// Positions members voted in stay under member control.
+		if intent.TokenAmount > own {
+			return fmt.Errorf("sell exceeds agent position")
 		}
 	default:
 		return fmt.Errorf("invalid intent side")
@@ -124,4 +138,17 @@ func agentAvailableUsdcMicros(agent GroupAgent, snap AgentTreasurySnapshot) (int
 		return 0, nil
 	}
 	return remaining - snap.PendingAgentUsdcMicros, nil
+}
+
+// agentSellableTokenAmounts returns the treasury's holding of symbol and the part of it the
+// agent bought itself. Both are net quantities the caller derived by subtraction, so a
+// negative one means that subtraction went wrong; it is refused here rather than compared,
+// the same way agentAvailableUsdcMicros refuses negative spend.
+func agentSellableTokenAmounts(symbol string, snap AgentTreasurySnapshot) (held, own int64, err error) {
+	held = snap.TokenHoldingsBySymbol[symbol]
+	own = snap.AgentTokenHoldingsBySymbol[symbol]
+	if held < 0 || own < 0 {
+		return 0, 0, fmt.Errorf("treasury and agent token holdings must be non-negative")
+	}
+	return held, own, nil
 }

@@ -108,16 +108,17 @@ one readable momentum rule, dry run by default. How to run it:
 | Control | How it works | Code |
 | --- | --- | --- |
 | The cabal votes the agent in | `add_agent` is a proposal kind with the same tally as a trade. No vote, no key. | `packages/domain/votes.go`, `internal/app/agent_service.go` |
-| Budget cap, enforced server-side | Each intent is checked against `allocation − executed buys − pending buys`, and against the treasury's USDC. Over budget is a `422`, never a partial fill. The bot's own caps are a second, inner limit. | `domain.ValidateIntent` in `packages/domain/agent.go` |
-| Sells are bounded | An agent cannot sell more of a symbol than the cabal holds. | same |
+| Budget cap, enforced server-side | Each intent is checked against `allocation − in-flight, pending and confirmed buys`, and against the treasury's USDC, under a per-agent row lock that reserves the amount before the swap is sent, so concurrent intents cannot overshoot. Over budget is a `422`, never a partial fill. The bot's own caps are a second, inner limit. | `domain.ValidateIntent` in `packages/domain/agent.go` |
+| Sells are bounded | An agent can only sell what its own buys returned, net of its own sells, and never more than the cabal holds. Positions bought by vote are out of its reach. | same, `AgentSellableTokenAmountTx` in `internal/postgres/agent_limits.go` |
+| Safe retries | An optional `idempotencyKey` per intent: a resend gets the first outcome, never a second trade. | `reserveIntent` in `internal/app/agent_intent.go` |
 | Pause, resume, revoke by vote | Paused: key stays valid, intents get `403`. Revoked: key gets `401`. | `internal/app/agent_intent.go` |
 | Members-only key access | The key is minted when the vote passes; bots authenticate against its SHA-256 hash. The proposer can read the plaintext on the passed proposal for 15 minutes. Cabal members, and nobody else, can read it on the bot's detail screen while the bot is live, so the plaintext is stored until the cabal votes the bot out, which wipes it with the hash. | `agent_key.go`, `ReadAgentKeyReveal` and `RevokeGroupAgentKeyTx` in `internal/postgres/group_agents.go`, `GetGroupAgentViewForMember` in `internal/app/agent_service.go` |
-| Wrong-key throttling | 10 wrong keys per cabal or per address, then `429` with `Retry-After`, refilling one try per minute. Correct keys are never throttled. A key for another cabal gets the same `401` as an unknown key. | `internal/httpapi/agent_auth.go` |
+| Wrong-key throttling | 10 wrong keys per address, then `429` with `Retry-After`, refilling one try per minute. Wrong keys aimed at a cabal never lock out its bot. A key for another cabal gets the same `401` as an unknown key. | `internal/httpapi/agent_auth.go` |
 | Audit trail | Every intent is stored, including rejected ones with the reason. Fills appear in the cabal activity feed marked as agent trades. | `InsertAgentIntent` |
 
-Known limit: the key is five characters from a 31-letter alphabet so it can be typed on a
-phone. That is roughly 28.6 million combinations; the throttle, not the key length, is what
-makes guessing impractical.
+The key is `monaco_ak_` plus 32 characters from a 31-letter alphabet, about 158 bits from
+`crypto/rand`, so it is copied rather than typed. Five-character keys minted before that
+still authenticate and stay behind a per-cabal wrong-key throttle until the bot is re-added.
 
 ## Tracks
 
