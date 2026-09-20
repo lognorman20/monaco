@@ -58,13 +58,23 @@ func (l *requestLog) done(ctx context.Context, branch string, status int, attrs 
 
 func logJSONError(ctx context.Context, log *requestLog, branch string, w http.ResponseWriter, status int, message string, attrs ...any) {
 	log.done(ctx, branch, status, attrs...)
-	writeJSONError(w, status, message)
+	writeJSONError(ctx, w, status, message)
 }
 
-func writeJSONError(w http.ResponseWriter, status int, message string) {
+// errorResponse is the single error shape every API route returns: a human
+// message plus the correlation id a client can quote in a bug report.
+type errorResponse struct {
+	Error     string `json:"error"`
+	RequestID string `json:"requestId,omitempty"`
+}
+
+func writeJSONError(ctx context.Context, w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
+	_ = json.NewEncoder(w).Encode(errorResponse{
+		Error:     message,
+		RequestID: RequestIDFromContext(ctx),
+	})
 }
 
 func logNoContent(ctx context.Context, log *requestLog, branch string, attrs ...any) {
