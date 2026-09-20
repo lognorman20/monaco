@@ -100,6 +100,16 @@ struct PotSectionView: View {
 private struct PotHoldingRow: View {
     let row: PotRowDTO
     let isLast: Bool
+    /// Reduced once, when the row value is made. The cabal screen polls, so a
+    /// series normalised inside `body` would be redone on every tick for every
+    /// holding.
+    private let spark: SparklineSeries?
+
+    init(row: PotRowDTO, isLast: Bool) {
+        self.row = row
+        self.isLast = isLast
+        spark = SparklineSeries(usdcMicros: row.sparkUsdcMicros)
+    }
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .body) private var titleWidthFloor = MonacoRowLayout.baseMinimumTitleWidth
@@ -107,8 +117,6 @@ private struct PotHoldingRow: View {
     private var layout: MonacoRowLayout {
         MonacoRowLayout(dynamicTypeSize: dynamicTypeSize, scaledTitleWidthFloor: titleWidthFloor)
     }
-
-    private var spark: SparklineSeries? { SparklineSeries(usdcMicros: row.sparkUsdcMicros) }
 
     var body: some View {
         MonacoRow(
