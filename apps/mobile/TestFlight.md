@@ -7,6 +7,28 @@ Optional upload path for hackathon demo builds. Requires Apple Developer account
 - Xcode signed in with team that owns bundle ID `com.monaco.app`
 - Privy iOS client includes `com.monaco.app` (OTP `sendCode` otherwise returns 403)
 - Wave 4 green: `just test mobile` and `just build mobile`
+- A reachable **https** backend for the archive's environment (next section). A Release build cannot use `localhost` or `http`
+
+## Pick the API environment
+
+Archives are Release builds, and Release defaults to `MONACO_ENVIRONMENT = production` (`Config/Monaco.xcconfig`). The staging and production URLs are **placeholders, empty in git**, because no hosted backend is committed to this repo. Until you set one, the archive builds but refuses to launch with `MONACO_API_BASE_URL is empty for the selected environment`.
+
+1. Set the URL once (not a secret; must be `https://`, a tunnel URL is fine for a demo build):
+
+   ```bash
+   dotenvx set MONACO_STAGING_API_BASE_URL https://<staging-or-tunnel-host> -f .env.local --plain
+   dotenvx set MONACO_PRODUCTION_API_BASE_URL https://<production-host> -f .env.local --plain
+   ```
+
+2. Regenerate the gitignored config (`just build mobile` does this too): `./scripts/ensure-ios-privy-config.sh generate`. It writes `Config/Environment.local.xcconfig` and fails on a non-https value.
+3. Archive. Production is the default, so the Xcode **Product → Archive** path always targets production. For a staging archive use the CLI alternative below and add `MONACO_ENVIRONMENT=staging` to the `xcodebuild archive` command.
+4. Check what went into the archive before uploading:
+
+   ```bash
+   plutil -p /tmp/Monaco.xcarchive/Products/Applications/Monaco.app/Info.plist | grep MONACO_
+   ```
+
+Release rejects at launch: an empty or malformed URL, `http`, `localhost` / loopback / `.local` hosts, and the `local` environment. Release also ignores `SIMCTL_CHILD_MONACO_API_BASE_URL`; that override is Debug-only.
 
 ## Build archive
 
@@ -47,7 +69,7 @@ xcodebuild -exportArchive \
 
 ## Smoke after install
 
-Follow [`docs/m5-demo-script.md`](../../docs/m5-demo-script.md) on a physical device. Backend must be reachable (staging or tunnel) for live JSON flows.
+Follow [`docs/m5-demo-script.md`](../../docs/m5-demo-script.md) on a physical device. The backend at the archive's `MONACO_API_BASE_URL` must be reachable over https for live JSON flows.
 
 ## Done when
 
