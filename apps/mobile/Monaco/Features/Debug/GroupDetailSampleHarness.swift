@@ -51,6 +51,10 @@ struct GroupDetailSampleHarness: View {
     @State private var toast: MonacoToast?
     @State private var heroScrolledAway = false
 
+    /// The one scenario that stands in for a leave in flight, read wherever the product reads
+    /// `isLeaving`, so the harness and the product gate on the same thing.
+    private var isLeaving: Bool { scenario == .sellAndLeave }
+
     var body: some View {
         NavigationStack {
             root
@@ -112,13 +116,19 @@ struct GroupDetailSampleHarness: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .monacoCanvas()
         // The same cover the real screen puts up while a leave is running.
-        .groupLeaveProgress(isLeaving: scenario == .sellAndLeave, isSellingSlice: true)
+        .groupLeaveProgress(isLeaving: isLeaving, isSellingSlice: true)
         .navigationTitle(heroScrolledAway ? view.name : "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { showDetails = true } label: { Image(systemName: "info.circle") }
-                    .accessibilityLabel("Cabal details")
+            // `GroupDetailView` drops this item entirely while a leave runs, so the harness
+            // drops it under the same condition. Rendering it regardless would leave the
+            // leave-in-progress test asserting against an item the product never shows.
+            if !isLeaving {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showDetails = true } label: { Image(systemName: "info.circle") }
+                        .accessibilityLabel("Cabal details")
+                        .accessibilityIdentifier("group-details-button")
+                }
             }
         }
         .navigationDestination(item: $route) { route in

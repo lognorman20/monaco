@@ -39,9 +39,11 @@ final class GroupLeaveProgressSampleUITests: XCTestCase {
 
         let cover = anyElement(app, "group-leaving-cover")
         XCTAssertTrue(cover.waitForExistence(timeout: 20), "the leave cover should be on screen")
+        // The cover combines its children into one element, so the two Texts are not separate
+        // `staticTexts` to query — the label of the combined element is what VoiceOver reads.
         XCTAssertTrue(
-            app.staticTexts["Selling your slice…"].exists,
-            "the cover should say the slice is being sold, not just spin"
+            cover.label.contains("Selling your slice"),
+            "the cover should say the slice is being sold, not just spin — label was \(cover.label)"
         )
     }
 
@@ -53,11 +55,16 @@ final class GroupLeaveProgressSampleUITests: XCTestCase {
 
         for action in ["group-action-fund", "group-action-propose", "group-action-sell", "group-action-chat"] {
             let button = anyElement(app, action)
+            // Without this the `isHittable` check below passes on a query that matches
+            // nothing, which is how it would rot into saying nothing at all.
+            XCTAssertTrue(button.exists, "\(action) should still be on screen while leaving")
             XCTAssertFalse(button.isHittable, "\(action) should not be tappable while leaving")
         }
+        // The product removes the toolbar item rather than disabling it, so absence is the
+        // assertion. `isHittable` on a missing element is false for the wrong reason.
         XCTAssertFalse(
-            anyElement(app, "group-details-button").isHittable,
-            "the details sheet should not open while leaving"
+            anyElement(app, "group-details-button").exists,
+            "the details item should be gone while leaving, not merely untappable"
         )
     }
 
@@ -70,5 +77,11 @@ final class GroupLeaveProgressSampleUITests: XCTestCase {
         XCTAssertTrue(fund.waitForExistence(timeout: 20), "the action row should be on screen")
         XCTAssertTrue(fund.isHittable, "Add money should be tappable on a cabal nobody is leaving")
         XCTAssertFalse(anyElement(app, "group-leaving-cover").exists, "no leave is running")
+        // The positive half of the leaving-screen assertion: the details item really does carry
+        // this identifier when it is on screen. Without this, "it is gone while leaving" could
+        // go on passing against a query that never matches anything.
+        let details = anyElement(app, "group-details-button")
+        XCTAssertTrue(details.exists, "the details item should be on screen when no leave is running")
+        XCTAssertTrue(details.isHittable, "the details item should open the sheet when no leave is running")
     }
 }
