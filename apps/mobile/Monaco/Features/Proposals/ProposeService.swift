@@ -194,7 +194,10 @@ enum ProposeErrorCopy {
     private static func refusal(_ error: Error, stockName: String? = nil, isSell: Bool = false) -> String? {
         guard case MonacoAPIError.apiError(_, let message) = error else { return nil }
         switch message {
-        case "amount exceeds treasury holding": return ProposeFlowCopy.sellNoLongerAvailable
+        // Only a sell is refused against the holding. A buy answered with this is the server
+        // telling us something we cannot read, and "the cabal doesn't hold that much anymore" is
+        // not advice a member buying a stock can act on.
+        case "amount exceeds treasury holding": return isSell ? ProposeFlowCopy.sellNoLongerAvailable : nil
         case "amount exceeds treasury total available": return isSell ? ProposeFlowCopy.overHoldings : ProposeFlowCopy.overPot
         case "thesis exceeds maximum length": return ProposeFlowCopy.reasonTooLong
         case "quote not routable":
