@@ -553,26 +553,26 @@ final class GroupChatRowTests: XCTestCase {
 
 final class GroupChatAutoScrollTests: XCTestCase {
     func testOwnMessage_alwaysScrolls() {
-        XCTAssertTrue(GroupChatTimeline.shouldAutoScroll(added: [mine("m1")], isPinnedToBottom: false))
-        XCTAssertTrue(GroupChatTimeline.shouldAutoScroll(added: [mine("m1")], isPinnedToBottom: true))
+        XCTAssertTrue(GroupChatTimeline.shouldAutoScroll(added: [mine("m1")], isFollowingThread: false))
+        XCTAssertTrue(GroupChatTimeline.shouldAutoScroll(added: [mine("m1")], isFollowingThread: true))
     }
 
     /// The bug: someone else posting yanked a member reading backlog down to the newest
     /// message, once per arrival, on a four-second poll.
-    func testSomeoneElsesMessage_onlyScrollsWhenAlreadyAtTheBottom() {
+    func testSomeoneElsesMessage_onlyScrollsWhenTheThreadIsFollowing() {
         let arrival = [notMine("m1")]
-        XCTAssertFalse(GroupChatTimeline.shouldAutoScroll(added: arrival, isPinnedToBottom: false))
-        XCTAssertTrue(GroupChatTimeline.shouldAutoScroll(added: arrival, isPinnedToBottom: true))
+        XCTAssertFalse(GroupChatTimeline.shouldAutoScroll(added: arrival, isFollowingThread: false))
+        XCTAssertTrue(GroupChatTimeline.shouldAutoScroll(added: arrival, isFollowingThread: true))
     }
 
     func testMixedBatchContainingMine_scrollsEvenWhenScrolledUp() {
         XCTAssertTrue(
-            GroupChatTimeline.shouldAutoScroll(added: [notMine("m1"), mine("m2")], isPinnedToBottom: false)
+            GroupChatTimeline.shouldAutoScroll(added: [notMine("m1"), mine("m2")], isFollowingThread: false)
         )
     }
 
     func testNothingAdded_neverScrolls() {
-        XCTAssertFalse(GroupChatTimeline.shouldAutoScroll(added: [], isPinnedToBottom: true))
+        XCTAssertFalse(GroupChatTimeline.shouldAutoScroll(added: [], isFollowingThread: true))
     }
 
     private func mine(_ id: String) -> GroupMessageDTO { message(id, at: "2026-09-18T15:00:00.000000Z", mine: true) }
