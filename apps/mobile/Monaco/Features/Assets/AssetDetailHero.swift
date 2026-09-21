@@ -49,27 +49,57 @@ struct AssetDetailHero: View {
         }
     }
 
-    /// "▲ $5.50 · 2.4%  Past day", or the scrubbed sample's own time in place of the
-    /// period. Dollars come from the curve, so they are only shown when there is one.
+    /// "▲ $5.50 · 2.4%  Past day · AAPL", or the scrubbed sample's own time in place
+    /// of the period. Dollars come from the curve, so they are only shown when there
+    /// is one — and so is the instrument tag, because a figure folded from the curve
+    /// is the underlying equity's while the price above it is the token's. Two
+    /// numbers that cannot be reconciled by subtraction have to say which is which.
     private func changeRow(_ move: AssetDetailModel.Move) -> some View {
         HStack(spacing: MonacoTheme.Space.s) {
             Group {
                 if let dollars = move.dollars {
                     PnLBadge(dollarPnl: dollars, percentReturn: move.ratio)
+                        .priceTickFlash(tick)
                 } else {
+                    // Bare text, no pill: a capsule wash here would draw a stray
+                    // capsule hugging the glyphs, so the flash takes a rounded
+                    // rectangle with a little room around it instead.
                     PercentText(percentReturn: move.ratio, style: .row)
+                        .priceTickFlash(
+                            tick,
+                            in: RoundedRectangle(cornerRadius: 8, style: .continuous),
+                            expand: 5
+                        )
                 }
             }
-            .priceTickFlash(tick)
 
-            Text(move.label)
+            Text(periodLabel(move))
                 .font(MonacoTheme.Typo.caption)
                 .foregroundStyle(isScrubbing ? MonacoTheme.ink : MonacoTheme.muted)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenChange(move))
         .accessibilityIdentifier("asset-detail-move")
+    }
+
+    /// "Past day" on its own, or "Past day · AAPL" when the figure is measured on
+    /// another instrument than the price above it. The chart's own caption under the
+    /// curve spells the same fact out in full; here it has to stay one line.
+    private func periodLabel(_ move: AssetDetailModel.Move) -> String {
+        guard let symbol = move.basisSymbol else { return move.label }
+        return "\(move.label) · \(symbol)"
+    }
+
+    /// VoiceOver gets the long form: "Up $5.50, 2.4%, Past day. AAPL on its home
+    /// exchange." — a combined label would read the "·" and drop the caption.
+    private func spokenChange(_ move: AssetDetailModel.Move) -> String {
+        var sentence = move.dollars.map { PnLSpeech.badge(dollarPnl: $0, percentReturn: move.ratio) }
+            ?? PnLSpeech.percent(PercentReturnFormatter.format(move.ratio))
+        sentence += ", \(move.label)"
+        if let caption = move.basisCaption { sentence += ". \(caption)." }
+        return sentence
     }
 
     /// The exchange's state, and — whenever it is shut — the sentence this product

@@ -73,6 +73,20 @@ final class AssetDetailModel {
         /// The same move in dollars ("5.50"), when the curve can measure one. Nil when
         /// the only figure available is the backend's own 24h ratio.
         var dollars: String?
+        /// Which instrument this figure is about, when that is *not* the instrument
+        /// of the price it sits under.
+        ///
+        /// The hero price is the token's (`AAPLx` on Solana); every Pyth history
+        /// source we have serves the underlying equity, so a move folded from the
+        /// curve is `AAPL` on NASDAQ. The two cannot be reconciled by subtraction,
+        /// and a `PnLBadge` is the same component the app uses for a member's own
+        /// realised P&L — unlabelled, "▲ $5.50" under "$232.05" reads as a
+        /// subtraction that does not work. Nil when the figure and the price are
+        /// about the same thing, which is the case for the 24h fallback.
+        var basisSymbol: String?
+        /// The long form of the same fact, for VoiceOver and for the caption line:
+        /// "AAPL on its home exchange".
+        var basisCaption: String?
 
         private var value: Decimal {
             Decimal(string: ratio, locale: Locale(identifier: "en_US_POSIX")) ?? 0
@@ -127,6 +141,10 @@ final class AssetDetailModel {
 
     private let dataSource: AssetDetailDataSource
     private var tickSequence = 0
+    /// Per-range issue order, so only the newest request for a range may write it.
+    private var chartRequestSequence: [AssetChartRange: Int] = [:]
+    /// How many requests the member is actually waiting on, per range.
+    private var visibleChartRequests: [AssetChartRange: Int] = [:]
 
     init(symbol: String, dataSource: AssetDetailDataSource) {
         self.symbol = symbol
@@ -212,17 +230,36 @@ final class AssetDetailModel {
     var move: Move? {
         if let series, let index = scrubbedIndex, let point = series.point(at: index),
            let ratio = series.changeRatio(toIndex: index) {
-            return Move(
+            return curveMove(
+                series,
                 ratio: ratio,
                 label: ChartScrubLabel.caption(for: point.date, range: series.range),
                 dollars: series.changeDollars(toIndex: index)
             )
         }
-        if let ratio = windowRatio {
-            return Move(ratio: ratio, label: range.moveLabel, dollars: series?.changeDollars())
+        if let series, let ratio = windowRatio {
+            return curveMove(series, ratio: ratio, label: range.moveLabel, dollars: series.changeDollars())
         }
+        // No curve: the 24h change from the detail route, which is the token's — the
+        // same instrument as the price above it, so it carries no instrument label.
+        // That is what keeps "Past day" honest whichever way the chart call went: the
+        // label a figure wears changes with the figure's instrument, never silently.
         guard let change = detail?.change24h, !change.isEmpty else { return nil }
         return Move(ratio: change, label: AssetChartRange.oneDay.moveLabel)
+    }
+
+    /// A figure measured from the curve, tagged with the curve's instrument whenever
+    /// that is not the one the hero price is quoted in.
+    private func curveMove(_ series: AssetChartSeries, ratio: String, label: String, dollars: String?) -> Move {
+        var move = Move(ratio: ratio, label: label, dollars: dollars)
+        // Only the underlying differs from the token in the hero. A series the
+        // backend says is the token's needs no tag, and one it will not name at all
+        // gets no guess.
+        if series.basis == .underlying, let symbol = series.basisSymbol, !symbol.isEmpty {
+            move.basisSymbol = symbol
+            move.basisCaption = series.basisCaption
+        }
+        return move
     }
 
     /// The curve's own verdict, which does *not* follow the scrub: a line that changed
@@ -269,14 +306,26 @@ final class AssetDetailModel {
     }
 
     /// Writes only into `range`'s slot, so a late response lands where it belongs or nowhere.
+    ///
+    /// A quiet load is invisible by definition: no spinner, no error, and nothing on
+    /// screen replaced by an equal value. `loadingRanges` is what the chip's spinner
+    /// reads, and that spinner means "you tapped this and it has not arrived" — a
+    /// two-minute background re-read must never raise it, or the selected chip sprouts
+    /// a `ProgressView` (and says "Loading" to VoiceOver) for a refresh nobody asked for.
     func loadChart(range: AssetChartRange, quietly: Bool = false) async {
         if !quietly, charts[range] == nil || charts[range] == .failed {
             charts[range] = .loading
         }
-        loadingRanges.insert(range)
-        defer { loadingRanges.remove(range) }
+        // Newest request for a range wins its slot, whichever order the answers come
+        // back in: a tap and a background poll overlap constantly, and without this
+        // the older response can land last and repaint the newer one.
+        chartRequestSequence[range, default: 0] += 1
+        let sequence = chartRequestSequence[range] ?? 0
+        if !quietly { beginVisibleRequest(range) }
+        defer { if !quietly { endVisibleRequest(range) } }
         do {
             let response = try await dataSource.chart(symbol: symbol, range: range)
+            guard chartRequestSequence[range] == sequence else { return }
             guard let series = AssetChartSeries(response, requested: range) else {
                 // The server answered about a window nobody asked for. Drawing it would put
                 // a year of history under a 1D chip; leave the slot alone and offer a retry.
@@ -285,10 +334,32 @@ final class AssetDetailModel {
             }
             apply(series, to: range, quietly: quietly)
         } catch {
+            guard chartRequestSequence[range] == sequence else { return }
             handle(error) {
+                if quietly { return }
                 if hasDrawnCurve(range) { return }
                 charts[range] = .failed
             }
+        }
+    }
+
+    /// The chip spins while at least one *asked-for* request for its range is out.
+    ///
+    /// Counted rather than a bare flag: a tap and a retry on the same range overlap,
+    /// and the first to return would otherwise stop the spinner while the other
+    /// request is still in flight.
+    private func beginVisibleRequest(_ range: AssetChartRange) {
+        visibleChartRequests[range, default: 0] += 1
+        loadingRanges.insert(range)
+    }
+
+    private func endVisibleRequest(_ range: AssetChartRange) {
+        let remaining = (visibleChartRequests[range] ?? 1) - 1
+        if remaining > 0 {
+            visibleChartRequests[range] = remaining
+        } else {
+            visibleChartRequests[range] = nil
+            loadingRanges.remove(range)
         }
     }
 
