@@ -121,7 +121,7 @@ struct FundCabalView: View {
         .navigationTitle("Add money")
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("fund-cabal-view")
-        .monacoToast($toast, bottomInset: 72)
+        .monacoToast($toast, placement: .aboveBottomCTA)
         .task(id: auth.sessionIdentity) {
             if selectedGroupId == nil {
                 selectedGroupId = preselectedGroupId ?? joinedCabals.first?.groupId

@@ -120,8 +120,8 @@ struct AmountEntry: View {
         ZStack {
             HStack(alignment: .center, spacing: 2) {
                 Text(AmountEntryText.display(amountText))
-                    .font(MonacoTheme.Typo.moneyHero)
-                    .foregroundStyle(amountText.isEmpty ? MonacoTheme.tertiaryText : (hasProblem ? MonacoTheme.loss : MonacoTheme.ink))
+                    .moneyFont(.hero)
+                    .foregroundStyle(amountText.isEmpty ? MonacoTheme.disabledLabel : (hasProblem ? MonacoTheme.loss : MonacoTheme.ink))
                     .lineLimit(1)
                     .minimumScaleFactor(0.4)
                     .contentTransition(reduceMotion ? .identity : .numericText())

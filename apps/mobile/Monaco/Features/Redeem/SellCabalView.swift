@@ -83,7 +83,7 @@ struct SellCabalView: View {
         }
         .navigationTitle("Cash out")
         .navigationBarTitleDisplayMode(.inline)
-        .monacoToast($toast, bottomInset: 72)
+        .monacoToast($toast, placement: .aboveBottomCTA)
     }
 
     // MARK: - Derived values

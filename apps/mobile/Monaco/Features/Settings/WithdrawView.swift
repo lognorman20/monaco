@@ -106,7 +106,7 @@ struct WithdrawView: View {
         }
         .navigationTitle("Cash out")
         .navigationBarTitleDisplayMode(.inline)
-        .monacoToast($toast, bottomInset: 72)
+        .monacoToast($toast, placement: .aboveBottomCTA)
         .navigationDestination(isPresented: $showConfirm) {
             WithdrawConfirmView(
                 destinationAddress: destinationAddress.trimmingCharacters(in: .whitespacesAndNewlines),
