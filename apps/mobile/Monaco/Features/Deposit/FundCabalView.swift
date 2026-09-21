@@ -15,7 +15,16 @@ struct FundCabalView: View {
     @State private var selectedGroupId: String?
     @State private var amountText = ""
     @State private var isSubmitting = false
+    /// The fund whose sweep this screen is watching, if any.
+    @State private var sweep: FundSweep?
     @State private var toast: MonacoToast?
+
+    /// One fund on its way into the pot, kept as a value so `.task(id:)` owns the watching.
+    private struct FundSweep: Equatable {
+        let depositId: String
+        let cabalName: String
+        let amountLabel: String
+    }
 
     private var isSingleCabalContext: Bool {
         preselectedGroupId != nil
@@ -119,6 +128,10 @@ struct FundCabalView: View {
             }
             await balanceLoader.load(accessToken: auth.accessToken)
         }
+        .task(id: sweep) {
+            guard let sweep else { return }
+            await watchFundSweep(sweep)
+        }
         .pollWhileVisible(every: AddMoneyPolling.balanceInterval, isActive: auth.accessToken != nil) {
             try await refreshBalance()
         }
@@ -210,18 +223,54 @@ struct FundCabalView: View {
         defer { isSubmitting = false }
 
         do {
-            _ = try await apiClient.fundGroup(accessToken: token, groupId: groupId, amount: micros)
+            let fund = try await apiClient.fundGroup(accessToken: token, groupId: groupId, amount: micros)
             Haptics.success()
             let name = selectedCabalName ?? "your cabal"
-            toast = MonacoToast(message: "Added \(AmountEntryText.display(amountText)) to \(name).", isSuccess: true)
+            let amountLabel = UsdAmountFormatter.format(micros: micros)
+            // The fund call records the intent; the sweep into the pot lands afterwards. Saying
+            // "Added" here claimed money the pot did not have yet. The watch below says so once
+            // it does, or that it could not.
+            toast = MonacoToast(message: "Adding \(amountLabel) to \(name)…", isSuccess: true)
             amountText = ""
             // A reload here leaves the amount pad and the button exactly where they are: the
             // loader keeps the balance on screen while it refreshes.
             await balanceLoader.load(accessToken: token)
             await onFunded()
+            sweep = FundSweep(depositId: fund.depositId, cabalName: name, amountLabel: amountLabel)
         } catch {
             if error.isRequestCancellation { return }
             toast = MonacoToast(message: MoneyFlowCopy.fundCabalFailure(FlowErrorInput(error)).summary, isSuccess: false)
         }
+    }
+
+    /// Watches one fund until the pot has it. Structured, so it stops with the screen instead of
+    /// polling on to post a toast nobody is there to read — Activity on the cabal carries the
+    /// outcome either way.
+    private func watchFundSweep(_ sweep: FundSweep) async {
+        guard let token = auth.accessToken else { return }
+        let phase = await FundSweepWatcher.watch {
+            try await apiClient.getDeposit(accessToken: token, depositId: sweep.depositId).status
+        }
+        guard !Task.isCancelled else { return }
+        switch phase {
+        case .credited:
+            toast = MonacoToast(message: "Added \(sweep.amountLabel) to \(sweep.cabalName)", isSuccess: true)
+            await onFunded()
+        case .failed:
+            toast = MonacoToast(message: "Couldn't add \(sweep.amountLabel) to \(sweep.cabalName)", isSuccess: false)
+            await balanceLoader.load(accessToken: token)
+            await onFunded()
+        case .idle, .awaitingSweep:
+            toast = MonacoToast(
+                message: "Still adding \(sweep.amountLabel) to \(sweep.cabalName), Activity will show when it lands",
+                isSuccess: true
+            )
+        }
+
+        // This fund has been watched to its end and spoken for. Forgetting it stops `.task(id:)`
+        // from starting the watch again on the next re-appear: switching tabs tears this task
+        // down, and coming back would otherwise re-poll a deposit that already landed and toast
+        // money from a previous session as if it had just arrived.
+        self.sweep = nil
     }
 }
