@@ -250,7 +250,7 @@ enum GroupActivityRules {
             if let proceeds = item.proceedsUsdcMicros, let micros = Int64(proceeds), micros > 0 {
                 return micros
             }
-            // A sell's amountMicros is not dollars; without proceeds the row shows shares instead.
+            // A sell with no recorded proceeds has no dollar figure; the row shows shares instead.
             return nil
         }
         return item.amountMicros

@@ -209,15 +209,15 @@ enum GroupDetailSampleData {
         inputToken: nil, outputToken: nil, inputSymbol: "USDC", outputSymbol: "AAPLx",
         txHash: "4mZaQ8nJv2kPp7sWfLr3bXy9TcHd6eUoGi1AqRsNmVtK", executeRequestId: nil, proposalId: "p1",
         costBasisPrice: 250_000_000, costBasisAmount: 108_034_000, createdAt: "2026-09-16T14:02:00Z",
-        confirmedAt: "2026-09-16T14:02:09Z", failureReason: nil, proceedsUsdcMicros: nil
+        confirmedAt: "2026-09-16T14:02:09Z", failureReason: nil, proceedsUsdcMicros: nil, tokenAmount: nil
     )
 
     static let failedSell = TransactionDetailDTO(
-        transactionId: "t3", groupId: "g1", action: "sell", status: "failed", amountMicros: 25_000_000,
+        transactionId: "t3", groupId: "g1", action: "sell", status: "failed", amountMicros: 0,
         inputToken: nil, outputToken: nil, inputSymbol: "TSLAx", outputSymbol: "USDC",
         txHash: nil, executeRequestId: nil, proposalId: "p2",
         costBasisPrice: nil, costBasisAmount: nil, createdAt: "2026-09-18T11:40:00Z",
-        confirmedAt: nil, failureReason: "slippage", proceedsUsdcMicros: nil
+        confirmedAt: nil, failureReason: "slippage", proceedsUsdcMicros: nil, tokenAmount: 25_000_000
     )
 }
 #endif
