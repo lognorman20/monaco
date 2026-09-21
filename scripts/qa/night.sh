@@ -236,7 +236,8 @@ round=0
 while (( round < rounds )); do
   round=$((round + 1))
   past_deadline && { log "reached --until $until_time"; break; }
-  log "=== round $round · free swap $(free_swap_mb) MB ==="
+  swap="$(free_swap_mb)"
+  log "=== round $round · free swap ${swap:-(no swap file yet)}${swap:+ MB} ==="
 
   if (( ! skip_backend )); then
     run_step "$round" backend 2400 backend_tests || true
