@@ -17,7 +17,6 @@ struct CabalMark: View {
     private let accessibilityLabel: String?
 
     @State private var loadedPicture: UIImage?
-    @State private var pictureFailed = false
 
     /// `onInk` brightens the tile and drops the initials to deep ink, so the mark still
     /// carries the cabal's identity on a deep ink hero card.
@@ -54,13 +53,14 @@ struct CabalMark: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: MarkGeometry.radius(for: size), style: .continuous)
+        let picture = loadedPicture ?? cachedPicture
         return shape
             .fill(onInk ? tint.onInk : tint.fill)
             .frame(width: size, height: size)
             .overlay {
                 // A picture already in the cache draws on the first pass, so a mark
                 // scrolling back into a lazy stack never flashes its initials.
-                if let picture = loadedPicture ?? cachedPicture {
+                if let picture {
                     Image(uiImage: picture)
                         .resizable()
                         .scaledToFill()
@@ -72,7 +72,7 @@ struct CabalMark: View {
                 }
             }
             .clipShape(shape)
-            .modifier(CabalMarkAccessibility(label: accessibilityLabel))
+            .modifier(CabalMarkAccessibility(label: accessibilityLabel, showsPicture: picture != nil))
             .task(id: pictureURL) { await loadPicture() }
     }
 
@@ -92,9 +92,13 @@ struct CabalMark: View {
     /// Shares `MonacoAvatarImageStore` with member avatars: it is keyed by URL
     /// and knows nothing about what it is holding, and cabal pictures get a
     /// fresh object key per upload exactly as profile photos do.
+    ///
+    /// A fetch that fails leaves the initials up, which are the right answer for a
+    /// picture that cannot be drawn. It is not retried while the URL stays the
+    /// same: the task only runs again when the URL changes, and every upload
+    /// brings a new URL.
     private func loadPicture() async {
         loadedPicture = nil
-        pictureFailed = false
         guard let pictureURL else { return }
 
         let store = MonacoAvatarImageStore.shared
@@ -106,8 +110,6 @@ struct CabalMark: View {
         guard !Task.isCancelled else { return }
         if let fetched {
             withAnimation(.easeOut(duration: 0.2)) { loadedPicture = fetched }
-        } else {
-            pictureFailed = true
         }
     }
 
@@ -137,9 +139,11 @@ struct CabalMark: View {
 
 /// A mark with no label of its own stays hidden from VoiceOver, because the row
 /// around it already reads the cabal's name. One that was given a label becomes
-/// an image element carrying it.
+/// an image element carrying it, whose value says what is actually drawn: a
+/// picture still loading, or one that failed to, shows the initials.
 private struct CabalMarkAccessibility: ViewModifier {
     let label: String?
+    let showsPicture: Bool
 
     func body(content: Content) -> some View {
         if let label {
@@ -147,6 +151,7 @@ private struct CabalMarkAccessibility: ViewModifier {
                 .accessibilityElement(children: .ignore)
                 .accessibilityAddTraits(.isImage)
                 .accessibilityLabel(label)
+                .accessibilityValue(showsPicture ? "Picture" : "Initials")
         } else {
             content.accessibilityHidden(true)
         }
