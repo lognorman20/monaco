@@ -85,6 +85,11 @@ public struct MonacoHTTPTransport: Sendable {
         do {
             freshToken = try await refresh(rejectedToken)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch let cancellation as CancellationError {
+            // The caller went away (a `.task(id:)` that restarted, a dismissed screen). That
+            // is not a sign-in problem, and screens that ignore cancellation have to still
+            // see it as cancellation.
+            throw cancellation
         } catch {
             throw Self.tokenRefreshFailure(error)
         }

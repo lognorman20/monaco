@@ -129,6 +129,22 @@ final class MonacoHTTPTransportTests: XCTestCase {
         }
     }
 
+    /// A refresh cut short because the caller went away is cancellation, not a sign-in
+    /// failure: a screen whose `.task(id:)` restarted mid-refresh must not show "we couldn't
+    /// check your sign-in".
+    func test401_whenRefreshIsCancelled_rethrowsCancellationUnchanged() async {
+        MockURLProtocol.requestHandler = { [self] request in respond(request, status: 401) }
+        let transport = MonacoHTTPTransport(session: makeMockURLSession()) { _ in throw CancellationError() }
+
+        do {
+            _ = try await transport.data(for: request(token: "stale", method: "POST"))
+            XCTFail("expected the cancellation to propagate")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "got \(error)")
+            XCTAssertFalse(error.isTokenRefreshFailure)
+        }
+    }
+
     func testRequestFailure_isNotMistakenForARefreshFailure() async {
         MockURLProtocol.requestHandler = { _ in throw URLError(.timedOut) }
         let transport = MonacoHTTPTransport(session: makeMockURLSession()) { _ in "fresh" }
