@@ -130,18 +130,7 @@ struct AssetDetailView: View {
     @ViewBuilder
     private var chartSection: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            HStack(spacing: MonacoTheme.Space.s) {
-                ForEach(AssetChartRange.allCases, id: \.self) { range in
-                    Button {
-                        model.range = range
-                    } label: {
-                        MonacoChip(title: range.label, isSelected: model.range == range)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(range.accessibilityLabel)
-                    .accessibilityIdentifier("asset-chart-range-\(range.rawValue)")
-                }
-            }
+            rangeChips
 
             switch model.chartState {
             case .loading:
@@ -162,6 +151,38 @@ struct AssetDetailView: View {
                 .accessibilityIdentifier("asset-detail-chart-failed")
             }
         }
+    }
+
+    /// Six ranges do not fit on one line. At the default text size the chips are
+    /// already ~320pt of the 335pt a 375pt device leaves inside the gutters, so one
+    /// Dynamic Type step up clipped the row and an accessibility size made it
+    /// unreadable. Scrolling horizontally is the only layout that stays correct as
+    /// the chips grow.
+    ///
+    /// The row clips at the gutter on purpose, so a half-visible chip reads as "there
+    /// is more" rather than bleeding to the edge.
+    private var rangeChips: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: MonacoTheme.Space.s) {
+                ForEach(AssetChartRange.allCases, id: \.self) { range in
+                    Button {
+                        model.range = range
+                    } label: {
+                        MonacoChip(title: range.label, isSelected: model.range == range)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(range.accessibilityLabel)
+                    .accessibilityIdentifier("asset-chart-range-\(range.rawValue)")
+                }
+            }
+            // The capsules have a stroke, so a hairline of padding keeps the first
+            // and last chip from being shaved by the clip edge.
+            .padding(.horizontal, 1)
+        }
+        .scrollIndicators(.hidden)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Chart range")
+        .accessibilityIdentifier("asset-chart-ranges")
     }
 
     private func chart(_ points: [AssetChartPointDTO]) -> some View {
