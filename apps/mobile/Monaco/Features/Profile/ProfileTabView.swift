@@ -181,7 +181,7 @@ struct ProfileTabView: View {
             statDivider
             statItem(label: "Cabals") {
                 Text("\(cabalRows.count)")
-                    .font(MonacoTheme.Typo.moneyRow)
+                    .moneyFont(.row)
                     .foregroundStyle(MonacoTheme.ink)
             }
         }
