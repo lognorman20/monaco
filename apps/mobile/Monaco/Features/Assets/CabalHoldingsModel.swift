@@ -18,8 +18,7 @@ struct LiveCabalHoldingsDataSource: CabalHoldingsDataSource {
     }
 
     func groupView(groupId: String) async throws -> GroupViewDTO {
-        guard let token = auth.accessToken else { throw MonacoAPIError.missingAccessToken }
-        return try await apiClient.getGroupView(accessToken: token, groupId: groupId)
+        try await auth.sendingAccessToken { try await apiClient.getGroupView(accessToken: $0, groupId: groupId) }
     }
 }
 
@@ -59,8 +58,11 @@ final class CabalHoldingsModel {
     let symbol: String
     private(set) var state: State = .loading
 
-    /// Set when the server rejects the session; the view signs out.
-    private(set) var sessionExpired = false
+    /// The rejection that ended this screen's reads, naming the token the request sent. The
+    /// view reports that token to the guarded sign-out.
+    private(set) var rejectedSession: RejectedSession?
+
+    var sessionExpired: Bool { rejectedSession != nil }
 
     private let dataSource: CabalHoldingsDataSource
 
@@ -89,7 +91,7 @@ final class CabalHoldingsModel {
     private enum Outcome: Sendable {
         case answered(Resolved)
         case unreachable
-        case unauthorized
+        case unauthorized(RejectedSession)
         case cancelled
     }
 
@@ -115,8 +117,11 @@ final class CabalHoldingsModel {
         if outcomes.contains(where: { if case .cancelled = $0 { return true } else { return false } }) {
             return
         }
-        if outcomes.contains(where: { if case .unauthorized = $0 { return true } else { return false } }) {
-            sessionExpired = true
+        if let rejected = outcomes.lazy.compactMap({ outcome -> RejectedSession? in
+            if case .unauthorized(let rejected) = outcome { return rejected }
+            return nil
+        }).first {
+            rejectedSession = rejected
             return
         }
 
@@ -148,7 +153,7 @@ final class CabalHoldingsModel {
             ))
         } catch {
             if error.isRequestCancellation { return .cancelled }
-            if case MonacoAPIError.httpStatus(401) = error { return .unauthorized }
+            if let rejected = error as? RejectedSession { return .unauthorized(rejected) }
             return .unreachable
         }
     }

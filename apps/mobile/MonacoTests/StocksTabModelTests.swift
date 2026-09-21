@@ -164,13 +164,15 @@ struct StocksTabModelTests {
 
     @Test func rejectedSessionAsksTheViewToSignOut() async throws {
         let source = StubStocksDataSource()
-        source.errors["tesla"] = Monaco.MonacoAPIError.httpStatus(401)
+        source.errors["tesla"] = RejectedSession(token: "token-1")
         let model = StocksTabModel(dataSource: source)
 
         model.updateQuery("tesla")
         try await settle()
 
         #expect(model.sessionExpired)
+        // The view signs out through the token that read carried, not whatever is current.
+        #expect(model.rejectedSession == RejectedSession(token: "token-1"))
     }
 
     /// The bug: a missing token returned before the loading flag was cleared, so the tab

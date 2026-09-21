@@ -142,12 +142,14 @@ struct CabalHoldingsModelTests {
 
     @Test func rejectedSessionAsksTheViewToSignOut() async throws {
         let source = StubCabalHoldingsDataSource()
-        source.errorsByGroup = ["a": Monaco.MonacoAPIError.httpStatus(401)]
+        source.errorsByGroup = ["a": RejectedSession(token: "token-1")]
         let model = CabalHoldingsModel(symbol: "AAPLc", dataSource: source)
 
         await model.load(cabals: [cabal("a")])
 
         #expect(model.sessionExpired)
+        // The view signs out through the token that read carried, not whatever is current.
+        #expect(model.rejectedSession == RejectedSession(token: "token-1"))
         #expect(model.state == .loading)
     }
 

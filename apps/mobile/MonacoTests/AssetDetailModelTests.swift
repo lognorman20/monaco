@@ -162,12 +162,14 @@ struct AssetDetailModelTests {
 
     @Test func rejectedSessionAsksTheViewToSignOut() async throws {
         let source = StubAssetDetailDataSource()
-        source.detailError = Monaco.MonacoAPIError.httpStatus(401)
+        source.detailError = RejectedSession(token: "token-1")
         let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
 
         await model.loadDetail()
 
         #expect(model.sessionExpired)
+        // The view signs out through the token that read carried, not whatever is current.
+        #expect(model.rejectedSession == RejectedSession(token: "token-1"))
         #expect(model.detailState == .loading)
     }
 

@@ -18,17 +18,14 @@ struct LiveStocksTabDataSource: StocksTabDataSource {
         self.auth = auth
     }
 
-    private func token() throws -> String {
-        guard let token = auth.accessToken else { throw MonacoAPIError.missingAccessToken }
-        return token
-    }
-
     func search(query: String, offset: Int, limit: Int) async throws -> ListMarketAssetsResponse {
-        try await apiClient.listMarketAssets(accessToken: try token(), query: query, limit: limit, offset: offset)
+        try await auth.sendingAccessToken {
+            try await apiClient.listMarketAssets(accessToken: $0, query: query, limit: limit, offset: offset)
+        }
     }
 
     func popular(limit: Int) async throws -> PopularAssetsResponse {
-        try await apiClient.getPopularAssets(accessToken: try token(), limit: limit)
+        try await auth.sendingAccessToken { try await apiClient.getPopularAssets(accessToken: $0, limit: limit) }
     }
 }
 
@@ -73,8 +70,11 @@ final class StocksTabModel {
     private(set) var popular: [MarketAssetDTO] = []
     private(set) var popularState: PopularState = .loading
 
-    /// Set when the server rejects the session; the view signs out.
-    private(set) var sessionExpired = false
+    /// The rejection that ended this screen's reads, naming the token the request sent. The
+    /// view reports that token to the guarded sign-out.
+    private(set) var rejectedSession: RejectedSession?
+
+    var sessionExpired: Bool { rejectedSession != nil }
 
     private let dataSource: StocksTabDataSource
     private let pageSize: Int
@@ -246,8 +246,8 @@ final class StocksTabModel {
 
     private func handle(_ error: Error, otherwise: () -> Void) {
         if error.isRequestCancellation { return }
-        if case MonacoAPIError.httpStatus(401) = error {
-            sessionExpired = true
+        if let rejected = error as? RejectedSession {
+            rejectedSession = rejected
             return
         }
         otherwise()

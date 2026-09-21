@@ -18,17 +18,14 @@ struct LiveAssetDetailDataSource: AssetDetailDataSource {
         self.auth = auth
     }
 
-    private func token() throws -> String {
-        guard let token = auth.accessToken else { throw MonacoAPIError.missingAccessToken }
-        return token
-    }
-
     func detail(symbol: String) async throws -> AssetDetailDTO {
-        try await apiClient.getMarketAsset(accessToken: try token(), symbol: symbol)
+        try await auth.sendingAccessToken { try await apiClient.getMarketAsset(accessToken: $0, symbol: symbol) }
     }
 
     func chart(symbol: String, range: AssetChartRange) async throws -> AssetChartDTO {
-        try await apiClient.getMarketAssetChart(accessToken: try token(), symbol: symbol, range: range)
+        try await auth.sendingAccessToken {
+            try await apiClient.getMarketAssetChart(accessToken: $0, symbol: symbol, range: range)
+        }
     }
 }
 
@@ -86,8 +83,11 @@ final class AssetDetailModel {
     private(set) var detailState: DetailState = .loading
     private(set) var charts: [AssetChartRange: ChartState] = [:]
 
-    /// Set when the server rejects the session; the view signs out.
-    private(set) var sessionExpired = false
+    /// The rejection that ended this screen's reads, naming the token the request sent. The
+    /// view reports that token to the guarded sign-out.
+    private(set) var rejectedSession: RejectedSession?
+
+    var sessionExpired: Bool { rejectedSession != nil }
 
     private let dataSource: AssetDetailDataSource
 
@@ -181,8 +181,8 @@ final class AssetDetailModel {
 
     private func handle(_ error: Error, otherwise: () -> Void) {
         if error.isRequestCancellation { return }
-        if case MonacoAPIError.httpStatus(401) = error {
-            sessionExpired = true
+        if let rejected = error as? RejectedSession {
+            rejectedSession = rejected
             return
         }
         otherwise()
