@@ -468,6 +468,9 @@ final class DynamicAuthService: ObservableObject {
         securityOTPMessage = nil
         flow.signedOut()
         sessionStore.clear()
+        // Ballots cast this session are shown only until the server returns them on list rows
+        // (#291). They must not outlive the session on a shared device.
+        ProposalVoteLedger.shared.clear()
     }
 
     nonisolated static func isSignedOutError(_ error: Error) -> Bool {
