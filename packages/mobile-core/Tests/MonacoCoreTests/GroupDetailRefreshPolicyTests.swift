@@ -104,3 +104,49 @@ struct GroupDetailJoinRequestsPolicyTests {
         #expect(GroupDetailRefreshPolicy.joinRequestAlreadyAnswered(failureStatus: 503) == false)
     }
 }
+
+@Suite("Leave that did not come back as done")
+struct GroupDetailLeaveFailureTests {
+    private let unconfirmed = "We couldn't confirm that. Check your slice below before trying again"
+    private let refused = "Couldn't leave this cabal. Try again"
+
+    /// The bug: a lost response on "Sell and leave" said "Try again", but the server sells the
+    /// slice before it answers, and with no idempotency key a second tap is a second request.
+    @Test("A sell-and-leave that got no answer sends the member to their slice")
+    func lostResponseIsUnconfirmed() {
+        #expect(GroupDetailRefreshPolicy.leaveMayHaveSoldSlice(sellsSlice: true, failureStatus: nil))
+        #expect(GroupDetailRefreshPolicy.leaveFailureMessage(sellsSlice: true, failureStatus: nil) == unconfirmed)
+    }
+
+    @Test("A sell-and-leave the server failed partway through is unconfirmed too")
+    func serverFailureIsUnconfirmed() {
+        for status in [500, 502, 503, 504] {
+            #expect(GroupDetailRefreshPolicy.leaveMayHaveSoldSlice(sellsSlice: true, failureStatus: status))
+            #expect(GroupDetailRefreshPolicy.leaveFailureMessage(sellsSlice: true, failureStatus: status) == unconfirmed)
+        }
+    }
+
+    @Test("A sell-and-leave refused up front can be tried again")
+    func clientRefusalIsFinal() {
+        for status in [400, 403, 404, 429] {
+            #expect(GroupDetailRefreshPolicy.leaveMayHaveSoldSlice(sellsSlice: true, failureStatus: status) == false)
+            #expect(GroupDetailRefreshPolicy.leaveFailureMessage(sellsSlice: true, failureStatus: status) == refused)
+        }
+    }
+
+    @Test("A leave with nothing to sell has no money at stake")
+    func plainLeaveIsNeverUnconfirmed() {
+        for status in [nil, 400, 500, 503] as [Int?] {
+            #expect(GroupDetailRefreshPolicy.leaveMayHaveSoldSlice(sellsSlice: false, failureStatus: status) == false)
+            #expect(GroupDetailRefreshPolicy.leaveFailureMessage(sellsSlice: false, failureStatus: status) == refused)
+        }
+    }
+
+    @Test("The unconfirmed copy never promises a retry is safe")
+    func unconfirmedCopyDoesNotInviteARetry() {
+        let copy = GroupDetailRefreshPolicy.leaveFailureMessage(sellsSlice: true, failureStatus: nil)
+        #expect(copy.contains("Check your slice"))
+        #expect(!copy.lowercased().hasSuffix("try again"))
+        #expect(!copy.lowercased().contains("safe"))
+    }
+}

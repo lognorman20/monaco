@@ -101,4 +101,36 @@ public enum GroupDetailRefreshPolicy {
         default: return false
         }
     }
+
+    // MARK: - Leaving
+
+    /// Whether a leave that did not come back as done may still have sold the member's slice.
+    ///
+    /// The server sells the slice first and only then removes the member, and the sale can take
+    /// most of a minute. A request that never got an answer, or a server that failed partway (a
+    /// 5xx), may well have sold it. A 4xx is the server refusing before it sold anything, and a
+    /// leave with nothing to sell has no money at stake either way. (A blocked leave is answered
+    /// with its own reason and never reaches this.)
+    ///
+    /// - Parameters:
+    ///   - sellsSlice: the member chose "Sell and leave".
+    ///   - failureStatus: the HTTP status the request failed with, or nil when it got no answer.
+    public static func leaveMayHaveSoldSlice(sellsSlice: Bool, failureStatus: Int?) -> Bool {
+        guard sellsSlice else { return false }
+        guard let failureStatus else { return true }
+        return failureStatus >= 500
+    }
+
+    /// What the cabal screen says when a leave did not come back as done.
+    ///
+    /// No idempotency key rides on a leave, so pressing "Sell and leave" again is a brand-new
+    /// request, not a replay of the lost one. When the sale may already have gone through, the
+    /// member is sent to look at their slice before anything else, and is never told to simply
+    /// try again.
+    public static func leaveFailureMessage(sellsSlice: Bool, failureStatus: Int?) -> String {
+        if leaveMayHaveSoldSlice(sellsSlice: sellsSlice, failureStatus: failureStatus) {
+            return "We couldn't confirm that. Check your slice below before trying again"
+        }
+        return "Couldn't leave this cabal. Try again"
+    }
 }
