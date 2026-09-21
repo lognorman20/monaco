@@ -80,9 +80,9 @@ private struct GalleryPrimitivesPage: View {
                 VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
                     MonacoSectionHeader("Stock marks")
                     HStack(spacing: MonacoTheme.Space.sm) {
-                        StockMark(symbol: "AAPLx")
-                        StockMark(symbol: "NVDAx")
-                        StockMark(symbol: "TSLAx")
+                        StockMark(symbol: "AAPLc")
+                        StockMark(symbol: "NVDAc")
+                        StockMark(symbol: "TSLAc")
                         StockMark(symbol: "USDC")
                         StockMark(systemImage: "cpu")
                     }
@@ -116,7 +116,7 @@ private struct GalleryPrimitivesPage: View {
                     MonacoSectionHeader("Holdings")
                     MonacoGroupedList {
                         MonacoRow(title: "Apple", subtitle: "1.2034 shares · $231.40") {
-                            StockMark(symbol: "AAPLx")
+                            StockMark(symbol: "AAPLc")
                         } trailing: {
                             MoneyText(decimalString: "278.47", style: .row)
                             PnLText(dollarPnl: "+12.10", style: .caption)
