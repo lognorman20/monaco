@@ -31,20 +31,26 @@ struct LiveAssetDetailDataSource: AssetDetailDataSource {
 
 /// How often the screen re-reads itself while the member is looking at it.
 ///
-/// Both cadences sit at or above what the backend caches, so a screen left open never
-/// makes the API ask Pyth or Kyber more often than it already would:
+/// Both cadences are chosen against what the backend caches, so while the sources are
+/// healthy a screen left open adds little upstream traffic:
 ///
-/// - The detail route carries the hero price (the Chainlink mark, read per request), the
-///   Pyth equity quote (shared between callers for 10 s, `pyth.EquityQuoteTTL`), the Kyber
-///   probes (60 s, `liquidityProbeTTL`) and the Benchmarks 1D and 1Y series behind the
-///   grid (1 and 10 minutes, `pyth.ChartCacheDayTTL` / `ChartCacheLongTTL`). Asking every
-///   10 s re-reads the mark and at most one fresh Hermes quote per symbol, however many
-///   people have the screen open.
+/// - The detail route carries the hero price (the Chainlink mark, read on every request,
+///   uncached), the Pyth equity quote (shared between callers for 10 s,
+///   `pyth.EquityQuoteTTL`), the Kyber probes (60 s, `liquidityProbeTTL`) and the Benchmarks
+///   1D and 1Y series behind the grid (1 and 10 minutes, `pyth.ChartCacheDayTTL` /
+///   `ChartCacheLongTTL`). While everything answers, a 10 s poll costs one Chainlink read
+///   per viewer and at most one fresh Hermes quote per symbol.
 /// - A chart range is cached for a minute (1D) or ten (everything longer), so this is about
 ///   a screen left open across a range's worth of new bars, not about live ticks.
 ///
-/// A poll that fails backs off (see `pollWhileVisible`), so an outage is not hammered at
-/// the healthy rate.
+/// Two costs this does not bound. The Chainlink `latestRoundData` read is per viewer per
+/// poll. And the backend does not cache a Kyber probe that *errored*, so during a Kyber
+/// outage every viewer's poll fires a fresh buy and sell probe; the detail call itself still
+/// succeeds, so the back-off below never engages. A short negative cache for errored probes
+/// belongs in the backend, not here.
+///
+/// A poll whose request fails backs off (see `pollWhileVisible`), so an API outage is not
+/// hammered at the healthy rate.
 enum AssetDetailPolling {
     static let price: Duration = .seconds(10)
     static let chart: Duration = .seconds(120)
@@ -81,8 +87,10 @@ final class AssetDetailModel {
         /// move as a gain.
         let ratio: String
         let label: String
-        /// The same move in dollars ("5.50"), when the curve can measure one. Nil when
-        /// the only figure available is the backend's own day move.
+        /// The same move in dollars ("5.50"), when the curve can measure one *in the unit
+        /// of the price above it*. Nil when the only figure available is the backend's own
+        /// day move, and nil under the token's live mark when the curve is the share's:
+        /// the token carries a multiplier, so the share's dollars are not the token's.
         var dollars: String?
         /// Which instrument this figure is about, when that is *not* the instrument of
         /// the price it sits under and the label does not already say so.
@@ -96,6 +104,12 @@ final class AssetDetailModel {
         var basisSymbol: String?
         /// The long form of the same fact, for VoiceOver: "AAPL on its home exchange".
         var basisCaption: String?
+
+        /// The pill's short tag: "AAPL share". The bare ticker is not enough, because the
+        /// token's own display ticker (the screen's title) is also "AAPL".
+        var basisTag: String? {
+            basisSymbol.map { "\($0) share" }
+        }
 
         private var value: Decimal {
             Decimal(string: ratio, locale: Locale(identifier: "en_US_POSIX")) ?? 0
@@ -156,6 +170,11 @@ final class AssetDetailModel {
 
     private let dataSource: AssetDetailDataSource
     private var tickSequence = 0
+    /// Issue order of detail reads. The first load, a Retry, the 10 s poll and the tick on
+    /// returning from the background can all be in flight at once, and only the newest may
+    /// write: an older Chainlink mark landing last would move the hero price backwards and
+    /// flash it the wrong way.
+    private var detailRequestSequence = 0
     /// Per-range issue order, so only the newest request for a range may write it.
     private var chartRequestSequence: [AssetChartRange: Int] = [:]
     /// How many requests the member is actually waiting on, per range.
@@ -187,16 +206,16 @@ final class AssetDetailModel {
 
     /// Only the stock-level verdict blocks the buy; an unknown answer leaves it open.
     ///
-    /// Not `liquidity.routable`: that is the quote probe's own answer, and the server keeps a
-    /// failed probe's `false` for a minute, so reading it would call a buyable stock unbuyable
-    /// after one rate limit or timeout.
+    /// Not `liquidity.routable`: that is this one response's quote probe, and a probe that
+    /// *errored* (a rate limit, a timeout) reports `routable = false` for that response even
+    /// though it says nothing about the pool. Reading it would call a buyable stock unbuyable
+    /// after one bad probe.
     ///
-    /// On `main` today this is effectively always `true`: the backend computes the stock-level
-    /// `routable` as `asset.Routable || tokenAddress != "" || liquidity.Routable`, and every
-    /// pinned B20 stock has a token address, so a genuine no-route never reaches this flag and
-    /// the "Can't be bought right now." caption does not render. It starts blocking once the
-    /// backend's `liquiditySnippet` stops reporting a failed quote as a no-route and the
-    /// stock-level verdict can use the probe's answer again.
+    /// On the backend today this is effectively always `true`: the stock-level `routable` is
+    /// `asset.Routable || tokenAddress != "" || liquidity.Routable`, and every pinned B20 stock
+    /// has a token address, so a genuine no-route never reaches this flag and the "Can't be
+    /// bought right now." caption does not render. Making the stock-level verdict tell a real
+    /// no-route from an errored probe is backend work, tracked against the data stage (#407).
     var canBuy: Bool {
         detail?.routable ?? true
     }
@@ -215,10 +234,17 @@ final class AssetDetailModel {
         return MarketStatusDTO(session: session, isOpen: session.isRegularSession, afterHours: detail.afterHours)
     }
 
-    /// The chip only says the token still trades on Base when this read's Kyber buy
-    /// probe found a route.
+    /// The chip only says the token still trades on Base when this read's Kyber probes
+    /// found a route both ways. "Trades" means a member could get in and out; a buy route
+    /// with no sell route is half a market, and the chip stays quiet about it.
     var sessionChip: MarketSessionChipCopy? {
-        MarketSessionCopy.chip(for: marketStatus, tokenRoutable: detail?.liquidity.routable ?? false)
+        MarketSessionCopy.chip(for: marketStatus, tokenRoutable: tokenRoutesBothWays)
+    }
+
+    private var tokenRoutesBothWays: Bool {
+        guard let liquidity = detail?.liquidity, liquidity.routable else { return false }
+        let sellOut = liquidity.sellProbeOutAmount?.trimmingCharacters(in: .whitespaces) ?? ""
+        return !sellOut.isEmpty
     }
 
     /// True while the exchange behind the curve is still printing. The chart's
@@ -251,14 +277,22 @@ final class AssetDetailModel {
         scrubbedPoint?.priceUsdcMicros ?? detail?.priceUsdcMicros
     }
 
-    /// Whose price the hero is showing while a finger is on an underlying curve: "AAPL on
-    /// its home exchange". The sample under the finger is the share's price, not the
-    /// token's, so the line that names the stock says so for as long as it is shown. Nil
-    /// when the hero shows the token's own mark, or a sample of the token's own rounds.
+    /// Whose price the hero is showing while a finger is on the curve.
+    ///
+    /// On an underlying curve it is "AAPL on its home exchange": the sample under the finger
+    /// is the share's price, not the token's, so the line that names the stock says so for
+    /// as long as it is shown. A sample of the token's own rounds is the hero's instrument
+    /// and needs nothing. A series the backend did not name gets "Chart price", so an
+    /// unknown instrument never passes for the token's mark. Nil when not scrubbing.
     var heroPriceCaption: String? {
-        guard isScrubbing, let series, series.underlyingDisplaySymbol != nil else { return nil }
-        return series.basisCaption
+        guard isScrubbing, let series else { return nil }
+        if series.underlyingDisplaySymbol != nil { return series.basisCaption }
+        if series.basis == .token { return nil }
+        return Self.unnamedChartPriceCaption
     }
+
+    static let unnamedChartPriceCaption = "Chart price"
+
 
     /// The figure under the price.
     ///
@@ -291,7 +325,12 @@ final class AssetDetailModel {
     /// token's. Without a basis from the backend there is no figure at all.
     var windowMove: Move? {
         if let series, let ratio = windowRatio {
-            return curveMove(series, ratio: ratio, label: windowLabel(series), dollars: series.changeDollars())
+            // Unscrubbed, the hero is the token's mark. Dollars measured on the share's curve
+            // do not hold across the token's multiplier, so under the token's price only the
+            // ratio (which does) is shown. A scrub puts the share's price in the hero, and
+            // the dollars come back with it.
+            let dollars = series.underlyingDisplaySymbol == nil ? series.changeDollars() : nil
+            return curveMove(series, ratio: ratio, label: windowLabel(series), dollars: dollars)
         }
         guard let dayMove = detail?.stockDayMove else { return nil }
         // The label already names the instrument, so the pill carries no second tag;
@@ -374,25 +413,50 @@ final class AssetDetailModel {
 
     func loadDetail() async {
         if detail == nil { detailState = .loading }
+        let sequence = beginDetailRequest()
         do {
-            apply(try await dataSource.detail(symbol: symbol))
+            let fresh = try await dataSource.detail(symbol: symbol)
+            guard isCurrentDetailRequest(sequence) else { return }
+            apply(fresh)
         } catch {
+            guard isCurrentDetailRequest(sequence) else { return }
             handle(error) { if detail == nil { detailState = .failed } }
         }
+    }
+
+    /// A new session starts with no rejection on record. Called when the signed-in member
+    /// changes, before the screen reads again.
+    func beginSession() {
+        rejectedSession = nil
     }
 
     /// A poll tick. It never shows a spinner, never shows an error, and never replaces
     /// what is on screen with an equal value — a refresh nobody asked for must leave the
     /// screen exactly as the member last saw it.
     ///
-    /// It rethrows a failure so the poll loop can back off; nothing on screen reads it.
+    /// It rethrows a failure so the poll loop can back off; nothing on screen reads it. A
+    /// failure that a newer read has already superseded is dropped, not rethrown: the
+    /// newer read is the one that speaks for the backend now.
     func refreshDetail() async throws {
+        let sequence = beginDetailRequest()
         do {
-            apply(try await dataSource.detail(symbol: symbol))
+            let fresh = try await dataSource.detail(symbol: symbol)
+            guard isCurrentDetailRequest(sequence) else { return }
+            apply(fresh)
         } catch {
+            guard isCurrentDetailRequest(sequence) else { return }
             handle(error) {}
             throw error
         }
+    }
+
+    private func beginDetailRequest() -> Int {
+        detailRequestSequence += 1
+        return detailRequestSequence
+    }
+
+    private func isCurrentDetailRequest(_ sequence: Int) -> Bool {
+        detailRequestSequence == sequence
     }
 
     /// Re-reads the range on screen without disturbing it. Throws only so the poll can

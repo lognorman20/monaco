@@ -79,8 +79,13 @@ struct AssetDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("asset-detail-root")
         .monacoToast($toast)
-        // Two independent loads: the curve does not wait on the (slow) detail call.
-        .task { await model.loadDetail() }
+        // Two independent loads: the curve does not wait on the (slow) detail call. The
+        // detail read is keyed on who is signed in, not on the access token, so Dynamic's
+        // token rotation does not reload the screen, but a new sign-in starts clean.
+        .task(id: auth.sessionIdentity) {
+            model.beginSession()
+            await model.loadDetail()
+        }
         .task(id: model.range) { _ = await model.loadChart(range: model.range) }
         // The hero keeps itself current while the member is looking at it. Both loops
         // are silent: a tick that fails leaves the screen exactly as they last saw it,

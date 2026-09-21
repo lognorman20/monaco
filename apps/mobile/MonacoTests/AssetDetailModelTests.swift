@@ -21,9 +21,22 @@ private final class StubAssetDetailDataSource: AssetDetailDataSource {
     var detailError: Error?
     var chartError: Error?
     var routable = true
-    /// The quote probe's own verdict. Main's backend caches a `false` here for a minute after a
-    /// probe error, so it can disagree with `routable`.
+    /// The buy probe's own verdict for this one response. A probe that errored reports `false`
+    /// here for that response (the backend does not cache it), so it can disagree with `routable`.
     var liquidityRoutable = true
+    /// The sell probe's USDC out, or nil when the sell side found no route.
+    var sellProbeOutAmount: String? = "185000000"
+    /// One scripted detail answer: how long it takes, the price it reports, and the error
+    /// it throws instead, if any.
+    struct ScriptedDetail {
+        var delay: Duration
+        var price: Int64?
+        var error: Error?
+    }
+
+    /// Scripted answers for successive detail calls, consumed in order. Lets a slow first
+    /// load answer after a faster poll.
+    var scriptedDetail: [ScriptedDetail] = []
     var change24h: String? = "0.05"
     /// The backend labels `change24h` as the underlying's; nil plays an older backend.
     var change24hBasis: MarketPriceBasis? = .underlying
@@ -46,7 +59,15 @@ private final class StubAssetDetailDataSource: AssetDetailDataSource {
 
     func detail(symbol: String) async throws -> AssetDetailDTO {
         detailCalls += 1
-        if let detailError { throw detailError }
+        var priceUsdcMicros = self.priceUsdcMicros
+        if !scriptedDetail.isEmpty {
+            let next = scriptedDetail.removeFirst()
+            priceUsdcMicros = next.price
+            try? await Task.sleep(for: next.delay)
+            if let error = next.error { throw error }
+        } else if let detailError {
+            throw detailError
+        }
         return AssetDetailDTO(
             symbol: symbol,
             name: "Apple",
@@ -61,8 +82,8 @@ private final class StubAssetDetailDataSource: AssetDetailDataSource {
                 routable: liquidityRoutable,
                 buyProbeUsdcMicros: 1_000_000,
                 buyProbeOutAmount: "100000000",
-                sellProbeInAmount: nil,
-                sellProbeOutAmount: nil,
+                sellProbeInAmount: sellProbeOutAmount == nil ? nil : "100000000",
+                sellProbeOutAmount: sellProbeOutAmount,
                 spreadBps: 12
             ),
             marketSession: marketSession,
@@ -358,8 +379,9 @@ struct AssetDetailModelTests {
         #expect(!model.canBuy)
     }
 
-    /// The backend keeps a failed quote probe's `liquidity.routable = false` for 60 seconds, so
-    /// the probe snippet cannot decide the button: the stock-level verdict does.
+    /// A quote probe that errored (a rate limit, a timeout) reports `liquidity.routable = false`
+    /// for that one response, though it says nothing about the pool. So the probe snippet
+    /// cannot decide the button: the stock-level verdict does.
     @Test func aFailedQuoteProbeDoesNotBlockTheBuy() async throws {
         let source = StubAssetDetailDataSource()
         source.routable = true
@@ -549,6 +571,21 @@ struct AssetDetailModelTests {
         #expect(model.heroPriceCaption == "AAPL on its home exchange")
     }
 
+    /// A series the backend did not name could be either instrument. The scrubbed price must
+    /// not pass for the token's mark, so the name line says only that it is the chart's.
+    @Test func aScrubbedUnnamedSampleIsCaptionedAsTheChartsPrice() async throws {
+        let source = StubAssetDetailDataSource()
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+        await model.loadDetail()
+        await model.loadChart(range: .oneDay)
+        #expect(model.heroPriceCaption == nil)
+
+        model.scrubbedIndex = 0
+
+        #expect(model.heroPriceCaption == AssetDetailModel.unnamedChartPriceCaption)
+        #expect(model.heroPriceCaption == "Chart price")
+    }
+
     /// A sample of the token's own Chainlink rounds is the same instrument as the hero.
     @Test func aScrubbedTokenRoundNeedsNoCaption() async throws {
         let source = StubAssetDetailDataSource()
@@ -652,6 +689,89 @@ struct AssetDetailModelTests {
         #expect(model.priceTick == nil)
     }
 
+    /// The race the 10 s poll opened: the first load stalls (a slow Base RPC), a poll issued
+    /// after it answers first with a newer mark, and then the stalled load lands. The older
+    /// mark must not move the hero price backwards, nor flash it the wrong way.
+    @Test func aSlowFirstLoadCannotOverwriteANewerPoll() async throws {
+        let source = StubAssetDetailDataSource()
+        source.scriptedDetail = [
+            .init(delay: .milliseconds(400), price: 185_000_000),
+            .init(delay: .milliseconds(20), price: 186_000_000),
+        ]
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+
+        let slow = Task { await model.loadDetail() }
+        try await Task.sleep(for: .milliseconds(50))
+        try await model.refreshDetail()
+        #expect(model.heroPriceUsdcMicros == 186_000_000)
+        let tickAfterPoll = model.priceTick
+
+        await slow.value
+
+        #expect(source.detailCalls == 2)
+        #expect(model.heroPriceUsdcMicros == 186_000_000, "the older mark landed on top of the newer one")
+        #expect(model.priceTick == tickAfterPoll)
+    }
+
+    /// The same holds between two polls, and between a Retry and a poll.
+    @Test func aLateOlderPollCannotOverwriteANewerRetry() async throws {
+        let source = StubAssetDetailDataSource()
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+        await model.loadDetail()
+        source.scriptedDetail = [
+            .init(delay: .milliseconds(400), price: 184_000_000),
+            .init(delay: .milliseconds(20), price: 187_000_000),
+        ]
+
+        let stalePoll = Task { try await model.refreshDetail() }
+        try await Task.sleep(for: .milliseconds(50))
+        await model.loadDetail()
+        let up = try #require(model.priceTick)
+        #expect(up.direction == .up)
+
+        try await stalePoll.value
+
+        #expect(model.heroPriceUsdcMicros == 187_000_000)
+        #expect(model.priceTick == up)
+    }
+
+    /// A failure that a newer read has already overtaken says nothing about the screen now:
+    /// it must not fail a loaded screen, sign the member out, or back the poll off.
+    @Test func aSupersededFailureIsDropped() async throws {
+        let source = StubAssetDetailDataSource()
+        source.scriptedDetail = [
+            .init(delay: .milliseconds(300), price: nil, error: RejectedSession(token: "old-token")),
+            .init(delay: .milliseconds(20), price: 185_000_000),
+        ]
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+
+        let stale = Task { try await model.refreshDetail() }
+        try await Task.sleep(for: .milliseconds(50))
+        await model.loadDetail()
+        #expect(model.detail != nil)
+
+        // Superseded, so the poll loop is not told to back off either.
+        try await stale.value
+        #expect(model.detail != nil)
+        #expect(model.rejectedSession == nil)
+    }
+
+    /// A new sign-in starts with no rejection on record, so the screen reads again.
+    @Test func aNewSessionClearsTheRejection() async throws {
+        let source = StubAssetDetailDataSource()
+        source.detailError = RejectedSession(token: "token-1")
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+        await model.loadDetail()
+        #expect(model.sessionExpired)
+
+        source.detailError = nil
+        model.beginSession()
+        await model.loadDetail()
+
+        #expect(!model.sessionExpired)
+        #expect(model.detail != nil)
+    }
+
     /// A poll nobody asked for must never put an error in front of the member. It does
     /// report the failure to the poll loop, which is what backs the loop off.
     @Test func aFailedPollLeavesTheScreenExactlyAsItWas() async throws {
@@ -720,6 +840,20 @@ struct AssetDetailModelTests {
         await model.loadDetail()
 
         #expect(model.sessionChip?.title == "Market closed")
+        #expect(model.sessionChip?.detail == nil)
+    }
+
+    /// A buy route alone is half a market: the chip does not say the token trades.
+    @Test func aBuyRouteWithoutASellRouteDoesNotSayTheTokenTrades() async throws {
+        let source = StubAssetDetailDataSource()
+        source.market = MarketSampleData.sessionAfterHours
+        source.liquidityRoutable = true
+        source.sellProbeOutAmount = nil
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+
+        await model.loadDetail()
+
+        #expect(model.sessionChip?.title == "After hours")
         #expect(model.sessionChip?.detail == nil)
     }
 
@@ -842,7 +976,43 @@ struct AssetDetailModelTests {
 
         let move = try #require(model.move)
         #expect(move.basisSymbol == "AAPL")
+        // The token's own ticker is also "AAPL", so the tag says it is the share.
+        #expect(move.basisTag == "AAPL share")
         #expect(move.basisCaption == "AAPL on its home exchange")
+    }
+
+    /// Under the token's live mark the share's dollars would read as the token's, and the
+    /// multiplier makes them different numbers. The ratio holds across it; the dollars come
+    /// back only while the hero itself shows the share's price.
+    @Test func theSharesDollarsAreOnlyShownUnderTheSharesPrice() async throws {
+        let source = StubAssetDetailDataSource()
+        source.points[.oneDay] = StubAssetDetailDataSource.series(from: 100, to: 110)
+        source.basis = .underlying
+        source.basisSymbol = "AAPL"
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+        await model.loadDetail()
+        await model.loadChart(range: .oneDay)
+
+        let live = try #require(model.move)
+        #expect(live.dollars == nil)
+        #expect(PercentReturnFormatter.format(live.ratio) == "+10.0%")
+
+        model.scrubbedIndex = 1
+        #expect(model.heroPriceCaption == "AAPL on its home exchange")
+        #expect(model.move?.dollars == "10.00")
+    }
+
+    /// A curve that is the token's own rounds is in the hero's unit, so its dollars stay.
+    @Test func theTokensOwnCurveKeepsItsDollars() async throws {
+        let source = StubAssetDetailDataSource()
+        source.points[.oneDay] = StubAssetDetailDataSource.series(from: 100, to: 110)
+        source.basis = .token
+        source.basisSymbol = "AAPLc"
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+        await model.loadChart(range: .oneDay)
+
+        #expect(model.move?.dollars == "10.00")
+        #expect(model.move?.basisTag == nil)
     }
 
     /// Scrubbing does not change whose numbers these are.

@@ -52,11 +52,11 @@ struct AssetDetailHero: View {
         }
     }
 
-    /// "▲ $5.50 · 2.4%  Past day · AAPL", or the scrubbed sample's own time in place
-    /// of the period. Dollars come from the curve, so they are only shown when there
-    /// is one — and so is the instrument tag, because a figure folded from the curve
-    /// is the underlying equity's while the price above it is the token's. Two
-    /// numbers that cannot be reconciled by subtraction have to say which is which.
+    /// "▲ 2.4%  Past day · AAPL share" under the token's live mark, or "▲ $5.50 · 2.4%"
+    /// with the scrubbed sample's own time while the hero shows the share's price. The
+    /// figure comes from the curve, and the instrument tag says whose it is, because a
+    /// move folded from the share's curve sits under a price that is the token's. The
+    /// model leaves the dollars out whenever they are not in the hero's unit.
     private func changeRow(_ move: AssetDetailModel.Move) -> some View {
         HStack(spacing: MonacoTheme.Space.s) {
             Group {
@@ -87,12 +87,12 @@ struct AssetDetailHero: View {
         .accessibilityIdentifier("asset-detail-move")
     }
 
-    /// "Past day" on its own, or "Past day · AAPL" when the figure is measured on
-    /// another instrument than the price above it. The chart's own caption under the
-    /// curve spells the same fact out in full; here it has to stay one line.
+    /// "Past day" on its own, or "Past day · AAPL share" when the figure is measured on
+    /// another instrument than the token. The chart's own caption under the curve spells
+    /// the same fact out in full; here it has to stay one line.
     private func periodLabel(_ move: AssetDetailModel.Move) -> String {
-        guard let symbol = move.basisSymbol else { return move.label }
-        return "\(move.label) · \(symbol)"
+        guard let tag = move.basisTag else { return move.label }
+        return "\(move.label) · \(tag)"
     }
 
     /// VoiceOver gets the long form: "Up $5.50, 2.4%, Past day. AAPL on its home
