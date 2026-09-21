@@ -1,9 +1,12 @@
 import Foundation
+import MonacoCore
 
 /// Maps a session-open failure onto user-facing copy plus a developer-only debug
 /// detail line. Pure function — no I/O — so it's simple to unit test.
 ///
 /// Distinguishes:
+///  - the access token could not be refreshed → the sign-in message, even when the
+///    refresh failed for want of a connection: the request was refused, not unsent
 ///  - can't connect at all (URLError / NSURLErrorDomain) → "Can't reach Monaco…"
 ///  - 5xx from the backend → "Monaco's server hit a problem…"
 ///  - 401 opening the session → a distinct message meant for the *login* screen,
@@ -30,6 +33,15 @@ enum SessionErrorMapping {
 
         if let apiError = error as? MonacoAPIError, case .httpStatus(let status) = apiError {
             return httpDescription(status: status, origin: origin)
+        }
+
+        // Before the URLError branch: the transport rewrites a failed refresh into a URLError
+        // that keeps the underlying code, which would otherwise read as "Can't reach Monaco".
+        if error.isTokenRefreshFailure {
+            return Description(
+                message: signInVerificationFailureMessage,
+                debugDetail: "Token refresh failed: \(String(describing: error)) — \(origin)"
+            )
         }
 
         if let urlError = error as? URLError {
