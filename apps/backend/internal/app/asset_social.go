@@ -3,11 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
@@ -118,11 +116,6 @@ type AssetSocialResult struct {
 // handful; the rest is in the cabal's own activity screen.
 const assetSocialActivityLimit = 20
 
-// assetSocialGroupConcurrency bounds the per-cabal valuations. Each one is an RPC
-// read plus a Pyth mark, and a member with twenty cabals must not open twenty
-// sockets at once.
-const assetSocialGroupConcurrency = 6
-
 // GetAssetSocial answers "what are my cabals doing with this stock".
 //
 // Three reads, all scoped to the caller's own memberships: the pot of every cabal
@@ -190,110 +183,6 @@ func (h *HomeService) GetAssetSocial(ctx context.Context, accessToken, symbol st
 	return result, nil
 }
 
-// assetHoldings values every cabal the viewer belongs to and keeps the ones that
-// hold this symbol.
-//
-// The per-cabal work is the same read the cabal's own screen does, so a cabal that
-// cannot be valued here could not be shown there either. Those are counted and
-// reported instead of being silently treated as holding nothing.
-func (h *HomeService) assetHoldings(ctx context.Context, userID string, groupIDs []string, symbol string) ([]AssetSocialHolding, int) {
-	type slot struct {
-		holding  AssetSocialHolding
-		holds    bool
-		unvalued bool
-	}
-	slots := make([]slot, len(groupIDs))
-
-	var wg sync.WaitGroup
-	gate := make(chan struct{}, assetSocialGroupConcurrency)
-	for i, groupID := range groupIDs {
-		wg.Add(1)
-		go func(i int, groupID string) {
-			defer wg.Done()
-			gate <- struct{}{}
-			defer func() { <-gate }()
-
-			holding, holds, err := h.assetHoldingForGroup(ctx, userID, groupID, symbol)
-			if err != nil {
-				slog.Warn("asset social: cabal could not be valued",
-					"group_id", groupID, "symbol", symbol, "err", err)
-				slots[i] = slot{unvalued: true}
-				return
-			}
-			slots[i] = slot{holding: holding, holds: holds}
-		}(i, groupID)
-	}
-	wg.Wait()
-
-	holdings := make([]AssetSocialHolding, 0, len(groupIDs))
-	unvalued := 0
-	for _, s := range slots {
-		switch {
-		case s.unvalued:
-			unvalued++
-		case s.holds:
-			holdings = append(holdings, s.holding)
-		}
-	}
-	// Biggest position first: the cabal with the most at stake is the one the member
-	// came to look at.
-	sort.SliceStable(holdings, func(a, b int) bool {
-		return usdDecimalLess(holdings[b].ValueUsd, holdings[a].ValueUsd)
-	})
-	return holdings, unvalued
-}
-
-func (h *HomeService) assetHoldingForGroup(ctx context.Context, userID, groupID, symbol string) (AssetSocialHolding, bool, error) {
-	group, found, err := h.store.GetGroupByID(ctx, groupID)
-	if err != nil {
-		return AssetSocialHolding{}, false, err
-	}
-	if !found {
-		return AssetSocialHolding{}, false, nil
-	}
-	treasury, treasuryFound, err := h.store.GetTreasuryByGroupID(ctx, groupID)
-	if err != nil {
-		return AssetSocialHolding{}, false, err
-	}
-	if !treasuryFound {
-		return AssetSocialHolding{}, false, nil
-	}
-
-	netUsdcIn, err := h.groupNetUsdcIn(ctx, groupID)
-	if err != nil {
-		return AssetSocialHolding{}, false, err
-	}
-	treasuryUSDC, err := h.groupTreasuryUSDC(ctx, groupID, netUsdcIn)
-	if err != nil {
-		return AssetSocialHolding{}, false, err
-	}
-
-	// valuePot rather than computeGroupPotView: the pot rows drop the cost basis
-	// behind each mark, and this card shows it.
-	valuation, err := valuePot(ctx, h.store, h.pyth, h.symbols, nil, groupID, treasury.SolanaAddress, treasuryUSDC, potMarksBestAvailable)
-	if err != nil {
-		return AssetSocialHolding{}, false, err
-	}
-
-	for _, marked := range valuation.Marked.Holdings {
-		if marked.Units <= 0 || !strings.EqualFold(strings.TrimSpace(marked.Symbol), symbol) {
-			continue
-		}
-		holding, err := assetHoldingRow(group.Name, groupID, marked)
-		if err != nil {
-			return AssetSocialHolding{}, false, err
-		}
-		slicePercent, sliceMicros, err := h.viewerSliceOfHolding(ctx, userID, groupID, valuation.ShareBaseMicros, holding.valueMicros)
-		if err != nil {
-			return AssetSocialHolding{}, false, err
-		}
-		holding.row.MySliceUsd = formatMicrosAsUsdDecimal(sliceMicros)
-		holding.row.MySlicePercent = slicePercent
-		return holding.row, true, nil
-	}
-	return AssetSocialHolding{}, false, nil
-}
-
 type assetHoldingBuild struct {
 	row         AssetSocialHolding
 	valueMicros int64
@@ -325,35 +214,6 @@ func assetHoldingRow(groupName, groupID string, marked pyth.MarkedHolding) (asse
 		row.PercentReturn = formatPercentReturnDecimal(ratio)
 	}
 	return assetHoldingBuild{row: row, valueMicros: valueMicros}, nil
-}
-
-// viewerSliceOfHolding converts the viewer's share units into their dollars of this
-// one holding. A member owning a fifth of the pot owns a fifth of every position in it.
-func (h *HomeService) viewerSliceOfHolding(
-	ctx context.Context,
-	userID, groupID string,
-	shareBaseMicros, holdingValueMicros int64,
-) (string, int64, error) {
-	position, hasPosition, err := h.store.GetPosition(ctx, userID, groupID)
-	if err != nil {
-		return "0", 0, err
-	}
-	if !hasPosition || position.ShareUnits <= 0 || shareBaseMicros <= 0 {
-		return "0", 0, nil
-	}
-	sliceMicros, err := shareOfPotMicros(position.ShareUnits, holdingValueMicros, shareBaseMicros)
-	if err != nil {
-		return "0", 0, err
-	}
-	memberShares, err := domain.ShareUnitsMicrosToDomain(position.ShareUnits)
-	if err != nil {
-		return "0", 0, err
-	}
-	totalShares, err := domain.ShareUnitsMicrosToDomain(shareBaseMicros)
-	if err != nil {
-		return "0", 0, err
-	}
-	return formatShareFractionDecimal(memberShares, totalShares), sliceMicros, nil
 }
 
 // openProposalsForSymbol keeps the open votes and attaches who voted, in one extra

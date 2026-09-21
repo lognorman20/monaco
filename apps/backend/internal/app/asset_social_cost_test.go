@@ -29,6 +29,7 @@ const (
 type assetSocialFixture struct {
 	h        integrationHarness
 	counting *countingDB
+	store    *postgres.Store
 	rpc      *countingRPC
 	home     *HomeService
 	token    string
@@ -82,6 +83,7 @@ func newAssetSocialFixture(t *testing.T, cabals int) assetSocialFixture {
 	return assetSocialFixture{
 		h:        h,
 		counting: counting,
+		store:    countingStore,
 		rpc:      rpc,
 		home:     home,
 		token:    token,
@@ -130,18 +132,52 @@ func (fx assetSocialFixture) call(t *testing.T) (AssetSocialResult, int64, int) 
 	return result, fx.counting.since(statementsBefore), fx.rpc.count() - rpcBefore
 }
 
-// TestAssetSocialCost_reportsPerCabalCost is the measurement behind the query counts
-// in the pull request: it prints what one request costs at two cabal counts.
-func TestAssetSocialCost_reportsPerCabalCost(t *testing.T) {
-	for _, cabals := range []int{1, 5} {
-		t.Run(fmt.Sprintf("cabals=%d", cabals), func(t *testing.T) {
-			fx := newAssetSocialFixture(t, cabals)
-			result, statements, rpcs := fx.call(t)
-			t.Logf("cabals=%d statements=%d rpc=%d holdings=%d unvalued=%d",
-				cabals, statements, rpcs, len(result.Holdings), result.UnvaluedGroups)
-			if len(result.Holdings) != cabals {
-				t.Fatalf("holdings = %d, want %d", len(result.Holdings), cabals)
-			}
-		})
+// holdingsWithStatements runs the holdings half on its own and reports the SQL it sent.
+func (fx assetSocialFixture) holdingsWithStatements(t *testing.T, symbol string) ([]AssetSocialHolding, int, []string) {
+	t.Helper()
+	stop := fx.counting.log.start()
+	holdings, unvalued := fx.home.assetHoldings(context.Background(), fx.userID, fx.groupIDs, symbol)
+	return holdings, unvalued, stop()
+}
+
+// assetSocialReconcilePerCabal is what one cabal still costs the whole endpoint after
+// the holdings read stopped scaling: the deposit reconcile that GET /v1/home/dashboard
+// also runs, which checks each treasury for USDC that landed without being credited.
+// It is a separate N+1 and is tracked on its own; this test bounds it so that a
+// regression in the holdings read cannot hide behind it.
+const (
+	assetSocialReconcileStatementsPerCabal = 5
+	assetSocialReconcileRPCPerCabal        = 1
+)
+
+// TestAssetSocialCost_endpointDoesNotScaleWithCabalCount measures the whole request,
+// not just the holdings read, so the card's real cost is on the record.
+func TestAssetSocialCost_endpointDoesNotScaleWithCabalCount(t *testing.T) {
+	const few, many = 1, 5
+
+	oneFx := newAssetSocialFixture(t, few)
+	oneResult, oneStatements, oneRPC := oneFx.call(t)
+	manyFx := newAssetSocialFixture(t, many)
+	manyResult, manyStatements, manyRPC := manyFx.call(t)
+
+	t.Logf("cabals=%d statements=%d rpc=%d", few, oneStatements, oneRPC)
+	t.Logf("cabals=%d statements=%d rpc=%d", many, manyStatements, manyRPC)
+
+	if len(oneResult.Holdings) != few || len(manyResult.Holdings) != many {
+		t.Fatalf("holdings = %d and %d, want %d and %d",
+			len(oneResult.Holdings), len(manyResult.Holdings), few, many)
+	}
+	if oneResult.UnvaluedGroups != 0 || manyResult.UnvaluedGroups != 0 {
+		t.Fatalf("unvalued = %d and %d, want 0", oneResult.UnvaluedGroups, manyResult.UnvaluedGroups)
+	}
+
+	extraCabals := int64(many - few)
+	if perCabal := (manyStatements - oneStatements) / extraCabals; perCabal > assetSocialReconcileStatementsPerCabal {
+		t.Fatalf("each extra cabal costs %d statements, want at most %d (the deposit reconcile alone)",
+			perCabal, assetSocialReconcileStatementsPerCabal)
+	}
+	if perCabal := (manyRPC - oneRPC) / int(extraCabals); perCabal > assetSocialReconcileRPCPerCabal {
+		t.Fatalf("each extra cabal costs %d rpc reads, want at most %d (the deposit reconcile alone)",
+			perCabal, assetSocialReconcileRPCPerCabal)
 	}
 }

@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -77,6 +79,27 @@ func firstLineOf(query string) string {
 		}
 	}
 	return "(empty)"
+}
+
+// countStatements tallies recorded SQL by its opening line.
+func countStatements(recorded []string) map[string]int {
+	counts := make(map[string]int, len(recorded))
+	for _, query := range recorded {
+		counts[firstLineOf(query)]++
+	}
+	return counts
+}
+
+// formatStatementCounts renders a tally for a failure message, so a regression names
+// the query that started repeating.
+func formatStatementCounts(recorded []string) string {
+	counts := countStatements(recorded)
+	lines := make([]string, 0, len(counts))
+	for statement, sent := range counts {
+		lines = append(lines, fmt.Sprintf("  %3d  %s", sent, statement))
+	}
+	sort.Strings(lines)
+	return strings.Join(lines, "\n")
 }
 
 // openCountingTestDB opens a second connection to the same test database as
