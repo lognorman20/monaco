@@ -23,7 +23,7 @@
 | Confirmation | A tx is confirmed when `eth_getTransactionReceipt.status == 0x1`. Failed receipt (`0x0`) is terminal failure. `tx_hash` is the idempotency key everywhere `tx_signature` was. |
 | Trading venue | KyberSwap Aggregator on Base (keyless; `x-client-id: monaco`). `GET https://aggregator-api.kyberswap.com/base/api/v1/routes` for quotes, `POST …/api/v1/route/build` for calldata. Slippage 50 bps. No route (`code != 0`, empty `routeSummary`, HTTP error) → refuse, no `transactions` row. The venue sits behind `dex.Client` so 0x can replace it later. |
 | Stock catalog | Coinbase B20 tokens on Base (8 decimals; verified `AAPLc.decimals() == 8`). Pinned list of 14 (`AAPLc, AMZNc, COINc, CRCLc, GOOGLc, INTCc, METAc, MSFTc, MSTRc, NVDAc, SNDKc, SPCXc, TSLAc`, plus any listed in `docs.base.org` table at implementation time) with contract + Chainlink feed. Onchain Registry `0x3f3E8cf41cdd3b1D118c16471aB0113DfDDd5CaD` is documented, not read at runtime. Symbols shown to users strip the trailing `c` for display names only via existing display helpers; API `symbol` stays `AAPLc`. |
-| Pot marks | Chainlink total-return feeds on Base via `latestRoundData()` (8 decimals). These already include the B20 multiplier (splits, dividends). **Pyth is not used for NAV.** `AfterHours = updatedAt older than 25h` (feeds hold last close on weekends/holidays). Pyth Hermes remains only for Assets-tab charts (`AAPLc` → `Equity.US.AAPL/USD`). |
+| Pot marks | Chainlink total-return feeds on Base via `latestRoundData()` (8 decimals). These already include the B20 multiplier (splits, dividends). **Pyth is not used for NAV.** `AfterHours = updatedAt older than 25h` (feeds hold last close on weekends/holidays). Pyth for charts and display; never NAV. On the stock screens Pyth serves the underlying equity (`AAPLc` → `Equity.US.AAPL/USD`, one lowercase `c` stripped before upper-casing, so `SPCXc` → `SPCX`): Benchmarks chart history for 1D/1W/1M/3M/1Y/ALL, the stats grid, the day change against the previous regular-session close, and a labelled equity reference line. The hero price stays the Chainlink total-return mark, the same per-token mark NAV uses. The stock-vs-token premium is the Kyber quote-implied mid against that mark; Pyth publishes no feed for a B20 token. |
 | Swap execution | `app/swap.go` orchestrates: ensure treasury gas → `allowance(treasury, router)` → `approve(router, amountIn)` if short (wait receipt) → send swap calldata from treasury (wait receipt) → parse ERC-20 `Transfer` logs to the treasury for the output token to get the fill → `transactions` row. Sell is the mirror. |
 | Cabal cash-out target | Redeem pays the **member wallet only** (existing withdraw-to-balance path). The external payout address and payout proof are removed from the redeem API and UI; `VerifyPayoutProof` is deleted. External exit is Settings → Withdraw (platform withdraw to any pasted Base address). `payout_proofs` table is dropped in `000013`. |
 | Deposits | Unchanged model: inbound Base USDC sits in the member wallet; platform balance = on-chain USDC minus in-flight intents. No log indexer. |
@@ -54,7 +54,7 @@ apps/backend/
   internal/b20/                    Catalog interface (ResolveTokenAddress, Search, LookupByAddress, Popular, Feed); pinned.go; fake.go
   internal/marks/                  TreasuryRef, CostBasis, MarkedHolding, NavInput, Client interface (moved from pyth)
   internal/chainlink/              marks.Client over evm.ChainlinkLatestRoundData; AssetMark for Assets tab; fake.go
-  internal/pyth/                   ChartSeries only (Hermes). EquityQuerySymbol strips trailing "c".
+  internal/pyth/                   Display only, never NAV: Benchmarks history, Hermes equity price, stats. EquityQuerySymbol strips one trailing lowercase "c".
   internal/worker/                 Confirmer = evm.IsConfirmed; sweep poller unchanged in shape
   internal/app/                    swap.go on dex + wallets + evm; redeem.go member-wallet payout only; treasury gas
   cmd/api/main.go                  wires signer, evm, wallets, auth, dex, b20, chainlink; boot: relayer ETH check, signer /healthz
@@ -128,7 +128,7 @@ Removed: every `PRIVY_*`, `SOLANA_RPC_URL`, `JUPITER_API_KEY`.
 | `BASE_RPC_URL` | Go, signer | default `https://mainnet.base.org` |
 | `RELAYER_PRIVATE_KEY` | signer (sign), Go (derive address) | `0x` + 64 hex |
 | `KYBER_CLIENT_ID` | Go | optional, default `monaco` |
-| `PYTH_API_KEY`, `PYTH_HERMES_BASE_URL` | Go | charts only, unchanged |
+| `PYTH_API_KEY`, `PYTH_HERMES_BASE_URL`, `PYTH_BENCHMARKS_BASE_URL` | Go | Pyth for charts and display; never NAV. Benchmarks is keyless; the key gates only Hermes |
 | `AUTH_SMS_LOGIN_ENABLED`, `AUTH_EMAIL_LOGIN_ENABLED` | iOS | replace `PRIVY_*_LOGIN_ENABLED` |
 
 Dynamic dashboard (manual, once): enable Email OTP and SMS OTP; enable EVM + Base; **disable** embedded wallets for end users; enable server wallets; create API token; whitelist deeplink `monaco://`; set minimum API version so headless device registration + step-up apply.

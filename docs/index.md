@@ -158,3 +158,6 @@ Never `simctl erase` for QA. Agent-driven QA must export `SIMSLIM_UDID` and pass
 ## M6 — Dynamic and Base
 
 [`docs/milestones/m6-dynamic-base.md`](milestones/m6-dynamic-base.md)
+
+Market data on the asset routes (which figure comes from Chainlink, Pyth or Kyber):
+[`docs/market-data.md`](market-data.md)
