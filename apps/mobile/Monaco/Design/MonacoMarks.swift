@@ -83,8 +83,11 @@ struct StockMark: View {
     ///
     /// A class separator is dropped rather than left hanging: "BRK.B" cut at four characters is
     /// "BRK." reading as an abbreviation of itself.
+    ///
+    /// Callers pass the wire symbol (`AAPLc`), so the tile goes through `AssetSymbolFormatter.display`
+    /// first: uppercasing the raw symbol would print the token suffix as part of a short ticker ("Fc" → "FC").
     static func tileText(forTicker ticker: String) -> String {
-        let trimmed = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let trimmed = AssetSymbolFormatter.display(ticker).uppercased()
         var tile = String(trimmed.prefix(4))
         while let last = tile.last, last == "." || last == "-" {
             tile.removeLast()

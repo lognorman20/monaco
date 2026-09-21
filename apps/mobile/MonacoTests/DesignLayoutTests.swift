@@ -102,6 +102,28 @@ struct StockMarkTests {
         #expect(StockMark.tileText(forTicker: ticker) == expected)
     }
 
+    /// Rows hand StockMark the wire symbol. The Base token suffix is not part of the ticker, so a
+    /// short ticker must not come out with a stray "C" on the tile.
+    @Test(arguments: [
+        ("AAPLc", "AAPL"),
+        ("GOOGLc", "GOOG"),
+        ("Fc", "F"),
+        ("GEc", "GE"),
+        ("BRK.Bc", "BRK"),
+        ("BF.Bc", "BF.B"),
+        // Legacy suffix still reads the same way.
+        ("Fx", "F"),
+    ])
+    func tileTextDropsTheTokenSuffix(symbol: String, expected: String) {
+        #expect(StockMark.tileText(forTicker: symbol) == expected)
+    }
+
+    /// Only the lowercase suffix is dropped; a ticker that really ends in "C" keeps it.
+    @Test func aTickerEndingInACapitalCKeepsIt() {
+        #expect(StockMark.tileText(forTicker: "INTC") == "INTC")
+        #expect(StockMark.tileText(forTicker: "ABC") == "ABC")
+    }
+
     /// A separator inside the first four characters is content, not a dangling edge.
     @Test func aSeparatorThatIsNotAtTheEndIsKept() {
         #expect(StockMark.tileText(forTicker: "BF.B") == "BF.B")
