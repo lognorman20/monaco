@@ -44,14 +44,6 @@ var (
 	ErrImageUploadNotConfigured = errors.New("image upload is not configured")
 )
 
-// Profile photo errors kept under their original names so existing callers and
-// their HTTP copy do not change. They are the same conditions.
-var (
-	ErrProfilePhotoTooLarge      = ErrImageTooLarge
-	ErrProfilePhotoInvalid       = ErrImageInvalid
-	ErrProfilePhotoNotConfigured = ErrImageUploadNotConfigured
-)
-
 // uploadedImageLimits is the one policy every upload is measured against.
 func uploadedImageLimits() imageupload.Limits {
 	return imageupload.Limits{
