@@ -39,6 +39,18 @@ final class StocksTabSampleUITests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
+    /// `assets-search-field` is set on the MonacoSearchField container and the text field inside
+    /// carries `monaco-search-field`; which one XCUITest resolves depends on how SwiftUI flattens
+    /// the pair, so try both before settling for the screen's only text field.
+    @MainActor
+    private func searchField(_ app: XCUIApplication) -> XCUIElement {
+        for candidate in [app.textFields["assets-search-field"], app.textFields["monaco-search-field"]]
+        where candidate.waitForExistence(timeout: 2) {
+            return candidate
+        }
+        return app.textFields.firstMatch
+    }
+
     @MainActor
     private func openDetail(_ app: XCUIApplication, symbol: String) {
         let row = anyElement(app, "assets-popular-\(symbol)")
@@ -57,8 +69,8 @@ final class StocksTabSampleUITests: XCTestCase {
         XCTAssertTrue(anyElement(app, "assets-popular-AAPLc").waitForExistence(timeout: 10))
         attachScreenshot(app, name: "stocks-popular")
 
-        let field = app.textFields["monaco-search-field"].firstMatch
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        let field = searchField(app)
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
         field.tap()
         field.typeText("tes")
 
