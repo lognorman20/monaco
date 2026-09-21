@@ -24,6 +24,7 @@ const (
 	envKyberClientID          = "KYBER_CLIENT_ID"
 	envPythAPIKey             = "PYTH_API_KEY"
 	envPythHermesBaseURL      = "PYTH_HERMES_BASE_URL"
+	envPythBenchmarksBaseURL  = "PYTH_BENCHMARKS_BASE_URL"
 	envSupabaseURL            = "SUPABASE_URL"
 	envSupabaseServiceRoleKey = "SUPABASE_SERVICE_ROLE_KEY"
 )
@@ -46,6 +47,7 @@ type Config struct {
 	KyberClientID          string
 	PythAPIKey             string
 	PythHermesBaseURL      string
+	PythBenchmarksBaseURL  string
 	SupabaseURL            string
 	SupabaseServiceRoleKey string
 }
@@ -65,6 +67,7 @@ func Load() (*Config, error) {
 		KyberClientID:          strings.TrimSpace(os.Getenv(envKyberClientID)),
 		PythAPIKey:             strings.TrimSpace(os.Getenv(envPythAPIKey)),
 		PythHermesBaseURL:      strings.TrimRight(strings.TrimSpace(os.Getenv(envPythHermesBaseURL)), "/"),
+		PythBenchmarksBaseURL:  strings.TrimRight(strings.TrimSpace(os.Getenv(envPythBenchmarksBaseURL)), "/"),
 		SupabaseURL:            strings.TrimSpace(os.Getenv(envSupabaseURL)),
 		SupabaseServiceRoleKey: strings.TrimSpace(os.Getenv(envSupabaseServiceRoleKey)),
 	}
