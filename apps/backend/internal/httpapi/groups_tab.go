@@ -31,6 +31,7 @@ type groupDiscoveryRowResponse struct {
 	DollarPnL     string  `json:"dollarPnl"`
 	IsJoined      bool    `json:"isJoined"`
 	JoinMode      string  `json:"joinMode"`
+	PictureURL    *string `json:"pictureUrl"`
 }
 
 type groupSearchResponse struct {
@@ -90,6 +91,7 @@ func discoveryRowResponse(row app.GroupDiscoveryRow) groupDiscoveryRowResponse {
 		DollarPnL:     row.DollarPnL,
 		IsJoined:      row.IsJoined,
 		JoinMode:      string(row.JoinMode),
+		PictureURL:    optionalString(row.PictureURL),
 	}
 }
 

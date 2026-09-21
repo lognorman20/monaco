@@ -65,6 +65,8 @@ var apiRoutes = []string{
 	"POST /v1/groups/{id}/withdraw-to-balance",
 	"GET /v1/groups/{id}",
 	"GET /v1/groups/{id}/view",
+	"POST /v1/groups/{id}/picture",
+	"DELETE /v1/groups/{id}/picture",
 	"GET /v1/groups/{id}/activity",
 	"GET /v1/groups/{id}/proposals",
 	"POST /v1/groups/{id}/deposits",
@@ -168,6 +170,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}
 	profilePhotos := app.NewProfilePhotoService(store, authVerifier, walletClient, storageClient).
 		WithUploadLimiter(app.NewProfilePhotoUploadLimiter())
+	groupPictures := app.NewGroupPictureService(store, authVerifier, storageClient).
+		WithWriteLimiter(app.NewGroupPictureWriteLimiter())
 	home := app.NewHomeService(store, authVerifier, walletClient, marksClient, deposits, symbols)
 	groups := app.NewGroupService(store, authVerifier, walletClient)
 	governance := app.NewGovernanceService(store, authVerifier, walletClient)
@@ -182,6 +186,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	homeHandlers := &httpapi.HomeHandlers{Home: home}
 	groupHandlers := &httpapi.GroupHandlers{Groups: groups, Governance: governance, Home: home, Redeem: redeem}
 	groupsTabHandlers := &httpapi.GroupsTabHandlers{GroupsTab: app.NewGroupsTabService(home, store)}
+	groupPictureHandlers := &httpapi.GroupPictureHandlers{Pictures: groupPictures}
 	executeOnPass := app.NewExecuteOnPassService(swap, store)
 	governance.SetBuyService(buy)
 	governance.SetHomeService(home)
@@ -281,6 +286,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("POST /v1/groups/{id}/join-requests/{requestId}/deny", groupHandlers.DenyJoinRequestHandler)
 	mux.HandleFunc("GET /v1/groups/{id}", groupHandlers.GetGroupHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/view", groupHandlers.GetGroupViewHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/picture", groupPictureHandlers.UploadGroupPictureHandler)
+	mux.HandleFunc("DELETE /v1/groups/{id}/picture", groupPictureHandlers.RemoveGroupPictureHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/activity", groupHandlers.ListGroupActivityHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/deposits", depositHandlers.CreateDepositHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/fund", depositHandlers.FundGroupHandler)

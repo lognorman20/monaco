@@ -45,6 +45,8 @@ type HomeGroupRow struct {
 	PercentReturn *string
 	DollarPnL     string
 	IsJoined      bool
+	// PictureURL is blank when the cabal has no picture.
+	PictureURL string
 }
 
 // HomePeopleRow is one ranked person on the app-home people board.
@@ -114,8 +116,14 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 
 	groupInputs := make([]domain.GroupBoardInput, 0, len(directory))
 	memberPnLByUser := make(map[string][]domain.MemberPnL)
+	// The ranked board comes back from the domain layer carrying only id, name
+	// and money, so the picture is looked up here rather than threaded through it.
+	pictureByGroupID := make(map[string]string, len(directory))
 
 	for _, dir := range directory {
+		if picture := nullStringValue(dir.PictureURL); picture != "" {
+			pictureByGroupID[dir.ID] = picture
+		}
 		groupID := dir.ID
 		netUsdcIn := dir.NetUsdcInMicros
 		_, isJoined := joinedGroups[groupID]
@@ -176,6 +184,7 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 			PercentReturn: formatPercentReturnDecimal(row.PercentReturn),
 			DollarPnL:     formatSignedDollarPnL(int64(row.DollarPnL)),
 			IsJoined:      isJoined,
+			PictureURL:    pictureByGroupID[row.GroupID],
 		})
 	}
 	for _, input := range groupInputs {
@@ -190,6 +199,7 @@ func (h *HomeService) GetHome(ctx context.Context, accessToken string) (HomeResu
 			PercentReturn: nil,
 			DollarPnL:     formatSignedDollarPnL(int64(input.PotNav - input.NetUsdcIn)),
 			IsJoined:      isJoined,
+			PictureURL:    pictureByGroupID[input.GroupID],
 		})
 	}
 	for _, row := range peopleBoard {
@@ -475,6 +485,7 @@ func (h *HomeService) GetUserSharedGroups(ctx context.Context, accessToken, targ
 			PercentReturn: percentReturn,
 			DollarPnL:     formatSignedDollarPnL(potNav - netUsdcIn),
 			IsJoined:      true,
+			PictureURL:    nullStringValue(group.PictureURL),
 		})
 	}
 	return rows, nil
