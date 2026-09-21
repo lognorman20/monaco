@@ -73,6 +73,20 @@ type AssetPriceClient interface {
 	ChartSeries(ctx context.Context, symbol string, chartRange ChartRange) (AssetChartSeries, error)
 }
 
+// CachedSeriesSource serves a chart series from memory and never goes upstream.
+//
+// It exists for the list rows. A sparkline on a row is decoration: the page is
+// worth showing without it and is never worth waiting on a vendor for, so the
+// read must be one that cannot block. A client that implements this is expected
+// to arrange the cold path for itself — a background fill, a warmer — so that the
+// second look at a symbol has a series even though the first did not.
+//
+// Reporting a miss rather than an error is deliberate: "we have no series yet"
+// and "the fetch failed" look the same to a row, which draws no line either way.
+type CachedSeriesSource interface {
+	CachedChartSeries(ctx context.Context, symbol string, chartRange ChartRange) (AssetChartSeries, bool)
+}
+
 func (c *HermesClient) AssetMark(ctx context.Context, symbol string) (AssetMark, error) {
 	marked, err := c.markHolding(ctx, CostBasis{
 		Symbol: symbol,

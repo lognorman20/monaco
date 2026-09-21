@@ -122,6 +122,44 @@ type Chain struct {
 	warned     map[string]time.Time
 
 	flights flightGroup
+	// warmSlots caps the background fills a burst of cache misses can start, so a
+	// page of cold rows leaves rate-limit headroom for the requests someone is
+	// actually waiting on.
+	warmSlots semaphore
+}
+
+// defaultWarmConcurrency is how many cold symbols may be filled in the background
+// at once across the whole process.
+const defaultWarmConcurrency = 4
+
+// semaphore is a non-blocking counting semaphore: a caller that cannot get a slot
+// is told so rather than queued, because the work it guards is optional.
+type semaphore struct {
+	slots chan struct{}
+}
+
+func newSemaphore(n int) semaphore { return semaphore{slots: make(chan struct{}, n)} }
+
+func (s semaphore) acquire() bool {
+	if s.slots == nil {
+		return false
+	}
+	select {
+	case s.slots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s semaphore) release() {
+	if s.slots == nil {
+		return
+	}
+	select {
+	case <-s.slots:
+	default:
+	}
 }
 
 // New builds a chain. pythSource, jupiterPrices and charts may each be nil; a nil
@@ -141,6 +179,7 @@ func New(pythSource PythSource, jupiterPrices jupiter.PriceClient, charts pyth.A
 		breakers:   make(map[string]breaker),
 		entitled:   make(map[string]time.Time),
 		warned:     make(map[string]time.Time),
+		warmSlots:  newSemaphore(defaultWarmConcurrency),
 	}
 }
 
@@ -418,6 +457,13 @@ func (c *Chain) AssetMark(ctx context.Context, symbol string) (pyth.AssetMark, e
 // That gate is about the sampler, not about history in general. A chart client with
 // a keyless one-call source (Pyth Benchmarks) can serve the range whatever Hermes
 // thinks of our key, and gating it on entitlement would lose charts we can draw.
+//
+// The caller's deadline is honoured. The shared fetch still runs to completion on a
+// detached context — it is what fills the cache, and one caller walking away must
+// not throw that away — but a caller that arrives with a budget gets its own
+// deadline error when the budget runs out instead of waiting out FetchTimeout.
+// Before that, a caller's context was observed nowhere past this function's first
+// two lines, so every documented budget upstream was decoration.
 func (c *Chain) ChartSeries(ctx context.Context, symbol string, chartRange pyth.ChartRange) (pyth.AssetChartSeries, error) {
 	unavailable := pyth.AssetChartSeries{EmptyReason: pyth.EmptyReasonNoHistory}
 	if c.charts == nil {
@@ -427,15 +473,30 @@ func (c *Chain) ChartSeries(ctx context.Context, symbol string, chartRange pyth.
 	if series, ok := c.cachedChart(cacheKey); ok {
 		return series, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return unavailable, err
+	}
 	if !c.chartsAreKeyless() && !c.pythEntitled(ctx, symbol) {
 		return unavailable, nil
 	}
 
-	type chartResult struct {
-		series pyth.AssetChartSeries
-		err    error
+	raw, err := c.flights.doCtx(ctx, "chart:"+cacheKey, c.fetchChart(ctx, cacheKey, symbol, chartRange))
+	if err != nil {
+		return unavailable, err
 	}
-	result := c.flights.do("chart:"+cacheKey, func() any {
+	result := raw.(chartResult)
+	return result.series, result.err
+}
+
+type chartResult struct {
+	series pyth.AssetChartSeries
+	err    error
+}
+
+// fetchChart is the shared, detached body of one chart fetch: whoever wins the
+// flight runs it, and every other caller — and the cache — gets its answer.
+func (c *Chain) fetchChart(ctx context.Context, cacheKey, symbol string, chartRange pyth.ChartRange) func() any {
+	return func() any {
 		if series, ok := c.cachedChart(cacheKey); ok {
 			return chartResult{series: series}
 		}
@@ -454,8 +515,52 @@ func (c *Chain) ChartSeries(ctx context.Context, symbol string, chartRange pyth.
 		c.chartCache[cacheKey] = chartEntry{series: series, fetchedAt: c.cfg.Now()}
 		c.mu.Unlock()
 		return chartResult{series: series}
-	}).(chartResult)
-	return result.series, result.err
+	}
+}
+
+// CachedChartSeries answers from the chart cache and never goes upstream, and
+// schedules a background warm when there is nothing cached.
+//
+// This is what a list row's sparkline reads. A row's series is decoration: a page
+// of twenty rows is worth showing without it, and is never worth waiting on
+// Hermes for. So the read path is memory-only and the cold path belongs to a
+// background fill, which the next request — or the spark warmer's next pass —
+// collects. That is a budget that cannot be exceeded rather than a budget that is
+// merely written down.
+func (c *Chain) CachedChartSeries(ctx context.Context, symbol string, chartRange pyth.ChartRange) (pyth.AssetChartSeries, bool) {
+	if c.charts == nil {
+		return pyth.AssetChartSeries{}, false
+	}
+	cacheKey := normalizeSymbol(symbol) + "|" + string(chartRange)
+	if series, ok := c.cachedChart(cacheKey); ok {
+		return series, true
+	}
+	c.warmChart(ctx, cacheKey, symbol, chartRange)
+	return pyth.AssetChartSeries{}, false
+}
+
+// warmChart starts the shared fetch for a symbol nobody has cached yet, without
+// waiting for it. The flight group is what keeps a page of cold rows from
+// becoming a page of duplicate fetches: a symbol already being fetched is left
+// alone.
+func (c *Chain) warmChart(ctx context.Context, cacheKey, symbol string, chartRange pyth.ChartRange) {
+	key := "chart:" + cacheKey
+	if c.flights.inFlight(key) {
+		return
+	}
+	if !c.warmSlots.acquire() {
+		// The warm budget for concurrent cold symbols is spent. The spark warmer's
+		// next pass picks this up; a row without a series draws no line, which is
+		// what it is supposed to do.
+		return
+	}
+	// Detached on purpose: this outlives the request that noticed the miss.
+	warmCtx := context.WithoutCancel(ctx)
+	fetch := c.fetchChart(warmCtx, cacheKey, symbol, chartRange)
+	go func() {
+		defer c.warmSlots.release()
+		c.flights.do(key, fetch)
+	}()
 }
 
 // chartsAreKeyless reports whether the chart client can serve history without a
