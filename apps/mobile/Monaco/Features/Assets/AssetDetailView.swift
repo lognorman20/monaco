@@ -9,13 +9,15 @@ struct AssetDetailView: View {
     @State private var model: AssetDetailModel
     @State private var pickerKind: ProposalPickKind?
     @State private var toast: MonacoToast?
+    private let sources: StocksFlowSources
 
-    init(auth: DynamicAuthService, symbol: String, dataSource: AssetDetailDataSource? = nil) {
+    init(auth: DynamicAuthService, symbol: String, sources: StocksFlowSources = .live) {
         self.auth = auth
         self.symbol = symbol
+        self.sources = sources
         _model = State(initialValue: AssetDetailModel(
             symbol: symbol,
-            dataSource: dataSource ?? LiveAssetDetailDataSource(auth: auth)
+            dataSource: sources.detail ?? LiveAssetDetailDataSource(auth: auth)
         ))
     }
 
@@ -73,7 +75,9 @@ struct AssetDetailView: View {
                     pickerKind = nil
                     Haptics.success()
                     toast = MonacoToast(message: ProposeFlowCopy.proposalSent(cabalName), isSuccess: true)
-                }
+                },
+                service: sources.propose,
+                holdingsDataSource: sources.holdings
             )
         }
         .monacoFrameStats("AssetDetail")

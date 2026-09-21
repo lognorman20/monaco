@@ -14,10 +14,12 @@ struct AssetsTabView: View {
     @State private var model: StocksTabModel
     @State private var searchQuery = ""
     @State private var selectedSymbol: String?
+    private let sources: StocksFlowSources
 
-    init(auth: DynamicAuthService, dataSource: StocksTabDataSource? = nil) {
+    init(auth: DynamicAuthService, sources: StocksFlowSources = .live) {
         self.auth = auth
-        _model = State(initialValue: StocksTabModel(dataSource: dataSource ?? LiveStocksTabDataSource(auth: auth)))
+        self.sources = sources
+        _model = State(initialValue: StocksTabModel(dataSource: sources.tab ?? LiveStocksTabDataSource(auth: auth)))
     }
 
     var body: some View {
@@ -50,7 +52,7 @@ struct AssetsTabView: View {
             set: { if !$0 { selectedSymbol = nil } }
         )) {
             if let selectedSymbol {
-                AssetDetailView(auth: auth, symbol: selectedSymbol)
+                AssetDetailView(auth: auth, symbol: selectedSymbol, sources: sources)
             }
         }
         .onChange(of: searchQuery) { _, newValue in
