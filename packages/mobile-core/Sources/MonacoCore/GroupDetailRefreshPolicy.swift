@@ -115,8 +115,10 @@ public enum GroupDetailRefreshPolicy {
     /// - Parameters:
     ///   - sellsSlice: the member chose "Sell and leave".
     ///   - failureStatus: the HTTP status the request failed with, or nil when it got no answer.
-    public static func leaveMayHaveSoldSlice(sellsSlice: Bool, failureStatus: Int?) -> Bool {
-        guard sellsSlice else { return false }
+    ///   - neverSent: the request provably never left the phone (no connection, no DNS), so the
+    ///     server never saw it and nothing was sold.
+    public static func leaveMayHaveSoldSlice(sellsSlice: Bool, failureStatus: Int?, neverSent: Bool = false) -> Bool {
+        guard sellsSlice, !neverSent else { return false }
         guard let failureStatus else { return true }
         return failureStatus >= 500
     }
@@ -127,9 +129,12 @@ public enum GroupDetailRefreshPolicy {
     /// request, not a replay of the lost one. When the sale may already have gone through, the
     /// member is sent to look at their slice before anything else, and is never told to simply
     /// try again.
-    public static func leaveFailureMessage(sellsSlice: Bool, failureStatus: Int?) -> String {
-        if leaveMayHaveSoldSlice(sellsSlice: sellsSlice, failureStatus: failureStatus) {
+    public static func leaveFailureMessage(sellsSlice: Bool, failureStatus: Int?, neverSent: Bool = false) -> String {
+        if leaveMayHaveSoldSlice(sellsSlice: sellsSlice, failureStatus: failureStatus, neverSent: neverSent) {
             return "We couldn't confirm that. Check your slice below before trying again"
+        }
+        if sellsSlice, neverSent {
+            return "No connection, so nothing was sold. Check your internet and try again"
         }
         return "Couldn't leave this cabal. Try again"
     }

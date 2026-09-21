@@ -458,9 +458,11 @@ struct GroupDetailView: View {
             // No idempotency key rides on this request, so another "Sell and leave" is a new
             // request rather than a replay of this one. When the sale may already have happened
             // the member is told to look at their slice first, never simply to try again.
+            let failure = FlowErrorInput(error)
             toast = MonacoToast(message: GroupDetailRefreshPolicy.leaveFailureMessage(
                 sellsSlice: withdrawStake,
-                failureStatus: Self.httpStatus(of: error)
+                failureStatus: failure.status,
+                neverSent: failure.isOffline
             ))
         }
         // A refused leave can still have sold the slice: the server sells first and checks the
@@ -584,13 +586,11 @@ struct GroupDetailView: View {
     }
 
     /// The status the server answered with, or nil when the request never reached one.
+    ///
+    /// Read through `FlowErrorInput`, the one place the app reduces its API errors to a status,
+    /// so a new error case lands there without this screen having to enumerate it.
     private static func httpStatus(of error: Error) -> Int? {
-        guard let apiError = error as? MonacoAPIError else { return nil }
-        switch apiError {
-        case .httpStatus(let code): return code
-        case .apiError(let status, _): return status
-        case .invalidResponse, .missingAccessToken, .leaveBlocked: return nil
-        }
+        FlowErrorInput(error).status
     }
 }
 

@@ -150,3 +150,27 @@ struct GroupDetailLeaveFailureTests {
         #expect(!copy.lowercased().contains("safe"))
     }
 }
+
+@Suite("Leave that never left the phone")
+struct GroupDetailLeaveNeverSentTests {
+    /// With no connection at all the server never saw the request, so nothing was sold and the
+    /// next tap is the first sale, not a second one. "Check your slice" there would send the
+    /// member looking for a sale that cannot have happened.
+    @Test("A sell-and-leave that never left the phone sold nothing and can be tried again")
+    func neverSentIsARetry() {
+        #expect(GroupDetailRefreshPolicy.leaveMayHaveSoldSlice(sellsSlice: true, failureStatus: nil, neverSent: true) == false)
+        let copy = GroupDetailRefreshPolicy.leaveFailureMessage(sellsSlice: true, failureStatus: nil, neverSent: true)
+        #expect(copy == "No connection, so nothing was sold. Check your internet and try again")
+    }
+
+    @Test("A request that did leave the phone and got no answer is still unconfirmed")
+    func sentButUnansweredIsUnconfirmed() {
+        #expect(GroupDetailRefreshPolicy.leaveMayHaveSoldSlice(sellsSlice: true, failureStatus: nil, neverSent: false))
+    }
+
+    @Test("A plain leave that never left the phone says only to try again")
+    func plainLeaveNeverSent() {
+        let copy = GroupDetailRefreshPolicy.leaveFailureMessage(sellsSlice: false, failureStatus: nil, neverSent: true)
+        #expect(copy == "Couldn't leave this cabal. Try again")
+    }
+}
