@@ -26,6 +26,14 @@ private final class StubAssetDetailDataSource: AssetDetailDataSource {
     var previousCloseUsdcMicros: Int64?
     /// The range the server claims each series was built for. Nil echoes the request.
     var echoedRange: AssetChartRange?
+    /// Which instrument the series is about. Every Pyth history source serves the
+    /// underlying equity, so this is what the shipping backend sends.
+    var basis: MarketPriceBasis?
+    var basisSymbol: String?
+    /// Scripted answers for successive calls to one range, consumed in order. Lets a
+    /// test make the *first* request return after the second, which is how a tap and
+    /// a background poll overlap in life.
+    var scripted: [AssetChartRange: [(delay: Duration, points: [AssetChartPointDTO])]] = [:]
 
     func detail(symbol: String) async throws -> AssetDetailDTO {
         detailCalls += 1
@@ -54,15 +62,23 @@ private final class StubAssetDetailDataSource: AssetDetailDataSource {
 
     func chart(symbol: String, range: AssetChartRange) async throws -> AssetChartDTO {
         chartCalls.append(range)
-        if let delay = delays[range] {
+        var answer = points[range] ?? Self.series(from: 100, to: 110)
+        if var queued = scripted[range], !queued.isEmpty {
+            let next = queued.removeFirst()
+            scripted[range] = queued
+            answer = next.points
+            try? await Task.sleep(for: next.delay)
+        } else if let delay = delays[range] {
             try? await Task.sleep(for: delay)
         }
         if let chartError { throw chartError }
         return AssetChartDTO(
-            points: points[range] ?? Self.series(from: 100, to: 110),
+            points: answer,
             emptyReason: nil,
             previousCloseUsdcMicros: previousCloseUsdcMicros,
-            range: echoedRange ?? range
+            range: echoedRange ?? range,
+            basis: basis,
+            basisSymbol: basisSymbol
         )
     }
 
@@ -532,5 +548,195 @@ struct AssetDetailModelTests {
 
         #expect(model.sessionChip == nil)
         #expect(!model.isMarketLive)
+    }
+
+    // MARK: - A silent poll is silent
+
+    /// The bug: the two-minute background chart re-read inserted into `loadingRanges`
+    /// like any other load, so the selected chip sprouted a spinner — and said
+    /// "Loading" to VoiceOver — every two minutes for a refresh nobody asked for.
+    /// The spinner means "you tapped this and it has not arrived".
+    @Test func aQuietReReadNeverSpinsTheChip() async throws {
+        let source = StubAssetDetailDataSource()
+        source.delays[.oneDay] = .milliseconds(200)
+        let model = AssetDetailModel(symbol: "AAPLx", dataSource: source)
+
+        let refresh = Task { await model.refreshChart() }
+        try await Task.sleep(for: .milliseconds(60))
+
+        #expect(model.loadingRanges.isEmpty)
+        #expect(!model.isLoadingCurrentRange)
+        await refresh.value
+        #expect(model.loadingRanges.isEmpty)
+    }
+
+    /// And it never puts an error in front of the member either, even on a range that
+    /// has nothing drawn yet: the member did not ask for this read.
+    @Test func aQuietReReadThatFailsLeavesTheRangeAlone() async throws {
+        let source = StubAssetDetailDataSource()
+        source.chartError = Monaco.MonacoAPIError.httpStatus(500)
+        let model = AssetDetailModel(symbol: "AAPLx", dataSource: source)
+
+        await model.refreshChart()
+
+        #expect(model.chartState == .loading)
+        #expect(model.charts[.oneDay] == nil)
+    }
+
+    /// The bug: `defer { loadingRanges.remove(range) }` had no in-flight guard, so a
+    /// quiet poll and a tap on one range raced — whichever returned first stopped the
+    /// spinner while the other request was still out.
+    @Test func theChipKeepsSpinningUntilTheLastAskedForRequestReturns() async throws {
+        let source = StubAssetDetailDataSource()
+        source.scripted[.oneDay] = [
+            (delay: .milliseconds(400), points: StubAssetDetailDataSource.series(from: 100, to: 110)),
+            (delay: .milliseconds(80), points: StubAssetDetailDataSource.series(from: 200, to: 210)),
+        ]
+        let model = AssetDetailModel(symbol: "AAPLx", dataSource: source)
+
+        let slow = Task { await model.loadChart(range: .oneDay) }
+        try await Task.sleep(for: .milliseconds(30))
+        let quick = Task { await model.loadChart(range: .oneDay) }
+        await quick.value
+
+        // The second request is home; the first is still out, so the chip is still
+        // working.
+        #expect(model.isLoadingCurrentRange)
+
+        await slow.value
+        #expect(!model.isLoadingCurrentRange)
+    }
+
+    /// And the older request, arriving last, must not repaint the slot the newer one
+    /// already wrote.
+    @Test func aLateOlderResponseDoesNotOverwriteTheNewerOne() async throws {
+        let source = StubAssetDetailDataSource()
+        source.scripted[.oneDay] = [
+            (delay: .milliseconds(400), points: StubAssetDetailDataSource.series(from: 100, to: 110)),
+            (delay: .milliseconds(80), points: StubAssetDetailDataSource.series(from: 200, to: 210)),
+        ]
+        let model = AssetDetailModel(symbol: "AAPLx", dataSource: source)
+
+        let stale = Task { await model.loadChart(range: .oneDay) }
+        try await Task.sleep(for: .milliseconds(30))
+        await model.loadChart(range: .oneDay)
+        let newest = StubAssetDetailDataSource.expected(.oneDay, from: 200, to: 210)
+        #expect(model.chartState == .series(newest))
+
+        await stale.value
+
+        #expect(model.chartState == .series(newest), "the older answer landed on top of the newer one")
+    }
+
+    // MARK: - Whose number is under the price
+
+    /// The hero price is the token's and every Pyth history source serves the
+    /// underlying equity, so a figure folded from the curve is a different instrument
+    /// from the price it sits under — the two cannot be reconciled by subtraction.
+    /// The pill has to say which instrument it is about.
+    @Test func aFigureFoldedFromTheCurveSaysWhichInstrumentItIsAbout() async throws {
+        let source = StubAssetDetailDataSource()
+        source.basis = .underlying
+        source.basisSymbol = "AAPL"
+        let model = AssetDetailModel(symbol: "AAPLx", dataSource: source)
+
+        await model.loadDetail()
+        await model.loadChart(range: .oneDay)
+
+        let move = try #require(model.move)
+        #expect(move.basisSymbol == "AAPL")
+        #expect(move.basisCaption == "AAPL on its home exchange")
+    }
+
+    /// Scrubbing does not change whose numbers these are.
+    @Test func aScrubbedFigureCarriesTheSameInstrument() async throws {
+        let source = StubAssetDetailDataSource()
+        source.basis = .underlying
+        source.basisSymbol = "AAPL"
+        let model = AssetDetailModel(symbol: "AAPLx", dataSource: source)
+
+        await model.loadDetail()
+        await model.loadChart(range: .oneDay)
+        model.scrubbedIndex = 0
+
+        #expect(model.move?.basisSymbol == "AAPL")
+    }
+
+    /// The fallback is the detail route's 24h change, which is the token's — the same
+    /// instrument as the price above it, so it wears no tag. The bug this closes: the
+    /// identical "Past day" label described the equity or the token depending on
+    /// whether an unrelated chart request had succeeded.
+    @Test func theFallbackFigureIsTheTokensAndSaysNothingElse() async throws {
+        let source = StubAssetDetailDataSource()
+        source.basis = .underlying
+        source.basisSymbol = "AAPL"
+        source.chartError = Monaco.MonacoAPIError.httpStatus(500)
+        let model = AssetDetailModel(symbol: "AAPLx", dataSource: source)
+
+        await model.loadDetail()
+        await model.loadChart(range: .oneDay)
+
+        let move = try #require(model.move)
+        #expect(move.label == "Past day")
+        #expect(move.basisSymbol == nil)
+        #expect(move.basisCaption == nil)
+    }
+
+    /// A curve the backend says is the token's is the same instrument as the hero, so
+    /// it needs no tag either — and one it will not name gets no guess.
+    @Test func aTokenCurveAndAnUnnamedCurveBothGoUntagged() async throws {
+        let token = StubAssetDetailDataSource()
+        token.basis = .token
+        token.basisSymbol = "AAPLx"
+        let tokenModel = AssetDetailModel(symbol: "AAPLx", dataSource: token)
+        await tokenModel.loadChart(range: .oneDay)
+        #expect(tokenModel.move?.basisSymbol == nil)
+
+        let unnamed = AssetDetailModel(symbol: "AAPLx", dataSource: StubAssetDetailDataSource())
+        await unnamed.loadChart(range: .oneDay)
+        #expect(unnamed.move?.basisSymbol == nil)
+    }
+
+    // MARK: - Walking out of a scrub
+
+    /// VoiceOver's adjustable action has no release, so walking forward off the last
+    /// sample is the way back to the live price: the hero unpins, the change row goes
+    /// back to the window's own label, and a poll can flash again.
+    @Test func walkingOffTheEndOfTheCurveRestoresTheLiveHero() async throws {
+        let source = StubAssetDetailDataSource()
+        let model = AssetDetailModel(symbol: "AAPLx", dataSource: source)
+        await model.loadDetail()
+        await model.loadChart(range: .oneDay)
+
+        let count = try #require(model.series).points.count
+        model.scrubbedIndex = MonacoScrubStep.next(from: nil, forward: false, count: count)
+        #expect(model.isScrubbing)
+
+        model.scrubbedIndex = MonacoScrubStep.next(from: model.scrubbedIndex, forward: true, count: count)
+
+        #expect(model.scrubbedIndex == nil)
+        #expect(!model.isScrubbing)
+        #expect(model.heroPriceUsdcMicros == 185_000_000)
+        #expect(model.move?.label == AssetChartRange.oneDay.moveLabel)
+    }
+
+    /// The tick a poll raised while a finger was down lands when the scrub ends,
+    /// rather than being lost: that is why the hero must be able to end a scrub.
+    @Test func theFlashHeldBackByAScrubArrivesWhenItEnds() async throws {
+        let source = StubAssetDetailDataSource()
+        let model = AssetDetailModel(symbol: "AAPLx", dataSource: source)
+        await model.loadDetail()
+        await model.loadChart(range: .oneDay)
+        model.scrubbedIndex = 0
+
+        source.priceUsdcMicros = 186_000_000
+        await model.refreshDetail()
+        #expect(model.heroTick == nil, "a sample from the past must not flash")
+
+        model.scrubbedIndex = MonacoScrubStep.next(from: 0, forward: true, count: 2)
+        model.scrubbedIndex = MonacoScrubStep.next(from: model.scrubbedIndex, forward: true, count: 2)
+
+        #expect(model.scrubbedIndex == nil)
+        #expect(model.heroTick != nil)
     }
 }
