@@ -141,7 +141,7 @@ struct ProposalCardView<Destination: View>: View {
             switch proposal.resolvedKind {
             case "sell":
                 Text(ProposalShareFormatter.sharesLabel(fromAtomics: proposal.tokenAmount ?? "0"))
-                    .font(MonacoTheme.Typo.moneyLarge)
+                    .moneyFont(.large)
                     .foregroundStyle(MonacoTheme.ink)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)

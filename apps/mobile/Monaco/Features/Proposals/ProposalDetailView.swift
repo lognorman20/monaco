@@ -110,7 +110,7 @@ struct ProposalDetailView: View {
                 )
             }
         }
-        .monacoToast($toast, bottomInset: 72)
+        .monacoToast($toast, placement: .aboveBottomCTA)
         .navigationTitle(proposal.map(ProposalFeedCopy.title(for:)) ?? "")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: proposalId) {

@@ -337,7 +337,7 @@ struct ProposeSellReviewView: View {
                         if let estimate = review.estimateMicros {
                             MoneyText(micros: estimate, style: .hero)
                         } else {
-                            Text(review.sharesLabel).font(MonacoTheme.Typo.moneyHero)
+                            Text(review.sharesLabel).moneyFont(.hero)
                         }
                     },
                     stockName: review.name,
