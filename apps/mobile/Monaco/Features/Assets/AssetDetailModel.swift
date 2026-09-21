@@ -127,23 +127,31 @@ final class AssetDetailModel {
     }
 
     /// The figure under the price: the drawn window's move when there is a curve, otherwise the
-    /// 24h move under its own label so the number never claims a period it did not measure.
+    /// stock's day move under its own label ("AAPL day move") so the number never claims a
+    /// period it did not measure, nor to be the token's.
+    ///
+    /// Known gap, owned by stocks-detail-chart: the curve's 1D move measures from the first
+    /// point (the 04:00 ET pre-market bar), not from the chart's `previousCloseUsdcMicros`, and
+    /// "Past day" is shown on a weekend when the session is Friday's.
     var move: Move? {
         if case .series(let points) = chartState, points.count >= 2,
            let first = points.first?.chartValue, let last = points.last?.chartValue, first > 0 {
             return Move(ratio: Self.ratioString(last / first - 1), label: range.moveLabel)
         }
-        guard let change = detail?.change24h, !change.isEmpty else { return nil }
-        return Move(ratio: change, label: AssetChartRange.oneDay.moveLabel)
+        // Only a move the backend labelled as the underlying's; without that basis the ratio
+        // beside the token's price would read as the token's move.
+        guard let dayMove = detail?.stockDayMove else { return nil }
+        return Move(ratio: dayMove.ratio, label: dayMove.caption)
     }
 
     /// What VoiceOver reads for the chart: the range and the move over it, never dollar figures.
     ///
-    /// The headline price is the token's own mark, but the series can be the underlying share's
-    /// price (Pyth) or the token's (Chainlink) depending on backend configuration, and the
-    /// response does not say which. A dollar low/high read from the series could sit in a
-    /// different unit from the price above it. The move is a ratio, so it holds in either unit.
-    /// Dollar figures come back once the chart response labels its basis.
+    /// The headline price is the token's own mark, while the series is usually the underlying
+    /// share's price (Pyth) and only falls back to the token's (Chainlink). The chart response
+    /// now says which (`basis`/`basisSymbol`), but this model keeps only the points, so a dollar
+    /// low/high read here could sit in a different unit from the price above it. The move is a
+    /// ratio, so it holds in either unit. Reading the basis into the summary belongs to
+    /// stocks-detail-chart, which labels whose move the chart is.
     var chartAccessibilitySummary: String {
         let move = move.map { PercentReturnFormatter.format($0.ratio) } ?? "—"
         return "\(range.accessibilityLabel) price history. \(move) \(range.moveLabel.lowercased())."

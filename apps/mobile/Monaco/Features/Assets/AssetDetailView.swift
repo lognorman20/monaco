@@ -90,7 +90,6 @@ struct AssetDetailView: View {
             symbol: detail.symbol,
             name: ProposeStock.displayName(symbol: detail.symbol, catalogName: detail.name),
             priceMicros: detail.priceUsdcMicros,
-            change24h: detail.change24h,
             isTradable: detail.routable
         )
     }

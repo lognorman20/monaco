@@ -55,17 +55,37 @@ final class AssetDetailSampleUITests: XCTestCase {
         )
     }
 
-    /// Every scenario reaches a drawn screen. This is the screenshot sweep: one
-    /// attachment per state the backend can put the screen in.
+    /// Every scenario reaches a drawn screen, with the chart state that scenario
+    /// serves for 1D. One screenshot per scenario is attached.
+    ///
+    /// What this does not check: the stats grid and the stock-vs-token card are not
+    /// drawn by this branch's screen (they land with stocks-detail-cards), so the
+    /// scenarios that differ only there (noRoute, notEntitled, weekend) draw the same
+    /// screen as `open`, and their screenshots show it. `loading` is covered by the
+    /// skeleton, not here: it never finishes.
     @MainActor
-    func testEveryScenarioRendersTheDetailScreen() throws {
-        let scenarios = [
-            "open", "afterHours", "preMarket", "holiday", "sparse",
-            "noRoute", "notEntitled", "fallbackSeries", "chainlinkSeries", "emptyChart", "chartFailed",
+    func testEveryScenarioReachesItsChartState() throws {
+        let chartIdentifierByScenario: [(String, String)] = [
+            ("open", "asset-detail-chart"),
+            ("afterHours", "asset-detail-chart"),
+            ("preMarket", "asset-detail-chart"),
+            ("weekend", "asset-detail-chart"),
+            ("holiday", "asset-detail-chart"),
+            ("sparse", "asset-detail-chart"),
+            ("noRoute", "asset-detail-chart"),
+            ("notEntitled", "asset-detail-chart"),
+            ("fallbackSeries", "asset-detail-chart"),
+            ("chainlinkSeries", "asset-detail-chart"),
+            ("emptyChart", "asset-detail-chart-empty"),
+            ("chartFailed", "asset-detail-chart-failed"),
         ]
-        for scenario in scenarios {
+        for (scenario, chartIdentifier) in chartIdentifierByScenario {
             let app = launch(scenario)
             waitForScreen(app, scenario)
+            XCTAssertTrue(
+                anyElement(app, chartIdentifier).waitForExistence(timeout: 10),
+                "\(scenario) should show \(chartIdentifier)"
+            )
             attachScreenshot(app, name: "asset-detail-\(scenario)")
             app.terminate()
         }
@@ -101,7 +121,8 @@ final class AssetDetailSampleUITests: XCTestCase {
     }
 
     /// The chart's own failure must not take the screen with it: the detail call
-    /// succeeded, so the header and the retry both have to be on screen.
+    /// succeeded, so the header and the retry both have to be on screen. With no
+    /// curve, the figure under the price is the share's day move, and it says so.
     @MainActor
     func testAFailedChartLeavesTheRestOfTheScreenStanding() throws {
         let app = launch("chartFailed")
@@ -109,6 +130,14 @@ final class AssetDetailSampleUITests: XCTestCase {
         XCTAssertTrue(
             anyElement(app, "asset-detail-chart-failed").waitForExistence(timeout: 10)
         )
+        XCTAssertTrue(app.buttons["Retry"].exists, "the failed chart offers a retry")
+        // The header: the hero price and its caption, then the labelled move.
+        let heroPrice = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "232.05")).firstMatch
+        XCTAssertTrue(heroPrice.waitForExistence(timeout: 10), "the hero price is on screen")
+        XCTAssertTrue(app.staticTexts["Apple"].exists, "the hero caption is on screen")
+        let move = anyElement(app, "asset-detail-move")
+        XCTAssertTrue(move.waitForExistence(timeout: 10), "the move under the price is on screen")
+        XCTAssertTrue(move.label.contains("AAPL day move"), "move label = \(move.label)")
         attachScreenshot(app, name: "asset-detail-chart-failed")
     }
 }

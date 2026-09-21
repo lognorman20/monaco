@@ -46,7 +46,10 @@ enum StocksTabSampleData {
             tokenAddress: "0xb2000000000000000000000000000000000000" + suffix,
             routable: true,
             priceUsdcMicros: micros,
-            change24h: change
+            change24h: change,
+            // As the backend sends it: the share's day move, labelled as such.
+            change24hBasis: .underlying,
+            change24hBasisSymbol: AssetSymbolFormatter.display(symbol)
         )
     }
 
@@ -134,6 +137,8 @@ enum StocksTabSampleData {
                 routable: true,
                 priceUsdcMicros: asset.priceUsdcMicros,
                 change24h: asset.change24h,
+                change24hBasis: asset.change24hBasis,
+                change24hBasisSymbol: asset.change24hBasisSymbol,
                 liquidity: AssetLiquidityDTO(
                     label: "Via DEX",
                     routable: true,
