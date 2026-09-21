@@ -46,6 +46,9 @@ func (h *GroupHandlers) potRowResponses(ctx context.Context, rows []app.GroupVie
 		if decorated, ok := market[strings.ToUpper(strings.TrimSpace(row.Symbol))]; ok {
 			resp.Change24h = decorated.Change24h
 			resp.Spark = decorated.Spark
+			resp.SparkBasis = decorated.SparkBasis
+			resp.SparkBasisSymbol = decorated.SparkBasisSymbol
+			resp.ChangeBasis = decorated.ChangeBasis
 			resp.LogoURL = decorated.LogoURL
 		}
 		out = append(out, resp)

@@ -69,6 +69,24 @@ type openProposalRow struct {
 	expiresAt time.Time
 }
 
+const (
+	// heldGroupBudget bounds valuing one cabal. Valuing a pot is a Solana RPC call
+	// and a Pyth mark per holding, so one unresponsive cabal used to hold the whole
+	// "In your cabals" section — and with it the Stocks tab — until the request
+	// context died. A cabal that is merely slow is now dropped for this response
+	// exactly as one that errors is, which is what the section's contract already
+	// said it did.
+	heldGroupBudget = 3 * time.Second
+	// heldGroupConcurrency caps the simultaneous pot valuations one member's
+	// screen can start. This is the expensive fan-out on this route.
+	heldGroupConcurrency = 4
+	// maxScannedGroups caps how many cabals one response scans. A member in fifty
+	// cabals is not a reason for fifty pot valuations per refresh; the sections are
+	// a leaderboard of their own money, and the tail of it is not what they opened
+	// the tab for.
+	maxScannedGroups = 25
+)
+
 // GetHeldAssets answers "what do my cabals own, and what are they voting on" in
 // one pass over the caller's cabals.
 //
@@ -76,12 +94,18 @@ type openProposalRow struct {
 // tab needs both sections before its first scroll, and N round trips from a phone
 // is N chances to arrive after the member has moved on.
 //
-// A cabal that cannot be valued is left out rather than failing the whole answer,
-// and its open votes are still read — the two are separate failures. The
-// alternative is an empty "In your cabals" because one unrelated cabal's treasury
-// did not respond, which reads as "you own nothing", a lie about someone's money.
-// Marks are best-available for the same reason: this is a display aggregate and
-// nothing here moves funds.
+// A cabal that cannot be valued *in budget* is left out rather than failing or
+// delaying the whole answer, and its open votes are still read — the two are
+// separate failures. The alternative is an empty "In your cabals" because one
+// unrelated cabal's treasury did not respond, which reads as "you own nothing", a
+// lie about someone's money. Marks are best-available for the same reason: this is
+// a display aggregate and nothing here moves funds.
+//
+// Nothing on this path writes. The Stocks tab fires it on every appearance and
+// every 45-second refresh, and a read at that cadence is the wrong place to
+// reconcile deposits: the sweep poller already credits uncredited treasury USDC,
+// and this route filters cash out of its answer anyway, so the write it used to do
+// could not change a figure here — it could only make the read fail.
 func (h *HomeService) GetHeldAssets(ctx context.Context, accessToken string) (HeldAssetsResult, error) {
 	ctx = HomeContextWithPotNavCache(ctx)
 	user, joinedGroupIDs, err := h.authenticateHomeUser(ctx, accessToken)
@@ -92,9 +116,8 @@ func (h *HomeService) GetHeldAssets(ctx context.Context, accessToken string) (He
 	if len(joinedGroupIDs) == 0 {
 		return empty, nil
 	}
-
-	if err := h.creditUncreditedForGroups(ctx, joinedGroupIDs); err != nil {
-		return HeldAssetsResult{}, err
+	if len(joinedGroupIDs) > maxScannedGroups {
+		joinedGroupIDs = joinedGroupIDs[:maxScannedGroups]
 	}
 
 	type groupScan struct {
@@ -104,20 +127,32 @@ func (h *HomeService) GetHeldAssets(ctx context.Context, accessToken string) (He
 	scans := make([]groupScan, len(joinedGroupIDs))
 
 	var wg sync.WaitGroup
+	slots := make(chan struct{}, heldGroupConcurrency)
 	for i, groupID := range joinedGroupIDs {
 		wg.Add(1)
 		go func(i int, groupID string) {
 			defer wg.Done()
-			group, found, err := h.store.GetGroupByID(ctx, groupID)
+			select {
+			case slots <- struct{}{}:
+				defer func() { <-slots }()
+			case <-ctx.Done():
+				return
+			}
+			// Each cabal gets its own budget, so one slow treasury costs its own
+			// row and nobody else's.
+			groupCtx, cancel := context.WithTimeout(ctx, heldGroupBudget)
+			defer cancel()
+
+			group, found, err := h.store.GetGroupByID(groupCtx, groupID)
 			if err != nil || !found {
 				return
 			}
-			if holdings, err := h.heldRowsForGroup(ctx, user.ID, groupID, group.Name); err == nil {
+			if holdings, err := h.heldRowsForGroup(groupCtx, user.ID, groupID, group.Name); err == nil {
 				scans[i].holdings = holdings
 			} else {
 				logHeldScanFailed(groupID, err)
 			}
-			if proposals, err := h.openProposalsForGroup(ctx, groupID, group.Name); err == nil {
+			if proposals, err := h.openProposalsForGroup(groupCtx, groupID, group.Name); err == nil {
 				scans[i].proposals = proposals
 			} else {
 				logHeldScanFailed(groupID, err)

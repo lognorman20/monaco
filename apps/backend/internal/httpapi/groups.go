@@ -399,7 +399,15 @@ type groupViewPotRowResponse struct {
 	// holding, and the row renders without them.
 	Change24h *string `json:"change24h,omitempty"`
 	Spark     []int64 `json:"spark,omitempty"`
-	LogoURL   string  `json:"logoUrl,omitempty"`
+	// SparkBasis, SparkBasisSymbol and ChangeBasis name the instrument behind each
+	// of those two figures. Spark comes from Pyth, which serves the underlying
+	// equity; Change24h comes from Jupiter, which prices the xStock token. They
+	// diverge, and a row that drew one and tinted it by the other was asserting
+	// they were the same thing.
+	SparkBasis       string `json:"sparkBasis,omitempty"`
+	SparkBasisSymbol string `json:"sparkBasisSymbol,omitempty"`
+	ChangeBasis      string `json:"changeBasis,omitempty"`
+	LogoURL          string `json:"logoUrl,omitempty"`
 }
 
 type groupViewMemberSliceResponse struct {

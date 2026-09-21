@@ -81,9 +81,24 @@ type marketAssetResponse struct {
 	// Omitted when no series could be sourced in budget — the row then draws no
 	// sparkline rather than a flat line.
 	Spark []int64 `json:"spark,omitempty"`
-	// LogoURL is the company's logo. Omitted until a catalogue source for it
-	// exists; the app falls back to its ticker tile, which is the resting state of
-	// the mark rather than a placeholder.
+	// SparkBasis and SparkBasisSymbol name the instrument Spark is about, and they
+	// are not decoration.
+	//
+	// Change24h is the xStock token's 24h move on Solana, from Jupiter. Spark comes
+	// from Pyth, which serves the *underlying equity* — Apple on NASDAQ, not AAPLx.
+	// The two genuinely diverge, and that divergence is a feature of this product,
+	// not noise. A row that drew one and tinted it by the other was asserting they
+	// were the same instrument. The app tints the drawn line from the drawn series
+	// whenever these two bases disagree, which it can only do if it is told.
+	SparkBasis       string `json:"sparkBasis,omitempty"`
+	SparkBasisSymbol string `json:"sparkBasisSymbol,omitempty"`
+	// ChangeBasis and ChangeBasisSymbol name the instrument Change24h is about,
+	// for the same reason.
+	ChangeBasis       string `json:"changeBasis,omitempty"`
+	ChangeBasisSymbol string `json:"changeBasisSymbol,omitempty"`
+	// LogoURL is the company's logo, as the xStocks catalogue publishes it. Empty
+	// when the catalogue has none, in which case the app falls back to its ticker
+	// tile — the resting state of the mark rather than a placeholder.
 	LogoURL string `json:"logoUrl,omitempty"`
 }
 
@@ -409,20 +424,29 @@ func (h *AssetsHandlers) fetchPrices(ctx context.Context, assets []xstocks.Catal
 func marketAssetResponseFor(
 	asset xstocks.CatalogAsset,
 	prices map[string]jupiter.TokenPrice,
-	sparks map[string][]int64,
+	sparks map[string]rowSeries,
 ) marketAssetResponse {
 	resp := marketAssetResponse{
 		Symbol:     asset.Symbol,
 		Name:       asset.Name,
 		SolanaMint: asset.SolanaMint,
 		Routable:   asset.Routable,
+		LogoURL:    asset.LogoURL,
 	}
 	if price, ok := prices[asset.SolanaMint]; ok && price.PriceUsdcMicros > 0 {
 		resp.PriceUsdcMicros = &price.PriceUsdcMicros
 		resp.Change24h = price.Change24h
+		if price.Change24h != nil {
+			// Jupiter prices the mint, so this move is the xStock's, not the
+			// equity's. The row is told, because the series next to it is not.
+			resp.ChangeBasis = pyth.PriceBasisToken
+			resp.ChangeBasisSymbol = asset.Symbol
+		}
 	}
-	if spark, ok := sparks[asset.SolanaMint]; ok && len(spark) > 1 {
-		resp.Spark = spark
+	if series, ok := sparks[asset.SolanaMint]; ok && len(series.spark) > 1 {
+		resp.Spark = series.spark
+		resp.SparkBasis = series.basis
+		resp.SparkBasisSymbol = series.basisSymbol
 	}
 	return resp
 }
