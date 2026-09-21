@@ -102,26 +102,34 @@ struct StockMarkTests {
         #expect(StockMark.tileText(forTicker: ticker) == expected)
     }
 
-    /// Rows hand StockMark the wire symbol. The Base token suffix is not part of the ticker, so a
-    /// short ticker must not come out with a stray "C" on the tile.
+    /// `StockMark(symbol:)` is handed the wire symbol by most rows and the display ticker by a
+    /// few. Either way the tile shows the ticker: the Base token suffix never reaches it.
     @Test(arguments: [
         ("AAPLc", "AAPL"),
+        ("AAPL", "AAPL"),
         ("GOOGLc", "GOOG"),
         ("Fc", "F"),
         ("GEc", "GE"),
         ("BRK.Bc", "BRK"),
         ("BF.Bc", "BF.B"),
+        (" NVDAc ", "NVDA"),
         // Legacy suffix still reads the same way.
         ("Fx", "F"),
     ])
-    func tileTextDropsTheTokenSuffix(symbol: String, expected: String) {
-        #expect(StockMark.tileText(forTicker: symbol) == expected)
+    func theTileShowsTheTickerForAWireSymbol(symbol: String, expected: String) {
+        #expect(StockMark.content(forSymbol: symbol) == .letter(expected))
     }
 
     /// Only the lowercase suffix is dropped; a ticker that really ends in "C" keeps it.
     @Test func aTickerEndingInACapitalCKeepsIt() {
-        #expect(StockMark.tileText(forTicker: "INTC") == "INTC")
-        #expect(StockMark.tileText(forTicker: "ABC") == "ABC")
+        #expect(StockMark.content(forSymbol: "INTC") == .letter("INTC"))
+        #expect(StockMark.content(forSymbol: "ABC") == .letter("ABC"))
+    }
+
+    /// Cash is a dollar sign, not a "USDC" tile, however the symbol arrives.
+    @Test(arguments: ["USDC", "usdc", " USDC "])
+    func cashShowsADollarSign(symbol: String) {
+        #expect(StockMark.content(forSymbol: symbol) == .symbol("dollarsign"))
     }
 
     /// A separator inside the first four characters is content, not a dangling edge.

@@ -60,7 +60,7 @@ struct CabalMark: View {
 
 /// A stock's tile: sunken fill with a hairline and the ticker. "USDC" (cash) shows a dollar sign.
 struct StockMark: View {
-    private enum Content {
+    enum Content: Equatable {
         case letter(String)
         case symbol(String)
     }
@@ -69,13 +69,20 @@ struct StockMark: View {
     private let size: CGFloat
 
     init(symbol: String, size: CGFloat = 44) {
+        content = StockMark.content(forSymbol: symbol)
+        self.size = size
+    }
+
+    /// What the tile draws for a symbol as callers hold it. Most rows pass the wire symbol
+    /// (`AAPLc`); a few pass the display ticker already. Both go through
+    /// `AssetSymbolFormatter.display` here, once, so the token suffix never reaches the tile and
+    /// `display` being idempotent makes the already-normalised callers read the same.
+    static func content(forSymbol symbol: String) -> Content {
         let ticker = AssetSymbolFormatter.display(symbol)
         if ticker.uppercased() == "USDC" {
-            content = .symbol("dollarsign")
-        } else {
-            content = .letter(StockMark.tileText(forTicker: ticker))
+            return .symbol("dollarsign")
         }
-        self.size = size
+        return .letter(tileText(forTicker: ticker))
     }
 
     /// The whole ticker, up to four characters. One letter is not an identity: nine tickers in
@@ -84,10 +91,10 @@ struct StockMark: View {
     /// A class separator is dropped rather than left hanging: "BRK.B" cut at four characters is
     /// "BRK." reading as an abbreviation of itself.
     ///
-    /// Callers pass the wire symbol (`AAPLc`), so the tile goes through `AssetSymbolFormatter.display`
-    /// first: uppercasing the raw symbol would print the token suffix as part of a short ticker ("Fc" → "FC").
+    /// Takes the display ticker, not the wire symbol: `content(forSymbol:)` strips the token
+    /// suffix before it gets here.
     static func tileText(forTicker ticker: String) -> String {
-        let trimmed = AssetSymbolFormatter.display(ticker).uppercased()
+        let trimmed = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         var tile = String(trimmed.prefix(4))
         while let last = tile.last, last == "." || last == "-" {
             tile.removeLast()
