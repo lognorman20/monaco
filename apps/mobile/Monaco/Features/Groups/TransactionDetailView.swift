@@ -50,6 +50,16 @@ struct TransactionDetailView: View {
         .task(id: loadTaskID) {
             await loadDetail()
         }
+        // A buy or sell opened while it is still going through settles a few seconds later, and
+        // the receipt is exactly where a member watches for that.
+        .pollWhileVisible(every: LiveRefreshCadence.inPlay, isActive: isSwapStillGoingThrough) {
+            guard let token = auth.accessToken else { return }
+            let latest = try await apiClient.getTransactionDetail(accessToken: token, transactionId: detailTransactionId)
+            QuietUpdate.apply(latest, over: transaction) { transaction = $0 }
+        }
+        .refreshable {
+            await loadDetail(showLoadingIndicator: false)
+        }
     }
 
     private var receipt: TransactionReceipt? {
@@ -79,26 +89,39 @@ struct TransactionDetailView: View {
         return GroupActivityRules.canRetry(activityItem)
     }
 
-    private func loadDetail() async {
+    /// A swap the receipt is showing as still on its way. Deposits are read once here.
+    private var isSwapStillGoingThrough: Bool {
+        guard !isDeposit else { return false }
+        let status = transaction?.status ?? activityItem.status
+        return GroupDetailCadence.isStillGoingThrough(status: status)
+    }
+
+    private func loadDetail(showLoadingIndicator: Bool = true) async {
         guard let token = auth.accessToken else {
             isLoading = false
             errorMessage = "Sign in again to see this."
             return
         }
 
-        isLoading = true
+        if showLoadingIndicator { isLoading = true }
         errorMessage = nil
-        defer { isLoading = false }
+        defer {
+            if showLoadingIndicator { isLoading = false }
+        }
 
         do {
             if isDeposit {
                 deposit = try await apiClient.getDeposit(accessToken: token, depositId: activityItem.id)
             } else {
-                transaction = try await apiClient.getTransactionDetail(accessToken: token, transactionId: detailTransactionId)
+                let latest = try await apiClient.getTransactionDetail(accessToken: token, transactionId: detailTransactionId)
+                QuietUpdate.apply(latest, over: transaction) { transaction = $0 }
             }
         } catch is CancellationError {
             return
         } catch {
+            if error.isRequestCancellation { return }
+            // A failed re-read leaves the receipt the member is reading exactly as it was.
+            guard receipt == nil else { return }
             errorMessage = "Couldn't load this. Try again"
         }
     }
