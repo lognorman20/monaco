@@ -5,7 +5,8 @@ import SwiftUI
 /// Debug-only: the group screen and its pushed screens on canned data, no sign-in or backend.
 /// Launch with `-MonacoGroupDetailSample <scenario>`:
 /// `populated` · `empty` · `loading` · `details` (Cabal details sheet open) · `propose` (chooser sheet open)
-/// · `cashOut` · `receipt` (bought) · `receiptFailed` (failed sell) · `activity` (full list).
+/// · `cashOut` · `receipt` (bought) · `receiptFailed` (failed sell) · `activity` (full list)
+/// · `sellAndLeave` (the screen while the slice is being sold).
 enum GroupDetailSampleScenario: String, CaseIterable {
     case populated
     case empty
@@ -16,6 +17,7 @@ enum GroupDetailSampleScenario: String, CaseIterable {
     case receipt
     case receiptFailed
     case activity
+    case sellAndLeave
 
     static let launchArgument = "-MonacoGroupDetailSample"
 
@@ -49,6 +51,10 @@ struct GroupDetailSampleHarness: View {
     @State private var toast: MonacoToast?
     @State private var heroScrolledAway = false
 
+    /// The one scenario that stands in for a leave in flight, read wherever the product reads
+    /// `isLeaving`, so the harness and the product gate on the same thing.
+    private var isLeaving: Bool { scenario == .sellAndLeave }
+
     var body: some View {
         NavigationStack {
             root
@@ -81,7 +87,7 @@ struct GroupDetailSampleHarness: View {
                 .monacoCanvas()
                 .navigationTitle("Weekend investors")
                 .navigationBarTitleDisplayMode(.inline)
-        case .populated, .empty, .details, .propose:
+        case .populated, .empty, .details, .propose, .sellAndLeave:
             groupScreen(scenario == .empty ? GroupDetailSampleData.emptyView : GroupDetailSampleData.view)
         }
     }
@@ -109,18 +115,26 @@ struct GroupDetailSampleHarness: View {
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .monacoCanvas()
+        // The same cover the real screen puts up while a leave is running.
+        .groupLeaveProgress(isLeaving: isLeaving, isSellingSlice: true)
         .navigationTitle(heroScrolledAway ? view.name : "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { showDetails = true } label: { Image(systemName: "info.circle") }
-                    .accessibilityLabel("Cabal details")
+            // `GroupDetailView` drops this item entirely while a leave runs, so the harness
+            // drops it under the same condition. Rendering it regardless would leave the
+            // leave-in-progress test asserting against an item the product never shows.
+            if !isLeaving {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showDetails = true } label: { Image(systemName: "info.circle") }
+                        .accessibilityLabel("Cabal details")
+                        .accessibilityIdentifier("group-details-button")
+                }
             }
         }
         .navigationDestination(item: $route) { route in
             switch route {
-            case .cashOut:
-                SellCabalView(auth: auth, groupId: view.id, maxShareUnits: Int64(view.you.shareUnits) ?? 0, equityUsd: view.you.equityUsd)
+            case .cashOut(let shareUnits, let equityUsd):
+                SellCabalView(auth: auth, groupId: view.id, maxShareUnits: shareUnits, equityUsd: equityUsd)
             case .activity:
                 GroupActivityListView(auth: auth, items: GroupDetailSampleData.activity, retryingTransactionIDs: [], onRetry: { _ in nil })
             case .proposals:
