@@ -187,6 +187,10 @@ struct AssetDetailView: View {
                 proposals: social.openProposals,
                 symbol: symbol
             )
+        } else if social.hasFailed {
+            // A read that failed is not an answer of "nobody holds this". Say so, and
+            // offer the way back — the same retry restores the activity card below.
+            AssetSocialFailedCard(symbol: symbol, retry: { Task { await social.load() } })
         }
         // 2. Stats grid — open/high/low, 52-week range, trading cost      (#342)
         if let grid = AssetStatsGrid.make(model.detail?.stats, currentUsdcMicros: model.detail?.priceUsdcMicros) {
@@ -231,13 +235,13 @@ struct AssetDetailView: View {
                 isRoutable: model.canBuy,
                 liquidityLabel: model.detail?.liquidity.label,
                 holdings: social.holdings,
-                hasLoadedHoldings: social.hasAnswered
+                holdingsState: social.state
             ),
             onBuy: { pickerKind = .buy },
             onSell: { pickerKind = .sell }
         )
         // The sell button arrives with the holdings answer; a fade reads as an answer
         // landing rather than as the layout jumping.
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: social.hasAnswered)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: social.state)
     }
 }

@@ -30,18 +30,22 @@ struct LiveAssetSocialDataSource: AssetSocialDataSource {
 /// cabals, changes when somebody votes, and costs a pot valuation per cabal to read.
 /// Folding it into the detail model would have tied a heavy read to a fast poll.
 ///
-/// A failure here is silent. The cards this feeds are additions to a screen that is
-/// already useful without them, so a social read that does not come back leaves the
-/// price, the chart and the buy button exactly as they were.
+/// A failure here is quiet, not silent. The cards this feeds are additions to a
+/// screen that is already useful without them, so a social read that does not come
+/// back leaves the price, the chart and the buy button exactly as they were — but it
+/// says that it failed, rather than letting an empty card and a missing Sell button
+/// assert that no cabal of the member's holds the stock. That assertion is about
+/// their money, and we do not make it on a read we never got.
 @Observable
 @MainActor
 final class AssetSocialModel {
     let symbol: String
 
     private(set) var social: AssetSocialDTO?
-    /// True once a read has completed, whichever way it went. The trade bar reads
-    /// this: until an answer has landed, "no cabal holds this" is not yet a fact.
-    private(set) var hasAnswered = false
+    /// How far the read has got. The trade bar and the position card both read this:
+    /// until an answer has landed, "no cabal holds this" is not yet a fact, and a
+    /// read that failed never makes it one.
+    private(set) var state: AssetSocialLoadState = .loading
 
     /// Set when the server rejects the session. The data source has already ended it.
     private(set) var sessionExpired = false
@@ -58,6 +62,10 @@ final class AssetSocialModel {
         AssetPositionSummary.make(social, symbol: symbol)
     }
 
+    /// True when the cards should draw the failed state and offer a retry: the read
+    /// did not come back and there is nothing on screen it could have replaced.
+    var hasFailed: Bool { state == .failed }
+
     var openProposals: [AssetProposalDTO] { social?.openProposals ?? [] }
 
     var activity: [AssetActivityDTO] { social?.activity ?? [] }
@@ -67,17 +75,20 @@ final class AssetSocialModel {
     func load() async {
         do {
             social = try await dataSource.social(symbol: symbol)
-            hasAnswered = true
+            state = .answered
         } catch {
             if error.isRequestCancellation { return }
             if case MonacoAPIError.httpStatus(401) = error {
                 sessionExpired = true
                 return
             }
-            // Keep whatever was already on screen. A failed re-read must not empty
-            // a card the member is looking at, and a first failure simply leaves the
-            // cards unbuilt rather than putting an error under the chart.
-            hasAnswered = true
+            // Keep whatever was already on screen: a failed re-read must not empty a
+            // card the member is looking at, and an answer that did land is still the
+            // best one we have. With nothing behind the cards, though, the screen has
+            // to say the read failed — leaving them unbuilt would have the position
+            // card, the activity card and the Sell button all agreeing, wordlessly,
+            // that no cabal of theirs holds this.
+            state = social == nil ? .failed : .answered
         }
     }
 

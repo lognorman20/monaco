@@ -81,7 +81,8 @@ struct AssetTradeBar: View {
 
     @ViewBuilder
     private var sellButton: some View {
-        if case .available(let caption) = state.sell {
+        switch state.sell {
+        case .available(let caption):
             Button(action: onSell) {
                 VStack(spacing: 1) {
                     Text("Propose sell")
@@ -101,6 +102,21 @@ struct AssetTradeBar: View {
             // The button arrives once the holdings answer does. Fading it in reads as
             // an answer landing; appearing instantly reads as a layout jump.
             .transition(.opacity)
+        case .unknown(let notice):
+            // Text, not a disabled button: there is nothing to tap here, and a grey
+            // "Propose sell" would only invite the tap. What matters is that the
+            // missing button stops speaking for a read that never came back — the
+            // card above carries the retry.
+            Text(notice)
+                .font(MonacoTheme.Typo.caption)
+                .foregroundStyle(MonacoTheme.muted)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("asset-trade-bar-sell-unknown")
+                .transition(.opacity)
+        case .hidden:
+            EmptyView()
         }
     }
 

@@ -160,6 +160,28 @@ final class AssetDetailCardsUITests: XCTestCase {
         attachScreenshot(app, name: "asset-detail-not-routable")
     }
 
+    /// A read that failed is not an answer of "nobody holds this". The card says so
+    /// and offers the way back, and the bar does not let a missing Sell button make
+    /// the claim the card refused to make.
+    @MainActor
+    func testAFailedSocialReadSaysSoRatherThanShowingNothing() throws {
+        let app = launch("cabalsFailed")
+        waitForScreen(app, "cabalsFailed")
+
+        XCTAssertTrue(
+            scrollTo(app, "asset-detail-position-failed"),
+            "a failed read drew no card at all, which reads as 'no cabal holds this'"
+        )
+        XCTAssertTrue(app.buttons["asset-position-retry"].exists, "no way back from the failure")
+        XCTAssertTrue(
+            anyElement(app, "asset-trade-bar-sell-unknown").exists,
+            "the bar let an absent Sell button speak for a read that never came back"
+        )
+        XCTAssertFalse(app.buttons["asset-detail-sell"].exists, "Sell on an unknown position would dead-end")
+        XCTAssertTrue(app.buttons["asset-detail-buy"].isEnabled, "buying never depended on this read")
+        attachScreenshot(app, name: "asset-detail-cabals-failed")
+    }
+
     /// A cabal that could not be priced is said out loud. Silence would read as "no
     /// cabal holds this", which is a lie about someone's money.
     @MainActor

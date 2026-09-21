@@ -64,6 +64,10 @@ enum AssetDetailSampleScenario: String, CaseIterable {
     /// A pass where one cabal could not be priced. The card shows what it has and
     /// says what it could not check.
     case cabalsPartial
+    /// The social read fails outright. The card must say so and offer a retry, and
+    /// the trade bar must not let a missing Sell button claim the member holds
+    /// nothing — they may well hold this in three cabals.
+    case cabalsFailed
     /// Nothing can be bought: the trade bar carries the reason next to the button
     /// it disables.
     case notRoutable
@@ -128,7 +132,7 @@ private final class AssetDetailSampleDataSource: AssetDetailDataSource {
         detailCalls += 1
         switch scenario {
         case .open, .fallbackSeries, .emptyChart, .chartFailed, .loading, .slowRange, .staleRange, .tickingChart,
-             .cabals, .oneCabal, .noCabals, .cabalsPartial:
+             .cabals, .oneCabal, .noCabals, .cabalsPartial, .cabalsFailed:
             return MarketSampleData.detail()
         case .notRoutable:
             return unroutableDetail()
@@ -245,6 +249,8 @@ private struct AssetDetailSampleSocialSource: AssetSocialDataSource {
             return AssetSocialSampleData.partial(symbol: symbol)
         case .noCabals, .sparse, .notRoutable:
             return AssetSocialSampleData.empty(symbol: symbol)
+        case .cabalsFailed:
+            throw SampleSocialFailure()
         case .loading:
             // Never answers, so the screen can be screenshotted with the cards still
             // unbuilt and the trade bar still holding back its sell.
@@ -257,4 +263,5 @@ private struct AssetDetailSampleSocialSource: AssetSocialDataSource {
 }
 
 private struct SampleChartFailure: Error {}
+private struct SampleSocialFailure: Error {}
 #endif

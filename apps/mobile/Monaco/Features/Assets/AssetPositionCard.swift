@@ -114,6 +114,38 @@ struct AssetPositionCard: View {
     }
 }
 
+/// The position slot when the social read did not come back.
+///
+/// One card, not two: the holdings, the votes and the activity are all one call, so
+/// one notice explains all three and one retry brings all three back. What it must
+/// never do is stay quiet — an absent card reads as "no cabal of yours holds this",
+/// which is a claim about the member's money that we have no answer to make.
+///
+/// The wording is `AssetSocialFailureCopy` (MonacoCore, tested).
+struct AssetSocialFailedCard: View {
+    let symbol: String
+    let retry: () -> Void
+
+    var body: some View {
+        AssetDetailCard(
+            title: AssetSocialFailureCopy.cardTitle,
+            identifier: "asset-detail-position-failed"
+        ) {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+                Label(AssetSocialFailureCopy.message(symbol: symbol), systemImage: "exclamationmark.triangle")
+                    .font(MonacoTheme.Typo.callout)
+                    .foregroundStyle(MonacoTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(AssetSocialFailureCopy.spoken(symbol: symbol))
+                Button(AssetSocialFailureCopy.retryTitle, action: retry)
+                    .buttonStyle(.monacoSecondary)
+                    .accessibilityIdentifier("asset-position-retry")
+            }
+        }
+    }
+}
+
 /// One cabal's line: who, how much, and what it has done.
 private struct HoldingRow: View {
     let holding: AssetHoldingDTO

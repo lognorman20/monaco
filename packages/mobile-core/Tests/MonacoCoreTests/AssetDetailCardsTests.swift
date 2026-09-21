@@ -293,8 +293,9 @@ final class AssetActivityCopyTests: XCTestCase {
 /// The sticky trade bar.
 final class AssetTradeBarStateTests: XCTestCase {
     func testNoCabalHoldsIt_hidesSellRatherThanOfferingADeadEnd() {
-        let bar = AssetTradeBarState.make(isRoutable: true, holdings: [], hasLoadedHoldings: true)
+        let bar = AssetTradeBarState.make(isRoutable: true, holdings: [], holdingsState: .answered)
         XCTAssertFalse(bar.showsSell)
+        XCTAssertEqual(bar.sell, .hidden)
         XCTAssertTrue(bar.canBuy)
         XCTAssertEqual(bar.buyTitle, "Propose buy")
     }
@@ -305,16 +306,39 @@ final class AssetTradeBarStateTests: XCTestCase {
         let bar = AssetTradeBarState.make(
             isRoutable: true,
             holdings: [AssetSocialSampleData.weekendInvestors],
-            hasLoadedHoldings: false
+            holdingsState: .loading
         )
         XCTAssertFalse(bar.showsSell)
+        XCTAssertEqual(bar.sell, .hidden)
+    }
+
+    /// The bug this case exists for: a failed read used to be indistinguishable from
+    /// "no cabal of yours holds this", so a member with units in three cabals got a
+    /// screen with no Sell button and no explanation.
+    func testAFailedRead_saysSoInsteadOfClaimingNothingIsHeld() {
+        let bar = AssetTradeBarState.make(isRoutable: true, holdings: [], holdingsState: .failed)
+        XCTAssertFalse(bar.showsSell)
+        XCTAssertEqual(bar.sell, .unknown(notice: "Couldn't check what your cabals hold"))
+        XCTAssertNotEqual(bar.sell, .hidden, "silence here is the lie")
+        XCTAssertTrue(bar.canBuy, "the buy path never depended on this read")
+    }
+
+    /// A re-read that failed does not take a position away: the holdings already in
+    /// hand are still sellable.
+    func testAFailedRereadKeepsSellOnTheHoldingsAlreadyInHand() {
+        let bar = AssetTradeBarState.make(
+            isRoutable: true,
+            holdings: [AssetSocialSampleData.weekendInvestors],
+            holdingsState: .failed
+        )
+        XCTAssertEqual(bar.sell, .available(caption: "Weekend investors"))
     }
 
     func testOneHolder_namesTheCabalUnderSell() {
         let bar = AssetTradeBarState.make(
             isRoutable: true,
             holdings: [AssetSocialSampleData.weekendInvestors],
-            hasLoadedHoldings: true
+            holdingsState: .answered
         )
         XCTAssertEqual(bar.sell, .available(caption: "Weekend investors"))
     }
@@ -323,7 +347,7 @@ final class AssetTradeBarStateTests: XCTestCase {
         let bar = AssetTradeBarState.make(
             isRoutable: true,
             holdings: [AssetSocialSampleData.weekendInvestors, AssetSocialSampleData.deskLunch],
-            hasLoadedHoldings: true
+            holdingsState: .answered
         )
         XCTAssertEqual(bar.sell, .available(caption: "2 cabals"))
     }
@@ -331,14 +355,56 @@ final class AssetTradeBarStateTests: XCTestCase {
     /// An unroutable token says so inside the bar, where the button is, rather than
     /// as a toast after a tap that was never going to work.
     func testUnroutable_explainsItselfInTheBar() throws {
-        let bar = AssetTradeBarState.make(isRoutable: false, holdings: [], hasLoadedHoldings: true)
+        let bar = AssetTradeBarState.make(isRoutable: false, holdings: [], holdingsState: .answered)
         XCTAssertFalse(bar.canBuy)
         XCTAssertTrue(try XCTUnwrap(bar.buyDisabledReason).hasPrefix("Can't be bought right now."))
         XCTAssertNil(bar.caption, "no promise about voting on a trade that cannot happen")
     }
 
     func testCaption_saysWhatTheButtonActuallyDoes() {
-        let bar = AssetTradeBarState.make(isRoutable: true, holdings: [], hasLoadedHoldings: true)
+        let bar = AssetTradeBarState.make(isRoutable: true, holdings: [], holdingsState: .answered)
         XCTAssertEqual(bar.caption, "Your cabal votes before anything is bought")
+    }
+}
+
+/// What the screen says when the social read did not come back.
+final class AssetSocialFailureCopyTests: XCTestCase {
+    /// One call behind three cards, so one sentence and one retry cover all of it.
+    func testTheMessageCoversTheWholeReadAndNamesTheTicker() {
+        XCTAssertEqual(
+            AssetSocialFailureCopy.message(symbol: "AAPLx"),
+            "Couldn't load what your cabals hold, or what they've done with AAPLx."
+        )
+        XCTAssertEqual(AssetSocialFailureCopy.cardTitle, "Your cabals' position")
+        XCTAssertEqual(AssetSocialFailureCopy.retryTitle, "Retry")
+    }
+
+    /// Never the empty-state wording. "No cabal of yours holds this" is an answer,
+    /// and a failed read does not have one.
+    func testTheFailureNeverClaimsNothingIsHeld() {
+        let said = [
+            AssetSocialFailureCopy.message(symbol: "AAPLx"),
+            AssetSocialFailureCopy.sellUnknown,
+            AssetSocialFailureCopy.spoken(symbol: "AAPLx"),
+        ]
+        for sentence in said {
+            XCTAssertFalse(
+                sentence.lowercased().contains("no cabal"),
+                "\(sentence) asserts an answer the read never gave"
+            )
+        }
+    }
+
+    func testSpokenIsOneSentenceForVoiceOver() {
+        XCTAssertEqual(
+            AssetSocialFailureCopy.spoken(symbol: "AAPLx"),
+            "Your cabals' position. Couldn't load what your cabals hold, or what they've done with AAPLx."
+        )
+    }
+
+    func testTheLoadStateKnowsAnAnswerFromAFailure() {
+        XCTAssertTrue(AssetSocialLoadState.answered.isAnswered)
+        XCTAssertFalse(AssetSocialLoadState.failed.isAnswered)
+        XCTAssertFalse(AssetSocialLoadState.loading.isAnswered)
     }
 }
