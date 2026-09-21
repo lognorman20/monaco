@@ -56,7 +56,7 @@ struct CabalHoldingsModelTests {
         let source = StubCabalHoldingsDataSource()
         source.potsByGroup = [
             "a": [holding("AAPLc")],
-            "b": [holding("TSLAx")],
+            "b": [holding("TSLAc")],
             "c": [holding("AAPLc")],
         ]
         let model = CabalHoldingsModel(symbol: "AAPLc", dataSource: source)
@@ -116,7 +116,7 @@ struct CabalHoldingsModelTests {
     /// the count is what lets the picker say "couldn't check" instead of "nobody holds it".
     @Test func aCabalThatDidNotAnswerIsCountedRatherThanCountedOut() async throws {
         let source = StubCabalHoldingsDataSource()
-        source.potsByGroup = ["a": [holding("TSLAx")]]
+        source.potsByGroup = ["a": [holding("TSLAc")]]
         source.errorsByGroup = ["b": Monaco.MonacoAPIError.httpStatus(500)]
         let model = CabalHoldingsModel(symbol: "AAPLc", dataSource: source)
 

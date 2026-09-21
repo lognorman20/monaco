@@ -217,9 +217,9 @@ struct StocksTabModelTests {
         let source = StubStocksDataSource()
         let model = StocksTabModel(dataSource: source)
 
-        model.seedPopular([StubStocksDataSource.asset(symbol: "NVDAx")])
+        model.seedPopular([StubStocksDataSource.asset(symbol: "NVDAc")])
         #expect(model.popularState == .loaded)
-        #expect(model.popular.map(\.symbol) == ["NVDAx"])
+        #expect(model.popular.map(\.symbol) == ["NVDAc"])
 
         await model.refreshPopularIfStale()
         #expect(source.popularCalls == 1)
