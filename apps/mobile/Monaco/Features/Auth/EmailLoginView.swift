@@ -12,7 +12,7 @@ struct EmailLoginView: View {
                 prompt: "Email address",
                 keyboardType: .emailAddress,
                 contentType: .emailAddress,
-                invalidHint: "Enter an email address, like you@example.com.",
+                invalidHint: { _ in "Enter an email address, like you@example.com." },
                 changeLabel: "Change email",
                 addressFieldIdentifier: "emailAddressField",
                 identifierPrefix: "email",

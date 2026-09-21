@@ -11,8 +11,9 @@ struct OTPLoginForm: View {
         let prompt: String
         let keyboardType: UIKeyboardType
         let contentType: UITextContentType
-        /// Shown under the field once what's typed can't be sent to.
-        let invalidHint: String
+        /// Shown under the field once what's typed can't be sent to. Given what was typed,
+        /// so it can say why rather than repeat the same instruction.
+        let invalidHint: (String) -> String
         let changeLabel: String
         let addressFieldIdentifier: String
         let identifierPrefix: String
@@ -66,7 +67,7 @@ struct OTPLoginForm: View {
                 }
 
             if showsAddressHint {
-                Text(destination.invalidHint)
+                Text(destination.invalidHint(address))
                     .font(.footnote)
                     .foregroundStyle(MonacoTheme.secondaryText)
                     .accessibilityIdentifier("\(destination.identifierPrefix)AddressHint")

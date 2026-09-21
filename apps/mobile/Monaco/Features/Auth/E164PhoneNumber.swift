@@ -29,6 +29,27 @@ struct E164PhoneNumber: Equatable {
     /// A bare 10-digit number, or 11 starting with 1, is taken as US. Everything else needs
     /// its country code, written either as "+44…" or as "0044…".
     init?(_ input: String) {
+        guard let international = Self.internationalDigits(input) else { return nil }
+        // A country code we cannot name cannot be sent: Dynamic needs the region, and
+        // guessing one would text somebody else's number.
+        guard let country = Self.callingCode(prefixing: international) else { return nil }
+
+        value = "+" + international
+        countryCode = country.code
+        regionCode = country.region
+    }
+
+    /// True when `input` is a well-formed international number whose country calling code
+    /// we cannot name yet. The form says so, rather than asking a member whose number is
+    /// perfectly valid to add a country code they already typed.
+    static func isUnsupportedCountry(_ input: String) -> Bool {
+        guard let international = internationalDigits(input) else { return false }
+        return callingCode(prefixing: international) == nil
+    }
+
+    /// The digits after the "+", country code first, when `input` is shaped like a number
+    /// sign-in could send to. Whether the country code is one we can name is checked apart.
+    private static func internationalDigits(_ input: String) -> String? {
         var digits = ""
         var leadsWithPlus = false
         for scalar in input.unicodeScalars {
@@ -69,13 +90,7 @@ struct E164PhoneNumber: Equatable {
         // The single length rule: E.164 allows at most 15 digits, and nothing shorter than
         // 8 reaches a mobile phone anywhere.
         guard (8...15).contains(international.count), !international.hasPrefix("0") else { return nil }
-        // A country code we cannot name cannot be sent: Dynamic needs the region, and
-        // guessing one would text somebody else's number.
-        guard let country = Self.callingCode(prefixing: international) else { return nil }
-
-        value = "+" + international
-        countryCode = country.code
-        regionCode = country.region
+        return international
     }
 
     /// "(555) 123-4567" for US numbers, otherwise the E.164 form.

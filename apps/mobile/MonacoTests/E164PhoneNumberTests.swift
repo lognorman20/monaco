@@ -105,6 +105,19 @@ struct E164PhoneNumberTests {
         #expect(E164PhoneNumber("+299 32 1234") == nil)
     }
 
+    /// A refused country is told apart from a malformed number, so the form can say the
+    /// country is not supported instead of asking for a country code that is already there.
+    @Test func anUnsupportedCountryIsToldApartFromAMalformedNumber() {
+        #expect(E164PhoneNumber.isUnsupportedCountry("+299 32 1234"))
+        #expect(!E164PhoneNumber.isUnsupportedCountry("+65 9123 4567"))
+        #expect(!E164PhoneNumber.isUnsupportedCountry("3475757"))
+        #expect(!E164PhoneNumber.isUnsupportedCountry("+1 555 12a 4567"))
+        #expect(!E164PhoneNumber.isUnsupportedCountry(""))
+
+        #expect(SMSLoginView.invalidHint(for: "+299 32 1234").contains("in that country yet"))
+        #expect(SMSLoginView.invalidHint(for: "3475757").contains("country code"))
+    }
+
     @Test func usNumbersReadBackTheWayTheyWereTyped() {
         #expect(E164PhoneNumber("+15551234567")?.displayValue == "(555) 123-4567")
         #expect(E164PhoneNumber("+442079460958")?.displayValue == "+442079460958")

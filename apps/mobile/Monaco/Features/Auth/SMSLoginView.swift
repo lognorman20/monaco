@@ -12,7 +12,7 @@ struct SMSLoginView: View {
                 prompt: "Phone number",
                 keyboardType: .phonePad,
                 contentType: .telephoneNumber,
-                invalidHint: "Enter a mobile number with its country code, like +1 555 123 4567.",
+                invalidHint: Self.invalidHint(for:),
                 changeLabel: "Change number",
                 addressFieldIdentifier: "smsPhoneField",
                 identifierPrefix: "sms",
@@ -24,6 +24,15 @@ struct SMSLoginView: View {
                 await auth.loginWithSMSCode(code, sentTo: phoneNumber)
             }
         )
+    }
+
+    /// A member with a valid number from a country we cannot text yet is told that, rather
+    /// than being asked for the country code they already entered.
+    static func invalidHint(for input: String) -> String {
+        if E164PhoneNumber.isUnsupportedCountry(input) {
+            return "We can’t text numbers in that country yet."
+        }
+        return "Enter a mobile number with its country code, like +1 555 123 4567."
     }
 }
 
