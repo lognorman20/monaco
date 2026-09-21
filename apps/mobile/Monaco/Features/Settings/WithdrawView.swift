@@ -7,16 +7,18 @@ struct WithdrawView: View {
 
     private let apiClient = MonacoAPIClient()
 
-    @State private var balance: PlatformBalanceDTO?
+    @StateObject private var balanceLoader = PlatformBalanceLoader()
     @State private var destinationAddress = ""
     @State private var amountText = ""
-    @State private var isLoadingBalance = true
     @State private var isSubmitting = false
     @State private var showConfirm = false
-    @State private var errorMessage: String?
     /// Shown on the confirm screen, which covers this screen's toast while it is pushed.
     @State private var submitFailure: FlowFailure?
     @State private var toast: MonacoToast?
+
+    private var balance: PlatformBalanceDTO? {
+        balanceLoader.balance
+    }
 
     private var maxDollars: Decimal? {
         guard let micros = balance?.availableUsdcMicros, micros > 0 else { return nil }
@@ -43,12 +45,23 @@ struct WithdrawView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
-                if isLoadingBalance {
+                switch balanceLoader.phase {
+                case .loading:
                     ProgressView()
                         .tint(MonacoTheme.accent)
                         .frame(maxWidth: .infinity)
                         .padding(.top, MonacoTheme.Space.xl)
-                } else {
+                        .accessibilityIdentifier("withdraw-loading")
+                case .failed(let message):
+                    EmptyState(
+                        title: "Balance unavailable",
+                        message: message,
+                        actionTitle: "Try again",
+                        action: { Task { await balanceLoader.load(accessToken: auth.accessToken) } }
+                    )
+                    .padding(.top, MonacoTheme.Space.xl)
+                    .accessibilityIdentifier("withdraw-balance-error")
+                case .loaded:
                     AmountEntry(
                         amountText: $amountText,
                         max: maxDollars,
@@ -69,20 +82,17 @@ struct WithdrawView: View {
                         }
                     }
                 }
-
-                if let errorMessage, balance == nil, !isLoadingBalance {
-                    Text(errorMessage)
-                        .font(MonacoTheme.Typo.callout)
-                        .foregroundStyle(MonacoTheme.warning)
-                }
             }
             .padding(.horizontal, MonacoTheme.Space.gutter)
             .padding(.top, MonacoTheme.Space.m)
             .padding(.bottom, MonacoTheme.Space.xl)
         }
+        // The decimal pad covers the destination field, and a decimal pad has no return key:
+        // dragging the list is the member's way back to the address.
+        .scrollDismissesKeyboard(.interactively)
         .monacoCanvas()
         .safeAreaInset(edge: .bottom) {
-            if !isLoadingBalance {
+            if showsForm {
                 BottomCTA {
                     Button("Continue") {
                         submitFailure = nil
@@ -107,8 +117,15 @@ struct WithdrawView: View {
             )
         }
         .task(id: auth.accessToken) {
-            await loadBalance()
+            await balanceLoader.load(accessToken: auth.accessToken)
         }
+    }
+
+    /// The amount pad, the destination field and the button belong together: whenever one is on
+    /// screen, so are the others. A reload never takes them away mid-entry.
+    private var showsForm: Bool {
+        if case .loaded = balanceLoader.phase { return true }
+        return false
     }
 
     private var balanceHelper: String {
@@ -116,41 +133,16 @@ struct WithdrawView: View {
         return "\(UsdAmountFormatter.format(micros: balance.availableUsdcMicros)) available"
     }
 
-    private func loadBalance() async {
-        guard let token = auth.accessToken else {
-            balance = nil
-            errorMessage = "Sign in to view your account balance."
-            isLoadingBalance = false
-            return
-        }
-
-        isLoadingBalance = true
-        errorMessage = nil
-        do {
-            balance = try await apiClient.getPlatformBalance(accessToken: token)
-        } catch MonacoAPIError.httpStatus {
-            errorMessage = "Couldn't load your balance. Pull down to try again."
-            balance = nil
-        } catch {
-            errorMessage = "No connection. Check your internet and try again."
-            balance = nil
-        }
-        isLoadingBalance = false
-    }
-
     private func submitWithdrawal() async {
         // The disabled state only lands on the next render; a second tap in the same frame
         // must not start a second transfer.
         guard !isSubmitting else { return }
         guard let token = auth.accessToken else { return }
-        guard let value = AmountEntryText.decimal(amountText), value > 0 else {
+        guard let value = AmountEntryText.decimal(amountText), value > 0,
+              let micros = AmountEntryText.micros(amountText) else {
             toast = MonacoToast(message: "Enter a valid amount.", isSuccess: false)
             return
         }
-        var rounded = Decimal()
-        var scaled = value * 1_000_000
-        NSDecimalRound(&rounded, &scaled, 0, .plain)
-        let micros = (rounded as NSDecimalNumber).int64Value
 
         guard case .success(let address) = addressValidation else { return }
         if let available = balance?.availableUsdcMicros, micros > available {
@@ -175,7 +167,7 @@ struct WithdrawView: View {
             destinationAddress = ""
             amountText = ""
             showConfirm = false
-            await loadBalance()
+            await balanceLoader.load(accessToken: token)
         } catch {
             if error.isRequestCancellation { return }
             submitFailure = MoneyFlowCopy.cashOutFailure(FlowErrorInput(error))

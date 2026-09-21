@@ -11,12 +11,10 @@ struct FundCabalView: View {
 
     private let apiClient = MonacoAPIClient()
 
-    @State private var balance: PlatformBalanceDTO?
+    @StateObject private var balanceLoader = PlatformBalanceLoader()
     @State private var selectedGroupId: String?
     @State private var amountText = ""
-    @State private var isLoadingBalance = true
     @State private var isSubmitting = false
-    @State private var errorMessage: String?
     @State private var toast: MonacoToast?
 
     private var isSingleCabalContext: Bool {
@@ -27,9 +25,8 @@ struct FundCabalView: View {
         joinedCabals.first(where: { $0.groupId == selectedGroupId })?.name
     }
 
-    private var screenTitle: String {
-        guard let selectedCabalName else { return "Add money" }
-        return "Add money to \(selectedCabalName)"
+    private var balance: PlatformBalanceDTO? {
+        balanceLoader.balance
     }
 
     private var maxDollars: Decimal? {
@@ -37,9 +34,15 @@ struct FundCabalView: View {
         return Decimal(micros) / Decimal(1_000_000)
     }
 
-    private var showDepositPrompt: Bool {
-        guard let balance, !isLoadingBalance else { return false }
+    private var hasNothingToFundWith: Bool {
+        guard let balance else { return false }
         return balance.availableUsdcMicros <= 0
+    }
+
+    /// The amount pad and its button belong together: whenever one is on screen, so is the other.
+    private var showsAmountEntry: Bool {
+        guard case .loaded = balanceLoader.phase else { return false }
+        return !joinedCabals.isEmpty && !hasNothingToFundWith
     }
 
     private var ctaTitle: String {
@@ -60,31 +63,33 @@ struct FundCabalView: View {
                     cabalPicker
                 }
 
-                if isLoadingBalance {
+                switch balanceLoader.phase {
+                case .loading:
                     ProgressView()
                         .tint(MonacoTheme.accent)
                         .frame(maxWidth: .infinity)
                         .padding(.top, MonacoTheme.Space.xl)
-                } else if joinedCabals.isEmpty {
-                    Text("Join a cabal first, then fund it from your account balance.")
-                        .font(MonacoTheme.Typo.body)
-                        .foregroundStyle(MonacoTheme.muted)
-                } else if showDepositPrompt {
-                    depositPrompt
-                } else {
-                    AmountEntry(
-                        amountText: $amountText,
-                        max: maxDollars,
-                        presets: [.dollars(25), .dollars(50), .dollars(100), .fraction(1, label: "Max")],
-                        helper: "From your account balance"
-                    )
-                    .padding(.top, MonacoTheme.Space.l)
-                }
-
-                if let errorMessage, balance == nil, !isLoadingBalance {
-                    Text(errorMessage)
-                        .font(MonacoTheme.Typo.callout)
-                        .foregroundStyle(MonacoTheme.warning)
+                        .accessibilityIdentifier("fund-cabal-loading")
+                case .failed(let message):
+                    balanceUnavailable(message)
+                case .loaded(let balance):
+                    PlatformBalanceCard(balance: balance)
+                    if joinedCabals.isEmpty {
+                        Text("Join a cabal first, then fund it from your account balance.")
+                            .font(MonacoTheme.Typo.body)
+                            .foregroundStyle(MonacoTheme.muted)
+                    } else if hasNothingToFundWith {
+                        depositPrompt
+                    } else {
+                        AmountEntry(
+                            amountText: $amountText,
+                            max: maxDollars,
+                            presets: [.dollars(25), .dollars(50), .dollars(100), .fraction(1, label: "Max")],
+                            helper: "From your account balance",
+                            showsKeyboardDoneButton: true
+                        )
+                        .padding(.top, MonacoTheme.Space.l)
+                    }
                 }
             }
             .padding(.horizontal, MonacoTheme.Space.gutter)
@@ -93,7 +98,7 @@ struct FundCabalView: View {
         }
         .monacoCanvas()
         .safeAreaInset(edge: .bottom) {
-            if !showDepositPrompt, !joinedCabals.isEmpty, !isLoadingBalance {
+            if showsAmountEntry {
                 BottomCTA {
                     Button(isSubmitting ? "Adding money…" : ctaTitle) {
                         Task { await submitFund() }
@@ -104,15 +109,18 @@ struct FundCabalView: View {
                 }
             }
         }
-        .navigationTitle(screenTitle)
+        .navigationTitle("Add money")
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("fund-cabal-view")
         .monacoToast($toast, bottomInset: 72)
         .task(id: auth.accessToken) {
-            await loadBalance()
             if selectedGroupId == nil {
                 selectedGroupId = preselectedGroupId ?? joinedCabals.first?.groupId
             }
+            await balanceLoader.load(accessToken: auth.accessToken)
+        }
+        .pollWhileVisible(every: AddMoneyPolling.balanceInterval, isActive: auth.accessToken != nil) {
+            try await refreshBalance()
         }
     }
 
@@ -128,6 +136,17 @@ struct FundCabalView: View {
             .tint(MonacoTheme.ink)
             .accessibilityIdentifier("fund-cabal-picker")
         }
+    }
+
+    private func balanceUnavailable(_ message: String) -> some View {
+        EmptyState(
+            title: "Balance unavailable",
+            message: message,
+            actionTitle: "Try again",
+            action: { Task { await balanceLoader.load(accessToken: auth.accessToken) } }
+        )
+        .padding(.top, MonacoTheme.Space.xl)
+        .accessibilityIdentifier("fund-cabal-balance-error")
     }
 
     private var depositPrompt: some View {
@@ -168,26 +187,13 @@ struct FundCabalView: View {
         toast = MonacoToast(message: "Address copied.", isSuccess: true)
     }
 
-    private func loadBalance() async {
-        guard let token = auth.accessToken else {
-            balance = nil
-            errorMessage = "Sign in to view your account balance."
-            isLoadingBalance = false
-            return
+    /// The background poll. It never shows a spinner or an error; it only announces money arriving.
+    private func refreshBalance() async throws {
+        let hadNothing = (balance?.availableUsdcMicros ?? 0) == 0
+        guard let fresh = try await balanceLoader.refresh(accessToken: auth.accessToken) else { return }
+        if hadNothing, fresh.availableUsdcMicros > 0 {
+            toast = MonacoToast(message: "USDC arrived. You can fund your cabal now.", isSuccess: true)
         }
-
-        isLoadingBalance = true
-        errorMessage = nil
-        do {
-            balance = try await apiClient.getPlatformBalance(accessToken: token)
-        } catch MonacoAPIError.httpStatus {
-            errorMessage = "Couldn't load your balance. Pull down to try again."
-            balance = nil
-        } catch {
-            errorMessage = "No connection. Check your internet and try again."
-            balance = nil
-        }
-        isLoadingBalance = false
     }
 
     private func submitFund() async {
@@ -196,14 +202,10 @@ struct FundCabalView: View {
         guard !isSubmitting else { return }
         guard let token = auth.accessToken else { return }
         guard let groupId = selectedGroupId else { return }
-        guard let value = AmountEntryText.decimal(amountText), value > 0 else {
+        guard let value = AmountEntryText.decimal(amountText), value > 0, let micros = AmountEntryText.micros(amountText) else {
             toast = MonacoToast(message: "Enter a valid amount.", isSuccess: false)
             return
         }
-        var rounded = Decimal()
-        var scaled = value * 1_000_000
-        NSDecimalRound(&rounded, &scaled, 0, .plain)
-        let micros = (rounded as NSDecimalNumber).int64Value
         if let available = balance?.availableUsdcMicros, micros > available {
             toast = MonacoToast(message: "More than you have. Try a smaller amount.", isSuccess: false)
             return
@@ -218,7 +220,9 @@ struct FundCabalView: View {
             let name = selectedCabalName ?? "your cabal"
             toast = MonacoToast(message: "Added \(AmountEntryText.display(amountText)) to \(name).", isSuccess: true)
             amountText = ""
-            await loadBalance()
+            // A reload here leaves the amount pad and the button exactly where they are: the
+            // loader keeps the balance on screen while it refreshes.
+            await balanceLoader.load(accessToken: token)
             await onFunded()
         } catch {
             if error.isRequestCancellation { return }

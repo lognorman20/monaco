@@ -140,7 +140,9 @@ struct DepositView: View {
             }
             depositAddress = address
         } catch MonacoAPIError.httpStatus {
-            errorMessage = "Couldn't load your deposit address. Pull down to try again."
+            // The Try again button in this section is the way back, so the copy does not send the
+            // member pulling on a screen that has no pull-to-refresh.
+            errorMessage = "Couldn't load your deposit address."
         } catch {
             errorMessage = "No connection. Check your internet and try again."
         }
