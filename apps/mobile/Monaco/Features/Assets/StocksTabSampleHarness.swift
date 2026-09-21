@@ -180,17 +180,24 @@ enum StocksTabSampleData {
         func buyQuote(groupId: String, symbol: String, usdcMicros: Int64) async throws -> BuyQuoteDTO {
             try await Task.sleep(for: .milliseconds(300))
             let price = catalog.first { $0.symbol == symbol }?.priceUsdcMicros ?? 100_000_000
-            let atomics = usdcMicros * 100_000_000 / price
+            let atomics = Self.mulDiv(usdcMicros, 100_000_000, price)
             return BuyQuoteDTO(
                 symbol: symbol, kind: "buy", usdcMicros: String(usdcMicros), tokenAmount: nil,
                 routable: true, outputAmount: String(atomics), outputUsdcMicros: nil, priceUsdcMicros: String(price)
             )
         }
 
+        /// `a * b / c` rounded down, without the Int64 overflow the plain product hits past
+        /// about $92k of input.
+        private static func mulDiv(_ a: Int64, _ b: Int64, _ c: Int64) -> Int64 {
+            let (high, low) = a.multipliedFullWidth(by: b)
+            return c.dividingFullWidth((high, low)).quotient
+        }
+
         func sellQuote(groupId: String, symbol: String, tokenAmount: Int64) async throws -> BuyQuoteDTO {
             try await Task.sleep(for: .milliseconds(300))
             let price = catalog.first { $0.symbol == symbol }?.priceUsdcMicros ?? 100_000_000
-            let usdc = tokenAmount * price / 100_000_000
+            let usdc = Self.mulDiv(tokenAmount, price, 100_000_000)
             return BuyQuoteDTO(
                 symbol: symbol, kind: "sell", usdcMicros: nil, tokenAmount: String(tokenAmount),
                 routable: true, outputAmount: String(usdc), outputUsdcMicros: String(usdc), priceUsdcMicros: nil
