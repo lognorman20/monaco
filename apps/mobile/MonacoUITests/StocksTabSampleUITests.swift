@@ -142,10 +142,15 @@ final class StocksTabSampleUITests: XCTestCase {
         XCTAssertTrue(anyElement(app, "assets-row-TSLAx").waitForExistence(timeout: 25), "search results never drew")
         XCTAssertFalse(app.staticTexts["In your cabals"].exists, "a search is a different question")
 
-        // Clearing puts the four sections back.
+        // Clearing puts the sections back. Asked of the first section rather than
+        // "Popular": the browse list is a LazyVStack, and with the keyboard still up
+        // the viewport is short enough that the fourth section is not built yet.
+        // "In your cabals" is always built, so it is the honest signal that browsing
+        // came back — waiting on a section that may never be instantiated is a test
+        // that fails for a reason that has nothing to do with the behaviour.
         app.buttons["Clear search"].firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Popular"].waitForExistence(timeout: 25))
-        XCTAssertTrue(app.staticTexts["In your cabals"].exists)
+        XCTAssertTrue(app.staticTexts["In your cabals"].waitForExistence(timeout: 25))
+        XCTAssertFalse(anyElement(app, "assets-row-TSLAx").exists, "the search results should be gone")
     }
 
     /// The rows stack at accessibility text sizes rather than squeezing the name
@@ -155,7 +160,11 @@ final class StocksTabSampleUITests: XCTestCase {
         let app = launch("full", textSize: "UICTContentSizeCategoryAccessibilityXXXL")
         waitForTab(app, "full at AX5")
 
-        XCTAssertTrue(anyElement(app, "assets-popular-AAPLx").waitForExistence(timeout: 30))
+        // The held row, not a popular one: at AX5 every row is tall enough that the
+        // fourth section is far below the fold and the LazyVStack has not built it.
+        // A row in the first section proves the same thing — rows render, stacked,
+        // at accessibility text sizes.
+        XCTAssertTrue(anyElement(app, "assets-held-AAPLx").waitForExistence(timeout: 30))
         attachScreenshot(app, name: "stocks-ax5")
     }
 
@@ -167,9 +176,13 @@ final class StocksTabSampleUITests: XCTestCase {
         let app = launch("full")
         waitForTab(app, "full")
 
-        let row = anyElement(app, "assets-popular-AAPLx")
+        let row = anyElement(app, "assets-held-AAPLx")
         XCTAssertTrue(row.waitForExistence(timeout: 25))
-        row.tap()
+        // Tapped a quarter of the way in, over the logo and name, rather than at the
+        // element's own hit point: that lands on the right-hand edge of the row,
+        // where the day-change pill is its own control and deliberately swallows the
+        // tap to switch % and $. Opening the stock is what the rest of the row does.
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5)).tap()
 
         let leftTheTab = NSPredicate(format: "exists == false")
         expectation(for: leftTheTab, evaluatedWith: app.navigationBars["Stocks"])
