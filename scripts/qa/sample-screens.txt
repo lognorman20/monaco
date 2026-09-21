@@ -1,0 +1,57 @@
+# Screens for the QA screenshot gallery, one per line: <file name> <launch arguments...>
+# Every screen is a Debug sample harness: canned data, no backend, no sign-in.
+# `scripts/qa/screens.sh --check` fails when a harness flag or scenario in the app is missing here.
+
+design-gallery-primitives     -MonacoDesignGallery -MonacoDesignGalleryTab primitives
+design-gallery-money          -MonacoDesignGallery -MonacoDesignGalleryTab money
+design-gallery-controls       -MonacoDesignGallery -MonacoDesignGalleryTab controls
+design-gallery-toast          -MonacoDesignGallery -MonacoDesignGalleryTab toast
+
+onboarding-fresh              -MonacoOnboardingSample fresh
+onboarding-photo              -MonacoOnboardingSample photo
+onboarding-invalid            -MonacoOnboardingSample invalid
+onboarding-failure            -MonacoOnboardingSample failure
+
+home-populated                -MonacoHomeSample populated
+home-empty                    -MonacoHomeSample empty
+home-loading                  -MonacoHomeSample loading
+home-missed-vote              -MonacoHomeSample missedVote
+
+cabals-tab                    -MonacoCabalsTabSample
+
+group-nav-root                -MonacoGroupNavSample root
+group-nav-list                -MonacoGroupNavSample list
+group-nav-create              -MonacoGroupNavSample create
+
+group-detail-populated        -MonacoGroupDetailSample populated
+group-detail-empty            -MonacoGroupDetailSample empty
+group-detail-loading          -MonacoGroupDetailSample loading
+group-detail-details          -MonacoGroupDetailSample details
+group-detail-propose          -MonacoGroupDetailSample propose
+group-detail-cash-out         -MonacoGroupDetailSample cashOut
+group-detail-receipt          -MonacoGroupDetailSample receipt
+group-detail-receipt-failed   -MonacoGroupDetailSample receiptFailed
+group-detail-activity         -MonacoGroupDetailSample activity
+
+proposal-feed                 -MonacoProposalFeedSample
+proposal-detail-commented     -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-0
+proposal-detail-sell          -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-1
+proposal-detail-add-agent     -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-2
+proposal-detail-read-only     -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-3
+proposal-detail-passed        -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-20
+proposal-detail-failed        -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-21
+proposal-detail-swapping      -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-22
+propose-cabal                 -MonacoProposalFeedSample -MonacoProposeSample
+propose-sheet                 -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleOpen
+
+profile-placeholder           -MonacoProfileSample placeholder
+profile-photo                 -MonacoProfileSample photo
+profile-validation            -MonacoProfileSample validation
+profile-cabals                -MonacoProfileSample cabals
+profile-empty                 -MonacoProfileSample empty
+profile-loading               -MonacoProfileSample loading
+profile-error                 -MonacoProfileSample error
+
+chat-thread                   -MonacoChatSampleQA
+chat-empty                    -MonacoChatSampleQA -MonacoChatSampleEmpty
+chat-offline                  -MonacoChatSampleQA -MonacoChatSampleOffline
