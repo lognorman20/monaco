@@ -47,6 +47,7 @@ struct CabalsSearchResultsSection: View {
                             rank: nil,
                             groupId: row.groupID,
                             name: row.name,
+                            pictureUrl: row.pictureUrl,
                             detail: cabalRowDetail(memberCount: row.memberCount, isJoined: row.isJoined, joinMode: row.joinMode),
                             potValueUsd: row.potValueUsd,
                             percentReturn: row.percentReturn,

@@ -49,6 +49,14 @@ struct GroupViewDTO: Codable, Equatable {
     let members: [LeaderboardRowDTO]
     let proposals: [ProposalDTO]?
     let agent: GroupAgentDTO?
+    /// The cabal's picture; nil falls back to the tinted initials.
+    var pictureUrl: String? = nil
+    /// Whether this viewer created the cabal. Optional so a server that predates
+    /// the field still decodes; a missing value hides the picture controls.
+    var isCreator: Bool? = nil
+
+    /// True only when the server said so. Decides what to offer, never what is allowed.
+    var viewerIsCreator: Bool { isCreator == true }
 
     var resolvedPotTotalUsd: String {
         if let potTotalUsd, !potTotalUsd.isEmpty {

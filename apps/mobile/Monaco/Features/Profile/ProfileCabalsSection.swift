@@ -7,6 +7,8 @@ struct ProfileCabalRow: Identifiable, Equatable {
     let groupId: String
     let name: String
     let potValueUsd: String
+    /// The cabal's picture; nil draws its tinted initials.
+    var pictureUrl: String?
     let equityUsd: String?
     let dollarPnl: String?
     let percentReturn: String?
@@ -26,6 +28,7 @@ struct ProfileCabalRow: Identifiable, Equatable {
                     groupId: group.groupId,
                     name: group.name,
                     potValueUsd: group.potValueUsd,
+                    pictureUrl: group.pictureUrl,
                     equityUsd: position?.equityUsd,
                     dollarPnl: position?.dollarPnl,
                     percentReturn: position?.percentReturn
@@ -69,6 +72,7 @@ struct ProfileCabalsSection: View {
                             CabalPositionRow(
                                 groupId: row.groupId,
                                 name: row.name,
+                                pictureUrl: row.pictureUrl,
                                 potValueUsd: row.potValueUsd,
                                 figures: row.figures,
                                 isLast: row.groupId == rows.last?.groupId

@@ -18,6 +18,8 @@ struct HomeMyGroupRowDTO: Codable, Equatable, Identifiable {
     let slicePercent: String
     let dollarPnl: String
     let percentReturn: String?
+    /// The cabal's picture; nil falls back to the tinted initials.
+    var pictureUrl: String? = nil
 
     var id: String { groupId }
 }
