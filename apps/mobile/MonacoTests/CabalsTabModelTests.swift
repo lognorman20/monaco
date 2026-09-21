@@ -177,13 +177,15 @@ struct CabalsTabModelTests {
 
     @Test func expiredSessionIsReportedInsteadOfAnError() async throws {
         let source = RecordingDataSource()
-        source.searchError = Monaco.MonacoAPIError.httpStatus(401)
+        source.searchError = RejectedSession(token: "token-1")
         let model = CabalsTabModel(dataSource: source)
 
         model.updateQuery("weekend")
         try await settle()
 
         #expect(model.sessionExpired)
+        // The view signs out through the token that read carried, not whatever is current.
+        #expect(model.rejectedSession == RejectedSession(token: "token-1"))
     }
 
     @Test func changingRangeReloadsTheChart() async throws {

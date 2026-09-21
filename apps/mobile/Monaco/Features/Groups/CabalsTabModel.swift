@@ -20,21 +20,18 @@ struct LiveCabalsTabDataSource: CabalsTabDataSource {
         self.auth = auth
     }
 
-    private func token() throws -> String {
-        guard let token = auth.accessToken else { throw MonacoAPIError.missingAccessToken }
-        return token
-    }
-
     func leaderboard() async throws -> GroupLeaderboardResponseDTO {
-        try await apiClient.groupLeaderboard(accessToken: try token(), limit: 20)
+        try await auth.sendingAccessToken { try await apiClient.groupLeaderboard(accessToken: $0, limit: 20) }
     }
 
     func pnlHistory(range: GroupPnLRange) async throws -> MyGroupsPnLHistoryDTO {
-        try await apiClient.myGroupsPnLHistory(accessToken: try token(), range: range)
+        try await auth.sendingAccessToken { try await apiClient.myGroupsPnLHistory(accessToken: $0, range: range) }
     }
 
     func search(query: String, cursor: String?) async throws -> GroupSearchResponseDTO {
-        try await apiClient.searchGroups(accessToken: try token(), query: query, limit: 20, cursor: cursor)
+        try await auth.sendingAccessToken {
+            try await apiClient.searchGroups(accessToken: $0, query: query, limit: 20, cursor: cursor)
+        }
     }
 }
 
@@ -87,8 +84,11 @@ final class CabalsTabModel {
     private(set) var isLoadingMore = false
     private(set) var loadMoreFailed = false
 
-    /// Set when the server rejects the session; the view signs out.
-    private(set) var sessionExpired = false
+    /// The rejection that ended this screen's reads, naming the token the request sent. The
+    /// view reports that token to the guarded sign-out.
+    private(set) var rejectedSession: RejectedSession?
+
+    var sessionExpired: Bool { rejectedSession != nil }
 
     private let dataSource: CabalsTabDataSource
     private var searchTask: Task<Void, Never>?
@@ -366,8 +366,8 @@ final class CabalsTabModel {
 
     private func handle(_ error: Error, otherwise: () -> Void) {
         if error.isRequestCancellation { return }
-        if case MonacoAPIError.httpStatus(401) = error {
-            sessionExpired = true
+        if let rejected = error as? RejectedSession {
+            rejectedSession = rejected
             return
         }
         otherwise()

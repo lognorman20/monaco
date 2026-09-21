@@ -135,10 +135,9 @@ struct CabalsTabView: View {
             // Joined, created, or left a cabal somewhere in the app.
             Task { await model.reload(hasCabals: !ids.isEmpty) }
         }
-        .onChange(of: model.sessionExpired) { _, expired in
-            if expired {
-                Task { await auth.logout() }
-            }
+        .onChange(of: model.rejectedSession) { _, rejected in
+            guard let rejected else { return }
+            Task { await auth.signOutAfterRejectedSession(rejectedToken: rejected.token) }
         }
         .accessibilityIdentifier("cabals-root")
         .monacoFrameStats("Cabals")
