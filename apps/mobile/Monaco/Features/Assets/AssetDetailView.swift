@@ -201,7 +201,7 @@ struct AssetDetailView: View {
         .chartYScale(domain: (low - pad)...(high + pad))
         .frame(height: 180)
         .accessibilityElement()
-        .accessibilityLabel(chartAccessibilityLabel(points))
+        .accessibilityLabel(model.chartAccessibilitySummary)
         .accessibilityIdentifier("asset-detail-chart")
     }
 
@@ -218,16 +218,6 @@ struct AssetDetailView: View {
     private var chartPlaceholder: some View {
         SkeletonBlock(width: nil, height: 180, radius: MonacoTheme.Radius.card)
             .frame(maxWidth: .infinity)
-    }
-
-    private func chartAccessibilityLabel(_ points: [AssetChartPointDTO]) -> String {
-        let low = points.map(\.chartValue).min() ?? 0
-        let high = points.map(\.chartValue).max() ?? 0
-        let move = model.move.map { PercentReturnFormatter.format($0.ratio) } ?? "—"
-        return "\(model.range.accessibilityLabel) price history. "
-            + "\(move) \(model.range.moveLabel.lowercased()). "
-            + "Low \(UsdAmountFormatter.format(micros: Int64(low * 1_000_000))), "
-            + "high \(UsdAmountFormatter.format(micros: Int64(high * 1_000_000)))."
     }
 
     private var actionRow: some View {

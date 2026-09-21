@@ -264,4 +264,21 @@ struct AssetDetailModelTests {
 
         #expect(model.move?.direction == .down)
     }
+
+    /// The headline is the token's own mark ($185 here), but the series can be the underlying
+    /// share's price ($250 to $275 here) depending on backend configuration. VoiceOver must not
+    /// read a dollar range next to a price in a different unit; the move is a ratio and holds.
+    @Test func theChartSummarySpeaksTheMoveNotDollarsInAnotherUnit() async throws {
+        let source = StubAssetDetailDataSource()
+        source.points[.oneWeek] = StubAssetDetailDataSource.series(from: 250, to: 275)
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+        model.range = .oneWeek
+
+        await model.loadDetail()
+        await model.loadChart(range: .oneWeek)
+
+        let summary = model.chartAccessibilitySummary
+        #expect(summary == "One week price history. +10.0% past week.")
+        #expect(!summary.contains("$"), "got \(summary)")
+    }
 }

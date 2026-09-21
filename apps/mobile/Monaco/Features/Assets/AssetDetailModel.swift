@@ -115,6 +115,13 @@ final class AssetDetailModel {
     /// Not `liquidity.routable`: that is the quote probe's own answer, and the server keeps a
     /// failed probe's `false` for a minute, so reading it would call a buyable stock unbuyable
     /// after one rate limit or timeout.
+    ///
+    /// On `main` today this is effectively always `true`: the backend computes the stock-level
+    /// `routable` as `asset.Routable || tokenAddress != "" || liquidity.Routable`, and every
+    /// pinned B20 stock has a token address, so a genuine no-route never reaches this flag and
+    /// the "Can't be bought right now." caption does not render. It starts blocking once the
+    /// backend's `liquiditySnippet` stops reporting a failed quote as a no-route and the
+    /// stock-level verdict can use the probe's answer again.
     var canBuy: Bool {
         detail?.routable ?? true
     }
@@ -128,6 +135,18 @@ final class AssetDetailModel {
         }
         guard let change = detail?.change24h, !change.isEmpty else { return nil }
         return Move(ratio: change, label: AssetChartRange.oneDay.moveLabel)
+    }
+
+    /// What VoiceOver reads for the chart: the range and the move over it, never dollar figures.
+    ///
+    /// The headline price is the token's own mark, but the series can be the underlying share's
+    /// price (Pyth) or the token's (Chainlink) depending on backend configuration, and the
+    /// response does not say which. A dollar low/high read from the series could sit in a
+    /// different unit from the price above it. The move is a ratio, so it holds in either unit.
+    /// Dollar figures come back once the chart response labels its basis.
+    var chartAccessibilitySummary: String {
+        let move = move.map { PercentReturnFormatter.format($0.ratio) } ?? "—"
+        return "\(range.accessibilityLabel) price history. \(move) \(range.moveLabel.lowercased())."
     }
 
     func loadDetail() async {
