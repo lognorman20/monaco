@@ -72,11 +72,26 @@ final class AssetSocialModel {
 
     var holdings: [AssetHoldingDTO] { social?.holdings ?? [] }
 
+    /// Issue order of reads, so only the newest one may write. The same marker the
+    /// chart keeps per range (`AssetDetailModel.chartRequestSequence`), for the same
+    /// reason: two reads overlap here all the time — the one `.task` fires on appear,
+    /// and the one the propose callback fires the moment a proposal lands — and
+    /// without it the older answer can arrive last and put the pre-proposal card back
+    /// over the one that already counts the new vote.
+    private var requestSequence = 0
+
     func load() async {
+        requestSequence += 1
+        let sequence = requestSequence
         do {
-            social = try await dataSource.social(symbol: symbol)
+            let answer = try await dataSource.social(symbol: symbol)
+            guard requestSequence == sequence else { return }
+            social = answer
             state = .answered
         } catch {
+            // A failure that a newer read has overtaken says nothing about the
+            // screen: that read will answer for itself, one way or the other.
+            guard requestSequence == sequence else { return }
             if error.isRequestCancellation { return }
             if case MonacoAPIError.httpStatus(401) = error {
                 sessionExpired = true

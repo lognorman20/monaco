@@ -22,6 +22,32 @@ private final class StubAssetSocialDataSource: AssetSocialDataSource {
 
 private struct SocialFailure: Error {}
 
+/// A source whose answers the test hands out by hand, in whatever order it likes.
+/// That is the only way to put an older response behind a newer one on purpose.
+@MainActor
+private final class GatedAssetSocialDataSource: AssetSocialDataSource {
+    private(set) var calls = 0
+    private var pending: [CheckedContinuation<Result<AssetSocialDTO, Error>, Never>] = []
+
+    func social(symbol: String) async throws -> AssetSocialDTO {
+        calls += 1
+        let result = await withCheckedContinuation { pending.append($0) }
+        return try result.get()
+    }
+
+    /// Answers the `index`th call (0-based, in issue order).
+    func answer(_ index: Int, with result: Result<AssetSocialDTO, Error>) {
+        pending[index].resume(returning: result)
+    }
+
+    /// Lets queued main-actor tasks run until `count` reads are in flight.
+    func waitForCalls(_ count: Int) async {
+        for _ in 0..<1_000 where calls < count {
+            await Task.yield()
+        }
+    }
+}
+
 @MainActor
 private func model(_ source: StubAssetSocialDataSource, symbol: String = "AAPLx") -> AssetSocialModel {
     AssetSocialModel(symbol: symbol, dataSource: source)
@@ -119,6 +145,77 @@ struct AssetSocialModelTests {
         #expect(model.holdings.count == 3)
         #expect(model.summary?.headline == "3 cabals hold AAPLx")
         #expect(!model.hasFailed)
+    }
+
+    /// The race: the screen's first read is still out when a proposal lands and the
+    /// propose callback re-reads. The newer answer — the one that counts the new
+    /// vote — comes back first, and the older one must not land on top of it.
+    @Test("An older answer that lands last does not overwrite a newer one")
+    @MainActor
+    func staleAnswerIsDropped() async {
+        let source = GatedAssetSocialDataSource()
+        let model = AssetSocialModel(symbol: "AAPLx", dataSource: source)
+
+        let onAppear = Task { await model.load() }
+        await source.waitForCalls(1)
+        let afterProposing = Task { await model.refresh() }
+        await source.waitForCalls(2)
+        #expect(source.calls == 2)
+
+        source.answer(1, with: .success(AssetSocialSampleData.modest()))
+        await afterProposing.value
+        #expect(model.summary?.headline == "One cabal holds AAPLx")
+
+        source.answer(0, with: .success(AssetSocialSampleData.social()))
+        await onAppear.value
+
+        #expect(model.summary?.headline == "One cabal holds AAPLx", "the pre-proposal answer repainted the card")
+        #expect(model.openProposals.count == 1)
+        #expect(model.state == .answered)
+    }
+
+    /// An overtaken read that fails says nothing about the screen: the newer read
+    /// has already answered for it.
+    @Test("An older failure that lands last leaves the newer answer alone")
+    @MainActor
+    func staleFailureIsDropped() async {
+        let source = GatedAssetSocialDataSource()
+        let model = AssetSocialModel(symbol: "AAPLx", dataSource: source)
+
+        let first = Task { await model.load() }
+        await source.waitForCalls(1)
+        let second = Task { await model.refresh() }
+        await source.waitForCalls(2)
+
+        source.answer(1, with: .success(AssetSocialSampleData.social()))
+        await second.value
+        source.answer(0, with: .failure(MonacoAPIError.httpStatus(401)))
+        await first.value
+
+        #expect(model.state == .answered)
+        #expect(model.holdings.count == 3)
+        #expect(!model.sessionExpired, "an overtaken read does not get to end the session either")
+    }
+
+    /// And the ordinary case still works: answers that come back in issue order
+    /// leave the newest on screen.
+    @Test("Answers in issue order leave the newest on screen")
+    @MainActor
+    func inOrderAnswers() async {
+        let source = GatedAssetSocialDataSource()
+        let model = AssetSocialModel(symbol: "AAPLx", dataSource: source)
+
+        let first = Task { await model.load() }
+        await source.waitForCalls(1)
+        let second = Task { await model.refresh() }
+        await source.waitForCalls(2)
+
+        source.answer(0, with: .success(AssetSocialSampleData.social()))
+        await first.value
+        source.answer(1, with: .success(AssetSocialSampleData.modest()))
+        await second.value
+
+        #expect(model.summary?.headline == "One cabal holds AAPLx")
     }
 
     @Test("A rejected session is reported, not swallowed")
