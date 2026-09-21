@@ -114,6 +114,33 @@ public struct AssetPositionSummary: Equatable, Sendable {
         }
     }
 
+    /// "Ada and Bo voted yes", or nil when nobody has.
+    ///
+    /// The card draws these as overlapped faces, which VoiceOver cannot read — the
+    /// avatars are decoration and the row is one accessibility element. Who voted is
+    /// half of what makes an open vote worth looking at (#341), so it is said in
+    /// words. Three names, then a count: a sentence naming nine people is not a
+    /// sentence anyone listens to.
+    public static func yesVoterSentence(_ voters: [AssetVoterDTO]) -> String? {
+        let names = voters
+            .map { $0.displayName.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !names.isEmpty else { return nil }
+        let shown = Array(names.prefix(3))
+        let rest = names.count - shown.count
+        var tail = shown
+        if rest > 0 {
+            tail.append(rest == 1 ? "1 other" : "\(rest) others")
+        }
+        let list: String
+        switch tail.count {
+        case 1: list = tail[0]
+        case 2: list = "\(tail[0]) and \(tail[1])"
+        default: list = tail.dropLast().joined(separator: ", ") + " and " + tail[tail.count - 1]
+        }
+        return "\(list) voted yes"
+    }
+
     static func unvaluedNotice(_ count: Int) -> String? {
         switch count {
         case 0: return nil

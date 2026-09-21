@@ -102,6 +102,73 @@ final class AssetDetailCardsUITests: XCTestCase {
         }
     }
 
+    /// #341: the rows are the way into the cabal and into the vote. They were built
+    /// with no `openCabal` and no `openProposal`, so every one of them fell into its
+    /// non-Button branch and the card was a picture of a position rather than a way
+    /// into one.
+    ///
+    /// The pushed screens read from the real API, which the harness does not run —
+    /// what is asserted here is the push itself: a back button in the bar, which the
+    /// stock screen alone does not have.
+    @MainActor
+    func testHoldingRowsAndVoteRowsActuallyGoSomewhere() throws {
+        for row in ["asset-position-holding-g-weekend", "asset-position-vote-p-buy"] {
+            let app = launch("cabals")
+            waitForScreen(app, "cabals")
+            XCTAssertTrue(scrollTo(app, "asset-detail-position"), "the position card never appeared")
+
+            let target = anyElement(app, row)
+            XCTAssertTrue(target.waitForExistence(timeout: 10), "\(row) is not in the tree")
+            XCTAssertTrue(
+                bringIntoOpenView(app, target),
+                "\(row) never came out from under the trade bar: row \(target.frame), nav \(app.navigationBars.firstMatch.frame), buy \(app.buttons["asset-detail-buy"].frame)"
+            )
+            target.tap()
+
+            // A pushed screen puts a back button in the bar; the stock screen alone has none.
+            let back = app.navigationBars.buttons.firstMatch
+            XCTAssertTrue(back.waitForExistence(timeout: 10), "\(row) did not push anything")
+            attachScreenshot(app, name: "asset-detail-opened-from-\(row)")
+            app.terminate()
+        }
+    }
+
+    /// A card's rows are built whether or not they are on screen, so "exists" says
+    /// nothing about where a tap lands. The trade bar is a material pinned over the
+    /// bottom of the scroll view: a tap on a row still under it lands on the bar.
+    /// Nudge the content until the row sits between the navigation bar and the
+    /// trade bar, and only then tap.
+    ///
+    /// The drag runs in the page's gutter, never across the middle of the screen,
+    /// where the chart sits.
+    @MainActor
+    private func bringIntoOpenView(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        for _ in 0..<12 {
+            let top = app.navigationBars.firstMatch.frame.maxY
+            let bottom = app.buttons["asset-detail-buy"].frame.minY - 24
+            let frame = element.frame
+            // At the accessibility sizes the trade bar takes half the screen and a
+            // stacked row can be taller than what is left, so a row counts as open
+            // once as much of it as fits is showing, from its top down.
+            let visibleHeight = min(frame.height, bottom - top)
+            if frame.minY >= top, frame.minY + visibleHeight <= bottom { return true }
+            // Aim the row's top at the top of the open area, plus a little air.
+            let target = top + 8
+            let distance = min(abs(frame.minY - target), bottom - top - 16)
+            let scrollUp = frame.minY > target
+            let startY = scrollUp ? bottom - 8 : top + 8
+            // In the page's own 16pt gutter, right of every card, so the drag is
+            // never read as a scrub of the curve. The right gutter, because the left
+            // edge belongs to the system's back-swipe.
+            let gutterX = app.windows.firstMatch.frame.width - 6
+            let start = origin.withOffset(CGVector(dx: gutterX, dy: startY))
+            let end = start.withOffset(CGVector(dx: 0, dy: scrollUp ? -distance : distance))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        return false
+    }
+
     /// The cards are not decorations with empty states. Nothing held, nothing voted
     /// and nothing done means the position and activity cards are simply not there,
     /// and the screen is shorter rather than padded with empty frames.
@@ -256,9 +323,11 @@ final class AssetDetailCardsUITests: XCTestCase {
     /// The position card was the only one below the chart that kept its side-by-side
     /// rows at the accessibility sizes: a cabal name truncated and the money beside it
     /// scaled itself down, which is the one thing on this screen that must never be
-    /// cut short. It stacks now, like the stats grid and the Pyth legs. The screenshot
-    /// carries the layout claim; what is asserted is that the card and its rows stay
-    /// reachable through the switch.
+    /// cut short. It stacks now, like the stats grid and the Pyth legs. What is
+    /// asserted is that the card and its rows survive the switch, the same claim
+    /// `testStatsGridSurvivesAnAccessibilityTextSize` makes. Like that test, the
+    /// screenshot shows the top of the page: at this size synthesized drags do not
+    /// move it in the harness, which is its own open question.
     @MainActor
     func testPositionCardSurvivesAnAccessibilityTextSize() throws {
         let app = launch("cabals", textSize: "UICTContentSizeCategoryAccessibilityL")
@@ -266,10 +335,26 @@ final class AssetDetailCardsUITests: XCTestCase {
 
         XCTAssertTrue(scrollTo(app, "asset-detail-position", attempts: 12), "the position card never appeared")
         XCTAssertTrue(
-            scrollTo(app, "asset-position-holding-g-weekend", attempts: 12),
-            "a holding row was unreachable at the accessibility text sizes"
+            anyElement(app, "asset-position-holding-g-weekend").waitForExistence(timeout: 10),
+            "a holding row is missing at the accessibility text sizes"
         )
         attachScreenshot(app, name: "asset-detail-position-accessibility-text")
+    }
+
+    /// The badge measures the cabals' return and the big figure is the member's own
+    /// slice; they must not read as one pair. The screenshot shows the labelled line.
+    @MainActor
+    func testTheCabalsReturnIsLabelledAsTheirs() throws {
+        let app = launch("cabals")
+        waitForScreen(app, "cabals")
+        let totals = anyElement(app, "asset-position-totals")
+        XCTAssertTrue(totals.waitForExistence(timeout: 10), "the totals never drew")
+        XCTAssertTrue(bringIntoOpenView(app, totals), "the totals never came out from under the trade bar")
+        XCTAssertTrue(
+            totals.label.contains("Your cabals' return"),
+            "the P&L reached VoiceOver without saying whose it is: \(totals.label)"
+        )
+        attachScreenshot(app, name: "asset-detail-position-labelled-return")
     }
 
     /// The honest-grid rule: a cell we could source is there, and a cell we could not

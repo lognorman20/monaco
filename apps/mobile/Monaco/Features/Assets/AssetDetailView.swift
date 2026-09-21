@@ -16,7 +16,8 @@ struct AssetDetailView: View {
     /// separate read at a separate cadence: the price is polled every ten seconds,
     /// this changes when somebody votes.
     @State private var social: AssetSocialModel
-    @State private var pickerKind: ProposalPickKind?
+    /// The one screen this one is pushing, if any. See `AssetDetailRoute`.
+    @State private var route: AssetDetailRoute?
     @State private var toast: MonacoToast?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -103,22 +104,51 @@ struct AssetDetailView: View {
         .onChange(of: social.sessionExpired) { _, expired in
             if expired { Task { await auth.logout() } }
         }
-        .navigationDestination(item: $pickerKind) { kind in
+        .navigationDestination(item: $route) { route in
+            destination(for: route)
+        }
+        .monacoFrameStats("AssetDetail")
+    }
+
+    /// The screen behind a route. Declared once, so no card ever builds a destination.
+    @ViewBuilder
+    private func destination(for route: AssetDetailRoute) -> some View {
+        switch route {
+        case .propose(let kind):
             GroupPickerForProposalView(
                 auth: auth,
                 symbol: symbol,
                 kind: kind,
                 stock: proposeStock,
                 onProposed: { cabalName in
-                    pickerKind = nil
+                    self.route = nil
                     Haptics.success()
                     toast = MonacoToast(message: ProposeFlowCopy.proposalSent(cabalName), isSuccess: true)
                     // A new proposal is exactly the thing the position card counts.
                     Task { await social.refresh() }
                 }
             )
+        case let .cabal(id, name):
+            GroupDetailView(auth: auth, groupId: id, groupName: name)
+        case .proposal(let id):
+            ProposalDetailView(auth: auth, proposalId: id)
         }
-        .monacoFrameStats("AssetDetail")
+    }
+
+    /// The cabal's name as one of the cards already knows it, so the pushed screen
+    /// carries its title from the first frame instead of saying "Cabal" until it
+    /// loads. Nil is a perfectly good answer; the cabal screen loads its own name.
+    private func cabalName(_ groupId: String) -> String? {
+        if let holding = social.holdings.first(where: { $0.groupId == groupId }) {
+            return holding.name.isEmpty ? nil : holding.name
+        }
+        if let proposal = social.openProposals.first(where: { $0.groupId == groupId }) {
+            return proposal.groupName.isEmpty ? nil : proposal.groupName
+        }
+        if let item = social.activity.first(where: { $0.groupId == groupId }) {
+            return item.groupName.isEmpty ? nil : item.groupName
+        }
+        return nil
     }
 
     /// Everything the propose flow needs, so it never refetches what this screen already showed.
@@ -185,7 +215,12 @@ struct AssetDetailView: View {
             AssetPositionCard(
                 summary: summary,
                 proposals: social.openProposals,
-                symbol: symbol
+                symbol: symbol,
+                // #341: a holding row opens the cabal, a vote row opens the vote.
+                // Without these the rows fall into their non-Button branch and the
+                // card is a picture of a position rather than a way into one.
+                openCabal: { route = .cabal(id: $0, name: cabalName($0)) },
+                openProposal: { route = .proposal(id: $0.id) }
             )
         } else if social.hasFailed {
             // A read that failed is not an answer of "nobody holds this". Say so, and
@@ -211,7 +246,11 @@ struct AssetDetailView: View {
         }
         // 5. Activity on this stock — proposals, fills and comments       (#344)
         if !social.activity.isEmpty {
-            AssetActivityCard(symbol: symbol, activity: social.activity)
+            AssetActivityCard(
+                symbol: symbol,
+                activity: social.activity,
+                openCabal: { route = .cabal(id: $0, name: cabalName($0)) }
+            )
         }
     }
 
@@ -237,8 +276,8 @@ struct AssetDetailView: View {
                 holdings: social.holdings,
                 holdingsState: social.state
             ),
-            onBuy: { pickerKind = .buy },
-            onSell: { pickerKind = .sell }
+            onBuy: { route = .propose(.buy) },
+            onSell: { route = .propose(.sell) }
         )
         // The sell button arrives with the holdings answer; a fade reads as an answer
         // landing rather than as the layout jumping.

@@ -237,6 +237,7 @@ private struct HoldingRow: View {
                     identity
                     Spacer(minLength: MonacoTheme.Space.s)
                     money(alignment: .trailing)
+                    if openCabal != nil { RowChevron() }
                 }
             }
         }
@@ -361,18 +362,30 @@ private struct VoteRow: View {
         }
     }
 
-    @ViewBuilder
+    /// Where the row stands, and where it goes.
+    ///
+    /// The "Vote" capsule used to be brand-filled at 44pt: it looked like the primary
+    /// action on the card and did nothing at all — no ballot is cast on this screen,
+    /// and nothing was wired behind it. It is a badge now, in the same wash as the
+    /// "waiting on your vote" pill above it, saying what this vote's state is. The
+    /// chevron says where the row leads, and the row leads to the proposal screen,
+    /// which is where a ballot has always been cast.
     private var status: some View {
-        if proposal.myVote == nil {
-            Text("Vote")
-                .font(MonacoTheme.Typo.caption.weight(.semibold))
-                .foregroundStyle(MonacoTheme.onBrand)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(Capsule().fill(MonacoTheme.brandFill))
-        } else {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(MonacoTheme.profit)
+        HStack(spacing: MonacoTheme.Space.xs) {
+            if proposal.myVote == nil {
+                Text("Vote")
+                    .font(MonacoTheme.Typo.caption.weight(.semibold))
+                    .foregroundStyle(MonacoTheme.brandOnWash)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(MonacoTheme.brandWash))
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(MonacoTheme.profit)
+            }
+            if openProposal != nil {
+                RowChevron()
+            }
         }
     }
 
@@ -401,12 +414,33 @@ private struct VoteRow: View {
 
     private var spoken: String {
         var sentence = "\(title). \(tally)."
+        // The faces are decoration and this row is one element, so without this the
+        // one thing #341 is about — which of your friends is already behind this —
+        // never reached VoiceOver at all.
+        if let voters = AssetPositionSummary.yesVoterSentence(proposal.yesVoters) {
+            sentence += " \(voters)."
+        }
         if proposal.myVote == nil {
             sentence += " Waiting on your vote."
         } else {
             sentence += " You voted."
         }
+        if openProposal != nil {
+            sentence += " Opens the vote."
+        }
         return sentence
+    }
+}
+
+/// The affordance that says a row goes somewhere, in the shape `MonacoRow` uses.
+/// Only drawn on rows that actually navigate — a chevron on a row that does nothing
+/// is the same lie as a filled capsule that does nothing.
+private struct RowChevron: View {
+    var body: some View {
+        Image(systemName: "chevron.right")
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(MonacoTheme.tertiaryText)
+            .accessibilityHidden(true)
     }
 }
 
@@ -429,6 +463,9 @@ private struct VoterFaces: View {
                     .padding(.leading, 12)
             }
         }
+        // Decoration: the row is one accessibility element and speaks the voters'
+        // names itself, in `VoteRow.spoken`. Unhiding these would read four avatars
+        // and a "+2" between the vote's title and its tally.
         .accessibilityHidden(true)
     }
 }

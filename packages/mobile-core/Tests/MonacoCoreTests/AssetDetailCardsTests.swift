@@ -227,6 +227,43 @@ final class AssetPositionSummaryTests: XCTestCase {
         XCTAssertEqual(summary.waitingOnYou, "1 is waiting on your vote")
     }
 
+    /// The card draws the yes votes as overlapped faces, which VoiceOver cannot read.
+    /// Who is already behind a vote is half of what makes it worth looking at, so it
+    /// is said in words instead of being lost with the avatars.
+    func testTheVotersBehindAVoteAreNamedOutLoud() {
+        let ada = AssetSocialSampleData.ada
+        let bo = AssetSocialSampleData.bo
+        XCTAssertNil(AssetPositionSummary.yesVoterSentence([]))
+        XCTAssertEqual(AssetPositionSummary.yesVoterSentence([ada]), "Ada voted yes")
+        XCTAssertEqual(AssetPositionSummary.yesVoterSentence([ada, bo]), "Ada and Bo voted yes")
+    }
+
+    /// Three names, then a count. A sentence naming nine people is not a sentence
+    /// anyone listens to.
+    func testALongBallotIsSummarisedRatherThanRecited() {
+        let voters = ["Ada", "Bo", "Cy", "Di", "Eve"].map {
+            AssetVoterDTO(userId: $0, displayName: $0, choice: .yes)
+        }
+        XCTAssertEqual(
+            AssetPositionSummary.yesVoterSentence(voters),
+            "Ada, Bo, Cy and 2 others voted yes"
+        )
+        XCTAssertEqual(
+            AssetPositionSummary.yesVoterSentence(Array(voters.prefix(4))),
+            "Ada, Bo, Cy and 1 other voted yes"
+        )
+    }
+
+    /// A voter the backend sent with no name is not read out as a pause.
+    func testANamelessVoterIsSkippedRatherThanSpoken() {
+        let nameless = AssetVoterDTO(userId: "u-x", displayName: "  ", choice: .yes)
+        XCTAssertEqual(
+            AssetPositionSummary.yesVoterSentence([AssetSocialSampleData.ada, nameless]),
+            "Ada voted yes"
+        )
+        XCTAssertNil(AssetPositionSummary.yesVoterSentence([nameless]))
+    }
+
     func testEveryVoteAlreadyCast_asksForNothing() {
         let voted = AssetProposalDTO(
             id: "p", groupId: "g", groupName: "Weekend investors", kind: .buy, myVote: .yes
