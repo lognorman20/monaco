@@ -28,7 +28,7 @@ func integrationAssetsApp(t *testing.T) (*AssetsHandlers, *AuthHandlers, wallets
 		Wallets: privyClient,
 		Catalog: catalog,
 		Pyth:    pythClient,
-		Charts:  pyth.NewFakeAssetPriceClient(),
+		Charts:  pyth.NewFakeAssetPriceClient().(pyth.MarketDataClient),
 		Quotes:  pyth.NewFakeEquityQuoteClient(),
 		Dex:     jupiterClient,
 		// Pin the clock to a Tuesday inside the regular session so session

@@ -42,7 +42,7 @@ type AssetsHandlers struct {
 	// Charts is Pyth history alone, with no Chainlink fallback. The stats grid and
 	// the day change read it, because a figure folded from token rounds would be
 	// a different instrument under the same label. Nil omits both.
-	Charts pyth.ChartSeriesClient
+	Charts pyth.MarketDataClient
 	// Quotes is Pyth's latest equity price, the reference line on the
 	// stock-vs-token card. Nil reports that line as not configured.
 	Quotes pyth.EquityQuoteClient
@@ -523,7 +523,7 @@ func (h *AssetsHandlers) dayChanges(ctx context.Context, assets []b20.Asset) map
 				return
 			}
 			defer func() { <-sem }()
-			change := pyth.DayChange(h.underlyingSeries(ctx, symbol, pyth.ChartRange1D))
+			change := h.Charts.DayChange(ctx, symbol)
 			if change == nil {
 				return
 			}

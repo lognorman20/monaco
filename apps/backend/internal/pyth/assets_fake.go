@@ -105,6 +105,13 @@ func (f *fakeAssetPriceClient) ChartSeries(ctx context.Context, symbol string, c
 	return series, nil
 }
 
+// DayChange derives the day change from the registered 1D series, the way the
+// real client does from Benchmarks.
+func (f *fakeAssetPriceClient) DayChange(ctx context.Context, symbol string) *string {
+	series, _ := f.ChartSeries(ctx, symbol, ChartRange1D)
+	return DayChange(series)
+}
+
 type fakeEquityQuoteClient struct {
 	mu     sync.Mutex
 	quotes map[string]ReferenceQuote

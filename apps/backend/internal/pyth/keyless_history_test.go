@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -77,6 +78,59 @@ func TestHermesClient_ChartSeries_keylessOutageShortCircuitsTheSampler(t *testin
 	_, _ = client.ChartSeries(context.Background(), "AAPLc", ChartRange1M)
 	if sourceCalls.Load() != 2 {
 		t.Fatalf("source called %d times after the cooldown, want 2", sourceCalls.Load())
+	}
+}
+
+func TestHermesClient_DayChange_neverSamplesHermes(t *testing.T) {
+	// The sampler cannot know a previous close, so it cannot produce a day change.
+	// With Benchmarks down, a list page must not spend a request per sample per row
+	// to learn nothing.
+	ClearFeedRegistry()
+	resetEquityDeniedForTest()
+	RegisterFeedID("AAPLc", "feed-aapl")
+
+	var hermesCalls atomic.Int32
+	hermes := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hermesCalls.Add(1)
+		_, _ = w.Write([]byte(`{"parsed":[{"id":"feed-aapl","price":{"price":"18500000","expo":-5,"publish_time":1714746101}}]}`))
+	}))
+	t.Cleanup(hermes.Close)
+	failing := benchmarksServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	client := NewHermesClientWithHTTP(hermes.URL, hermes.Client(), "test-pyth-key").WithSeriesSource(failing)
+
+	if got := client.DayChange(context.Background(), "AAPLc"); got != nil {
+		t.Fatalf("DayChange = %q, want nil with Benchmarks down", *got)
+	}
+	if hermesCalls.Load() != 0 {
+		t.Fatalf("hermes called %d times for a day change", hermesCalls.Load())
+	}
+}
+
+func TestHermesClient_DayChange_comesFromBenchmarksAndIsCached(t *testing.T) {
+	ClearFeedRegistry()
+	// Tuesday 2026-09-22 12:00 ET; Monday's regular close is the previous close.
+	now := time.Date(2026, time.September, 22, 16, 0, 0, 0, time.UTC)
+	var calls atomic.Int32
+	source := benchmarksServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		mondayClose := time.Date(2026, time.September, 21, 19, 55, 0, 0, time.UTC).Unix()
+		tuesdayNoon := time.Date(2026, time.September, 22, 15, 55, 0, 0, time.UTC).Unix()
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"s":"ok","t":[%d,%d],"c":[200.0,202.0]}`, mondayClose, tuesdayNoon)))
+	})
+	client := NewHermesClientWithHTTP("http://127.0.0.1:1", nil, "").WithSeriesSource(source)
+	client.now = func() time.Time { return now }
+	client.charts = newChartCache(func() time.Time { return now })
+
+	for i := 0; i < 2; i++ {
+		got := client.DayChange(context.Background(), "AAPLc")
+		if got == nil || *got != "0.010000" {
+			t.Fatalf("DayChange = %v, want 0.010000", got)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("benchmarks called %d times, want 1", calls.Load())
 	}
 }
 

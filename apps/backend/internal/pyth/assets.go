@@ -66,6 +66,15 @@ type ChartSeriesClient interface {
 	ChartSeries(ctx context.Context, symbol string, chartRange ChartRange) (AssetChartSeries, error)
 }
 
+// MarketDataClient is Pyth history for the stock screens: whole ranges, and the
+// underlying's day change on its own.
+type MarketDataClient interface {
+	ChartSeriesClient
+	// DayChange is the underlying's move against its previous regular-session
+	// close, or nil when it cannot be known.
+	DayChange(ctx context.Context, symbol string) *string
+}
+
 // AssetPriceClient fetches standalone marks and chart history.
 type AssetPriceClient interface {
 	ChartSeriesClient
@@ -122,6 +131,22 @@ func (c *HermesClient) ChartSeries(ctx context.Context, symbol string, chartRang
 		c.charts.set(symbol, chartRange, series)
 	}
 	return series, nil
+}
+
+// DayChange reads the 1D series from the cache or from Benchmarks, and never from
+// the Hermes sampler: the sampler cannot know a previous close, so a day change
+// can only ever come from Benchmarks, and sampling thirteen points per stock for a
+// list row that would then show nothing is pure cost.
+func (c *HermesClient) DayChange(ctx context.Context, symbol string) *string {
+	if cached, ok := c.charts.get(symbol, ChartRange1D); ok {
+		return DayChange(cached)
+	}
+	series, ok := c.seriesFromSource(ctx, symbol, ChartRange1D, c.clock())
+	if !ok {
+		return nil
+	}
+	c.charts.set(symbol, ChartRange1D, series)
+	return DayChange(series)
 }
 
 // seriesFromSource asks the one-call history source for the range. A failure opens
