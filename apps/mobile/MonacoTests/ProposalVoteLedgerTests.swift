@@ -5,7 +5,7 @@ import Testing
 @MainActor
 struct ProposalVoteLedgerTests {
     private func proposal(id: String = "p-1", votes: [ProposalVoteDTO]? = nil) -> ProposalDTO {
-        ProposalDTO(id: id, symbol: "AAPLx", status: "open", kind: "buy", usdcMicros: "25000000", canVote: false, votes: votes)
+        ProposalDTO(id: id, symbol: "AAPLc", status: "open", kind: "buy", usdcMicros: "25000000", canVote: false, votes: votes)
     }
 
     @Test func aProposalTheMemberHasNotVotedOnHasNoChoice() {

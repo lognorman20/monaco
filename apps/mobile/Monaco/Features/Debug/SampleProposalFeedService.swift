@@ -34,7 +34,7 @@ final class SampleProposalFeedService: ProposalFeedService {
     ]
 
     init(now: Date = Date()) {
-        let symbols = ["AAPLx", "NVDAx", "TSLAx", "MSFTx", "AMZNx", "GOOGLx", "METAx", "SPYx"]
+        let symbols = ["AAPLc", "NVDAc", "TSLAc", "MSFTc", "AMZNc", "GOOGLc", "METAc", "SPYc"]
         let proposers = ["Ada Park", "Ben Ortiz", "Cy Lin", "Dee Shah"]
         var built: [Record] = []
         for index in 0..<24 {
@@ -234,7 +234,7 @@ private struct SampleProposeFromStockRoot: View {
                 service: service,
                 groupId: SampleProposeService.groupView.id,
                 pot: nil,
-                initialSymbol: "AAPLx"
+                initialSymbol: "AAPLc"
             )
         }
     }
@@ -250,8 +250,8 @@ final class SampleProposeService: ProposeService {
         treasuryAddress: nil,
         potTotalUsd: "548.20",
         pot: [
-            PotRowDTO(symbol: "AAPLx", units: "1.2034", markUsd: "231.40", valueUsd: "278.47", dollarPnl: "+28.47", afterHours: false, tokenAmount: "120340000"),
-            PotRowDTO(symbol: "NVDAx", units: "1.05", markUsd: "178.20", valueUsd: "187.11", dollarPnl: "+22.11", afterHours: false, tokenAmount: "105000000"),
+            PotRowDTO(symbol: "AAPLc", units: "1.2034", markUsd: "231.40", valueUsd: "278.47", dollarPnl: "+28.47", afterHours: false, tokenAmount: "120340000"),
+            PotRowDTO(symbol: "NVDAc", units: "1.05", markUsd: "178.20", valueUsd: "187.11", dollarPnl: "+22.11", afterHours: false, tokenAmount: "105000000"),
             PotRowDTO(symbol: "USDC", units: "82.62", markUsd: "1.00", valueUsd: "82.62", dollarPnl: "+0.00", afterHours: nil, tokenAmount: nil),
         ],
         you: MemberSliceDTO(shareUnits: "311500000", equityUsd: "311.50", slicePercent: "0.568", dollarPnl: "+27.40", percentReturn: "0.096"),
@@ -261,13 +261,13 @@ final class SampleProposeService: ProposeService {
     )
 
     private let catalog: [ProposeStock] = [
-        ProposeStock(symbol: "AAPLx", name: "Apple", priceMicros: 231_400_000, change24h: "0.012"),
-        ProposeStock(symbol: "NVDAx", name: "Nvidia", priceMicros: 178_200_000, change24h: "-0.008"),
-        ProposeStock(symbol: "TSLAx", name: "Tesla", priceMicros: 342_100_000, change24h: "0.034"),
-        ProposeStock(symbol: "MSFTx", name: "Microsoft", priceMicros: 438_900_000, change24h: "0.004"),
-        ProposeStock(symbol: "SPYx", name: "S&P 500", priceMicros: 612_300_000, change24h: "0.002"),
-        ProposeStock(symbol: "GOOGLx", name: "Alphabet", priceMicros: 201_000_000, change24h: "-0.015"),
-        ProposeStock(symbol: "AMBRx", name: "Amber", priceMicros: 12_400_000, change24h: nil, isTradable: false),
+        ProposeStock(symbol: "AAPLc", name: "Apple", priceMicros: 231_400_000, change24h: "0.012"),
+        ProposeStock(symbol: "NVDAc", name: "Nvidia", priceMicros: 178_200_000, change24h: "-0.008"),
+        ProposeStock(symbol: "TSLAc", name: "Tesla", priceMicros: 342_100_000, change24h: "0.034"),
+        ProposeStock(symbol: "MSFTc", name: "Microsoft", priceMicros: 438_900_000, change24h: "0.004"),
+        ProposeStock(symbol: "SPYc", name: "S&P 500", priceMicros: 612_300_000, change24h: "0.002"),
+        ProposeStock(symbol: "GOOGLc", name: "Alphabet", priceMicros: 201_000_000, change24h: "-0.015"),
+        ProposeStock(symbol: "AMBRc", name: "Amber", priceMicros: 12_400_000, change24h: nil, isTradable: false),
     ]
 
     /// `-MonacoProposePotFails`: the first read fails, so a retry can be driven from a test.

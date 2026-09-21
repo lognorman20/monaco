@@ -11,7 +11,7 @@ struct ProposeStock: Hashable, Identifiable {
 
     var id: String { symbol }
 
-    /// Ticker without the xStock suffix, e.g. "AAPL".
+    /// Ticker without the token suffix, e.g. "AAPLc" → "AAPL".
     var ticker: String { AssetSymbolFormatter.display(symbol) }
 
     var priceUsd: Decimal? {
@@ -219,7 +219,7 @@ enum ProposeErrorCopy {
     }
 }
 
-/// Fixed-point conversions for the propose flows. USDC has 6 decimals; xStock tokens have 8.
+/// Fixed-point conversions for the propose flows. USDC has 6 decimals; B20 stock tokens have 8.
 enum ProposeMath {
     static let usdcScale = Decimal(1_000_000)
     static let shareScale = Decimal(sign: .plus, exponent: ProposalShareFormatter.decimals, significand: 1)

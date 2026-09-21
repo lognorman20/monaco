@@ -4,7 +4,7 @@ import Testing
 
 struct ProposalFeedPollingTests {
     private func open(_ ids: [String]) -> [ProposalDTO] {
-        ids.map { ProposalDTO(id: $0, symbol: "AAPLx", status: "open", kind: "buy", canVote: true) }
+        ids.map { ProposalDTO(id: $0, symbol: "AAPLc", status: "open", kind: "buy", canVote: true) }
     }
 
     @Test func theFirstTickFillsTheClosedTab() {

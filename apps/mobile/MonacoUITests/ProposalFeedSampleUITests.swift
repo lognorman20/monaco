@@ -190,7 +190,7 @@ final class ProposeFlowSampleUITests: XCTestCase {
         capture("10-chooser")
         buy.tap()
 
-        let apple = element("proposal-asset-AAPLx")
+        let apple = element("proposal-asset-AAPLc")
         XCTAssertTrue(apple.waitForExistence(timeout: 5))
         sleep(1)
         capture("11-pick-stock")
@@ -243,7 +243,7 @@ final class ProposeFlowSampleUITests: XCTestCase {
         let buy = element("propose-kind-buy")
         XCTAssertTrue(buy.waitForExistence(timeout: 5))
         buy.tap()
-        let apple = element("proposal-asset-AAPLx")
+        let apple = element("proposal-asset-AAPLc")
         XCTAssertTrue(apple.waitForExistence(timeout: 5))
         apple.tap()
         let addReason = element("proposal-add-reason")
@@ -270,7 +270,7 @@ final class ProposeFlowSampleUITests: XCTestCase {
         XCTAssertTrue(sell.waitForExistence(timeout: 5))
         sell.tap()
 
-        let apple = element("proposal-sell-AAPLx")
+        let apple = element("proposal-sell-AAPLc")
         XCTAssertTrue(apple.waitForExistence(timeout: 5))
         sleep(1)
         capture("20-sell-pick")
