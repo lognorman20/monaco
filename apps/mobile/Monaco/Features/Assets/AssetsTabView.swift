@@ -35,7 +35,6 @@ struct AssetsTabView: View {
             .textInputAutocapitalization(.words)
             .autocorrectionDisabled()
             .submitLabel(.search)
-            .accessibilityIdentifier("assets-search-field")
 
             listRegion
         }
@@ -45,6 +44,10 @@ struct AssetsTabView: View {
         .foregroundStyle(MonacoTheme.ink)
         .navigationTitle("Stocks")
         .navigationBarTitleDisplayMode(.large)
+        // Same reason as the sections: without `.contain` this identifier is pushed
+        // onto every leaf on the screen, and the search field stops answering to the
+        // name the design system gave it.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("assets-root")
         .navigationDestination(isPresented: Binding(
             get: { selectedSymbol != nil },
@@ -231,6 +234,7 @@ struct AssetsTabView: View {
                 }
                 .padding(.horizontal, -MonacoTheme.Space.m)
             }
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("assets-movers")
         }
     }
@@ -250,6 +254,12 @@ struct AssetsTabView: View {
             MonacoSectionHeader(title)
             content()
         }
+        // `.contain` first, so the section is itself one container element and the
+        // identifier lands on it. Without it the VStack is not an accessibility
+        // element at all, and SwiftUI pushes the identifier down onto every leaf
+        // inside — stamping "assets-popular" over each row's own identifier and
+        // leaving every row in the section indistinguishable.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)
     }
 
@@ -266,6 +276,10 @@ struct AssetsTabView: View {
                     )
                 }
                 .buttonStyle(.monacoRow)
+                // On the Button, not inside its label: the row combines its children
+                // into one element, and an identifier set inside that label never
+                // reaches the button element — the row then inherits the section's
+                // identifier instead, and every row in a section looks alike to a test.
                 .accessibilityIdentifier("\(identifierPrefix)-\(row.asset.symbol)")
             }
         }
