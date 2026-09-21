@@ -28,6 +28,18 @@ final class ProposalFeedSampleUITests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
 
+    /// Drags from the thesis down into the keyboard: the detail scroll view dismisses it
+    /// interactively. No-op when no software keyboard is showing (a hardware keyboard is attached).
+    private func dismissKeyboard() {
+        var drags = 0
+        while app.keyboards.firstMatch.exists && drags < 3 {
+            let start = element("proposal-detail-thesis").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+            drags += 1
+        }
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "keyboard still covers the thread")
+    }
+
     func testFeed_voteFromCard_thenCommentAndReplyInThread() throws {
         // Feed renders cards with vote summary and inline voting.
         let yes = element("proposal-card-vote-yes-sample-0")
@@ -79,8 +91,16 @@ final class ProposalFeedSampleUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Count me in if we cap it at $25."].waitForExistence(timeout: 5))
         capture("05-comment-posted")
 
-        // Reply to Ben's comment.
-        element("comment-reply-c-1").tap()
+        // Reply to Ben's comment. The software keyboard stays up after posting and covers the
+        // thread, so put it away first, as a user would, then bring the Reply button on screen.
+        dismissKeyboard()
+        let reply = element("comment-reply-c-1")
+        var replySwipes = 0
+        while !reply.isHittable && replySwipes < 6 {
+            app.swipeUp()
+            replySwipes += 1
+        }
+        reply.tap()
         XCTAssertTrue(app.staticTexts["Replying to Ben Ortiz"].waitForExistence(timeout: 5))
         field.tap()
         field.typeText("Agreed, Nvidia next.")
