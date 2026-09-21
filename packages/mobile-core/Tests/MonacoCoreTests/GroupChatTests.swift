@@ -422,6 +422,50 @@ final class GroupChatAPITests: XCTestCase {
         }
     }
 
+    /// The replica-lag 404 end to end: whatever case the client carries it in, a member still
+    /// in their cabal must not be told it was deleted, and the thread must stay open.
+    func testListGroupMessages_userNotFound404_isNotAClosedChat() async {
+        // Arrange
+        MockURLProtocol.requestHandler = { request in
+            (Self.response(request, status: 404), Data(#"{"error":"user not found"}"#.utf8))
+        }
+
+        // Act + Assert
+        do {
+            _ = try await makeClient().listGroupMessages(groupId: "g1")
+            XCTFail("expected throw")
+        } catch {
+            XCTAssertEqual(Self.status(of: error), 404)
+            XCTAssertNil(GroupChatCopy.chatClosed(error), "got \(String(describing: GroupChatCopy.chatClosed(error)))")
+            XCTAssertEqual(GroupChatCopy.loadFailure(error), "Couldn't load messages.")
+        }
+    }
+
+    /// A deleted cabal closes the thread only when the client keeps the 404's body, because
+    /// the body is the only thing that tells it apart from the case above. While the chat
+    /// routes throw a bare status, the member sees the retryable sentence instead.
+    func testListGroupMessages_groupNotFound404_closesOnlyWithItsBody() async {
+        // Arrange
+        MockURLProtocol.requestHandler = { request in
+            (Self.response(request, status: 404), Data(#"{"error":"group not found"}"#.utf8))
+        }
+
+        // Act + Assert
+        do {
+            _ = try await makeClient().listGroupMessages(groupId: "g1")
+            XCTFail("expected throw")
+        } catch MonacoAPIError.rejected(status: 404, let message) {
+            XCTAssertEqual(message, "group not found")
+            XCTAssertEqual(
+                GroupChatCopy.loadFailure(MonacoAPIError.rejected(status: 404, message: message)),
+                "This cabal no longer exists."
+            )
+        } catch {
+            XCTAssertEqual(Self.status(of: error), 404)
+            XCTAssertEqual(GroupChatCopy.loadFailure(error), "Couldn't load messages.")
+        }
+    }
+
     func testListGroupMessages_malformedJSON_throwsDecodingError() async {
         // Arrange
         MockURLProtocol.requestHandler = { request in
@@ -716,6 +760,35 @@ final class GroupChatFailureCopyTests: XCTestCase {
             "This cabal no longer exists."
         )
     }
+
+    /// Without its body a 404 is as likely to be that lagging membership read as a deleted
+    /// cabal, so it must not close the thread or tell the member their cabal is gone. This is
+    /// what every chat 404 looks like while the chat routes still throw a bare status.
+    func testChatClosed_a404WithoutItsBodyIsNotADeletedCabal() {
+        XCTAssertNil(GroupChatCopy.chatClosed(MonacoAPIError.httpStatus(404)))
+        XCTAssertEqual(GroupChatCopy.loadFailure(MonacoAPIError.httpStatus(404)), "Couldn't load messages.")
+        XCTAssertEqual(
+            GroupChatCopy.refreshFailure(MonacoAPIError.httpStatus(404)),
+            "Couldn't refresh messages. Pull down to try again."
+        )
+
+        var tracker = GroupChatClosureTracker()
+        tracker.memberLoadFailed(MonacoAPIError.httpStatus(404))
+        for _ in 0..<GroupChatClosureTracker.pollsBeforeClosing {
+            tracker.pollFailed(MonacoAPIError.httpStatus(404))
+        }
+        XCTAssertFalse(tracker.isClosed)
+    }
+
+    /// A body-less 403 still closes: the API only ever sends it about this member.
+    func testChatClosed_a403ClosesWithOrWithoutItsBody() {
+        let removed = "You're no longer in this cabal, so its chat is closed to you."
+        XCTAssertEqual(GroupChatCopy.chatClosed(MonacoAPIError.httpStatus(403)), removed)
+        XCTAssertEqual(
+            GroupChatCopy.chatClosed(MonacoAPIError.rejected(status: 403, message: "not a group member")),
+            removed
+        )
+    }
 }
 
 final class GroupChatClosureTrackerTests: XCTestCase {
@@ -804,9 +877,10 @@ final class GroupChatClosureTrackerTests: XCTestCase {
 
     func testClosedCopy_reachesEveryFailureSurface() {
         let closed = "This cabal no longer exists."
-        XCTAssertEqual(GroupChatCopy.loadFailure(MonacoAPIError.httpStatus(404)), closed)
-        XCTAssertEqual(GroupChatCopy.refreshFailure(MonacoAPIError.httpStatus(404)), closed)
-        XCTAssertEqual(GroupChatCopy.earlierFailure(MonacoAPIError.httpStatus(404)), closed)
+        let cabalGone = MonacoAPIError.rejected(status: 404, message: "group not found")
+        XCTAssertEqual(GroupChatCopy.loadFailure(cabalGone), closed)
+        XCTAssertEqual(GroupChatCopy.refreshFailure(cabalGone), closed)
+        XCTAssertEqual(GroupChatCopy.earlierFailure(cabalGone), closed)
     }
 
     func testNewMessagesPill_singularAndPlural() {
@@ -820,7 +894,7 @@ final class GroupChatClosureTrackerTests: XCTestCase {
             GroupChatCopy.refreshFailure(URLError(.timedOut)),
             GroupChatCopy.earlierFailure(URLError(.timedOut)),
             GroupChatCopy.chatClosed(MonacoAPIError.httpStatus(403)) ?? "",
-            GroupChatCopy.chatClosed(MonacoAPIError.httpStatus(404)) ?? "",
+            GroupChatCopy.chatClosed(MonacoAPIError.rejected(status: 404, message: "group not found")) ?? "",
             GroupChatCopy.newMessagesPill(count: 3),
             // The newest member-facing sentence in chat, and the one a member has to act on.
             GroupChatCopy.sendUnconfirmed,

@@ -327,7 +327,9 @@ public enum GroupChatCopy {
             return "Type a message first."
         case GroupChatDraft.Problem.tooLong:
             return "Messages can be up to \(GroupChatDraft.maxCharacters) characters."
-        // 429 arrives as its own case with the server's Retry-After, never as httpStatus.
+        // A 429 arrives here, with the server's Retry-After, once the chat routes map their
+        // failures in full. Until then it arrives as a bare httpStatus(429) and reads as the
+        // countdown-free sentence further down.
         case MonacoAPIError.rateLimited(let retryAfterSeconds):
             guard let seconds = retryAfterSeconds, seconds > 0 else {
                 return "You're sending messages fast. Wait a moment and try again."
@@ -449,14 +451,21 @@ public enum GroupChatCopy {
     /// polling on one of these instead of asking a cabal it was thrown out of every 4 seconds.
     public static func chatClosed(_ error: Error) -> String? {
         switch error {
-        case MonacoAPIError.httpStatus(let code):
-            return chatClosed(status: code, serverMessage: nil)
-        case MonacoAPIError.rejected(let code, let message):
-            return chatClosed(status: code, serverMessage: message)
+        case MonacoAPIError.httpStatus(403), MonacoAPIError.rejected(status: 403, _):
+            return removedFromCabal
+        case MonacoAPIError.rejected(status: 404, let message):
+            return isAboutTheUser(message) ? nil : cabalGone
+        // A 404 without its body cannot be told apart from the replica-lag "user not found"
+        // described below, so it is no evidence the cabal is gone. Reading it as one would
+        // close a live thread after three polls and tell a member their cabal was deleted.
+        // Chat keeps asking instead, which is what it did before this split existed.
         default:
             return nil
         }
     }
+
+    private static let removedFromCabal = "You're no longer in this cabal, so its chat is closed to you."
+    private static let cabalGone = "This cabal no longer exists."
 
     /// 403 is the API making a decision about this member, and it means what it says.
     ///
@@ -466,18 +475,6 @@ public enum GroupChatCopy {
     /// caught up yet. The body is the only thing that tells them apart — these branches log a
     /// machine-readable reason but do not put it in the response — so match the one that is
     /// about something other than the group and treat it as worth retrying.
-    private static func chatClosed(status: Int, serverMessage: String?) -> String? {
-        switch status {
-        case 403:
-            return "You're no longer in this cabal, so its chat is closed to you."
-        case 404:
-            guard !isAboutTheUser(serverMessage) else { return nil }
-            return "This cabal no longer exists."
-        default:
-            return nil
-        }
-    }
-
     private static func isAboutTheUser(_ serverMessage: String?) -> Bool {
         guard let serverMessage else { return false }
         return serverMessage.localizedCaseInsensitiveContains("user not found")
