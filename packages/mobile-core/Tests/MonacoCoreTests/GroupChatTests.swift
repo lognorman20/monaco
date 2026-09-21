@@ -404,7 +404,7 @@ final class GroupChatAPITests: XCTestCase {
         XCTAssertNil(query.first { $0.name == "before" })
     }
 
-    func testListGroupMessages_forbidden_throwsHTTPStatus() async {
+    func testListGroupMessages_forbidden_readsAsAClosedChat() async {
         // Arrange
         MockURLProtocol.requestHandler = { request in
             (Self.response(request, status: 403), Data(#"{"error":"not a group member"}"#.utf8))
@@ -415,7 +415,10 @@ final class GroupChatAPITests: XCTestCase {
             _ = try await makeClient().listGroupMessages(groupId: "g1")
             XCTFail("expected throw")
         } catch {
-            XCTAssertEqual(error as? MonacoAPIError, .httpStatus(403))
+            // The client may surface a 403 bare or with the server's reason attached; the
+            // member reads the same closed-chat copy either way.
+            XCTAssertEqual(Self.status(of: error), 403)
+            XCTAssertEqual(GroupChatCopy.loadFailure(error), "You're no longer in this cabal, so its chat is closed to you.")
         }
     }
 
@@ -467,7 +470,13 @@ final class GroupChatAPITests: XCTestCase {
             _ = try await makeClient().postGroupMessage(groupId: "g1", body: "spam")
             XCTFail("expected throw")
         } catch {
-            XCTAssertEqual(error as? MonacoAPIError, .httpStatus(429))
+            // A 429 arrives either bare or as `.rateLimited` with the server's Retry-After;
+            // both read as "slow down", never as a failed or unconfirmed send.
+            XCTAssertEqual(Self.status(of: error), 429)
+            XCTAssertTrue(
+                GroupChatCopy.sendFailure(error).hasPrefix("You're sending messages fast."),
+                "got \(GroupChatCopy.sendFailure(error))"
+            )
         }
     }
 
@@ -496,6 +505,16 @@ final class GroupChatAPITests: XCTestCase {
             session: URLSession(configuration: configuration),
             accessTokenProvider: { token }
         )
+    }
+
+    /// The HTTP status a thrown `MonacoAPIError` carries, whichever case it arrived as.
+    private static func status(of error: Error) -> Int? {
+        switch error {
+        case MonacoAPIError.httpStatus(let status): return status
+        case MonacoAPIError.rejected(let status, _): return status
+        case MonacoAPIError.rateLimited: return 429
+        default: return nil
+        }
     }
 
     private static func response(_ request: URLRequest, status: Int) -> HTTPURLResponse {
