@@ -140,8 +140,13 @@ jobs:
       - name: Sample-screen manifest covers every harness
         run: scripts/qa/screens.sh --check
 
-      - name: Pick a simulator
-        run: echo "SIM=$(scripts/resolve-ios-sim.sh)" >> "$GITHUB_ENV"
+      # Booting here lets the simulator start while the app compiles.
+      - name: Pick and boot a simulator
+        run: |
+          sim="$(scripts/resolve-ios-sim.sh)"
+          xcrun simctl list devices available | grep -F "$sim"
+          xcrun simctl boot "$sim"
+          echo "SIM=$sim" >> "$GITHUB_ENV"
 
       - name: Build app and tests
         run: |
@@ -154,7 +159,7 @@ jobs:
           xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco -configuration Debug \
             -destination "platform=iOS Simulator,id=$SIM" -derivedDataPath "$DERIVED_DATA" \
             -resultBundlePath "$RUNNER_TEMP/MonacoTests.xcresult" \
-            CODE_SIGNING_ALLOWED=NO -quiet -only-testing:MonacoTests test-without-building
+            CODE_SIGNING_ALLOWED=NO -only-testing:MonacoTests test-without-building
 
       - name: Upload test results
         if: failure()
