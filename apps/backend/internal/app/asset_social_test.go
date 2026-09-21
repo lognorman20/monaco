@@ -1,9 +1,11 @@
 package app
 
 import (
+	"database/sql"
 	"testing"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/packages/domain"
@@ -131,9 +133,9 @@ func TestAssetActivityFeed_newestFirstAndFillAboveItsProposal(t *testing.T) {
 	}
 	fills := []postgres.SymbolFillRow{
 		// Same instant as the proposal it settles: the fill is the later fact.
-		{ID: "t-1", GroupID: "g1", GroupName: "Weekend investors", Action: "buy", Status: "confirmed", AmountUsdc: 5_000_000, CreatedAt: at.Add(-2 * time.Hour)},
+		{ID: "t-1", GroupID: "g1", GroupName: "Weekend investors", Action: "buy", Status: "confirmed", Amount: 5_000_000, CreatedAt: at.Add(-2 * time.Hour)},
 		// Still in flight: the proposal's own line already covers it.
-		{ID: "t-2", GroupID: "g1", GroupName: "Weekend investors", Action: "buy", Status: "pending", AmountUsdc: 1_000_000, CreatedAt: at.Add(-time.Minute)},
+		{ID: "t-2", GroupID: "g1", GroupName: "Weekend investors", Action: "buy", Status: "pending", Amount: 1_000_000, CreatedAt: at.Add(-time.Minute)},
 	}
 
 	feed := assetActivityFeed(proposals, fills, 10)
@@ -149,6 +151,51 @@ func TestAssetActivityFeed_newestFirstAndFillAboveItsProposal(t *testing.T) {
 	}
 	if feed[2].ID != "p-old" || feed[2].Kind != AssetActivityPassed {
 		t.Fatalf("third item = %+v, want the passed proposal", feed[2])
+	}
+}
+
+func TestAssetActivityFeed_sellReportsProceedsNotTokenAtomics(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2026, 9, 22, 14, 0, 0, 0, time.UTC)
+	// The cabal sold 12 AAPLx for $2,784.60. transactions.amount holds the input
+	// side of the swap, which for a sell is the token: 12 * 1e8 atomics. Read as
+	// micros that is "$1,200.00", a number nobody's money ever touched.
+	const soldAtomics = 12 * jupiter.XStockAtomicScale
+	const proceedsMicros = int64(2_784_600_000)
+
+	fills := []postgres.SymbolFillRow{
+		{
+			ID: "t-sell", GroupID: "g1", GroupName: "Weekend investors",
+			Action: "sell", Status: "confirmed",
+			Amount:          soldAtomics,
+			CostBasisAmount: sql.NullInt64{Int64: proceedsMicros, Valid: true},
+			TokenAmount:     soldAtomics,
+			CreatedAt:       at,
+		},
+		// An older sell that never recorded proceeds has no dollar figure at all.
+		// Zero lets the app fall back to the share count instead of inventing one.
+		{
+			ID: "t-sell-legacy", GroupID: "g1", GroupName: "Weekend investors",
+			Action: "sell", Status: "confirmed",
+			Amount:      soldAtomics,
+			TokenAmount: soldAtomics,
+			CreatedAt:   at.Add(-time.Hour),
+		},
+	}
+
+	feed := assetActivityFeed(nil, fills, 10)
+	if len(feed) != 2 {
+		t.Fatalf("feed length = %d, want 2; feed = %+v", len(feed), feed)
+	}
+	if feed[0].UsdcMicros != proceedsMicros {
+		t.Fatalf("sell usdcMicros = %d, want the %d micros of proceeds (a sell's amount column is token atomics)", feed[0].UsdcMicros, proceedsMicros)
+	}
+	if feed[0].TokenAmount != soldAtomics {
+		t.Fatalf("sell tokenAmount = %d, want %d", feed[0].TokenAmount, soldAtomics)
+	}
+	if feed[1].UsdcMicros != 0 {
+		t.Fatalf("sell without recorded proceeds reported %d micros, want 0 so the row shows shares", feed[1].UsdcMicros)
 	}
 }
 

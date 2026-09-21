@@ -199,18 +199,23 @@ ORDER BY v.cast_at`
 // TokenAmount is the proposal's, not the transaction's: a transaction stores its
 // fill sizes under cost-basis columns whose meaning differs between a buy and a
 // sell, and the asset screen only ever says "the cabal voted to sell 12 shares".
+//
+// Amount is the swap's raw input amount — USDC micros for a buy, token atomics
+// for a sell — so it is not a dollar figure on its own. Call SwapUsdcMicros
+// with Action, Status, Amount and CostBasisAmount to get one.
 type SymbolFillRow struct {
-	ID          string
-	GroupID     string
-	GroupName   string
-	ProposalID  string
-	Action      string
-	Status      string
-	AmountUsdc  int64
-	TokenAmount int64
-	TxSignature string
-	ActorName   string
-	CreatedAt   time.Time
+	ID              string
+	GroupID         string
+	GroupName       string
+	ProposalID      string
+	Action          string
+	Status          string
+	Amount          int64
+	CostBasisAmount sql.NullInt64
+	TokenAmount     int64
+	TxSignature     string
+	ActorName       string
+	CreatedAt       time.Time
 }
 
 // ListFillsForSymbol returns confirmed and in-flight swaps for one symbol across
@@ -230,8 +235,8 @@ func (s *Store) ListFillsForSymbol(ctx context.Context, groupIDs []string, symbo
 
 	const selectSQL = `
 SELECT t.id, t.group_id, g.name, t.proposal_id, t.action, t.status,
-       COALESCE(t.amount, 0), COALESCE(p.token_amount, 0), COALESCE(t.tx_signature, ''),
-       COALESCE(actor.display_name, ''), t.created_at
+       COALESCE(t.amount, 0), t.cost_basis_amount, COALESCE(p.token_amount, 0),
+       COALESCE(t.tx_signature, ''), COALESCE(actor.display_name, ''), t.created_at
 FROM transactions t
 JOIN proposals p ON p.id = t.proposal_id
 JOIN groups g ON g.id = t.group_id
@@ -260,7 +265,8 @@ LIMIT $3`
 			&proposalID,
 			&row.Action,
 			&row.Status,
-			&row.AmountUsdc,
+			&row.Amount,
+			&row.CostBasisAmount,
 			&row.TokenAmount,
 			&row.TxSignature,
 			&row.ActorName,

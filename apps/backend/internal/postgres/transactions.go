@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -16,6 +17,30 @@ const (
 	TransactionStatusConfirmed = "confirmed"
 	TransactionStatusFailed    = "failed"
 )
+
+// SwapUsdcMicros reports what a swap row is worth in USDC micros, and whether
+// that figure is known at all.
+//
+// transactions.amount is the swap's INPUT amount, so its unit depends on the
+// direction: a buy spends USDC and stores micros, but a sell spends the xStock
+// and stores token atomics (jupiter.XStockAtomicScale per share). Printing a
+// sell's amount as dollars is off by the ratio of the two scales, which is why
+// every caller that shows money must go through here instead of reading Amount.
+//
+// A confirmed sell carries its USDC proceeds in cost_basis_amount, and that is
+// the only honest dollar figure for a sell. A sell that has not confirmed — or
+// an older row that never recorded proceeds — has no USDC figure, and the
+// second return is false so callers can say "12 AAPLx" rather than invent a
+// price.
+func SwapUsdcMicros(action, status string, amount int64, costBasisAmount sql.NullInt64) (int64, bool) {
+	if !strings.EqualFold(strings.TrimSpace(action), TransactionActionSell) {
+		return amount, true
+	}
+	if strings.EqualFold(strings.TrimSpace(status), TransactionStatusConfirmed) && costBasisAmount.Valid {
+		return costBasisAmount.Int64, true
+	}
+	return 0, false
+}
 
 // TransactionRow is a row in transactions.
 type TransactionRow struct {

@@ -445,6 +445,10 @@ func assetActivityFeed(proposals []postgres.SymbolProposalRow, fills []postgres.
 		if !strings.EqualFold(fill.Status, "confirmed") {
 			continue
 		}
+		// A sell's amount column is token atomics, not micros: only the recorded
+		// proceeds are dollars. Unknown leaves UsdcMicros at zero and the row
+		// falls back to its share count.
+		usdcMicros, _ := postgres.SwapUsdcMicros(fill.Action, fill.Status, fill.Amount, fill.CostBasisAmount)
 		items = append(items, AssetSocialActivity{
 			ID:          fill.ID,
 			GroupID:     fill.GroupID,
@@ -452,7 +456,7 @@ func assetActivityFeed(proposals []postgres.SymbolProposalRow, fills []postgres.
 			Kind:        AssetActivityFilled,
 			Action:      fill.Action,
 			Status:      fill.Status,
-			UsdcMicros:  fill.AmountUsdc,
+			UsdcMicros:  usdcMicros,
 			TokenAmount: fill.TokenAmount,
 			ActorName:   fill.ActorName,
 			TxSignature: fill.TxSignature,
