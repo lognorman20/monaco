@@ -100,6 +100,22 @@ type marketAssetResponse struct {
 	// ("AAPL"). Both are set exactly when Change24h is.
 	Change24hBasis       string `json:"change24hBasis,omitempty"`
 	Change24hBasisSymbol string `json:"change24hBasisSymbol,omitempty"`
+	// Spark is the day's closes, downsampled to what a row's sparkline draws, from
+	// the same Pyth 1D series change24h is measured on. It is batched onto the page
+	// so the app never asks per row: twenty visible rows would otherwise be twenty
+	// chart requests, all arriving after the user has scrolled past. Omitted when
+	// no series could be sourced in budget; the row then draws no line rather than
+	// a flat one, which would read as "this stock did not move".
+	Spark []int64 `json:"spark,omitempty"`
+	// SparkBasis and SparkBasisSymbol name the instrument Spark is about
+	// ("underlying", "AAPL"). They are set exactly when Spark is. The app tints a
+	// line by change24h only when the two name the same instrument, and by the
+	// line's own first and last close otherwise, so it has to be told.
+	SparkBasis       string `json:"sparkBasis,omitempty"`
+	SparkBasisSymbol string `json:"sparkBasisSymbol,omitempty"`
+	// LogoURL is kept on the wire and always empty: a B20 token publishes no logo,
+	// and the app draws the bundled mark for the underlying (or its ticker tile).
+	LogoURL string `json:"logoUrl,omitempty"`
 }
 
 // dayChangeFields is change24h with the basis section 4.3 of the port requires on
@@ -439,144 +455,26 @@ func (h *AssetsHandlers) authorizeUser(ctx context.Context, accessToken string) 
 	return user.ID, nil
 }
 
+// marketRows is the one place a stock row's market figures come from, shared with
+// the held route and the cabal screen so the same instrument is read the same way
+// everywhere.
+func (h *AssetsHandlers) marketRows() *MarketRowSource {
+	return &MarketRowSource{Catalog: h.Catalog, Marks: h.Pyth, Charts: h.Charts}
+}
+
 func (h *AssetsHandlers) lookupAsset(ctx context.Context, symbol string) (b20.Asset, bool, error) {
-	needle := strings.ToUpper(strings.TrimSpace(symbol))
-	page, err := h.Catalog.Search(ctx, symbol, 25, 0)
-	if err != nil {
-		return b20.Asset{}, false, err
-	}
-	for _, asset := range page.Assets {
-		if strings.EqualFold(strings.TrimSpace(asset.Symbol), needle) {
-			return asset, true, nil
-		}
-	}
-	addr, err := h.Catalog.ResolveTokenAddress(ctx, symbol)
-	if err != nil || strings.TrimSpace(addr) == "" {
-		return b20.Asset{}, false, nil
-	}
-	asset, found, err := h.Catalog.LookupByAddress(ctx, addr)
-	if err != nil {
-		return b20.Asset{}, false, err
-	}
-	return asset, found, nil
+	return h.marketRows().LookupAsset(ctx, symbol)
 }
 
-// enrichAssets attaches the Chainlink mark and the underlying's day change.
+// enrichAssets attaches the Chainlink mark, the underlying's day change and the
+// day's sparkline.
 func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []b20.Asset) []marketAssetResponse {
-	ctx, cancel := context.WithTimeout(ctx, catalogPriceBudget)
-	defer cancel()
-
-	var (
-		prices  map[string]assetPriceSnapshot
-		changes map[string]*string
-		wg      sync.WaitGroup
-	)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		prices = h.fetchPrices(ctx, assets)
-	}()
-	go func() {
-		defer wg.Done()
-		changes = h.dayChanges(ctx, assets)
-	}()
-	wg.Wait()
-
-	out := make([]marketAssetResponse, 0, len(assets))
-	for _, asset := range assets {
-		resp := marketAssetResponseFor(asset, prices)
-		resp.Change24h, resp.Change24hBasis, resp.Change24hBasisSymbol = dayChangeFields(asset.Symbol, changes[asset.Symbol])
-		out = append(out, resp)
-	}
-	return out
+	return h.marketRows().Enrich(ctx, assets)
 }
 
-// assetPriceSnapshot is one current Chainlink mark, with when it was struck.
-type assetPriceSnapshot struct {
-	PriceUsdcMicros int64
-	Mark            pyth.AssetMark
-}
-
-// catalogPriceBudget bounds the reads a catalog page costs, so a slow RPC or a
-// slow Pyth costs a missing price or change, never a hung list.
-const catalogPriceBudget = 4 * time.Second
-
-// dayChangeConcurrency bounds how many 1D series one catalog page asks Pyth for at
-// once. They are cached for a minute, so a warm page costs none.
-const dayChangeConcurrency = 4
-
-// fetchPrices loads current marks. A nil client or a failed fetch degrades to "no
-// price" rather than erroring the whole catalog response.
+// fetchPrices loads current Chainlink marks, keyed by token address.
 func (h *AssetsHandlers) fetchPrices(ctx context.Context, assets []b20.Asset) map[string]assetPriceSnapshot {
-	if h.Pyth == nil {
-		return nil
-	}
-	symbols := make([]string, 0, len(assets))
-	for _, asset := range assets {
-		symbols = append(symbols, asset.Symbol)
-	}
-	marks, err := h.Pyth.AssetMarks(ctx, symbols)
-	if err != nil {
-		marks = nil
-	}
-	out := make(map[string]assetPriceSnapshot, len(assets))
-	for _, asset := range assets {
-		mark, ok := marks[asset.Symbol]
-		if !ok || mark.PriceUsdcMicros <= 0 {
-			continue
-		}
-		out[asset.TokenAddress] = assetPriceSnapshot{PriceUsdcMicros: mark.PriceUsdcMicros, Mark: mark}
-	}
-	return out
-}
-
-// dayChanges reads each asset's 1D Pyth series and keeps the ones with an honest
-// day change. An asset whose series is late, empty or not the underlying simply
-// has no change on the wire.
-func (h *AssetsHandlers) dayChanges(ctx context.Context, assets []b20.Asset) map[string]*string {
-	out := make(map[string]*string, len(assets))
-	if h.Charts == nil || len(assets) == 0 {
-		return out
-	}
-	var (
-		mu  sync.Mutex
-		wg  sync.WaitGroup
-		sem = make(chan struct{}, dayChangeConcurrency)
-	)
-	for _, asset := range assets {
-		wg.Add(1)
-		go func(symbol string) {
-			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				return
-			}
-			defer func() { <-sem }()
-			change := h.Charts.DayChange(ctx, symbol)
-			if change == nil {
-				return
-			}
-			mu.Lock()
-			out[symbol] = change
-			mu.Unlock()
-		}(asset.Symbol)
-	}
-	wg.Wait()
-	return out
-}
-
-func marketAssetResponseFor(asset b20.Asset, prices map[string]assetPriceSnapshot) marketAssetResponse {
-	resp := marketAssetResponse{
-		Symbol:       asset.Symbol,
-		Name:         asset.Name,
-		TokenAddress: asset.TokenAddress,
-		Routable:     asset.Routable || strings.TrimSpace(asset.TokenAddress) != "",
-	}
-	if price, ok := prices[asset.TokenAddress]; ok && price.PriceUsdcMicros > 0 {
-		resp.PriceUsdcMicros = &price.PriceUsdcMicros
-	}
-	return resp
+	return h.marketRows().Prices(ctx, assets)
 }
 
 // marketSectionTimeout bounds the reads the detail screen fans out — the mark, the
@@ -651,7 +549,7 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset b20.Asset) 
 	wg.Wait()
 
 	var mark *pyth.AssetMark
-	if price, ok := prices[asset.TokenAddress]; ok && price.PriceUsdcMicros > 0 {
+	if price, ok := prices[tokenKey(asset.TokenAddress)]; ok && price.PriceUsdcMicros > 0 {
 		detail.PriceUsdcMicros = &price.PriceUsdcMicros
 		mark = &price.Mark
 	}

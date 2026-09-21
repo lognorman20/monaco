@@ -179,6 +179,68 @@ func TestGET_assets_list_change24hIsTheUnderlyingsDayMove(t *testing.T) {
 	}
 }
 
+func TestGET_assets_popular_rowsCarryTheDaySparklineWithItsBasis(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, walletClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
+	seedApple(t, handlers)
+	pyth.RegisterChartSeries(handlers.Charts.(pyth.AssetPriceClient), "AAPLc", pyth.ChartRange1D, underlyingDay())
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/popular", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handlers.PopularAssetsHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+	}
+	var popular popularAssetsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &popular); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if len(popular.Assets) != 1 {
+		t.Fatalf("assets = %+v, want AAPLc", popular.Assets)
+	}
+	apple := popular.Assets[0]
+	want := []int64{240_000_000, 229_500_000, 231_420_000}
+	if len(apple.Spark) != len(want) {
+		t.Fatalf("spark = %v, want %v", apple.Spark, want)
+	}
+	for i := range want {
+		if apple.Spark[i] != want[i] {
+			t.Fatalf("spark = %v, want %v", apple.Spark, want)
+		}
+	}
+	if apple.SparkBasis != "underlying" || apple.SparkBasisSymbol != "AAPL" {
+		t.Fatalf("spark basis = %q/%q, want underlying/AAPL", apple.SparkBasis, apple.SparkBasisSymbol)
+	}
+	if apple.LogoURL != "" || strings.Contains(rec.Body.String(), `"logoUrl"`) {
+		t.Fatalf("logoUrl shipped (%q); the B20 catalog has none", apple.LogoURL)
+	}
+}
+
+func TestGET_assets_list_rowWithoutASeriesShipsNoSparkField(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, walletClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
+	seedApple(t, handlers)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets?query=AAPL", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handlers.ListAssetsHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, field := range []string{`"spark"`, `"sparkBasis"`, `"sparkBasisSymbol"`} {
+		if strings.Contains(body, field) {
+			t.Fatalf("body carries %s with no series behind it: %s", field, body)
+		}
+	}
+}
+
 func TestGET_assets_symbol_afterHoursSessionIsReported(t *testing.T) {
 	t.Parallel()
 
