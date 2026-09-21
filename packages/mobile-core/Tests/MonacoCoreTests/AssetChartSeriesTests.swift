@@ -338,6 +338,39 @@ final class AssetChartSeriesTests: XCTestCase {
         XCTAssertTrue(session.date.contains("25"), session.date)
     }
 
+    /// The case above cannot tell the two calendars apart on "today": Fri 15:55 ET and
+    /// Fri 16:00 ET are the same day in Tokyo too. These two can. In each, New York and
+    /// Tokyo disagree about whether the session and "now" share a day, so a reader-calendar
+    /// implementation gets `isToday` wrong.
+    func testTodayIsDecidedOnTheExchangesCalendarWhereTheTwoDisagree() throws {
+        var newYork = Calendar(identifier: .gregorian)
+        newYork.timeZone = ChartSessionDay.exchangeTimeZone
+        var tokyo = Calendar(identifier: .gregorian)
+        tokyo.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        let locale = Locale(identifier: "en_JP")
+
+        // Friday's session, read at Sat 00:30 ET (Sat 13:30 in Tokyo). Tokyo calls the
+        // session Saturday morning and so "today"; on the exchange it was yesterday.
+        let saturdayJustAfterMidnightET = fridayAfternoon.addingTimeInterval(8 * 3600 + 35 * 60)
+        XCTAssertTrue(tokyo.isDate(fridayAfternoon, inSameDayAs: saturdayJustAfterMidnightET), "the fixture is one day in Tokyo")
+        XCTAssertFalse(newYork.isDate(fridayAfternoon, inSameDayAs: saturdayJustAfterMidnightET), "the fixture is two days in New York")
+
+        let yesterday = try XCTUnwrap(fridaySession().session(now: saturdayJustAfterMidnightET, locale: locale))
+        XCTAssertFalse(yesterday.isToday)
+        XCTAssertNotEqual(yesterday.caption, "Today")
+        XCTAssertTrue(yesterday.date.contains("25"), yesterday.date)
+
+        // A bar at Fri 09:35 ET (Fri 22:35 in Tokyo), read at Fri 15:55 ET (Sat 04:55 in
+        // Tokyo). Tokyo says two different days; on the exchange it is still today's session.
+        let fridayOpen = fridayAfternoon.addingTimeInterval(-(6 * 3600 + 20 * 60))
+        XCTAssertFalse(tokyo.isDate(fridayOpen, inSameDayAs: fridayAfternoon), "the fixture is two days in Tokyo")
+        XCTAssertTrue(newYork.isDate(fridayOpen, inSameDayAs: fridayAfternoon), "the fixture is one day in New York")
+
+        let today = ChartSessionDay(sessionInstant: fridayOpen, now: fridayAfternoon, locale: locale)
+        XCTAssertTrue(today.isToday)
+        XCTAssertEqual(today.caption, "Today")
+    }
+
     /// The sampler and the Chainlink rounds are a rolling 24 hours, which "Past day"
     /// describes; only a longer range or another source is never named for a session.
     func testOnlyABenchmarksDayChartIsOneSession() {

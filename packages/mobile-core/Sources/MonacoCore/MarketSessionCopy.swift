@@ -42,8 +42,9 @@ public enum MarketSessionCopy {
     /// or a session name this build does not know. A chip that guesses is worse than
     /// no chip on the screen where someone decides to trade.
     ///
-    /// `tokenRoutable` is the detail's Kyber buy probe (`liquidity.routable`). It
-    /// defaults to false so a caller that does not know stays quiet about the pools.
+    /// `tokenRoutable` is whether the detail's Kyber probes found a route both ways (the
+    /// buy probe's `liquidity.routable` and a sell probe output). It defaults to false so
+    /// a caller that does not know stays quiet about the pools.
     public static func chip(
         for market: MarketStatusDTO?,
         tokenRoutable: Bool = false,

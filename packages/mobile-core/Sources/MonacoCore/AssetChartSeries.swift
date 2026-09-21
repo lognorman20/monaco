@@ -154,8 +154,7 @@ public struct AssetChartSeries: Equatable, Sendable {
     /// Both legs come from the curve, never from the hero price above it: the curve is
     /// usually the underlying equity's, per share, and the hero is the B20 token's
     /// Chainlink mark, per token. Subtracting one from the other would fold the
-    /// token's multiplier (and whatever the pools are paying over the mark) into the
-    /// day's move.
+    /// token's multiplier (splits and reinvested dividends) into the day's move.
     public func changeDollars(toIndex index: Int? = nil) -> String? {
         guard let baseline = baselineValue else { return nil }
         guard let value = target(at: index)?.chartValue else { return nil }
