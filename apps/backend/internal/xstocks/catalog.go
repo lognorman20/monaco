@@ -313,28 +313,6 @@ func xStockSymbolCandidates(query string) []string {
 	return []string{upper + "x", q + "x"}
 }
 
-// catalogAssetsFromListResponse parses one catalog list page JSON and filters by query.
-func catalogAssetsFromListResponse(body []byte, query string) ([]CatalogAsset, error) {
-	var list catalogListResponse
-	if err := json.Unmarshal(body, &list); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
-	}
-
-	needle := strings.ToLower(strings.TrimSpace(query))
-	assets := make([]CatalogAsset, 0)
-	for _, node := range list.Nodes {
-		if !catalogNodeMatches(node, needle) {
-			continue
-		}
-		mint, err := solanaMintFromDeployments(node.Deployments)
-		if err != nil {
-			continue
-		}
-		assets = append(assets, catalogAssetFromNode(node, mint))
-	}
-	return assets, nil
-}
-
 func catalogNodeMatches(node catalogAssetNode, needle string) bool {
 	symbol := strings.ToLower(strings.TrimSpace(node.Symbol))
 	name := strings.ToLower(strings.TrimSpace(node.Name))
