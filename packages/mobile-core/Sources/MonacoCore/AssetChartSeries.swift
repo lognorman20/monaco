@@ -15,9 +15,11 @@ import Foundation
 public struct AssetChartSeries: Equatable, Sendable {
     /// The range this series is for — the chip it belongs under.
     public let range: AssetChartRange
-    /// Ascending by timestamp. `init` sorts, because the nearest-point search is a
-    /// binary search and a series that arrived out of order would silently return
-    /// the wrong point rather than fail.
+    /// Ascending by timestamp, one point per timestamp. `init` sorts, because the
+    /// nearest-point search is a binary search and a series that arrived out of
+    /// order would silently return the wrong point rather than fail; it also drops
+    /// repeats, because the drawing side keys its marks by timestamp and two
+    /// samples at one instant are two marks with one identity.
     public let points: [AssetChartPointDTO]
     /// The close of the regular session before this window, when the source knew
     /// one. Only the day chart has a use for it.
@@ -35,7 +37,7 @@ public struct AssetChartSeries: Equatable, Sendable {
         basisSymbol: String? = nil
     ) {
         self.range = range
-        self.points = points.sorted { $0.timestamp < $1.timestamp }
+        self.points = Self.canonical(points)
         self.previousCloseUsdcMicros = previousCloseUsdcMicros
         self.source = source
         self.basis = basis
@@ -59,6 +61,29 @@ public struct AssetChartSeries: Equatable, Sendable {
             basis: dto.basis,
             basisSymbol: dto.basisSymbol
         )
+    }
+
+    /// Sorted ascending, with at most one point per timestamp.
+    ///
+    /// Nothing upstream promises distinct instants: a source that stitches two
+    /// windows together, or a cache that concatenates a refresh onto its tail, can
+    /// hand us the same second twice. Downstream that is not a cosmetic problem —
+    /// the chart draws one mark per point keyed by its timestamp, so a repeat is a
+    /// duplicate identity, which SwiftUI warns about and then renders wrong. The
+    /// last sample for an instant wins, on the same "a later read is a better read"
+    /// rule the quiet poll uses.
+    private static func canonical(_ points: [AssetChartPointDTO]) -> [AssetChartPointDTO] {
+        let sorted = points.sorted { $0.timestamp < $1.timestamp }
+        var deduplicated: [AssetChartPointDTO] = []
+        deduplicated.reserveCapacity(sorted.count)
+        for point in sorted {
+            if deduplicated.last?.timestamp == point.timestamp {
+                deduplicated[deduplicated.count - 1] = point
+            } else {
+                deduplicated.append(point)
+            }
+        }
+        return deduplicated
     }
 
     // MARK: - Shape
@@ -115,10 +140,12 @@ public struct AssetChartSeries: Equatable, Sendable {
     /// Always fixed-point and POSIX. `String(someDouble)` switches to scientific
     /// notation below 1e-4, and `MonacoTheme.signed` reads the digits of "5e-05" as
     /// "505" and tints a flat move as a gain.
+    /// Nil when there is no baseline to measure from, and nil when `index` names a
+    /// sample the series does not have: falling back to the last point there would
+    /// hand a caller a real-looking number for a sample that does not exist.
     public func changeRatio(toIndex index: Int? = nil) -> String? {
         guard let baseline = baselineValue, baseline > 0 else { return nil }
-        let target = index.flatMap(point(at:)) ?? points.last
-        guard let value = target?.chartValue else { return nil }
+        guard let value = target(at: index)?.chartValue else { return nil }
         return Self.ratioString(value / baseline - 1)
     }
 
@@ -129,11 +156,20 @@ public struct AssetChartSeries: Equatable, Sendable {
     /// the other would quietly fold the premium between them into the day's move.
     public func changeDollars(toIndex index: Int? = nil) -> String? {
         guard let baseline = baselineValue else { return nil }
-        let target = index.flatMap(point(at:)) ?? points.last
-        guard let value = target?.chartValue else { return nil }
+        guard let value = target(at: index)?.chartValue else { return nil }
         let delta = value - baseline
         guard delta.isFinite else { return nil }
         return String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), delta)
+    }
+
+    /// The sample a change is measured *to*. No index means the end of the window —
+    /// "what has it done so far". An index means that sample and no other, so an
+    /// index the series does not have is nil rather than the end: a caller that
+    /// trusts an index it computed elsewhere should get nothing, not a plausible
+    /// number for a different point.
+    private func target(at index: Int?) -> AssetChartPointDTO? {
+        guard let index else { return points.last }
+        return point(at: index)
     }
 
     /// Fixed-point, POSIX, so no formatter downstream ever sees an exponent.

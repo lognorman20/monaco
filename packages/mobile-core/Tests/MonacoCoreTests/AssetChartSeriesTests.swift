@@ -169,10 +169,51 @@ final class AssetChartSeriesTests: XCTestCase {
         XCTAssertEqual(SignedUsdFormatter.format(try XCTUnwrap(chart.changeDollars())), "−$1.25")
     }
 
-    func testAnOutOfBoundsScrubIndexFallsBackToTheEndOfTheCurve() {
+    /// An index is a claim about a sample. One the series does not have gets nothing
+    /// back — a fallback to the end of the curve would hand a caller a real-looking
+    /// number for a point that is not there. "No index" still means the end.
+    func testAnOutOfBoundsScrubIndexMeasuresNothing() {
         let chart = series(prices: [100_000_000, 110_000_000])
 
-        XCTAssertEqual(chart.changeRatio(toIndex: 99), chart.changeRatio())
+        XCTAssertNil(chart.changeRatio(toIndex: 99))
+        XCTAssertNil(chart.changeDollars(toIndex: 99))
+        XCTAssertNil(chart.changeRatio(toIndex: -1))
+        XCTAssertNotNil(chart.changeRatio())
+        XCTAssertEqual(chart.changeRatio(toIndex: 1), chart.changeRatio())
+    }
+
+    // MARK: - One point per instant
+
+    /// The drawing side keys a mark by its timestamp, so two samples at one instant
+    /// are two marks with one identity — SwiftUI warns and then renders it wrong.
+    /// Nothing upstream promises distinct instants, so the series is what enforces
+    /// it: the later read of an instant wins.
+    func testTwoSamplesAtOneInstantCollapseToTheLaterRead() {
+        let start = Int64(tuesday.timeIntervalSince1970)
+        let chart = AssetChartSeries(range: .oneDay, points: [
+            AssetChartPointDTO(timestamp: start, priceUsdcMicros: 100_000_000),
+            AssetChartPointDTO(timestamp: start + 300, priceUsdcMicros: 101_000_000),
+            AssetChartPointDTO(timestamp: start + 300, priceUsdcMicros: 102_000_000),
+            AssetChartPointDTO(timestamp: start + 600, priceUsdcMicros: 103_000_000),
+        ])
+
+        XCTAssertEqual(chart.points.map(\.timestamp), [start, start + 300, start + 600])
+        XCTAssertEqual(chart.points[1].priceUsdcMicros, 102_000_000)
+        XCTAssertEqual(Set(chart.points.map(\.timestamp)).count, chart.points.count)
+    }
+
+    /// Out of order *and* repeated: sorting happens first, so the winner is the last
+    /// one for that instant in time order, not in arrival order.
+    func testRepeatsAreCollapsedAfterSorting() {
+        let start = Int64(tuesday.timeIntervalSince1970)
+        let chart = AssetChartSeries(range: .oneWeek, points: [
+            AssetChartPointDTO(timestamp: start + 600, priceUsdcMicros: 103_000_000),
+            AssetChartPointDTO(timestamp: start, priceUsdcMicros: 100_000_000),
+            AssetChartPointDTO(timestamp: start + 600, priceUsdcMicros: 104_000_000),
+        ])
+
+        XCTAssertEqual(chart.points.map(\.timestamp), [start, start + 600])
+        XCTAssertEqual(chart.points.last?.priceUsdcMicros, 104_000_000)
     }
 
     // MARK: - Range echo
