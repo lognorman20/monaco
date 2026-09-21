@@ -453,6 +453,12 @@ struct GroupDetailView: View {
         } catch MonacoAPIError.leaveBlocked(let reason) {
             isLeaving = false
             toast = MonacoToast(message: leaveBlockedMessage(for: reason))
+        } catch MonacoAPIError.missingAccessToken {
+            // Thrown before anything is sent, when the session's token is blank: the server was
+            // never asked, so nothing was sold. It is a sign-in problem, not an unconfirmed sale.
+            isLeaving = false
+            toast = MonacoToast(message: "Sign in again to leave.")
+            return
         } catch {
             isLeaving = false
             // No idempotency key rides on this request, so another "Sell and leave" is a new
@@ -503,14 +509,25 @@ struct GroupDetailView: View {
             return result
         } catch is CancellationError {
             return nil
-        } catch MonacoAPIError.httpStatus(let code) where code == 409 {
-            toast = MonacoToast(message: "This one can't be retried")
-            return nil
-        } catch MonacoAPIError.httpStatus {
-            toast = MonacoToast(message: "Retry didn't go through. Try again")
+        } catch MonacoAPIError.missingAccessToken {
+            toast = MonacoToast(message: "Sign in again to retry.")
             return nil
         } catch {
-            toast = MonacoToast(message: "Retry didn't go through. Try again")
+            // A retry places a brand-new swap and leaves the failed row as it was, and no
+            // idempotency key rides on it, so tapping Retry again after a lost answer is a second
+            // swap. When this one may have gone through, re-read the activity and send the member
+            // there first rather than inviting another tap.
+            let failure = FlowErrorInput(error)
+            toast = MonacoToast(message: GroupDetailRefreshPolicy.swapRetryFailureMessage(
+                failureStatus: failure.status,
+                neverSent: failure.isOffline
+            ))
+            if GroupDetailRefreshPolicy.swapRetryMayHavePlacedSwap(
+                failureStatus: failure.status,
+                neverSent: failure.isOffline
+            ) {
+                await refreshQuietly()
+            }
             return nil
         }
     }

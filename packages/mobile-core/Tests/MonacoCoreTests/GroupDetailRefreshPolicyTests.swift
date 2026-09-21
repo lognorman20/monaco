@@ -126,9 +126,17 @@ struct GroupDetailLeaveFailureTests {
         }
     }
 
+    /// The server re-reads the membership after the sale, so a member removed while their slice
+    /// was selling is answered 404 with the slice already sold. "Try again" there is wrong.
+    @Test("A sell-and-leave answered 'not found' may still have sold the slice")
+    func notFoundIsUnconfirmed() {
+        #expect(GroupDetailRefreshPolicy.leaveMayHaveSoldSlice(sellsSlice: true, failureStatus: 404))
+        #expect(GroupDetailRefreshPolicy.leaveFailureMessage(sellsSlice: true, failureStatus: 404) == unconfirmed)
+    }
+
     @Test("A sell-and-leave refused up front can be tried again")
     func clientRefusalIsFinal() {
-        for status in [400, 403, 404, 429] {
+        for status in [400, 401, 403, 429] {
             #expect(GroupDetailRefreshPolicy.leaveMayHaveSoldSlice(sellsSlice: true, failureStatus: status) == false)
             #expect(GroupDetailRefreshPolicy.leaveFailureMessage(sellsSlice: true, failureStatus: status) == refused)
         }
@@ -172,5 +180,55 @@ struct GroupDetailLeaveNeverSentTests {
     func plainLeaveNeverSent() {
         let copy = GroupDetailRefreshPolicy.leaveFailureMessage(sellsSlice: false, failureStatus: nil, neverSent: true)
         #expect(copy == "Couldn't leave this cabal. Try again")
+    }
+}
+
+@Suite("Retrying a failed buy or sell")
+struct GroupDetailSwapRetryFailureTests {
+    private let unconfirmed = "We couldn't confirm the retry. Check the activity below before trying again"
+
+    /// The bug: a retry that lost its answer said "Retry didn't go through. Try again". The server
+    /// places a new swap for every retry and leaves the failed row retryable, so a second tap is a
+    /// second swap.
+    @Test("A retry that got no answer sends the member to the activity")
+    func lostResponseIsUnconfirmed() {
+        #expect(GroupDetailRefreshPolicy.swapRetryMayHavePlacedSwap(failureStatus: nil))
+        #expect(GroupDetailRefreshPolicy.swapRetryFailureMessage(failureStatus: nil) == unconfirmed)
+    }
+
+    @Test("A retry the server failed partway through is unconfirmed too")
+    func serverFailureIsUnconfirmed() {
+        for status in [500, 502, 503, 504] {
+            #expect(GroupDetailRefreshPolicy.swapRetryMayHavePlacedSwap(failureStatus: status))
+            #expect(GroupDetailRefreshPolicy.swapRetryFailureMessage(failureStatus: status) == unconfirmed)
+        }
+    }
+
+    @Test("A retry that never left the phone placed nothing and can be tried again")
+    func neverSentIsARetry() {
+        #expect(GroupDetailRefreshPolicy.swapRetryMayHavePlacedSwap(failureStatus: nil, neverSent: true) == false)
+        #expect(GroupDetailRefreshPolicy.swapRetryFailureMessage(failureStatus: nil, neverSent: true)
+            == "No connection, so nothing was retried. Check your internet and try again")
+    }
+
+    @Test("A row that is no longer failed says it can't be retried")
+    func conflictIsFinal() {
+        #expect(GroupDetailRefreshPolicy.swapRetryMayHavePlacedSwap(failureStatus: 409) == false)
+        #expect(GroupDetailRefreshPolicy.swapRetryFailureMessage(failureStatus: 409) == "This one can't be retried")
+    }
+
+    @Test("A retry refused before it ran can be tried again")
+    func clientRefusalIsARetry() {
+        for status in [400, 403, 404] {
+            #expect(GroupDetailRefreshPolicy.swapRetryMayHavePlacedSwap(failureStatus: status) == false)
+            #expect(GroupDetailRefreshPolicy.swapRetryFailureMessage(failureStatus: status) == "Retry didn't go through. Try again")
+        }
+    }
+
+    @Test("The unconfirmed copy never ends on an invitation to retry")
+    func unconfirmedCopyDoesNotInviteARetry() {
+        let copy = GroupDetailRefreshPolicy.swapRetryFailureMessage(failureStatus: nil)
+        #expect(copy.contains("Check the activity"))
+        #expect(!copy.lowercased().hasSuffix("try again"))
     }
 }

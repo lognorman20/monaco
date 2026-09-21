@@ -108,9 +108,11 @@ public enum GroupDetailRefreshPolicy {
     ///
     /// The server sells the slice first and only then removes the member, and the sale can take
     /// most of a minute. A request that never got an answer, or a server that failed partway (a
-    /// 5xx), may well have sold it. A 4xx is the server refusing before it sold anything, and a
-    /// leave with nothing to sell has no money at stake either way. (A blocked leave is answered
-    /// with its own reason and never reaches this.)
+    /// 5xx), may well have sold it. So may a 404: after the sale the server re-reads the
+    /// membership inside its transaction, and a member removed in the meantime is answered
+    /// "group not found" with the slice already sold. Every other 4xx is written before the sale
+    /// starts, and a leave with nothing to sell has no money at stake either way. (A blocked
+    /// leave is answered with its own reason and never reaches this.)
     ///
     /// - Parameters:
     ///   - sellsSlice: the member chose "Sell and leave".
@@ -120,7 +122,7 @@ public enum GroupDetailRefreshPolicy {
     public static func leaveMayHaveSoldSlice(sellsSlice: Bool, failureStatus: Int?, neverSent: Bool = false) -> Bool {
         guard sellsSlice, !neverSent else { return false }
         guard let failureStatus else { return true }
-        return failureStatus >= 500
+        return failureStatus >= 500 || failureStatus == 404
     }
 
     /// What the cabal screen says when a leave did not come back as done.
@@ -137,5 +139,39 @@ public enum GroupDetailRefreshPolicy {
             return "No connection, so nothing was sold. Check your internet and try again"
         }
         return "Couldn't leave this cabal. Try again"
+    }
+
+    // MARK: - Retrying a failed buy or sell
+
+    /// What the cabal screen says when "Retry" on a failed buy or sell did not come back as done.
+    ///
+    /// A retry is not a replay: the server places a brand-new swap and leaves the failed row as it
+    /// was, and no idempotency key rides on the request. A retry that got no answer, or that the
+    /// server failed partway through (a 5xx), may already have bought or sold, and tapping Retry
+    /// on the same failed row again would place a second swap. So that case sends the member to
+    /// the activity first and never simply says to try again.
+    ///
+    /// - Parameters:
+    ///   - failureStatus: the HTTP status the request failed with, or nil when it got no answer.
+    ///   - neverSent: the request provably never left the phone, so nothing was placed.
+    public static func swapRetryFailureMessage(failureStatus: Int?, neverSent: Bool = false) -> String {
+        if swapRetryMayHavePlacedSwap(failureStatus: failureStatus, neverSent: neverSent) {
+            return "We couldn't confirm the retry. Check the activity below before trying again"
+        }
+        if neverSent {
+            return "No connection, so nothing was retried. Check your internet and try again"
+        }
+        if failureStatus == 409 {
+            return "This one can't be retried"
+        }
+        return "Retry didn't go through. Try again"
+    }
+
+    /// Whether a retry that did not come back as done may have placed a swap, so the screen should
+    /// re-read its activity before the member decides what to do next.
+    public static func swapRetryMayHavePlacedSwap(failureStatus: Int?, neverSent: Bool = false) -> Bool {
+        guard !neverSent else { return false }
+        guard let failureStatus else { return true }
+        return failureStatus >= 500
     }
 }
