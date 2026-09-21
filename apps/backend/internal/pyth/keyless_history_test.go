@@ -134,6 +134,71 @@ func TestHermesClient_DayChange_comesFromBenchmarksAndIsCached(t *testing.T) {
 	}
 }
 
+func TestHermesClient_DaySeries_sharesTheDayChangesUpstreamCall(t *testing.T) {
+	// A list row takes its day change and its sparkline from the same series. The
+	// two reads must cost one Benchmarks call between them, and the curve must be
+	// labelled as the underlying so the app can tell whose shape it is drawing.
+	ClearFeedRegistry()
+	now := time.Date(2026, time.September, 22, 16, 0, 0, 0, time.UTC)
+	var calls atomic.Int32
+	source := benchmarksServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		mondayClose := time.Date(2026, time.September, 21, 19, 55, 0, 0, time.UTC).Unix()
+		tuesdayOpen := time.Date(2026, time.September, 22, 13, 30, 0, 0, time.UTC).Unix()
+		tuesdayNoon := time.Date(2026, time.September, 22, 15, 55, 0, 0, time.UTC).Unix()
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"s":"ok","t":[%d,%d,%d],"c":[200.0,201.0,202.0]}`, mondayClose, tuesdayOpen, tuesdayNoon)))
+	})
+	client := NewHermesClientWithHTTP("http://127.0.0.1:1", nil, "").WithSeriesSource(source)
+	client.now = func() time.Time { return now }
+	client.charts = newChartCache(func() time.Time { return now })
+
+	if got := client.DayChange(context.Background(), "AAPLc"); got == nil {
+		t.Fatal("DayChange = nil, want a change")
+	}
+	series, ok := client.DaySeries(context.Background(), "AAPLc")
+	if !ok {
+		t.Fatal("DaySeries reported no answer after DayChange cached one")
+	}
+	if series.Basis != PriceBasisUnderlying || series.BasisSymbol != "AAPL" || series.Source != ChartSourceBenchmarks {
+		t.Fatalf("basis/symbol/source = %q/%q/%q", series.Basis, series.BasisSymbol, series.Source)
+	}
+	if len(SparkFromSeries(series, DefaultSparkPoints)) < 2 {
+		t.Fatalf("series %+v has no drawable spark", series.Points)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("benchmarks called %d times, want 1", calls.Load())
+	}
+}
+
+func TestHermesClient_DaySeries_outageIsNoAnswer(t *testing.T) {
+	// Benchmarks down: the row gets no sparkline, not a flat line and not a line
+	// sampled from Hermes one request per point.
+	ClearFeedRegistry()
+	resetEquityDeniedForTest()
+	failing := benchmarksServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	})
+	client := NewHermesClientWithHTTP("http://127.0.0.1:1", nil, "test-pyth-key").WithSeriesSource(failing)
+	if series, ok := client.DaySeries(context.Background(), "AAPLc"); ok {
+		t.Fatalf("DaySeries = %+v, true; want no answer on an outage", series)
+	}
+	if _, cached := client.charts.get("AAPLc", ChartRange1D); cached {
+		t.Fatal("an outage must not be cached")
+	}
+}
+
+func TestHermesClient_DaySeries_malformedPayloadIsNoAnswer(t *testing.T) {
+	ClearFeedRegistry()
+	resetEquityDeniedForTest()
+	garbled := benchmarksServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"s":"ok","t":[1,2`))
+	})
+	client := NewHermesClientWithHTTP("http://127.0.0.1:1", nil, "").WithSeriesSource(garbled)
+	if series, ok := client.DaySeries(context.Background(), "AAPLc"); ok && len(SparkFromSeries(series, DefaultSparkPoints)) > 0 {
+		t.Fatalf("a malformed payload drew a spark: %+v", series.Points)
+	}
+}
+
 func TestHermesClient_ChartSeries_cachesAnEmptyAnswer(t *testing.T) {
 	// "This feed has nothing in this window" is an upstream answer. Not caching it
 	// made the symbols with no history the most expensive ones in the catalog.

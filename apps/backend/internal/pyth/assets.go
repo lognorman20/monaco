@@ -79,6 +79,12 @@ type MarketDataClient interface {
 	// DayChange is the underlying's move against its previous regular-session
 	// close, or nil when it cannot be known.
 	DayChange(ctx context.Context, symbol string) *string
+	// DaySeries is the underlying's 1D Benchmarks series, from the cache or from
+	// Benchmarks and never from the Hermes sampler. A list row reads it once and
+	// takes both its day change and its sparkline from it, so the two figures on a
+	// row are always the same instrument over the same window. The second result
+	// is false when Benchmarks could not answer (an outage, the caller's deadline).
+	DaySeries(ctx context.Context, symbol string) (AssetChartSeries, bool)
 }
 
 // AssetPriceClient fetches standalone marks and chart history.
@@ -144,15 +150,28 @@ func (c *HermesClient) ChartSeries(ctx context.Context, symbol string, chartRang
 // can only ever come from Benchmarks, and sampling thirteen points per stock for a
 // list row that would then show nothing is pure cost.
 func (c *HermesClient) DayChange(ctx context.Context, symbol string) *string {
-	if cached, ok := c.charts.get(symbol, ChartRange1D); ok {
-		return DayChange(cached)
-	}
-	series, ok := c.seriesFromSource(ctx, symbol, ChartRange1D, c.clock())
+	series, ok := c.DaySeries(ctx, symbol)
 	if !ok {
 		return nil
 	}
-	c.charts.set(symbol, ChartRange1D, series)
 	return DayChange(series)
+}
+
+// DaySeries is the 1D series DayChange reads, for callers that want the curve as
+// well as the change: the cache, else Benchmarks, never the Hermes sampler. A
+// Benchmarks answer (including "no bars in this window") is cached like any other
+// 1D series, so the chart route, the list's day change and its sparkline share
+// one upstream call per symbol per minute.
+func (c *HermesClient) DaySeries(ctx context.Context, symbol string) (AssetChartSeries, bool) {
+	if cached, ok := c.charts.get(symbol, ChartRange1D); ok {
+		return cached, true
+	}
+	series, ok := c.seriesFromSource(ctx, symbol, ChartRange1D, c.clock())
+	if !ok {
+		return AssetChartSeries{}, false
+	}
+	c.charts.set(symbol, ChartRange1D, series)
+	return series, true
 }
 
 // seriesFromSource asks the one-call history source for the range. An outage of

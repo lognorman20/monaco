@@ -112,6 +112,17 @@ func (f *fakeAssetPriceClient) DayChange(ctx context.Context, symbol string) *st
 	return DayChange(series)
 }
 
+// DaySeries serves the registered 1D series. A symbol with nothing registered is
+// Benchmarks failing to answer, so it reports false, the way the real client does
+// on an outage.
+func (f *fakeAssetPriceClient) DaySeries(ctx context.Context, symbol string) (AssetChartSeries, bool) {
+	_ = ctx
+	f.mu.Lock()
+	series, ok := f.charts[chartKey(symbol, ChartRange1D)]
+	f.mu.Unlock()
+	return series, ok
+}
+
 type fakeEquityQuoteClient struct {
 	mu     sync.Mutex
 	quotes map[string]ReferenceQuote
