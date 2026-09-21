@@ -58,10 +58,12 @@ type chartRangeWindow struct {
 	// extended session; only the stats grid folds over these.
 	regularOpen  time.Time
 	regularClose time.Time
-	// previousCloseAt is the instant the previous close is taken at or before.
-	// Zero means "the last bar before from", which is what every range but 1D
-	// wants; 1D wants the previous regular session's closing bar, not whatever
-	// after-hours print happened to be last before 04:00 ET.
+	// previousCloseAt is the closing bell the previous close is taken from: the
+	// close of the last bar that opens strictly before it (bars are stamped with
+	// their open time, so the bar stamped at the bell is after-hours). Zero means
+	// "the last bar before from", which is what every range but 1D wants; 1D wants
+	// the previous regular session's closing bar, not whatever after-hours print
+	// happened to be last before 04:00 ET.
 	previousCloseAt time.Time
 }
 

@@ -95,17 +95,20 @@ func TestBenchmarks_Series_previousCloseIsThePriorRegularSessionClose(t *testing
 	t.Parallel()
 
 	client := benchmarksServer(t, func(w http.ResponseWriter, r *http.Request) {
-		// Monday's last regular bar, then a Monday after-hours print, then Tuesday.
-		// The after-hours print must not become "previous close": it is not a close.
+		// Monday's last regular bar, then Monday's after-hours bars, then Tuesday.
+		// The bar stamped 16:00 ET is the first post-market bar (the shim stamps a
+		// bar with its open time), and its close is not the session's close. Neither
+		// is the later after-hours print.
 		_, _ = w.Write([]byte(fmt.Sprintf(`{
 			"s":"ok",
-			"t":[%d,%d,%d,%d],
-			"o":[225.0,226.5,229.0,231.0],
-			"h":[226.0,227.9,229.5,231.8],
-			"l":[224.0,226.4,228.2,230.4],
-			"c":[226.5,227.8,229.4,231.4]
+			"t":[%d,%d,%d,%d,%d],
+			"o":[225.0,226.5,226.6,229.0,231.0],
+			"h":[226.0,226.9,227.9,229.5,231.8],
+			"l":[224.0,226.4,226.4,228.2,230.4],
+			"c":[226.5,226.8,227.8,229.4,231.4]
 		}`,
 			etUnix(2026, time.September, 21, 15, 55),
+			etUnix(2026, time.September, 21, 16, 0),
 			etUnix(2026, time.September, 21, 18, 0),
 			etUnix(2026, time.September, 22, 10, 0),
 			etUnix(2026, time.September, 22, 11, 0),
@@ -123,7 +126,40 @@ func TestBenchmarks_Series_previousCloseIsThePriorRegularSessionClose(t *testing
 		t.Fatal("expected a previous close from the prior session")
 	}
 	if *series.PreviousCloseUsdcMicros != 226_500_000 {
-		t.Fatalf("previous close = %d, want the 15:55 ET close 226500000, not the after-hours print", *series.PreviousCloseUsdcMicros)
+		t.Fatalf("previous close = %d, want the 15:55 ET bar's close 226500000, not the 16:00 post-market bar", *series.PreviousCloseUsdcMicros)
+	}
+}
+
+func TestBenchmarks_Series_previousCloseAfterAHalfDayIsThe1300Bell(t *testing.T) {
+	t.Parallel()
+
+	// Friday 27 November 2026 is the day after Thanksgiving and closes at 13:00 ET.
+	// On Monday the previous close is the 12:55 bar's close; the bar stamped 13:00
+	// is already after-hours.
+	monday := time.Date(2026, time.November, 30, 17, 0, 0, 0, time.UTC)
+
+	client := benchmarksServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(fmt.Sprintf(`{
+			"s":"ok",
+			"t":[%d,%d,%d,%d],
+			"c":[250.0,251.0,249.0,252.0]
+		}`,
+			etUnix(2026, time.November, 27, 12, 55),
+			etUnix(2026, time.November, 27, 13, 0),
+			etUnix(2026, time.November, 27, 15, 0),
+			etUnix(2026, time.November, 30, 10, 0),
+		)))
+	})
+
+	series, err := client.Series(context.Background(), "AAPLc", ChartRange1D, monday)
+	if err != nil {
+		t.Fatalf("Series: %v", err)
+	}
+	if series.PreviousCloseUsdcMicros == nil || *series.PreviousCloseUsdcMicros != 250_000_000 {
+		t.Fatalf("previous close = %v, want the 12:55 ET bar's close 250000000", series.PreviousCloseUsdcMicros)
+	}
+	if len(series.Points) != 1 {
+		t.Fatalf("points = %d, want only Monday's bar", len(series.Points))
 	}
 }
 

@@ -207,17 +207,24 @@ func assembleSeries(bars []ohlcBar, window chartRangeWindow) AssetChartSeries {
 	if !window.to.IsZero() {
 		toUnix = window.to.Unix()
 	}
-	// Without an explicit instant, the previous close is the last bar before the
-	// window opens. 1D sets one: the previous regular session's close.
-	previousCloseUnix := fromUnix - 1
+	// The previous close is the close of the last bar that opens strictly before a
+	// cut-off. Without an explicit instant the cut-off is the window's first
+	// instant. 1D sets one: the previous regular session's closing bell.
+	//
+	// Strictly before, because the TradingView shim stamps a bar with its open
+	// time. The bar stamped 16:00 ET is 16:00-16:05, the first post-market bar, and
+	// its close is an after-hours print; the regular session's close is the close
+	// of the bar stamped 15:55. On a half day the same holds at 13:00. This matches
+	// regularSessionPoints, which also counts the bar at the bell as after-hours.
+	previousCloseCutoff := fromUnix
 	if !window.previousCloseAt.IsZero() {
-		previousCloseUnix = window.previousCloseAt.Unix()
+		previousCloseCutoff = window.previousCloseAt.Unix()
 	}
 
 	inWindow := make([]ohlcBar, 0, len(bars))
 	var previousClose int64
 	for _, bar := range bars {
-		if bar.timestamp <= previousCloseUnix {
+		if bar.timestamp < previousCloseCutoff {
 			previousClose = bar.close
 		}
 		if bar.timestamp >= fromUnix && bar.timestamp <= toUnix {
