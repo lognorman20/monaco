@@ -426,7 +426,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
             QuoteRequestDTO(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount)
         )
 
-        let (data, response) = try await session.data(for: request)
+        // Runs the same Kyber route and treasury read as proposal create.
+        let (data, response) = try await session.data(for: request, timeout: MonacoRequestTimeout.quote)
         guard let http = response as? HTTPURLResponse else {
             throw MonacoAPIError.invalidResponse
         }
@@ -453,8 +454,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
             ProposalRequestDTO(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount, thesis: thesis)
         )
 
-        // A Kyber quote and a Base RPC treasury read run before this answers.
-        let (data, response) = try await session.data(for: request, timeout: MonacoRequestTimeout.moneyWrite)
+        // Prices the trade (a Kyber route plus a Base RPC treasury read) before it answers.
+        let (data, response) = try await session.data(for: request, timeout: MonacoRequestTimeout.quote)
         guard let http = response as? HTTPURLResponse else {
             throw MonacoAPIError.invalidResponse
         }

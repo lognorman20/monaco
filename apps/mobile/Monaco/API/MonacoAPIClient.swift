@@ -479,7 +479,9 @@ final class MonacoAPIClient {
         try applyAuthorizationHeader(accessToken: accessToken, to: &request)
         request.httpBody = try JSONEncoder().encode(CreateDepositRequest(amount: amount))
 
-        let (data, response) = try await session.data(for: request, timeout: MonacoRequestTimeout.moneyWrite)
+        // Deprecated: the backend answers 410 Gone without moving anything, so this keeps
+        // the read budget.
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw MonacoAPIError.invalidResponse
         }
@@ -667,7 +669,8 @@ final class MonacoAPIClient {
             QuoteRequest(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount)
         )
 
-        let (data, response) = try await session.data(for: request)
+        // Runs the same Kyber route and treasury read as proposal create.
+        let (data, response) = try await session.data(for: request, timeout: MonacoRequestTimeout.quote)
         guard let http = response as? HTTPURLResponse else {
             throw MonacoAPIError.invalidResponse
         }
@@ -705,8 +708,8 @@ final class MonacoAPIClient {
             )
         )
 
-        // A Kyber quote and a Base RPC treasury read run before this answers.
-        let (data, response) = try await session.data(for: request, timeout: MonacoRequestTimeout.moneyWrite)
+        // Prices the trade (a Kyber route plus a Base RPC treasury read) before it answers.
+        let (data, response) = try await session.data(for: request, timeout: MonacoRequestTimeout.quote)
         guard let http = response as? HTTPURLResponse else {
             throw MonacoAPIError.invalidResponse
         }

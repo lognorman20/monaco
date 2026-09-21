@@ -19,9 +19,11 @@ final class MonacoAPIClientBudgetTests: XCTestCase {
         super.tearDown()
     }
 
-    /// Main has no idempotency key, so nothing on the wire says "this moves money": every
-    /// route whose handler submits on Base inside the request has to name the money budget
-    /// where it is built, and a route dropped from this list silently falls to 15s.
+    /// The API has no idempotency key (the restore series that starts at #413 brings one
+    /// back), so nothing on the wire says "this moves money": every route whose handler
+    /// submits on Base inside the request has to name the money budget where it is built,
+    /// and a route dropped from this list silently falls to 15s. The deprecated deposits
+    /// route answers 410 Gone without doing any work, so it keeps the read budget.
     func testMoneyAndProvisioningRoutes_nameTheirBudget_readsKeepTheShortOne() async {
         BudgetStubProtocol.respond(status: 500, body: Data("{}".utf8))
         let client = MonacoAPIClient(baseURL: baseURL, session: BudgetStubProtocol.session())
@@ -43,6 +45,7 @@ final class MonacoAPIClientBudgetTests: XCTestCase {
 
         let money = MonacoRequestTimeout.moneyWrite
         let provisioning = MonacoRequestTimeout.walletProvisioning
+        let quote = MonacoRequestTimeout.quote
         let read = MonacoRequestTimeout.standard
         XCTAssertEqual(BudgetStubProtocol.seen(), [
             "POST /v1/auth/session \(provisioning)",
@@ -51,13 +54,13 @@ final class MonacoAPIClientBudgetTests: XCTestCase {
             "POST /v1/me/withdrawals \(money)",
             "POST /v1/groups/g1/withdraw-to-balance \(money)",
             "POST /v1/groups/g1/leave \(money)",
-            "POST /v1/groups/g1/deposits \(money)",
+            "POST /v1/groups/g1/deposits \(read)",
             "POST /v1/transactions/tx1/retry \(money)",
             "POST /v1/groups/g1/redeems \(money)",
             "POST /v1/dev/groups/g1/buy \(money)",
-            "POST /v1/groups/g1/proposals \(money)",
+            "POST /v1/groups/g1/proposals \(quote)",
             "GET /v1/me \(read)",
-            "POST /v1/groups/g1/quotes \(read)",
+            "POST /v1/groups/g1/quotes \(quote)",
             "POST /v1/groups/g1/join \(read)",
         ])
     }

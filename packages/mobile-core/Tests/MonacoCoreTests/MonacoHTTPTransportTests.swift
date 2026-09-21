@@ -193,9 +193,11 @@ final class MonacoHTTPTransportTests: XCTestCase {
     }
 
     /// Every route whose handler moves money on Base inside the request names the money
-    /// budget. Main has no idempotency key, so there is nothing else a budget could be keyed
-    /// off; a route dropped from this list silently falls to 15s.
-    func testCoreClient_moneyRoutesNameTheMoneyBudget_andReadsKeepTheShortOne() async {
+    /// budget, and every route that prices a trade names the quote budget. The API has no
+    /// idempotency key (the restore series that starts at #413 brings one back), so there is
+    /// nothing else a budget could be keyed off; a route dropped from this list silently
+    /// falls to 15s.
+    func testCoreClient_moneyAndQuoteRoutesNameTheirBudget_andReadsKeepTheShortOne() async {
         let timeouts = Recorder<String>()
         MockURLProtocol.requestHandler = { [self] request in
             timeouts.append("\(request.httpMethod ?? "") \(request.url!.path) \(request.timeoutInterval)")
@@ -226,10 +228,10 @@ final class MonacoHTTPTransportTests: XCTestCase {
             "POST /v1/groups/g1/leave \(money)",
             "POST /v1/groups/g1/redeems \(money)",
             "POST /v1/dev/groups/g1/buy \(money)",
-            "POST /v1/groups/g1/proposals \(money)",
+            "POST /v1/groups/g1/proposals \(MonacoRequestTimeout.quote)",
             "POST /v1/me/profile-photo \(MonacoRequestTimeout.upload)",
             "GET /v1/me \(MonacoRequestTimeout.standard)",
-            "POST /v1/groups/g1/quotes \(MonacoRequestTimeout.standard)",
+            "POST /v1/groups/g1/quotes \(MonacoRequestTimeout.quote)",
         ])
     }
 
@@ -240,6 +242,7 @@ final class MonacoHTTPTransportTests: XCTestCase {
         // session value has to be a ceiling the per-request stamp can only shorten.
         // Configuring it with `standard` would cap every money write at 15s.
         XCTAssertEqual(URLSession.monaco.configuration.timeoutIntervalForRequest, MonacoRequestTimeout.sessionCeiling)
+        XCTAssertGreaterThanOrEqual(MonacoRequestTimeout.sessionCeiling, MonacoRequestTimeout.quote)
         XCTAssertGreaterThanOrEqual(MonacoRequestTimeout.sessionCeiling, MonacoRequestTimeout.moneyWrite)
         XCTAssertGreaterThanOrEqual(MonacoRequestTimeout.sessionCeiling, MonacoRequestTimeout.upload)
         XCTAssertGreaterThanOrEqual(MonacoRequestTimeout.sessionCeiling, MonacoRequestTimeout.walletProvisioning)

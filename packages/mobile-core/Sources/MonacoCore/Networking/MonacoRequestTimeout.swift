@@ -11,21 +11,27 @@ import Foundation
 /// inferred from the method or the headers: every route that is slow on purpose says so
 /// where it is built, and a test pins each one (see `MonacoHTTPTransportTests`).
 public enum MonacoRequestTimeout {
-    /// Reads, polls and light writes (vote, chat, comment, quote). Short on purpose: the
-    /// feed refreshes every 5-15s, so a request that is still open after this is stale.
+    /// Reads, polls and light writes (vote, chat, comment). Short on purpose: the feed
+    /// refreshes every 5-15s, so a request that is still open after this is stale.
     public static let standard: TimeInterval = 15
 
+    /// Requests whose handler prices a trade before it answers: a buy/sell quote
+    /// (`POST /v1/groups/{id}/quotes`) and proposal create (`POST /v1/groups/{id}/proposals`).
+    /// Both run the same `StartBuy` path on the backend, a KyberSwap route request plus a
+    /// Base RPC treasury balance read, so both name this budget. Neither moves money,
+    /// so a timeout here is a missing quote, never an unconfirmed transfer.
+    public static let quote: TimeInterval = 30
+
     /// Writes that move money inside the request: fund a cabal, cash out to a wallet,
-    /// cash out of a cabal, leave with a stake, retry a swap, the dev buy, and proposal
-    /// create (its handler runs a Kyber quote and a Base RPC treasury read before it
-    /// answers). The backend submits and waits for a receipt inside the handler, so they
-    /// need room.
+    /// cash out of a cabal, leave with a stake, retry a swap and the dev buy. The backend
+    /// submits and waits for a receipt inside the handler, so they need room.
     ///
     /// 60s is the number `URLSession.shared` already gave these routes, so this constant is
     /// not a behaviour change for money: a confirm that takes longer still surfaces as a
     /// failure exactly as before, and that failure is worded as unconfirmed ("check your
-    /// balance before trying again"). The API has no idempotency key, so a resend after
-    /// this deadline is a second submission — the copy must never invite one.
+    /// balance before trying again"). The API has no idempotency key (the restore series
+    /// that starts at #413 brings one back), so a resend after this deadline is a second
+    /// submission — the copy must never invite one.
     public static let moneyWrite: TimeInterval = 60
 
     /// Uploads (profile photo): megabytes on a phone network.
@@ -39,10 +45,10 @@ public enum MonacoRequestTimeout {
     public static let walletProvisioning: TimeInterval = 60
 
     /// Ceiling for one URLSession task, set on the session. Deliberately NOT a ceiling for
-    /// one logical request: a 401 refresh-and-retry runs two tasks (`send` in
-    /// `MonacoHTTPTransport`), each getting its own budget, with the auth provider's
-    /// refresh between them on no deadline at all. Bounding the whole sequence needs a
-    /// deadline around `send`, not a larger number here.
+    /// one logical request: a 401 refresh-and-retry runs two tasks
+    /// (`MonacoHTTPTransport.data(for:timeout:)`), each getting its own budget, with the
+    /// auth provider's refresh between them on no deadline at all. Bounding the whole
+    /// sequence needs a deadline around `data(for:timeout:)`, not a larger number here.
     static let resource: TimeInterval = 180
 
     /// The longest budget any single request may ask for. The session is configured with
@@ -52,7 +58,7 @@ public enum MonacoRequestTimeout {
     /// two. Configuring the session with the longest budget makes the per-request stamp
     /// able only to *shorten* a request: reads still get `standard` under either rule, and
     /// a money write can never be cut below `moneyWrite` by the session default.
-    static var sessionCeiling: TimeInterval { max(moneyWrite, upload, walletProvisioning) }
+    static var sessionCeiling: TimeInterval { max(quote, moneyWrite, upload, walletProvisioning) }
 
     /// The budget for a request: `override` when the call site named one, `standard`
     /// otherwise.
