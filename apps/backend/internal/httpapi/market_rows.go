@@ -46,8 +46,8 @@ const (
 //   - change24h and spark are both read from one Pyth 1D Benchmarks series of the
 //     underlying equity, per share, so they are the same instrument over the same
 //     window and each carries its basis;
-//   - logoUrl stays empty: the B20 catalog publishes no logo and the app draws its
-//     bundled marks.
+//   - logoUrl is the image the issuer publishes in the token's own ERC-7572
+//     contractURI metadata, only when it is https on the issuer's metadata host.
 //
 // Every dependency is optional. A nil client means that part of a row is absent,
 // never an error: a list is worth showing without a sparkline and never worth
@@ -61,6 +61,48 @@ type MarketRowSource struct {
 	// its day move or its line: a token curve beside an equity change would be two
 	// instruments under one row.
 	Charts pyth.MarketDataClient
+	// Logos resolves each token's logo from the issuer's on-chain ERC-7572
+	// metadata (b20.NewContractLogos). Nil ships rows without logoUrl, and the app
+	// draws the ticker tile.
+	Logos b20.LogoSource
+}
+
+// LogoURLs resolves each asset's issuer logo, keyed by token address, under a
+// bounded fan-out. Answers are cached for a day per token, so a warm page costs
+// no chain reads; a token whose logo cannot be resolved is simply absent.
+func (s *MarketRowSource) LogoURLs(ctx context.Context, assets []b20.Asset) map[string]string {
+	out := make(map[string]string, len(assets))
+	if s == nil || s.Logos == nil || len(assets) == 0 {
+		return out
+	}
+	var (
+		mu  sync.Mutex
+		wg  sync.WaitGroup
+		sem = make(chan struct{}, dayChangeConcurrency)
+	)
+	for _, asset := range assets {
+		key := tokenKey(asset.TokenAddress)
+		if key == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(key string) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-sem }()
+			if logo := s.Logos.LogoURL(ctx, key); logo != "" {
+				mu.Lock()
+				out[key] = logo
+				mu.Unlock()
+			}
+		}(key)
+	}
+	wg.Wait()
+	return out
 }
 
 // LookupAsset resolves one symbol in the catalog: an exact symbol match first,
@@ -194,9 +236,9 @@ func (s *MarketRowSource) Enrich(ctx context.Context, assets []b20.Asset) []mark
 	return s.enrich(ctx, assets, catalogPriceBudget)
 }
 
-// enrich reads the marks and the day series together: a page that waited for one
-// and then the other would pay both budgets in a row for data neither needs from
-// the other.
+// enrich reads the marks, the day series and the logos together: a page that
+// waited for one and then the next would pay each budget in a row for data none
+// needs from the others.
 func (s *MarketRowSource) enrich(ctx context.Context, assets []b20.Asset, budget time.Duration) []marketAssetResponse {
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
@@ -204,9 +246,10 @@ func (s *MarketRowSource) enrich(ctx context.Context, assets []b20.Asset, budget
 	var (
 		prices map[string]assetPriceSnapshot
 		days   map[string]rowDay
+		logos  map[string]string
 		wg     sync.WaitGroup
 	)
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		prices = s.Prices(ctx, assets)
@@ -215,11 +258,17 @@ func (s *MarketRowSource) enrich(ctx context.Context, assets []b20.Asset, budget
 		defer wg.Done()
 		days = s.DaySeries(ctx, assets)
 	}()
+	go func() {
+		defer wg.Done()
+		logos = s.LogoURLs(ctx, assets)
+	}()
 	wg.Wait()
 
 	out := make([]marketAssetResponse, 0, len(assets))
 	for _, asset := range assets {
-		out = append(out, marketAssetResponseFor(asset, prices, days))
+		row := marketAssetResponseFor(asset, prices, days)
+		row.LogoURL = logos[tokenKey(asset.TokenAddress)]
+		out = append(out, row)
 	}
 	return out
 }

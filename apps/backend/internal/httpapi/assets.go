@@ -51,6 +51,9 @@ type AssetsHandlers struct {
 	// GET /v1/assets/held. Nil makes that one route unavailable and leaves the
 	// catalog routes untouched.
 	Home *app.HomeService
+	// Logos reads each token's issuer logo from its on-chain metadata. Nil ships
+	// rows without logoUrl.
+	Logos b20.LogoSource
 	// Now is the market clock; tests pin it so session assertions do not depend on
 	// the wall clock of whoever runs them.
 	Now func() time.Time
@@ -117,8 +120,9 @@ type marketAssetResponse struct {
 	// line's own first and last close otherwise, so it has to be told.
 	SparkBasis       string `json:"sparkBasis,omitempty"`
 	SparkBasisSymbol string `json:"sparkBasisSymbol,omitempty"`
-	// LogoURL is kept on the wire and always empty: a B20 token publishes no logo,
-	// and the app draws the bundled mark for the underlying (or its ticker tile).
+	// LogoURL is the company icon the issuer publishes in the token's own ERC-7572
+	// contractURI metadata (https on metadata.coinbase.com only). Omitted when it
+	// cannot be read; the app then draws the ticker tile.
 	LogoURL string `json:"logoUrl,omitempty"`
 }
 
@@ -463,7 +467,7 @@ func (h *AssetsHandlers) authorizeUser(ctx context.Context, accessToken string) 
 // the held route and the cabal screen so the same instrument is read the same way
 // everywhere.
 func (h *AssetsHandlers) marketRows() *MarketRowSource {
-	return &MarketRowSource{Catalog: h.Catalog, Marks: h.Pyth, Charts: h.Charts}
+	return &MarketRowSource{Catalog: h.Catalog, Marks: h.Pyth, Charts: h.Charts, Logos: h.Logos}
 }
 
 func (h *AssetsHandlers) lookupAsset(ctx context.Context, symbol string) (b20.Asset, bool, error) {

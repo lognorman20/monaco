@@ -215,7 +215,7 @@ func TestGET_assets_popular_rowsCarryTheDaySparklineWithItsBasis(t *testing.T) {
 		t.Fatalf("spark basis = %q/%q, want underlying/AAPL", apple.SparkBasis, apple.SparkBasisSymbol)
 	}
 	if apple.LogoURL != "" || strings.Contains(rec.Body.String(), `"logoUrl"`) {
-		t.Fatalf("logoUrl shipped (%q); the B20 catalog has none", apple.LogoURL)
+		t.Fatalf("logoUrl shipped (%q) with no logo source configured", apple.LogoURL)
 	}
 }
 

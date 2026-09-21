@@ -218,9 +218,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Quotes:  marketData,
 		Dex:     dexClient,
 		Home:    home,
+		// Company icons come from each token's own ERC-7572 metadata on Base.
+		Logos: b20.NewContractLogos(chain, time.Now),
 	}
 	// A cabal's holdings rows read the market exactly as the Stocks tab does.
-	groupHandlers.Market = &httpapi.MarketRowSource{Catalog: catalog, Marks: assetPrices, Charts: marketData}
+	groupHandlers.Market = &httpapi.MarketRowSource{Catalog: catalog, Marks: assetPrices, Charts: marketData, Logos: assetsHandlers.Logos}
 	go warmCatalogMarks(catalog, assetPrices)
 	quoteHandlers := &httpapi.QuoteHandlers{
 		Store:      store,

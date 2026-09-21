@@ -69,7 +69,7 @@ it lists one.
 | `change24h`, `change24hBasis`, `change24hBasisSymbol` | The underlying's move against its previous regular-session close, from Pyth Benchmarks: `"underlying"` / `"AAPL"`. |
 | `spark` | About two dozen closes of the same Pyth 1D series, oldest first, for the row's sparkline. Omitted when no series could be read in budget or it had fewer than two usable closes: the row then draws no line rather than a flat one. |
 | `sparkBasis`, `sparkBasisSymbol` | Which instrument `spark` is about. Set exactly when `spark` is. |
-| `logoUrl` | Kept on the wire and always empty. The B20 catalog publishes no logo; the app draws its bundled mark for the underlying, or a ticker tile. |
+| `logoUrl` | The company icon the issuer publishes in the token's own on-chain metadata: B20 tokens implement ERC-7572 `contractURI()`, which returns an inline `data:application/json` document whose `image` is on `metadata.coinbase.com`. Read with one `eth_call` per token, cached 24 h (a failed read backs off 5 min). Only an `https` URL on that host is sent, because the app loads whatever it is given. Omitted when unreadable; the app then draws a ticker tile. |
 
 On Base, `spark` and `change24h` come from one read of one series, so both bases say
 `underlying` and the app tints the line by the day move. The bases still ship because

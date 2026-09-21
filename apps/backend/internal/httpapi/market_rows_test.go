@@ -73,7 +73,7 @@ func TestMarketRowSource_enrichAttachesTheDaySeriesAndTheMark(t *testing.T) {
 		t.Fatal("change24h missing: the series carries a previous close")
 	}
 	if row.LogoURL != "" {
-		t.Fatalf("logoUrl = %q; the B20 catalog publishes no logo, so the backend sends none", row.LogoURL)
+		t.Fatalf("logoUrl = %q with no logo source; nothing may be invented", row.LogoURL)
 	}
 }
 
@@ -325,5 +325,30 @@ func TestMarketRowSource_nilSourceAnswersEmpty(t *testing.T) {
 	}
 	if days := source.DaySeries(context.Background(), []b20.Asset{{Symbol: "AAPLc", TokenAddress: rowsAppleToken}}); len(days) != 0 {
 		t.Fatalf("days = %v, want none", days)
+	}
+}
+
+// stubLogos answers from a map keyed by token address.
+type stubLogos map[string]string
+
+func (s stubLogos) LogoURL(_ context.Context, token string) string { return s[token] }
+
+// The row carries the issuer's own logo when the token's metadata published one,
+// and nothing when it did not.
+func TestMarketRowSource_theRowCarriesTheIssuersLogo(t *testing.T) {
+	t.Parallel()
+	source, _ := newMarketRowSource(t)
+	apple := registerRowApple(t, source)
+	other := b20.Asset{Symbol: "SPCXc", Name: "SpaceX", TokenAddress: "0xb2000000000000000000007b9fcbd005511acbd5", Routable: true}
+	b20.RegisterCatalogAsset(source.Catalog, other)
+	const logo = "https://metadata.coinbase.com/equity_icons/aapl.png"
+	source.Logos = stubLogos{rowsAppleToken: logo}
+
+	rows := source.Enrich(context.Background(), []b20.Asset{apple, other})
+	if rows[0].LogoURL != logo {
+		t.Fatalf("AAPLc logoUrl = %q, want the issuer's", rows[0].LogoURL)
+	}
+	if rows[1].LogoURL != "" {
+		t.Fatalf("SPCXc logoUrl = %q, want none when the metadata has none", rows[1].LogoURL)
 	}
 }
