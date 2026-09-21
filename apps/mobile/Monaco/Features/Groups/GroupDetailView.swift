@@ -302,7 +302,9 @@ struct GroupDetailView: View {
     }
 
     private var loadTaskID: String {
-        "\(groupId)-\(auth.accessToken ?? "")"
+        // Keyed on who is signed in, not on the token: Dynamic rotates the token under a
+        // session that has not changed, and that must not reload the cabal.
+        "\(groupId)-\(auth.sessionIdentity ?? "")"
     }
 
     /// The open-votes preview reporting what it is showing.

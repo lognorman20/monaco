@@ -69,7 +69,9 @@ struct TransactionDetailView: View {
     }
 
     private var loadTaskID: String {
-        "\(detailTransactionId)-\(activityItem.kind)-\(auth.accessToken ?? "")"
+        // Keyed on who is signed in, not on the token, so a token rotation does not reload
+        // the receipt.
+        "\(detailTransactionId)-\(activityItem.kind)-\(auth.sessionIdentity ?? "")"
     }
 
     private var detailTransactionId: String {
