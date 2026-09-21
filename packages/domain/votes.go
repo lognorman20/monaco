@@ -158,14 +158,18 @@ func TallyProposal(in VoteTallyInput) (ProposalStatus, error) {
 		}
 	}
 
-	remaining := len(in.VoterIDs) - voted
+	// Count eligible voters from the deduplicated set: one member is one ballot
+	// even if the id is listed twice, otherwise "remaining" is inflated forever.
+	eligible := len(voterSet)
+	remaining := eligible - voted
 
 	switch in.Threshold {
 	case ThresholdUnanimous:
-		if no > 0 {
+		// An empty electorate must not pass vacuously; it fails, as under majority.
+		if no > 0 || eligible == 0 {
 			return ProposalFailed, nil
 		}
-		if voted == len(in.VoterIDs) && yes == len(in.VoterIDs) {
+		if yes == eligible {
 			return ProposalPassed, nil
 		}
 		return ProposalOpen, nil

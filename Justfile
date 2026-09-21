@@ -99,7 +99,7 @@ test app:
         ./scripts/ensure-test-database.sh
         ./scripts/verify-local-db.sh
         if [[ -f apps/backend/go.mod ]]; then
-          (cd apps/backend && go test -p 1 ./...)
+          (cd apps/backend && go test -race -p 1 ./...)
         else
           echo "M0: apps/backend not scaffolded. Local DB smoke test passed."
         fi
