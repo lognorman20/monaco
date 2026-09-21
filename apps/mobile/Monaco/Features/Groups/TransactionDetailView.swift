@@ -292,7 +292,7 @@ struct TransactionReceiptView: View {
                             MoneyText(micros: micros, style: .hero)
                         } else {
                             Text(receipt.fallbackHero ?? "—")
-                                .font(MonacoTheme.Typo.moneyHero)
+                                .moneyFont(.hero)
                                 .foregroundStyle(MonacoTheme.ink)
                         }
                     }
