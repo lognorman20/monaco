@@ -8,10 +8,22 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
     /// The token's Chainlink total-return mark, per token.
     public let priceUsdcMicros: Int64?
     /// The underlying equity's move against its previous regular-session close, as a
-    /// decimal ratio. It is the stock's day move, not the token's.
+    /// decimal ratio. It is the stock's day move, not the token's. Render it through
+    /// `stockDayMove`, which carries the label; the raw ratio beside the per-token
+    /// price reads as the token's move.
     public let change24h: String?
+    /// Which instrument `change24h` is about: `underlying` from the backend.
+    public let change24hBasis: MarketPriceBasis?
+    /// The instrument named in full: "AAPL".
+    public let change24hBasisSymbol: String?
 
     public var id: String { symbol }
+
+    /// The day move with its label, or nil when the backend did not say whose move
+    /// it is.
+    public var stockDayMove: StockDayMove? {
+        StockDayMove(ratio: change24h, basis: change24hBasis, basisSymbol: change24hBasisSymbol)
+    }
 
     /// Picker rows use this, not a live DEX probe. A listed token is buyable even when
     /// `routable` was cached false from an old probe.
@@ -25,7 +37,9 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         tokenAddress: String,
         routable: Bool,
         priceUsdcMicros: Int64? = nil,
-        change24h: String? = nil
+        change24h: String? = nil,
+        change24hBasis: MarketPriceBasis? = nil,
+        change24hBasisSymbol: String? = nil
     ) {
         self.symbol = symbol
         self.name = name
@@ -33,7 +47,36 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         self.routable = routable
         self.priceUsdcMicros = priceUsdcMicros
         self.change24h = change24h
+        self.change24hBasis = change24hBasis
+        self.change24hBasisSymbol = change24hBasisSymbol
     }
+}
+
+/// The underlying equity's day move, labelled as the stock's.
+///
+/// `change24h` is Pyth's price for the equity against its previous regular-session
+/// close. It sits beside the token's Chainlink price, which is a different unit
+/// (the token carries a multiplier) and trades on different hours, so an unlabelled
+/// percentage there reads as the token's move. This only exists when the backend
+/// said the figure is the underlying's; without that it is not shown at all.
+public struct StockDayMove: Equatable, Sendable {
+    /// Decimal ratio string, "0.012345" for +1.23%.
+    public let ratio: String
+    /// The equity's display ticker: "AAPL".
+    public let symbol: String
+
+    public init?(ratio: String?, basis: MarketPriceBasis?, basisSymbol: String?) {
+        guard basis == .underlying,
+              let ratio, !ratio.isEmpty,
+              let basisSymbol, !basisSymbol.isEmpty
+        else { return nil }
+        self.ratio = ratio
+        self.symbol = AssetSymbolFormatter.display(basisSymbol)
+    }
+
+    /// "AAPL day move": the share's move over its last session, which on a weekend
+    /// is Friday's, so the caption does not say "today".
+    public var caption: String { "\(symbol) day move" }
 }
 
 public struct ListMarketAssetsResponseDTO: Codable, Equatable, Sendable {
@@ -115,8 +158,9 @@ public enum MarketPriceBasis: String, Codable, Sendable {
 /// The stats grid. Every field is optional because the backend omits a cell it
 /// could not source rather than sending a placeholder.
 ///
-/// Market cap, P/E and dividend yield are deliberately absent: nothing behind a B20
-/// token publishes them.
+/// Every cell is the underlying equity's, per share. Market cap, P/E and dividend
+/// yield are deliberately absent: nothing behind a B20 token publishes them. The
+/// Kyber spread is the token's, so it is on `liquidity` and `stockVsToken`, not here.
 public struct AssetStatsDTO: Codable, Equatable, Sendable {
     public let openUsdcMicros: Int64?
     public let highUsdcMicros: Int64?
@@ -124,8 +168,6 @@ public struct AssetStatsDTO: Codable, Equatable, Sendable {
     public let previousCloseUsdcMicros: Int64?
     public let week52HighUsdcMicros: Int64?
     public let week52LowUsdcMicros: Int64?
-    /// Round-trip trading cost in basis points, from the Kyber probes.
-    public let spreadBps: Int?
     /// Pyth's own confidence interval around the latest equity price, in USDC micros.
     public let confUsdcMicros: Int64?
     /// Which instrument the price cells describe. They come from Pyth's equity feed,
@@ -142,7 +184,6 @@ public struct AssetStatsDTO: Codable, Equatable, Sendable {
         previousCloseUsdcMicros: Int64? = nil,
         week52HighUsdcMicros: Int64? = nil,
         week52LowUsdcMicros: Int64? = nil,
-        spreadBps: Int? = nil,
         confUsdcMicros: Int64? = nil,
         basis: MarketPriceBasis? = nil,
         basisSymbol: String? = nil
@@ -153,7 +194,6 @@ public struct AssetStatsDTO: Codable, Equatable, Sendable {
         self.previousCloseUsdcMicros = previousCloseUsdcMicros
         self.week52HighUsdcMicros = week52HighUsdcMicros
         self.week52LowUsdcMicros = week52LowUsdcMicros
-        self.spreadBps = spreadBps
         self.confUsdcMicros = confUsdcMicros
         self.basis = basis
         self.basisSymbol = basisSymbol
@@ -168,7 +208,6 @@ public struct AssetStatsDTO: Codable, Equatable, Sendable {
             && previousCloseUsdcMicros == nil
             && week52HighUsdcMicros == nil
             && week52LowUsdcMicros == nil
-            && spreadBps == nil
             && confUsdcMicros == nil
     }
 
@@ -213,8 +252,9 @@ public enum ReferenceQuoteSource: String, Codable, Sendable {
 public enum ReferenceQuoteStatus: String, Codable, Sendable {
     /// The price is current.
     case live
-    /// A real price, frozen — an equity feed outside the cash session, or a feed
-    /// that has stopped publishing. `publishedAt` says when it stopped.
+    /// A real price, frozen — an equity feed outside the cash session, the token's
+    /// total-return mark holding the last close over a weekend or holiday, or a feed
+    /// that has stopped publishing. `publishedAt` says when, if the source said.
     case stale
     /// No price at all. `reason` says why, and `priceUsdcMicros` is nil.
     case unavailable
@@ -247,12 +287,16 @@ public struct ReferenceQuoteDTO: Codable, Equatable, Sendable {
     public let priceUsdcMicros: Int64?
     /// Pyth's confidence interval. Never set on a Kyber or Chainlink line.
     public let confUsdcMicros: Int64?
-    /// When the price was struck. Nil for a Kyber quote, which does not say.
+    /// When the price was struck: a Pyth publish time, or the Chainlink round's
+    /// updatedAt. Nil for a Kyber quote, which does not say.
     public let publishedAt: Date?
     public let reason: String?
     /// The probes behind a `dexKyber` mid.
     public let bidUsdcMicros: Int64?
     public let askUsdcMicros: Int64?
+    /// When the backend took the Kyber probes behind a `dexKyber` mid. Probes are
+    /// shared for up to a minute, so this can be older than the card's `asOf`.
+    public let probedAt: Date?
 
     public init(
         source: ReferenceQuoteSource,
@@ -262,7 +306,8 @@ public struct ReferenceQuoteDTO: Codable, Equatable, Sendable {
         publishedAt: Date? = nil,
         reason: String? = nil,
         bidUsdcMicros: Int64? = nil,
-        askUsdcMicros: Int64? = nil
+        askUsdcMicros: Int64? = nil,
+        probedAt: Date? = nil
     ) {
         self.source = source
         self.status = status
@@ -272,11 +317,13 @@ public struct ReferenceQuoteDTO: Codable, Equatable, Sendable {
         self.reason = reason
         self.bidUsdcMicros = bidUsdcMicros
         self.askUsdcMicros = askUsdcMicros
+        self.probedAt = probedAt
     }
 
-    /// True when this line carries a number worth showing.
+    /// True when this line carries a number worth showing: a live or stale price.
+    /// A status this build does not know is not assumed to be either.
     public var isPriced: Bool {
-        status != .unavailable && (priceUsdcMicros ?? 0) > 0
+        (status == .live || status == .stale) && (priceUsdcMicros ?? 0) > 0
     }
 
     public var unavailableReason: ReferenceQuoteReason? {
@@ -284,7 +331,7 @@ public struct ReferenceQuoteDTO: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case source, status, priceUsdcMicros, confUsdcMicros, publishedAt, reason, bidUsdcMicros, askUsdcMicros
+        case source, status, priceUsdcMicros, confUsdcMicros, publishedAt, reason, bidUsdcMicros, askUsdcMicros, probedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -297,6 +344,7 @@ public struct ReferenceQuoteDTO: Codable, Equatable, Sendable {
         reason = try container.decodeIfPresent(String.self, forKey: .reason)
         bidUsdcMicros = try container.decodeIfPresent(Int64.self, forKey: .bidUsdcMicros)
         askUsdcMicros = try container.decodeIfPresent(Int64.self, forKey: .askUsdcMicros)
+        probedAt = try container.decodeIfPresent(MonacoTimestamp.self, forKey: .probedAt)?.date
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -309,6 +357,7 @@ public struct ReferenceQuoteDTO: Codable, Equatable, Sendable {
         try container.encodeIfPresent(reason, forKey: .reason)
         try container.encodeIfPresent(bidUsdcMicros, forKey: .bidUsdcMicros)
         try container.encodeIfPresent(askUsdcMicros, forKey: .askUsdcMicros)
+        try container.encodeIfPresent(probedAt.map(MonacoTimestamp.init(date:)), forKey: .probedAt)
     }
 }
 
@@ -328,7 +377,9 @@ public struct StockVsTokenDTO: Codable, Equatable, Sendable {
     /// The underlying's ticker, "AAPL".
     public let equitySymbol: String?
     /// How far the token trades above (positive) or below (negative) its mark. Nil
-    /// unless both carry a real price.
+    /// unless both carry a real price and both are live: against a mark holding the
+    /// last close (`mark.status == .stale`, e.g. over a weekend) the difference is
+    /// the market's move since then, not a premium.
     public let premiumBps: Int?
     /// Kyber ask against bid, in basis points.
     public let spreadBps: Int?
@@ -387,7 +438,11 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
     public let tokenAddress: String
     public let routable: Bool
     public let priceUsdcMicros: Int64?
+    /// The underlying equity's day move; see `MarketAssetDTO.change24h`. Render it
+    /// through `stockDayMove`.
     public let change24h: String?
+    public let change24hBasis: MarketPriceBasis?
+    public let change24hBasisSymbol: String?
     public let liquidity: AssetLiquidityDTO
     /// The session the hero header reads. Nil against an older backend.
     public let marketSession: MarketSession?
@@ -403,6 +458,8 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
         routable: Bool,
         priceUsdcMicros: Int64? = nil,
         change24h: String? = nil,
+        change24hBasis: MarketPriceBasis? = nil,
+        change24hBasisSymbol: String? = nil,
         liquidity: AssetLiquidityDTO,
         marketSession: MarketSession? = nil,
         afterHours: Bool = false,
@@ -416,6 +473,8 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
         self.routable = routable
         self.priceUsdcMicros = priceUsdcMicros
         self.change24h = change24h
+        self.change24hBasis = change24hBasis
+        self.change24hBasisSymbol = change24hBasisSymbol
         self.liquidity = liquidity
         self.marketSession = marketSession
         self.afterHours = afterHours
@@ -424,9 +483,15 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
         self.stockVsToken = stockVsToken
     }
 
+    /// The day move with its label, or nil when the backend did not say whose move
+    /// it is.
+    public var stockDayMove: StockDayMove? {
+        StockDayMove(ratio: change24h, basis: change24hBasis, basisSymbol: change24hBasisSymbol)
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case symbol, name, tokenAddress, routable, priceUsdcMicros, change24h, liquidity
-        case marketSession, afterHours, market, stats, stockVsToken
+        case symbol, name, tokenAddress, routable, priceUsdcMicros, change24h, change24hBasis, change24hBasisSymbol
+        case liquidity, marketSession, afterHours, market, stats, stockVsToken
     }
 
     public init(from decoder: Decoder) throws {
@@ -437,15 +502,19 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
         routable = try container.decodeIfPresent(Bool.self, forKey: .routable) ?? false
         priceUsdcMicros = try container.decodeIfPresent(Int64.self, forKey: .priceUsdcMicros)
         change24h = try container.decodeIfPresent(String.self, forKey: .change24h)
+        change24hBasis = try container.decodeIfPresent(MarketPriceBasis.self, forKey: .change24hBasis)
+        change24hBasisSymbol = try container.decodeIfPresent(String.self, forKey: .change24hBasisSymbol)
         liquidity = try container.decode(AssetLiquidityDTO.self, forKey: .liquidity)
         market = try container.decodeIfPresent(MarketStatusDTO.self, forKey: .market)
         marketSession = try container.decodeIfPresent(MarketSession.self, forKey: .marketSession) ?? market?.session
         afterHours = try container.decodeIfPresent(Bool.self, forKey: .afterHours) ?? market?.afterHours ?? false
-        // An empty grid object is the same as no grid at all; collapse it here so
-        // no screen has to check both.
-        let decodedStats = try container.decodeIfPresent(AssetStatsDTO.self, forKey: .stats)
+        // The grid and the card are optional sections. A malformed one is dropped on
+        // its own rather than failing the whole detail and taking the hero price,
+        // which decoded fine, down with it. An empty grid object is the same as no
+        // grid at all; collapse it here so no screen has to check both.
+        let decodedStats = (try? container.decodeIfPresent(AssetStatsDTO.self, forKey: .stats)) ?? nil
         stats = (decodedStats?.isEmpty ?? true) ? nil : decodedStats
-        stockVsToken = try container.decodeIfPresent(StockVsTokenDTO.self, forKey: .stockVsToken)
+        stockVsToken = (try? container.decodeIfPresent(StockVsTokenDTO.self, forKey: .stockVsToken)) ?? nil
     }
 }
 

@@ -50,6 +50,9 @@ final class MarketAssetDTOTests: XCTestCase {
         XCTAssertEqual(dto.stockVsToken?.mark.source, .chainlinkTRV)
         XCTAssertEqual(dto.stockVsToken?.premiumBps, 50)
         XCTAssertEqual(dto.stockVsToken?.spreadBps, dto.liquidity.spreadBps)
+        XCTAssertNotNil(dto.stockVsToken?.mark.publishedAt)
+        XCTAssertNotNil(dto.stockVsToken?.token.probedAt)
+        XCTAssertEqual(dto.stockDayMove?.caption, "AAPL day move")
     }
 
     func testAssetChart_decodesPoints() throws {

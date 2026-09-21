@@ -7,9 +7,9 @@ import Foundation
 /// harness flags in the app pick a scenario by name; this is the data behind them.
 ///
 /// The awkward states are the point. A stats grid with half its cells missing, an
-/// equity feed our Pyth key is not entitled to, a pool with no sell route: the
-/// backend really produces these, so the UI has to be built against them rather
-/// than against a happy path that always has every number.
+/// equity feed our Pyth key is not entitled to, a pool with no sell route, a mark
+/// holding Friday's close: the backend really produces these, so the UI has to be
+/// built against them rather than against a happy path that always has every number.
 ///
 /// Units, as on the wire: the hero price and `mark` are the AAPLc token's Chainlink
 /// total-return mark, per token; the chart, the grid and `equity` are Apple per share
@@ -20,8 +20,14 @@ public enum MarketSampleData {
     /// 2026-09-22 14:00 UTC — 10:00 ET on an ordinary Tuesday.
     public static let tradingTuesday = Date(timeIntervalSince1970: 1_790_085_600)
 
+    /// Saturday 2026-09-26 16:00 UTC — noon ET, the exchange and the 24/5 feeds shut.
+    public static let saturdayNoon = Date(timeIntervalSince1970: 1_790_438_400)
+
     /// The pinned AAPLc token contract on Base.
     public static let appleTokenAddress = "0xb200000000000000000000c2e324d24d7eecd1fb"
+
+    /// The pinned SPCXc token contract on Base.
+    public static let spaceXTokenAddress = "0xb2000000000000000000007b9fcbd005511acbd5"
 
     // MARK: - Market status
 
@@ -61,6 +67,17 @@ public enum MarketSampleData {
         asOf: tradingTuesday.addingTimeInterval(12 * 3600)
     )
 
+    /// Saturday: closed until Monday's pre-market.
+    public static let sessionWeekend = MarketStatusDTO(
+        session: .closed,
+        isOpen: false,
+        afterHours: true,
+        nextSession: .preMarket,
+        // Monday 2026-09-28 04:00 ET.
+        nextTransition: Date(timeIntervalSince1970: 1_790_582_400),
+        asOf: saturdayNoon
+    )
+
     /// Thanksgiving: closed all day, and the next session is a half day.
     public static let sessionHoliday = MarketStatusDTO(
         session: .closed,
@@ -95,30 +112,32 @@ public enum MarketSampleData {
         previousCloseUsdcMicros: 226_500_000,
         week52HighUsdcMicros: 262_000_000,
         week52LowUsdcMicros: 163_000_000,
-        spreadBps: 63,
         confUsdcMicros: 30_000,
         basis: .underlying,
         basisSymbol: "AAPL"
     )
 
-    /// No year of history reached and no Pyth key: a session and a spread, nothing more.
+    /// A recent listing. Benchmarks (keyless) has today's session candles but not a
+    /// year of them, so there is no 52-week range; and there is no equity quote, so
+    /// no confidence interval. A session, nothing more.
     public static let statsPartial = AssetStatsDTO(
         openUsdcMicros: 41_200_000,
         highUsdcMicros: 42_050_000,
         lowUsdcMicros: 40_900_000,
         previousCloseUsdcMicros: 41_000_000,
-        spreadBps: 149,
         basis: .underlying,
         basisSymbol: "SPCX"
     )
 
     // MARK: - Stock vs token
 
-    /// The AAPLc token's Chainlink total-return mark, per token.
+    /// The AAPLc token's Chainlink total-return mark, per token, struck two minutes
+    /// before the sample clock.
     public static let appleMark = ReferenceQuoteDTO(
         source: .chainlinkTRV,
         status: .live,
-        priceUsdcMicros: 232_050_000
+        priceUsdcMicros: 232_050_000,
+        publishedAt: tradingTuesday.addingTimeInterval(-120)
     )
 
     /// Apple on its exchange, per share, from Pyth.
@@ -138,7 +157,8 @@ public enum MarketSampleData {
             status: .live,
             priceUsdcMicros: 231_829_069,
             bidUsdcMicros: 231_100_000,
-            askUsdcMicros: 232_558_139
+            askUsdcMicros: 232_558_139,
+            probedAt: tradingTuesday
         ),
         mark: appleMark,
         equity: appleEquityLive,
@@ -148,17 +168,24 @@ public enum MarketSampleData {
         asOf: tradingTuesday
     )
 
-    /// After the bell: the equity print is frozen at 16:00 ET and the mark holds the
-    /// close, while the pools keep trading. This is the state the card exists to show.
+    /// After the bell: the Pyth equity print is frozen at 16:00 ET, while the 24/5
+    /// total-return feed keeps moving through the post-market and so do the pools.
+    /// Both per-token legs are live, so the premium stands.
     public static let stockVsTokenAfterHours = StockVsTokenDTO(
         token: ReferenceQuoteDTO(
             source: .dexKyber,
             status: .live,
             priceUsdcMicros: 233_210_000,
             bidUsdcMicros: 232_520_000,
-            askUsdcMicros: 233_900_000
+            askUsdcMicros: 233_900_000,
+            probedAt: tradingTuesday.addingTimeInterval(9 * 3600 - 30)
         ),
-        mark: appleMark,
+        mark: ReferenceQuoteDTO(
+            source: .chainlinkTRV,
+            status: .live,
+            priceUsdcMicros: 232_050_000,
+            publishedAt: tradingTuesday.addingTimeInterval(9 * 3600 - 240)
+        ),
         equity: ReferenceQuoteDTO(
             source: .pythEquity,
             status: .stale,
@@ -172,18 +199,36 @@ public enum MarketSampleData {
         asOf: tradingTuesday.addingTimeInterval(9 * 3600)
     )
 
-    /// Kyber found a buy route but no sell route: half a market, so no mid, no
-    /// premium and no spread — and the line says why.
-    public static let stockVsTokenNoRoute = StockVsTokenDTO(
+    /// Saturday: the pools trade while the total-return feed holds Friday's close
+    /// (its last round at 19:59 ET). The mark is stale with its round time, and
+    /// there is no premium: the gap is the market's move since Friday, not a premium.
+    public static let stockVsTokenWeekend = StockVsTokenDTO(
         token: ReferenceQuoteDTO(
             source: .dexKyber,
-            status: .unavailable,
-            reason: ReferenceQuoteReason.noRoute.rawValue
+            status: .live,
+            priceUsdcMicros: 234_100_000,
+            bidUsdcMicros: 233_400_000,
+            askUsdcMicros: 234_800_000,
+            probedAt: saturdayNoon.addingTimeInterval(-20)
         ),
-        mark: appleMark,
-        equity: appleEquityLive,
+        mark: ReferenceQuoteDTO(
+            source: .chainlinkTRV,
+            status: .stale,
+            priceUsdcMicros: 232_050_000,
+            // Friday 2026-09-25 19:59 ET.
+            publishedAt: Date(timeIntervalSince1970: 1_790_380_740)
+        ),
+        equity: ReferenceQuoteDTO(
+            source: .pythEquity,
+            status: .stale,
+            priceUsdcMicros: 231_400_000,
+            confUsdcMicros: 30_000,
+            // Friday's 16:00 ET print.
+            publishedAt: Date(timeIntervalSince1970: 1_790_366_400)
+        ),
         equitySymbol: "AAPL",
-        asOf: tradingTuesday
+        spreadBps: 60,
+        asOf: saturdayNoon
     )
 
     /// Our Pyth key is not entitled to the equity feed. The comparison that matters
@@ -214,7 +259,8 @@ public enum MarketSampleData {
         range: AssetChartRange,
         points: Int = 78,
         startUsdcMicros: Int64 = 226_500_000,
-        previousCloseUsdcMicros: Int64? = 224_800_000
+        previousCloseUsdcMicros: Int64? = 224_800_000,
+        basisSymbol: String = "AAPL"
     ) -> AssetChartDTO {
         let step = range.sampleInterval
         let start = tradingTuesday.timeIntervalSince1970 - Double(points) * step
@@ -241,7 +287,7 @@ public enum MarketSampleData {
             range: range,
             source: .benchmarks,
             basis: .underlying,
-            basisSymbol: "AAPL",
+            basisSymbol: basisSymbol,
             market: sessionOpen
         )
     }
@@ -290,6 +336,24 @@ public enum MarketSampleData {
         )
     }
 
+    /// The recent SPCX listing: Benchmarks candles for the short ranges, nothing
+    /// before it listed. The same session candles the partial grid folds, so the
+    /// 1D chart and the grid agree.
+    public static func chartRecentListing(range: AssetChartRange) -> AssetChartDTO {
+        switch range {
+        case .oneDay, .oneWeek, .oneMonth:
+            return chart(
+                range: range,
+                points: 40,
+                startUsdcMicros: 40_900_000,
+                previousCloseUsdcMicros: 41_000_000,
+                basisSymbol: "SPCX"
+            )
+        case .threeMonths, .oneYear, .all:
+            return chartEmpty(range: range)
+        }
+    }
+
     // MARK: - Detail
 
     /// A 1 USDC buy for 0.00430000 AAPLc and a 1 AAPLc sell for $231.10.
@@ -303,10 +367,21 @@ public enum MarketSampleData {
         spreadBps: 63
     )
 
+    /// Kyber found a buy route but no sell route: half a market. The backend sends
+    /// no stock-vs-token card then (the card is the token's pool price, and there
+    /// is none) and no spread.
+    public static let liquidityNoSellRoute = AssetLiquidityDTO(
+        label: "Via DEX",
+        routable: true,
+        buyProbeUsdcMicros: 1_000_000,
+        buyProbeOutAmount: "430000"
+    )
+
     public static func detail(
         symbol: String = "AAPLc",
         name: String = "Apple",
         market: MarketStatusDTO = sessionOpen,
+        liquidity: AssetLiquidityDTO = liquidity,
         stats: AssetStatsDTO? = statsComplete,
         stockVsToken: StockVsTokenDTO? = stockVsTokenLive
     ) -> AssetDetailDTO {
@@ -317,6 +392,8 @@ public enum MarketSampleData {
             routable: true,
             priceUsdcMicros: 232_050_000,
             change24h: "0.021634",
+            change24hBasis: .underlying,
+            change24hBasisSymbol: "AAPL",
             liquidity: liquidity,
             marketSession: market.session,
             afterHours: market.afterHours,
@@ -326,24 +403,24 @@ public enum MarketSampleData {
         )
     }
 
-    /// A thin listing with no Pyth key configured: no year of history, no equity
-    /// line, and a wide spread on the probes.
+    /// A recent, thin listing: today's session but less than a year of history,
+    /// no equity quote, and a sell probe that found no route, so no spread and no
+    /// card.
     public static func sparseDetail() -> AssetDetailDTO {
         AssetDetailDTO(
             symbol: "SPCXc",
             name: "SpaceX",
-            tokenAddress: "0xb2000000000000000000000000000000000005cc",
+            tokenAddress: spaceXTokenAddress,
             routable: true,
             priceUsdcMicros: 41_250_000,
             change24h: "-0.008200",
+            change24hBasis: .underlying,
+            change24hBasisSymbol: "SPCX",
             liquidity: AssetLiquidityDTO(
                 label: "Via DEX",
                 routable: true,
                 buyProbeUsdcMicros: 1_000_000,
-                buyProbeOutAmount: "2400000",
-                sellProbeInAmount: "100000000",
-                sellProbeOutAmount: "41050000",
-                spreadBps: 149
+                buyProbeOutAmount: "2400000"
             ),
             marketSession: .open,
             afterHours: false,

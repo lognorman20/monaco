@@ -28,7 +28,6 @@ final class MarketDataDTOTests: XCTestCase {
             "previousCloseUsdcMicros":226500000,
             "week52HighUsdcMicros":262000000,
             "week52LowUsdcMicros":163000000,
-            "spreadBps":12,
             "confUsdcMicros":30000
           }
         }
@@ -38,7 +37,6 @@ final class MarketDataDTOTests: XCTestCase {
         XCTAssertEqual(stats.openUsdcMicros, 229_000_000)
         XCTAssertEqual(stats.previousCloseUsdcMicros, 226_500_000)
         XCTAssertEqual(stats.week52LowUsdcMicros, 163_000_000)
-        XCTAssertEqual(stats.spreadBps, 12)
         XCTAssertEqual(stats.confUsdcMicros, 30_000)
         XCTAssertFalse(stats.isEmpty)
         XCTAssertEqual(dto.marketSession, .open)
@@ -46,13 +44,13 @@ final class MarketDataDTOTests: XCTestCase {
     }
 
     func testAssetDetail_partialStatsKeepTheCellsThatExist() throws {
-        // A stock listed last month: a session, but no year behind it and no Pyth
-        // feed. The cells that cannot be sourced are simply absent.
+        // A stock listed last month: a session, but no year behind it and no equity
+        // quote. The cells that cannot be sourced are simply absent.
         let dto = try decode(AssetDetailDTO.self, """
         {
-          "symbol":"SPCXc","name":"SpaceX","tokenAddress":"0xb2000000000000000000000000000000000005cc","routable":true,
+          "symbol":"SPCXc","name":"SpaceX","tokenAddress":"0xb2000000000000000000007b9fcbd005511acbd5","routable":true,
           "liquidity":{"label":"Via DEX","routable":true,"buyProbeUsdcMicros":1000000},
-          "stats":{"openUsdcMicros":41200000,"previousCloseUsdcMicros":41000000,"spreadBps":48}
+          "stats":{"openUsdcMicros":41200000,"previousCloseUsdcMicros":41000000}
         }
         """)
 
@@ -66,12 +64,67 @@ final class MarketDataDTOTests: XCTestCase {
     func testAssetDetail_anEmptyStatsObjectCollapsesToNoGrid() throws {
         let dto = try decode(AssetDetailDTO.self, """
         {
-          "symbol":"SPCXc","name":"SpaceX","tokenAddress":"0xb2000000000000000000000000000000000005cc","routable":true,
+          "symbol":"SPCXc","name":"SpaceX","tokenAddress":"0xb2000000000000000000007b9fcbd005511acbd5","routable":true,
           "liquidity":{"label":"Via DEX","routable":true,"buyProbeUsdcMicros":1000000},
           "stats":{}
         }
         """)
         XCTAssertNil(dto.stats, "an object with nothing in it must not become a grid of dashes")
+    }
+
+    func testAssetStats_aSpreadFromAnOlderBackendIsNotAGridCell() throws {
+        // The spread is the token's round-trip cost, not a figure about the share
+        // the grid is headed with. A backend that still sends it there is ignored,
+        // and a grid holding only that is no grid.
+        let dto = try decode(AssetDetailDTO.self, """
+        {
+          "symbol":"AAPLc","name":"Apple","tokenAddress":"0xb200000000000000000000c2e324d24d7eecd1fb","routable":true,
+          "liquidity":{"label":"Via DEX","routable":true,"buyProbeUsdcMicros":1000000,"spreadBps":63},
+          "stats":{"spreadBps":63,"basis":"underlying","basisSymbol":"AAPL"}
+        }
+        """)
+        XCTAssertNil(dto.stats)
+        XCTAssertEqual(dto.liquidity.spreadBps, 63)
+    }
+
+    // MARK: - Day move
+
+    func testDayMove_isLabelledAsTheStocksWhenTheBackendSaysSo() throws {
+        let dto = try decode(AssetDetailDTO.self, """
+        {
+          "symbol":"AAPLc","name":"Apple","tokenAddress":"0xb200000000000000000000c2e324d24d7eecd1fb","routable":true,
+          "priceUsdcMicros":232050000,"change24h":"0.015000","change24hBasis":"underlying","change24hBasisSymbol":"AAPL",
+          "liquidity":{"label":"Via DEX","routable":true,"buyProbeUsdcMicros":1000000}
+        }
+        """)
+        let move = try XCTUnwrap(dto.stockDayMove)
+        XCTAssertEqual(move.ratio, "0.015000")
+        XCTAssertEqual(move.symbol, "AAPL")
+        XCTAssertEqual(move.caption, "AAPL day move")
+
+        let row = try decode(MarketAssetDTO.self, """
+        {"symbol":"AAPLc","name":"Apple","tokenAddress":"0xb200000000000000000000c2e324d24d7eecd1fb","routable":true,
+         "priceUsdcMicros":232050000,"change24h":"0.015000","change24hBasis":"underlying","change24hBasisSymbol":"AAPL"}
+        """)
+        XCTAssertEqual(row.stockDayMove, move)
+    }
+
+    func testDayMove_withoutABasisIsNotShown() throws {
+        // A backend that sends the ratio without saying whose move it is: beside a
+        // per-token price it would read as the token's move, so there is no label
+        // to put on it and it is not rendered.
+        let unlabelled = try decode(MarketAssetDTO.self, """
+        {"symbol":"AAPLc","name":"Apple","tokenAddress":"0xb200000000000000000000c2e324d24d7eecd1fb","routable":true,
+         "change24h":"0.015000"}
+        """)
+        XCTAssertEqual(unlabelled.change24h, "0.015000")
+        XCTAssertNil(unlabelled.stockDayMove)
+
+        let tokenBasis = try decode(MarketAssetDTO.self, """
+        {"symbol":"AAPLc","name":"Apple","tokenAddress":"0xb200000000000000000000c2e324d24d7eecd1fb","routable":true,
+         "change24h":"0.015000","change24hBasis":"token","change24hBasisSymbol":"AAPLc"}
+        """)
+        XCTAssertNil(tokenBasis.stockDayMove, "only the underlying's move is the stock's day move")
     }
 
     // MARK: - Stock vs token
@@ -83,8 +136,8 @@ final class MarketDataDTOTests: XCTestCase {
           "priceUsdcMicros":232050000,
           "liquidity":{"label":"Via DEX","routable":true,"buyProbeUsdcMicros":1000000,"spreadBps":63},
           "stockVsToken":{
-            "token":{"source":"dex_kyber","status":"live","priceUsdcMicros":231829069,"bidUsdcMicros":231100000,"askUsdcMicros":232558139},
-            "mark":{"source":"chainlink_trv","status":"live","priceUsdcMicros":232050000},
+            "token":{"source":"dex_kyber","status":"live","priceUsdcMicros":231829069,"bidUsdcMicros":231100000,"askUsdcMicros":232558139,"probedAt":"2026-09-22T13:59:30Z"},
+            "mark":{"source":"chainlink_trv","status":"live","priceUsdcMicros":232050000,"publishedAt":"2026-09-22T13:58:00Z"},
             "equity":{"source":"pyth_equity","status":"live","priceUsdcMicros":231400000,"confUsdcMicros":30000,"publishedAt":"2026-09-22T13:59:52Z"},
             "equitySymbol":"AAPL",
             "premiumBps":-10,
@@ -101,7 +154,9 @@ final class MarketDataDTOTests: XCTestCase {
         XCTAssertEqual(card.token.askUsdcMicros, 232_558_139)
         XCTAssertNil(card.token.publishedAt, "a Kyber quote does not say when it was struck")
         XCTAssertNil(card.token.confUsdcMicros, "Kyber publishes no confidence interval")
+        XCTAssertEqual(card.token.probedAt?.timeIntervalSince1970, 1_790_085_570, "when we took the probes, which can trail asOf")
         XCTAssertEqual(card.mark.source, .chainlinkTRV)
+        XCTAssertEqual(card.mark.publishedAt?.timeIntervalSince1970, 1_790_085_480, "the Chainlink round's updatedAt")
         XCTAssertEqual(card.mark.priceUsdcMicros, dto.priceUsdcMicros, "the mark is the hero price")
         XCTAssertEqual(card.equity.source, .pythEquity)
         XCTAssertEqual(card.equitySymbol, "AAPL")
@@ -174,6 +229,45 @@ final class MarketDataDTOTests: XCTestCase {
 
         XCTAssertEqual(card.equity.source, .unknown)
         XCTAssertEqual(card.token.status, .unknown)
+        XCTAssertFalse(card.token.isPriced, "a status this build does not know is not assumed to be a usable price")
+    }
+
+    func testStockVsToken_aWeekendMarkIsStaleWithItsRoundTimeAndNoPremium() throws {
+        let card = try decode(StockVsTokenDTO.self, """
+        {
+          "token":{"source":"dex_kyber","status":"live","priceUsdcMicros":234100000,"bidUsdcMicros":233400000,"askUsdcMicros":234800000},
+          "mark":{"source":"chainlink_trv","status":"stale","priceUsdcMicros":232050000,"publishedAt":"2026-09-25T23:59:00Z"},
+          "equity":{"source":"pyth_equity","status":"stale","priceUsdcMicros":231400000,"confUsdcMicros":30000,"publishedAt":"2026-09-25T20:00:00Z"},
+          "equitySymbol":"AAPL",
+          "spreadBps":60,
+          "asOf":"2026-09-26T16:00:00Z"
+        }
+        """)
+        XCTAssertEqual(card.mark.status, .stale)
+        XCTAssertTrue(card.mark.isPriced, "a held close is still a price to show, with its time")
+        XCTAssertEqual(card.mark.publishedAt?.timeIntervalSince1970, 1_790_380_740)
+        XCTAssertNil(card.premiumBps)
+        // The harness's weekend card is the same payload.
+        XCTAssertEqual(card.mark, MarketSampleData.stockVsTokenWeekend.mark)
+        XCTAssertEqual(card.equity, MarketSampleData.stockVsTokenWeekend.equity)
+        XCTAssertNil(MarketSampleData.stockVsTokenWeekend.premiumBps)
+    }
+
+    func testAssetDetail_aMalformedCardOrGridDoesNotTakeTheHeroDown() throws {
+        // The hero price and the liquidity strip decoded fine. A card missing its
+        // mark, or a grid with a string where a number goes, is dropped on its own.
+        let dto = try decode(AssetDetailDTO.self, """
+        {
+          "symbol":"AAPLc","name":"Apple","tokenAddress":"0xb200000000000000000000c2e324d24d7eecd1fb","routable":true,
+          "priceUsdcMicros":232050000,
+          "liquidity":{"label":"Via DEX","routable":true,"buyProbeUsdcMicros":1000000},
+          "stats":{"openUsdcMicros":"not a number"},
+          "stockVsToken":{"token":{"source":"dex_kyber","status":"live","priceUsdcMicros":1},"asOf":"2026-09-22T14:00:00Z"}
+        }
+        """)
+        XCTAssertEqual(dto.priceUsdcMicros, 232_050_000)
+        XCTAssertNil(dto.stats)
+        XCTAssertNil(dto.stockVsToken)
     }
 
     func testStockVsToken_unknownReasonStringSurvivesAsRawText() throws {
@@ -347,8 +441,11 @@ final class MarketDataDTOTests: XCTestCase {
         XCTAssertEqual(MarketSampleData.stockVsTokenAfterHours.equity.status, .stale)
         XCTAssertEqual(MarketSampleData.stockVsTokenLive.token.source, .dexKyber)
         XCTAssertEqual(MarketSampleData.stockVsTokenLive.mark.source, .chainlinkTRV)
-        XCTAssertEqual(MarketSampleData.stockVsTokenNoRoute.token.unavailableReason, .noRoute)
-        XCTAssertNil(MarketSampleData.stockVsTokenNoRoute.premiumBps)
+        // No sell route: the backend sends no card and no spread.
+        XCTAssertNil(MarketSampleData.liquidityNoSellRoute.spreadBps)
+        XCTAssertNil(MarketSampleData.liquidityNoSellRoute.sellProbeOutAmount)
+        XCTAssertEqual(MarketSampleData.stockVsTokenWeekend.mark.status, .stale)
+        XCTAssertEqual(MarketSampleData.sessionWeekend.session, .closed)
         // The premium is token against mark, so it survives a missing equity line.
         XCTAssertEqual(MarketSampleData.stockVsTokenEquityUnavailable.equity.unavailableReason, .notEntitled)
         XCTAssertNotNil(MarketSampleData.stockVsTokenEquityUnavailable.premiumBps)
@@ -369,6 +466,26 @@ final class MarketDataDTOTests: XCTestCase {
 
         XCTAssertNil(MarketSampleData.sparseDetail().stockVsToken)
         XCTAssertEqual(MarketSampleData.detail().marketSession, .open)
+    }
+
+    func testSampleData_theSparseListingIsOneTheBackendCouldProduce() throws {
+        let sparse = MarketSampleData.sparseDetail()
+        // The pinned SPCXc contract (apps/backend/internal/b20/pinned.go).
+        XCTAssertEqual(sparse.tokenAddress, "0xb2000000000000000000007b9fcbd005511acbd5")
+        // Session cells exist only because a 1D Benchmarks series does, so the 1D
+        // chart the harness serves beside them is not empty.
+        XCTAssertNotNil(sparse.stats?.openUsdcMicros)
+        let day = MarketSampleData.chartRecentListing(range: .oneDay)
+        XCTAssertFalse(day.points.isEmpty)
+        XCTAssertEqual(day.previousCloseUsdcMicros, sparse.stats?.previousCloseUsdcMicros)
+        XCTAssertEqual(day.basisSymbol, "SPCX")
+        // No year of candles, so no 52-week range and no long chart.
+        XCTAssertNil(sparse.stats?.week52HighUsdcMicros)
+        XCTAssertTrue(MarketSampleData.chartRecentListing(range: .oneYear).points.isEmpty)
+        // One probe unrouted: no spread, no card.
+        XCTAssertNil(sparse.liquidity.spreadBps)
+        XCTAssertNil(sparse.stockVsToken)
+        XCTAssertEqual(sparse.stockDayMove?.caption, "SPCX day move")
     }
 
     func testSampleData_survivesARoundTripThroughJSON() throws {

@@ -89,7 +89,7 @@ final class MarketAssetAPITests: XCTestCase {
           "liquidity":{"label":"Via DEX","routable":true,"buyProbeUsdcMicros":1000000,"spreadBps":12},
           "marketSession":"after_hours","afterHours":true,
           "market":{"session":"after_hours","isOpen":false,"afterHours":true,"nextSession":"closed","asOf":"2026-09-22T21:00:00Z"},
-          "stats":{"openUsdcMicros":229000000,"highUsdcMicros":231800000,"lowUsdcMicros":228200000,"previousCloseUsdcMicros":226500000,"week52HighUsdcMicros":262000000,"week52LowUsdcMicros":163000000,"spreadBps":12,"confUsdcMicros":30000},
+          "stats":{"openUsdcMicros":229000000,"highUsdcMicros":231800000,"lowUsdcMicros":228200000,"previousCloseUsdcMicros":226500000,"week52HighUsdcMicros":262000000,"week52LowUsdcMicros":163000000,"confUsdcMicros":30000},
           "stockVsToken":{
             "equity":{"source":"pyth_equity","status":"stale","priceUsdcMicros":231400000,"confUsdcMicros":30000,"publishedAt":"2026-09-22T20:00:00Z"},
             "token":{"source":"dex_kyber","status":"live","priceUsdcMicros":233210000,"bidUsdcMicros":232520000,"askUsdcMicros":233900000},
@@ -116,13 +116,13 @@ final class MarketAssetAPITests: XCTestCase {
     }
 
     func testGetMarketAsset_missingComparisonIsNotAnError() async throws {
-        // The card is dropped when neither feed had a price. The rest of the screen
-        // still has to load.
+        // The card is dropped when the Kyber probes did not both route. The rest of
+        // the screen still has to load.
         respond("""
         {
-          "symbol":"SPCXc","name":"SpaceX","tokenAddress":"0xb2000000000000000000000000000000000005cc","routable":true,
+          "symbol":"SPCXc","name":"SpaceX","tokenAddress":"0xb2000000000000000000007b9fcbd005511acbd5","routable":true,
           "priceUsdcMicros":41250000,
-          "liquidity":{"label":"Via DEX","routable":true,"buyProbeUsdcMicros":1000000,"spreadBps":48},
+          "liquidity":{"label":"Via DEX","routable":true,"buyProbeUsdcMicros":1000000},
           "marketSession":"open","afterHours":false
         }
         """)

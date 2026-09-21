@@ -5,6 +5,8 @@
   "routable": true,
   "priceUsdcMicros": 232050000,
   "change24h": "0.021634",
+  "change24hBasis": "underlying",
+  "change24hBasisSymbol": "AAPL",
   "liquidity": {
     "label": "Via DEX",
     "routable": true,
@@ -31,7 +33,6 @@
     "previousCloseUsdcMicros": 226500000,
     "week52HighUsdcMicros": 262000000,
     "week52LowUsdcMicros": 163000000,
-    "spreadBps": 59,
     "confUsdcMicros": 30000,
     "basis": "underlying",
     "basisSymbol": "AAPL"
@@ -42,12 +43,14 @@
       "status": "live",
       "priceUsdcMicros": 233210000,
       "bidUsdcMicros": 232520000,
-      "askUsdcMicros": 233900000
+      "askUsdcMicros": 233900000,
+      "probedAt": "2026-09-22T20:59:30Z"
     },
     "mark": {
       "source": "chainlink_trv",
       "status": "live",
-      "priceUsdcMicros": 232050000
+      "priceUsdcMicros": 232050000,
+      "publishedAt": "2026-09-22T20:56:00Z"
     },
     "equity": {
       "source": "pyth_equity",
