@@ -352,3 +352,9 @@ killports:
     fi
     ./scripts/kill-listeners.sh "$port"
     ./scripts/kill-listeners.sh 8081
+
+# Overnight QA loop: backend, host tests, app unit tests, then each sample UI test class
+# one at a time on a slimmed simulator. Report lands in .logs/qa/<timestamp>/report.md.
+# Examples: `just qa-night`, `just qa-night --until 07:30`, `just qa-night --skip-backend`.
+qa-night *args:
+    ./scripts/qa/night.sh {{args}}
