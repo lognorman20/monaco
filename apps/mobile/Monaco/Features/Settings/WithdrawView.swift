@@ -39,7 +39,7 @@ struct WithdrawView: View {
     /// Nothing while the field is empty; otherwise why the pasted address can't be used.
     private var addressProblemMessage: String? {
         guard case .failure(let problem) = addressValidation, problem != .empty else { return nil }
-        return EVMAddress.message(for: problem)
+        return WithdrawAddressCopy.message(for: problem, pasted: destinationAddress)
     }
 
     var body: some View {
@@ -172,6 +172,26 @@ struct WithdrawView: View {
             if error.isRequestCancellation { return }
             submitFailure = MoneyFlowCopy.cashOutFailure(FlowErrorInput(error))
             Haptics.warning()
+        }
+    }
+}
+
+/// What the destination field says about an address it won't take.
+///
+/// A pasted address of the wrong length is the common case — a copy that dropped the last few
+/// characters, or the `0x` — and "check you copied the whole thing" does not say what whole looks
+/// like. A Base address has exactly one length, so the field says it, and how long this one is.
+enum WithdrawAddressCopy {
+    /// `0x` and 40 hex characters.
+    static let baseAddressLength = 2 + EVMAddress.hexCount
+
+    static func message(for problem: EVMAddressProblem, pasted: String) -> String {
+        switch problem {
+        case .notAnAccountAddress:
+            let length = pasted.trimmingCharacters(in: .whitespacesAndNewlines).count
+            return "A Base address is \(baseAddressLength) characters: 0x, then 40 letters and numbers. This one is \(length)."
+        case .empty, .badCharacter, .ownDepositAddress:
+            return EVMAddress.message(for: problem)
         }
     }
 }
