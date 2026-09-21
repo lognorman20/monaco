@@ -29,10 +29,32 @@ struct LiveAssetDetailDataSource: AssetDetailDataSource {
     }
 }
 
+/// How often the screen re-reads itself while the member is looking at it.
+///
+/// Both cadences sit at or above what the backend caches, so a screen left open never
+/// makes the API ask Pyth or Kyber more often than it already would:
+///
+/// - The detail route carries the hero price (the Chainlink mark, read per request), the
+///   Pyth equity quote (shared between callers for 10 s, `pyth.EquityQuoteTTL`), the Kyber
+///   probes (60 s, `liquidityProbeTTL`) and the Benchmarks 1D and 1Y series behind the
+///   grid (1 and 10 minutes, `pyth.ChartCacheDayTTL` / `ChartCacheLongTTL`). Asking every
+///   10 s re-reads the mark and at most one fresh Hermes quote per symbol, however many
+///   people have the screen open.
+/// - A chart range is cached for a minute (1D) or ten (everything longer), so this is about
+///   a screen left open across a range's worth of new bars, not about live ticks.
+///
+/// A poll that fails backs off (see `pollWhileVisible`), so an outage is not hammered at
+/// the healthy rate.
+enum AssetDetailPolling {
+    static let price: Duration = .seconds(10)
+    static let chart: Duration = .seconds(120)
+}
+
 /// State for the stock detail screen.
 ///
-/// The header figure and the curve are read from the same series, and each range owns its own
-/// slot, so a slow range can never repaint a range the user has already moved on from.
+/// The header figure and the curve are read from the same `AssetChartSeries`, and each
+/// range owns its own slot, so a slow range can never repaint a range the user has
+/// already moved on from.
 @Observable
 @MainActor
 final class AssetDetailModel {
@@ -44,12 +66,13 @@ final class AssetDetailModel {
 
     enum ChartState: Equatable {
         case loading
-        case series([AssetChartPointDTO])
+        case series(AssetChartSeries)
         case empty
         case failed
     }
 
-    /// The move the header shows, always measured over the window the curve draws.
+    /// The move the header shows: over the drawn window, or — while a finger is on the
+    /// curve — from the baseline to the point under it.
     struct Move: Equatable {
         /// Backend-style ratio ("0.0124"), so it formats through `PercentReturnFormatter`.
         ///
@@ -58,6 +81,21 @@ final class AssetDetailModel {
         /// move as a gain.
         let ratio: String
         let label: String
+        /// The same move in dollars ("5.50"), when the curve can measure one. Nil when
+        /// the only figure available is the backend's own day move.
+        var dollars: String?
+        /// Which instrument this figure is about, when that is *not* the instrument of
+        /// the price it sits under and the label does not already say so.
+        ///
+        /// The hero price is the B20 token's Chainlink total-return mark, per token.
+        /// Every Pyth history source serves the underlying equity, per share, so a move
+        /// folded from the curve is `AAPL` on its exchange. The two cannot be reconciled
+        /// by subtraction (the token carries a multiplier), and a `PnLBadge` is the same
+        /// component the app uses for a member's own P&L — unlabelled, "▲ $5.50" under
+        /// "$232.05" reads as a subtraction that does not work.
+        var basisSymbol: String?
+        /// The long form of the same fact, for VoiceOver: "AAPL on its home exchange".
+        var basisCaption: String?
 
         private var value: Decimal {
             Decimal(string: ratio, locale: Locale(identifier: "en_US_POSIX")) ?? 0
@@ -78,10 +116,34 @@ final class AssetDetailModel {
         }
     }
 
+    /// A price that changed under a poll. The hero flashes on it, so it carries a
+    /// sequence number: two ticks in the same direction are still two ticks.
+    struct PriceTick: Equatable {
+        let sequence: Int
+        let direction: Move.Direction
+    }
+
     let symbol: String
-    var range: AssetChartRange = .oneDay
+
+    /// The chip the member is on. Changing it drops any scrub, because the point under
+    /// the finger belonged to the window that is going away.
+    var range: AssetChartRange = .oneDay {
+        didSet {
+            guard range != oldValue else { return }
+            scrubbedIndex = nil
+        }
+    }
+
+    /// The sample under the finger, as an index into the current series. Set by the
+    /// chart, read by the header — that is what makes the price follow the drag.
+    var scrubbedIndex: Int?
+
     private(set) var detailState: DetailState = .loading
     private(set) var charts: [AssetChartRange: ChartState] = [:]
+    /// Ranges with a request in flight. Distinct from `ChartState.loading`: a range that
+    /// already has a curve keeps showing it, and the chip carries the spinner instead.
+    private(set) var loadingRanges: Set<AssetChartRange> = []
+    private(set) var priceTick: PriceTick?
 
     /// The rejection that ended this screen's reads, naming the token the request sent. The
     /// view reports that token to the guarded sign-out.
@@ -89,7 +151,15 @@ final class AssetDetailModel {
 
     var sessionExpired: Bool { rejectedSession != nil }
 
+    /// What "today" is when a day chart names its session. Only tests set it.
+    var now: () -> Date = Date.init
+
     private let dataSource: AssetDetailDataSource
+    private var tickSequence = 0
+    /// Per-range issue order, so only the newest request for a range may write it.
+    private var chartRequestSequence: [AssetChartRange: Int] = [:]
+    /// How many requests the member is actually waiting on, per range.
+    private var visibleChartRequests: [AssetChartRange: Int] = [:]
 
     init(symbol: String, dataSource: AssetDetailDataSource) {
         self.symbol = symbol
@@ -105,9 +175,14 @@ final class AssetDetailModel {
         charts[range] ?? .loading
     }
 
-    var chartPoints: [AssetChartPointDTO] {
-        if case .series(let points) = chartState { return points }
-        return []
+    /// The series on screen, if there is one.
+    var series: AssetChartSeries? {
+        if case .series(let series) = chartState { return series }
+        return nil
+    }
+
+    var isLoadingCurrentRange: Bool {
+        loadingRanges.contains(range)
     }
 
     /// Only the stock-level verdict blocks the buy; an unknown answer leaves it open.
@@ -126,65 +201,300 @@ final class AssetDetailModel {
         detail?.routable ?? true
     }
 
-    /// The figure under the price: the drawn window's move when there is a curve, otherwise the
-    /// stock's day move under its own label ("AAPL day move") so the number never claims a
-    /// period it did not measure, nor to be the token's.
+    // MARK: - The exchange
+
+    /// The exchange's state for the chip under the price.
     ///
-    /// Known gap, owned by stocks-detail-chart: the curve's 1D move measures from the first
-    /// point (the 04:00 ET pre-market bar), not from the chart's `previousCloseUsdcMicros`, and
-    /// "Past day" is shown on a weekend when the session is Friday's.
-    var move: Move? {
-        if case .series(let points) = chartState, points.count >= 2,
-           let first = points.first?.chartValue, let last = points.last?.chartValue, first > 0 {
-            return Move(ratio: Self.ratioString(last / first - 1), label: range.moveLabel)
-        }
-        // Only a move the backend labelled as the underlying's; without that basis the ratio
-        // beside the token's price would read as the token's move.
-        guard let dayMove = detail?.stockDayMove else { return nil }
-        return Move(ratio: dayMove.ratio, label: dayMove.caption)
+    /// The detail payload carries the full status block and also mirrors the session
+    /// at the top level. A backend that sends only the mirror still gets a chip, built
+    /// from what it did send — it just has no next transition to count down to.
+    var marketStatus: MarketStatusDTO? {
+        guard let detail else { return nil }
+        if let market = detail.market { return market }
+        guard let session = detail.marketSession else { return nil }
+        return MarketStatusDTO(session: session, isOpen: session.isRegularSession, afterHours: detail.afterHours)
     }
 
-    /// What VoiceOver reads for the chart: the range and the move over it, never dollar figures.
-    ///
-    /// The headline price is the token's own mark, while the series is usually the underlying
-    /// share's price (Pyth) and only falls back to the token's (Chainlink). The chart response
-    /// now says which (`basis`/`basisSymbol`), but this model keeps only the points, so a dollar
-    /// low/high read here could sit in a different unit from the price above it. The move is a
-    /// ratio, so it holds in either unit. Reading the basis into the summary belongs to
-    /// stocks-detail-chart, which labels whose move the chart is.
-    var chartAccessibilitySummary: String {
-        let move = move.map { PercentReturnFormatter.format($0.ratio) } ?? "—"
-        return "\(range.accessibilityLabel) price history. \(move) \(range.moveLabel.lowercased())."
+    /// The chip only says the token still trades on Base when this read's Kyber buy
+    /// probe found a route.
+    var sessionChip: MarketSessionChipCopy? {
+        MarketSessionCopy.chip(for: marketStatus, tokenRoutable: detail?.liquidity.routable ?? false)
     }
+
+    /// True while the exchange behind the curve is still printing. The chart's
+    /// end-of-line pulse and nothing else reads this.
+    var isMarketLive: Bool { sessionChip?.isLive ?? false }
+
+    /// What the hero's change pill flashes on, or nil when nothing has moved yet.
+    ///
+    /// Silent while a finger is on the curve: the pill is showing a sample from the
+    /// past then, and flashing it would claim that *that* number had just moved. The
+    /// tick is still recorded, so the flash lands when the finger lifts and the live
+    /// price comes back.
+    var heroTick: MonacoPriceTick? {
+        guard !isScrubbing else { return nil }
+        return priceTick.map { MonacoPriceTick(sequence: $0.sequence, isUp: $0.direction == .up) }
+    }
+
+    // MARK: - What the hero shows
+
+    var isScrubbing: Bool { scrubbedPoint != nil }
+
+    var scrubbedPoint: AssetChartPointDTO? {
+        guard let scrubbedIndex, let series else { return nil }
+        return series.point(at: scrubbedIndex)
+    }
+
+    /// The price in the hero: the sample under the finger while scrubbing, otherwise the
+    /// token's live Chainlink mark from the detail route.
+    var heroPriceUsdcMicros: Int64? {
+        scrubbedPoint?.priceUsdcMicros ?? detail?.priceUsdcMicros
+    }
+
+    /// Whose price the hero is showing while a finger is on an underlying curve: "AAPL on
+    /// its home exchange". The sample under the finger is the share's price, not the
+    /// token's, so the line that names the stock says so for as long as it is shown. Nil
+    /// when the hero shows the token's own mark, or a sample of the token's own rounds.
+    var heroPriceCaption: String? {
+        guard isScrubbing, let series, series.underlyingDisplaySymbol != nil else { return nil }
+        return series.basisCaption
+    }
+
+    /// The figure under the price.
+    ///
+    /// While scrubbing it is the move from the window's baseline to the point under the
+    /// finger, labelled with that point's own time. Otherwise it is the drawn window's
+    /// move (see `windowMove`).
+    var move: Move? {
+        if let series, let index = scrubbedIndex, let point = series.point(at: index),
+           let ratio = series.changeRatio(toIndex: index) {
+            return curveMove(
+                series,
+                ratio: ratio,
+                label: ChartScrubLabel.caption(for: point.date, range: series.range),
+                dollars: series.changeDollars(toIndex: index)
+            )
+        }
+        return windowMove
+    }
+
+    /// The drawn window's move under the window's name, measured from the series'
+    /// baseline: the previous session's close on a Benchmarks day chart, the window's
+    /// first sample otherwise.
+    ///
+    /// A day chart of one session is named for that session ("Today", or "Fri, Sep 25"
+    /// over a weekend), because the backend's 1D window is the last trading session and
+    /// not a rolling 24 hours.
+    ///
+    /// With no curve it falls back to the stock's day move under its own label ("AAPL day
+    /// move"), so the number never claims a period it did not measure, nor to be the
+    /// token's. Without a basis from the backend there is no figure at all.
+    var windowMove: Move? {
+        if let series, let ratio = windowRatio {
+            return curveMove(series, ratio: ratio, label: windowLabel(series), dollars: series.changeDollars())
+        }
+        guard let dayMove = detail?.stockDayMove else { return nil }
+        // The label already names the instrument, so the pill carries no second tag;
+        // VoiceOver still gets the long form.
+        return Move(
+            ratio: dayMove.ratio,
+            label: dayMove.caption,
+            basisCaption: MarketPriceBasisCaption.caption(basis: .underlying, symbol: dayMove.symbol)
+        )
+    }
+
+    /// A figure measured from the curve, tagged with the curve's instrument whenever
+    /// that is not the one the hero price is quoted in.
+    private func curveMove(_ series: AssetChartSeries, ratio: String, label: String, dollars: String?) -> Move {
+        var move = Move(ratio: ratio, label: label, dollars: dollars)
+        // Only the underlying differs from the token in the hero. A series the
+        // backend says is the token's needs no tag, and one it will not name at all
+        // gets no guess.
+        if let symbol = series.underlyingDisplaySymbol {
+            move.basisSymbol = symbol
+            move.basisCaption = series.basisCaption
+        }
+        return move
+    }
+
+    private func windowLabel(_ series: AssetChartSeries) -> String {
+        series.session(now: now())?.caption ?? series.range.moveLabel
+    }
+
+    private func spokenWindow(_ series: AssetChartSeries) -> String {
+        series.session(now: now())?.spokenPhrase ?? series.range.moveLabel.lowercased()
+    }
+
+    /// The curve's own verdict, which does *not* follow the scrub: a line that changed
+    /// colour under the finger would read as the price having moved, and the member is
+    /// only looking at where it has been.
+    var curveDirection: Move.Direction {
+        windowMove?.direction ?? .flat
+    }
+
+    private var windowRatio: String? {
+        guard let series, series.isDrawable else { return nil }
+        return series.changeRatio()
+    }
+
+    /// What VoiceOver reads for the chart: the range, the window's move and whose price
+    /// the curve is.
+    ///
+    /// The low and the high are dollars on the curve's own instrument, which is usually
+    /// the share (Pyth) while the price above is the token (Chainlink). They are only read
+    /// when the series names its instrument, so a dollar figure is never spoken next to a
+    /// price in another unit without saying so. The move is a ratio and holds in either.
+    var chartAccessibilitySummary: String {
+        guard let series, series.isDrawable else {
+            return "\(range.accessibilityLabel) price history."
+        }
+        let moveText = windowMove.map { PercentReturnFormatter.format($0.ratio) } ?? "—"
+        var sentence = "\(series.range.accessibilityLabel) price history. \(moveText) \(spokenWindow(series))."
+        if let caption = series.basisCaption {
+            sentence += " Low \(UsdAmountFormatter.format(micros: Self.micros(series.lowValue))), "
+                + "high \(UsdAmountFormatter.format(micros: Self.micros(series.highValue))), \(caption)."
+        }
+        return sentence
+    }
+
+    /// What VoiceOver reads for one sample: "$231.40, up 2.4%, Tue 2:05 PM".
+    func describePoint(at index: Int) -> String {
+        guard let series, let point = series.point(at: index) else { return "—" }
+        let price = UsdAmountFormatter.format(micros: point.priceUsdcMicros)
+        let time = ChartScrubLabel.caption(for: point.date, range: series.range)
+        guard let ratio = series.changeRatio(toIndex: index) else { return "\(price), \(time)" }
+        return "\(price), \(PnLSpeech.percent(PercentReturnFormatter.format(ratio))), \(time)"
+    }
+
+    private static func micros(_ value: Double) -> Int64 {
+        Int64((value * 1_000_000).rounded())
+    }
+
+    // MARK: - Loading
 
     func loadDetail() async {
         if detail == nil { detailState = .loading }
         do {
-            detailState = .loaded(try await dataSource.detail(symbol: symbol))
+            apply(try await dataSource.detail(symbol: symbol))
         } catch {
             handle(error) { if detail == nil { detailState = .failed } }
         }
     }
 
-    /// Writes only into `range`'s slot, so a late response lands where it belongs or nowhere.
-    func loadChart(range: AssetChartRange) async {
-        if charts[range] == nil || charts[range] == .failed {
-            charts[range] = .loading
-        }
+    /// A poll tick. It never shows a spinner, never shows an error, and never replaces
+    /// what is on screen with an equal value — a refresh nobody asked for must leave the
+    /// screen exactly as the member last saw it.
+    ///
+    /// It rethrows a failure so the poll loop can back off; nothing on screen reads it.
+    func refreshDetail() async throws {
         do {
-            let chart = try await dataSource.chart(symbol: symbol, range: range)
-            charts[range] = chart.points.count >= 2 ? .series(chart.points) : .empty
+            apply(try await dataSource.detail(symbol: symbol))
         } catch {
-            handle(error) {
-                if case .series = charts[range] { return }
-                charts[range] = .failed
-            }
+            handle(error) {}
+            throw error
         }
     }
 
-    /// Fixed-point, POSIX, so the string never reaches the formatters in scientific notation.
-    private static func ratioString(_ ratio: Double) -> String {
-        String(format: "%.6f", locale: Locale(identifier: "en_US_POSIX"), ratio)
+    /// Re-reads the range on screen without disturbing it. Throws only so the poll can
+    /// back off.
+    func refreshChart() async throws {
+        if let error = await loadChart(range: range, quietly: true) { throw error }
+    }
+
+    /// Writes only into `range`'s slot, so a late response lands where it belongs or nowhere.
+    ///
+    /// A quiet load is invisible by definition: no spinner, no error, and nothing on
+    /// screen replaced by an equal value. `loadingRanges` is what the chip's spinner
+    /// reads, and that spinner means "you tapped this and it has not arrived" — a
+    /// two-minute background re-read must never raise it, or the selected chip sprouts
+    /// a `ProgressView` (and says "Loading" to VoiceOver) for a refresh nobody asked for.
+    ///
+    /// Returns the failure, if any, for the poll's back-off; callers that are not polling
+    /// ignore it.
+    @discardableResult
+    func loadChart(range: AssetChartRange, quietly: Bool = false) async -> Error? {
+        if !quietly, charts[range] == nil || charts[range] == .failed {
+            charts[range] = .loading
+        }
+        // Newest request for a range wins its slot, whichever order the answers come
+        // back in: a tap and a background poll overlap constantly, and without this
+        // the older response can land last and repaint the newer one.
+        chartRequestSequence[range, default: 0] += 1
+        let sequence = chartRequestSequence[range] ?? 0
+        if !quietly { beginVisibleRequest(range) }
+        defer { if !quietly { endVisibleRequest(range) } }
+        do {
+            let response = try await dataSource.chart(symbol: symbol, range: range)
+            guard chartRequestSequence[range] == sequence else { return nil }
+            guard let series = AssetChartSeries(response, requested: range) else {
+                // The server answered about a window nobody asked for. Drawing it would put
+                // a year of history under a 1D chip; leave the slot alone and offer a retry.
+                if !quietly, !hasDrawnCurve(range) { charts[range] = .failed }
+                return nil
+            }
+            apply(series, to: range, quietly: quietly)
+            return nil
+        } catch {
+            guard chartRequestSequence[range] == sequence else { return nil }
+            handle(error) {
+                if quietly { return }
+                if hasDrawnCurve(range) { return }
+                charts[range] = .failed
+            }
+            return error
+        }
+    }
+
+    /// The chip spins while at least one *asked-for* request for its range is out.
+    ///
+    /// Counted rather than a bare flag: a tap and a retry on the same range overlap,
+    /// and the first to return would otherwise stop the spinner while the other
+    /// request is still in flight.
+    private func beginVisibleRequest(_ range: AssetChartRange) {
+        visibleChartRequests[range, default: 0] += 1
+        loadingRanges.insert(range)
+    }
+
+    private func endVisibleRequest(_ range: AssetChartRange) {
+        let remaining = (visibleChartRequests[range] ?? 1) - 1
+        if remaining > 0 {
+            visibleChartRequests[range] = remaining
+        } else {
+            visibleChartRequests[range] = nil
+            loadingRanges.remove(range)
+        }
+    }
+
+    private func apply(_ series: AssetChartSeries, to range: AssetChartRange, quietly: Bool) {
+        let fresh: ChartState = series.isDrawable ? .series(series) : .empty
+        // A quiet re-read that comes back empty is a source hiccup, not news: keep the
+        // curve the member is looking at rather than blanking it.
+        if quietly, fresh == .empty, hasDrawnCurve(range) { return }
+        QuietUpdate.apply(fresh, over: charts[range] ?? .loading) { charts[range] = $0 }
+        clampScrubIfNeeded(for: range)
+    }
+
+    /// A shorter series must not leave the finger pointing past the end of it.
+    private func clampScrubIfNeeded(for range: AssetChartRange) {
+        guard range == self.range, let index = scrubbedIndex else { return }
+        if series?.point(at: index) == nil { scrubbedIndex = nil }
+    }
+
+    private func hasDrawnCurve(_ range: AssetChartRange) -> Bool {
+        if case .series = charts[range] { return true }
+        return false
+    }
+
+    /// Records a fresh detail payload, and notices when the price moved.
+    ///
+    /// The tick is what the hero flashes on, so it is only ever raised by a price that
+    /// *changed*: the first load has nothing to compare against and must not flash.
+    private func apply(_ fresh: AssetDetailDTO) {
+        let previousPrice = detail?.priceUsdcMicros
+        QuietUpdate.apply(DetailState.loaded(fresh), over: detailState) { detailState = $0 }
+        guard let previousPrice, let price = fresh.priceUsdcMicros, price != previousPrice else { return }
+        tickSequence += 1
+        priceTick = PriceTick(sequence: tickSequence, direction: price > previousPrice ? .up : .down)
     }
 
     private func handle(_ error: Error, otherwise: () -> Void) {

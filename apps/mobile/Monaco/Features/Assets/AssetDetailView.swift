@@ -1,7 +1,12 @@
-import Charts
 import MonacoCore
 import SwiftUI
 
+/// One stock: what it costs, what it has done, and — below the chart — what the
+/// member's cabals are doing about it.
+///
+/// The screen is a hero, a chart, and an ordered list of section slots. The slots are
+/// the extension point: a card goes into `detailSections` in its place in the order
+/// and nothing else on this screen moves.
 struct AssetDetailView: View {
     @ObservedObject var auth: DynamicAuthService
     let symbol: String
@@ -11,10 +16,25 @@ struct AssetDetailView: View {
     @State private var toast: MonacoToast?
     private let sources: StocksFlowSources
 
-    init(auth: DynamicAuthService, symbol: String, sources: StocksFlowSources = .live) {
+    /// How often the hero re-reads the price, and how often the drawn range is
+    /// re-read. Only the sample harness passes anything but the defaults, so a
+    /// scripted price walk does not take a minute to show and a quiet chart re-read
+    /// can be watched inside a screenshot run rather than two minutes after one.
+    private let pricePollInterval: Duration
+    private let chartPollInterval: Duration
+
+    init(
+        auth: DynamicAuthService,
+        symbol: String,
+        sources: StocksFlowSources = .live,
+        pricePollInterval: Duration = AssetDetailPolling.price,
+        chartPollInterval: Duration = AssetDetailPolling.chart
+    ) {
         self.auth = auth
         self.symbol = symbol
         self.sources = sources
+        self.pricePollInterval = pricePollInterval
+        self.chartPollInterval = chartPollInterval
         _model = State(initialValue: AssetDetailModel(
             symbol: symbol,
             dataSource: sources.detail ?? LiveAssetDetailDataSource(auth: auth)
@@ -26,8 +46,8 @@ struct AssetDetailView: View {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
                 switch model.detailState {
                 case .loading:
-                    headerSkeleton
-                    chartSection
+                    AssetDetailHeroSkeleton()
+                    chartCard
                 case .failed:
                     EmptyState(
                         title: "Could not load this stock",
@@ -37,16 +57,17 @@ struct AssetDetailView: View {
                     .accessibilityIdentifier("asset-detail-failed")
                     // The curve was decoupled from this call; throwing away a chart that did
                     // arrive would leave the screen emptier than before they were split.
-                    chartSection
+                    chartCard
                 case .loaded(let detail):
-                    header(detail)
+                    hero
                     if !detail.routable {
                         Text("Can't be bought right now.")
-                            .font(MonacoTheme.TypeRole.caption)
+                            .font(MonacoTheme.Typo.caption)
                             .foregroundStyle(MonacoTheme.warning)
                             .accessibilityIdentifier("asset-detail-no-route")
                     }
-                    chartSection
+                    chartCard
+                    detailSections
                     actionRow
                 }
             }
@@ -60,7 +81,12 @@ struct AssetDetailView: View {
         .monacoToast($toast)
         // Two independent loads: the curve does not wait on the (slow) detail call.
         .task { await model.loadDetail() }
-        .task(id: model.range) { await model.loadChart(range: model.range) }
+        .task(id: model.range) { _ = await model.loadChart(range: model.range) }
+        // The hero keeps itself current while the member is looking at it. Both loops
+        // are silent: a tick that fails leaves the screen exactly as they last saw it,
+        // and only backs the loop off.
+        .pollWhileVisible(every: pricePollInterval) { try await model.refreshDetail() }
+        .pollWhileVisible(every: chartPollInterval) { try await model.refreshChart() }
         .onChange(of: model.rejectedSession) { _, rejected in
             guard let rejected else { return }
             Task { await auth.signOutAfterRejectedSession(rejectedToken: rejected.token) }
@@ -94,150 +120,59 @@ struct AssetDetailView: View {
         )
     }
 
-    private func header(_ detail: AssetDetailDTO) -> some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            MonacoHeroHeader(
-                title: formattedPrice(detail.priceUsdcMicros),
-                // Same resolver as the list rows, so one stock never carries two names.
-                caption: ProposeStock.displayName(symbol: detail.symbol, catalogName: detail.name)
-            )
-            if let move = model.move {
-                HStack(spacing: MonacoTheme.Space.xs) {
-                    Text(PercentReturnFormatter.format(move.ratio))
-                        .font(MonacoTheme.TypeRole.body)
-                        .foregroundStyle(MonacoTheme.signed(move.ratio))
-                    Text(move.label)
-                        .font(MonacoTheme.TypeRole.caption)
-                        .foregroundStyle(MonacoTheme.muted)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("asset-detail-move")
-            }
-        }
+    private var hero: some View {
+        AssetDetailHero(
+            // Same resolver as the list rows, so one stock never carries two names.
+            displayName: ProposeStock.displayName(
+                symbol: model.detail?.symbol ?? symbol,
+                catalogName: model.detail?.name ?? ""
+            ),
+            priceCaption: model.heroPriceCaption,
+            priceUsdcMicros: model.heroPriceUsdcMicros,
+            move: model.move,
+            isScrubbing: model.isScrubbing,
+            tick: model.heroTick,
+            session: model.sessionChip
+        )
     }
 
-    private var headerSkeleton: some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            SkeletonBlock(width: 120, height: 14)
-            SkeletonBlock(width: 180, height: 34)
-            SkeletonBlock(width: 100, height: 14)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityLabel("Loading stock")
+    private var chartCard: some View {
+        AssetChartCard(model: model, isMarketLive: model.isMarketLive)
     }
 
+    // MARK: - Section slots
+    //
+    // Everything below the chart, in the order it appears. Each slot is one view;
+    // adding a card means adding it here, in its place, and nothing above or below
+    // has to move. The order is the product's, not the implementation's: what the
+    // member's own cabals are doing comes before what the market says about the
+    // stock, and the disclosure comes last.
+    //
+    //   1. Your cabals' position: holdings, P&L, open votes
+    //   2. Stats grid: the share's open/high/low and 52-week range, from Pyth
+    //   3. Stock vs token: the B20 token's Kyber mid against its Chainlink mark,
+    //      with the share's Pyth price as a separate reference line
+    //   4. About: what the B20 token is, and the tracker disclosure
+    //   5. Activity on this stock: proposals, fills and comments
+    //
+    // The trade bar is not a slot: it belongs in a `safeAreaInset`, not in this stack.
+    //
+    // No stack around the slots while they are all empty. The `EmptyView`s collapse
+    // but a `VStack` holding them does not: it is still a child of the outer stack,
+    // so the screen would carry a stray 24pt gap between the chart and the action row
+    // until the first card lands. Each slot brings its own spacing from the outer
+    // stack when it arrives.
+    //
+    // Do not put an accessibility identifier on a stack of cards either. A modifier
+    // on a VStack is applied to each of its children, so naming the stack renames
+    // every card inside it and makes each one unfindable by its own name.
     @ViewBuilder
-    private var chartSection: some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            rangeChips
-
-            switch model.chartState {
-            case .loading:
-                chartPlaceholder
-                    .accessibilityLabel("Loading price history")
-                    .accessibilityIdentifier("asset-detail-chart-loading")
-            case .series(let points):
-                chart(points)
-            case .empty:
-                EmptyState(title: "No price history for this window yet")
-                    .accessibilityIdentifier("asset-detail-chart-empty")
-            case .failed:
-                EmptyState(
-                    title: "Could not load price history",
-                    actionTitle: "Retry",
-                    action: { Task { await model.loadChart(range: model.range) } }
-                )
-                .accessibilityIdentifier("asset-detail-chart-failed")
-            }
-        }
-    }
-
-    /// Six ranges do not fit on one line. At the default text size the chips are
-    /// already ~320pt of the 335pt a 375pt device leaves inside the gutters, so one
-    /// Dynamic Type step up clipped the row and an accessibility size made it
-    /// unreadable. Scrolling horizontally is the only layout that stays correct as
-    /// the chips grow.
-    ///
-    /// The row clips at the gutter on purpose, so a half-visible chip reads as "there
-    /// is more" rather than bleeding to the edge.
-    private var rangeChips: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: MonacoTheme.Space.s) {
-                ForEach(AssetChartRange.allCases, id: \.self) { range in
-                    Button {
-                        model.range = range
-                    } label: {
-                        MonacoChip(title: range.label, isSelected: model.range == range)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(range.accessibilityLabel)
-                    .accessibilityIdentifier("asset-chart-range-\(range.rawValue)")
-                }
-            }
-            // The capsules have a stroke, so a hairline of padding keeps the first
-            // and last chip from being shaved by the clip edge.
-            .padding(.horizontal, 1)
-        }
-        .scrollIndicators(.hidden)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Chart range")
-        .accessibilityIdentifier("asset-chart-ranges")
-    }
-
-    private func chart(_ points: [AssetChartPointDTO]) -> some View {
-        // The figure's own verdict, not a second one computed from the series: a move the header
-        // prints as flat must not be drawn as a gain.
-        let tint = curveTint
-        // Prices live far from zero, so the area is clipped to the series' own range.
-        let low = points.map(\.chartValue).min() ?? 0
-        let high = points.map(\.chartValue).max() ?? 0
-        let pad = max((high - low) * 0.12, 0.01)
-
-        return Chart(points) { point in
-            AreaMark(
-                x: .value("Time", point.date),
-                yStart: .value("Floor", low - pad),
-                yEnd: .value("Price", point.chartValue)
-            )
-            .foregroundStyle(
-                LinearGradient(
-                    colors: [tint.opacity(0.26), tint.opacity(0)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            // Monotone, not Catmull-Rom: sparse series must not draw peaks the data never had.
-            .interpolationMethod(.monotone)
-            LineMark(
-                x: .value("Time", point.date),
-                y: .value("Price", point.chartValue)
-            )
-            .foregroundStyle(tint)
-            .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-            .interpolationMethod(.monotone)
-        }
-        .chartXAxis(.hidden)
-        .chartYAxis(.hidden)
-        .chartYScale(domain: (low - pad)...(high + pad))
-        .frame(height: 180)
-        .accessibilityElement()
-        .accessibilityLabel(model.chartAccessibilitySummary)
-        .accessibilityIdentifier("asset-detail-chart")
-    }
-
-    /// Vivid counterpart of `MonacoTheme.signed(move.ratio)`, so the curve and the figure under
-    /// the price always carry the same verdict.
-    private var curveTint: Color {
-        switch model.move?.direction {
-        case .up: return MonacoTheme.profitVivid
-        case .down: return MonacoTheme.lossVivid
-        case .flat, nil: return MonacoTheme.muted
-        }
-    }
-
-    private var chartPlaceholder: some View {
-        SkeletonBlock(width: nil, height: 180, radius: MonacoTheme.Radius.card)
-            .frame(maxWidth: .infinity)
+    private var detailSections: some View {
+        EmptyView() // 1. Your cabals' position
+        EmptyView() // 2. Stats grid
+        EmptyView() // 3. Stock vs token
+        EmptyView() // 4. About
+        EmptyView() // 5. Activity on this stock
     }
 
     private var actionRow: some View {
@@ -255,10 +190,5 @@ struct AssetDetailView: View {
             .buttonStyle(.monacoSecondary)
             .accessibilityIdentifier("asset-detail-sell")
         }
-    }
-
-    private func formattedPrice(_ micros: Int64?) -> String {
-        guard let micros else { return "—" }
-        return UsdAmountFormatter.format(micros: micros)
     }
 }
