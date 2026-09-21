@@ -21,7 +21,7 @@ enum SessionErrorMapping {
 
     static let signInVerificationFailureMessage = "We couldn't verify your sign-in. Try again."
 
-    private static let cantConnectMessage = "Can't reach Monaco. Is the server running?"
+    private static let cantConnectMessage = "Can't reach Monaco. Check your connection and try again."
     private static let serverErrorMessage = "Monaco's server hit a problem. Try again in a moment."
     private static let genericMessage = "Couldn't open Monaco. Try again."
 
