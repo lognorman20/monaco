@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,11 +19,23 @@ const (
 	defaultTimeout       = 15 * time.Second
 )
 
-// HermesClient fetches equity marks from the Pyth Hermes HTTP API.
+// HermesClient fetches equity prices from the Pyth Hermes HTTP API, and serves
+// chart history from a one-call source (Pyth Benchmarks) with the Hermes
+// per-sample path behind it as the fallback.
 type HermesClient struct {
 	baseURL    string
 	httpClient *http.Client
 	apiKey     string
+	now        func() time.Time
+
+	// seriesSource serves a whole chart range in one call (Pyth Benchmarks). Nil
+	// leaves only the Hermes per-sample path, which needs a key.
+	seriesSource  SeriesSource
+	seriesBreaker *seriesBreaker
+	charts        *chartCache
+
+	quoteMu    sync.Mutex
+	quoteCache map[string]equityQuoteEntry
 }
 
 // NewHermesClient returns a production Hermes client authenticated with a Pyth API key.
@@ -49,10 +62,35 @@ func newHermesClient(baseURL string, httpClient *http.Client, apiKey string) *He
 		httpClient = &http.Client{Timeout: defaultTimeout}
 	}
 	return &HermesClient{
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		httpClient: httpClient,
-		apiKey:     strings.TrimSpace(apiKey),
+		baseURL:       strings.TrimRight(baseURL, "/"),
+		httpClient:    httpClient,
+		apiKey:        strings.TrimSpace(apiKey),
+		now:           time.Now,
+		seriesBreaker: newSeriesBreaker(defaultSeriesBreakerCooldown),
+		charts:        newChartCache(time.Now),
+		quoteCache:    make(map[string]equityQuoteEntry),
 	}
+}
+
+// WithSeriesSource points chart history at a one-call source such as Pyth
+// Benchmarks. The Hermes per-sample path stays as the fallback behind a breaker.
+func (c *HermesClient) WithSeriesSource(source SeriesSource) *HermesClient {
+	c.seriesSource = source
+	return c
+}
+
+// HasAPIKey reports whether Hermes itself can be asked anything. Every Hermes
+// request is authenticated, so without a key only the keyless Benchmarks history
+// is available.
+func (c *HermesClient) HasAPIKey() bool {
+	return c != nil && c.apiKey != ""
+}
+
+func (c *HermesClient) clock() time.Time {
+	if c.now == nil {
+		return time.Now().UTC()
+	}
+	return c.now().UTC()
 }
 
 func (c *HermesClient) setHermesAuth(req *http.Request) error {
@@ -64,8 +102,13 @@ func (c *HermesClient) setHermesAuth(req *http.Request) error {
 }
 
 type priceFeedResponse struct {
-	ID          string      `json:"id"`
-	MarketHours marketHours `json:"market_hours"`
+	ID          string         `json:"id"`
+	Attributes  feedAttributes `json:"attributes"`
+	MarketHours marketHours    `json:"market_hours"`
+}
+
+type feedAttributes struct {
+	Symbol string `json:"symbol"`
 }
 
 type marketHours struct {
@@ -83,7 +126,11 @@ type parsedPriceUpdate struct {
 }
 
 type priceUpdate struct {
-	Price       string `json:"price"`
+	Price string `json:"price"`
+	// Conf is Pyth's confidence interval around Price, in the same exponent. It is
+	// the publisher's own statement of how sure it is, and the only honest source
+	// for a "price certainty" cell.
+	Conf        string `json:"conf"`
 	Expo        int32  `json:"expo"`
 	PublishTime int64  `json:"publish_time"`
 }
@@ -145,22 +192,40 @@ func (c *HermesClient) markHolding(ctx context.Context, holding CostBasis) (Mark
 }
 
 // resolveFeedSession returns a cached feed id and a fresh market_hours.is_open value.
+// It always goes to the wire, because is_open is the part it is asked for.
 func (c *HermesClient) resolveFeedSession(ctx context.Context, symbol string) (feedID string, isOpen bool, err error) {
-	feed, err := c.fetchPriceFeedBySymbol(ctx, symbol)
+	return c.fetchFeedSession(ctx, symbol, EquityQuerySymbol(symbol))
+}
+
+// resolveFeedID answers from the registry when the feed id is already known. Feed
+// ids do not change, so a caller that only needs the id has nothing to learn from a
+// /v2/price_feeds round trip.
+func (c *HermesClient) resolveFeedID(ctx context.Context, symbol, query string) (string, error) {
+	if cachedID, ok := lookupFeedID(query); ok && cachedID != "" {
+		return cachedID, nil
+	}
+	feedID, _, err := c.fetchFeedSession(ctx, symbol, query)
+	return feedID, err
+}
+
+// fetchFeedSession fetches the feed and its market_hours.is_open. The registry is
+// consulted for the id so a feed registered by a test or a previous lookup keeps
+// winning, but the request happens regardless: is_open is only fresh from upstream.
+func (c *HermesClient) fetchFeedSession(ctx context.Context, symbol, query string) (feedID string, isOpen bool, err error) {
+	feed, err := c.fetchPriceFeedByQuery(ctx, symbol, query)
 	if err != nil {
 		return "", false, err
 	}
 
-	if cachedID, ok := lookupFeedID(symbol); ok && cachedID != "" {
+	if cachedID, ok := lookupFeedID(query); ok && cachedID != "" {
 		return cachedID, feed.MarketHours.IsOpen, nil
 	}
 
-	registerFeedID(symbol, feed.ID)
+	registerFeedID(query, feed.ID)
 	return feed.ID, feed.MarketHours.IsOpen, nil
 }
 
-func (c *HermesClient) fetchPriceFeedBySymbol(ctx context.Context, symbol string) (priceFeedResponse, error) {
-	query := EquityQuerySymbol(symbol)
+func (c *HermesClient) fetchPriceFeedByQuery(ctx context.Context, symbol, query string) (priceFeedResponse, error) {
 	endpoint := fmt.Sprintf("%s/v2/price_feeds?query=%s", c.baseURL, url.QueryEscape(query))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -195,13 +260,39 @@ func (c *HermesClient) fetchPriceFeedBySymbol(ctx context.Context, symbol string
 		logFeedLookup(symbol, "", lookupErr)
 		return priceFeedResponse{}, lookupErr
 	}
-	if len(feeds) == 0 || feeds[0].ID == "" {
-		lookupErr := fmt.Errorf("pyth feed not found for %s", symbol)
+	feed, found := selectFeed(feeds, query)
+	if !found {
+		lookupErr := fmt.Errorf("%w: %s (%s)", ErrFeedNotFound, symbol, query)
 		logFeedLookup(symbol, "", lookupErr)
 		return priceFeedResponse{}, lookupErr
 	}
-	logFeedLookup(symbol, feeds[0].ID, nil)
-	return feeds[0], nil
+	logFeedLookup(symbol, feed.ID, nil)
+	return feed, nil
+}
+
+// selectFeed picks the feed whose own symbol equals the query. The Hermes search is
+// a substring match, so "Equity.US.AAPL/USD" comes back alongside other AAPL feeds
+// (the 24/7 index, the Solana xStock, Ondo); the first result is not necessarily
+// the one asked for, and pricing the wrong feed is the kind of mistake nobody
+// notices until it is on a chart.
+func selectFeed(feeds []priceFeedResponse, query string) (priceFeedResponse, bool) {
+	normalizedQuery := normalizeSymbol(query)
+	for _, feed := range feeds {
+		if feed.ID != "" && normalizeSymbol(feed.Attributes.Symbol) == normalizedQuery {
+			return feed, true
+		}
+	}
+	// Older Hermes payloads omit attributes entirely; fall back to the first result
+	// only when no feed in the page claims a symbol at all.
+	for _, feed := range feeds {
+		if strings.TrimSpace(feed.Attributes.Symbol) != "" {
+			return priceFeedResponse{}, false
+		}
+	}
+	if len(feeds) > 0 && feeds[0].ID != "" {
+		return feeds[0], true
+	}
+	return priceFeedResponse{}, false
 }
 
 func hermesPricePath(kind string, feedID string, publishTime int64) string {
@@ -297,7 +388,14 @@ func parseDecimalInt(value string) (int64, error) {
 		if ch < '0' || ch > '9' {
 			return 0, fmt.Errorf("invalid price %q", value)
 		}
-		n = n*10 + int64(ch-'0')
+		digit := int64(ch - '0')
+		// Untrusted upstream input: a long enough digit string wraps int64 silently
+		// and turns a nonsense payload into a plausible-looking price. This path
+		// parses both `price` and `conf` from Hermes, and Kyber amounts.
+		if n > (math.MaxInt64-digit)/10 {
+			return 0, fmt.Errorf("price %q overflows", value)
+		}
+		n = n*10 + digit
 	}
 	return sign * n, nil
 }
@@ -325,14 +423,14 @@ func isFrozenEquityMark(publishTime, prevPublishTime int64) bool {
 func hermesRequestError(prefix string, status int, body []byte) error {
 	detail := strings.TrimSpace(string(body))
 	if detail == "" {
-		return fmt.Errorf("%s: status %d", prefix, status)
+		return &RequestError{Status: status, message: fmt.Sprintf("%s: status %d", prefix, status)}
 	}
 	const maxDetailLen = 240
 	if len(detail) > maxDetailLen {
 		detail = detail[:maxDetailLen]
 	}
 	if status == http.StatusForbidden && strings.Contains(strings.ToLower(detail), "not entitled") {
-		return fmt.Errorf("%s: status %d: %s (accept equity feed grants in Pyth Terminal)", prefix, status, detail)
+		return &RequestError{Status: status, message: fmt.Sprintf("%s: status %d: %s (accept equity feed grants in Pyth Terminal)", prefix, status, detail)}
 	}
-	return fmt.Errorf("%s: status %d: %s", prefix, status, detail)
+	return &RequestError{Status: status, message: fmt.Sprintf("%s: status %d: %s", prefix, status, detail)}
 }

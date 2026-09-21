@@ -5,19 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
-	"strings"
 	"time"
-)
-
-// ChartRange is a supported asset chart window.
-type ChartRange string
-
-const (
-	ChartRange1D ChartRange = "1D"
-	ChartRange1W ChartRange = "1W"
-	ChartRange1M ChartRange = "1M"
 )
 
 // AssetMark is a standalone equity mark for catalog pricing.
@@ -26,23 +15,62 @@ type AssetMark struct {
 	Change24h       *string
 }
 
-// ChartPoint is one chart sample.
+// ChartPoint is one chart sample. The OHLC fields are populated by sources that
+// serve candles (Benchmarks) and left at zero by sources that only know a price at
+// an instant (the Hermes sampler, Chainlink rounds), so a caller can tell the two
+// apart.
 type ChartPoint struct {
 	Timestamp       int64 `json:"timestamp"`
 	PriceUsdcMicros int64 `json:"priceUsdcMicros"`
+	OpenUsdcMicros  int64 `json:"openUsdcMicros,omitempty"`
+	HighUsdcMicros  int64 `json:"highUsdcMicros,omitempty"`
+	LowUsdcMicros   int64 `json:"lowUsdcMicros,omitempty"`
 }
+
+// Chart series sources, reported so a caller can tell a dense candle series from a
+// sparse fallback.
+const (
+	ChartSourceBenchmarks = "benchmarks"
+	ChartSourceHermes     = "hermes"
+	// ChartSourceChainlink is the token's own total-return rounds, the last
+	// fallback when Pyth has nothing for the range.
+	ChartSourceChainlink = "chainlink"
+)
 
 // AssetChartSeries is a time series for Swift Charts.
 type AssetChartSeries struct {
 	Points      []ChartPoint `json:"points"`
 	EmptyReason string       `json:"emptyReason,omitempty"`
+	// PreviousCloseUsdcMicros is the previous regular session's close — the
+	// baseline a day chart measures its change against. Nil when the source could
+	// not reach back far enough to know one; never a point from the series itself.
+	PreviousCloseUsdcMicros *int64 `json:"previousCloseUsdcMicros,omitempty"`
+	// Range echoes the window this series was built for.
+	Range ChartRange `json:"range,omitempty"`
+	// Source names which upstream produced the series.
+	Source string `json:"source,omitempty"`
+	// Basis names which instrument these prices are (PriceBasisUnderlying or
+	// PriceBasisToken), and BasisSymbol names it in full ("AAPL", "AAPLc").
+	Basis       string `json:"-"`
+	BasisSymbol string `json:"-"`
+	// RegularOpen and RegularClose bound the regular cash session this window
+	// covers, in UTC, and are zero for the ranges that do not have one. The series
+	// itself spans the extended session so the chart can draw pre- and post-market;
+	// the stats grid folds only between these two.
+	RegularOpen  time.Time `json:"-"`
+	RegularClose time.Time `json:"-"`
+}
+
+// ChartSeriesClient serves chart history for one symbol and range.
+type ChartSeriesClient interface {
+	ChartSeries(ctx context.Context, symbol string, chartRange ChartRange) (AssetChartSeries, error)
 }
 
 // AssetPriceClient fetches standalone marks and chart history.
 type AssetPriceClient interface {
+	ChartSeriesClient
 	AssetMark(ctx context.Context, symbol string) (AssetMark, error)
 	AssetMarks(ctx context.Context, symbols []string) (map[string]AssetMark, error)
-	ChartSeries(ctx context.Context, symbol string, chartRange ChartRange) (AssetChartSeries, error)
 }
 
 func (c *HermesClient) AssetMark(ctx context.Context, symbol string) (AssetMark, error) {
@@ -55,12 +83,10 @@ func (c *HermesClient) AssetMark(ctx context.Context, symbol string) (AssetMark,
 	if err != nil {
 		return AssetMark{}, err
 	}
-
-	mark := AssetMark{PriceUsdcMicros: marked.MarkUsdc}
-	if change, ok, err := c.change24h(ctx, symbol, marked.MarkUsdc); err == nil && ok {
-		mark.Change24h = &change
-	}
-	return mark, nil
+	// No change24h here: the day change is the underlying's move against its
+	// previous regular-session close (DayChange), not against a Hermes print taken
+	// 24 hours ago, which on a Monday morning is Sunday's frozen Friday price.
+	return AssetMark{PriceUsdcMicros: marked.MarkUsdc}, nil
 }
 
 func (c *HermesClient) AssetMarks(ctx context.Context, symbols []string) (map[string]AssetMark, error) {
@@ -75,19 +101,81 @@ func (c *HermesClient) AssetMarks(ctx context.Context, symbols []string) (map[st
 	return out, nil
 }
 
+// ChartSeries serves one range of the underlying equity's history: from the cache,
+// else from the one-call source (Benchmarks), else from the Hermes sampler. Every
+// answer is Pyth's equity feed, so every series is labelled with the underlying
+// basis. It never returns an error; a range nobody could serve comes back empty
+// with EmptyReasonNoHistory.
 func (c *HermesClient) ChartSeries(ctx context.Context, symbol string, chartRange ChartRange) (AssetChartSeries, error) {
-	if equityFeedsDenied() {
-		return AssetChartSeries{EmptyReason: "price history unavailable"}, nil
-	}
-	feedID, _, err := c.resolveFeedSession(ctx, symbol)
-	if err != nil {
-		markEquityDenied(err)
-		return AssetChartSeries{EmptyReason: "price history unavailable"}, nil
+	if cached, ok := c.charts.get(symbol, chartRange); ok {
+		return cached, nil
 	}
 
-	samples := chartSampleTimes(chartRange, time.Now().UTC())
+	now := c.clock()
+	if series, ok := c.seriesFromSource(ctx, symbol, chartRange, now); ok {
+		c.charts.set(symbol, chartRange, series)
+		return series, nil
+	}
+
+	series, answered := c.seriesFromHermes(ctx, symbol, chartRange, now)
+	if answered {
+		c.charts.set(symbol, chartRange, series)
+	}
+	return series, nil
+}
+
+// seriesFromSource asks the one-call history source for the range. A failure opens
+// a short breaker so an outage costs one timeout rather than one per chart load.
+// The second result is false when the source could not answer at all.
+func (c *HermesClient) seriesFromSource(ctx context.Context, symbol string, chartRange ChartRange, now time.Time) (AssetChartSeries, bool) {
+	if c.seriesSource == nil || !c.seriesBreaker.allows(now) {
+		return AssetChartSeries{}, false
+	}
+	series, err := c.seriesSource.Series(ctx, symbol, chartRange, now)
+	if err != nil {
+		c.seriesBreaker.trip(now)
+		logSeriesSource(symbol, chartRange, err)
+		return AssetChartSeries{}, false
+	}
+	c.seriesBreaker.reset()
+	series.Range = chartRange
+	series.Source = ChartSourceBenchmarks
+	series.Basis = PriceBasisUnderlying
+	series.BasisSymbol = UnderlyingTicker(symbol)
+	if len(series.Points) == 0 {
+		// The source answered and had nothing. Sampling Hermes for the same window
+		// would only spend a request per point to learn the same thing.
+		series.Points = nil
+		series.EmptyReason = EmptyReasonNoHistory
+	}
+	return series, true
+}
+
+// seriesFromHermes is the fallback: one request per sample against the historical
+// price endpoint. It is coarse, but it keeps charts alive when Benchmarks is down.
+// The second result says whether Hermes gave an answer worth caching; a missing
+// key, a denied entitlement or a run of failed samples is not one.
+func (c *HermesClient) seriesFromHermes(ctx context.Context, symbol string, chartRange ChartRange, now time.Time) (AssetChartSeries, bool) {
+	empty := AssetChartSeries{EmptyReason: EmptyReasonNoHistory, Range: chartRange}
+	// Every Hermes request is authenticated. Without a key there is nothing to ask,
+	// and building a request per sample only to have each one refused locally
+	// would make the no-key deployment look like an outage in the logs.
+	if !c.HasAPIKey() || equityFeedsDenied() {
+		return empty, false
+	}
+	feedID, err := c.resolveFeedID(ctx, symbol, EquityQuerySymbol(symbol))
+	if err != nil {
+		markEquityDenied(err)
+		return empty, false
+	}
+
+	window := chartWindow(chartRange, now)
+	samples := chartSampleTimes(chartRange, now)
 	points := make([]ChartPoint, 0, len(samples))
 	for _, ts := range samples {
+		if ctx.Err() != nil {
+			break
+		}
 		price, err := c.fetchHistoricalPrice(ctx, feedID, ts)
 		if err != nil {
 			if markEquityDenied(err) {
@@ -95,34 +183,43 @@ func (c *HermesClient) ChartSeries(ctx context.Context, symbol string, chartRang
 			}
 			continue
 		}
-		points = append(points, ChartPoint{
-			Timestamp:       ts.Unix(),
-			PriceUsdcMicros: price,
-		})
+		points = append(points, ChartPoint{Timestamp: ts.Unix(), PriceUsdcMicros: price})
 	}
-	if len(points) < 2 && !equityFeedsDenied() {
-		if latest, err := c.fetchLatestPrice(ctx, feedID); err == nil {
-			if price, err := priceToUSDCMicros(latest.Price.Price, latest.Price.Expo); err == nil && price > 0 {
-				now := time.Now().UTC().Unix()
-				points = []ChartPoint{
-					{Timestamp: now - 3600, PriceUsdcMicros: price},
-					{Timestamp: now, PriceUsdcMicros: price},
-				}
-			}
-		}
+	if len(points) == 0 {
+		// Nothing came back. That is not a price history, and it is not drawn as one
+		// either: no flat line built from the latest price, which would be a chart of
+		// a single number presented as a range.
+		return empty, false
 	}
-	if len(points) < 2 {
-		return AssetChartSeries{EmptyReason: "price history unavailable"}, nil
-	}
-	return AssetChartSeries{Points: points}, nil
+	// The sampler reads the same equity feed Benchmarks does. It ships no previous
+	// close: its first sample is a point on the curve, not a close, and sending it
+	// under that name would draw the baseline straight through the first point.
+	return AssetChartSeries{
+		Points:       points,
+		Range:        chartRange,
+		Source:       ChartSourceHermes,
+		Basis:        PriceBasisUnderlying,
+		BasisSymbol:  UnderlyingTicker(symbol),
+		RegularOpen:  window.regularOpen,
+		RegularClose: window.regularClose,
+	}, true
 }
 
+// chartSampleTimes is the sampler's grid. Every range is capped at roughly 30
+// samples because each one is a separate Hermes request; the long ranges are
+// deliberately coarse rather than expensive.
 func chartSampleTimes(chartRange ChartRange, now time.Time) []time.Time {
 	switch chartRange {
 	case ChartRange1W:
-		return dailySamples(now, 7)
+		return strideSamples(now, 7, 1)
 	case ChartRange1M:
-		return dailySamples(now, 30)
+		return strideSamples(now, 30, 1)
+	case ChartRange3M:
+		return strideSamples(now, 90, 3)
+	case ChartRange1Y:
+		return strideSamples(now, 365, 14)
+	case ChartRangeAll:
+		return strideSamples(now, 365*allRangeYears, 70)
 	default:
 		return hourlySamples(now, 12)
 	}
@@ -142,26 +239,36 @@ func hourlySamples(now time.Time, hours int) []time.Time {
 	return out
 }
 
-func dailySamples(now time.Time, days int) []time.Time {
-	out := make([]time.Time, 0, days)
+// strideSamples walks back days from now and takes a sample every strideDays.
+func strideSamples(now time.Time, days, strideDays int) []time.Time {
+	if strideDays < 1 {
+		strideDays = 1
+	}
 	start := now.AddDate(0, 0, -days).Truncate(24 * time.Hour)
-	for i := 0; i <= days; i++ {
-		out = append(out, start.AddDate(0, 0, i))
+	out := make([]time.Time, 0, days/strideDays+1)
+	for offset := 0; offset <= days; offset += strideDays {
+		out = append(out, start.AddDate(0, 0, offset))
 	}
 	return out
 }
 
-func (c *HermesClient) change24h(ctx context.Context, symbol string, currentMicros int64) (string, bool, error) {
-	feedID, _, err := c.resolveFeedSession(ctx, symbol)
-	if err != nil {
-		return "", false, err
+// DayChange is the underlying's move today as a decimal ratio string ("0.012345"
+// for +1.23%): the latest price in the 1D series against the previous regular
+// session's close. It is nil unless the series is Pyth's underlying equity and
+// carries a genuine previous close, because a ratio across two instruments —
+// a token mark over an equity close — would fold the token's multiplier into a
+// "move" that never happened.
+func DayChange(day AssetChartSeries) *string {
+	if day.Basis != PriceBasisUnderlying || day.PreviousCloseUsdcMicros == nil || len(day.Points) == 0 {
+		return nil
 	}
-	prior, err := c.fetchHistoricalPrice(ctx, feedID, time.Now().UTC().Add(-24*time.Hour))
-	if err != nil || prior <= 0 {
-		return "", false, err
+	previous := *day.PreviousCloseUsdcMicros
+	latest := day.Points[len(day.Points)-1].PriceUsdcMicros
+	if previous <= 0 || latest <= 0 {
+		return nil
 	}
-	delta := float64(currentMicros-prior) / float64(prior)
-	return formatDecimalRatio(delta), true, nil
+	change := formatDecimalRatio(float64(latest-previous) / float64(previous))
+	return &change
 }
 
 func formatDecimalRatio(ratio float64) string {
@@ -202,40 +309,4 @@ func (c *HermesClient) fetchHistoricalPrice(ctx context.Context, feedID string, 
 		return 0, fmt.Errorf("pyth historical price: empty parsed payload")
 	}
 	return priceToUSDCMicros(payload.Parsed[0].Price.Price, payload.Parsed[0].Price.Expo)
-}
-
-// ParseChartRange validates a chart range query param.
-func ParseChartRange(raw string) (ChartRange, error) {
-	switch strings.ToUpper(strings.TrimSpace(raw)) {
-	case string(ChartRange1D), "":
-		return ChartRange1D, nil
-	case string(ChartRange1W):
-		return ChartRange1W, nil
-	case string(ChartRange1M):
-		return ChartRange1M, nil
-	default:
-		return "", fmt.Errorf("invalid chart range %q", raw)
-	}
-}
-
-// MidSpreadBps compares a Jupiter implied price to a Pyth mid mark.
-func MidSpreadBps(markMicros int64, jupiterOutAmount string, jupiterInMicros int64, outputDecimals int32) *int {
-	if markMicros <= 0 || jupiterInMicros <= 0 {
-		return nil
-	}
-	outRaw, err := parseDecimalInt(strings.TrimSpace(jupiterOutAmount))
-	if err != nil || outRaw <= 0 {
-		return nil
-	}
-	scale := int64(math.Pow10(int(outputDecimals)))
-	if scale <= 0 {
-		return nil
-	}
-	jupiterMicrosPerShare := (jupiterInMicros * scale) / outRaw
-	if jupiterMicrosPerShare <= 0 {
-		return nil
-	}
-	spread := float64(jupiterMicrosPerShare-markMicros) / float64(markMicros)
-	bps := int(math.Round(spread * 10_000))
-	return &bps
 }
