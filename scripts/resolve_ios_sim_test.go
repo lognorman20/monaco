@@ -36,6 +36,31 @@ func TestResolveIOSSim_picksBootedIPhoneWhenSlimUnset(t *testing.T) {
 	}
 }
 
+// A fresh CI runner has several runtimes and nothing booted; the oldest can sit below the
+// app's deployment target, so the pick must come from the newest runtime.
+func TestResolveIOSSim_prefersNewestRuntimeWhenNothingBooted(t *testing.T) {
+	root := repoRoot(t)
+	fakebin := filepath.Join(root, "scripts", "testdata", "fakebin")
+	fixture := filepath.Join(root, "scripts", "testdata", "simctl-shutdown")
+
+	cmd := exec.Command("bash", filepath.Join(root, "scripts", "resolve-ios-sim.sh"))
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(),
+		"PATH="+fakebin+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"FAKE_SIMCTL_DIR="+fixture,
+		"SIMSLIM_UDID=",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("resolve-ios-sim.sh: %v\n%s", err, out)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	udid := strings.TrimSpace(lines[len(lines)-1])
+	if udid != "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD" {
+		t.Fatalf("expected the iOS 26.0 iPhone, got %q\n%s", udid, out)
+	}
+}
+
 func TestResolveIOSSim_usesSlimUdidWhenDeviceExists(t *testing.T) {
 	root := repoRoot(t)
 	fakebin := filepath.Join(root, "scripts", "testdata", "fakebin")
