@@ -1,17 +1,64 @@
 {
-  "symbol": "AAPLx",
+  "symbol": "AAPLc",
   "name": "Apple",
-  "tokenAddress": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+  "tokenAddress": "0xb200000000000000000000c2e324d24d7eecd1fb",
   "routable": true,
-  "priceUsdcMicros": 185000000,
-  "change24h": "0.027027",
+  "priceUsdcMicros": 232050000,
+  "change24h": "0.021634",
   "liquidity": {
-    "label": "Via Kyber",
+    "label": "Via DEX",
     "routable": true,
     "buyProbeUsdcMicros": 1000000,
-    "buyProbeOutAmount": "100000000",
+    "buyProbeOutAmount": "430000",
     "sellProbeInAmount": "100000000",
-    "sellProbeOutAmount": "1800000",
-    "spreadBps": 12
+    "sellProbeOutAmount": "232520000",
+    "spreadBps": 59
+  },
+  "marketSession": "after_hours",
+  "afterHours": true,
+  "market": {
+    "session": "after_hours",
+    "isOpen": false,
+    "afterHours": true,
+    "nextSession": "closed",
+    "nextTransition": "2026-09-23T00:00:00Z",
+    "asOf": "2026-09-22T21:00:00Z"
+  },
+  "stats": {
+    "openUsdcMicros": 229000000,
+    "highUsdcMicros": 231800000,
+    "lowUsdcMicros": 228200000,
+    "previousCloseUsdcMicros": 226500000,
+    "week52HighUsdcMicros": 262000000,
+    "week52LowUsdcMicros": 163000000,
+    "spreadBps": 59,
+    "confUsdcMicros": 30000,
+    "basis": "underlying",
+    "basisSymbol": "AAPL"
+  },
+  "stockVsToken": {
+    "token": {
+      "source": "dex_kyber",
+      "status": "live",
+      "priceUsdcMicros": 233210000,
+      "bidUsdcMicros": 232520000,
+      "askUsdcMicros": 233900000
+    },
+    "mark": {
+      "source": "chainlink_trv",
+      "status": "live",
+      "priceUsdcMicros": 232050000
+    },
+    "equity": {
+      "source": "pyth_equity",
+      "status": "stale",
+      "priceUsdcMicros": 231400000,
+      "confUsdcMicros": 30000,
+      "publishedAt": "2026-09-22T20:00:00Z"
+    },
+    "equitySymbol": "AAPL",
+    "premiumBps": 50,
+    "spreadBps": 59,
+    "asOf": "2026-09-22T21:00:00Z"
   }
 }

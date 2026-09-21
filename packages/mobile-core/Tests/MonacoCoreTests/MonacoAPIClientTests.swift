@@ -226,9 +226,10 @@ final class MonacoAPIClientTests: XCTestCase {
             session: makeMockURLSession(),
             accessTokenProvider: { TestFixtures.fixtureSessionToken }
         )
-        let detail = try await client.getMarketAsset(symbol: "AAPLx")
-        XCTAssertEqual(capturedPath, "/v1/assets/AAPLx")
-        XCTAssertEqual(detail.liquidity.label, "Via Kyber")
+        let detail = try await client.getMarketAsset(symbol: "AAPLc")
+        XCTAssertEqual(capturedPath, "/v1/assets/AAPLc")
+        // The backend's own label; the venue is not named in it.
+        XCTAssertEqual(detail.liquidity.label, "Via DEX")
     }
 
     func testAPIClient_getMarketAssetChart_callsV1AssetsChart() async throws {
