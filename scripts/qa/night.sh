@@ -6,6 +6,7 @@
 #   scripts/qa/night.sh --rounds 6           # six rounds back to back
 #   scripts/qa/night.sh --until 07:30        # keep going until 07:30 local time
 #   scripts/qa/night.sh --skip-backend --only-ui CabalsTabSampleUITests
+#   scripts/qa/night.sh --screenshots        # also shoot every sample screen (round 1)
 #
 # What a round does, strictly one heavy job at a time:
 #   1. backend: go vet + go test -p 1 ./...      (needs Postgres; see MONACO_QA_DATABASE_URL)
@@ -13,13 +14,26 @@
 #   3. app unit tests, then each UI test class on its own, on one slimmed simulator,
 #      with a watchdog timeout, one retry when the test runner itself is killed,
 #      and a screen recording per class
+#   4. with --screenshots: a PNG of every screen in scripts/qa/sample-screens.txt
+#
+# App config (MONACO_QA_IOS_CONFIG): `generate` (default) builds the app from .env.local
+# via scripts/ensure-ios-dynamic-config.sh; `placeholder` builds against a compile-only
+# config with no Dynamic environment, which is all the sample-data steps need (CI uses it).
 #
 # Safety: holds scripts/qa/xcode-lock.sh around every Xcode job, slims the simulator
 # before use, shuts it down at the end, keeps the Mac awake with caffeinate, and stops
-# starting new UI classes when free swap runs low.
+# starting new UI classes when free swap runs low. SimSlim, caffeinate and the named
+# simulator are optional: without them it logs and carries on (a CI runner has none).
 #
-# Output: .logs/qa/<UTC timestamp>/{report.md,*.log,clips/*.mp4}. Exit 1 if anything failed.
+# Output: .logs/qa/<UTC timestamp>/{report.md,failures.tsv,*.log,clips/*.mp4,screens/*.png}.
+# Exit 1 if anything failed.
 set -uo pipefail
+
+# Keep the Mac awake for the whole run: re-exec once under caffeinate with the same arguments.
+if [[ -z "${MONACO_QA_KEEP_AWAKE:-}" ]] && command -v caffeinate >/dev/null 2>&1; then
+  export MONACO_QA_KEEP_AWAKE=1
+  exec caffeinate -i "$0" "$@"
+fi
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
@@ -30,6 +44,8 @@ skip_backend=0
 skip_ui=0
 only_ui=""
 sim="${MONACO_QA_SIM:-}"
+screenshots="${MONACO_QA_SCREENSHOTS:-0}"
+ios_config="${MONACO_QA_IOS_CONFIG:-generate}"
 class_timeout="${MONACO_QA_CLASS_TIMEOUT:-1500}"
 min_free_swap_mb="${MONACO_QA_MIN_FREE_SWAP_MB:-256}"
 boot_timeout="${MONACO_QA_BOOT_TIMEOUT:-180}"
@@ -42,23 +58,23 @@ while [[ $# -gt 0 ]]; do
     --skip-ui) skip_ui=1; shift ;;
     --only-ui) only_ui="$2"; shift 2 ;;
     --sim) sim="$2"; shift 2 ;;
-    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+    --screenshots) screenshots=1; shift ;;
+    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
 
-if [[ -z "${MONACO_QA_KEEP_AWAKE:-}" ]] && command -v caffeinate >/dev/null 2>&1; then
-  export MONACO_QA_KEEP_AWAKE=1
-  exec caffeinate -i "$0" ${rounds:+--rounds "$rounds"} ${until_time:+--until "$until_time"} \
-    $([[ $skip_backend == 1 ]] && echo --skip-backend) $([[ $skip_ui == 1 ]] && echo --skip-ui) \
-    ${only_ui:+--only-ui "$only_ui"} ${sim:+--sim "$sim"}
-fi
+case "$ios_config" in
+  generate|placeholder) ;;
+  *) echo "MONACO_QA_IOS_CONFIG must be generate or placeholder, not '$ios_config'" >&2; exit 2 ;;
+esac
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 out="$root/.logs/qa/$stamp"
 mkdir -p "$out/clips"
 report="$out/report.md"
 results="$out/results.tsv"
+failures="$out/failures.tsv"
 : > "$results"
 lock="$root/scripts/qa/xcode-lock.sh"
 # .tools/ is untracked, so inside a git worktree it lives in the main checkout.
@@ -76,8 +92,14 @@ record() { # round step status seconds detail
   log "round $1 · $2 · $3 (${4}s) $5"
 }
 
+# Empty (no reading) until macOS has created a swap file: "free = 0" then means no swap has
+# been needed yet, not that it ran out. A fresh CI runner starts that way.
 free_swap_mb() {
-  sysctl -n vm.swapusage 2>/dev/null | sed -E 's/.*free = ([0-9.]+)M.*/\1/' | cut -d. -f1
+  local usage total
+  usage="$(sysctl -n vm.swapusage 2>/dev/null)" || return 0
+  total="$(sed -E 's/.*total = ([0-9.]+)M.*/\1/' <<< "$usage" | cut -d. -f1)"
+  [[ -n "$total" && "$total" != 0 ]] || return 0
+  sed -E 's/.*free = ([0-9.]+)M.*/\1/' <<< "$usage" | cut -d. -f1
 }
 
 # run_step <round> <name> <timeout seconds> <command...>
@@ -98,14 +120,25 @@ run_step() {
   [[ "$status" == pass ]]
 }
 
+sim_resolved=0
 resolve_sim() {
-  if [[ -z "$sim" ]]; then
-    sim="$(xcrun simctl list devices available | sed -nE 's/^ +Monaco Night QA \(([0-9A-F-]{36})\).*/\1/p' | head -1)"
+  (( sim_resolved )) && return 0
+  if [[ -n "$sim" ]]; then
+    sim_resolved=1
+    log "simulator: $sim (--sim / MONACO_QA_SIM)"
+    return 0
   fi
-  if [[ -z "$sim" ]]; then
-    sim="$("$root/scripts/resolve-ios-sim.sh" 2>/dev/null || true)"
+  sim="$(xcrun simctl list devices available | sed -nE 's/^ +Monaco Night QA \(([0-9A-F-]{36})\).*/\1/p' | head -1)"
+  if [[ -n "$sim" ]]; then
+    sim_resolved=1
+    log "simulator: $sim (Monaco Night QA)"
+    return 0
   fi
-  [[ -n "$sim" ]]
+  # No named simulator (a CI runner): take the one scripts/resolve-ios-sim.sh picks.
+  sim="$("$root/scripts/resolve-ios-sim.sh" 2>/dev/null || true)"
+  [[ -n "$sim" ]] || return 1
+  sim_resolved=1
+  log "simulator: $sim from resolve-ios-sim.sh ($(xcrun simctl list devices available | grep -F "$sim" | sed -E 's/^ +//'))"
 }
 
 # `simctl bootstatus` can wait forever on a slimmed simulator whose disabled services never
@@ -133,7 +166,7 @@ prepare_sim() {
       || "$simslim_bin" on "$sim" --no-reboot --profile "$root/scripts/simslim-profile.json" >> "$out/night.log" 2>&1 \
       || log "warning: could not slim $sim; continuing on a stock simulator"
   else
-    log "warning: simslim not found; continuing on a stock simulator"
+    log "simslim not found; skipping slimming, continuing on a stock simulator"
   fi
   xcrun simctl status_bar "$sim" override --time 9:41 --batteryState charged --batteryLevel 100 \
     --cellularBars 4 --wifiBars 3 >/dev/null 2>&1 || true
@@ -211,7 +244,7 @@ while (( round < rounds )); do
   run_step "$round" mobile-core 1200 bash -c 'cd packages/mobile-core && swift test' || true
 
   if (( ! skip_ui )); then
-    if ! run_step "$round" ios-config 120 "$root/scripts/ensure-ios-dynamic-config.sh" generate; then
+    if ! run_step "$round" ios-config 120 "$root/scripts/ensure-ios-dynamic-config.sh" "$ios_config"; then
       # The app's xcconfig includes a generated file, so there is nothing to build without it.
       # The usual cause is DYNAMIC_ENVIRONMENT_ID missing from .env.local; the step log says so.
       record "$round" app-build skipped 0 "no Dynamic config; see r${round}-ios-config.log"
@@ -221,6 +254,10 @@ while (( round < rounds )); do
       prepare_sim
       if run_step "$round" app-build 2700 xcode_test build-for-testing; then
         run_step "$round" app-unit 900 xcode_test -only-testing:MonacoTests test-without-building || true
+        if [[ "$screenshots" == 1 && "$round" == 1 ]]; then
+          run_step "$round" screens 900 "$root/scripts/qa/screens.sh" "$sim" \
+            "$derived/Build/Products/Debug-iphonesimulator/Monaco.app" "$out/screens" || true
+        fi
         while read -r class; do
           [[ -z "$class" ]] && continue
           swap="$(free_swap_mb)"
@@ -239,7 +276,7 @@ done
 {
   echo "# Monaco overnight QA — $stamp (UTC)"
   echo
-  echo "Commit \`$(git rev-parse --short HEAD)\` on \`$(git rev-parse --abbrev-ref HEAD)\` · simulator \`${sim:-none}\`"
+  echo "Commit \`$(git rev-parse --short HEAD)\` on \`$(git rev-parse --abbrev-ref HEAD)\` · simulator \`${sim:-none}\` · app config \`$ios_config\`"
   echo
   echo "| Round | Step | Result | Seconds | Log |"
   echo "| --- | --- | --- | --- | --- |"
@@ -257,5 +294,6 @@ done
   echo '```'
 } > "$report"
 
+hard_failures > "$failures"
 log "report: $report"
-[[ -z "$(hard_failures)" ]]
+[[ ! -s "$failures" ]]
