@@ -792,12 +792,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
         try await applyAuthorizationHeader(to: &request)
 
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 200 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
+        try Self.requireOK(response, data: data)
         return try JSONDecoder().decode(GroupMessagesPageDTO.self, from: data)
     }
 
@@ -811,12 +806,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpBody = try JSONEncoder().encode(GroupMessageRequestDTO(body: body))
 
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard http.statusCode == 201 else {
-            throw MonacoAPIError.httpStatus(http.statusCode)
-        }
+        try Self.requireOK(response, data: data, accepting: [201])
         return try JSONDecoder().decode(GroupMessageDTO.self, from: data)
     }
 

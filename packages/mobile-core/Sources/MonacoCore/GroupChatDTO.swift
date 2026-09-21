@@ -327,9 +327,9 @@ public enum GroupChatCopy {
             return "Type a message first."
         case GroupChatDraft.Problem.tooLong:
             return "Messages can be up to \(GroupChatDraft.maxCharacters) characters."
-        // A 429 arrives here, with the server's Retry-After, once the chat routes map their
-        // failures in full. Until then it arrives as a bare httpStatus(429) and reads as the
-        // countdown-free sentence further down.
+        // A 429 arrives here with the server's Retry-After: the chat routes map their failures
+        // through requireOK. A bare httpStatus(429) still reads as the countdown-free sentence
+        // further down.
         case MonacoAPIError.rateLimited(let retryAfterSeconds):
             guard let seconds = retryAfterSeconds, seconds > 0 else {
                 return "You're sending messages fast. Wait a moment and try again."

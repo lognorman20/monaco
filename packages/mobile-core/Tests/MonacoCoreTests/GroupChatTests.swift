@@ -415,9 +415,12 @@ final class GroupChatAPITests: XCTestCase {
             _ = try await makeClient().listGroupMessages(groupId: "g1")
             XCTFail("expected throw")
         } catch {
-            // The client may surface a 403 bare or with the server's reason attached; the
-            // member reads the same closed-chat copy either way.
-            XCTAssertEqual(Self.status(of: error), 403)
+            // The chat routes keep the server's reason, and the member reads the closed-chat copy.
+            guard case MonacoAPIError.rejected(status: 403, let message) = error else {
+                return XCTFail("expected .rejected(403), got \(error)")
+            }
+            XCTAssertEqual(message, "not a group member")
+            XCTAssertEqual((error as? MonacoAPIError)?.statusCode, 403)
             XCTAssertEqual(GroupChatCopy.loadFailure(error), "You're no longer in this cabal, so its chat is closed to you.")
         }
     }
@@ -442,8 +445,8 @@ final class GroupChatAPITests: XCTestCase {
     }
 
     /// A deleted cabal closes the thread only when the client keeps the 404's body, because
-    /// the body is the only thing that tells it apart from the case above. While the chat
-    /// routes throw a bare status, the member sees the retryable sentence instead.
+    /// the body is the only thing that tells it apart from the case above. The chat routes
+    /// keep it, so the member is told the cabal is gone.
     func testListGroupMessages_groupNotFound404_closesOnlyWithItsBody() async {
         // Arrange
         MockURLProtocol.requestHandler = { request in
@@ -461,8 +464,7 @@ final class GroupChatAPITests: XCTestCase {
                 "This cabal no longer exists."
             )
         } catch {
-            XCTAssertEqual(Self.status(of: error), 404)
-            XCTAssertEqual(GroupChatCopy.loadFailure(error), "Couldn't load messages.")
+            XCTFail("expected .rejected(404) with the body, got \(error)")
         }
     }
 
@@ -506,7 +508,10 @@ final class GroupChatAPITests: XCTestCase {
     func testPostGroupMessage_rateLimited_throws429() async {
         // Arrange
         MockURLProtocol.requestHandler = { request in
-            (Self.response(request, status: 429), Data(#"{"error":"too many messages, try again shortly"}"#.utf8))
+            (
+                Self.response(request, status: 429, headers: ["Retry-After": "60"]),
+                Data(#"{"error":"too many messages, try again shortly"}"#.utf8)
+            )
         }
 
         // Act + Assert
@@ -514,13 +519,12 @@ final class GroupChatAPITests: XCTestCase {
             _ = try await makeClient().postGroupMessage(groupId: "g1", body: "spam")
             XCTFail("expected throw")
         } catch {
-            // A 429 arrives either bare or as `.rateLimited` with the server's Retry-After;
-            // both read as "slow down", never as a failed or unconfirmed send.
-            XCTAssertEqual(Self.status(of: error), 429)
-            XCTAssertTrue(
-                GroupChatCopy.sendFailure(error).hasPrefix("You're sending messages fast."),
-                "got \(GroupChatCopy.sendFailure(error))"
-            )
+            // The server's Retry-After reaches the copy as a countdown, never as a failed or
+            // unconfirmed send.
+            guard case MonacoAPIError.rateLimited(retryAfterSeconds: 60) = error else {
+                return XCTFail("expected .rateLimited(60), got \(error)")
+            }
+            XCTAssertEqual(GroupChatCopy.sendFailure(error), "You're sending messages fast. Try again in 60 seconds.")
         }
     }
 
@@ -561,8 +565,17 @@ final class GroupChatAPITests: XCTestCase {
         }
     }
 
-    private static func response(_ request: URLRequest, status: Int) -> HTTPURLResponse {
-        HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+    private static func response(
+        _ request: URLRequest,
+        status: Int,
+        headers: [String: String] = [:]
+    ) -> HTTPURLResponse {
+        HTTPURLResponse(
+            url: request.url!,
+            statusCode: status,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"].merging(headers) { _, new in new }
+        )!
     }
 
     private static func httpBody(from request: URLRequest) -> Data? {
