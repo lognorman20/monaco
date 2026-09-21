@@ -74,7 +74,9 @@ enum CabalsTabSampleData {
     static let createdCabal = CreateGroupResponse(
         groupId: "5b1f0c9e-0007-4c55-9a51-000000000007",
         name: "Lunch money",
-        treasuryAddress: "SampleTreasury1111111111111111111111111111"
+        // A treasury is a Base address. Never rendered: the created cabal's
+        // screen reads its own group view.
+        treasuryAddress: "0x5a3b000000000000000000000000000000000007"
     )
 
     /// Stubbed writes. Create always succeeds; join answers the way the sample
