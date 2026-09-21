@@ -49,7 +49,7 @@ final class DynamicAuthService: ObservableObject {
     /// earlier session can tell that the session it is about is no longer the open one.
     private var signInEpoch = 0
     /// How long a new sign-in will wait out a revoke before going ahead anyway.
-    private static let revokeWait = Duration.seconds(2)
+    private static let revokeWait = Swift.Duration.seconds(2)
 
     private static var stepUpScope: TokenScope {
         .userUpdate
