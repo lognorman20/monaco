@@ -3,22 +3,22 @@ import XCTest
 
 /// What the chip under the hero price says in each session the calendar can produce.
 ///
-/// The product argument lives in this copy — the stock stops, the token does not —
+/// The product argument lives in this copy — the stock stops, the B20 token does not —
 /// so it is asserted rather than left to whoever edits the view next.
 final class MarketSessionCopyTests: XCTestCase {
     private let easternUS = Locale(identifier: "en_US")
     private let newYork = TimeZone(identifier: "America/New_York")!
 
-    private func chip(_ market: MarketStatusDTO?) -> MarketSessionChipCopy? {
-        MarketSessionCopy.chip(for: market, locale: easternUS, timeZone: newYork)
+    private func chip(_ market: MarketStatusDTO?, tokenRoutable: Bool = true) -> MarketSessionChipCopy? {
+        MarketSessionCopy.chip(for: market, tokenRoutable: tokenRoutable, locale: easternUS, timeZone: newYork)
     }
 
-    func testOpenSaysNothingAboutSolanaBecauseThereIsNothingToExplain() throws {
+    func testOpenSaysNothingAboutBaseBecauseThereIsNothingToExplain() throws {
         let copy = try XCTUnwrap(chip(MarketSampleData.sessionOpen))
 
         XCTAssertEqual(copy.title, "Market open")
         XCTAssertTrue(copy.isLive)
-        XCTAssertFalse(copy.spoken.contains("Solana"))
+        XCTAssertFalse(copy.spoken.contains("Base"))
     }
 
     func testOpenNamesTheBell() throws {
@@ -44,7 +44,7 @@ final class MarketSessionCopyTests: XCTestCase {
         let copy = try XCTUnwrap(chip(MarketSampleData.sessionAfterHours))
 
         XCTAssertEqual(copy.title, "After hours")
-        XCTAssertEqual(copy.detail, "Trading 24/7 on Solana")
+        XCTAssertEqual(copy.detail, "Token still trades on Base")
         XCTAssertFalse(copy.isLive)
     }
 
@@ -71,14 +71,14 @@ final class MarketSessionCopyTests: XCTestCase {
         )
         let copy = try XCTUnwrap(chip(market))
 
-        XCTAssertEqual(copy.detail, "Trading 24/7 on Solana")
+        XCTAssertEqual(copy.detail, "Token still trades on Base")
     }
 
     func testAHolidayIsNamed() throws {
         let copy = try XCTUnwrap(chip(MarketSampleData.sessionHoliday))
 
         XCTAssertEqual(copy.title, "Closed for Thanksgiving Day")
-        XCTAssertEqual(copy.detail, "Trading 24/7 on Solana")
+        XCTAssertEqual(copy.detail, "Token still trades on Base")
     }
 
     func testAnOrdinaryOvernightCloseIsJustClosed() throws {
@@ -95,10 +95,42 @@ final class MarketSessionCopyTests: XCTestCase {
         XCTAssertNil(chip(MarketStatusDTO(session: .unknown, isOpen: false, afterHours: true)))
     }
 
-    func testSpokenFormJoinsBothHalves() {
-        let copy = MarketSessionChipCopy(title: "After hours", detail: "Trading 24/7 on Solana", isLive: false)
+    /// The pools are the claim. When the detail's Kyber probe found no route, the
+    /// token is not trading anywhere, so the chip names the close and nothing else.
+    func testWithoutARouteTheChipDoesNotSayTheTokenTrades() throws {
+        for market in [
+            MarketSampleData.sessionAfterHours,
+            MarketSampleData.sessionWeekend,
+            MarketSampleData.sessionHoliday,
+            MarketSampleData.sessionClosedOvernight,
+        ] {
+            let copy = try XCTUnwrap(chip(market, tokenRoutable: false))
+            XCTAssertNil(copy.detail, "\(market.session) said \(copy.detail ?? "")")
+        }
+        // A caller that says nothing about the pools gets no claim about them either.
+        XCTAssertNil(MarketSessionCopy.chip(for: MarketSampleData.sessionAfterHours)?.detail)
+    }
 
-        XCTAssertEqual(copy.spoken, "After hours, Trading 24/7 on Solana")
+    /// No "24/7" and nothing about Solana: nothing checks a Base pool around the
+    /// clock, and the token is not on Solana.
+    func testNoClosedStateOverclaims() throws {
+        for market in [
+            MarketSampleData.sessionAfterHours,
+            MarketSampleData.sessionWeekend,
+            MarketSampleData.sessionHoliday,
+            MarketSampleData.sessionClosedOvernight,
+            MarketSampleData.sessionPreMarket,
+        ] {
+            let spoken = try XCTUnwrap(chip(market)).spoken
+            XCTAssertFalse(spoken.contains("24/7"), spoken)
+            XCTAssertFalse(spoken.contains("Solana"), spoken)
+        }
+    }
+
+    func testSpokenFormJoinsBothHalves() {
+        let copy = MarketSessionChipCopy(title: "After hours", detail: MarketSessionCopy.tokenTradesOnBase, isLive: false)
+
+        XCTAssertEqual(copy.spoken, "After hours, Token still trades on Base")
         XCTAssertEqual(MarketSessionChipCopy(title: "Market open", detail: nil, isLive: true).spoken, "Market open")
     }
 
