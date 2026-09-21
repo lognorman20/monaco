@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -183,6 +184,46 @@ func TestRemoveGroupPicture_creatorClearsItBackToNull(t *testing.T) {
 	}
 	if persisted := groupPictureURL(t, f.Store, c.ID); persisted != "" {
 		t.Fatalf("persisted picture_url = %q, want empty after removal", persisted)
+	}
+}
+
+// A faker demo club (#153) is a read-only spectator fixture: even the user
+// recorded as its creator cannot change its picture, and a refused write never
+// reaches storage or the column.
+func TestGroupPicture_fakerDemoClubRefusesEveryWrite(t *testing.T) {
+	f := newPictureFixture(t)
+	owner := f.signIn(t, "pic-faker", "Faker Owner")
+	c := f.createClub(t, owner, "Faker Club")
+	tx, err := f.Store.BeginTx(t.Context())
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if _, err := tx.ExecContext(t.Context(),
+		`UPDATE groups SET is_faker = true, faker_key = $2 WHERE id = $1`, c.ID, "test:picture:"+c.ID); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("flag club as faker: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	upload := f.upload(t, owner, c.ID, samplePicture(t, 40, 40))
+	requireStatus(t, upload, http.StatusForbidden, "creator POST picture on a faker club")
+	if !strings.Contains(upload.Body.String(), "demo club is read-only") {
+		t.Fatalf("upload body = %s, want the read-only demo club error", upload.Body.String())
+	}
+
+	remove := f.remove(t, owner, c.ID)
+	requireStatus(t, remove, http.StatusForbidden, "creator DELETE picture on a faker club")
+	if !strings.Contains(remove.Body.String(), "demo club is read-only") {
+		t.Fatalf("remove body = %s, want the read-only demo club error", remove.Body.String())
+	}
+
+	if len(f.Storage.Uploads) != 0 {
+		t.Fatalf("storage upload count = %d, want 0: a faker club must not reach storage", len(f.Storage.Uploads))
+	}
+	if persisted := groupPictureURL(t, f.Store, c.ID); persisted != "" {
+		t.Fatalf("persisted picture_url = %q, want empty", persisted)
 	}
 }
 
@@ -463,10 +504,12 @@ func TestGroupView_staysDecodableByAClientThatDoesNotKnowThePictureFields(t *tes
 
 // Every board that draws a cabal's mark reads the picture from its own payload,
 // so each one has to carry it: the home board, the dashboard's "your cabals"
-// rows and search.
+// rows, search, the leaderboard, GET /v1/groups/{id} and a member's shared
+// cabals (GET /v1/users/{id}/groups).
 func TestGroupPicture_reachesEveryPayloadThatDrawsTheMark(t *testing.T) {
 	f := newPictureFixture(t)
 	owner := f.signIn(t, "pic-boards", "Boards Owner")
+	member := f.signIn(t, "pic-boards-member", "Boards Member")
 	c := f.createClub(t, owner, "Boards Club")
 	f.deposit(t, owner, c, 5_000_000)
 
@@ -506,11 +549,50 @@ func TestGroupPicture_reachesEveryPayloadThatDrawsTheMark(t *testing.T) {
 		t.Fatalf("search pictureUrl = %q, want %q", got, want)
 	}
 
+	board := f.call(t, tab.GroupLeaderboardHandler, http.MethodGet,
+		"/v1/groups/leaderboard?limit="+strconv.Itoa(app.GroupsTabMaxLimit), owner.Token, "")
+	requireStatus(t, board, http.StatusOK, "GET /v1/groups/leaderboard")
+	var boardRow *groupLeaderboardRowResponse
+	for _, row := range decodeBody[groupLeaderboardResponse](t, board).Groups {
+		if row.GroupID == c.ID {
+			boardRow = &row
+		}
+	}
+	if boardRow == nil {
+		t.Fatalf("funded club %s missing from the leaderboard; body = %s", c.ID, board.Body.String())
+	}
+	if got := derefOrNil(boardRow.PictureURL); got != want {
+		t.Fatalf("leaderboard pictureUrl = %q, want %q", got, want)
+	}
+
+	group := f.call(t, f.Groups.GetGroupHandler, http.MethodGet, "/v1/groups/"+c.ID, owner.Token, "", "id", c.ID)
+	requireStatus(t, group, http.StatusOK, "GET /v1/groups/{id}")
+	if got := derefOrNil(decodeBody[getGroupResponse](t, group).PictureURL); got != want {
+		t.Fatalf("GET /v1/groups/{id} pictureUrl = %q, want %q", got, want)
+	}
+
+	// Another member looking at the owner's profile sees the cabals they share.
+	f.join(t, member, c)
+	shared := f.call(t, f.Home.UserSharedGroupsHandler, http.MethodGet,
+		"/v1/users/"+owner.UserID+"/groups", member.Token, "", "id", owner.UserID)
+	requireStatus(t, shared, http.StatusOK, "GET /v1/users/{id}/groups")
+	sharedRow, found := homeGroupRow(decodeBody[map[string][]homeGroupBoardRowResponse](t, shared)["groups"], c.ID)
+	if !found {
+		t.Fatalf("shared club %s missing from GET /v1/users/{id}/groups; body = %s", c.ID, shared.Body.String())
+	}
+	if got := derefOrNil(sharedRow.PictureURL); got != want {
+		t.Fatalf("shared groups pictureUrl = %q, want %q", got, want)
+	}
+
 	// A cabal with no picture sends an explicit null, not a blank string.
 	requireStatus(t, f.remove(t, owner, c.ID), http.StatusOK, "remove")
 	cleared, _ := homeGroupRow(f.home(t, owner).Groups, c.ID)
 	if cleared.PictureURL != nil {
 		t.Fatalf("home board pictureUrl = %q after removal, want null", *cleared.PictureURL)
+	}
+	clearedGroup := f.call(t, f.Groups.GetGroupHandler, http.MethodGet, "/v1/groups/"+c.ID, owner.Token, "", "id", c.ID)
+	if !strings.Contains(clearedGroup.Body.String(), `"pictureUrl":null`) {
+		t.Fatalf("GET /v1/groups/{id} after removal = %s, want an explicit null pictureUrl", clearedGroup.Body.String())
 	}
 }
 
