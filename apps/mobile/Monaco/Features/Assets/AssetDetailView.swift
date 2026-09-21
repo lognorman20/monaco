@@ -15,19 +15,24 @@ struct AssetDetailView: View {
     @State private var pickerKind: ProposalPickKind?
     @State private var toast: MonacoToast?
 
-    /// How often the hero re-reads the price. Only the sample harness passes anything
-    /// but the default, so a scripted price walk does not take a minute to show.
+    /// How often the hero re-reads the price, and how often the drawn range is
+    /// re-read. Only the sample harness passes anything but the defaults, so a
+    /// scripted price walk does not take a minute to show and a quiet chart re-read
+    /// can be watched inside a screenshot run rather than two minutes after one.
     private let pricePollInterval: Duration
+    private let chartPollInterval: Duration
 
     init(
         auth: PrivyAuthService,
         symbol: String,
         dataSource: AssetDetailDataSource? = nil,
-        pricePollInterval: Duration = AssetDetailPolling.price
+        pricePollInterval: Duration = AssetDetailPolling.price,
+        chartPollInterval: Duration = AssetDetailPolling.chart
     ) {
         self.auth = auth
         self.symbol = symbol
         self.pricePollInterval = pricePollInterval
+        self.chartPollInterval = chartPollInterval
         _model = State(initialValue: AssetDetailModel(
             symbol: symbol,
             dataSource: dataSource ?? LiveAssetDetailDataSource(auth: auth)
@@ -78,7 +83,7 @@ struct AssetDetailView: View {
         // The hero keeps itself current while the member is looking at it. Both loops
         // are silent: a tick that fails leaves the screen exactly as they last saw it.
         .pollWhileVisible(every: pricePollInterval) { await model.refreshDetail() }
-        .pollWhileVisible(every: AssetDetailPolling.chart) { await model.refreshChart() }
+        .pollWhileVisible(every: chartPollInterval) { await model.refreshChart() }
         .onChange(of: model.sessionExpired) { _, expired in
             if expired { Task { await auth.logout() } }
         }
@@ -145,19 +150,23 @@ struct AssetDetailView: View {
     //
     // The trade bar (#340) is not a slot: it belongs in a `safeAreaInset`, not in
     // this stack.
+    // No stack around the slots while they are all empty. The `EmptyView`s collapse
+    // but a `VStack` holding them does not: it is still a child of the outer stack,
+    // so the screen would carry a stray 24pt gap between the chart and the action row
+    // until the first card lands. Each slot brings its own spacing from the outer
+    // stack when it arrives.
+    //
+    // Do not put an accessibility identifier on a stack of cards either. A modifier
+    // on a VStack is applied to each of its children, so naming the stack renames
+    // every card inside it and makes each one unfindable by its own name — which is
+    // exactly what it did to the chart before this was noticed.
     @ViewBuilder
     private var detailSections: some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
-            EmptyView() // 1. Your cabals' position
-            EmptyView() // 2. Stats grid
-            EmptyView() // 3. Stock vs token
-            EmptyView() // 4. About
-            EmptyView() // 5. Activity on this stock
-        }
-        // Do not put an accessibility identifier on this stack. A modifier on a
-        // VStack is applied to each of its children, so naming the stack renames
-        // every card inside it and makes each one unfindable by its own name —
-        // which is exactly what it did to the chart before this was noticed.
+        EmptyView() // 1. Your cabals' position
+        EmptyView() // 2. Stats grid
+        EmptyView() // 3. Stock vs token
+        EmptyView() // 4. About
+        EmptyView() // 5. Activity on this stock
     }
 
     private var actionRow: some View {

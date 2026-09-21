@@ -46,6 +46,11 @@ enum AssetDetailSampleScenario: String, CaseIterable {
     /// The server answers with a series built for another window. It must be
     /// refused rather than drawn under the wrong chip.
     case staleRange
+    /// The background chart re-read, at a cadence you can watch: every couple of
+    /// seconds the window grows a bar, the way an open market's day chart does. The
+    /// curve must not wipe itself left to right each time, and the selected chip
+    /// must not sprout a spinner for a refresh nobody asked for.
+    case tickingChart
 
     static let launchArgument = "-MonacoAssetDetailSample"
 
@@ -76,7 +81,9 @@ struct AssetDetailSampleHarness: View {
                 dataSource: AssetDetailSampleDataSource(scenario: scenario),
                 // The scripted price walk is the point of `ticking`; at the shipping
                 // cadence a screenshot would wait ten seconds for the first move.
-                pricePollInterval: scenario == .ticking ? .seconds(2) : AssetDetailPolling.price
+                pricePollInterval: scenario == .ticking ? .seconds(2) : AssetDetailPolling.price,
+                // Same for the quiet chart re-read, which ships at two minutes.
+                chartPollInterval: scenario == .tickingChart ? .seconds(2) : AssetDetailPolling.chart
             )
         }
         .tint(MonacoTheme.ink)
@@ -93,6 +100,7 @@ struct AssetDetailSampleHarness: View {
 private final class AssetDetailSampleDataSource: AssetDetailDataSource {
     let scenario: AssetDetailSampleScenario
     private var detailCalls = 0
+    private var chartCalls = 0
 
     init(scenario: AssetDetailSampleScenario) {
         self.scenario = scenario
@@ -102,7 +110,7 @@ private final class AssetDetailSampleDataSource: AssetDetailDataSource {
         if scenario == .loading { try await Task.sleep(for: .seconds(3600)) }
         detailCalls += 1
         switch scenario {
-        case .open, .fallbackSeries, .emptyChart, .chartFailed, .loading, .slowRange, .staleRange:
+        case .open, .fallbackSeries, .emptyChart, .chartFailed, .loading, .slowRange, .staleRange, .tickingChart:
             return MarketSampleData.detail()
         case .ticking:
             return tickingDetail()
@@ -125,7 +133,12 @@ private final class AssetDetailSampleDataSource: AssetDetailDataSource {
     }
 
     func chart(symbol: String, range: AssetChartRange) async throws -> AssetChartDTO {
+        chartCalls += 1
         switch scenario {
+        case .tickingChart:
+            // One more bar every re-read, which is what an open market's day chart
+            // does. Same range, same shape, one sample longer.
+            return MarketSampleData.chart(range: range, points: 78 + chartCalls)
         case .loading:
             try await Task.sleep(for: .seconds(3600))
             return MarketSampleData.chart(range: range)
@@ -141,8 +154,10 @@ private final class AssetDetailSampleDataSource: AssetDetailDataSource {
             if range != .oneDay { try await Task.sleep(for: .seconds(6)) }
             return MarketSampleData.chart(range: range)
         case .staleRange:
-            // A year of history answered under whichever chip was tapped.
-            return MarketSampleData.chart(range: .oneYear)
+            // Always a window other than the one asked for. Answering 1Y to every
+            // chip made 1Y itself the one chip where the mismatch could not be shown:
+            // tapping it succeeded and drew.
+            return MarketSampleData.chart(range: range == .oneYear ? .oneDay : .oneYear)
         default:
             return MarketSampleData.chart(range: range)
         }

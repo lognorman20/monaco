@@ -12,10 +12,16 @@ struct AssetChartCard: View {
     /// uses it — a pulsing dot on a year of history claims a liveness nobody means.
     let isMarketLive: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+            // No height here. Only a curve and its skeleton are 200pt tall; an empty
+            // or failed state is a title, a message and a button, and forcing that
+            // into a fixed height does not clip it — it overflows, and at the
+            // accessibility text sizes the retry button draws straight over the
+            // caption and the chip row below.
             chart
-                .frame(height: Self.chartHeight)
             if let caption = model.series?.basisCaption {
                 // The curve is the underlying equity's; the price above it is the
                 // token's. Say so, or a curve ending below the hero price reads as a
@@ -43,6 +49,11 @@ struct AssetChartCard: View {
         case .loading:
             SkeletonBlock(width: nil, height: Self.chartHeight, radius: MonacoTheme.Radius.card)
                 .frame(maxWidth: .infinity)
+                // `SkeletonBlock` hides itself from VoiceOver, so a label on the
+                // outside would attach to nothing and the loading chart would
+                // announce silence. Making this one element first is what gives the
+                // label — and the identifier a UI test asks by — something to sit on.
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Loading price history")
                 .accessibilityIdentifier("asset-detail-chart-loading")
         case .series(let series):
@@ -54,6 +65,7 @@ struct AssetChartCard: View {
                 actionTitle: "Try again",
                 action: { reload() }
             )
+            .frame(minHeight: Self.chartHeight)
             .accessibilityIdentifier("asset-detail-chart-empty")
         case .failed:
             EmptyState(
@@ -61,6 +73,7 @@ struct AssetChartCard: View {
                 actionTitle: "Retry",
                 action: { reload() }
             )
+            .frame(minHeight: Self.chartHeight)
             .accessibilityIdentifier("asset-detail-chart-failed")
         }
     }
@@ -75,21 +88,27 @@ struct AssetChartCard: View {
             drawOnKey: Self.drawOnKey(series),
             selection: $model.scrubbedIndex,
             summary: summary(series),
+            // The one nearest-sample search, not a second copy inside the chart: the
+            // drag and the tests have to be measuring the same thing.
+            nearestIndex: { series.nearestIndex(to: $0) },
             describePoint: { describe(series, at: $0) },
             accessibilityIdentifier: "asset-detail-chart"
         )
     }
 
-    /// What makes the draw-on replay: a different range, or a genuinely different
-    /// series. A quiet re-read that returns the same bars must not redraw the curve
-    /// under the member's finger.
-    private static func drawOnKey(_ series: AssetChartSeries) -> AnyHashable {
-        [
-            series.range.rawValue,
-            String(series.points.count),
-            String(series.points.first?.timestamp ?? 0),
-            String(series.points.last?.timestamp ?? 0),
-        ]
+    /// What makes the draw-on replay: a different window, and nothing else.
+    ///
+    /// It used to include the data's shape — the sample count and the first and last
+    /// timestamps — which sounds like "a genuinely different series" and is in fact
+    /// "a live day chart". The background re-read runs every two minutes and the last
+    /// bar's timestamp advances on essentially every quiet re-read of an open market,
+    /// so the curve wiped itself left to right every two minutes, unasked, including
+    /// under a member's finger: the selection survives a replay but the mask does not.
+    ///
+    /// The first series for a window still draws on, because the chart view plays it
+    /// on the first appearance of the curve rather than on this key.
+    static func drawOnKey(_ series: AssetChartSeries) -> AnyHashable {
+        series.range.rawValue
     }
 
     /// The figure's own verdict, not a second one computed from the series: a move the
@@ -117,25 +136,39 @@ struct AssetChartCard: View {
     /// `scrollClipDisabled` is off on purpose: the row must clip at the gutter so a
     /// half-visible chip reads as "there is more", rather than bleeding to the edge.
     private var rangeChips: some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: MonacoTheme.Space.s) {
-                ForEach(AssetChartRange.allCases, id: \.self) { range in
-                    AssetChartRangeChip(
-                        range: range,
-                        isSelected: model.range == range,
-                        isLoading: model.loadingRanges.contains(range)
-                    ) {
-                        guard model.range != range else { return }
-                        Haptics.selection()
-                        model.range = range
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: MonacoTheme.Space.s) {
+                    ForEach(AssetChartRange.allCases, id: \.self) { range in
+                        AssetChartRangeChip(
+                            range: range,
+                            isSelected: model.range == range,
+                            isLoading: model.loadingRanges.contains(range)
+                        ) {
+                            guard model.range != range else { return }
+                            Haptics.selection()
+                            model.range = range
+                        }
+                        .id(range)
                     }
                 }
+                // The capsules have a stroke, so a hairline of padding keeps the first
+                // and last chip from being shaved by the clip edge.
+                .padding(.horizontal, 1)
             }
-            // The capsules have a stroke, so a hairline of padding keeps the first
-            // and last chip from being shaved by the clip edge.
-            .padding(.horizontal, 1)
+            .scrollIndicators(.hidden)
+            // A row that clips at the gutter can hold the selection off screen —
+            // arriving on ALL, or coming back to a screen left on 1Y, would show six
+            // chips with no visible selection at all. Bring it into the middle.
+            .onAppear { proxy.scrollTo(model.range, anchor: .center) }
+            .onChange(of: model.range) { _, range in
+                guard !reduceMotion else {
+                    proxy.scrollTo(range, anchor: .center)
+                    return
+                }
+                withAnimation(.snappy(duration: 0.25)) { proxy.scrollTo(range, anchor: .center) }
+            }
         }
-        .scrollIndicators(.hidden)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Chart range")
         .accessibilityIdentifier("asset-chart-ranges")
@@ -171,6 +204,10 @@ struct AssetChartCard: View {
 /// A range chip. 44pt tall so it is a real target, and it carries its own spinner:
 /// a range that is still loading used to look exactly like a range that had arrived,
 /// which made a slow fetch read as a chart that had not changed.
+///
+/// Not built on `MonacoChip`: that primitive is deprecated in favour of exactly this
+/// — "a 44pt chip built on surfaceSunken" — because its 8pt vertical padding leaves a
+/// target under the 44pt minimum. Extending a deprecated view would spread it.
 struct AssetChartRangeChip: View {
     let range: AssetChartRange
     let isSelected: Bool
