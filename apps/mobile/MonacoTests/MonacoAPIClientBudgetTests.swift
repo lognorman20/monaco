@@ -105,6 +105,32 @@ final class MonacoAPIClientBudgetTests: XCTestCase {
             )
         }
     }
+
+    /// The default client must be on Monaco's own session: a default argument slipping back
+    /// to `.shared` would put every request on the 60s one-size-fits-all deadline.
+    func testDefaultClient_runsOnMonacosOwnSession() throws {
+        let transport = try XCTUnwrap(
+            Mirror(reflecting: MonacoAPIClient(baseURL: baseURL)).children
+                .first { $0.label == "session" }?.value as? MonacoHTTPTransport
+        )
+        let session = try XCTUnwrap(
+            Mirror(reflecting: transport).children.first { $0.label == "session" }?.value as? URLSession
+        )
+        XCTAssertTrue(session === URLSession.monaco)
+    }
+
+    /// Deliberately synchronous: the client must be able to die on the main thread outside
+    /// any task, the way a view's stored `apiClient` does on teardown. With the synthesized
+    /// main-actor deinit this aborted the process ("pointer being freed was not allocated").
+    func testClient_releasedOnTheMainThreadOutsideATask_tearsDownCleanly() {
+        weak var released: Monaco.MonacoAPIClient?
+        do {
+            let client = MonacoAPIClient(baseURL: baseURL)
+            released = client
+            XCTAssertNotNil(released)
+        }
+        XCTAssertNil(released)
+    }
 }
 
 /// Answers every request with one canned response and records "METHOD path timeout".

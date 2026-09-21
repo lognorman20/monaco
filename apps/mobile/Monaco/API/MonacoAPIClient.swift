@@ -49,6 +49,16 @@ final class MonacoAPIClient {
         self.session = MonacoHTTPTransport(session: session)
     }
 
+    /// The app target defaults to `MainActor` isolation, so without this the compiler
+    /// synthesizes an *isolated* deinit and routes every release through
+    /// `swift_task_deinitOnExecutor` (the back-deployed shim, because the deployment target
+    /// is iOS 18). When the last reference dies on the main thread outside a task, that
+    /// path aborts with "pointer being freed was not allocated" in
+    /// `TaskLocal::StopLookupScope` (swiftlang/swift#87316, #85663). Views and stores hold
+    /// this client in stored properties, so it is released synchronously all the time.
+    /// It owns only immutable, Sendable state, so its teardown needs no actor at all.
+    nonisolated deinit {}
+
     func health() async throws -> HealthResponse {
         let url = baseURL.appending(path: "health")
         let (data, response) = try await session.data(from: url)
