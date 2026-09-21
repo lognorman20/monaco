@@ -85,7 +85,7 @@ struct HomeBalanceRowSection: View {
     private var unavailableBalance: some View {
         HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.s) {
             Text("—")
-                .font(MoneyStyle.row.font)
+                .moneyFont(.row)
                 .foregroundStyle(MonacoTheme.muted)
                 .accessibilityLabel("Account balance unavailable")
                 .accessibilityIdentifier("platform-balance-unavailable")
