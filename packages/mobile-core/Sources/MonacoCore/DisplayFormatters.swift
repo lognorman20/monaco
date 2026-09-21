@@ -64,7 +64,8 @@ public enum AssetSymbolFormatter {
         return trimmed
     }
 
-    /// Ticker as people know it: "AAPLx" → "AAPL", "BRK.Bx" → "BRK.B". "USDC" stays; a mint → "Unknown stock".
+    /// Ticker as people know it: "AAPLc" → "AAPL", "NVDAc" → "NVDA". "USDC" stays; a 0x token address → "Unknown stock".
+    /// A trailing "x" (the retired Solana xStock symbols) is still stripped, so old rows read the same.
     /// Keep the raw symbol for API calls.
     public static func display(_ symbol: String) -> String {
         let formatted = format(symbol)
@@ -82,7 +83,8 @@ public enum AssetSymbolFormatter {
     }
 }
 
-/// Company names for the xStocks catalog, for surfaces whose DTO only carries a symbol.
+/// Company names for the tokenized-stock catalog, keyed by the underlying ticker, for
+/// surfaces whose DTO only carries a symbol.
 /// Follow-up: the API returns `assetName` on proposal rows and this table goes away.
 public enum AssetDisplayNames {
     private static let names: [String: String] = [
@@ -148,7 +150,7 @@ public enum AssetDisplayNames {
         "XOM": "Exxon Mobil",
     ]
 
-    /// "AAPLx" or "AAPL" → "Apple". Nil when the symbol is not in the table.
+    /// "AAPLc" or "AAPL" → "Apple". Nil when the symbol is not in the table.
     public static func name(forSymbol symbol: String) -> String? {
         let ticker = AssetSymbolFormatter.display(symbol).uppercased()
         return names[ticker]
@@ -249,7 +251,9 @@ public enum StakeWithdrawConverter {
 }
 
 public enum CatalogAssetNameFormatter {
-    /// User-facing catalog name without trailing xStocks branding (e.g. "Apple xStock" → "Apple").
+    /// User-facing catalog name without a trailing "xStock" brand (e.g. "Apple xStock" → "Apple").
+    /// Legacy tolerance: the Base catalogue sends plain names, but names cached or stored from
+    /// the retired Solana catalogue still carry the suffix.
     public static func format(_ catalogName: String) -> String {
         var name = catalogName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return name }
