@@ -12,14 +12,11 @@ struct SellCabalView: View {
     var onToast: ((MonacoToast) -> Void)? = nil
 
     private let apiClient = MonacoAPIClient()
-    private let dustGate = RedeemSliderGate()
 
     @Environment(\.dismiss) private var dismiss
     @State private var amountText = ""
     @State private var isSubmitting = false
     @State private var toast: MonacoToast?
-
-    private static let posix = Locale(identifier: "en_US_POSIX")
 
     var body: some View {
         ScrollView {
@@ -33,17 +30,26 @@ struct SellCabalView: View {
                             .fraction(0.5, label: "50%"),
                             .fraction(1, label: "All"),
                         ],
-                        helper: "Your slice is worth \(UsdAmountFormatter.format(micros: maxEquityUsdMicros))",
-                        overLimitHelper: "More than your slice"
+                        helper: helperLine,
+                        overLimitHelper: "More than your slice",
+                        problem: CashOutAmountRule.problem(for: verdict),
+                        showsKeyboardDoneButton: true
                     )
                     .padding(.top, MonacoTheme.Space.xl)
                     .accessibilityIdentifier("sell-cabal-amount-display")
-                    Text("We sell this much of your slice and move the cash to your account balance. You stay in the cabal.")
+                    Text(CashOutAmountRule.explainer(for: verdict))
                         .font(MonacoTheme.Typo.caption)
                         .foregroundStyle(MonacoTheme.muted)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, MonacoTheme.Space.sm)
                         .accessibilityIdentifier("sell-cabal-explainer")
+                } else if sliceIsTooSmall {
+                    EmptyState(
+                        title: "Too small to cash out",
+                        message: "Your slice is worth \(UsdAmountFormatter.format(micros: maxEquityUsdMicros)). Cash out starts at \(UsdAmountFormatter.format(micros: RedeemDustMinimum.usdcMicros)), so this one has to grow first."
+                    )
+                    .padding(.top, 48)
+                    .accessibilityIdentifier("sell-cabal-below-minimum")
                 } else {
                     EmptyState(
                         title: "Nothing to cash out yet",
@@ -82,8 +88,14 @@ struct SellCabalView: View {
 
     // MARK: - Derived values
 
+    /// A slice worth enough to be sold. One worth less than the floor gets its own explanation
+    /// rather than a keypad where every amount is refused.
     private var hasStake: Bool {
-        maxShareUnits > 0 && maxEquityUsdMicros > 0
+        maxShareUnits > 0 && maxEquityUsdMicros >= RedeemDustMinimum.usdcMicros
+    }
+
+    private var sliceIsTooSmall: Bool {
+        maxShareUnits > 0 && CashOutAmountRule.sliceIsBelowMinimum(sliceMicros: maxEquityUsdMicros)
     }
 
     private var maxEquityUsd: Decimal {
@@ -95,16 +107,21 @@ struct SellCabalView: View {
     }
 
     private var enteredUsdMicros: Int64 {
-        parseUsdcMicros(amountText) ?? 0
+        AmountEntryText.micros(amountText) ?? 0
     }
 
-    /// What will actually be sold: never more than the slice.
+    private var verdict: CashOutAmountRule.Verdict {
+        CashOutAmountRule.verdict(enteredMicros: enteredUsdMicros, sliceMicros: maxEquityUsdMicros)
+    }
+
+    /// What will actually be sold: the typed amount, or the whole slice when leaving the
+    /// remainder behind would strand it.
     private var selectedUsdMicros: Int64 {
-        min(enteredUsdMicros, maxEquityUsdMicros)
-    }
-
-    private var isOverLimit: Bool {
-        enteredUsdMicros > maxEquityUsdMicros
+        CashOutAmountRule.effectiveMicros(
+            for: verdict,
+            enteredMicros: enteredUsdMicros,
+            sliceMicros: maxEquityUsdMicros
+        )
     }
 
     private var selectedShareUnits: Int64 {
@@ -115,16 +132,21 @@ struct SellCabalView: View {
         ) ?? 0
     }
 
+    private var helperLine: String {
+        CashOutAmountRule.note(for: verdict, sliceMicros: maxEquityUsdMicros)
+            ?? "Your slice is worth \(UsdAmountFormatter.format(micros: maxEquityUsdMicros))"
+    }
+
     private var canSubmit: Bool {
-        !isOverLimit
-            && dustGate.maySubmit(selectedMicros: selectedUsdMicros)
+        CashOutAmountRule.maySubmit(verdict)
             && selectedShareUnits > 0
             && selectedShareUnits <= maxShareUnits
     }
 
     private var ctaTitle: String {
         if isSubmitting { return "Cashing out…" }
-        guard selectedUsdMicros > 0 else { return "Cash out" }
+        // An amount the screen won't take never appears on the button.
+        guard CashOutAmountRule.maySubmit(verdict), selectedUsdMicros > 0 else { return "Cash out" }
         return "Cash out \(UsdAmountFormatter.format(micros: selectedUsdMicros))"
     }
 
@@ -134,20 +156,19 @@ struct SellCabalView: View {
         // The disabled state only lands on the next render; a second tap in the same frame
         // must not sell the slice twice.
         guard !isSubmitting, let token = auth.accessToken, canSubmit else { return }
+        // A full exit sends no share amount, so the backend closes the position outright. That is
+        // also how a sale that would have stranded a sub-floor remainder goes out.
+        guard let sale = CashOutAmountRule.sale(for: verdict, selectedShareUnits: selectedShareUnits) else { return }
         isSubmitting = true
         defer { isSubmitting = false }
 
         let soldMicros = selectedUsdMicros
-        let shareAmount = StakeWithdrawConverter.isFullWithdraw(
-            selectedUsdMicros: soldMicros,
-            totalEquityUsdMicros: maxEquityUsdMicros
-        ) ? nil : selectedShareUnits
 
         do {
             _ = try await apiClient.withdrawToBalance(
                 accessToken: token,
                 groupId: groupId,
-                shareAmountMicros: shareAmount
+                shareAmountMicros: sale.shareAmountMicros
             )
             let success = MonacoToast(
                 message: "Cashing out \(UsdAmountFormatter.format(micros: soldMicros)). It lands in your balance in about a minute",
@@ -165,19 +186,5 @@ struct SellCabalView: View {
             if error.isRequestCancellation { return }
             toast = MonacoToast(message: MoneyFlowCopy.sellStakeFailure(FlowErrorInput(error)).summary)
         }
-    }
-
-    private func parseUsdcMicros(_ raw: String) -> Int64? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: ",", with: ".")
-        guard !trimmed.isEmpty,
-              let decimal = Decimal(string: trimmed, locale: Self.posix),
-              decimal >= 0 else {
-            return nil
-        }
-        var scaled = decimal * Decimal(1_000_000)
-        var rounded = Decimal()
-        NSDecimalRound(&rounded, &scaled, 0, .plain)
-        return (rounded as NSDecimalNumber).int64Value
     }
 }
