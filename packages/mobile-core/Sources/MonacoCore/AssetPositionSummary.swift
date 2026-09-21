@@ -14,10 +14,32 @@ public struct AssetPositionSummary: Equatable, Sendable {
     /// The viewer's own share of that, as a decimal string.
     public let myTotalSliceUsd: String
     /// The cabals' combined P&L on this symbol, signed.
+    ///
+    /// The cabals'. Not the viewer's: it is `sum(valueUsd) - sum(costBasisUsd)` over
+    /// every cabal, and a member holding a fifth of those pots earned nothing like
+    /// all of it. Whatever draws this must say whose number it is — see
+    /// `totalPnlLabel`.
     public let totalDollarPnl: String
     /// The same as a ratio ("0.0710"), or nil when there is no cost basis behind the
-    /// position to measure a return against.
+    /// position to measure a return against. Also the cabals'.
     public let totalPercentReturn: String?
+    /// Whose the P&L figures are, in words: "Your cabals' return".
+    ///
+    /// The card used to set `myTotalSliceUsd` in the big money font with the badge on
+    /// the same baseline, which reads as one pair — a slice of $837.32 that is up
+    /// $323.83. It is not: the $323.83 is what the cabals made, and the member's share
+    /// of it is about a fifth. We cannot fix that by scaling, because nothing on the
+    /// wire supports it: `/v1/assets/{symbol}/social` sends the viewer's share of each
+    /// position's *value* (`mySliceUsd`, share units over share base) and no basis
+    /// behind it, and a pot's share units are bought in at the NAV of the day someone
+    /// joined — so a member who joined last week did not earn last year's gain, and
+    /// `pnl x mySlicePercent` would hand it to them. The honest per-member figure the
+    /// backend does compute (`MemberSliceDTO.dollarPnl`) is per cabal, not per symbol.
+    /// So the pair is labelled instead of being invented.
+    ///
+    /// Nil when no cabal holds the symbol, so a card that is only carrying an
+    /// "unvalued" notice does not print a $0.00 return under it.
+    public let totalPnlLabel: String?
     /// "3 cabals hold AAPLx" / "One cabal holds AAPLx".
     public let headline: String
     /// "2 open votes on AAPLx", or nil when there are none.
@@ -47,11 +69,23 @@ public struct AssetPositionSummary: Equatable, Sendable {
             myTotalSliceUsd: decimalString(slice),
             totalDollarPnl: signedDecimalString(pnl),
             totalPercentReturn: basis > 0 ? ratioString(pnl / basis) : nil,
+            totalPnlLabel: pnlLabel(holdingCount: holdings.count),
             headline: headline(holdingCount: holdings.count, ticker: ticker),
             voteHeadline: voteHeadline(social.openProposals, ticker: ticker),
             waitingOnYou: waitingOnYou(social.openProposals),
             unvaluedNotice: unvaluedNotice(social.unvaluedGroups)
         )
+    }
+
+    /// Whose return the badge measures. The possessive is the whole job of this
+    /// string: without it the figure above and the badge beside it read as one pair,
+    /// and they are about two different sets of money.
+    static func pnlLabel(holdingCount: Int) -> String? {
+        switch holdingCount {
+        case 0: return nil
+        case 1: return "Your cabal's return"
+        default: return "Your cabals' return"
+        }
     }
 
     static func headline(holdingCount: Int, ticker: String) -> String {

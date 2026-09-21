@@ -152,6 +152,34 @@ final class AssetPositionSummaryTests: XCTestCase {
         XCTAssertEqual(summary.headline, "3 cabals hold AAPLx")
     }
 
+    /// The P&L is the cabals', and the slice above it is the member's. The card used
+    /// to put them on one baseline, which reads as "$837.32, up $323.83" — a claim
+    /// that the member made the whole gain, when their share of it is about a fifth.
+    /// Nothing on the wire supports scaling it (`mySliceUsd` is a share of the
+    /// *value*, with no basis behind it), so the figure carries a possessive instead.
+    func testThePnlSaysWhoseItIs() throws {
+        let summary = try XCTUnwrap(AssetPositionSummary.make(AssetSocialSampleData.social(), symbol: "AAPLx"))
+        XCTAssertEqual(summary.totalPnlLabel, "Your cabals' return")
+        XCTAssertNotEqual(
+            summary.totalDollarPnl, summary.myTotalSliceUsd,
+            "the two figures are about different money and the card must not pair them unlabelled"
+        )
+    }
+
+    func testThePnlLabelCountsCabalsTheWayTheHeadlineDoes() {
+        XCTAssertEqual(AssetPositionSummary.pnlLabel(holdingCount: 1), "Your cabal's return")
+        XCTAssertEqual(AssetPositionSummary.pnlLabel(holdingCount: 3), "Your cabals' return")
+    }
+
+    /// A card that is only carrying an "unvalued" notice has no position to report a
+    /// return on, so it prints none rather than a $0.00 nobody earned.
+    func testNoHoldings_labelsNoReturnAtAll() throws {
+        let unreachable = AssetSocialDTO(symbol: "AAPLx", unvaluedGroups: 1)
+        let summary = try XCTUnwrap(AssetPositionSummary.make(unreachable, symbol: "AAPLx"))
+        XCTAssertNil(summary.totalPnlLabel)
+        XCTAssertNil(AssetPositionSummary.pnlLabel(holdingCount: 0))
+    }
+
     /// A gain is signed so `MonacoTheme.signed` tints it; a loss keeps its own sign
     /// and must not gain a "+".
     func testLossKeepsItsSign() throws {

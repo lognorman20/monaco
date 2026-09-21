@@ -253,6 +253,25 @@ final class AssetDetailCardsUITests: XCTestCase {
         attachScreenshot(app, name: "asset-detail-stats-accessibility-text")
     }
 
+    /// The position card was the only one below the chart that kept its side-by-side
+    /// rows at the accessibility sizes: a cabal name truncated and the money beside it
+    /// scaled itself down, which is the one thing on this screen that must never be
+    /// cut short. It stacks now, like the stats grid and the Pyth legs. The screenshot
+    /// carries the layout claim; what is asserted is that the card and its rows stay
+    /// reachable through the switch.
+    @MainActor
+    func testPositionCardSurvivesAnAccessibilityTextSize() throws {
+        let app = launch("cabals", textSize: "UICTContentSizeCategoryAccessibilityL")
+        waitForScreen(app, "position card at accessibility text size")
+
+        XCTAssertTrue(scrollTo(app, "asset-detail-position", attempts: 12), "the position card never appeared")
+        XCTAssertTrue(
+            scrollTo(app, "asset-position-holding-g-weekend", attempts: 12),
+            "a holding row was unreachable at the accessibility text sizes"
+        )
+        attachScreenshot(app, name: "asset-detail-position-accessibility-text")
+    }
+
     /// The honest-grid rule: a cell we could source is there, and a cell we could not
     /// is absent rather than a dash. `statsComplete` has every figure; `statsPartial`
     /// (the `sparse` scenario) has no year of history and no Pyth interval.

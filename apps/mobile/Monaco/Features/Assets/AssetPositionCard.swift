@@ -21,6 +21,14 @@ struct AssetPositionCard: View {
     /// Opens one proposal.
     var openProposal: ((AssetProposalDTO) -> Void)?
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// Every other card below the chart gives up its side-by-side layout at the
+    /// accessibility sizes — the stats grid drops to one column, the Pyth legs
+    /// stack. This one held on to its rows and truncated a member's money instead,
+    /// which is the one thing on the screen that must never be cut short.
+    private var isStacked: Bool { dynamicTypeSize.isAccessibilitySize }
+
     var body: some View {
         AssetDetailCard(
             title: "Your cabals' position",
@@ -61,31 +69,67 @@ struct AssetPositionCard: View {
                 .font(MonacoTheme.Typo.caption)
                 .foregroundStyle(MonacoTheme.muted)
 
-            HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.s) {
-                // The member's own slice is the headline figure. The cabals' total
-                // is context underneath it — they came to see their own money.
-                Text(UsdAmountFormatter.format(decimalString: summary.myTotalSliceUsd))
-                    .moneyFont(.large)
-                    .foregroundStyle(MonacoTheme.ink)
-                Spacer(minLength: MonacoTheme.Space.s)
-                PnLBadge(dollarPnl: summary.totalDollarPnl, percentReturn: summary.totalPercentReturn)
-            }
+            // The member's own slice is the headline figure. The cabals' total is
+            // context underneath it — they came to see their own money.
+            //
+            // The badge does *not* sit on this baseline. It measures what the cabals
+            // made, the slice is what the member holds, and side by side they read as
+            // one pair: "$837.32, up $323.83", when the member's share of that gain is
+            // about a fifth of it. It gets its own line and its own possessive below.
+            Text(UsdAmountFormatter.format(decimalString: summary.myTotalSliceUsd))
+                .moneyFont(.large)
+                .foregroundStyle(MonacoTheme.ink)
 
             Text("Your slice of \(UsdAmountFormatter.format(decimalString: summary.totalValueUsd)) held across your cabals")
                 .font(MonacoTheme.Typo.caption)
                 .foregroundStyle(MonacoTheme.muted)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if let pnlLabel = summary.totalPnlLabel {
+                cabalReturn(pnlLabel)
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spokenTotals)
         .accessibilityIdentifier("asset-position-totals")
     }
 
+    /// The cabals' P&L, named. Label and badge sit on one line until the text stops
+    /// fitting beside it, the way every other pairing on this screen behaves.
+    @ViewBuilder
+    private func cabalReturn(_ label: String) -> some View {
+        let name = Text(label)
+            .font(MonacoTheme.Typo.caption)
+            .foregroundStyle(MonacoTheme.muted)
+        let badge = PnLBadge(dollarPnl: summary.totalDollarPnl, percentReturn: summary.totalPercentReturn)
+        Group {
+            if isStacked {
+                VStack(alignment: .leading, spacing: 4) {
+                    name
+                    badge
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.s) {
+                    name
+                    Spacer(minLength: MonacoTheme.Space.s)
+                    badge
+                }
+            }
+        }
+        .padding(.top, 2)
+    }
+
     private var spokenTotals: String {
         var sentence = "\(summary.headline). Your slice, "
         sentence += UsdAmountFormatter.format(decimalString: summary.myTotalSliceUsd)
         sentence += ", of \(UsdAmountFormatter.format(decimalString: summary.totalValueUsd)) held. "
-        sentence += PnLSpeech.badge(dollarPnl: summary.totalDollarPnl, percentReturn: summary.totalPercentReturn)
+        // The possessive is read out too: a figure that is not the listener's own must
+        // not arrive unqualified on the one output where there is no layout to say so.
+        if let pnlLabel = summary.totalPnlLabel {
+            sentence += "\(pnlLabel), "
+            sentence += PnLSpeech.badge(dollarPnl: summary.totalDollarPnl, percentReturn: summary.totalPercentReturn)
+            sentence += "."
+        }
         return sentence
     }
 
@@ -93,19 +137,26 @@ struct AssetPositionCard: View {
 
     private func votes(_ headline: String) -> some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.s) {
-                Text(headline)
-                    .font(MonacoTheme.Typo.rowTitle)
-                    .foregroundStyle(MonacoTheme.ink)
-                Spacer(minLength: MonacoTheme.Space.s)
-                if let waiting = summary.waitingOnYou {
-                    Text(waiting)
-                        .font(MonacoTheme.Typo.caption.weight(.semibold))
-                        .foregroundStyle(MonacoTheme.brandOnWash)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(MonacoTheme.brandWash))
-                        .accessibilityIdentifier("asset-position-waiting-on-you")
+            let title = Text(headline)
+                .font(MonacoTheme.Typo.rowTitle)
+                .foregroundStyle(MonacoTheme.ink)
+            let errand = summary.waitingOnYou.map { waiting in
+                Text(waiting)
+                    .font(MonacoTheme.Typo.caption.weight(.semibold))
+                    .foregroundStyle(MonacoTheme.brandOnWash)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(MonacoTheme.brandWash))
+                    .accessibilityIdentifier("asset-position-waiting-on-you")
+            }
+            if isStacked {
+                title
+                errand
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.s) {
+                    title
+                    Spacer(minLength: MonacoTheme.Space.s)
+                    errand
                 }
             }
             AssetOpenVotesList(proposals: proposals, symbol: symbol, openProposal: openProposal)
@@ -151,6 +202,10 @@ private struct HoldingRow: View {
     let holding: AssetHoldingDTO
     var openCabal: ((String) -> Void)?
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var isStacked: Bool { dynamicTypeSize.isAccessibilitySize }
+
     var body: some View {
         Group {
             if let openCabal {
@@ -167,29 +222,54 @@ private struct HoldingRow: View {
     }
 
     private var content: some View {
+        // Side by side until the text sizes stop allowing it. At the accessibility
+        // sizes the name and the money were fighting over one row and both lost:
+        // a cabal called "Weekend investors" truncated and the value scaled itself
+        // down to a size the member turned the text up to avoid.
+        Group {
+            if isStacked {
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                    identity
+                    money(alignment: .leading)
+                }
+            } else {
+                HStack(spacing: MonacoTheme.Space.sm) {
+                    identity
+                    Spacer(minLength: MonacoTheme.Space.s)
+                    money(alignment: .trailing)
+                }
+            }
+        }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+    }
+
+    private var identity: some View {
         HStack(spacing: MonacoTheme.Space.sm) {
             CabalMark(groupId: holding.groupId, name: holding.name, size: 36)
             VStack(alignment: .leading, spacing: 2) {
                 Text(holding.name)
                     .font(MonacoTheme.Typo.rowTitle)
                     .foregroundStyle(MonacoTheme.ink)
-                    .lineLimit(1)
+                    .lineLimit(isStacked ? 2 : 1)
+                    .fixedSize(horizontal: false, vertical: isStacked)
                 Text(subtitle)
                     .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(MonacoTheme.muted)
-                    .lineLimit(1)
+                    .lineLimit(isStacked ? 2 : 1)
                     .minimumScaleFactor(0.85)
-            }
-            Spacer(minLength: MonacoTheme.Space.s)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(UsdAmountFormatter.format(decimalString: holding.valueUsd))
-                    .moneyFont(.row)
-                    .foregroundStyle(MonacoTheme.ink)
-                PnLText(dollarPnl: holding.dollarPnl, style: .caption)
+                    .fixedSize(horizontal: false, vertical: isStacked)
             }
         }
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
+    }
+
+    private func money(alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 2) {
+            Text(UsdAmountFormatter.format(decimalString: holding.valueUsd))
+                .moneyFont(.row)
+                .foregroundStyle(MonacoTheme.ink)
+            PnLText(dollarPnl: holding.dollarPnl, style: .caption)
+        }
     }
 
     /// "12 units · $556.92 yours". The units are the cabal's, the dollars are the
@@ -227,6 +307,10 @@ private struct VoteRow: View {
     let proposal: AssetProposalDTO
     var openProposal: ((AssetProposalDTO) -> Void)?
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var isStacked: Bool { dynamicTypeSize.isAccessibilitySize }
+
     var body: some View {
         Group {
             if let openProposal {
@@ -243,35 +327,53 @@ private struct VoteRow: View {
     }
 
     private var content: some View {
-        HStack(spacing: MonacoTheme.Space.sm) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(MonacoTheme.Typo.rowTitle)
-                    .foregroundStyle(MonacoTheme.ink)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: MonacoTheme.Space.s) {
-                    VoterFaces(voters: proposal.yesVoters)
-                    Text(tally)
-                        .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.muted)
+        Group {
+            if isStacked {
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                    details
+                    status
                 }
-            }
-            Spacer(minLength: MonacoTheme.Space.s)
-            if proposal.myVote == nil {
-                Text("Vote")
-                    .font(MonacoTheme.Typo.caption.weight(.semibold))
-                    .foregroundStyle(MonacoTheme.onBrand)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(MonacoTheme.brandFill))
             } else {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(MonacoTheme.profit)
+                HStack(spacing: MonacoTheme.Space.sm) {
+                    details
+                    Spacer(minLength: MonacoTheme.Space.s)
+                    status
+                }
             }
         }
         .frame(minHeight: 44)
         .contentShape(Rectangle())
+    }
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(MonacoTheme.Typo.rowTitle)
+                .foregroundStyle(MonacoTheme.ink)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: MonacoTheme.Space.s) {
+                VoterFaces(voters: proposal.yesVoters)
+                Text(tally)
+                    .font(MonacoTheme.Typo.caption)
+                    .foregroundStyle(MonacoTheme.muted)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var status: some View {
+        if proposal.myVote == nil {
+            Text("Vote")
+                .font(MonacoTheme.Typo.caption.weight(.semibold))
+                .foregroundStyle(MonacoTheme.onBrand)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(MonacoTheme.brandFill))
+        } else {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(MonacoTheme.profit)
+        }
     }
 
     /// "Weekend investors · buy $500.00" — the cabal leads, because the member is
