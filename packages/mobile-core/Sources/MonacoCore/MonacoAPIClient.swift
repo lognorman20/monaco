@@ -365,6 +365,25 @@ public final class MonacoAPIClient: @unchecked Sendable {
         return try JSONDecoder().decode(PopularAssetsResponseDTO.self, from: data)
     }
 
+    /// What the caller's cabals hold and what they are voting on, for the Stocks
+    /// tab's two social sections. One aggregate rather than a group-view call per
+    /// cabal: the tab needs an answer before its first scroll, not N of them.
+    public func getHeldAssets() async throws -> HeldAssetsResponseDTO {
+        let url = baseURL.appending(path: "v1/assets/held")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(HeldAssetsResponseDTO.self, from: data)
+    }
+
     public func getMarketAsset(symbol: String) async throws -> AssetDetailDTO {
         let url = baseURL.appending(path: "v1/assets/\(symbol)")
         var request = URLRequest(url: url)

@@ -261,6 +261,38 @@ final class MonacoAPIClientTests: XCTestCase {
         XCTAssertEqual(chart.points.count, 2)
     }
 
+    func testAPIClient_getHeldAssets_callsV1AssetsHeldWithTheBearer() async throws {
+        var capturedPath: String?
+        var capturedAuth: String?
+        MockURLProtocol.requestHandler = { request in
+            capturedPath = request.url?.path
+            capturedAuth = request.value(forHTTPHeaderField: "Authorization")
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let body = """
+            {"held":[{"asset":{"symbol":"AAPLc","name":"Apple","tokenAddress":"0xb2","routable":true},"cabals":[],"totalValueUsd":"1.20","totalDollarPnl":"+0.20","mySliceUsd":"0.60"}],"upForVote":[]}
+            """
+            return (response, Data(body.utf8))
+        }
+        let client = MonacoAPIClient(baseURL: URL(string: "https://api.test")!, session: makeMockURLSession(), accessTokenProvider: { TestFixtures.fixtureSessionToken })
+        let held = try await client.getHeldAssets()
+        XCTAssertEqual(capturedPath, "/v1/assets/held")
+        XCTAssertEqual(capturedAuth, "Bearer \(TestFixtures.fixtureSessionToken)")
+        XCTAssertEqual(held.held.first?.mySliceUsd, "0.60")
+    }
+
+    func testAPIClient_getHeldAssets_401IsAnHTTPStatusNotADecodeError() async throws {
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!, Data("{}".utf8))
+        }
+        let client = MonacoAPIClient(baseURL: URL(string: "https://api.test")!, session: makeMockURLSession(), accessTokenProvider: { TestFixtures.fixtureSessionToken })
+        do {
+            _ = try await client.getHeldAssets()
+            XCTFail("a 401 decoded")
+        } catch MonacoAPIError.httpStatus(let status) {
+            XCTAssertEqual(status, 401)
+        }
+    }
+
     func testAPIClient_leaveGroup_callsV1Leave() async throws {
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(url: request.url!, statusCode: 204, httpVersion: nil, headerFields: nil)!

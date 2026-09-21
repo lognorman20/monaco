@@ -16,6 +16,27 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
     public let change24hBasis: MarketPriceBasis?
     /// The instrument named in full: "AAPL".
     public let change24hBasisSymbol: String?
+    /// The day's closes in USDC micros, oldest first, downsampled to about two dozen
+    /// points for the row's sparkline. The list routes batch it onto the page: a row
+    /// must never fetch its own history, or a screen of twenty rows is twenty
+    /// requests that all arrive after the user has scrolled past.
+    ///
+    /// Empty when the backend could not source a day series. An empty series draws
+    /// no line rather than a flat one, which would read as "this stock did not move"
+    /// instead of "we do not know how it moved".
+    public let sparkUsdcMicros: [Int64]
+    /// Which instrument `sparkUsdcMicros` is about, and its symbol ("AAPL").
+    ///
+    /// On Base the backend reads the line and `change24h` from one Pyth series of the
+    /// underlying, so both say `underlying`. They are still labelled separately,
+    /// because a line is only tinted by a day move measured on the same instrument;
+    /// `SparkTint` makes that call. Nil against a backend that does not send them.
+    public let sparkBasis: MarketPriceBasis?
+    public let sparkBasisSymbol: String?
+    /// Kept on the wire for a catalog that one day publishes a logo. The B20 catalog
+    /// does not, so the backend sends none and the app draws its bundled mark for the
+    /// underlying, or the ticker tile.
+    public let logoUrl: String?
 
     public var id: String { symbol }
 
@@ -31,6 +52,12 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         routable || !tokenAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// True when the drawn series and the reported day change are about different
+    /// instruments, so the change's sign says nothing about the line's shape.
+    public var sparkAndChangeDisagreeOnInstrument: Bool {
+        MarketRowBasis.disagree(spark: sparkBasis, change: change24hBasis)
+    }
+
     public init(
         symbol: String,
         name: String,
@@ -39,7 +66,11 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         priceUsdcMicros: Int64? = nil,
         change24h: String? = nil,
         change24hBasis: MarketPriceBasis? = nil,
-        change24hBasisSymbol: String? = nil
+        change24hBasisSymbol: String? = nil,
+        sparkUsdcMicros: [Int64] = [],
+        sparkBasis: MarketPriceBasis? = nil,
+        sparkBasisSymbol: String? = nil,
+        logoUrl: String? = nil
     ) {
         self.symbol = symbol
         self.name = name
@@ -49,6 +80,66 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         self.change24h = change24h
         self.change24hBasis = change24hBasis
         self.change24hBasisSymbol = change24hBasisSymbol
+        self.sparkUsdcMicros = sparkUsdcMicros
+        self.sparkBasis = sparkBasis
+        self.sparkBasisSymbol = sparkBasisSymbol
+        self.logoUrl = logoUrl
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case symbol, name, tokenAddress, routable, priceUsdcMicros
+        case change24h, change24hBasis, change24hBasisSymbol
+        case sparkUsdcMicros = "spark"
+        case sparkBasis, sparkBasisSymbol
+        case logoUrl
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        symbol = try container.decode(String.self, forKey: .symbol)
+        name = try container.decode(String.self, forKey: .name)
+        tokenAddress = try container.decode(String.self, forKey: .tokenAddress)
+        // Required, deliberately. `spark` and `logoUrl` default because a backend
+        // that cannot source them still serves a usable row; `routable` does not,
+        // because defaulting it to false silently disables Buy on every screen in
+        // the app. A backend that stops sending it should fail loudly here.
+        routable = try container.decode(Bool.self, forKey: .routable)
+        priceUsdcMicros = try container.decodeIfPresent(Int64.self, forKey: .priceUsdcMicros)
+        change24h = try container.decodeIfPresent(String.self, forKey: .change24h)
+        change24hBasis = try container.decodeIfPresent(MarketPriceBasis.self, forKey: .change24hBasis)
+        change24hBasisSymbol = try container.decodeIfPresent(String.self, forKey: .change24hBasisSymbol)
+        // An absent array, a null and an empty one all mean "no series to draw".
+        sparkUsdcMicros = try container.decodeIfPresent([Int64].self, forKey: .sparkUsdcMicros) ?? []
+        sparkBasis = try container.decodeIfPresent(MarketPriceBasis.self, forKey: .sparkBasis)
+        sparkBasisSymbol = try container.decodeIfPresent(String.self, forKey: .sparkBasisSymbol)
+        logoUrl = try container.decodeIfPresent(String.self, forKey: .logoUrl)
+    }
+}
+
+/// The one rule for turning a wire `logoUrl` into something the app loads: https and
+/// nothing else. The backend already only sends the issuer's metadata host; this keeps
+/// a stale or misbehaving backend from pointing a member's phone at a plain-http or
+/// odd-scheme URL.
+public enum StockLogoURL {
+    public static func parse(_ raw: String?) -> URL? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty,
+              let url = URL(string: raw), url.scheme?.lowercased() == "https", url.host != nil
+        else { return nil }
+        return url
+    }
+}
+
+extension MarketAssetDTO {
+    /// The issuer's logo for this token, or nil for the ticker tile.
+    public var logoURL: URL? { StockLogoURL.parse(logoUrl) }
+}
+
+/// Whether a row's line and its day move are about different instruments. Nil on
+/// either side is "not stated", which is not a disagreement.
+public enum MarketRowBasis {
+    public static func disagree(spark: MarketPriceBasis?, change: MarketPriceBasis?) -> Bool {
+        guard let spark, let change else { return false }
+        return spark != change
     }
 }
 
