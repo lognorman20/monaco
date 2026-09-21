@@ -8,6 +8,14 @@ import MonacoCore
 /// - `-MonacoChatSampleQA` — show chat with a short sample thread
 /// - `-MonacoChatSampleEmpty` — with the above, start with no messages
 /// - `-MonacoChatSampleOffline` — with the above, every send fails as if offline
+/// - `-MonacoChatSampleBusy` — with the above, a long backlog where another member keeps
+///   posting, so a viewer reading history can be tested against the arriving messages
+/// - `-MonacoChatSampleClosedBlip` — with the above, two polls in a row answer 403 and then
+///   the cabal is readable again: the blip a lagging membership read produces, which must not
+///   tell a member they were thrown out of their cabal
+/// - `-MonacoChatSampleClosedFirstLoad` — with the above, the *first* load answers 403 and
+///   every call after it succeeds: the thread opens closed, and the member has to be left
+///   something to tap that gets them back in
 enum ChatSampleQA {
     static var isEnabled: Bool { arguments.contains("-MonacoChatSampleQA") }
 
@@ -16,11 +24,23 @@ enum ChatSampleQA {
     static func rootView() -> some View {
         let service = SampleGroupChatService(
             startEmpty: arguments.contains("-MonacoChatSampleEmpty"),
-            failSends: arguments.contains("-MonacoChatSampleOffline")
+            failSends: arguments.contains("-MonacoChatSampleOffline"),
+            busy: arguments.contains("-MonacoChatSampleBusy"),
+            closedListCalls: closedListCalls,
+            closedFirstLoad: arguments.contains("-MonacoChatSampleClosedFirstLoad")
         )
         return NavigationStack {
             GroupChatView(groupId: SampleGroupChatService.groupId, groupName: "Weekend investors") { service }
         }
+    }
+
+    /// How many list calls after the first answer 403. One short of the run the screen needs
+    /// before it believes a thread is closed, or one exactly equal to it.
+    private static var closedListCalls: Int {
+        if arguments.contains("-MonacoChatSampleClosedBlip") {
+            return GroupChatClosureTracker.pollsBeforeClosing - 1
+        }
+        return 0
     }
 }
 
@@ -29,9 +49,26 @@ private actor SampleGroupChatService: GroupChatService {
 
     private var messages: [GroupMessageDTO]
     private let failSends: Bool
+    /// Another member posting while the viewer reads. Off unless `-MonacoChatSampleBusy`.
+    private let busy: Bool
+    private var listCalls = 0
+    /// List calls after the first that answer 403 before the cabal becomes readable again.
+    private let closedListCalls: Int
+    private var closedAnswersGiven = 0
+    /// The first load answers 403, so the screen opens in its closed state.
+    private let closedFirstLoad: Bool
 
-    init(startEmpty: Bool, failSends: Bool) {
+    init(
+        startEmpty: Bool,
+        failSends: Bool,
+        busy: Bool = false,
+        closedListCalls: Int = 0,
+        closedFirstLoad: Bool = false
+    ) {
         self.failSends = failSends
+        self.busy = busy
+        self.closedListCalls = closedListCalls
+        self.closedFirstLoad = closedFirstLoad
         guard !startEmpty else {
             messages = []
             return
@@ -51,10 +88,55 @@ private actor SampleGroupChatService: GroupChatService {
             msg("s7", "u-me", "You", "Voted yes.", 9),
             msg("s8", "u-me", "You", "Leo, you're the last vote.", 9),
         ]
+        guard busy else { return }
+        // A thread tall enough that the viewer can scroll away from the bottom, which is
+        // the whole point: a message arriving must not drag them back down.
+        let filler = (1...40).map { index in
+            msg("b\(index)", "u-leo", "Leo", "Backlog line \(index) about the Apple buy.", 1_180 - Double(index))
+        }
+        messages.insert(contentsOf: filler, at: 4)
+        messages.sort { $0.createdAt < $1.createdAt }
     }
 
     func listGroupMessages(groupId: String, before: String?, limit: Int) async throws -> GroupMessagesPageDTO {
-        GroupMessagesPageDTO(messages: messages.reversed())
+        if before == nil {
+            listCalls += 1
+            // Only the first load, so the member's retry finds the cabal readable again.
+            if closedFirstLoad, listCalls == 1 {
+                throw MonacoAPIError.httpStatus(403)
+            }
+            // Otherwise the first load lands, so the thread is on screen and the closed state
+            // shows as the banner over it rather than as a whole-screen error.
+            if listCalls > 1, closedAnswersGiven < closedListCalls {
+                closedAnswersGiven += 1
+                throw MonacoAPIError.httpStatus(403)
+            }
+            // Not on the first load: the test needs to get itself scrolled up first.
+            if busy, listCalls > 1 {
+                messages.append(
+                    GroupMessageDTO(
+                        id: "incoming-\(listCalls)",
+                        groupId: Self.groupId,
+                        authorId: "u-ana",
+                        authorName: "Ana",
+                        body: "Still thinking about Thursday (\(listCalls)).",
+                        createdAt: Self.stamp(Date()),
+                        mine: false
+                    )
+                )
+            }
+        }
+        // Paged the way the API pages: newest first, `before` an exclusive cursor on the
+        // timestamp, and `nextCursor` present only while older messages remain. Returning the
+        // whole thread with no cursor meant `hasOlder` was never true, so "Load earlier" —
+        // and the place-keeping behind it — could not be reached from the harness at all.
+        let newestFirst = messages.reversed().filter { message in
+            guard let before else { return true }
+            return message.createdAt < before
+        }
+        let page = Array(newestFirst.prefix(limit))
+        let hasOlder = newestFirst.count > page.count
+        return GroupMessagesPageDTO(messages: page, nextCursor: hasOlder ? page.last?.createdAt : nil)
     }
 
     func postGroupMessage(groupId: String, body: String) async throws -> GroupMessageDTO {
