@@ -7,7 +7,7 @@ import SwiftUI
 ///
 /// Both screens used to key their whole layout off a transient `isLoadingBalance` flag. Every
 /// reload — after a successful fund, and again whenever the hourly token rotation restarted
-/// `.task(id: auth.accessToken)` — flipped that flag, so the amount pad and the bottom button
+/// what was then `.task(id: auth.accessToken)` — flipped that flag, so the amount pad and the bottom button
 /// were torn out of the hierarchy, the keyboard dropped, and a spinner took their place mid-entry.
 /// The same flag turned a cancelled request into "No connection".
 ///
@@ -72,8 +72,8 @@ final class PlatformBalanceLoader: ObservableObject {
             let fresh = try await fetch(accessToken)
             apply(fresh, token: requestToken)
         } catch {
-            // `.task(id: auth.accessToken)` restarts this load whenever the token rotates, which
-            // cancels the request in flight. That is bookkeeping only while another load is
+            // `.task(id: auth.sessionIdentity)` restarts this load when the member signs in again,
+            // which cancels the request in flight. That is bookkeeping only while another load is
             // already queued to take its place — `requestsInFlight` still counts this one, so
             // anything above 1 is that replacement, and the spinner belongs to it.
             //

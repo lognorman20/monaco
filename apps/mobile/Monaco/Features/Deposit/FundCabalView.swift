@@ -122,7 +122,7 @@ struct FundCabalView: View {
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("fund-cabal-view")
         .monacoToast($toast, bottomInset: 72)
-        .task(id: auth.accessToken) {
+        .task(id: auth.sessionIdentity) {
             if selectedGroupId == nil {
                 selectedGroupId = preselectedGroupId ?? joinedCabals.first?.groupId
             }

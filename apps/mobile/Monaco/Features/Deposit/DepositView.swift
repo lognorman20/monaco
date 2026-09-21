@@ -82,7 +82,7 @@ struct DepositView: View {
         .navigationTitle("Add money")
         .navigationBarTitleDisplayMode(.inline)
         .monacoToast($toast)
-        .task(id: auth.accessToken) {
+        .task(id: auth.sessionIdentity) {
             await loadDepositAddress()
         }
         .pollWhileVisible(every: AddMoneyPolling.balanceInterval, isActive: depositAddress != nil) {
@@ -169,7 +169,7 @@ struct DepositView: View {
             // member pulling on a screen that has no pull-to-refresh.
             errorMessage = "Couldn't load your deposit address."
         } catch where error.isRequestCancellation {
-            // The token rotation restarts `.task(id: auth.accessToken)` and cancels this request.
+            // A new sign-in restarts `.task(id: auth.sessionIdentity)` and cancels this request.
             // Nothing went wrong, so nothing is claimed about the connection — but the spinner is
             // not left running either: a cancellation is not proof that a replacement is on its
             // way (URLSession reports -999 for more than a cancelled task), and the section's

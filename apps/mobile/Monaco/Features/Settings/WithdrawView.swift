@@ -116,7 +116,7 @@ struct WithdrawView: View {
                 onConfirm: { Task { await submitWithdrawal() } }
             )
         }
-        .task(id: auth.accessToken) {
+        .task(id: auth.sessionIdentity) {
             await balanceLoader.load(accessToken: auth.accessToken)
         }
     }
