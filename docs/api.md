@@ -120,6 +120,7 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/groups/{id}/assets` | Tradable catalog for a cabal. Bearer or agent key. |
 | `GET /v1/assets` | Catalog search with prices and the market session. |
 | `GET /v1/assets/popular` | Popular assets with prices and the market session. |
+| `GET /v1/assets/held` | What the caller's cabals own and have open votes on, in one scan. Read-only. |
 | `GET /v1/assets/{symbol}` | Asset detail: price, liquidity, market session, the stats grid, and the underlying equity against the token (`stockVsToken`). |
 | `GET /v1/assets/{symbol}/chart` | Price history. `range` is `1D`, `1W`, `1M`, `3M`, `1Y` or `ALL` (default `1D`); the response echoes the range, names its `source`, and carries the `previousCloseUsdcMicros` baseline. |
 | `POST /v1/groups/{id}/quotes` | Check that a buy or sell can route, and at what price. |
@@ -135,3 +136,29 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `POST /v1/transactions/{id}/retry` ● | Retry a failed swap. Members only; a non-member gets the same `404` as an unknown id. |
 | `POST /v1/groups/{id}/agents/intents` | An agent submits a trade. Agent key only. See [agent trading](agent-trading.md). |
 | `POST /v1/dev/faker` | Seed demo data. Only with `FAKER_ENABLED`, from loopback, on a local database. |
+
+## Market rows
+
+`GET /v1/assets`, `/v1/assets/popular`, `/v1/assets/held` and the holdings on
+`GET /v1/groups/{id}` all carry the same row shape, so the app renders a stock the
+same way wherever it lists one.
+
+| Field | Meaning |
+| --- | --- |
+| `priceUsdcMicros` | Current mark for the xStock's mint, from Jupiter. |
+| `change24h` | The **token's** 24h move on Solana, as a ratio string. |
+| `spark` | About two dozen closes for the row's sparkline. Omitted when no series was cached; the row then draws no line rather than a flat one. |
+| `sparkBasis` / `sparkBasisSymbol` | Which instrument `spark` is about — `underlying` (`AAPL` on NASDAQ) or `token`. |
+| `changeBasis` / `changeBasisSymbol` | Which instrument `change24h` is about. |
+| `logoUrl` | The catalogue's logo for the xStock. Absent when it publishes none; the app falls back to a ticker tile. |
+
+`sparkBasis` and `changeBasis` are not decoration. Pyth serves price history for the
+underlying equity while Jupiter prices the token, and the two genuinely diverge — that
+divergence is what the stock-vs-token card on the detail screen exists to show. A row
+that drew one and tinted it by the other would be asserting they are the same
+instrument, so when these two disagree the app tints the drawn line from the drawn
+series.
+
+`spark` is always served from cache. A list route never fetches price history: a miss
+is a row without a sparkline now and a background warm for the next request, so no
+page of rows can ever wait on a vendor.

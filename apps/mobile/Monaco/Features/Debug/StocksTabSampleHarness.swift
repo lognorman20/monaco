@@ -19,6 +19,10 @@ enum StocksTabSampleScenario: String, CaseIterable {
     case noCabals
     /// The cabal read failed; the catalogue did not. The market stays live.
     case cabalsFailed
+    /// The cabal sections loaded once and then a refresh failed. The rows stay on
+    /// screen — they are the member's own money — with the caption that says they
+    /// are not fresh.
+    case cabalsStale
     /// The catalogue would not load. Nothing else can be shown.
     case popularFailed
     /// Nothing has answered yet: the skeleton.
@@ -41,20 +45,52 @@ struct StocksTabSampleHarness: View {
     let scenario: StocksTabSampleScenario
     @ObservedObject var auth: PrivyAuthService
     @State private var session = AppSessionStore()
+    @State private var model: StocksTabModel
+    @State private var isPrepared = false
+
+    init(scenario: StocksTabSampleScenario, auth: PrivyAuthService) {
+        self.scenario = scenario
+        self.auth = auth
+        _model = State(initialValue: StocksTabModel(dataSource: StocksTabSampleDataSource(scenario: scenario)))
+    }
 
     var body: some View {
         NavigationStack {
-            AssetsTabView(auth: auth, dataSource: StocksTabSampleDataSource(scenario: scenario))
+            if isPrepared {
+                AssetsTabView(auth: auth, model: model)
+            } else {
+                Color.clear
+            }
         }
         .environment(session)
         .tint(MonacoTheme.ink)
+        .task {
+            await prepare()
+            isPrepared = true
+        }
+    }
+
+    /// Most scenarios are one canned answer per read. `cabalsStale` is two: the
+    /// cabal sections have to land before a refresh can fail on top of them, and
+    /// that sequence is the state worth screenshotting.
+    private func prepare() async {
+        guard scenario == .cabalsStale else { return }
+        await model.loadSocial()
+        await model.loadSocial()
     }
 }
 
 /// Canned answers for the three reads the tab makes. `loading` never returns,
 /// which is how the skeleton is screenshotted.
-private struct StocksTabSampleDataSource: StocksTabDataSource {
+private final class StocksTabSampleDataSource: StocksTabDataSource {
     let scenario: StocksTabSampleScenario
+    /// `cabalsStale` answers once and then stops, which is what a refresh failing
+    /// over rows that are already on screen looks like.
+    private var heldReads = 0
+
+    init(scenario: StocksTabSampleScenario) {
+        self.scenario = scenario
+    }
 
     private var market: MarketStatusDTO {
         scenario == .afterHours ? MarketSampleData.sessionAfterHours : MarketSampleData.sessionOpen
@@ -96,6 +132,11 @@ private struct StocksTabSampleDataSource: StocksTabDataSource {
     func held() async throws -> HeldAssetsResponse {
         if scenario == .loading { try await Task.sleep(for: .seconds(3600)) }
         if scenario == .cabalsFailed { throw SampleStocksFailure() }
+        if scenario == .cabalsStale {
+            heldReads += 1
+            if heldReads > 1 { throw SampleStocksFailure() }
+            return MarketSampleData.heldAssetsResponse(market: market)
+        }
         if scenario == .noCabals || scenario == .popularFailed {
             return HeldAssetsResponse(held: [], upForVote: [], market: market)
         }

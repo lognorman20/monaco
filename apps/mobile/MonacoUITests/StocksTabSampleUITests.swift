@@ -59,7 +59,7 @@ final class StocksTabSampleUITests: XCTestCase {
     /// attachment per state the backend can put the tab in.
     @MainActor
     func testEveryScenarioDraws() throws {
-        for scenario in ["full", "noCabals", "cabalsFailed", "popularFailed", "loading", "noSeries", "afterHours"] {
+        for scenario in ["full", "noCabals", "cabalsFailed", "cabalsStale", "popularFailed", "loading", "noSeries", "afterHours"] {
             let app = launch(scenario)
             waitForTab(app, scenario)
             attachScreenshot(app, name: "stocks-\(scenario)")
@@ -153,6 +153,28 @@ final class StocksTabSampleUITests: XCTestCase {
         XCTAssertFalse(anyElement(app, "assets-row-TSLAx").exists, "the search results should be gone")
     }
 
+    /// A cabal read that lands and is then not refreshed keeps its rows — they are
+    /// the member's own money — but says so. Silence here reads as "this is fresh".
+    @MainActor
+    func testAStaleCabalSectionSaysItIsStale() throws {
+        let app = launch("cabalsStale")
+        waitForTab(app, "cabalsStale")
+
+        XCTAssertTrue(
+            anyElement(app, "assets-held-AAPLx").waitForExistence(timeout: 25),
+            "the rows should survive the failed refresh"
+        )
+        XCTAssertTrue(
+            anyElement(app, "assets-held-stale").waitForExistence(timeout: 10),
+            "a stale cabal section must carry the same caption the search region uses"
+        )
+        XCTAssertFalse(
+            app.staticTexts["Could not load your cabals"].exists,
+            "rows on screen is not the failure state"
+        )
+        attachScreenshot(app, name: "stocks-cabals-stale")
+    }
+
     /// The rows stack at accessibility text sizes rather than squeezing the name
     /// out, and the tab still draws.
     @MainActor
@@ -166,6 +188,58 @@ final class StocksTabSampleUITests: XCTestCase {
         // at accessibility text sizes.
         XCTAssertTrue(anyElement(app, "assets-held-AAPLx").waitForExistence(timeout: 30))
         attachScreenshot(app, name: "stocks-ax5")
+    }
+
+    /// The mover strip is a scanning affordance: several cards at a glance, swiped
+    /// sideways. At AX5 one card fills the screen, and the card was pinned to a flat
+    /// 148pt while everything inside it scaled, so the price and the pill overflowed
+    /// it. The strip steps aside instead — every mover is in Popular below.
+    ///
+    /// This is the gap the old AX5 test left: it only ever asked for a held row and
+    /// never looked at the strip at all.
+    @MainActor
+    func testTheMoverStripStepsAsideAtAccessibilityTextSizes() throws {
+        let normal = launch("full")
+        waitForTab(normal, "full")
+        XCTAssertTrue(
+            normal.staticTexts["Top movers"].waitForExistence(timeout: 25),
+            "the strip should be there at the default text size"
+        )
+        XCTAssertTrue(anyElement(normal, "assets-mover-AAPLx").exists, "a mover card should be built")
+        attachScreenshot(normal, name: "stocks-movers-default")
+        normal.terminate()
+
+        let large = launch("full", textSize: "UICTContentSizeCategoryAccessibilityXXXL")
+        waitForTab(large, "full at AX5")
+        XCTAssertTrue(anyElement(large, "assets-held-AAPLx").waitForExistence(timeout: 30))
+        XCTAssertFalse(
+            large.staticTexts["Top movers"].exists,
+            "the strip should be hidden at accessibility text sizes rather than overflowing"
+        )
+        XCTAssertFalse(anyElement(large, "assets-mover-AAPLx").exists)
+        attachScreenshot(large, name: "stocks-movers-ax5")
+    }
+
+    /// The day-change pill is its own control at the trailing edge of a row whose
+    /// job is to navigate, and it now carries a 44pt tap target rather than a 20pt
+    /// one. Growing it must not grow what it swallows: the row's own hit point is
+    /// still the row's.
+    ///
+    /// Asked of a row in the first section, not of a popular one — the browse list
+    /// is a LazyVStack and the fourth section is below the fold, where a tap lands
+    /// on coordinates rather than on the row.
+    @MainActor
+    func testTappingTheMiddleOfARowOpensTheStock() throws {
+        let app = launch("full")
+        waitForTab(app, "full")
+
+        let row = anyElement(app, "assets-held-AAPLx")
+        XCTAssertTrue(row.waitForExistence(timeout: 25))
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+
+        let leftTheTab = NSPredicate(format: "exists == false")
+        expectation(for: leftTheTab, evaluatedWith: app.navigationBars["Stocks"])
+        waitForExpectations(timeout: 25)
     }
 
     /// Tapping a row opens the stock it is about. The pushed screen is the live

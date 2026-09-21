@@ -444,6 +444,51 @@ struct StocksTabModelTests {
         #expect(!model.heldRows.isEmpty)
     }
 
+    /// The rows staying is right; the rows staying *silently* is not. The figure on
+    /// them is "your slice $294.70", and nothing else on screen said it was old.
+    @Test func aFailedCabalRefreshMarksTheRowsStale() async throws {
+        let source = StubStocksDataSource()
+        source.heldResponse = MarketSampleData.heldAssetsResponse()
+        let model = StocksTabModel(dataSource: source)
+        await model.loadSocial()
+        #expect(!model.socialRefreshFailed)
+
+        source.heldError = Monaco.MonacoAPIError.httpStatus(500)
+        await model.loadSocial()
+
+        #expect(model.socialRefreshFailed, "a member must be told the money on screen is not fresh")
+        #expect(!model.heldRows.isEmpty)
+    }
+
+    @Test func aSuccessfulRefreshClearsTheStaleMark() async throws {
+        let source = StubStocksDataSource()
+        source.heldResponse = MarketSampleData.heldAssetsResponse()
+        let model = StocksTabModel(dataSource: source)
+        await model.loadSocial()
+        source.heldError = Monaco.MonacoAPIError.httpStatus(500)
+        await model.loadSocial()
+        #expect(model.socialRefreshFailed)
+
+        source.heldError = nil
+        await model.loadSocial()
+
+        #expect(!model.socialRefreshFailed)
+        #expect(model.socialState == .loaded)
+    }
+
+    /// An empty section that failed is `.failed`, which has its own retry. It is not
+    /// also stale — there is nothing on screen to be stale.
+    @Test func aFirstCabalReadThatFailsIsNotStaleItIsFailed() async throws {
+        let source = StubStocksDataSource()
+        source.heldError = Monaco.MonacoAPIError.httpStatus(500)
+        let model = StocksTabModel(dataSource: source)
+
+        await model.loadSocial()
+
+        #expect(model.socialState == .failed)
+        #expect(!model.socialRefreshFailed)
+    }
+
     @Test func anExpiredSessionFromTheCabalReadIsReported() async throws {
         let source = StubStocksDataSource()
         source.heldError = Monaco.MonacoAPIError.httpStatus(401)

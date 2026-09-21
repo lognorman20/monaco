@@ -113,11 +113,27 @@ private struct PotHoldingRow: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .body) private var titleWidthFloor = MonacoRowLayout.baseMinimumTitleWidth
+    @AppStorage(DayChangeModeStorage.key) private var storedMode = DayChangeMode.percent.rawValue
 
     private var layout: MonacoRowLayout {
         MonacoRowLayout(dynamicTypeSize: dynamicTypeSize, scaledTitleWidthFloor: titleWidthFloor)
     }
 
+    private var currentMode: DayChangeMode { DayChangeMode(rawValue: storedMode) ?? .percent }
+
+    /// The market's day pill sits beside the value rather than under it.
+    ///
+    /// `MonacoRow` stacks everything it is given in the trailing column, so four
+    /// things there — value, the cabal's P&L, the market's day pill and an "After
+    /// hours" caption — turned a 60pt row into roughly 120pt and put the position's
+    /// green P&L directly above the market's red day pill, which reads as one
+    /// figure contradicting itself. The two are different measurements: the P&L is
+    /// this cabal's, since it bought; the pill is the market's, today. Side by side
+    /// they read as two, which is what they are.
+    ///
+    /// After hours becomes the same moon glyph the Stocks tab puts next to a price,
+    /// rather than a line of prose. It is one signal in one shape across the app,
+    /// and it costs the row no height.
     var body: some View {
         MonacoRow(
             title: AssetDisplayNames.name(forSymbol: row.symbol) ?? AssetSymbolFormatter.display(row.symbol),
@@ -129,24 +145,48 @@ private struct PotHoldingRow: View {
         } trailing: {
             HStack(spacing: MonacoTheme.Space.s) {
                 if let spark, !layout.isStacked {
-                    Sparkline(series: spark, tone: PnLTone(change24h: row.change24h), width: 44, height: 20)
+                    Sparkline(series: spark, tone: sparkTone, width: 44, height: 20)
                 }
                 VStack(alignment: .trailing, spacing: 2) {
-                    MoneyText(decimalString: row.valueUsd, style: .row)
+                    HStack(spacing: MonacoTheme.Space.s) {
+                        if row.afterHours == true {
+                            Image(systemName: "moon.fill")
+                                .font(.caption2)
+                                .foregroundStyle(MonacoTheme.warning)
+                                .accessibilityLabel("After hours")
+                                .accessibilityIdentifier("pot-after-hours-\(row.symbol)")
+                        }
+                        MoneyText(decimalString: row.valueUsd, style: .row)
+                        if row.change24h != nil, !layout.isStacked {
+                            DayChangePill(change24h: row.change24h, priceUsdcMicros: row.markUsdcMicros)
+                                .accessibilityIdentifier("pot-row-change-\(row.symbol)")
+                        }
+                    }
                     PnLText(dollarPnl: row.dollarPnl, style: .caption)
                         .accessibilityIdentifier("pot-row-pnl-\(row.symbol)")
+                    // At accessibility sizes the row is stacked anyway, so the pill
+                    // goes back under the value rather than being squeezed out.
+                    if row.change24h != nil, layout.isStacked {
+                        DayChangePill(change24h: row.change24h, priceUsdcMicros: row.markUsdcMicros)
+                            .accessibilityIdentifier("pot-row-change-\(row.symbol)")
+                    }
                 }
             }
-            if row.change24h != nil {
-                DayChangePill(change24h: row.change24h, priceUsdcMicros: row.markUsdcMicros)
-                    .accessibilityIdentifier("pot-row-change-\(row.symbol)")
-            }
-            if row.afterHours == true {
-                Text("After hours")
-                    .font(MonacoTheme.Typo.micro)
-                    .foregroundStyle(MonacoTheme.warning)
-                    .accessibilityIdentifier("pot-after-hours-\(row.symbol)")
-            }
         }
+        // VoiceOver can hear the day change on this row; without this it could not
+        // switch it, which StockListRow has offered all along.
+        .accessibilityAction(named: Text(currentMode.switchActionName)) {
+            storedMode = currentMode.next.rawValue
+        }
+    }
+
+    /// The same decision the Stocks tab's rows make, from the same shared type:
+    /// when the drawn series and the reported change are different instruments,
+    /// the line is tinted from the line.
+    private var sparkTone: PnLTone {
+        PnLTone(
+            sparkTint: SparkTint(series: spark, basesDisagree: row.sparkAndChangeDisagreeOnInstrument),
+            change24h: row.change24h
+        )
     }
 }

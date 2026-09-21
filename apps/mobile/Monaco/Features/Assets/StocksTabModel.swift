@@ -97,6 +97,12 @@ final class StocksTabModel {
     private(set) var heldRows: [MarketRowData] = []
     private(set) var voteRows: [MarketRowData] = []
     private(set) var socialState: SectionState = .loading
+    /// A refresh of the cabal sections that failed while rows were already on
+    /// screen. The rows stay — a stale holding beats an empty section — but the
+    /// figure in question is "your slice $294.70", and leaving it unmarked lets a
+    /// member read a stale number as a live one. The search region has said this
+    /// all along; the cabal sections did not.
+    private(set) var socialRefreshFailed = false
     /// The exchange session the last page was priced in, for the moon glyph on the
     /// rows. An envelope fact, not a per-row one.
     private(set) var afterHours = false
@@ -224,10 +230,16 @@ final class StocksTabModel {
             }
             if let market = response.market { afterHours = market.afterHours }
             socialLoadedAt = now
+            socialRefreshFailed = false
             socialState = .loaded
         } catch {
             handle(error) {
-                guard heldRows.isEmpty, voteRows.isEmpty else { return }
+                guard heldRows.isEmpty, voteRows.isEmpty else {
+                    // Keep the rows, but say they are not fresh. Silence here is
+                    // the same as claiming they are.
+                    socialRefreshFailed = true
+                    return
+                }
                 socialState = .failed
             }
         }

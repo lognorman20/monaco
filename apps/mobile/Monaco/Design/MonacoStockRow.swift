@@ -38,6 +38,22 @@ extension PnLTone {
             self = .profit
         }
     }
+
+    /// The tone of a row's sparkline, which is not always the tone of its pill.
+    ///
+    /// The line is Pyth's underlying equity and the pill is Jupiter's price for the
+    /// xStock token, and those two genuinely diverge. When the row knows they are
+    /// different instruments it tints the line from the line, so the colour is
+    /// about the picture on screen rather than about a number measured somewhere
+    /// else.
+    init(sparkTint: SparkTint, change24h: String?) {
+        switch sparkTint {
+        case .reportedDayChange:
+            self.init(change24h: change24h)
+        case let .series(rising, flat):
+            self = flat ? .flat : (rising ? .profit : .loss)
+        }
+    }
 }
 
 /// The filled capsule on the right of a market row: "+1.24%", or "+$2.84" once
@@ -66,6 +82,15 @@ struct DayChangePill: View {
 
     private var isReadable: Bool { percentText != "—" }
 
+    /// How far the hit area reaches past the drawn capsule on each side.
+    ///
+    /// The capsule is about 22pt tall, which is the right size to read and the
+    /// wrong size to hit — under the HIG's 44pt minimum, and the UI test that opens
+    /// a stock had to aim a quarter of the way into the row to miss it. The padding
+    /// is applied for hit testing and then taken straight back off, so the target
+    /// grows without the row growing with it.
+    private static let tapTargetPadding: CGFloat = 11
+
     var body: some View {
         Text(label)
             .moneyFont(style, weight: .semibold)
@@ -75,11 +100,13 @@ struct DayChangePill: View {
             .padding(.horizontal, style == .caption ? 8 : 12)
             .padding(.vertical, style == .caption ? 4 : 6)
             .background(Capsule().fill(isReadable ? tone.wash : MonacoTheme.surfaceSunken))
-            .contentShape(Capsule())
+            .padding(DayChangePill.tapTargetPadding)
+            .contentShape(Rectangle())
             // A plain tap gesture inside a row-sized Button is swallowed by the row.
             // A high-priority one is not, which is what lets the pill be its own
             // control without the row being taken apart into two hit areas.
             .highPriorityGesture(TapGesture().onEnded { toggle() })
+            .padding(-DayChangePill.tapTargetPadding)
             .accessibilityLabel("Day change")
             .accessibilityValue(DayChangeSpeech.value(change24h: change24h, priceUsdcMicros: priceUsdcMicros, mode: mode))
     }
@@ -146,7 +173,10 @@ struct StockListRow: View {
                     Rectangle()
                         .fill(MonacoTheme.hairline)
                         .frame(height: 1)
-                        .padding(.leading, layout.separatorLeadingInset)
+                        // Derived from this row's own 40pt mark, so the separator
+                        // starts where the text does — as it does in every other
+                        // list in the app.
+                        .padding(.leading, layout.separatorLeadingInset(markSize: StockListRow.markSize))
                 }
             }
             .accessibilityElement(children: .combine)
@@ -176,8 +206,11 @@ struct StockListRow: View {
                 mark
                 labels.frame(minWidth: layout.minimumTitleWidth, alignment: .leading)
                 if let spark = row.spark {
-                    Sparkline(series: spark, tone: PnLTone(change24h: asset.change24h))
-                        .padding(.horizontal, MonacoTheme.Space.xs)
+                    Sparkline(
+                        series: spark,
+                        tone: PnLTone(sparkTint: row.sparkTint, change24h: asset.change24h)
+                    )
+                    .padding(.horizontal, MonacoTheme.Space.xs)
                 }
                 VStack(alignment: .trailing, spacing: 3) {
                     price
@@ -188,9 +221,14 @@ struct StockListRow: View {
         }
     }
 
+    /// The mark on a market row. Smaller than `MonacoRow`'s 44pt because a market
+    /// row carries a sparkline column as well, and the separator inset is derived
+    /// from this rather than assumed.
+    static let markSize: CGFloat = 40
+
     private var mark: some View {
-        StockMark(symbol: asset.symbol, size: 40, logoURL: asset.logoURL)
-            .frame(width: 40, height: 40)
+        StockMark(symbol: asset.symbol, size: StockListRow.markSize, logoURL: asset.logoURL)
+            .frame(width: StockListRow.markSize, height: StockListRow.markSize)
     }
 
     private var labels: some View {
@@ -231,10 +269,32 @@ struct StockListRow: View {
 
 /// A Webull-style mover card for a horizontal strip: logo, ticker, the day's shape
 /// and the move. Narrow on purpose — a strip is scanned, not read.
+///
+/// The card scales with the text inside it. It used to be pinned to a flat 148pt
+/// while its ticker, price and pill all grew, so at large text sizes the price and
+/// the pill overflowed the card they sit in. `StockListRow` had the stacked layout
+/// for this; the card had nothing.
 struct StockMoverCard: View {
     let row: MarketRowData
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body) private var cardWidth = StockMoverCard.baseWidth
+    @ScaledMetric(relativeTo: .body) private var sparkWidth = StockMoverCard.baseSparkWidth
+    @ScaledMetric(relativeTo: .body) private var sparkHeight = StockMoverCard.baseSparkHeight
+    @AppStorage(DayChangeModeStorage.key) private var storedMode = DayChangeMode.percent.rawValue
+
+    static let baseWidth: CGFloat = 148
+    static let baseSparkWidth: CGFloat = 104
+    static let baseSparkHeight: CGFloat = 30
+    /// Past this the card would be wider than a phone, and a horizontal strip of
+    /// one-and-a-bit cards is not a scanning affordance any more. The strip hides
+    /// itself at accessibility sizes instead — see `StockMoverStrip.isAvailable`.
+    static let maximumWidth: CGFloat = 260
+
     private var asset: MarketAssetDTO { row.asset }
+    private var currentMode: DayChangeMode { DayChangeMode(rawValue: storedMode) ?? .percent }
+
+    private var width: CGFloat { min(cardWidth, StockMoverCard.maximumWidth) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
@@ -247,25 +307,50 @@ struct StockMoverCard: View {
                     .minimumScaleFactor(0.7)
             }
             if let spark = row.spark {
-                Sparkline(series: spark, tone: PnLTone(change24h: asset.change24h), width: 104, height: 30)
+                Sparkline(
+                    series: spark,
+                    tone: PnLTone(sparkTint: row.sparkTint, change24h: asset.change24h),
+                    width: min(sparkWidth, StockMoverCard.maximumWidth - 2 * MonacoTheme.Space.sm),
+                    height: sparkHeight
+                )
             } else {
                 // Keeps every card the same height, so a symbol without history does
                 // not make the strip ragged.
-                Color.clear.frame(height: 30)
+                Color.clear.frame(height: sparkHeight)
             }
             HStack(spacing: MonacoTheme.Space.s) {
                 if let micros = asset.priceUsdcMicros {
                     MoneyText(micros: micros, style: .caption)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
                 Spacer(minLength: 0)
                 DayChangePill(change24h: asset.change24h, priceUsdcMicros: asset.priceUsdcMicros)
+                    .layoutPriority(1)
             }
         }
         .padding(MonacoTheme.Space.sm)
-        .frame(width: 148, alignment: .leading)
+        .frame(width: width, alignment: .leading)
         .background(MonacoTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: MonacoTheme.Radius.tile, style: .continuous))
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+        // VoiceOver can hear the day change on this surface; without this it could
+        // not switch it, which `StockListRow` has offered all along.
+        .accessibilityAction(named: Text(currentMode.switchActionName)) {
+            storedMode = currentMode.next.rawValue
+        }
+    }
+}
+
+/// Whether the Top movers strip is worth drawing at the current text size.
+///
+/// It is a scanning affordance: several cards at a glance, swiped sideways. At
+/// accessibility sizes one card fills the screen, so the strip stops being a way
+/// to scan and becomes a second, worse copy of the list below it. Hiding it is the
+/// honest answer — nothing is lost, because every mover is in Popular too.
+enum StockMoverStrip {
+    static func isAvailable(at dynamicTypeSize: DynamicTypeSize) -> Bool {
+        !dynamicTypeSize.isAccessibilitySize
     }
 }

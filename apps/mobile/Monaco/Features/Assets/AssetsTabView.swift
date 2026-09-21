@@ -15,14 +15,18 @@ struct AssetsTabView: View {
     // tab does not re-run it. The shell publishes which tab is showing for exactly this.
     @Environment(\.selectedMainTab) private var selectedMainTab
     @Environment(\.hostMainTab) private var hostMainTab
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var model: StocksTabModel
     @State private var searchQuery = ""
     @State private var selectedSymbol: String?
 
-    init(auth: PrivyAuthService, dataSource: StocksTabDataSource? = nil) {
+    /// `model` is the seam the sample harness uses: some states — rows on screen
+    /// plus a failed refresh — are a sequence of two responses, not one canned
+    /// answer, so the harness drives the model into them before the view appears.
+    init(auth: PrivyAuthService, dataSource: StocksTabDataSource? = nil, model: StocksTabModel? = nil) {
         self.auth = auth
-        _model = State(initialValue: StocksTabModel(dataSource: dataSource ?? LiveStocksTabDataSource(auth: auth)))
+        _model = State(initialValue: model ?? StocksTabModel(dataSource: dataSource ?? LiveStocksTabDataSource(auth: auth)))
     }
 
     var body: some View {
@@ -108,12 +112,7 @@ struct AssetsTabView: View {
         case .results:
             ScrollView {
                 if model.refreshFailed {
-                    Text("Couldn't refresh — these prices may be out of date.")
-                        .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.warning)
-                        .frame(maxWidth: .infinity)
-                        .padding(.bottom, MonacoTheme.Space.s)
-                        .accessibilityIdentifier("assets-refresh-failed")
+                    staleCaption(identifier: "assets-refresh-failed")
                 }
                 assetList(model.resultRows, identifierPrefix: "assets-row")
                 if model.loadMoreFailed {
@@ -196,11 +195,27 @@ struct AssetsTabView: View {
                 }
             } else {
                 section("In your cabals", identifier: "assets-held") {
+                    if model.socialRefreshFailed {
+                        staleCaption(identifier: "assets-held-stale")
+                    }
                     assetList(model.heldRows, identifierPrefix: "assets-held")
                 }
             }
         }
     }
+
+    /// The same sentence the search region uses. One wording for "what you are
+    /// looking at may be out of date", wherever it happens.
+    private func staleCaption(identifier: String) -> some View {
+        Text(AssetsTabView.staleRefreshCaption)
+            .font(MonacoTheme.Typo.caption)
+            .foregroundStyle(MonacoTheme.warning)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, MonacoTheme.Space.s)
+            .accessibilityIdentifier(identifier)
+    }
+
+    static let staleRefreshCaption = "Couldn't refresh — these prices may be out of date."
 
     @ViewBuilder
     private var upForVoteSection: some View {
@@ -215,7 +230,10 @@ struct AssetsTabView: View {
 
     @ViewBuilder
     private var topMoversSection: some View {
-        if !model.moverRows.isEmpty {
+        // Hidden at accessibility text sizes: a mover card is a thing you scan
+        // several of, and at AX5 one card fills the screen. Every mover is in
+        // Popular below, so nothing is lost by leaving it out.
+        if !model.moverRows.isEmpty, StockMoverStrip.isAvailable(at: dynamicTypeSize) {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
                 MonacoSectionHeader("Top movers")
                 ScrollView(.horizontal, showsIndicators: false) {

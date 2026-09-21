@@ -214,9 +214,23 @@ struct MonacoRowLayout: Equatable {
     /// 96pt is about five characters at that size, so a row with a wide figure went on truncating.
     var minimumTitleWidth: CGFloat? { isStacked ? nil : scaledTitleWidthFloor }
 
+    /// The mark size `separatorLeadingInset` is tuned for: `MonacoRow` draws a 44pt one.
+    static let baseMarkSize: CGFloat = 44
+
     /// The separator lines up under the labels in the inline layout, and runs the full width
     /// of a stacked row, where the figures sit below the mark.
-    var separatorLeadingInset: CGFloat { isStacked ? MonacoTheme.Space.m : 72 }
+    var separatorLeadingInset: CGFloat { separatorLeadingInset(markSize: MonacoRowLayout.baseMarkSize) }
+
+    /// The same inset for a row whose mark is not 44pt.
+    ///
+    /// It is derived rather than written down because a hard-coded 72 is only right
+    /// for one mark size: `StockListRow` draws a 40pt mark, so its text starts at
+    /// 68pt while its separator started at 72pt. Four points, and exactly the four
+    /// points that show when the Stocks list sits next to the cabal list.
+    func separatorLeadingInset(markSize: CGFloat) -> CGFloat {
+        guard !isStacked else { return MonacoTheme.Space.m }
+        return MonacoTheme.Space.m + markSize + MonacoTheme.Space.sm
+    }
 }
 
 extension MonacoRow where Trailing == EmptyView {
