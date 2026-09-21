@@ -222,17 +222,17 @@ struct LiveCabalPictureWriter: CabalPictureWriting {
     }
 
     /// Runs one write with the token current now. A 401 (the transport has already
-    /// tried a refresh) is reported against that token and comes back as
-    /// `RejectedSession`.
+    /// tried a refresh) is tied to that token by `RejectedSession.sending`, the same
+    /// path every other screen's reads go through, then reported and rethrown.
     private func sending<T>(_ write: (MonacoCore.MonacoAPIClient) async throws -> T) async throws -> T {
         guard let token = currentToken(), !token.isEmpty else {
             throw CabalPictureWriteError.notSignedIn
         }
         do {
-            return try await write(makeClient(token))
-        } catch MonacoCore.MonacoAPIError.httpStatus(401) {
-            await reportRejected(token)
-            throw RejectedSession(token: token)
+            return try await RejectedSession.sending(token: token) { try await write(makeClient($0)) }
+        } catch let rejected as RejectedSession {
+            await reportRejected(rejected.token)
+            throw rejected
         }
     }
 }
