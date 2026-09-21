@@ -61,6 +61,8 @@ struct GroupDetailView: View {
     @State private var viewerMayBeAdmin = true
     @State private var decidingRequestIDs: Set<String> = []
     @State private var proposalService: LiveProposalFeedService
+    /// Owns the cabal picture: which one is current, and whether a write is in flight.
+    @StateObject private var pictureEditor: CabalPictureEditor
     @State private var proposalRefreshCount = 0
     @State private var route: GroupDetailRoute?
     @State private var showProposeSheet = false
@@ -105,6 +107,11 @@ struct GroupDetailView: View {
         self.onLeft = onLeft
         _isLoading = State(initialValue: initialView == nil)
         _proposalService = State(initialValue: LiveProposalFeedService(auth: auth))
+        _pictureEditor = StateObject(wrappedValue: CabalPictureEditor(
+            groupId: groupId,
+            pictureUrl: initialView?.pictureUrl,
+            writer: LiveCabalPictureWriter(auth: auth)
+        ))
     }
 
     private var displayName: String {
@@ -219,7 +226,8 @@ struct GroupDetailView: View {
                     Task { await decideJoinRequest(request, approve: approve) }
                 },
                 onToast: { toast = $0 },
-                onHeroScrolledAway: { heroScrolledAway = $0 }
+                onHeroScrolledAway: { heroScrolledAway = $0 },
+                pictureEditor: pictureEditor
             )
         } else if let errorMessage {
             statusCard {
@@ -379,6 +387,9 @@ struct GroupDetailView: View {
             }
         }
 
+        // Taken before the request goes out: a picture write that starts after this
+        // point makes the reply's picture stale, however late the reply lands.
+        let pictureTicket = pictureEditor.beginRefresh()
         async let viewLoad = apiClient.getGroupView(accessToken: token, groupId: groupId)
         async let activityLoad = apiClient.getGroupActivity(accessToken: token, groupId: groupId)
         async let joinLoad = readJoinRequests(token: token)
@@ -397,6 +408,9 @@ struct GroupDetailView: View {
 
         if let loadedView {
             QuietUpdate.apply(loadedView, over: groupView) { groupView = $0 }
+            // The editor keeps its own copy of the picture, because a refresh that
+            // started before an upload must not land after it and put the old one back.
+            pictureEditor.adoptFromRefresh(loadedView.pictureUrl, ticket: pictureTicket)
             if errorMessage != nil { errorMessage = nil }
         }
         if let activity {
@@ -708,12 +722,18 @@ struct GroupDetailContent: View {
     let onDecideJoinRequest: (JoinRequestDTO, Bool) -> Void
     let onToast: (MonacoToast) -> Void
     var onHeroScrolledAway: (Bool) -> Void = { _ in }
+    /// Nil on read-only surfaces; the hero then draws a plain mark.
+    var pictureEditor: CabalPictureEditor?
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 32) {
                 VStack(spacing: 20) {
-                    GroupHeroSection(view: view)
+                    GroupHeroSection(
+                        view: view,
+                        pictureEditor: pictureEditor,
+                        onPictureResult: onToast
+                    )
                     GroupActionRow(slice: view.you, onRoute: onRoute, onPropose: onPropose)
                 }
 

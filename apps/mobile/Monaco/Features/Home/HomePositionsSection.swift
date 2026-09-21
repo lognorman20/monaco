@@ -36,6 +36,7 @@ struct HomePositionsSection: View {
                             CabalPositionRow(
                                 groupId: row.groupId,
                                 name: row.name,
+                                pictureUrl: row.pictureUrl,
                                 potValueUsd: potValuesUsd[row.groupId],
                                 figures: CabalPositionRowFigures(
                                     equityUsd: row.equityUsd,
@@ -60,6 +61,8 @@ struct HomePositionsSection: View {
 struct CabalPositionRow: View {
     let groupId: String
     let name: String
+    /// The cabal's picture; nil draws its tinted initials.
+    var pictureUrl: String? = nil
     let potValueUsd: String?
     /// Nil while the member's position has not loaded; the row then shows no figures.
     let figures: CabalPositionRowFigures?
@@ -71,7 +74,7 @@ struct CabalPositionRow: View {
             subtitle: CabalPositionRowFigures.potSubtitle(potValueUsd: potValueUsd),
             chevron: true,
             isLast: isLast,
-            leading: { CabalMark(groupId: groupId, name: name) },
+            leading: { CabalMark(groupId: groupId, name: name, pictureUrl: pictureUrl) },
             trailing: {
                 if let figures {
                     MoneyText(decimalString: figures.equityUsd, style: .row)

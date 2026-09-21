@@ -45,8 +45,9 @@ type createGroupResponse struct {
 }
 
 type getGroupResponse struct {
-	Name            string `json:"name"`
-	TreasuryAddress string `json:"treasuryAddress"`
+	Name            string  `json:"name"`
+	TreasuryAddress string  `json:"treasuryAddress"`
+	PictureURL      *string `json:"pictureUrl"`
 }
 
 type joinGroupStatusResponse struct {
@@ -394,6 +395,7 @@ func (h *GroupHandlers) GetGroupHandler(w http.ResponseWriter, r *http.Request) 
 	_ = json.NewEncoder(w).Encode(getGroupResponse{
 		Name:            result.Name,
 		TreasuryAddress: result.TreasuryAddress,
+		PictureURL:      optionalString(result.PictureURL),
 	})
 	logJSONOK(ctx, log, "ok", "group_id", groupID)
 }
@@ -442,6 +444,8 @@ type groupViewResponse struct {
 	Members         []groupViewMemberRowResponse `json:"members"`
 	Proposals       []any                        `json:"proposals"`
 	Agent           *groupViewAgentResponse      `json:"agent,omitempty"`
+	PictureURL      *string                      `json:"pictureUrl"`
+	IsCreator       bool                         `json:"isCreator"`
 }
 
 // GetGroupViewHandler handles GET /v1/groups/{id}/view.
@@ -526,8 +530,10 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 			DollarPnL:     result.You.DollarPnL,
 			PercentReturn: result.You.PercentReturn,
 		},
-		Members:   members,
-		Proposals: []any{},
+		Members:    members,
+		PictureURL: optionalString(result.PictureURL),
+		IsCreator:  result.IsCreator,
+		Proposals:  []any{},
 		Agent:     agentResp,
 	})
 	logJSONOK(ctx, log, "ok", "group_id", groupID)

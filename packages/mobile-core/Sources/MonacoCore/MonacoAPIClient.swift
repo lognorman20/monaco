@@ -166,6 +166,42 @@ public final class MonacoAPIClient: @unchecked Sendable {
         return try JSONDecoder().decode(MeDTO.self, from: data)
     }
 
+    /// `POST /v1/groups/{id}/picture` — multipart field `picture`; jpeg, png or
+    /// webp up to 2MB (413 over that). Only the cabal's creator may call it: a
+    /// member who is not gets 403, anyone else 404.
+    public func uploadCabalPicture(groupID: String, imageData: Data, mimeType: String) async throws -> CabalPictureDTO {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        let url = baseURL.appending(path: "v1/groups/\(groupID)/picture")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        try await applyAuthorizationHeader(to: &request)
+        request.httpBody = ImageUploadMultipart.body(
+            fieldName: "picture",
+            fileBaseName: "cabal",
+            imageData: imageData,
+            mimeType: mimeType,
+            boundary: boundary
+        )
+
+        let (data, response) = try await session.data(for: request, timeout: MonacoRequestTimeout.upload)
+        try Self.requireOK(response, data: data)
+        return try JSONDecoder().decode(CabalPictureDTO.self, from: data)
+    }
+
+    /// `DELETE /v1/groups/{id}/picture` — clears the picture, so the cabal falls
+    /// back to its tinted initials. Same permission rule as the upload.
+    public func removeCabalPicture(groupID: String) async throws -> CabalPictureDTO {
+        let url = baseURL.appending(path: "v1/groups/\(groupID)/picture")
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        try await applyAuthorizationHeader(to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        try Self.requireOK(response, data: data)
+        return try JSONDecoder().decode(CabalPictureDTO.self, from: data)
+    }
+
     /// Maps a response whose status is not in `accepting` to `MonacoAPIError`, keeping
     /// everything it carried: the server's `Retry-After` on a 429, and a 4xx body written
     /// for members. Routes whose callers still pattern-match `.httpStatus` stay on the

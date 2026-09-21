@@ -49,6 +49,12 @@ type GroupViewResult struct {
 	Pot             []GroupViewPotRow
 	You             GroupViewMemberSlice
 	Members         []GroupViewMemberRow
+	// PictureURL is blank when the cabal has no picture; the app then draws its
+	// tinted initials.
+	PictureURL string
+	// IsCreator tells the app whether this viewer may change the picture. The
+	// server checks again on every write; this only decides what to offer.
+	IsCreator bool
 }
 
 // GetGroupView returns pot, viewer slice, and member board for one club.
@@ -134,6 +140,8 @@ func (h *HomeService) GetGroupView(ctx context.Context, accessToken, groupID str
 		Pot:             potRows,
 		You:             you,
 		Members:         members,
+		PictureURL:      nullStringValue(group.PictureURL),
+		IsCreator:       group.CreatorUserID == viewerID,
 	}, nil
 }
 

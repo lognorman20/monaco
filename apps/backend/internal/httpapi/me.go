@@ -137,7 +137,7 @@ func (h *MeHandlers) UploadProfilePhotoHandler(w http.ResponseWriter, r *http.Re
 	if err := r.ParseMultipartForm(maxBodyBytes); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
-			logJSONError(ctx, log, "photo_too_large", w, http.StatusBadRequest, "photo must be at most 2MB")
+			logJSONError(ctx, log, "photo_too_large", w, http.StatusRequestEntityTooLarge, "photo must be at most 2MB")
 			return
 		}
 		logJSONError(ctx, log, "invalid_multipart", w, http.StatusBadRequest, "invalid multipart form", "err", err.Error())
@@ -228,11 +228,13 @@ func writeProfilePhotoUploadError(ctx context.Context, log *requestLog, w http.R
 		logJSONError(ctx, log, "user_not_found", w, http.StatusNotFound, "user not found")
 	case errors.Is(err, app.ErrRateLimited):
 		writeRateLimited(ctx, log, w, err)
-	case errors.Is(err, app.ErrProfilePhotoTooLarge):
-		logJSONError(ctx, log, "photo_too_large", w, http.StatusBadRequest, "photo must be at most 2MB")
-	case errors.Is(err, app.ErrProfilePhotoInvalid):
+	// 413, like the cabal picture upload and the oversized-body path above: one
+	// status for "too big" on every image upload.
+	case errors.Is(err, app.ErrImageTooLarge):
+		logJSONError(ctx, log, "photo_too_large", w, http.StatusRequestEntityTooLarge, "photo must be at most 2MB")
+	case errors.Is(err, app.ErrImageInvalid):
 		logJSONError(ctx, log, "invalid_photo", w, http.StatusBadRequest, "photo must be jpeg, png, or webp")
-	case errors.Is(err, app.ErrProfilePhotoNotConfigured):
+	case errors.Is(err, app.ErrImageUploadNotConfigured):
 		logJSONError(ctx, log, "not_configured", w, http.StatusServiceUnavailable, "profile photo upload is not configured")
 	default:
 		logJSONError(ctx, log, "upload_failed", w, http.StatusInternalServerError, "internal server error", "err", err.Error())

@@ -33,6 +33,9 @@ public struct GroupDiscoveryRowDTO: Codable, Equatable, Sendable, Identifiable {
     public let dollarPnl: String
     public let isJoined: Bool
     public let joinMode: GroupJoinMode
+    /// The cabal's picture. Nil when it has none, and the mark falls back
+    /// to its tinted initials.
+    public let pictureUrl: String?
 
     public var id: String { groupID }
 
@@ -44,7 +47,8 @@ public struct GroupDiscoveryRowDTO: Codable, Equatable, Sendable, Identifiable {
         percentReturn: String?,
         dollarPnl: String,
         isJoined: Bool,
-        joinMode: GroupJoinMode
+        joinMode: GroupJoinMode,
+        pictureUrl: String? = nil
     ) {
         self.groupID = groupID
         self.name = name
@@ -54,6 +58,7 @@ public struct GroupDiscoveryRowDTO: Codable, Equatable, Sendable, Identifiable {
         self.dollarPnl = dollarPnl
         self.isJoined = isJoined
         self.joinMode = joinMode
+        self.pictureUrl = pictureUrl
     }
 
     enum CodingKeys: String, CodingKey {
@@ -65,6 +70,7 @@ public struct GroupDiscoveryRowDTO: Codable, Equatable, Sendable, Identifiable {
         case dollarPnl
         case isJoined
         case joinMode
+        case pictureUrl
     }
 }
 
@@ -89,6 +95,9 @@ public struct GroupLeaderboardRowDTO: Codable, Equatable, Sendable, Identifiable
     public let dollarPnl: String
     public let isJoined: Bool
     public let joinMode: GroupJoinMode
+    /// The cabal's picture. Nil when it has none, and the mark falls back
+    /// to its tinted initials.
+    public let pictureUrl: String?
 
     public var id: String { groupID }
 
@@ -101,7 +110,8 @@ public struct GroupLeaderboardRowDTO: Codable, Equatable, Sendable, Identifiable
         percentReturn: String?,
         dollarPnl: String,
         isJoined: Bool,
-        joinMode: GroupJoinMode
+        joinMode: GroupJoinMode,
+        pictureUrl: String? = nil
     ) {
         self.rank = rank
         self.groupID = groupID
@@ -112,6 +122,7 @@ public struct GroupLeaderboardRowDTO: Codable, Equatable, Sendable, Identifiable
         self.dollarPnl = dollarPnl
         self.isJoined = isJoined
         self.joinMode = joinMode
+        self.pictureUrl = pictureUrl
     }
 
     enum CodingKeys: String, CodingKey {
@@ -124,6 +135,7 @@ public struct GroupLeaderboardRowDTO: Codable, Equatable, Sendable, Identifiable
         case dollarPnl
         case isJoined
         case joinMode
+        case pictureUrl
     }
 }
 

@@ -48,6 +48,7 @@ struct CabalsLeaderboardSection: View {
                                 rank: row.rank,
                                 groupId: row.groupID,
                                 name: row.name,
+                                pictureUrl: row.pictureUrl,
                                 detail: cabalRowDetail(memberCount: row.memberCount, isJoined: row.isJoined, joinMode: row.joinMode),
                                 potValueUsd: row.potValueUsd,
                                 percentReturn: row.percentReturn,
@@ -80,6 +81,8 @@ struct CabalDiscoveryRowContent: View {
     let rank: Int?
     let groupId: String
     let name: String
+    /// The cabal's picture; nil draws its tinted initials.
+    var pictureUrl: String? = nil
     let detail: String
     let potValueUsd: String
     let percentReturn: String?
@@ -92,9 +95,9 @@ struct CabalDiscoveryRowContent: View {
             isLast: isLast,
             leading: {
                 if let rank {
-                    RankedCabalMark(rank: rank, groupId: groupId, name: name)
+                    RankedCabalMark(rank: rank, groupId: groupId, name: name, pictureUrl: pictureUrl)
                 } else {
-                    CabalMark(groupId: groupId, name: name, size: 40)
+                    CabalMark(groupId: groupId, name: name, size: 40, pictureUrl: pictureUrl)
                 }
             },
             trailing: {
@@ -112,10 +115,11 @@ private struct RankedCabalMark: View {
     let rank: Int
     let groupId: String
     let name: String
+    var pictureUrl: String? = nil
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            CabalMark(groupId: groupId, name: name, size: 40)
+            CabalMark(groupId: groupId, name: name, size: 40, pictureUrl: pictureUrl)
                 .accessibilityHidden(true)
             Text("\(rank)")
                 .font(.system(size: 10, weight: .bold))

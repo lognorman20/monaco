@@ -34,6 +34,8 @@ type HomeMyGroupRow struct {
 	SlicePercent  string
 	DollarPnL     string
 	PercentReturn *string
+	// PictureURL is blank when the cabal has no picture.
+	PictureURL string
 }
 
 // HomePnLSeriesPoint is one aggregate viewer P&L sample for charts.
@@ -74,6 +76,7 @@ type HomeDashboardResult struct {
 type viewerGroupPosition struct {
 	GroupID          string
 	Name             string
+	PictureURL       string
 	ShareUnitsMicro  int64
 	NetUsdcInMicro   int64
 	EquityMicro      int64
@@ -286,6 +289,7 @@ func (h *HomeService) viewerGroupPosition(ctx context.Context, userID, groupID s
 	return viewerGroupPosition{
 		GroupID:          groupID,
 		Name:             group.Name,
+		PictureURL:       nullStringValue(group.PictureURL),
 		ShareUnitsMicro:  shareUnitsMicro,
 		NetUsdcInMicro:   deposited - withdrawn,
 		EquityMicro:      equityMicro,
@@ -318,6 +322,7 @@ func formatMyGroups(positions []viewerGroupPosition) ([]HomeMyGroupRow, int64, i
 			SlicePercent:  formatShareFractionDecimal(memberShares, totalShares),
 			DollarPnL:     formatSignedDollarPnL(pos.EquityMicro - pos.NetUsdcInMicro),
 			PercentReturn: percentReturn,
+			PictureURL:    pos.PictureURL,
 		})
 	}
 	return myGroups, netEquity, netDeposits

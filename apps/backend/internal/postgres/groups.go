@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/monaco/monaco/packages/domain"
@@ -23,6 +24,8 @@ type Group struct {
 	// IsFaker marks a wholly fake demo club (#153). Faker groups are read-only
 	// spectator clubs and are skipped by every chain/Dynamic/Kyber path.
 	IsFaker bool
+	// PictureURL is the cabal picture, null until the creator uploads one.
+	PictureURL sql.NullString
 }
 
 // InsertGroup persists a new group row.
@@ -46,7 +49,7 @@ func insertGroup(ctx context.Context, q queryRower, name string, creatorUserID s
 	const insertSQL = `
 INSERT INTO groups (name, creator_user_id)
 VALUES ($1, $2)
-RETURNING id, name, creator_user_id, created_at, is_faker`
+RETURNING id, name, creator_user_id, created_at, is_faker, picture_url`
 
 	var group Group
 	err := q.QueryRowContext(ctx, insertSQL, name, creatorUserID).Scan(
@@ -55,6 +58,7 @@ RETURNING id, name, creator_user_id, created_at, is_faker`
 		&group.CreatorUserID,
 		&group.CreatedAt,
 		&group.IsFaker,
+		&group.PictureURL,
 	)
 	if err != nil {
 		return Group{}, fmt.Errorf("insert group: %w", err)
@@ -70,7 +74,7 @@ func (s *Store) GetGroupByIDForUpdateTx(ctx context.Context, tx *sql.Tx, id stri
 	}
 
 	const selectSQL = `
-SELECT id, name, creator_user_id, created_at, is_faker
+SELECT id, name, creator_user_id, created_at, is_faker, picture_url
 FROM groups
 WHERE id = $1
 FOR UPDATE`
@@ -82,6 +86,7 @@ FOR UPDATE`
 		&group.CreatorUserID,
 		&group.CreatedAt,
 		&group.IsFaker,
+		&group.PictureURL,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Group{}, false, nil
@@ -100,7 +105,7 @@ func (s *Store) GetGroupByID(ctx context.Context, id string) (Group, bool, error
 	}
 
 	const selectSQL = `
-SELECT id, name, creator_user_id, created_at, is_faker
+SELECT id, name, creator_user_id, created_at, is_faker, picture_url
 FROM groups
 WHERE id = $1`
 
@@ -111,6 +116,7 @@ WHERE id = $1`
 		&group.CreatorUserID,
 		&group.CreatedAt,
 		&group.IsFaker,
+		&group.PictureURL,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Group{}, false, nil
@@ -178,13 +184,51 @@ ORDER BY created_at ASC`
 	return ids, nil
 }
 
+// SetGroupPictureURL persists the cabal picture URL for groupID and returns the
+// updated row. A blank pictureURL clears the picture back to NULL, which is how
+// "remove picture" is stored: the app then falls back to the tinted initials.
+// found is false when no group has that id.
+func (s *Store) SetGroupPictureURL(ctx context.Context, groupID, pictureURL string) (Group, bool, error) {
+	if groupID == "" {
+		return Group{}, false, fmt.Errorf("group_id is required")
+	}
+
+	stored := sql.NullString{}
+	if trimmed := strings.TrimSpace(pictureURL); trimmed != "" {
+		stored = sql.NullString{String: trimmed, Valid: true}
+	}
+
+	const updateSQL = `
+UPDATE groups
+SET picture_url = $2
+WHERE id = $1
+RETURNING id, name, creator_user_id, created_at, is_faker, picture_url`
+
+	var group Group
+	err := s.db.QueryRowContext(ctx, updateSQL, groupID, stored).Scan(
+		&group.ID,
+		&group.Name,
+		&group.CreatorUserID,
+		&group.CreatedAt,
+		&group.IsFaker,
+		&group.PictureURL,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Group{}, false, nil
+	}
+	if err != nil {
+		return Group{}, false, fmt.Errorf("set group picture url: %w", err)
+	}
+	return group, true, nil
+}
+
 func (s *Store) InsertGroupWithRulesTx(ctx context.Context, tx *sql.Tx, name, creatorUserID string, rules domain.GroupRules) (Group, error) {
 	if name == "" || creatorUserID == "" {
 		return Group{}, fmt.Errorf("name and creator_user_id are required")
 	}
-	const insertSQL = `INSERT INTO groups (name, creator_user_id, join_mode, voter_set_mode, threshold, vote_expiry_seconds) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, name, creator_user_id, created_at, is_faker`
+	const insertSQL = `INSERT INTO groups (name, creator_user_id, join_mode, voter_set_mode, threshold, vote_expiry_seconds) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, name, creator_user_id, created_at, is_faker, picture_url`
 	var group Group
-	err := tx.QueryRowContext(ctx, insertSQL, name, creatorUserID, string(rules.JoinPolicy.Mode), string(rules.VoterSet.Mode), string(rules.Threshold), int64(rules.VoteExpirySeconds)).Scan(&group.ID, &group.Name, &group.CreatorUserID, &group.CreatedAt, &group.IsFaker)
+	err := tx.QueryRowContext(ctx, insertSQL, name, creatorUserID, string(rules.JoinPolicy.Mode), string(rules.VoterSet.Mode), string(rules.Threshold), int64(rules.VoteExpirySeconds)).Scan(&group.ID, &group.Name, &group.CreatorUserID, &group.CreatedAt, &group.IsFaker, &group.PictureURL)
 	if err != nil {
 		return Group{}, fmt.Errorf("insert group with rules: %w", err)
 	}

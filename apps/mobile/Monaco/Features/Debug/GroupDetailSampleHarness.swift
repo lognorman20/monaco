@@ -1,12 +1,16 @@
 #if DEBUG
 import MonacoCore
 import SwiftUI
+import UIKit
 
 /// Debug-only: the group screen and its pushed screens on canned data, no sign-in or backend.
 /// Launch with `-MonacoGroupDetailSample <scenario>`:
 /// `populated` · `empty` · `loading` · `details` (Cabal details sheet open) · `propose` (chooser sheet open)
 /// · `cashOut` · `receipt` (bought) · `receiptFailed` (failed sell) · `activity` (full list)
-/// · `sellAndLeave` (the screen while the slice is being sold).
+/// · `sellAndLeave` (the screen while the slice is being sold)
+/// · `picture` (cabal with a picture, viewer is its creator) · `noPicture` (creator, tinted
+/// initials, nothing to remove) · `pictureNotCreator` (has a picture, viewer is a plain member,
+/// so no controls) · `pictureUploadFailure` (every write is refused).
 enum GroupDetailSampleScenario: String, CaseIterable {
     case populated
     case empty
@@ -18,6 +22,10 @@ enum GroupDetailSampleScenario: String, CaseIterable {
     case receiptFailed
     case activity
     case sellAndLeave
+    case picture
+    case noPicture
+    case pictureNotCreator
+    case pictureUploadFailure
 
     static let launchArgument = "-MonacoGroupDetailSample"
 
@@ -50,6 +58,19 @@ struct GroupDetailSampleHarness: View {
     @State private var route: GroupDetailRoute?
     @State private var toast: MonacoToast?
     @State private var heroScrolledAway = false
+    /// Every scenario gets an editor; only the ones whose sample view says the
+    /// viewer is the creator actually show its controls.
+    @StateObject private var pictureEditor: CabalPictureEditor
+
+    init(scenario: GroupDetailSampleScenario, auth: DynamicAuthService) {
+        self.scenario = scenario
+        self.auth = auth
+        _pictureEditor = StateObject(wrappedValue: CabalPictureEditor(
+            groupId: GroupDetailSampleData.pictureGroupId,
+            pictureUrl: GroupDetailSampleData.initialPictureURL(for: scenario),
+            writer: SampleCabalPictureWriter(alwaysFails: scenario == .pictureUploadFailure)
+        ))
+    }
 
     /// The one scenario that stands in for a leave in flight, read wherever the product reads
     /// `isLeaving`, so the harness and the product gate on the same thing.
@@ -89,6 +110,8 @@ struct GroupDetailSampleHarness: View {
                 .navigationBarTitleDisplayMode(.inline)
         case .populated, .empty, .details, .propose, .sellAndLeave:
             groupScreen(scenario == .empty ? GroupDetailSampleData.emptyView : GroupDetailSampleData.view)
+        case .picture, .noPicture, .pictureNotCreator, .pictureUploadFailure:
+            groupScreen(GroupDetailSampleData.pictureView(for: scenario))
         }
     }
 
@@ -111,7 +134,8 @@ struct GroupDetailSampleHarness: View {
             onRetry: { _ in nil },
             onDecideJoinRequest: { _, _ in },
             onToast: { toast = $0 },
-            onHeroScrolledAway: { heroScrolledAway = $0 }
+            onHeroScrolledAway: { heroScrolledAway = $0 },
+            pictureEditor: pictureEditor
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .monacoCanvas()
@@ -233,5 +257,82 @@ enum GroupDetailSampleData {
         costBasisPrice: nil, costBasisAmount: nil, createdAt: "2026-09-18T11:40:00Z",
         confirmedAt: nil, failureReason: "slippage", proceedsUsdcMicros: nil
     )
+
+    // MARK: - Cabal picture scenarios
+
+    static let pictureGroupId = "5b1f0c9e-0001-4c55-9a51-000000000001"
+
+    /// The picture a scenario starts with. A file URL, so the mark draws a real
+    /// image through the same image store with no network.
+    static func initialPictureURL(for scenario: GroupDetailSampleScenario) -> String? {
+        switch scenario {
+        case .picture, .pictureNotCreator, .pictureUploadFailure:
+            samplePictureURL()?.absoluteString
+        default:
+            nil
+        }
+    }
+
+    /// The group view behind each picture scenario. Only the two creator
+    /// scenarios say the viewer created the cabal, so the others must not offer
+    /// the controls at all.
+    static func pictureView(for scenario: GroupDetailSampleScenario) -> GroupViewDTO {
+        var view = self.view
+        view.pictureUrl = initialPictureURL(for: scenario)
+        view.isCreator = scenario != .pictureNotCreator
+        return view
+    }
+
+    /// A generated square written to tmp, so the cabal mark shows a picture with
+    /// no backend and no network.
+    static func samplePictureURL() -> URL? {
+        let size = CGSize(width: 256, height: 256)
+        let image = UIGraphicsImageRenderer(size: size).image { context in
+            let cg = context.cgContext
+            let colors = [
+                UIColor(red: 0.16, green: 0.36, blue: 0.75, alpha: 1).cgColor,
+                UIColor(red: 0.52, green: 0.22, blue: 0.70, alpha: 1).cgColor,
+            ] as CFArray
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
+                cg.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 256, y: 256), options: [.drawsAfterEndLocation])
+            }
+            UIColor(white: 1, alpha: 0.85).setFill()
+            cg.fillEllipse(in: CGRect(x: 78, y: 62, width: 100, height: 100))
+            UIColor(white: 1, alpha: 0.55).setFill()
+            cg.fill(CGRect(x: 48, y: 176, width: 160, height: 22))
+        }
+        guard let data = image.pngData() else { return nil }
+        let url = FileManager.default.temporaryDirectory.appending(path: "monaco-sample-cabal-picture.png")
+        do {
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
+        }
+    }
+}
+
+/// Stands in for the backend in the picture scenarios: a short delay so the
+/// spinner is visible, then either a new picture or the failure the
+/// `pictureUploadFailure` scenario exists to show.
+@MainActor
+struct SampleCabalPictureWriter: CabalPictureWriting {
+    var alwaysFails = false
+
+    func uploadPicture(groupId: String, imageData: Data, mimeType: String) async throws -> String? {
+        try? await Task.sleep(for: .milliseconds(700))
+        if alwaysFails {
+            throw MonacoCore.MonacoAPIError.rejected(status: 413, message: "picture must be at most 2MB")
+        }
+        return GroupDetailSampleData.samplePictureURL()?.absoluteString
+    }
+
+    func removePicture(groupId: String) async throws -> String? {
+        try? await Task.sleep(for: .milliseconds(400))
+        if alwaysFails {
+            throw MonacoCore.MonacoAPIError.httpStatus(503)
+        }
+        return nil
+    }
 }
 #endif
