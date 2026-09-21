@@ -59,19 +59,7 @@ final class MonacoUITests: XCTestCase {
         app.launchEnvironment = authLaunchEnvironment()
         app.launch()
 
-        let phoneField = app.textFields["Phone number"]
-        XCTAssertTrue(phoneField.waitForExistence(timeout: 15))
-        phoneField.tap()
-        phoneField.typeText("+15555557177")
-
-        app.buttons["Send code"].tap()
-
-        let codeField = app.textFields["6-digit code"]
-        XCTAssertTrue(codeField.waitForExistence(timeout: 20))
-        codeField.tap()
-        codeField.typeText("465354")
-
-        app.buttons["Verify code"].tap()
+        completeOTPLogin(app, prefix: "sms", addressField: "smsPhoneField", address: "+15555557177")
 
         XCTAssertTrue(appLandedInApp(app), "expected Home tab or account after login")
 
@@ -91,6 +79,37 @@ final class MonacoUITests: XCTestCase {
         add(attachment)
     }
 
+    /// Signs in through the one-time-code form, addressing every control by its accessibility
+    /// identifier. The buttons carry product copy that has already moved once — the verify
+    /// button reads "Continue", not "Verify code" — and a label-based tap fails the test for
+    /// a reason that has nothing to do with what it is checking.
+    @MainActor
+    private func completeOTPLogin(
+        _ app: XCUIApplication,
+        prefix: String,
+        addressField: String,
+        address: String
+    ) {
+        let field = app.textFields[addressField]
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        field.tap()
+        field.typeText(address)
+
+        app.buttons["\(prefix)SendCodeButton"].tap()
+
+        let codeField = app.textFields["\(prefix)CodeField"]
+        XCTAssertTrue(codeField.waitForExistence(timeout: 20))
+        codeField.tap()
+        codeField.typeText("465354")
+
+        // A complete code submits itself, so the button is only a fallback for the case
+        // where auto-submit has not already taken the code.
+        let verify = app.buttons["\(prefix)VerifyButton"]
+        if verify.waitForExistence(timeout: 2), verify.isEnabled {
+            verify.tap()
+        }
+    }
+
     @MainActor
     private func appLandedInApp(_ app: XCUIApplication, timeout: TimeInterval = 30) -> Bool {
         app.tabBars.buttons["Home"].waitForExistence(timeout: timeout)
@@ -105,19 +124,7 @@ final class MonacoUITests: XCTestCase {
             return
         }
 
-        let phoneField = app.textFields["Phone number"]
-        XCTAssertTrue(phoneField.waitForExistence(timeout: 15))
-        phoneField.tap()
-        phoneField.typeText("+15555557177")
-
-        app.buttons["Send code"].tap()
-
-        let codeField = app.textFields["6-digit code"]
-        XCTAssertTrue(codeField.waitForExistence(timeout: 20))
-        codeField.tap()
-        codeField.typeText("465354")
-
-        app.buttons["Verify code"].tap()
+        completeOTPLogin(app, prefix: "sms", addressField: "smsPhoneField", address: "+15555557177")
 
         XCTAssertTrue(appLandedInApp(app), "expected Home tab or account after login")
     }
@@ -298,7 +305,7 @@ final class MonacoUITests: XCTestCase {
         let signOut = app.buttons["profile-sign-out"].exists ? app.buttons["profile-sign-out"] : app.buttons["Sign out"]
         XCTAssertTrue(signOut.waitForExistence(timeout: 10))
         signOut.tap()
-        XCTAssertTrue(app.textFields["Phone number"].waitForExistence(timeout: 20), "sign out should return to login")
+        XCTAssertTrue(app.textFields["smsPhoneField"].waitForExistence(timeout: 20), "sign out should return to login")
         attachScreenshot(app, name: "issue-207-signed-out")
     }
 
@@ -421,19 +428,7 @@ final class MonacoUITests: XCTestCase {
             app.buttons["Email"].tap()
         }
 
-        let emailField = app.textFields["Email address"]
-        XCTAssertTrue(emailField.waitForExistence(timeout: 15))
-        emailField.tap()
-        emailField.typeText("test-8081@example.com")
-
-        app.buttons["Send code"].tap()
-
-        let codeField = app.textFields["6-digit code"]
-        XCTAssertTrue(codeField.waitForExistence(timeout: 20))
-        codeField.tap()
-        codeField.typeText("465354")
-
-        app.buttons["Verify code"].tap()
+        completeOTPLogin(app, prefix: "email", addressField: "emailAddressField", address: "test-8081@example.com")
 
         XCTAssertTrue(appLandedInApp(app, timeout: 60), "expected Home tab or account after email login")
     }
