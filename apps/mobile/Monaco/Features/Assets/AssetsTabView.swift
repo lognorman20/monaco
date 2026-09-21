@@ -238,7 +238,7 @@ struct AssetsTabView: View {
                 if let micros = asset.priceUsdcMicros {
                     MoneyText(micros: micros, style: .row)
                 } else {
-                    Text("—").font(MonacoTheme.Typo.moneyRow).foregroundStyle(MonacoTheme.muted)
+                    Text("—").moneyFont(.row).foregroundStyle(MonacoTheme.muted)
                 }
                 if let change = asset.change24h, !change.isEmpty {
                     PercentText(percentReturn: change, style: .caption)
