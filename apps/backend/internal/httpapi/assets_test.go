@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
@@ -27,10 +28,21 @@ func integrationAssetsApp(t *testing.T) (*AssetsHandlers, *AuthHandlers, wallets
 		Wallets: privyClient,
 		Catalog: catalog,
 		Pyth:    pythClient,
+		Charts:  pyth.NewFakeAssetPriceClient(),
+		Quotes:  pyth.NewFakeEquityQuoteClient(),
 		Dex:     jupiterClient,
+		// Pin the clock to a Tuesday inside the regular session so session
+		// assertions do not depend on when the suite happens to run.
+		Now: func() time.Time { return assetsTestClock },
 	}
 	return handlers, authHandlers, privyClient, jupiterClient, iso
 }
+
+// assetsTestClock is 2026-09-22 14:00 UTC — 10:00 ET on an ordinary Tuesday.
+var assetsTestClock = time.Date(2026, time.September, 22, 14, 0, 0, 0, time.UTC)
+
+// assetsTestClockClosed is the same day at 23:00 UTC — 19:00 ET, after-hours.
+var assetsTestClockClosed = time.Date(2026, time.September, 22, 23, 0, 0, 0, time.UTC)
 
 func seedAssetsToken(t *testing.T, iso *postgres.TestIsolation, authHandlers *AuthHandlers, privyClient wallets.Client) string {
 	t.Helper()
@@ -449,7 +461,7 @@ func TestGET_assets_symbol_chart_invalidRange_returns400(t *testing.T) {
 		Name:   "Apple",
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLx/chart?range=1Y", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLx/chart?range=5Y", nil)
 	req.SetPathValue("symbol", "AAPLx")
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()

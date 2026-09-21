@@ -48,11 +48,13 @@ func RegisterQuote(client Client, q Quote) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	key := sellKey(q.TokenIn, q.AmountIn)
 	if q.TokenIn == USDCAddress() {
-		f.quotes[buyKey(q.TokenOut, q.AmountIn)] = q
-	} else {
-		f.quotes[sellKey(q.TokenIn, q.AmountIn)] = q
+		key = buyKey(q.TokenOut, q.AmountIn)
 	}
+	f.quotes[key] = q
+	// A registered quote replaces an earlier registered failure for the same key.
+	delete(f.quoteErrs, key)
 }
 
 // RegisterNoRoute marks a buy quote key as unroutable.
@@ -64,6 +66,22 @@ func RegisterNoRoute(client Client, tokenOut string, usdcIn *big.Int) {
 	f.mu.Lock()
 	f.noRoute[buyKey(tokenOut, usdcIn)] = struct{}{}
 	f.mu.Unlock()
+}
+
+// RegisterQuoteError forces a buy (tokenIn == USDC) or sell quote to fail with err,
+// standing in for a timeout or a Kyber outage rather than a real no-route.
+func RegisterQuoteError(client Client, tokenIn, tokenOut string, amountIn *big.Int, err error) {
+	f, ok := client.(*fakeClient)
+	if !ok {
+		panic("dex: RegisterQuoteError requires NewFakeClient")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if tokenIn == USDCAddress() {
+		f.quoteErrs[buyKey(tokenOut, amountIn)] = err
+	} else {
+		f.quoteErrs[sellKey(tokenIn, amountIn)] = err
+	}
 }
 
 // RegisterSwapCall configures BuildSwap output for a quote shape.
