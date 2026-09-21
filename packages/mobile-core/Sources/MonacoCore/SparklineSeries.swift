@@ -69,6 +69,41 @@ public struct SparklineSeries: Equatable, Sendable {
     }
 }
 
+/// Where a sparkline takes its colour from.
+///
+/// Normally the reported day change, which is measured against the previous close
+/// and so can legitimately disagree with the slope of the drawn window — a stock
+/// can be down on the day while the last few hours rose. That is a known, correct
+/// disagreement about one instrument.
+///
+/// But when the series and the change are about *different instruments*, the
+/// change's sign says nothing at all about this line. The series is Pyth's
+/// underlying equity; the change is Jupiter's price for the xStock token. They
+/// diverge, which is the premise of the stock-vs-token comparison elsewhere in the
+/// app. In that case the line is tinted from its own first and last close, so the
+/// colour describes the picture the member is actually looking at.
+///
+/// One decision, in one place, for every surface that draws a sparkline next to a
+/// day-change pill: the Stocks tab's rows, the mover strip, and a cabal's holdings.
+public enum SparkTint: Equatable, Sendable {
+    /// Tint from the reported day change: it is about the same instrument as the
+    /// line, or nothing has said otherwise.
+    case reportedDayChange
+    /// Tint from the drawn series itself.
+    case series(rising: Bool, flat: Bool)
+
+    public init(series: SparklineSeries?, basesDisagree: Bool) {
+        guard let series, basesDisagree else {
+            self = .reportedDayChange
+            return
+        }
+        self = .series(
+            rising: series.isRising,
+            flat: series.lastUsdcMicros == series.firstUsdcMicros
+        )
+    }
+}
+
 /// One market list row, prepared once when its data lands.
 ///
 /// The normalised series is the reason this type exists. Building it inside the row
@@ -94,6 +129,38 @@ public struct MarketRowData: Identifiable, Equatable, Sendable {
         spark = SparklineSeries(usdcMicros: asset.sparkUsdcMicros)
         self.subtitle = subtitle
         self.accessoryLabel = accessoryLabel
+    }
+
+    /// Where the row's sparkline should take its colour from.
+    ///
+    /// Normally the reported day change, which is measured against the previous
+    /// close and so can legitimately disagree with the slope of the drawn window —
+    /// a stock can be down on the day while the last few hours rose. That is a
+    /// known, correct disagreement about one instrument.
+    ///
+    /// But when the series and the change are about *different instruments*, the
+    /// change's sign says nothing at all about this line. The series is Pyth's
+    /// underlying equity; the change is Jupiter's price for the xStock token. They
+    /// diverge, which is the premise of the stock-vs-token comparison elsewhere in
+    /// the app. In that case the line is tinted from its own first and last close,
+    /// so the colour describes the picture the member is actually looking at.
+    public typealias SparkTint = MonacoCore.SparkTint
+
+    public var sparkTint: SparkTint {
+        SparkTint(
+            series: spark,
+            basesDisagree: asset.sparkAndChangeDisagreeOnInstrument
+        )
+    }
+
+    /// The instrument the drawn line is about, when it is not the one the rest of
+    /// the row is about. Nil when they agree, so nothing is said that need not be.
+    public var sparkBasisNote: String? {
+        guard asset.sparkAndChangeDisagreeOnInstrument,
+              let basisSymbol = asset.sparkBasisSymbol,
+              !basisSymbol.isEmpty
+        else { return nil }
+        return basisSymbol
     }
 }
 

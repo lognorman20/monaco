@@ -15,9 +15,23 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
     /// The day's closes for the row's sparkline, in USDC micros. Empty when the
     /// backend had no series; the row then draws none.
     public let sparkUsdcMicros: [Int64]
+    /// Which instrument each half of the row is about. `change24h` is the xStock
+    /// token's move; the series is Pyth's underlying equity. They diverge, so when
+    /// the backend says they are different instruments the row tints its line from
+    /// its own line rather than from a number measured on something else.
+    public let sparkBasis: MarketPriceBasis?
+    public let sparkBasisSymbol: String?
+    public let changeBasis: MarketPriceBasis?
     public let logoUrl: String?
 
     public var id: String { symbol }
+
+    /// True when the drawn line and the reported day change are about different
+    /// instruments.
+    public var sparkAndChangeDisagreeOnInstrument: Bool {
+        guard let sparkBasis, let changeBasis else { return false }
+        return sparkBasis != changeBasis
+    }
 
     public var logoURL: URL? {
         guard let logoUrl, !logoUrl.isEmpty else { return nil }
@@ -45,6 +59,9 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
         tokenAmount: String? = nil,
         change24h: String? = nil,
         sparkUsdcMicros: [Int64] = [],
+        sparkBasis: MarketPriceBasis? = nil,
+        sparkBasisSymbol: String? = nil,
+        changeBasis: MarketPriceBasis? = nil,
         logoUrl: String? = nil
     ) {
         self.symbol = symbol
@@ -56,12 +73,16 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
         self.tokenAmount = tokenAmount
         self.change24h = change24h
         self.sparkUsdcMicros = sparkUsdcMicros
+        self.sparkBasis = sparkBasis
+        self.sparkBasisSymbol = sparkBasisSymbol
+        self.changeBasis = changeBasis
         self.logoUrl = logoUrl
     }
 
     private enum CodingKeys: String, CodingKey {
         case symbol, units, markUsd, valueUsd, dollarPnl, afterHours, tokenAmount, change24h
         case sparkUsdcMicros = "spark"
+        case sparkBasis, sparkBasisSymbol, changeBasis
         case logoUrl
     }
 
@@ -76,6 +97,9 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
         tokenAmount = try container.decodeIfPresent(String.self, forKey: .tokenAmount)
         change24h = try container.decodeIfPresent(String.self, forKey: .change24h)
         sparkUsdcMicros = try container.decodeIfPresent([Int64].self, forKey: .sparkUsdcMicros) ?? []
+        sparkBasis = try container.decodeIfPresent(MarketPriceBasis.self, forKey: .sparkBasis)
+        sparkBasisSymbol = try container.decodeIfPresent(String.self, forKey: .sparkBasisSymbol)
+        changeBasis = try container.decodeIfPresent(MarketPriceBasis.self, forKey: .changeBasis)
         logoUrl = try container.decodeIfPresent(String.self, forKey: .logoUrl)
     }
 }

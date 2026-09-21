@@ -282,18 +282,26 @@ public enum MarketSampleData {
         spark: [Int64]? = nil,
         logoUrl: String? = nil
     ) -> MarketAssetDTO {
-        MarketAssetDTO(
+        let series = spark ?? Self.spark(
+            startUsdcMicros: priceUsdcMicros,
+            driftUsdcMicros: Int64(Double(priceUsdcMicros) * 0.018),
+            wobbleUsdcMicros: Int64(Double(priceUsdcMicros) * 0.004)
+        )
+        return MarketAssetDTO(
             symbol: symbol,
             name: name,
             solanaMint: "Xs" + String(symbol.uppercased().prefix(4)) + "1111111111111111111111111111",
             routable: true,
             priceUsdcMicros: priceUsdcMicros,
             change24h: change24h,
-            sparkUsdcMicros: spark ?? Self.spark(
-                startUsdcMicros: priceUsdcMicros,
-                driftUsdcMicros: Int64(Double(priceUsdcMicros) * 0.018),
-                wobbleUsdcMicros: Int64(Double(priceUsdcMicros) * 0.004)
-            ),
+            sparkUsdcMicros: series,
+            // The production shape: Pyth serves the underlying equity, Jupiter
+            // prices the token. Sample rows carry the same labels so the harness
+            // renders what the app really gets rather than a simplified version.
+            sparkBasis: series.isEmpty ? nil : .underlying,
+            sparkBasisSymbol: series.isEmpty ? nil : String(symbol.dropLast()),
+            changeBasis: change24h == nil ? nil : .token,
+            changeBasisSymbol: change24h == nil ? nil : symbol,
             logoUrl: logoUrl
         )
     }
@@ -304,7 +312,16 @@ public enum MarketSampleData {
     public static let popularAssets: [MarketAssetDTO] = [
         listAsset(symbol: "AAPLx", name: "Apple", priceUsdcMicros: 232_050_000, change24h: "0.012400"),
         listAsset(symbol: "NVDAx", name: "NVIDIA", priceUsdcMicros: 178_200_000, change24h: "0.038600"),
-        listAsset(symbol: "TSLAx", name: "Tesla", priceUsdcMicros: 412_700_000, change24h: "-0.024100"),
+        // The divergence, on purpose: the token is down on the day while the drawn
+        // window — Tesla on NASDAQ — rose. The line is tinted from the line, the
+        // pill from the token, and the row has to survive the two disagreeing.
+        listAsset(
+            symbol: "TSLAx",
+            name: "Tesla",
+            priceUsdcMicros: 412_700_000,
+            change24h: "-0.024100",
+            spark: spark(startUsdcMicros: 404_100_000, driftUsdcMicros: 9_200_000, wobbleUsdcMicros: 1_600_000)
+        ),
         listAsset(symbol: "MSFTx", name: "Microsoft", priceUsdcMicros: 501_300_000, change24h: "0.000000"),
         listAsset(symbol: "AMZNx", name: "Amazon", priceUsdcMicros: 189_400_000, change24h: "-0.008300"),
         // No day change: the pill shows "—" and the row still lays out.
