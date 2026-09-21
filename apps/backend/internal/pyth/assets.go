@@ -174,6 +174,26 @@ func (c *HermesClient) DaySeries(ctx context.Context, symbol string) (AssetChart
 	return series, true
 }
 
+// DaySeriesWarmer refreshes a symbol's cached 1D series ahead of its expiry.
+type DaySeriesWarmer interface {
+	WarmDaySeries(ctx context.Context, symbol string) bool
+}
+
+// WarmDaySeries fetches the 1D series from Benchmarks whether or not the cache
+// still holds one, and replaces the cached entry on an answer. A warmer that only
+// read through the cache would find a live entry, do nothing, and let it lapse
+// between ticks; refreshing is what keeps the list's rows from ever meeting a cold
+// cache. It reports whether Benchmarks answered. An outage leaves the cached entry
+// alone, so a blip does not blank a series that was fine a minute ago.
+func (c *HermesClient) WarmDaySeries(ctx context.Context, symbol string) bool {
+	series, ok := c.seriesFromSource(ctx, symbol, ChartRange1D, c.clock())
+	if !ok {
+		return false
+	}
+	c.charts.set(symbol, ChartRange1D, series)
+	return true
+}
+
 // seriesFromSource asks the one-call history source for the range. An outage of
 // the source opens a short breaker so it costs one timeout rather than one per
 // chart load. The second result is false when the source could not answer at all.

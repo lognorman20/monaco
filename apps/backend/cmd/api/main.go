@@ -40,6 +40,7 @@ type bootResult struct {
 	DB                *sql.DB
 	stopPoller        context.CancelFunc
 	stopExecutePoller context.CancelFunc
+	stopSparkWarmer   context.CancelFunc
 }
 
 var apiRoutes = []string{
@@ -326,6 +327,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 	go worker.RunProposalExecutePoller(executeCtx, executePoller, worker.DefaultProposalExecuteInterval)
 	slog.Info("proposal execute poller started")
 
+	// Keeps the popular symbols' Pyth day series fresh, so the Stocks list serves
+	// their day moves and sparklines from the chart cache. Benchmarks is keyless,
+	// so this runs with or without PYTH_API_KEY.
+	sparkCtx, stopSparkWarmer := context.WithCancel(context.Background())
+	go worker.RunSparkWarmer(sparkCtx, worker.NewSparkWarmer(catalog, marketData), worker.DefaultSparkWarmInterval)
+
 	return &bootResult{
 		Server: &http.Server{
 			Addr:    addr,
@@ -336,6 +343,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 		DB:                db,
 		stopPoller:        stopPoller,
 		stopExecutePoller: stopExecutePoller,
+		stopSparkWarmer:   stopSparkWarmer,
 	}, nil
 }
 
@@ -380,6 +388,7 @@ func main() {
 	slog.Info("sweep poller stopped")
 	result.stopExecutePoller()
 	slog.Info("proposal execute poller stopped")
+	result.stopSparkWarmer()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()

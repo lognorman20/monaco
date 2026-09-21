@@ -170,6 +170,54 @@ func TestHermesClient_DaySeries_sharesTheDayChangesUpstreamCall(t *testing.T) {
 	}
 }
 
+func TestHermesClient_WarmDaySeries_refreshesALiveEntryAndSurvivesAnOutage(t *testing.T) {
+	ClearFeedRegistry()
+	resetEquityDeniedForTest()
+	now := time.Date(2026, time.September, 22, 16, 0, 0, 0, time.UTC)
+	var calls atomic.Int32
+	var down atomic.Bool
+	source := benchmarksServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if down.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		last := 200.0 + float64(calls.Load())
+		_, _ = w.Write([]byte(fmt.Sprintf(`{"s":"ok","t":[%d,%d],"c":[200.0,%.1f]}`,
+			time.Date(2026, time.September, 22, 13, 30, 0, 0, time.UTC).Unix(),
+			time.Date(2026, time.September, 22, 15, 55, 0, 0, time.UTC).Unix(),
+			last,
+		)))
+	})
+	client := NewHermesClientWithHTTP("http://127.0.0.1:1", nil, "").WithSeriesSource(source)
+	client.now = func() time.Time { return now }
+	client.charts = newChartCache(func() time.Time { return now })
+
+	if !client.WarmDaySeries(context.Background(), "AAPLc") {
+		t.Fatal("first warm: Benchmarks answered, want true")
+	}
+	// A second warm inside the TTL still goes upstream: that is what keeps the
+	// entry from lapsing between ticks.
+	if !client.WarmDaySeries(context.Background(), "AAPLc") {
+		t.Fatal("second warm: want true")
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("benchmarks called %d times, want 2", calls.Load())
+	}
+	cached, ok := client.charts.get("AAPLc", ChartRange1D)
+	if !ok || cached.Points[len(cached.Points)-1].PriceUsdcMicros != 202_000_000 {
+		t.Fatalf("cached = %+v, want the refreshed series", cached.Points)
+	}
+
+	down.Store(true)
+	if client.WarmDaySeries(context.Background(), "AAPLc") {
+		t.Fatal("an outage reported as warmed")
+	}
+	if kept, ok := client.charts.get("AAPLc", ChartRange1D); !ok || len(kept.Points) != 2 {
+		t.Fatal("an outage threw away a series that was fine a moment ago")
+	}
+}
+
 func TestHermesClient_DaySeries_outageIsNoAnswer(t *testing.T) {
 	// Benchmarks down: the row gets no sparkline, not a flat line and not a line
 	// sampled from Hermes one request per point.
