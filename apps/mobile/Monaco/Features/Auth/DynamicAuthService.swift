@@ -17,19 +17,10 @@ enum DynamicSessionGoneError: Error {
 /// Wraps Dynamic SDK init, session restore, SMS/email OTP, device registration, and step-up.
 @MainActor
 final class DynamicAuthService: ObservableObject {
-    enum Phase: Equatable {
-        case restoring
-        case restoreFailed(message: String)
-        case idle
-        case sendingCode
-        case awaitingCode
-        case verifyingCode
-        case codeRejected(message: String)
-        case authenticated(userID: String)
-        case failed(message: String)
-    }
+    typealias Phase = LoginFlow.Phase
 
-    @Published private(set) var phase: Phase
+    /// Where the login form is and what just happened to it. See `LoginFlow`.
+    @Published private(set) var flow: LoginFlow
     @Published private(set) var accessToken: String?
     @Published private(set) var lastSignOutReason: String?
     @Published private(set) var needsDeviceRegistration = false
@@ -40,11 +31,42 @@ final class DynamicAuthService: ObservableObject {
     private var sessionStore = MonacoSessionStore()
     private let tokenRefresh = SingleFlight<String?>()
     private var isRestoreInFlight = false
-    private var cancellables = Set<AnyCancellable>()
+    /// Subscriptions that belong to the open sign-in. Cancelled when it ends, so a late
+    /// event from the SDK about the old session is never delivered to the next one.
+    private var sessionCancellables = Set<AnyCancellable>()
     private let sdk: DynamicSDK?
+
+    /// The access tokens this sign-in has used. A 401 for a token that is not in here
+    /// belongs to a session that has already ended, so it must neither mint a token nor
+    /// sign out whoever is signed in now.
+    private var sessionTokens = SessionTokenLedger()
+    /// Set the moment a sign-out starts, so a late 401 cannot stamp "session expired"
+    /// over a sign-out the member asked for, and a second tap cannot start a second one.
+    private var isSigningOut = false
+    /// Best-effort revoke of the Dynamic session, running after local state is already gone.
+    private let pendingRevoke = PendingRevoke()
+    /// Bumped by every successful sign-in, so a revoke or an SDK event that belongs to an
+    /// earlier session can tell that the session it is about is no longer the open one.
+    private var signInEpoch = 0
+    /// How long a new sign-in will wait out a revoke before going ahead anyway.
+    private static let revokeWait = Duration.seconds(2)
 
     private static var stepUpScope: TokenScope {
         .userUpdate
+    }
+
+    /// What just happened to the login form. `flow.step` says which field is on screen.
+    var phase: Phase { flow.phase }
+
+    /// Which field the login form is on, so a failed request never takes the code box away
+    /// from a member who already has a code.
+    var loginStep: LoginFlow.Step { flow.step }
+
+    /// Who is signed in. Screens key their loads on this rather than on `accessToken`, so
+    /// Dynamic's token rotation is not mistaken for a new session.
+    var sessionIdentity: String? {
+        guard case .authenticated(let userID) = phase, accessToken != nil else { return nil }
+        return userID
     }
 
     init(settings: DynamicAuthSettings) {
@@ -53,8 +75,7 @@ final class DynamicAuthService: ObservableObject {
         } else {
             sdk = nil
         }
-        phase = sessionStore.hasExplicitLogin ? .restoring : .idle
-        observeSDK()
+        flow = LoginFlow(phase: sessionStore.hasExplicitLogin ? .restoring : .idle)
 
         AccessTokenRefreshRegistry.shared.register { [weak self] rejectedToken in
             try await self?.refreshedAccessToken(replacing: rejectedToken)
@@ -77,44 +98,59 @@ final class DynamicAuthService: ObservableObject {
         )
     }
 
-    private func observeSDK() {
+    /// Follows the SDK for the sign-in that just opened, and only for it.
+    ///
+    /// Dynamic's logout is global, and a sign-out's revoke can still be running when the next
+    /// member signs in. Every handler here captures the epoch it was created for and drops
+    /// events once another sign-in has replaced it; the subscriptions themselves are
+    /// cancelled when the session ends.
+    ///
+    /// Device registration / step-up would send a second OTP (often email).
+    /// Product login is SMS only — those SDK flags are ignored (`refreshSecurityFlags`).
+    private func observeSession(epoch: Int) {
+        sessionCancellables.removeAll()
         guard let sdk else { return }
+
         sdk.auth.minAuthTokenChanges
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] token in
-                guard let self, let jwt = DynamicSessionToken.preferred(minAuthToken: token, idToken: nil) else { return }
-                self.accessToken = jwt
-            }
-            .store(in: &cancellables)
+            .sink { [weak self] _ in self?.sdkTokenChanged(epoch: epoch) }
+            .store(in: &sessionCancellables)
 
         sdk.auth.tokenChanges
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] token in
-                guard let self else { return }
-                guard self.accessToken == nil else { return }
-                guard let jwt = DynamicSessionToken.preferred(minAuthToken: nil, idToken: token) else { return }
-                self.accessToken = jwt
-            }
-            .store(in: &cancellables)
+            .sink { [weak self] _ in self?.sdkTokenChanged(epoch: epoch) }
+            .store(in: &sessionCancellables)
 
         sdk.auth.authenticatedUserChanges
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] user in
-                guard let self else { return }
-                if user == nil, case .authenticated = self.phase {
-                    self.endSession(reason: LoginFailureCopy.sessionExpired)
-                }
-                self.refreshSecurityFlags()
-            }
-            .store(in: &cancellables)
+            .sink { [weak self] user in self?.sdkUserChanged(signedIn: user != nil, epoch: epoch) }
+            .store(in: &sessionCancellables)
+    }
 
-        // Device registration / step-up would send a second OTP (often email).
-        // Product login is SMS only — ignore those SDK flags.
+    /// A rotated token. The value the publisher carried is not trusted: after a logout the
+    /// SDK can republish the old token, so what is adopted is what the SDK holds right now,
+    /// and only while the session it was subscribed for is still open.
+    private func sdkTokenChanged(epoch: Int) {
+        guard epoch == signInEpoch, !isSigningOut, case .authenticated = phase else { return }
+        guard let jwt = sdkSessionJWT(), jwt != accessToken else { return }
+        adoptAccessToken(jwt)
+    }
+
+    /// The SDK says nobody is signed in. Ends the session only when that is news about the
+    /// session that is open now: not while our own revoke is running (its logout is what the
+    /// SDK is reporting), not for an earlier sign-in, and not when the SDK in fact still
+    /// holds a user.
+    private func sdkUserChanged(signedIn: Bool, epoch: Int) {
+        defer { refreshSecurityFlags() }
+        guard !signedIn, epoch == signInEpoch, !pendingRevoke.isPending else { return }
+        guard case .authenticated = phase else { return }
+        guard sdk?.auth.authenticatedUser == nil else { return }
+        endSession(reason: LoginFailureCopy.sessionExpired)
     }
 
     func restoreSessionIfNeeded() async {
         guard accessToken == nil, sessionStore.hasExplicitLogin else {
-            if phase == .restoring { phase = .idle }
+            if phase == .restoring { flow.signedOut() }
             return
         }
         switch phase {
@@ -125,9 +161,9 @@ final class DynamicAuthService: ObservableObject {
         isRestoreInFlight = true
         defer { isRestoreInFlight = false }
 
-        phase = .restoring
+        flow.restoring()
         guard let sdk else {
-            phase = .restoreFailed(message: LoginFailureCopy.restoreOffline)
+            flow.restoreFailed(message: LoginFailureCopy.restoreOffline)
             return
         }
         if let creds = sdkSessionCredentials() {
@@ -140,7 +176,7 @@ final class DynamicAuthService: ObservableObject {
             return
         }
         AppLogger.session.notice("Session restore: saved session could not be verified (offline)")
-        phase = .restoreFailed(message: LoginFailureCopy.restoreOffline)
+        flow.restoreFailed(message: LoginFailureCopy.restoreOffline)
     }
 
     func shouldInvalidateBackendSession(serverUserId: String) -> Bool {
@@ -152,6 +188,10 @@ final class DynamicAuthService: ObservableObject {
     }
 
     func refreshedAccessToken(replacing rejectedToken: String) async throws -> String? {
+        // The request was made by a session that has since ended (sign-out, or another
+        // account signed in). Retrying it under the current token would run one member's
+        // request as another.
+        guard sessionTokens.contains(rejectedToken) else { return nil }
         if let current = accessToken, current != rejectedToken {
             return current
         }
@@ -161,16 +201,22 @@ final class DynamicAuthService: ObservableObject {
         }
         let fresh = sdkSessionJWT()
         if let fresh, fresh != rejectedToken, accessToken != nil {
-            accessToken = fresh
+            adoptAccessToken(fresh)
         }
         return fresh
     }
 
+    private func adoptAccessToken(_ token: String) {
+        accessToken = token
+        sessionTokens.adopt(token)
+    }
+
+    // MARK: One-time codes
+
     func sendSMSCode(to phoneNumberE164: String) async {
         loginChannel = .sms
-        await sendCode {
-            let phone = try E164Phone.data(from: phoneNumberE164)
-            try await self.requireSDK().auth.sms.sendOTP(phoneData: phone)
+        await sendCode(to: phoneNumberE164) {
+            try await self.requireSDK().auth.sms.sendOTP(phoneData: Self.phoneData(from: phoneNumberE164))
         }
     }
 
@@ -182,7 +228,7 @@ final class DynamicAuthService: ObservableObject {
 
     func sendEmailCode(to email: String) async {
         loginChannel = .email
-        await sendCode {
+        await sendCode(to: email) {
             try await self.requireSDK().auth.email.sendOTP(email: email)
         }
     }
@@ -191,6 +237,16 @@ final class DynamicAuthService: ObservableObject {
         await verifyCode {
             try await self.requireSDK().auth.email.verifyOTP(token: code)
         }
+    }
+
+    /// Dynamic takes the number split into dial code, region and subscriber number. The
+    /// split comes off `E164PhoneNumber`, the same parser the form validated with, so there
+    /// is one rule about what a sendable number is.
+    static func phoneData(from raw: String) throws -> PhoneData {
+        guard let number = E164PhoneNumber(raw) else {
+            throw DynamicAuthHTTPError(status: 422, detail: "That phone number looks incomplete.")
+        }
+        return PhoneData(dialCode: "+" + number.countryCode, iso2: number.regionCode, phone: number.nationalNumber)
     }
 
     func sendDeviceRegistrationCode() async {
@@ -267,71 +323,123 @@ final class DynamicAuthService: ObservableObject {
         }
     }
 
-    private func sendCode(_ send: () async throws -> Void) async {
-        guard phase != .sendingCode, phase != .verifyingCode else { return }
+    private func sendCode(to destination: String, _ send: () async throws -> Void) async {
+        // A sign-out whose Dynamic revoke is still running would tear this session down
+        // again. Waited out *before* the form is marked busy: this can give up after a
+        // couple of seconds, and a disabled form with no cancel is not somewhere to leave
+        // a member.
+        await awaitPendingRevoke()
+        // A second tap while the first request is in flight must not send a second code.
+        guard flow.beginSend() else { return }
         lastSignOutReason = nil
-        phase = .sendingCode
         do {
             try await send()
-            phase = .awaitingCode
+            flow.sendSucceeded(destination: destination)
         } catch {
             let failure = Self.loginFailure(from: error, step: .sendCode)
             AppLogger.session.error("Send code failed: \(String(describing: error), privacy: .public)")
-            phase = .failed(message: LoginFailureCopy.message(for: failure, step: .sendCode))
+            // Note the failure, but leave the member where they are: a throttled resend
+            // must not take away a code box they are about to use.
+            flow.sendFailed(message: LoginFailureCopy.message(for: failure, step: .sendCode))
         }
     }
 
     private func verifyCode(_ verify: () async throws -> Void) async {
-        guard phase != .verifyingCode, phase != .sendingCode else { return }
-        phase = .verifyingCode
+        await awaitPendingRevoke()
+        guard flow.beginVerify() else { return }
         do {
             try await verify()
             await captureAuthenticatedSession(isRestore: false)
         } catch {
-            accessToken = nil
             let failure = Self.loginFailure(from: error, step: .verifyCode)
             AppLogger.session.error("Verify code failed: \(String(describing: error), privacy: .public)")
-            let message = LoginFailureCopy.message(for: failure, step: .verifyCode)
-            phase = failure.keepsCodeEntry ? .codeRejected(message: message) : .failed(message: message)
+            // The code field stays up whatever went wrong; see `LoginFlow`.
+            flow.verifyFailed(message: LoginFailureCopy.message(for: failure, step: .verifyCode))
         }
     }
 
+    /// "Change number" / switching sign-in method.
     func resetLoginFlow() {
-        switch phase {
-        case .authenticated, .restoring, .restoreFailed:
-            return
-        default:
-            phase = .idle
-        }
+        flow.returnToAddressEntry()
     }
 
+    // MARK: Sign out
+
+    /// The member's own sign-out.
     func logout() async {
-        await performLogout()
+        performLogout(reason: nil)
     }
 
-    func signOut(reason: String) async {
-        await performLogout()
-        lastSignOutReason = reason
+    /// Same as `logout()`, but records why so LoginView can explain it.
+    ///
+    /// Private on purpose: a sign-out driven by a server reply must name the token that
+    /// reply rejected, so it goes through `signOut(reason:rejectedToken:)`. The member's own
+    /// sign-out goes through `logout()`. Leaving this reachable is what lets a stale 401 end
+    /// the wrong session.
+    private func signOut(reason: String) async {
+        performLogout(reason: reason)
     }
 
-    func signOutAfterRejectedSession() async {
+    /// A 401 answering a request made with `rejectedToken`, ending the session with a
+    /// reason for the login screen to show. Guarded exactly like
+    /// `signOutAfterRejectedSession(rejectedToken:)`: a reply that outlived its sign-in must
+    /// not sign out the account signed in now, nor stamp its login screen with a reason
+    /// meant for the previous one.
+    func signOut(reason: String, rejectedToken: String) async {
+        guard sessionTokens.contains(rejectedToken) else { return }
+        await signOut(reason: reason)
+    }
+
+    /// The backend still answered 401 after a token refresh: the session is over.
+    /// Private on purpose — every caller must come through a `rejectedToken` overload so
+    /// the unguarded path cannot be reintroduced from another area.
+    private func signOutAfterRejectedSession() async {
         await signOut(reason: LoginFailureCopy.sessionExpired)
     }
 
-    private func performLogout() async {
-        if let sdk {
+    /// A 401 answering a request made with `rejectedToken`. Ignored unless that token
+    /// belongs to the session that is still open, so a reply that outlived its sign-in
+    /// cannot sign out the next account or contradict a deliberate sign-out.
+    func signOutAfterRejectedSession(rejectedToken: String) async {
+        guard sessionTokens.contains(rejectedToken) else { return }
+        await signOutAfterRejectedSession()
+    }
+
+    /// Sign-out is local-first: the session is gone before Dynamic is told, so the login
+    /// screen comes back immediately even offline, polling loops lose their token at once,
+    /// and a second tap has nothing left to do. `sdk.auth.logout()` used to be awaited
+    /// first, which left the member on a dead screen for as long as the network took.
+    private func performLogout(reason: String?) {
+        guard !isSigningOut else { return }
+        isSigningOut = true
+        endSession(reason: reason)
+
+        guard let sdk else { return }
+        let epoch = signInEpoch
+        pendingRevoke.start { [weak self] in
+            // Someone has signed in since this revoke was scheduled. Dynamic's logout is
+            // global, so revoking now would tear down the session that replaced this one.
+            // This is what makes giving up on the wait safe.
+            guard let self, self.signInEpoch == epoch else { return }
             try? await sdk.auth.logout()
         }
-        endSession(reason: nil)
+    }
+
+    /// Lets a new sign-in wait out a revoke that is still in flight, so a late logout cannot
+    /// tear down the session it is about to create — but only briefly. See `PendingRevoke`.
+    private func awaitPendingRevoke() async {
+        await pendingRevoke.wait(atMost: Self.revokeWait)
     }
 
     private func endSession(reason: String?) {
+        sessionCancellables.removeAll()
         accessToken = nil
+        sessionTokens.clear()
         lastSignOutReason = reason
         needsDeviceRegistration = false
         needsStepUp = false
         securityOTPMessage = nil
-        phase = .idle
+        flow.signedOut()
         sessionStore.clear()
     }
 
@@ -368,7 +476,7 @@ final class DynamicAuthService: ObservableObject {
             applyAuthenticated(userID: user.userId ?? "", token: token, isRestore: isRestore)
             return
         }
-        phase = .failed(message: LoginFailureCopy.tokenUnavailable)
+        flow.verifyFailed(message: LoginFailureCopy.tokenUnavailable)
     }
 
     private func waitForSessionCredentials() async -> (userID: String, token: String)? {
@@ -393,13 +501,23 @@ final class DynamicAuthService: ObservableObject {
     }
 
     private func applyAuthenticated(userID: String, token: String, isRestore: Bool) {
-        accessToken = token.isEmpty ? nil : token
+        isSigningOut = false
+        // From here a revoke scheduled by the previous sign-out is stale: this is the
+        // session Dynamic holds now, and ending it would sign the member straight out.
+        signInEpoch += 1
+        sessionTokens.clear()
+        if token.isEmpty {
+            accessToken = nil
+        } else {
+            adoptAccessToken(token)
+        }
         lastSignOutReason = nil
         securityOTPMessage = nil
-        phase = .authenticated(userID: userID)
+        flow.authenticated(userID: userID)
         if !isRestore {
             sessionStore.markExplicitLogin()
         }
+        observeSession(epoch: signInEpoch)
         refreshSecurityFlags()
     }
 
@@ -413,47 +531,5 @@ final class DynamicAuthService: ObservableObject {
             throw DynamicAuthHTTPError(status: 500, detail: "Dynamic is not configured")
         }
         return sdk
-    }
-}
-
-private enum E164Phone {
-    private static let prefixes: [(code: String, iso2: String)] = [
-        ("1", "US"), ("7", "RU"), ("20", "EG"), ("27", "ZA"), ("30", "GR"), ("31", "NL"),
-        ("32", "BE"), ("33", "FR"), ("34", "ES"), ("36", "HU"), ("39", "IT"), ("40", "RO"),
-        ("41", "CH"), ("43", "AT"), ("44", "GB"), ("45", "DK"), ("46", "SE"), ("47", "NO"),
-        ("48", "PL"), ("49", "DE"), ("51", "PE"), ("52", "MX"), ("53", "CU"), ("54", "AR"),
-        ("55", "BR"), ("56", "CL"), ("57", "CO"), ("58", "VE"), ("60", "MY"), ("61", "AU"),
-        ("62", "ID"), ("63", "PH"), ("64", "NZ"), ("65", "SG"), ("66", "TH"), ("81", "JP"),
-        ("82", "KR"), ("84", "VN"), ("86", "CN"), ("90", "TR"), ("91", "IN"), ("92", "PK"),
-        ("93", "AF"), ("94", "LK"), ("95", "MM"), ("98", "IR"), ("212", "MA"), ("213", "DZ"),
-        ("216", "TN"), ("218", "LY"), ("220", "GM"), ("234", "NG"), ("254", "KE"), ("255", "TZ"),
-        ("256", "UG"), ("351", "PT"), ("352", "LU"), ("353", "IE"), ("354", "IS"), ("358", "FI"),
-        ("370", "LT"), ("371", "LV"), ("372", "EE"), ("380", "UA"), ("381", "RS"), ("385", "HR"),
-        ("386", "SI"), ("420", "CZ"), ("421", "SK"), ("852", "HK"), ("853", "MO"), ("855", "KH"),
-        ("856", "LA"), ("880", "BD"), ("886", "TW"), ("960", "MV"), ("961", "LB"), ("962", "JO"),
-        ("963", "SY"), ("964", "IQ"), ("965", "KW"), ("966", "SA"), ("971", "AE"), ("972", "IL"),
-        ("973", "BH"), ("974", "QA"), ("975", "BT"), ("976", "MN"), ("977", "NP"), ("992", "TJ"),
-        ("993", "TM"), ("994", "AZ"), ("995", "GE"), ("996", "KG"), ("998", "UZ"),
-    ]
-
-    static func data(from raw: String) throws -> PhoneData {
-        var digits = LoginPhone.normalizedE164(raw)
-        if digits.hasPrefix("+") {
-            digits = String(digits.dropFirst())
-        }
-        digits = digits.filter(\.isNumber)
-        guard digits.count >= 11 else {
-            throw DynamicAuthHTTPError(status: 422, detail: "That phone number looks incomplete.")
-        }
-        let match = prefixes
-            .sorted { $0.code.count > $1.code.count }
-            .first { digits.hasPrefix($0.code) }
-        let code = match?.code ?? "1"
-        let iso2 = match?.iso2 ?? "US"
-        let national = String(digits.dropFirst(code.count))
-        guard national.count >= 6 else {
-            throw DynamicAuthHTTPError(status: 422, detail: "That phone number looks incomplete.")
-        }
-        return PhoneData(dialCode: "+" + code, iso2: iso2, phone: national)
     }
 }
