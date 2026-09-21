@@ -12,8 +12,14 @@ struct AssetDetailView: View {
     let symbol: String
 
     @State private var model: AssetDetailModel
+    /// The member's own cabals against this stock. A separate model because it is a
+    /// separate read at a separate cadence: the price is polled every ten seconds,
+    /// this changes when somebody votes.
+    @State private var social: AssetSocialModel
     @State private var pickerKind: ProposalPickKind?
     @State private var toast: MonacoToast?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// How often the hero re-reads the price, and how often the drawn range is
     /// re-read. Only the sample harness passes anything but the defaults, so a
@@ -26,6 +32,7 @@ struct AssetDetailView: View {
         auth: PrivyAuthService,
         symbol: String,
         dataSource: AssetDetailDataSource? = nil,
+        socialDataSource: AssetSocialDataSource? = nil,
         pricePollInterval: Duration = AssetDetailPolling.price,
         chartPollInterval: Duration = AssetDetailPolling.chart
     ) {
@@ -36,6 +43,10 @@ struct AssetDetailView: View {
         _model = State(initialValue: AssetDetailModel(
             symbol: symbol,
             dataSource: dataSource ?? LiveAssetDetailDataSource(auth: auth)
+        ))
+        _social = State(initialValue: AssetSocialModel(
+            symbol: symbol,
+            dataSource: socialDataSource ?? LiveAssetSocialDataSource(auth: auth)
         ))
     }
 
@@ -56,17 +67,13 @@ struct AssetDetailView: View {
                     // The curve was decoupled from this call; throwing away a chart that did
                     // arrive would leave the screen emptier than before they were split.
                     chartCard
-                case .loaded(let detail):
+                case .loaded:
                     hero
-                    if !detail.liquidity.routable {
-                        Text("Can't be bought right now.")
-                            .font(MonacoTheme.Typo.caption)
-                            .foregroundStyle(MonacoTheme.warning)
-                            .accessibilityIdentifier("asset-detail-no-route")
-                    }
+                    // The "can't be bought" line used to live here, above the chart.
+                    // It belongs next to the button it disables, which is now in the
+                    // trade bar — saying it twice made the screen argue with itself.
                     chartCard
                     detailSections
-                    actionRow
                 }
             }
             .padding(MonacoTheme.Space.m)
@@ -76,15 +83,24 @@ struct AssetDetailView: View {
         .navigationTitle(AssetSymbolFormatter.display(symbol))
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("asset-detail-root")
+        // The bar sits in the safe area, not in the scroll view: this screen is five
+        // cards long now, and the action a member came for must not be somewhere
+        // they have to scroll to.
+        .safeAreaInset(edge: .bottom, spacing: 0) { tradeBar }
         .monacoToast($toast)
-        // Two independent loads: the curve does not wait on the (slow) detail call.
+        // Three independent loads: the curve does not wait on the (slow) detail call,
+        // and neither waits on the per-cabal read behind the social cards.
         .task { await model.loadDetail() }
         .task(id: model.range) { await model.loadChart(range: model.range) }
+        .task { await social.load() }
         // The hero keeps itself current while the member is looking at it. Both loops
         // are silent: a tick that fails leaves the screen exactly as they last saw it.
         .pollWhileVisible(every: pricePollInterval) { await model.refreshDetail() }
         .pollWhileVisible(every: chartPollInterval) { await model.refreshChart() }
         .onChange(of: model.sessionExpired) { _, expired in
+            if expired { Task { await auth.logout() } }
+        }
+        .onChange(of: social.sessionExpired) { _, expired in
             if expired { Task { await auth.logout() } }
         }
         .navigationDestination(item: $pickerKind) { kind in
@@ -97,6 +113,8 @@ struct AssetDetailView: View {
                     pickerKind = nil
                     Haptics.success()
                     toast = MonacoToast(message: ProposeFlowCopy.proposalSent(cabalName), isSuccess: true)
+                    // A new proposal is exactly the thing the position card counts.
+                    Task { await social.refresh() }
                 }
             )
         }
@@ -162,27 +180,64 @@ struct AssetDetailView: View {
     // exactly what it did to the chart before this was noticed.
     @ViewBuilder
     private var detailSections: some View {
-        EmptyView() // 1. Your cabals' position
-        EmptyView() // 2. Stats grid
-        EmptyView() // 3. Stock vs token
-        EmptyView() // 4. About
-        EmptyView() // 5. Activity on this stock
+        // 1. Your cabals' position — holdings, P&L, open votes            (#341)
+        if let summary = social.summary {
+            AssetPositionCard(
+                summary: summary,
+                proposals: social.openProposals,
+                symbol: symbol
+            )
+        }
+        // 2. Stats grid — open/high/low, 52-week range, trading cost      (#342)
+        if let grid = AssetStatsGrid.make(model.detail?.stats, currentUsdcMicros: model.detail?.priceUsdcMicros) {
+            AssetStatsCard(grid: grid)
+        }
+        // 3. Stock vs token — NASDAQ against the xStock, premium          (#347)
+        if let card = stockVsTokenCard {
+            StockVsTokenCardView(card: card)
+        }
+        // 4. About — what the token is, and the tracker disclosure        (#343)
+        if let detail = model.detail {
+            AssetAboutCard(about: AssetAboutCopy.make(
+                symbol: detail.symbol,
+                name: detail.name,
+                solanaMint: detail.solanaMint,
+                liquidityLabel: detail.liquidity.label
+            ))
+        }
+        // 5. Activity on this stock — proposals, fills and comments       (#344)
+        if !social.activity.isEmpty {
+            AssetActivityCard(symbol: symbol, activity: social.activity)
+        }
     }
 
-    private var actionRow: some View {
-        HStack(spacing: MonacoTheme.Space.s) {
-            Button("Buy") {
-                pickerKind = .buy
-            }
-            .buttonStyle(.monacoPrimary)
-            .disabled(!model.canBuy)
-            .accessibilityIdentifier("asset-detail-buy")
+    /// The Pyth comparison, built from the same detail payload the hero reads. Nil
+    /// when the backend sent no comparison, or when neither leg carries a price.
+    private var stockVsTokenCard: StockVsTokenCard? {
+        guard let detail = model.detail else { return nil }
+        return StockVsTokenCard.make(
+            symbol: detail.symbol,
+            name: ProposeStock.displayName(symbol: detail.symbol, catalogName: detail.name),
+            quotes: detail.stockVsToken,
+            market: model.marketStatus
+        )
+    }
 
-            Button("Sell") {
-                pickerKind = .sell
-            }
-            .buttonStyle(.monacoSecondary)
-            .accessibilityIdentifier("asset-detail-sell")
-        }
+    /// The sticky bar. It replaces the inline action row, which sat below five cards
+    /// and offered a Sell that could walk into "This cabal does not hold this stock."
+    private var tradeBar: some View {
+        AssetTradeBar(
+            state: AssetTradeBarState.make(
+                isRoutable: model.canBuy,
+                liquidityLabel: model.detail?.liquidity.label,
+                holdings: social.holdings,
+                hasLoadedHoldings: social.hasAnswered
+            ),
+            onBuy: { pickerKind = .buy },
+            onSell: { pickerKind = .sell }
+        )
+        // The sell button arrives with the holdings answer; a fade reads as an answer
+        // landing rather than as the layout jumping.
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: social.hasAnswered)
     }
 }

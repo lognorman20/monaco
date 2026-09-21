@@ -104,30 +104,13 @@ struct AssetDetailHero: View {
 
     /// The exchange's state, and — whenever it is shut — the sentence this product
     /// exists for, on its own line so it is read rather than squeezed into a capsule.
+    ///
+    /// The chip itself is `MarketSessionChip`, shared with the stock-vs-token card.
+    /// Two copies of it drift: the same screen would say "After hours" in one place
+    /// and "Closed" in the other at the same moment.
     private func sessionChip(_ session: MarketSessionChipCopy) -> some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
-            HStack(spacing: 6) {
-                Image(systemName: session.isLive ? "circle.fill" : "moon.fill")
-                    .font(.system(size: 8))
-                    .foregroundStyle(session.isLive ? MonacoTheme.profit : MonacoTheme.warning)
-                Text(session.title)
-                    .font(MonacoTheme.Typo.caption.weight(.semibold))
-                    .foregroundStyle(MonacoTheme.ink)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(MonacoTheme.surfaceSunken))
-
-            if let detail = session.detail {
-                Text(detail)
-                    .font(MonacoTheme.Typo.caption)
-                    .foregroundStyle(MonacoTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(session.spoken)
-        .accessibilityIdentifier("asset-detail-session")
+        MarketSessionChip(session: session)
+            .accessibilityIdentifier("asset-detail-session")
     }
 }
 
