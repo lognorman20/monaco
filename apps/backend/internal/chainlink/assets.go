@@ -42,63 +42,75 @@ func (a *assetPrices) AssetMarks(ctx context.Context, symbols []string) (map[str
 	return out, nil
 }
 
+// chartRoundDepth is how many rounds back the fallback reads. Total-return feeds
+// update on deviation and on a daily heartbeat, so this is days of history, not
+// months.
+const chartRoundDepth = 48
+
+// ChartSeries is the last fallback behind Pyth: the token's own total-return rounds.
+// It is the token per token, so the series says so (Source chainlink, Basis token),
+// and it only ever draws rounds inside the requested window. The rounds it can
+// reach cover days, so 3M, 1Y and ALL come back empty: drawing two days of rounds
+// under a "1Y" chip would be a year chart of something else.
 func (a *assetPrices) ChartSeries(ctx context.Context, symbol string, chartRange pyth.ChartRange) (pyth.AssetChartSeries, error) {
+	empty := pyth.AssetChartSeries{EmptyReason: pyth.EmptyReasonNoHistory, Range: chartRange}
+	window, ok := chartWindow(chartRange)
+	if !ok {
+		return empty, nil
+	}
 	if a.live == nil || a.live.catalog == nil || a.live.chain == nil {
-		return pyth.AssetChartSeries{EmptyReason: "price history unavailable"}, nil
+		return empty, nil
 	}
 	feed, err := a.live.catalog.Feed(ctx, symbol)
 	if err != nil {
-		return pyth.AssetChartSeries{EmptyReason: "price history unavailable"}, nil
+		return empty, nil
 	}
-	rounds, err := a.live.chain.ChainlinkRoundHistory(ctx, feed, 48)
+	rounds, err := a.live.chain.ChainlinkRoundHistory(ctx, feed, chartRoundDepth)
 	if err != nil || len(rounds) == 0 {
-		return pyth.AssetChartSeries{EmptyReason: "price history unavailable"}, nil
+		return empty, nil
 	}
 	now := a.live.now()
-	cutoff := now.Add(-chartWindow(chartRange))
+	cutoff := now.Add(-window)
 	points := make([]pyth.ChartPoint, 0, len(rounds))
 	for _, round := range rounds {
+		if round.UpdatedAt.Before(cutoff) || round.UpdatedAt.After(now) {
+			continue
+		}
 		price, _, convErr := roundToMark(now, round)
 		if convErr != nil {
 			continue
 		}
-		if round.UpdatedAt.Before(cutoff) {
-			continue
-		}
 		points = append(points, pyth.ChartPoint{
-			Timestamp:       round.UpdatedAt.Unix(),
+			Timestamp:       round.UpdatedAt.UTC().Unix(),
 			PriceUsdcMicros: price,
 		})
-	}
-	if len(points) < 2 {
-		points = points[:0]
-		for _, round := range rounds {
-			price, _, convErr := roundToMark(now, round)
-			if convErr != nil {
-				continue
-			}
-			points = append(points, pyth.ChartPoint{
-				Timestamp:       round.UpdatedAt.Unix(),
-				PriceUsdcMicros: price,
-			})
-		}
 	}
 	sort.Slice(points, func(i, j int) bool { return points[i].Timestamp < points[j].Timestamp })
 	points = dedupeChartPoints(points)
 	if len(points) < 2 {
-		return pyth.AssetChartSeries{EmptyReason: "price history unavailable"}, nil
+		return empty, nil
 	}
-	return pyth.AssetChartSeries{Points: points}, nil
+	return pyth.AssetChartSeries{
+		Points:      points,
+		Range:       chartRange,
+		Source:      pyth.ChartSourceChainlink,
+		Basis:       pyth.PriceBasisToken,
+		BasisSymbol: symbol,
+	}, nil
 }
 
-func chartWindow(chartRange pyth.ChartRange) time.Duration {
+// chartWindow is how far back each range reaches. The second result is false for
+// the ranges the rounds cannot honestly cover.
+func chartWindow(chartRange pyth.ChartRange) (time.Duration, bool) {
 	switch chartRange {
+	case pyth.ChartRange1D:
+		return 24 * time.Hour, true
 	case pyth.ChartRange1W:
-		return 7 * 24 * time.Hour
+		return 7 * 24 * time.Hour, true
 	case pyth.ChartRange1M:
-		return 30 * 24 * time.Hour
+		return 30 * 24 * time.Hour, true
 	default:
-		return 24 * time.Hour
+		return 0, false
 	}
 }
 
