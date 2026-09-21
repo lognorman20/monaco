@@ -48,14 +48,33 @@ final class CabalPictureEditor: ObservableObject {
         self.writer = writer
     }
 
-    /// Adopts a picture that arrived from a refresh, unless a write is in flight.
+    /// Which writes a refresh has to be judged against. Bumped when a write starts
+    /// and again when it ends, so a refresh captured before or during a write never
+    /// carries the value current once that write has finished.
+    private var writeGeneration = 0
+
+    /// Where a refresh stands relative to this editor's writes. A refresh takes one
+    /// before it sends its request and hands it back with the reply.
+    struct RefreshTicket: Equatable {
+        fileprivate let generation: Int
+    }
+
+    /// Call before the refresh's request goes out, not when its reply lands.
+    func beginRefresh() -> RefreshTicket {
+        RefreshTicket(generation: writeGeneration)
+    }
+
+    /// Adopts a picture that arrived from a refresh, unless a write started since
+    /// that refresh was sent.
     ///
-    /// Without the guard a refresh that started before an upload can land after
-    /// it and put the old picture back, which reads to the member as the upload
-    /// silently undoing itself.
-    func adoptFromRefresh(_ refreshed: String?) {
-        guard !isWorking else { return }
-        pictureUrl = refreshed
+    /// A refresh sent before a write (or while one was in flight) can be answered
+    /// with the picture the cabal had before it, however late it lands. Adopting
+    /// that reply would put the old picture back after the new one was saved, which
+    /// reads to the member as the upload silently undoing itself. Such a reply is
+    /// dropped; the next refresh, sent after the write, carries the truth.
+    func adoptFromRefresh(_ refreshed: String?, ticket: RefreshTicket) {
+        guard !isWorking, ticket.generation == writeGeneration else { return }
+        pictureUrl = CabalPictureEditor.normalised(refreshed)
     }
 
     func setPicture(imageData: Data, mimeType: String) async -> CabalPictureOutcome {
@@ -81,8 +100,12 @@ final class CabalPictureEditor: ObservableObject {
             return .failed("Still working on the last change.")
         }
         isWorking = true
+        writeGeneration += 1
         lastFailure = nil
-        defer { isWorking = false }
+        defer {
+            isWorking = false
+            writeGeneration += 1
+        }
 
         do {
             let saved = try await work()

@@ -387,6 +387,9 @@ struct GroupDetailView: View {
             }
         }
 
+        // Taken before the request goes out: a picture write that starts after this
+        // point makes the reply's picture stale, however late the reply lands.
+        let pictureTicket = pictureEditor.beginRefresh()
         async let viewLoad = apiClient.getGroupView(accessToken: token, groupId: groupId)
         async let activityLoad = apiClient.getGroupActivity(accessToken: token, groupId: groupId)
         async let joinLoad = readJoinRequests(token: token)
@@ -407,7 +410,7 @@ struct GroupDetailView: View {
             QuietUpdate.apply(loadedView, over: groupView) { groupView = $0 }
             // The editor keeps its own copy of the picture, because a refresh that
             // started before an upload must not land after it and put the old one back.
-            pictureEditor.adoptFromRefresh(loadedView.pictureUrl)
+            pictureEditor.adoptFromRefresh(loadedView.pictureUrl, ticket: pictureTicket)
             if errorMessage != nil { errorMessage = nil }
         }
         if let activity {

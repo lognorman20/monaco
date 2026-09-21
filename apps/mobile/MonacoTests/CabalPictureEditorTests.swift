@@ -139,18 +139,19 @@ final class CabalPictureEditorTests: XCTestCase {
 
     // MARK: - Refresh races
 
-    /// A refresh that started before the upload must not land after it and put
-    /// the old picture back.
+    /// A refresh that lands while the upload is still running must not put the old
+    /// picture back.
     func testRefreshDoesNotOverwriteAWriteInFlight() async {
         let writer = StubCabalPictureWriter()
         writer.shouldWait = true
         writer.uploadResult = .success("https://cdn.test/groups/g1/new.jpg")
         let editor = makeEditor(pictureUrl: "https://cdn.test/groups/g1/old.jpg", writer: writer)
 
+        let ticket = editor.beginRefresh()
         let upload = Task { await editor.setPicture(imageData: image, mimeType: "image/jpeg") }
         await waitUntil { editor.isWorking }
 
-        editor.adoptFromRefresh("https://cdn.test/groups/g1/old.jpg")
+        editor.adoptFromRefresh("https://cdn.test/groups/g1/old.jpg", ticket: ticket)
         XCTAssertEqual(editor.pictureUrl, "https://cdn.test/groups/g1/old.jpg", "unchanged until the write lands")
 
         writer.release()
@@ -158,12 +159,96 @@ final class CabalPictureEditorTests: XCTestCase {
         XCTAssertEqual(editor.pictureUrl, "https://cdn.test/groups/g1/new.jpg")
     }
 
+    /// The race the in-flight guard alone missed: the refresh is sent at t0, the
+    /// upload starts at t1 and finishes at t2, and the refresh's reply (the old
+    /// picture) lands at t3 with nothing in flight. It must be dropped.
+    func testRefreshStartedBeforeAWriteThatLandsAfterItFinishedIsDropped() async {
+        let writer = StubCabalPictureWriter()
+        writer.uploadResult = .success("https://cdn.test/groups/g1/new.jpg")
+        let editor = makeEditor(pictureUrl: "https://cdn.test/groups/g1/old.jpg", writer: writer)
+
+        let ticket = editor.beginRefresh()                                     // t0
+        _ = await editor.setPicture(imageData: image, mimeType: "image/jpeg")  // t1..t2
+        XCTAssertFalse(editor.isWorking)
+
+        editor.adoptFromRefresh("https://cdn.test/groups/g1/old.jpg", ticket: ticket)  // t3
+        XCTAssertEqual(editor.pictureUrl, "https://cdn.test/groups/g1/new.jpg")
+    }
+
+    /// Same race after a removal: the stale reply must not bring the removed
+    /// picture back.
+    func testRefreshStartedBeforeARemovalCannotBringThePictureBack() async {
+        let writer = StubCabalPictureWriter()
+        let editor = makeEditor(pictureUrl: "https://cdn.test/groups/g1/old.jpg", writer: writer)
+
+        let ticket = editor.beginRefresh()
+        _ = await editor.removePicture()
+        editor.adoptFromRefresh("https://cdn.test/groups/g1/old.jpg", ticket: ticket)
+
+        XCTAssertNil(editor.pictureUrl)
+    }
+
+    /// A refresh sent while the write was in flight may have been answered before
+    /// the write committed, so it is stale too, even though it lands afterwards.
+    func testRefreshSentDuringAWriteThatLandsAfterItIsDropped() async {
+        let writer = StubCabalPictureWriter()
+        writer.shouldWait = true
+        writer.uploadResult = .success("https://cdn.test/groups/g1/new.jpg")
+        let editor = makeEditor(pictureUrl: "https://cdn.test/groups/g1/old.jpg", writer: writer)
+
+        let upload = Task { await editor.setPicture(imageData: image, mimeType: "image/jpeg") }
+        await waitUntil { editor.isWorking }
+        let ticket = editor.beginRefresh()
+        writer.release()
+        _ = await upload.value
+
+        editor.adoptFromRefresh("https://cdn.test/groups/g1/old.jpg", ticket: ticket)
+        XCTAssertEqual(editor.pictureUrl, "https://cdn.test/groups/g1/new.jpg")
+    }
+
+    /// A failed write still invalidates older refreshes: the editor cannot tell
+    /// whether the server applied it before the reply was lost.
+    func testRefreshStartedBeforeAFailedWriteIsDropped() async {
+        let writer = StubCabalPictureWriter()
+        writer.uploadResult = .failure(URLError(.timedOut))
+        let editor = makeEditor(pictureUrl: "https://cdn.test/groups/g1/old.jpg", writer: writer)
+
+        let ticket = editor.beginRefresh()
+        _ = await editor.setPicture(imageData: image, mimeType: "image/jpeg")
+        editor.adoptFromRefresh(nil, ticket: ticket)
+
+        XCTAssertEqual(editor.pictureUrl, "https://cdn.test/groups/g1/old.jpg")
+    }
+
+    /// A refresh sent after the write finished carries the truth and is adopted,
+    /// even when it disagrees with what the write returned (the picture changed
+    /// again elsewhere since).
+    func testRefreshSentAfterAWriteIsAdopted() async {
+        let writer = StubCabalPictureWriter()
+        writer.uploadResult = .success("https://cdn.test/groups/g1/new.jpg")
+        let editor = makeEditor(pictureUrl: nil, writer: writer)
+
+        _ = await editor.setPicture(imageData: image, mimeType: "image/jpeg")
+        let ticket = editor.beginRefresh()
+        editor.adoptFromRefresh("https://cdn.test/groups/g1/newer.jpg", ticket: ticket)
+
+        XCTAssertEqual(editor.pictureUrl, "https://cdn.test/groups/g1/newer.jpg")
+    }
+
     func testRefreshAdoptsThePictureWhenNothingIsInFlight() async {
         let editor = makeEditor(pictureUrl: nil, writer: StubCabalPictureWriter())
 
-        editor.adoptFromRefresh("https://cdn.test/groups/g1/from-refresh.jpg")
+        editor.adoptFromRefresh("https://cdn.test/groups/g1/from-refresh.jpg", ticket: editor.beginRefresh())
 
         XCTAssertEqual(editor.pictureUrl, "https://cdn.test/groups/g1/from-refresh.jpg")
+    }
+
+    func testRefreshWithABlankUrlIsNoPicture() async {
+        let editor = makeEditor(pictureUrl: "https://cdn.test/groups/g1/old.jpg", writer: StubCabalPictureWriter())
+
+        editor.adoptFromRefresh("  ", ticket: editor.beginRefresh())
+
+        XCTAssertNil(editor.pictureUrl)
     }
 
     // MARK: - Normalising
