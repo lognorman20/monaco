@@ -6,6 +6,8 @@ import (
 	"math/big"
 	"strings"
 	"time"
+
+	"github.com/monaco/monaco/apps/backend/internal/marketcal"
 )
 
 // The "stock vs token" comparison on the asset screen. It is read-only and
@@ -17,9 +19,12 @@ import (
 //     mid of a Kyber buy probe and a Kyber sell probe. Pyth publishes no feed for a
 //     B20 token (verified against Hermes: a query for AAPLC returns nothing), so a
 //     quote-implied price is the only market price of the token there is;
-//   - the mark, the token's Chainlink total-return value (TRV). Coinbase's B20 docs
-//     define it as the underlying's price times the token's multiplier, which is how
-//     splits and reinvested cash dividends reach the holder;
+//   - the mark, the token's Chainlink total-return value (TRV). Chainlink's docs for
+//     the Base tokenized-equity feeds define it as the underlying's market price
+//     times a multiplier read from Coinbase's on-chain registry; a cash dividend is
+//     converted into shares and raises the multiplier instead of being paid out,
+//     and a split moves the multiplier the other way
+//     (https://docs.chain.link/data-feeds/tokenized-equity-feeds/coinbase);
 //   - the equity reference, Pyth's price for the underlying on its exchange, per
 //     share.
 //
@@ -40,7 +45,9 @@ const (
 	// QuoteStatusLive means the price is current.
 	QuoteStatusLive QuoteStatus = "live"
 	// QuoteStatusStale means the price is real but frozen — an equity feed outside
-	// the cash session, or a feed that has stopped publishing. PublishedAt says when.
+	// the cash session, a total-return mark holding the last close over a weekend
+	// or holiday, or a feed that has stopped publishing. PublishedAt says when, if
+	// the source said.
 	QuoteStatusStale QuoteStatus = "stale"
 	// QuoteStatusUnavailable means there is no price to show at all.
 	QuoteStatusUnavailable QuoteStatus = "unavailable"
@@ -101,10 +108,15 @@ func unavailableQuote(source QuoteSource, reason string) ReferenceQuote {
 }
 
 // PremiumBps is how far the token leg trades above (positive) or below (negative)
-// the mark, in basis points. Nil unless both carry a real price: a premium against
-// a missing leg would be a fabricated number.
+// the mark, in basis points. Nil unless both carry a real price and both are live:
+// a premium against a missing leg would be a fabricated number, and a premium of a
+// live pool price over a frozen mark is the market's move since the mark froze,
+// not a premium.
 func PremiumBps(token, mark ReferenceQuote) *int {
 	if !token.Priced() || !mark.Priced() {
+		return nil
+	}
+	if token.Status != QuoteStatusLive || mark.Status != QuoteStatusLive {
 		return nil
 	}
 	ratio := float64(token.PriceUsdcMicros-mark.PriceUsdcMicros) / float64(mark.PriceUsdcMicros)
@@ -112,13 +124,63 @@ func PremiumBps(token, mark ReferenceQuote) *int {
 	return &bps
 }
 
+// MarkHeartbeat is how old a total-return round may be before the mark is called
+// stale. It is the rule chainlink.roundToMark already applies for NAV (a daily
+// heartbeat plus an hour of slack), restated here so a mark whose source did not
+// carry that verdict is still judged by it.
+const MarkHeartbeat = 25 * time.Hour
+
 // MarkQuote wraps the token's Chainlink total-return mark as the line the premium
 // is measured against.
-func MarkQuote(markUsdcMicros *int64) ReferenceQuote {
-	if markUsdcMicros == nil || *markUsdcMicros <= 0 {
+//
+// Chainlink's Base tokenized-equity feeds run 24/5 (pre-market, regular,
+// post-market and overnight) and, off-hours, "hold the last close" with no
+// heartbeat; integrators are told to bound staleness from updatedAt themselves
+// (https://docs.chain.link/data-feeds/tokenized-equity-feeds/coinbase). The token's
+// pools keep trading through a weekend or a holiday, so a premium against the held
+// close would report the market's move since Friday as a premium. The mark is
+// therefore stale when:
+//   - the source already judged it past the feed's heartbeat (AfterHours), or it
+//     is older than MarkHeartbeat;
+//   - it does not say when it was struck: it is never assumed fresh;
+//   - the exchange calendar has no session running and the round was struck no
+//     later than the end of the last session's post-market, i.e. the feed is
+//     holding that session's close. On a weekday night the overnight session
+//     moves the feed, so a round struck after the post-market ended is live; a
+//     quiet overnight feed reads stale, which errs on the side of no premium.
+func MarkQuote(mark *AssetMark, now time.Time) ReferenceQuote {
+	if mark == nil || mark.PriceUsdcMicros <= 0 {
 		return unavailableQuote(QuoteSourceChainlinkTRV, QuoteReasonUpstream)
 	}
-	return ReferenceQuote{Source: QuoteSourceChainlinkTRV, Status: QuoteStatusLive, PriceUsdcMicros: *markUsdcMicros}
+	quote := ReferenceQuote{
+		Source:          QuoteSourceChainlinkTRV,
+		Status:          QuoteStatusLive,
+		PriceUsdcMicros: mark.PriceUsdcMicros,
+	}
+	if !mark.UpdatedAt.IsZero() {
+		quote.PublishedAt = mark.UpdatedAt.UTC()
+	}
+	if markIsStale(*mark, now) {
+		quote.Status = QuoteStatusStale
+	}
+	return quote
+}
+
+func markIsStale(mark AssetMark, now time.Time) bool {
+	if mark.AfterHours || mark.UpdatedAt.IsZero() {
+		return true
+	}
+	if now.Sub(mark.UpdatedAt) > MarkHeartbeat {
+		return true
+	}
+	if marketcal.StatusAt(now).Session != marketcal.SessionClosed {
+		return false
+	}
+	last, found := marketcal.LastTradingSession(now)
+	if !found {
+		return true
+	}
+	return !mark.UpdatedAt.After(last.PostCloseEnd)
 }
 
 // KyberProbe is the pair of quotes the asset screen already takes for liquidity:
@@ -142,6 +204,10 @@ type KyberQuote struct {
 	// fees and price impact, so on a thin pool this reads wide — which is the real
 	// round-trip cost at that size.
 	SpreadBps *int
+	// ProbedAt is when we asked Kyber for the two probes, in UTC. It is our clock,
+	// not a time Kyber struck a price at, which is why it is not PublishedAt; the
+	// probes are shared for a minute, so it says how old the leg is.
+	ProbedAt time.Time
 }
 
 // KyberTokenQuote turns the two probes into the token leg. It needs both: an ask

@@ -1,8 +1,9 @@
 package pyth
 
 // The stats grid on the asset screen. Every cell here is derived from data the app
-// really has — Benchmarks candles, the Pyth confidence interval, the Kyber spread
-// probes. Market cap, P/E and dividend yield have no source behind B20 tokens, so they
+// really has about the underlying equity — Benchmarks candles and the Pyth
+// confidence interval. The Kyber spread is about the token and lives on the
+// liquidity strip and the stock-vs-token card instead. Market cap, P/E and dividend yield have no source behind B20 tokens, so they
 // are not in this struct at all: a grid with two honest cells missing beats a grid
 // with two invented ones in it.
 
@@ -15,10 +16,8 @@ type AssetStats struct {
 	PreviousCloseUsdcMicros *int64
 	Week52HighUsdcMicros    *int64
 	Week52LowUsdcMicros     *int64
-	// ConfUsdcMicros is Pyth's confidence interval on the latest mark.
+	// ConfUsdcMicros is Pyth's confidence interval on the latest equity price.
 	ConfUsdcMicros *int64
-	// SpreadBps is the round-trip cost implied by the Kyber buy and sell probes.
-	SpreadBps *int
 	// Basis names the instrument the candle-derived cells describe, and BasisSymbol
 	// names it in full. Every history source we have serves the underlying equity,
 	// so these cells are Apple on NASDAQ, per share, while the hero price is the
@@ -38,8 +37,7 @@ func (s AssetStats) HasFigures() bool {
 		s.PreviousCloseUsdcMicros != nil ||
 		s.Week52HighUsdcMicros != nil ||
 		s.Week52LowUsdcMicros != nil ||
-		s.ConfUsdcMicros != nil ||
-		s.SpreadBps != nil
+		s.ConfUsdcMicros != nil
 }
 
 // SessionStats folds a day series into open/high/low/previous close.

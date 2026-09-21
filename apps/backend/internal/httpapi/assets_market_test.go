@@ -17,7 +17,8 @@ import (
 
 const appleToken = "0xb200000000000000000000c2e324d24d7eecd1fb"
 
-// seedApple lists AAPLc with a Chainlink mark of $232.05.
+// seedApple lists AAPLc with a Chainlink mark of $232.05, struck two minutes
+// before the test clock.
 func seedApple(t *testing.T, handlers *AssetsHandlers) {
 	t.Helper()
 	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
@@ -26,7 +27,10 @@ func seedApple(t *testing.T, handlers *AssetsHandlers) {
 		TokenAddress: appleToken,
 		Routable:     true,
 	})
-	pyth.RegisterAssetMark(handlers.Pyth, "AAPLc", pyth.AssetMark{PriceUsdcMicros: 232_050_000})
+	pyth.RegisterAssetMark(handlers.Pyth, "AAPLc", pyth.AssetMark{
+		PriceUsdcMicros: 232_050_000,
+		UpdatedAt:       assetsTestClock.Add(-2 * time.Minute),
+	})
 }
 
 // seedKyberProbes makes 1 USDC buy 0.00430000 AAPLc (ask $232.558139) and one
@@ -163,11 +167,15 @@ func TestGET_assets_list_change24hIsTheUnderlyingsDayMove(t *testing.T) {
 		t.Fatalf("AAPLc change24h = %v, want 0.015000 (231.42 over a 228 previous close)", apple.Change24h)
 	}
 	// The hero price stays the Chainlink mark, not the Pyth equity price.
+	// It is the stock's move beside a per-token price, so it says whose move it is.
+	if apple.Change24hBasis != "underlying" || apple.Change24hBasisSymbol != "AAPL" {
+		t.Fatalf("AAPLc change24h basis = %q/%q, want underlying/AAPL", apple.Change24hBasis, apple.Change24hBasisSymbol)
+	}
 	if apple.PriceUsdcMicros == nil || *apple.PriceUsdcMicros != 232_050_000 {
 		t.Fatalf("AAPLc price = %v, want the Chainlink mark", apple.PriceUsdcMicros)
 	}
-	if amazon, ok := bySymbol["AMZNc"]; !ok || amazon.Change24h != nil {
-		t.Fatalf("AMZNc = %+v, want no change24h from a token-basis series", amazon)
+	if amazon, ok := bySymbol["AMZNc"]; !ok || amazon.Change24h != nil || amazon.Change24hBasis != "" || amazon.Change24hBasisSymbol != "" {
+		t.Fatalf("AMZNc = %+v, want no change24h (and no basis) from a token-basis series", amazon)
 	}
 }
 
@@ -214,8 +222,14 @@ func TestGET_assets_symbol_stockVsToken_isKyberAgainstTheChainlinkMark(t *testin
 	if card.Token.PublishedAt != nil || card.Token.ConfUsdcMicros != nil {
 		t.Fatal("a Kyber quote has no publish time and no confidence interval")
 	}
+	if card.Token.ProbedAt == nil || *card.Token.ProbedAt != "2026-09-22T14:00:00Z" {
+		t.Fatalf("token probedAt = %v, want when the probes were taken, in UTC", card.Token.ProbedAt)
+	}
 	if card.Mark.Source != "chainlink_trv" || card.Mark.PriceUsdcMicros == nil || *card.Mark.PriceUsdcMicros != 232_050_000 {
 		t.Fatalf("mark = %+v, want the Chainlink total-return mark", card.Mark)
+	}
+	if card.Mark.Status != "live" || card.Mark.PublishedAt == nil || *card.Mark.PublishedAt != "2026-09-22T13:58:00Z" {
+		t.Fatalf("mark = %+v, want live with the round's updatedAt", card.Mark)
 	}
 	// (231.829069 - 232.05) / 232.05 = -9.52 bps: the token against its own mark,
 	// never against the equity (231.40), which would read the multiplier as premium.
@@ -244,7 +258,7 @@ func TestGET_assets_symbol_stockVsToken_isKyberAgainstTheChainlinkMark(t *testin
 	}
 }
 
-func TestGET_assets_symbol_stockVsToken_noSellRouteIsExplicitAndHasNoPremium(t *testing.T) {
+func TestGET_assets_symbol_stockVsToken_noSellRouteShowsNoCard(t *testing.T) {
 	t.Parallel()
 
 	handlers, authHandlers, walletClient, dexClient, iso := integrationAssetsApp(t)
@@ -257,15 +271,16 @@ func TestGET_assets_symbol_stockVsToken_noSellRouteIsExplicitAndHasNoPremium(t *
 	pyth.RegisterEquityQuote(handlers.Quotes, "AAPLc", liveEquityQuote())
 
 	detail, _ := getAssetDetail(t, handlers, token)
-	card := detail.StockVsToken
-	if card == nil {
-		t.Fatal("the equity line alone still makes a card")
+	// The card is the token in its pools. With one probe unrouted there is no
+	// token leg, and the hero price plus a per-share line is not that card.
+	if detail.StockVsToken != nil {
+		t.Fatalf("card = %+v, want none without both probes", detail.StockVsToken)
 	}
-	if card.Token.Status != "unavailable" || card.Token.Reason != "no_route" || card.Token.PriceUsdcMicros != nil {
-		t.Fatalf("token = %+v, want unavailable/no_route with no price", card.Token)
+	if detail.Liquidity.SpreadBps != nil {
+		t.Fatal("half a market has no spread")
 	}
-	if card.PremiumBps != nil || card.SpreadBps != nil || detail.Liquidity.SpreadBps != nil {
-		t.Fatal("half a market has no premium and no spread")
+	if !detail.Liquidity.Routable || detail.Liquidity.BuyProbeOutAmount != "430000" {
+		t.Fatalf("liquidity = %+v, want the buy probe still reported", detail.Liquidity)
 	}
 }
 
@@ -283,8 +298,8 @@ func TestGET_assets_symbol_stockVsToken_probeErrorIsUpstreamAndNotCached(t *test
 	pyth.RegisterEquityQuote(handlers.Quotes, "AAPLc", liveEquityQuote())
 
 	detail, _ := getAssetDetail(t, handlers, token)
-	if detail.StockVsToken == nil || detail.StockVsToken.Token.Reason != "upstream_error" {
-		t.Fatalf("card = %+v, want the token leg unavailable because of the outage", detail.StockVsToken)
+	if detail.StockVsToken != nil {
+		t.Fatalf("card = %+v, want none while a probe is failing", detail.StockVsToken)
 	}
 
 	// Kyber recovers; the next load must probe again rather than serve the outage.
@@ -320,6 +335,83 @@ func TestGET_assets_symbol_stockVsToken_unavailableEquityLineIsExplicit(t *testi
 	}
 }
 
+func TestGET_assets_symbol_stockVsToken_aWeekendMarkIsStaleAndHasNoPremium(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, walletClient, dexClient, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
+	seedApple(t, handlers)
+	seedKyberProbes(t, dexClient)
+	pyth.RegisterEquityQuote(handlers.Quotes, "AAPLc", liveEquityQuote())
+	// Saturday noon ET. The total-return feed holds Friday's close (its last round
+	// at 19:59 ET, inside the post-market) while the pools keep trading. Only 16
+	// hours old, so the 25-hour heartbeat alone would not catch it.
+	saturday := time.Date(2026, time.September, 26, 16, 0, 0, 0, time.UTC)
+	handlers.Now = func() time.Time { return saturday }
+	pyth.RegisterAssetMark(handlers.Pyth, "AAPLc", pyth.AssetMark{
+		PriceUsdcMicros: 232_050_000,
+		UpdatedAt:       time.Date(2026, time.September, 25, 23, 59, 0, 0, time.UTC),
+	})
+
+	detail, _ := getAssetDetail(t, handlers, token)
+	card := detail.StockVsToken
+	if card == nil {
+		t.Fatal("expected the card: both probes routed")
+	}
+	if card.Mark.Status != "stale" {
+		t.Fatalf("mark status = %q, want stale over the weekend", card.Mark.Status)
+	}
+	if card.Mark.PublishedAt == nil || *card.Mark.PublishedAt != "2026-09-25T23:59:00Z" {
+		t.Fatalf("mark publishedAt = %v, want Friday's round time in UTC", card.Mark.PublishedAt)
+	}
+	if card.Mark.PriceUsdcMicros == nil {
+		t.Fatal("a stale mark is still shown, with its time")
+	}
+	if card.PremiumBps != nil {
+		t.Fatalf("premium = %d against Friday's close; that is the weekend's move, not a premium", *card.PremiumBps)
+	}
+	if card.Token.Status != "live" || card.SpreadBps == nil {
+		t.Fatalf("token = %+v spread = %v, want the live pool leg and its spread", card.Token, card.SpreadBps)
+	}
+}
+
+func TestGET_assets_symbol_stockVsToken_aMarkPastItsHeartbeatIsStale(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, walletClient, dexClient, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
+	seedApple(t, handlers)
+	seedKyberProbes(t, dexClient)
+	// Mid-session on a Tuesday, but the round is two days old: the feed stopped.
+	pyth.RegisterAssetMark(handlers.Pyth, "AAPLc", pyth.AssetMark{
+		PriceUsdcMicros: 232_050_000,
+		UpdatedAt:       assetsTestClock.Add(-48 * time.Hour),
+		AfterHours:      true,
+	})
+
+	detail, _ := getAssetDetail(t, handlers, token)
+	card := detail.StockVsToken
+	if card == nil || card.Mark.Status != "stale" || card.PremiumBps != nil {
+		t.Fatalf("card = %+v, want a stale mark and no premium", card)
+	}
+}
+
+func TestGET_assets_symbol_stockVsToken_aMarkWithNoRoundTimeIsNotLive(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, walletClient, dexClient, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
+	seedApple(t, handlers)
+	seedKyberProbes(t, dexClient)
+	pyth.RegisterAssetMark(handlers.Pyth, "AAPLc", pyth.AssetMark{PriceUsdcMicros: 232_050_000})
+
+	detail, _ := getAssetDetail(t, handlers, token)
+	card := detail.StockVsToken
+	if card == nil || card.Mark.Status != "stale" || card.Mark.PublishedAt != nil || card.PremiumBps != nil {
+		t.Fatalf("card = %+v, want a mark of unknown age reported stale, with no premium", card)
+	}
+}
+
 func TestGET_assets_symbol_stockVsToken_absentWhenNothingHasAPrice(t *testing.T) {
 	t.Parallel()
 
@@ -348,14 +440,14 @@ func TestGET_assets_symbol_stats_areTheUnderlyingsRegularSession(t *testing.T) {
 	charts := handlers.Charts.(pyth.AssetPriceClient)
 	pyth.RegisterChartSeries(charts, "AAPLc", pyth.ChartRange1D, underlyingDay())
 	pyth.RegisterChartSeries(charts, "AAPLc", pyth.ChartRange1Y, pyth.AssetChartSeries{
-		Basis: pyth.PriceBasisUnderlying, BasisSymbol: "AAPL",
+		Source: pyth.ChartSourceBenchmarks, Basis: pyth.PriceBasisUnderlying, BasisSymbol: "AAPL",
 		Points: []pyth.ChartPoint{
 			{Timestamp: 1, PriceUsdcMicros: 170_000_000, HighUsdcMicros: 172_000_000, LowUsdcMicros: 164_080_000},
 			{Timestamp: 2, PriceUsdcMicros: 250_000_000, HighUsdcMicros: 260_100_000, LowUsdcMicros: 248_000_000},
 		},
 	})
 
-	detail, _ := getAssetDetail(t, handlers, token)
+	detail, body := getAssetDetail(t, handlers, token)
 	stats := detail.Stats
 	if stats == nil {
 		t.Fatal("expected a stats grid")
@@ -373,14 +465,60 @@ func TestGET_assets_symbol_stats_areTheUnderlyingsRegularSession(t *testing.T) {
 	check("52w high", stats.Week52HighUsdcMicros, 260_100_000)
 	check("52w low", stats.Week52LowUsdcMicros, 164_080_000)
 	check("conf", stats.ConfUsdcMicros, 30_000)
-	if stats.SpreadBps == nil || *stats.SpreadBps != 63 {
-		t.Fatalf("spread = %v, want the Kyber spread", stats.SpreadBps)
-	}
 	if stats.Basis != "underlying" || stats.BasisSymbol != "AAPL" {
 		t.Fatalf("basis = %q/%q, want underlying/AAPL", stats.Basis, stats.BasisSymbol)
 	}
+	// The grid is the share's; the Kyber spread is the token's and lives on the
+	// liquidity strip and the card, not under an "AAPL on its home exchange" header.
+	var raw struct {
+		Stats map[string]json.RawMessage `json:"stats"`
+	}
+	if err := json.Unmarshal([]byte(body), &raw); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if _, ok := raw.Stats["spreadBps"]; ok {
+		t.Fatalf("stats carries the token's spread: %s", body)
+	}
+	if detail.Liquidity.SpreadBps == nil || *detail.Liquidity.SpreadBps != 63 {
+		t.Fatalf("liquidity spread = %v, want 63", detail.Liquidity.SpreadBps)
+	}
 	if detail.Change24h == nil || *detail.Change24h != "0.015000" {
 		t.Fatalf("change24h = %v, want 0.015000", detail.Change24h)
+	}
+	if detail.Change24hBasis != "underlying" || detail.Change24hBasisSymbol != "AAPL" {
+		t.Fatalf("change24h basis = %q/%q, want underlying/AAPL", detail.Change24hBasis, detail.Change24hBasisSymbol)
+	}
+}
+
+func TestGET_assets_symbol_stats_neverFoldTheHermesSampler(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, walletClient, dexClient, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
+	seedApple(t, handlers)
+	seedKyberProbes(t, dexClient)
+	// Benchmarks is down and the sampler answered: same equity feed, but a price
+	// every two hours and every fourteen days, not candles.
+	charts := handlers.Charts.(pyth.AssetPriceClient)
+	day := underlyingDay()
+	day.Source = pyth.ChartSourceHermes
+	day.PreviousCloseUsdcMicros = nil
+	for i := range day.Points {
+		day.Points[i].OpenUsdcMicros, day.Points[i].HighUsdcMicros, day.Points[i].LowUsdcMicros = 0, 0, 0
+	}
+	pyth.RegisterChartSeries(charts, "AAPLc", pyth.ChartRange1D, day)
+	pyth.RegisterChartSeries(charts, "AAPLc", pyth.ChartRange1Y, pyth.AssetChartSeries{
+		Source: pyth.ChartSourceHermes, Basis: pyth.PriceBasisUnderlying, BasisSymbol: "AAPL",
+		Points: []pyth.ChartPoint{{Timestamp: 1, PriceUsdcMicros: 170_000_000}, {Timestamp: 2, PriceUsdcMicros: 250_000_000}},
+	})
+	handlers.Quotes = nil
+
+	detail, _ := getAssetDetail(t, handlers, token)
+	if detail.Stats != nil {
+		t.Fatalf("stats = %+v, want the grid omitted: sampled points are not an open, a high or a 52-week range", detail.Stats)
+	}
+	if detail.Change24h != nil {
+		t.Fatalf("change24h = %q, want none without a Benchmarks previous close", *detail.Change24h)
 	}
 }
 

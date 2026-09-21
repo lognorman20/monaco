@@ -282,9 +282,15 @@ func TestKyberTokenQuote_halfAMarketIsNoRoute(t *testing.T) {
 	}
 }
 
+// tuesdayMidSession is 10:00 ET on a Tuesday, inside the regular session.
+var tuesdayMidSession = time.Date(2026, time.September, 22, 14, 0, 0, 0, time.UTC)
+
 func TestPremiumBps_isTheTokenAgainstTheMark(t *testing.T) {
 	t.Parallel()
-	mark := MarkQuote(int64Ptr(100_000_000))
+	mark := MarkQuote(&AssetMark{PriceUsdcMicros: 100_000_000, UpdatedAt: tuesdayMidSession.Add(-time.Minute)}, tuesdayMidSession)
+	if mark.Status != QuoteStatusLive {
+		t.Fatalf("mark = %+v, want live mid-session", mark)
+	}
 	token := ReferenceQuote{Source: QuoteSourceDexKyber, Status: QuoteStatusLive, PriceUsdcMicros: 99_000_000}
 	bps := PremiumBps(token, mark)
 	if bps == nil || *bps != -100 {
@@ -293,10 +299,99 @@ func TestPremiumBps_isTheTokenAgainstTheMark(t *testing.T) {
 	if PremiumBps(unavailableQuote(QuoteSourceDexKyber, QuoteReasonNoRoute), mark) != nil {
 		t.Fatal("no premium without a token price")
 	}
-	if PremiumBps(token, MarkQuote(nil)) != nil {
+	if PremiumBps(token, MarkQuote(nil, tuesdayMidSession)) != nil {
 		t.Fatal("no premium without a mark")
 	}
-	if got := MarkQuote(int64Ptr(0)); got.Priced() {
+	if got := MarkQuote(&AssetMark{PriceUsdcMicros: 0}, tuesdayMidSession); got.Priced() {
 		t.Fatal("a zero mark is not a price")
+	}
+}
+
+func TestMarkQuote_carriesTheRoundTimeInUTC(t *testing.T) {
+	t.Parallel()
+	struck := time.Date(2026, time.September, 22, 9, 58, 0, 0, time.FixedZone("ET", -4*3600))
+	mark := MarkQuote(&AssetMark{PriceUsdcMicros: 100_000_000, UpdatedAt: struck}, tuesdayMidSession)
+	if !mark.PublishedAt.Equal(struck) || mark.PublishedAt.Location() != time.UTC {
+		t.Fatalf("publishedAt = %v, want the round time in UTC", mark.PublishedAt)
+	}
+}
+
+func TestMarkQuote_staleMarksCarryNoPremium(t *testing.T) {
+	t.Parallel()
+	friday := time.Date(2026, time.September, 25, 19, 59, 0, 0, time.UTC)      // 15:59 ET
+	fridayNight := time.Date(2026, time.September, 25, 23, 59, 0, 0, time.UTC) // 19:59 ET, post-market
+	cases := []struct {
+		name string
+		mark AssetMark
+		now  time.Time
+		want QuoteStatus
+	}{
+		{
+			name: "saturday holds friday's close",
+			mark: AssetMark{PriceUsdcMicros: 100_000_000, UpdatedAt: fridayNight},
+			now:  time.Date(2026, time.September, 26, 15, 0, 0, 0, time.UTC),
+			want: QuoteStatusStale,
+		},
+		{
+			name: "sunday afternoon, still under the 25h heartbeat, still friday's close",
+			mark: AssetMark{PriceUsdcMicros: 100_000_000, UpdatedAt: fridayNight},
+			now:  time.Date(2026, time.September, 26, 22, 0, 0, 0, time.UTC),
+			want: QuoteStatusStale,
+		},
+		{
+			name: "a holiday holds the last session's close",
+			mark: AssetMark{PriceUsdcMicros: 100_000_000, UpdatedAt: time.Date(2026, time.November, 25, 23, 0, 0, 0, time.UTC)},
+			now:  time.Date(2026, time.November, 26, 17, 0, 0, 0, time.UTC), // Thanksgiving
+			want: QuoteStatusStale,
+		},
+		{
+			name: "the source's own after-hours verdict",
+			mark: AssetMark{PriceUsdcMicros: 100_000_000, UpdatedAt: tuesdayMidSession.Add(-time.Minute), AfterHours: true},
+			now:  tuesdayMidSession,
+			want: QuoteStatusStale,
+		},
+		{
+			name: "older than the heartbeat mid-session",
+			mark: AssetMark{PriceUsdcMicros: 100_000_000, UpdatedAt: tuesdayMidSession.Add(-MarkHeartbeat - time.Minute)},
+			now:  tuesdayMidSession,
+			want: QuoteStatusStale,
+		},
+		{
+			name: "no round time is never assumed fresh",
+			mark: AssetMark{PriceUsdcMicros: 100_000_000},
+			now:  tuesdayMidSession,
+			want: QuoteStatusStale,
+		},
+		{
+			name: "post-market still moves the 24/5 feed",
+			mark: AssetMark{PriceUsdcMicros: 100_000_000, UpdatedAt: friday},
+			now:  fridayNight,
+			want: QuoteStatusLive,
+		},
+		{
+			name: "a weekday overnight round after the post-market is live",
+			mark: AssetMark{PriceUsdcMicros: 100_000_000, UpdatedAt: time.Date(2026, time.September, 23, 2, 0, 0, 0, time.UTC)},
+			now:  time.Date(2026, time.September, 23, 2, 30, 0, 0, time.UTC), // Tue 22:30 ET
+			want: QuoteStatusLive,
+		},
+	}
+	token := ReferenceQuote{Source: QuoteSourceDexKyber, Status: QuoteStatusLive, PriceUsdcMicros: 101_000_000}
+	for _, tc := range cases {
+		mark := tc.mark
+		got := MarkQuote(&mark, tc.now)
+		if got.Status != tc.want {
+			t.Errorf("%s: status = %q, want %q", tc.name, got.Status, tc.want)
+			continue
+		}
+		if !got.Priced() {
+			t.Errorf("%s: a stale mark is still a price to show", tc.name)
+		}
+		premium := PremiumBps(token, got)
+		if tc.want == QuoteStatusStale && premium != nil {
+			t.Errorf("%s: premium = %d against a stale mark", tc.name, *premium)
+		}
+		if tc.want == QuoteStatusLive && premium == nil {
+			t.Errorf("%s: want a premium against a live mark", tc.name)
+		}
 	}
 }

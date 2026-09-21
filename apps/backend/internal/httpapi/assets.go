@@ -93,8 +93,22 @@ type marketAssetResponse struct {
 	Routable        bool   `json:"routable"`
 	PriceUsdcMicros *int64 `json:"priceUsdcMicros,omitempty"`
 	// Change24h is the underlying equity's move against its previous regular-session
-	// close (Pyth), as a decimal ratio. It is the stock's day move, not the token's.
+	// close (Pyth), as a decimal ratio. It is the stock's day move, not the token's,
+	// and it sits beside a per-token price, so it always travels with its basis.
 	Change24h *string `json:"change24h,omitempty"`
+	// Change24hBasis is "underlying" and Change24hBasisSymbol names the equity
+	// ("AAPL"). Both are set exactly when Change24h is.
+	Change24hBasis       string `json:"change24hBasis,omitempty"`
+	Change24hBasisSymbol string `json:"change24hBasisSymbol,omitempty"`
+}
+
+// dayChangeFields is change24h with the basis section 4.3 of the port requires on
+// every Pyth-derived figure. Nil in, empty out: no basis without a figure.
+func dayChangeFields(symbol string, change *string) (*string, string, string) {
+	if change == nil {
+		return nil, "", ""
+	}
+	return change, pyth.PriceBasisUnderlying, pyth.UnderlyingTicker(symbol)
 }
 
 type listAssetsResponse struct {
@@ -125,11 +139,14 @@ type assetLiquidityResponse struct {
 // cell rather than showing a made-up one. Market cap, P/E and dividend yield have
 // no source behind a B20 token and are deliberately absent.
 //
-// Open/High/Low/PreviousClose, the 52-week range and the confidence interval are
-// Pyth figures for the underlying equity, per share, while the hero price is the
-// token's total-return mark, per token. The two differ by the token's multiplier
-// and by market hours, so Basis/BasisSymbol label the grid; without that label a
-// hero price above "the day's high" reads as a bug.
+// Every cell is a Pyth figure for the underlying equity, per share: Open/High/Low/
+// PreviousClose from Benchmarks candles, the 52-week range from Benchmarks daily
+// bars, and the confidence interval on the latest equity price. The hero price is
+// the token's total-return mark, per token. The two differ by the token's
+// multiplier and by market hours, so Basis/BasisSymbol label the grid; without
+// that label a hero price above "the day's high" reads as a bug. The Kyber spread
+// is about the token, not the share, so it is not in this grid; it is on
+// liquidity and stockVsToken.
 type assetStatsResponse struct {
 	OpenUsdcMicros          *int64 `json:"openUsdcMicros,omitempty"`
 	HighUsdcMicros          *int64 `json:"highUsdcMicros,omitempty"`
@@ -137,8 +154,6 @@ type assetStatsResponse struct {
 	PreviousCloseUsdcMicros *int64 `json:"previousCloseUsdcMicros,omitempty"`
 	Week52HighUsdcMicros    *int64 `json:"week52HighUsdcMicros,omitempty"`
 	Week52LowUsdcMicros     *int64 `json:"week52LowUsdcMicros,omitempty"`
-	// SpreadBps is the round-trip trading cost implied by the Kyber probes.
-	SpreadBps *int `json:"spreadBps,omitempty"`
 	// ConfUsdcMicros is Pyth's own confidence interval on the latest equity price.
 	ConfUsdcMicros *int64 `json:"confUsdcMicros,omitempty"`
 	// Basis is "underlying"; BasisSymbol names it ("AAPL").
@@ -159,6 +174,11 @@ type referenceQuoteResponse struct {
 	// BidUsdcMicros and AskUsdcMicros are the Kyber probes behind a dex_kyber mid.
 	BidUsdcMicros *int64 `json:"bidUsdcMicros,omitempty"`
 	AskUsdcMicros *int64 `json:"askUsdcMicros,omitempty"`
+	// ProbedAt is when the Kyber probes behind a dex_kyber mid were taken, RFC3339
+	// in UTC. Probes are shared for up to a minute, so it can be that much older
+	// than asOf. It is our clock, not a publish time: Kyber does not say when a
+	// quote's price was struck, so a dex_kyber line never has publishedAt.
+	ProbedAt *string `json:"probedAt,omitempty"`
 }
 
 // stockVsTokenResponse compares the token in its pools with its own mark, and
@@ -167,14 +187,18 @@ type stockVsTokenResponse struct {
 	// Token is the Kyber quote-implied mid, per token.
 	Token referenceQuoteResponse `json:"token"`
 	// Mark is the Chainlink total-return mark the premium is measured against, per
-	// token. It equals the hero price.
+	// token. It equals the hero price. PublishedAt is the round's updatedAt, and
+	// Status is "stale" when the feed is holding a closed session's close (weekends,
+	// holidays) or the round is past the feed's heartbeat.
 	Mark referenceQuoteResponse `json:"mark"`
 	// Equity is Pyth's price for the underlying, per share. No premium is computed
 	// against it: the mark is this price times the token's multiplier, so the two
 	// are not the same unit.
 	Equity       referenceQuoteResponse `json:"equity"`
 	EquitySymbol string                 `json:"equitySymbol"`
-	// PremiumBps is Token against Mark. Absent unless both carry a real price.
+	// PremiumBps is Token against Mark. Absent unless both carry a real price and
+	// both are live: against a stale mark it would be the market's move since the
+	// mark froze, not a premium.
 	PremiumBps *int `json:"premiumBps,omitempty"`
 	// SpreadBps is the Kyber ask against bid, the same figure as liquidity.spreadBps.
 	SpreadBps *int   `json:"spreadBps,omitempty"`
@@ -182,13 +206,16 @@ type stockVsTokenResponse struct {
 }
 
 type assetDetailResponse struct {
-	Symbol          string                 `json:"symbol"`
-	Name            string                 `json:"name"`
-	TokenAddress    string                 `json:"tokenAddress"`
-	Routable        bool                   `json:"routable"`
-	PriceUsdcMicros *int64                 `json:"priceUsdcMicros,omitempty"`
-	Change24h       *string                `json:"change24h,omitempty"`
-	Liquidity       assetLiquidityResponse `json:"liquidity"`
+	Symbol          string  `json:"symbol"`
+	Name            string  `json:"name"`
+	TokenAddress    string  `json:"tokenAddress"`
+	Routable        bool    `json:"routable"`
+	PriceUsdcMicros *int64  `json:"priceUsdcMicros,omitempty"`
+	Change24h       *string `json:"change24h,omitempty"`
+	// Change24hBasis / Change24hBasisSymbol: see marketAssetResponse.
+	Change24hBasis       string                 `json:"change24hBasis,omitempty"`
+	Change24hBasisSymbol string                 `json:"change24hBasisSymbol,omitempty"`
+	Liquidity            assetLiquidityResponse `json:"liquidity"`
 	// MarketSession and AfterHours repeat Market.Session and Market.AfterHours on
 	// the detail response, because the hero header reads them directly.
 	MarketSession string                `json:"marketSession,omitempty"`
@@ -456,15 +483,16 @@ func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []b20.Asset) [
 	out := make([]marketAssetResponse, 0, len(assets))
 	for _, asset := range assets {
 		resp := marketAssetResponseFor(asset, prices)
-		resp.Change24h = changes[asset.Symbol]
+		resp.Change24h, resp.Change24hBasis, resp.Change24hBasisSymbol = dayChangeFields(asset.Symbol, changes[asset.Symbol])
 		out = append(out, resp)
 	}
 	return out
 }
 
-// assetPriceSnapshot is one current Chainlink mark.
+// assetPriceSnapshot is one current Chainlink mark, with when it was struck.
 type assetPriceSnapshot struct {
 	PriceUsdcMicros int64
+	Mark            pyth.AssetMark
 }
 
 // catalogPriceBudget bounds the reads a catalog page costs, so a slow RPC or a
@@ -495,7 +523,7 @@ func (h *AssetsHandlers) fetchPrices(ctx context.Context, assets []b20.Asset) ma
 		if !ok || mark.PriceUsdcMicros <= 0 {
 			continue
 		}
-		out[asset.TokenAddress] = assetPriceSnapshot{PriceUsdcMicros: mark.PriceUsdcMicros}
+		out[asset.TokenAddress] = assetPriceSnapshot{PriceUsdcMicros: mark.PriceUsdcMicros, Mark: mark}
 	}
 	return out
 }
@@ -620,31 +648,40 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset b20.Asset) 
 	}()
 	wg.Wait()
 
+	var mark *pyth.AssetMark
 	if price, ok := prices[asset.TokenAddress]; ok && price.PriceUsdcMicros > 0 {
 		detail.PriceUsdcMicros = &price.PriceUsdcMicros
+		mark = &price.Mark
 	}
-	detail.Change24h = pyth.DayChange(day)
+	detail.Change24h, detail.Change24hBasis, detail.Change24hBasisSymbol = dayChangeFields(asset.Symbol, pyth.DayChange(day))
 	detail.Liquidity = liquidity
 	detail.Routable = asset.Routable || strings.TrimSpace(asset.TokenAddress) != "" || liquidity.Routable
-	detail.StockVsToken = stockVsTokenResponseFor(asset.Symbol, tokenLeg, pyth.MarkQuote(detail.PriceUsdcMicros), equity, h.now())
+	now := h.now()
+	detail.StockVsToken = stockVsTokenResponseFor(asset.Symbol, tokenLeg, pyth.MarkQuote(mark, now), equity, now)
 
 	var confMicros *int64
 	if equity.Priced() && equity.ConfUsdcMicros > 0 {
 		conf := equity.ConfUsdcMicros
 		confMicros = &conf
 	}
-	detail.Stats = assetStatsResponseFor(asset.Symbol, day, year, liquidity.SpreadBps, confMicros)
+	detail.Stats = assetStatsResponseFor(asset.Symbol, day, year, confMicros)
 	return detail
 }
 
 // underlyingSeries reads Pyth history for the stats grid and the day change, and
-// discards anything that is not the underlying equity.
+// keeps only Benchmarks candles of the underlying equity.
+//
+// Not merely any underlying-basis series: the Hermes sampler is the same equity
+// feed but a price at an instant every two hours (1D) or every fourteen days (1Y).
+// Folded as candles it would give an "Open" that is the first sample after the
+// bell rather than the opening print, and a "52-week high" of 27 samples. Those
+// are not what the labels mean, so on a Benchmarks outage the grid omits them.
 func (h *AssetsHandlers) underlyingSeries(ctx context.Context, symbol string, chartRange pyth.ChartRange) pyth.AssetChartSeries {
 	if h.Charts == nil {
 		return pyth.AssetChartSeries{}
 	}
 	series, err := h.Charts.ChartSeries(ctx, symbol, chartRange)
-	if err != nil || series.Basis != pyth.PriceBasisUnderlying {
+	if err != nil || series.Basis != pyth.PriceBasisUnderlying || series.Source != pyth.ChartSourceBenchmarks {
 		return pyth.AssetChartSeries{}
 	}
 	return series
@@ -657,10 +694,9 @@ func (h *AssetsHandlers) equityQuote(ctx context.Context, symbol string) pyth.Re
 	return h.Quotes.EquityQuote(ctx, symbol)
 }
 
-func assetStatsResponseFor(symbol string, day, year pyth.AssetChartSeries, spreadBps *int, confMicros *int64) *assetStatsResponse {
+func assetStatsResponseFor(symbol string, day, year pyth.AssetChartSeries, confMicros *int64) *assetStatsResponse {
 	stats := pyth.SessionStats(day)
 	stats.Week52HighUsdcMicros, stats.Week52LowUsdcMicros = pyth.Week52Range(year)
-	stats.SpreadBps = spreadBps
 	stats.ConfUsdcMicros = confMicros
 	if !stats.HasFigures() {
 		// Nothing could be sourced. Omit the grid rather than ship an empty object.
@@ -675,23 +711,26 @@ func assetStatsResponseFor(symbol string, day, year pyth.AssetChartSeries, sprea
 		PreviousCloseUsdcMicros: stats.PreviousCloseUsdcMicros,
 		Week52HighUsdcMicros:    stats.Week52HighUsdcMicros,
 		Week52LowUsdcMicros:     stats.Week52LowUsdcMicros,
-		SpreadBps:               stats.SpreadBps,
 		ConfUsdcMicros:          stats.ConfUsdcMicros,
 		Basis:                   pyth.PriceBasisUnderlying,
 		BasisSymbol:             pyth.UnderlyingTicker(symbol),
 	}
 }
 
-// stockVsTokenResponseFor builds the card, or nil when neither the token leg nor
-// the equity line has a price: a card with nothing on it is not a card.
+// stockVsTokenResponseFor builds the card, or nil unless the token leg has a
+// price, which needs both Kyber probes to have routed. The card is about the
+// token in its pools; without that leg it is the hero price and a per-share
+// reference line, which the rest of the screen already shows.
 func stockVsTokenResponseFor(symbol string, token pyth.KyberQuote, mark, equity pyth.ReferenceQuote, asOf time.Time) *stockVsTokenResponse {
-	if !token.Quote.Priced() && !equity.Priced() {
+	if !token.Quote.Priced() {
 		return nil
 	}
 	tokenResp := referenceQuoteResponseFor(token.Quote)
-	if token.Quote.Priced() {
-		ask, bid := token.AskUsdcMicros, token.BidUsdcMicros
-		tokenResp.AskUsdcMicros, tokenResp.BidUsdcMicros = &ask, &bid
+	ask, bid := token.AskUsdcMicros, token.BidUsdcMicros
+	tokenResp.AskUsdcMicros, tokenResp.BidUsdcMicros = &ask, &bid
+	if !token.ProbedAt.IsZero() {
+		probedAt := token.ProbedAt.UTC().Format(time.RFC3339)
+		tokenResp.ProbedAt = &probedAt
 	}
 	return &stockVsTokenResponse{
 		Token:        tokenResp,
@@ -726,7 +765,8 @@ func referenceQuoteResponseFor(quote pyth.ReferenceQuote) referenceQuoteResponse
 }
 
 // liquiditySnippet probes Kyber once per token per minute: a 1 USDC buy and a
-// 1-token sell. The pair gives the liquidity strip, the spread and the token leg
+// 1-token sell. The token leg carries the probe time, so a leg served from this
+// cache says it is up to a minute old. The pair gives the liquidity strip, the spread and the token leg
 // of the stock-vs-token card. A probe that errored (a timeout, an outage) is not
 // cached, because it says nothing about the pool; a real no-route is.
 func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset b20.Asset) (assetLiquidityResponse, pyth.KyberQuote) {
@@ -734,7 +774,7 @@ func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset b20.Asset) 
 	if key != "" {
 		h.liqMu.Lock()
 		if h.liqCache != nil {
-			if hit, ok := h.liqCache[key]; ok && time.Since(hit.at) < liquidityProbeTTL {
+			if hit, ok := h.liqCache[key]; ok && h.now().Sub(hit.at) < liquidityProbeTTL {
 				h.liqMu.Unlock()
 				return hit.snippet, hit.token
 			}
@@ -761,6 +801,7 @@ func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset b20.Asset) 
 		buyErr, sellErr     error
 		wg                  sync.WaitGroup
 	)
+	probedAt := h.now()
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
@@ -783,6 +824,7 @@ func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset b20.Asset) 
 		probe.SellOutUsdcMicros = snippet.SellProbeOutAmount
 	}
 	tokenLeg := pyth.KyberTokenQuote(probe)
+	tokenLeg.ProbedAt = probedAt
 	if buyErr != nil || sellErr != nil {
 		if tokenLeg.Quote.Status == pyth.QuoteStatusUnavailable {
 			tokenLeg.Quote.Reason = pyth.QuoteReasonUpstream
@@ -795,7 +837,7 @@ func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset b20.Asset) 
 	if h.liqCache == nil {
 		h.liqCache = make(map[string]cachedLiquidity)
 	}
-	h.liqCache[key] = cachedLiquidity{snippet: snippet, token: tokenLeg, at: time.Now()}
+	h.liqCache[key] = cachedLiquidity{snippet: snippet, token: tokenLeg, at: probedAt}
 	h.liqMu.Unlock()
 	return snippet, tokenLeg
 }

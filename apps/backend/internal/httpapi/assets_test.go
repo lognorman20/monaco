@@ -457,12 +457,12 @@ func TestGET_assets_symbol_chart_invalidRange_returns400(t *testing.T) {
 	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
 	token := seedAssetsToken(t, iso, authHandlers, privyClient)
 	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
-		Symbol: "AAPLx",
+		Symbol: "AAPLc",
 		Name:   "Apple",
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLx/chart?range=5Y", nil)
-	req.SetPathValue("symbol", "AAPLx")
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLc/chart?range=5Y", nil)
+	req.SetPathValue("symbol", "AAPLc")
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	handlers.GetAssetChartHandler(rec, req)

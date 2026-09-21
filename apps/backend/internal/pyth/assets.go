@@ -9,10 +9,16 @@ import (
 	"time"
 )
 
-// AssetMark is a standalone equity mark for catalog pricing.
+// AssetMark is a standalone mark for catalog pricing.
 type AssetMark struct {
 	PriceUsdcMicros int64
 	Change24h       *string
+	// UpdatedAt is when the source struck this price, in UTC: a Chainlink round's
+	// updatedAt. Zero when the source does not say, which is never read as "now".
+	UpdatedAt time.Time
+	// AfterHours is the source's own verdict that the price is older than its feed
+	// heartbeat: for Chainlink, the same 25-hour rule NAV marks use.
+	AfterHours bool
 }
 
 // ChartPoint is one chart sample. The OHLC fields are populated by sources that

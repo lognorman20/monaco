@@ -47,8 +47,12 @@ func newChartCache(now func() time.Time) *chartCache {
 	return &chartCache{now: now, entries: make(map[string]chartCacheEntry)}
 }
 
+// chartCacheKey is the feed a series is about, not the spelling that asked for
+// it. Every series here is the underlying's, so AAPLc and a legacy AAPLx share
+// entries, while "AAPLC" (upper-case C, which is part of a ticker, not a suffix)
+// is a different feed and cannot collide with AAPLc.
 func chartCacheKey(symbol string, chartRange ChartRange) string {
-	return normalizeSymbol(symbol) + ":" + string(chartRange)
+	return normalizeSymbol(EquityQuerySymbol(symbol)) + ":" + string(chartRange)
 }
 
 // chartCacheTTL is the lifetime of one answer for one range.

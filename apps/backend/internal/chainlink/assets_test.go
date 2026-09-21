@@ -34,6 +34,49 @@ func TestAssetPrices_AssetMark_usesChainlinkAnswer(t *testing.T) {
 	}
 }
 
+func TestAssetPrices_AssetMark_carriesTheRoundTimeAndTheHeartbeatVerdict(t *testing.T) {
+	t.Parallel()
+	catalog := b20.NewPinnedCatalog()
+	fresh, err := catalog.Feed(context.Background(), "AAPLc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := catalog.Feed(context.Background(), "TSLAc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Monday 09:00 ET: AAPLc's round is from an hour ago, TSLAc's from Friday's
+	// close, which is past the feed's 25-hour heartbeat.
+	now := time.Date(2026, time.September, 21, 13, 0, 0, 0, time.UTC)
+	friday := time.Date(2026, time.September, 18, 20, 0, 0, 0, time.UTC)
+	chain := evm.NewFakeClient()
+	chain.SetRoundData(fresh, evm.RoundData{Answer: big.NewInt(23_205_000_000), UpdatedAt: now.Add(-time.Hour)})
+	chain.SetRoundData(old, evm.RoundData{Answer: big.NewInt(24_850_000_000), UpdatedAt: friday})
+	prices := NewAssetPrices(chain, catalog, func() time.Time { return now })
+
+	single, err := prices.AssetMark(context.Background(), "TSLAc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !single.UpdatedAt.Equal(friday) || !single.AfterHours {
+		t.Fatalf("TSLAc mark = %+v, want Friday's round time and after-hours", single)
+	}
+
+	marks, err := prices.AssetMarks(context.Background(), []string{"AAPLc", "TSLAc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := marks["AAPLc"]; !got.UpdatedAt.Equal(now.Add(-time.Hour)) || got.AfterHours {
+		t.Fatalf("AAPLc mark = %+v, want the round time an hour ago and not after-hours", got)
+	}
+	if got := marks["TSLAc"]; !got.UpdatedAt.Equal(friday) || !got.AfterHours {
+		t.Fatalf("TSLAc mark = %+v, want Friday's round time and after-hours", got)
+	}
+	if got := marks["TSLAc"].UpdatedAt.Location(); got != time.UTC {
+		t.Fatalf("round time location = %v, want UTC", got)
+	}
+}
+
 func TestAssetPrices_AssetMarks_fillsEveryPinnedSymbol(t *testing.T) {
 	t.Parallel()
 	catalog := b20.NewPinnedCatalog()

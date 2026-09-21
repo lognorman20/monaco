@@ -78,8 +78,8 @@ func TestAssetStats_hasFigures(t *testing.T) {
 	if labelled.HasFigures() {
 		t.Fatal("a grid with only a label in it has no figures")
 	}
-	if !(AssetStats{SpreadBps: new(int)}).HasFigures() {
-		t.Fatal("a sourced spread is a figure")
+	if !(AssetStats{ConfUsdcMicros: new(int64)}).HasFigures() {
+		t.Fatal("a sourced confidence interval is a figure")
 	}
 }
 

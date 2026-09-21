@@ -189,6 +189,21 @@ func TestChartCache_dayLivesAMinuteAndEmptyNeverOutlivesAReal(t *testing.T) {
 	}
 }
 
+func TestChartCache_isKeyedOnTheFeedNotTheSpelling(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, time.September, 22, 14, 0, 0, 0, time.UTC)
+	cache := newChartCache(func() time.Time { return now })
+	cache.set("AAPLc", ChartRange1D, AssetChartSeries{Points: []ChartPoint{{Timestamp: 1, PriceUsdcMicros: 1}}})
+
+	if _, ok := cache.get("AAPLx", ChartRange1D); !ok {
+		t.Fatal("AAPLx is the same Equity.US.AAPL/USD feed and should share the entry")
+	}
+	// Upper-case C is part of a ticker, not the token suffix: Equity.US.AAPLC/USD.
+	if _, ok := cache.get("AAPLC", ChartRange1D); ok {
+		t.Fatal("AAPLC is a different feed and must not read AAPLc's series")
+	}
+}
+
 func TestHermesClient_ChartSeries_servesRepeatsFromTheCache(t *testing.T) {
 	ClearFeedRegistry()
 	now := time.Now().UTC()
