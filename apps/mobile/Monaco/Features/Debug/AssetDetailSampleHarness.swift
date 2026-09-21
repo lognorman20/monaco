@@ -54,6 +54,14 @@ enum AssetDetailSampleScenario: String, CaseIterable {
         guard let flag = arguments.firstIndex(of: launchArgument), arguments.indices.contains(flag + 1) else { return nil }
         return AssetDetailSampleScenario(rawValue: arguments[flag + 1])
     }
+
+    /// `-MonacoScrubHolds` keeps a scrub selected after the finger lifts, so a UI
+    /// test can drag and then read the hero. XCUITest's press-drag-hold is one
+    /// synthesised gesture that only returns once the touch has ended, so without
+    /// this the screen has always snapped back before a test can look at it.
+    static var scrubHolds: Bool {
+        ProcessInfo.processInfo.arguments.contains("-MonacoScrubHolds")
+    }
 }
 
 struct AssetDetailSampleHarness: View {
@@ -72,6 +80,7 @@ struct AssetDetailSampleHarness: View {
             )
         }
         .tint(MonacoTheme.ink)
+        .environment(\.scrubSelectionPersists, AssetDetailSampleScenario.scrubHolds)
     }
 }
 

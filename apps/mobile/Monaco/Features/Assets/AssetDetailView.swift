@@ -154,7 +154,10 @@ struct AssetDetailView: View {
             EmptyView() // 4. About
             EmptyView() // 5. Activity on this stock
         }
-        .accessibilityIdentifier("asset-detail-sections")
+        // Do not put an accessibility identifier on this stack. A modifier on a
+        // VStack is applied to each of its children, so naming the stack renames
+        // every card inside it and makes each one unfindable by its own name —
+        // which is exactly what it did to the chart before this was noticed.
     }
 
     private var actionRow: some View {

@@ -50,7 +50,7 @@ struct MonacoScrubChart: View {
     var accessibilityIdentifier: String = "monaco-scrub-chart"
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var scrubDate: Date?
+    @Environment(\.scrubSelectionPersists) private var selectionPersists
     @State private var drawProgress: CGFloat = 0
     @State private var areaOpacity: Double = 0
 
@@ -73,18 +73,6 @@ struct MonacoScrubChart: View {
     var body: some View {
         chart
             .frame(height: height)
-            .chartXSelection(value: $scrubDate)
-            // `chartXSelection` alone leaves a tapped selection standing. A broker's
-            // chart snaps back the moment the finger leaves it, so the gesture is
-            // owned here and cleared on `onEnded`.
-            .chartGesture { proxy in
-                DragGesture(minimumDistance: 0)
-                    .onChanged { proxy.selectXValue(at: $0.location.x) }
-                    .onEnded { _ in scrubDate = nil }
-            }
-            .onChange(of: scrubDate) { _, date in
-                selection = date.flatMap(nearestIndex(to:))
-            }
             .onChange(of: drawOnKey) { _, _ in replayDrawOn() }
             .onAppear { replayDrawOn() }
             // A tick per sample the finger crosses, which is what makes a drag feel
@@ -139,11 +127,41 @@ struct MonacoScrubChart: View {
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
         .chartYScale(domain: valueDomain)
-        .chartPlotStyle { $0.background(Color.clear) }
+        // The plot stops short of the trailing edge so the dot at the end of the line
+        // has room to be a circle: at the frame's edge the mask cut it in half, which
+        // read as a rendering glitch rather than as "the price is here".
+        .chartPlotStyle { $0.background(Color.clear).padding(.trailing, 12) }
         .chartOverlay { proxy in
-            liveDot(proxy)
+            GeometryReader { geometry in
+                ZStack {
+                    liveDot(proxy, in: geometry)
+                    // The drag is owned here rather than left to `chartXSelection`,
+                    // for two reasons: a selection has to be dropped the moment the
+                    // finger leaves — a broker's chart snaps back — and the gesture
+                    // has to sit where a `ChartProxy` can turn an x into a date.
+                    Rectangle()
+                        .fill(.clear)
+                        .contentShape(Rectangle())
+                        .gesture(scrubGesture(proxy, in: geometry))
+                }
+            }
         }
         .mask(alignment: .leading) { drawOnMask }
+    }
+
+    /// The overlay spans the whole chart while the proxy measures from the plot
+    /// area's own origin, so the touch is moved into the plot's coordinates before
+    /// it is turned into a date. Skipping that subtraction reads the price a few
+    /// samples to the left of the finger.
+    private func scrubGesture(_ proxy: ChartProxy, in geometry: GeometryProxy) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                guard let plotAnchor = proxy.plotFrame else { return }
+                let x = value.location.x - geometry[plotAnchor].minX
+                guard let date: Date = proxy.value(atX: x) else { return }
+                selection = nearestIndex(to: date)
+            }
+            .onEnded { _ in if !selectionPersists { selection = nil } }
     }
 
     private var areaGradient: LinearGradient {
@@ -183,28 +201,26 @@ struct MonacoScrubChart: View {
     /// still moving. Static under Reduce Motion, and absent when nothing is live —
     /// the pulse is a claim that the number is current, so it must not be decoration.
     @ViewBuilder
-    private func liveDot(_ proxy: ChartProxy) -> some View {
-        GeometryReader { geometry in
-            if let last = points.last,
-               let plotAnchor = proxy.plotFrame,
-               let x = proxy.position(forX: last.date),
-               let y = proxy.position(forY: last.value) {
-                let plot = geometry[plotAnchor]
-                ZStack {
-                    Circle()
-                        .fill(tint.opacity(0.28))
-                        .frame(width: 20, height: 20)
-                        .opacityLoop(to: 0.15, halfPeriod: 1.6, active: isLive && !reduceMotion)
-                        .opacity(isLive ? 1 : 0)
-                    Circle()
-                        .fill(tint)
-                        .frame(width: 7, height: 7)
-                }
-                .position(x: plot.minX + x, y: plot.minY + y)
-                .opacity(drawProgress >= 1 ? 1 : 0)
+    private func liveDot(_ proxy: ChartProxy, in geometry: GeometryProxy) -> some View {
+        if let last = points.last,
+           let plotAnchor = proxy.plotFrame,
+           let x = proxy.position(forX: last.date),
+           let y = proxy.position(forY: last.value) {
+            let plot = geometry[plotAnchor]
+            ZStack {
+                Circle()
+                    .fill(tint.opacity(0.28))
+                    .frame(width: 20, height: 20)
+                    .opacityLoop(to: 0.15, halfPeriod: 1.6, active: isLive && !reduceMotion)
+                    .opacity(isLive ? 1 : 0)
+                Circle()
+                    .fill(tint)
+                    .frame(width: 7, height: 7)
             }
+            .position(x: plot.minX + x, y: plot.minY + y)
+            .opacity(drawProgress >= 1 ? 1 : 0)
+            .allowsHitTesting(false)
         }
-        .allowsHitTesting(false)
     }
 
     // MARK: - Selection
@@ -250,5 +266,26 @@ struct MonacoScrubChart: View {
     private var voiceOverValue: String {
         guard !points.isEmpty else { return "No price history" }
         return describePoint(selection ?? points.count - 1)
+    }
+}
+
+// MARK: - Holding a scrub open, for tests
+
+private struct ScrubSelectionPersistsKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Keeps the scrubbed sample selected after the finger lifts.
+    ///
+    /// False everywhere the app ships; the debug sample harness is the only thing
+    /// that sets it, and only when launched with `-MonacoScrubHolds`. It exists
+    /// because XCUITest's gesture calls return *after* the lift — a press-drag-hold
+    /// is one synthesised gesture, so by the time a test can read the screen the
+    /// chart has already snapped back and "does the hero follow the finger" is
+    /// unaskable. With this on, a test can drag and then look.
+    var scrubSelectionPersists: Bool {
+        get { self[ScrubSelectionPersistsKey.self] }
+        set { self[ScrubSelectionPersistsKey.self] = newValue }
     }
 }

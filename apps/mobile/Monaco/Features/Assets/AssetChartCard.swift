@@ -27,7 +27,10 @@ struct AssetChartCard: View {
             }
             rangeChips
         }
-        .accessibilityIdentifier("asset-detail-chart-section")
+        // No identifier on this stack. A modifier on a `VStack` is applied to each of
+        // its children, so an identifier here is not a name for the group: it renames
+        // the curve, the caption and the chip row, and every one of them becomes
+        // unfindable by the name it was actually given.
     }
 
     static let chartHeight: CGFloat = 200

@@ -178,8 +178,14 @@ final class AssetDetailModel {
     var isMarketLive: Bool { sessionChip?.isLive ?? false }
 
     /// What the hero's change pill flashes on, or nil when nothing has moved yet.
+    ///
+    /// Silent while a finger is on the curve: the pill is showing a sample from the
+    /// past then, and flashing it would claim that *that* number had just moved. The
+    /// tick is still recorded, so the flash lands when the finger lifts and the live
+    /// price comes back.
     var heroTick: MonacoPriceTick? {
-        priceTick.map { MonacoPriceTick(sequence: $0.sequence, isUp: $0.direction == .up) }
+        guard !isScrubbing else { return nil }
+        return priceTick.map { MonacoPriceTick(sequence: $0.sequence, isUp: $0.direction == .up) }
     }
 
     // MARK: - What the hero shows

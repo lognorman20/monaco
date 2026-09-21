@@ -62,6 +62,7 @@ final class AssetDetailSampleUITests: XCTestCase {
         let scenarios = [
             "open", "afterHours", "preMarket", "holiday", "sparse",
             "jupiterFallback", "notEntitled", "fallbackSeries", "emptyChart", "chartFailed",
+            "ticking", "slowRange", "staleRange",
         ]
         for scenario in scenarios {
             let app = launch(scenario)
@@ -103,5 +104,134 @@ final class AssetDetailSampleUITests: XCTestCase {
             anyElement(app, "asset-detail-chart-failed").waitForExistence(timeout: 10)
         )
         attachScreenshot(app, name: "asset-detail-chart-failed")
+    }
+
+    /// Drags across the curve from right to left and answers with the hero as it was
+    /// left. `scrubHolds` keeps the selection after the lift.
+    @MainActor
+    private func dragAcrossTheCurve(_ app: XCUIApplication) -> XCUIElement {
+        let chart = anyElement(app, "asset-detail-chart")
+        XCTAssertTrue(chart.waitForExistence(timeout: 30), "the curve never drew")
+        let start = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5))
+        let end = chart.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
+        start.press(forDuration: 0.2, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.5)
+        return chart
+    }
+
+    /// The scrub: the sample under the finger becomes the hero price, and its own
+    /// time takes the place of the period name.
+    ///
+    /// Launched with `-MonacoScrubHolds`, because XCUITest's press-drag-hold is one
+    /// synthesised gesture that returns only once the touch has ended — without the
+    /// flag the chart has always snapped back before the test can read anything, and
+    /// "did the hero follow the finger" cannot be asked at all. Snapping back is the
+    /// next test, on a build with the flag off.
+    @MainActor
+    func testScrubbingTheChartMovesTheHeroPriceAndTheFigureUnderIt() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-MonacoAssetDetailSample", "open", "-MonacoScrubHolds"]
+        app.launch()
+        waitForScreen(app, "open")
+
+        let price = anyElement(app, "asset-detail-price")
+        let move = anyElement(app, "asset-detail-move")
+        XCTAssertTrue(price.waitForExistence(timeout: 30))
+        let livePrice = price.label
+        let liveMove = move.label
+
+        let chart = dragAcrossTheCurve(app)
+
+        attachScreenshot(app, name: "asset-detail-scrubbing")
+        XCTAssertNotEqual(price.label, livePrice, "the hero price did not follow the scrub")
+        XCTAssertNotEqual(move.label, liveMove, "the figure under the price did not follow the scrub")
+        // The curve reads the same sample the hero does.
+        let spoken = try XCTUnwrap(chart.value as? String)
+        XCTAssertTrue(spoken.hasPrefix(price.label), "curve says \(spoken), hero says \(price.label)")
+    }
+
+    /// And on a normal build the finger lifting puts the live price back.
+    @MainActor
+    func testTheHeroSnapsBackWhenTheFingerLifts() throws {
+        let app = launch("open")
+        waitForScreen(app, "open")
+
+        let price = anyElement(app, "asset-detail-price")
+        XCTAssertTrue(price.waitForExistence(timeout: 30))
+        let livePrice = price.label
+
+        _ = dragAcrossTheCurve(app)
+
+        let restored = NSPredicate(format: "label == %@", livePrice)
+        expectation(for: restored, evaluatedWith: price)
+        waitForExpectations(timeout: 10)
+    }
+
+    /// The curve is one element with a sentence for a label and a price for a value,
+    /// rather than a silent picture. (The adjustable action that walks the samples is
+    /// not asserted here: XCUITest has no API to drive an increment on anything but a
+    /// slider. It is exercised by hand with VoiceOver.)
+    @MainActor
+    func testTheCurveSpeaksItsOwnSummaryAndValue() throws {
+        let app = launch("open")
+        waitForScreen(app, "open")
+
+        let chart = anyElement(app, "asset-detail-chart")
+        XCTAssertTrue(chart.waitForExistence(timeout: 10))
+
+        let label = chart.label
+        XCTAssertTrue(label.contains("One day price history"), label)
+        XCTAssertTrue(label.contains("Low $"), label)
+        // The curve is the underlying equity's, under a token price. It says so.
+        XCTAssertTrue(label.contains("home exchange"), label)
+
+        let value = try XCTUnwrap(chart.value as? String)
+        XCTAssertTrue(value.contains("$"), value)
+    }
+
+    /// The bug this closes: a range that was still loading looked exactly like a range
+    /// that had arrived, so a slow fetch read as a chart that had not changed.
+    @MainActor
+    func testASlowRangeSaysSoOnItsOwnChip() throws {
+        let app = launch("slowRange")
+        waitForScreen(app, "slowRange")
+
+        let week = anyElement(app, "asset-chart-range-1W")
+        week.tap()
+
+        let loading = NSPredicate(format: "value == %@", "Loading")
+        expectation(for: loading, evaluatedWith: week)
+        waitForExpectations(timeout: 5)
+        attachScreenshot(app, name: "asset-detail-range-loading")
+    }
+
+    /// A series the server built for another window is refused rather than drawn under
+    /// the wrong chip, and what the member gets is a retry — not a year of history
+    /// labelled "1D".
+    @MainActor
+    func testASeriesForAnotherWindowIsRefused() throws {
+        let app = launch("staleRange")
+        waitForScreen(app, "staleRange")
+
+        XCTAssertTrue(
+            anyElement(app, "asset-detail-chart-failed").waitForExistence(timeout: 10),
+            "a mismatched series was drawn instead of refused"
+        )
+        attachScreenshot(app, name: "asset-detail-stale-range")
+    }
+
+    /// The live hero: a poll that moves the price moves the figure on screen.
+    @MainActor
+    func testTheHeroPriceFollowsThePoll() throws {
+        let app = launch("ticking")
+        waitForScreen(app, "ticking")
+
+        let price = anyElement(app, "asset-detail-price")
+        XCTAssertTrue(price.waitForExistence(timeout: 10))
+        let first = price.label
+
+        let moved = NSPredicate(format: "label != %@", first)
+        expectation(for: moved, evaluatedWith: price)
+        waitForExpectations(timeout: 15)
+        attachScreenshot(app, name: "asset-detail-ticking")
     }
 }
