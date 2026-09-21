@@ -212,7 +212,7 @@ final class ProposalFeedFormatterTests: XCTestCase {
         // Feed rows carry no execution, so a passed trade may still be swapping — or may
         // have failed. Either way the chip must not read "Bought".
         func label(_ kind: String) -> String? {
-            ProposalFeedCopy.closedLabel(for: ProposalDTO(id: "p", symbol: "AAPLx", status: "passed", kind: kind))
+            ProposalFeedCopy.closedLabel(for: ProposalDTO(id: "p", symbol: "AAPLc", status: "passed", kind: kind))
         }
         XCTAssertEqual(label("buy"), "Passed")
         XCTAssertEqual(label("sell"), "Passed")
