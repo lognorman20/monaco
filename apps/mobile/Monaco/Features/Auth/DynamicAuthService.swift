@@ -28,7 +28,7 @@ final class DynamicAuthService: ObservableObject {
     @Published private(set) var loginChannel: DynamicLoginChannel = .sms
     @Published private(set) var securityOTPMessage: String?
 
-    private var sessionStore = MonacoSessionStore()
+    private var sessionStore: MonacoSessionStore
     private let tokenRefresh = SingleFlight<String?>()
     private var isRestoreInFlight = false
     /// Subscriptions that belong to the open sign-in. Cancelled when it ends, so a late
@@ -69,7 +69,10 @@ final class DynamicAuthService: ObservableObject {
         return userID
     }
 
-    init(settings: DynamicAuthSettings) {
+    /// `sessionStore` is injected so tests keep their markers out of the app's own defaults;
+    /// the app always uses the standard one.
+    init(settings: DynamicAuthSettings, sessionStore: MonacoSessionStore = MonacoSessionStore()) {
+        self.sessionStore = sessionStore
         if settings.isConfigured {
             sdk = DynamicAuthService.ensureSDK(environmentID: settings.environmentID)
         } else {
@@ -131,9 +134,16 @@ final class DynamicAuthService: ObservableObject {
     /// SDK can republish the old token, so what is adopted is what the SDK holds right now,
     /// and only while the session it was subscribed for is still open.
     private func sdkTokenChanged(epoch: Int) {
-        guard epoch == signInEpoch, !isSigningOut, case .authenticated = phase else { return }
-        guard let jwt = sdkSessionJWT(), jwt != accessToken else { return }
-        adoptAccessToken(jwt)
+        let held = sdkSessionJWT()
+        guard SessionEventGate.shouldAdoptToken(
+            eventEpoch: epoch,
+            currentEpoch: signInEpoch,
+            isSigningOut: isSigningOut,
+            isAuthenticated: isAuthenticated,
+            sdkToken: held,
+            current: accessToken
+        ), let held else { return }
+        adoptAccessToken(held)
     }
 
     /// The SDK says nobody is signed in. Ends the session only when that is news about the
@@ -142,10 +152,20 @@ final class DynamicAuthService: ObservableObject {
     /// holds a user.
     private func sdkUserChanged(signedIn: Bool, epoch: Int) {
         defer { refreshSecurityFlags() }
-        guard !signedIn, epoch == signInEpoch, !pendingRevoke.isPending else { return }
-        guard case .authenticated = phase else { return }
-        guard sdk?.auth.authenticatedUser == nil else { return }
+        guard SessionEventGate.shouldEndSession(
+            eventHasUser: signedIn,
+            eventEpoch: epoch,
+            currentEpoch: signInEpoch,
+            revokePending: pendingRevoke.isPending,
+            isAuthenticated: isAuthenticated,
+            sdkHoldsUser: sdk?.auth.authenticatedUser != nil
+        ) else { return }
         endSession(reason: LoginFailureCopy.sessionExpired)
+    }
+
+    private var isAuthenticated: Bool {
+        if case .authenticated = phase { return true }
+        return false
     }
 
     func restoreSessionIfNeeded() async {
@@ -191,6 +211,11 @@ final class DynamicAuthService: ObservableObject {
         // The request was made by a session that has since ended (sign-out, or another
         // account signed in). Retrying it under the current token would run one member's
         // request as another.
+        //
+        // Checked once, with nothing awaited between here and `adoptAccessToken`, so the
+        // answer cannot go stale before it is acted on. If an `await` is ever added below
+        // (an async SDK refresh, say), check the ledger again after it: a sign-out or a new
+        // sign-in can land during the suspension.
         guard sessionTokens.contains(rejectedToken) else { return nil }
         if let current = accessToken, current != rejectedToken {
             return current
@@ -420,7 +445,9 @@ final class DynamicAuthService: ObservableObject {
             // Someone has signed in since this revoke was scheduled. Dynamic's logout is
             // global, so revoking now would tear down the session that replaced this one.
             // This is what makes giving up on the wait safe.
-            guard let self, self.signInEpoch == epoch else { return }
+            guard let self,
+                  SessionEventGate.shouldRevoke(scheduledEpoch: epoch, currentEpoch: self.signInEpoch)
+            else { return }
             try? await sdk.auth.logout()
         }
     }
@@ -501,6 +528,20 @@ final class DynamicAuthService: ObservableObject {
     }
 
     private func applyAuthenticated(userID: String, token: String, isRestore: Bool) {
+        // A device-registration or step-up code hands the same member's credentials back
+        // mid-session. That session carries on: clearing the ledger here would drop the
+        // token a request still in flight was sent with, so its 401 could neither refresh
+        // nor sign out. Its epoch and subscriptions stay as they are for the same reason.
+        if SessionEventGate.continuesOpenSession(
+            openUserID: sessionIdentity,
+            isSigningOut: isSigningOut,
+            newUserID: userID
+        ) {
+            if !token.isEmpty, token != accessToken { adoptAccessToken(token) }
+            securityOTPMessage = nil
+            refreshSecurityFlags()
+            return
+        }
         isSigningOut = false
         // From here a revoke scheduled by the previous sign-out is stale: this is the
         // session Dynamic holds now, and ending it would sign the member straight out.

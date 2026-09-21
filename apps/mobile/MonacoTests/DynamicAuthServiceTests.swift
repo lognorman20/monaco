@@ -1,4 +1,5 @@
 import DynamicSDKSwift
+import Foundation
 import MonacoCore
 import Testing
 @testable import Monaco
@@ -8,12 +9,44 @@ import Testing
 /// `E164PhoneNumber`) have their own suites; these check the service wires them the way
 /// sign-in and sign-out rely on.
 @MainActor
-struct DynamicAuthServiceTests {
+final class DynamicAuthServiceTests {
     private static let unconfigured = DynamicAuthSettings(
         environmentID: "",
         smsLoginEnabled: true,
         emailLoginEnabled: true
     )
+
+    /// Each test gets its own defaults suite. Signing out clears the session markers, and
+    /// with the standard defaults that would wipe the test host's stored login and race the
+    /// other tests, which Swift Testing runs in parallel.
+    private let defaultsSuite = "DynamicAuthServiceTests.\(UUID().uuidString)"
+
+    private var defaults: UserDefaults { UserDefaults(suiteName: defaultsSuite)! }
+
+    private func makeService() -> DynamicAuthService {
+        DynamicAuthService(settings: Self.unconfigured, sessionStore: MonacoSessionStore(defaults: defaults))
+    }
+
+    deinit {
+        UserDefaults.standard.removePersistentDomain(forName: defaultsSuite)
+    }
+
+    /// Signing out clears the store the service was given, and only that one.
+    @Test func signOutClearsItsOwnSessionStoreAndNoOther() async {
+        let standardHadLogin = UserDefaults.standard.object(forKey: "monaco.session.hasExplicitLogin")
+        defaults.set(true, forKey: "monaco.session.hasExplicitLogin")
+        let auth = makeService()
+        #expect(auth.phase == .restoring)
+
+        await auth.logout()
+
+        #expect(!MonacoSessionStore(defaults: defaults).hasExplicitLogin)
+        #expect(auth.phase == .idle)
+        #expect(
+            UserDefaults.standard.object(forKey: "monaco.session.hasExplicitLogin") as? Bool
+                == standardHadLogin as? Bool
+        )
+    }
 
     /// Dynamic's SMS API takes the number split up. The split is read off the one parser
     /// the form validated with, so there is no second rule about what is sendable.
@@ -43,7 +76,7 @@ struct DynamicAuthServiceTests {
     /// A failed send notes the failure but never moves the member: the flow is idle again
     /// (not busy) and still on the address step it was on.
     @Test func aFailedSendLeavesTheFormUsable() async {
-        let auth = DynamicAuthService(settings: Self.unconfigured)
+        let auth = makeService()
 
         await auth.sendSMSCode(to: "+15551234567")
 
@@ -58,7 +91,7 @@ struct DynamicAuthServiceTests {
     /// A 401 naming a token this session never used belongs to a session that has already
     /// ended. It must not end anything nor leave a reason on the login screen.
     @Test func aRejectedTokenFromNoLiveSessionIsIgnored() async {
-        let auth = DynamicAuthService(settings: Self.unconfigured)
+        let auth = makeService()
 
         await auth.signOutAfterRejectedSession(rejectedToken: "someone-elses-token")
         await auth.signOut(reason: "Your session expired. Sign in again.", rejectedToken: "someone-elses-token")
@@ -68,9 +101,11 @@ struct DynamicAuthServiceTests {
     }
 
     /// Sign-out is local-first: it returns with the session already gone, without waiting
-    /// on the network, and a refresh for the old token cannot mint a new one.
+    /// on the network, and a refresh for the old token cannot mint a new one. With no SDK
+    /// configured no revoke is scheduled here; whether a revoke may run is
+    /// `SessionEventGate.shouldRevoke`, covered in `SessionEventGateTests`.
     @Test func signOutReturnsAtOnceAndLeavesNothingToRefresh() async throws {
-        let auth = DynamicAuthService(settings: Self.unconfigured)
+        let auth = makeService()
 
         await auth.logout()
 
