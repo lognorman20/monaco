@@ -47,6 +47,10 @@ type AssetsHandlers struct {
 	// stock-vs-token card. Nil reports that line as not configured.
 	Quotes pyth.EquityQuoteClient
 	Dex    dex.Client
+	// Home answers "what do my cabals own and what are they voting on" for
+	// GET /v1/assets/held. Nil makes that one route unavailable and leaves the
+	// catalog routes untouched.
+	Home *app.HomeService
 	// Now is the market clock; tests pin it so session assertions do not depend on
 	// the wall clock of whoever runs them.
 	Now func() time.Time

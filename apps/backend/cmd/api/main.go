@@ -78,6 +78,7 @@ var apiRoutes = []string{
 	"GET /v1/groups/{id}/cost-basis/{symbol}",
 	"GET /v1/groups/{id}/assets",
 	"GET /v1/assets",
+	"GET /v1/assets/held",
 	"GET /v1/assets/popular",
 	"GET /v1/assets/{symbol}",
 	"GET /v1/assets/{symbol}/chart",
@@ -215,7 +216,10 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Charts:  marketData,
 		Quotes:  marketData,
 		Dex:     dexClient,
+		Home:    home,
 	}
+	// A cabal's holdings rows read the market exactly as the Stocks tab does.
+	groupHandlers.Market = &httpapi.MarketRowSource{Catalog: catalog, Marks: assetPrices, Charts: marketData}
 	go warmCatalogMarks(catalog, assetPrices)
 	quoteHandlers := &httpapi.QuoteHandlers{
 		Store:      store,
@@ -295,6 +299,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/groups/{id}/cost-basis/{symbol}", transactionHandlers.GetCostBasisBySymbolHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/assets", catalogHandlers.SearchAssetsHandler)
 	mux.HandleFunc("GET /v1/assets", assetsHandlers.ListAssetsHandler)
+	mux.HandleFunc("GET /v1/assets/held", assetsHandlers.HeldAssetsHandler)
 	mux.HandleFunc("GET /v1/assets/popular", assetsHandlers.PopularAssetsHandler)
 	mux.HandleFunc("GET /v1/assets/{symbol}/chart", assetsHandlers.GetAssetChartHandler)
 	mux.HandleFunc("GET /v1/assets/{symbol}", assetsHandlers.GetAssetHandler)

@@ -2,6 +2,18 @@ package app
 
 import "log/slog"
 
+// --- held assets ---
+
+// logHeldScanFailed records a cabal that could not be scanned for GET
+// /v1/assets/held. The aggregate carries on without it: one unreachable cabal
+// must not turn "In your cabals" into "you own nothing".
+func logHeldScanFailed(groupID string, err error) {
+	slog.Warn("held assets scan failed for group",
+		"group_id", groupID,
+		"err", err,
+	)
+}
+
 // --- deposit ---
 
 func logDepositCreateStart(groupID string, amount int64) {
