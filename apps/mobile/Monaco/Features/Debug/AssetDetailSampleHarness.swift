@@ -36,6 +36,16 @@ enum AssetDetailSampleScenario: String, CaseIterable {
     case chartFailed
     /// Both calls are still in flight.
     case loading
+    /// The price moves every few seconds, the way a poll makes it: the digits roll
+    /// and the change pill flashes. This is the scenario the live hero is
+    /// screenshotted and demoed from.
+    case ticking
+    /// Every range but the one on screen takes seconds to answer, so the chip
+    /// carries its spinner while the curve already drawn stays put.
+    case slowRange
+    /// The server answers with a series built for another window. It must be
+    /// refused rather than drawn under the wrong chip.
+    case staleRange
 
     static let launchArgument = "-MonacoAssetDetailSample"
 
@@ -55,7 +65,10 @@ struct AssetDetailSampleHarness: View {
             AssetDetailView(
                 auth: auth,
                 symbol: scenario == .sparse ? "NEWx" : "AAPLx",
-                dataSource: AssetDetailSampleDataSource(scenario: scenario)
+                dataSource: AssetDetailSampleDataSource(scenario: scenario),
+                // The scripted price walk is the point of `ticking`; at the shipping
+                // cadence a screenshot would wait ten seconds for the first move.
+                pricePollInterval: scenario == .ticking ? .seconds(2) : AssetDetailPolling.price
             )
         }
         .tint(MonacoTheme.ink)
@@ -64,14 +77,26 @@ struct AssetDetailSampleHarness: View {
 
 /// Canned answers for the two calls the screen makes. `loading` never returns, which
 /// is how the skeleton is screenshotted.
-private struct AssetDetailSampleDataSource: AssetDetailDataSource {
+///
+/// A class, not a struct, because `ticking` has to remember how many times it has
+/// been polled — that is the whole state the live hero is built on.
+@MainActor
+private final class AssetDetailSampleDataSource: AssetDetailDataSource {
     let scenario: AssetDetailSampleScenario
+    private var detailCalls = 0
+
+    init(scenario: AssetDetailSampleScenario) {
+        self.scenario = scenario
+    }
 
     func detail(symbol: String) async throws -> AssetDetailDTO {
         if scenario == .loading { try await Task.sleep(for: .seconds(3600)) }
+        detailCalls += 1
         switch scenario {
-        case .open, .fallbackSeries, .emptyChart, .chartFailed, .loading:
+        case .open, .fallbackSeries, .emptyChart, .chartFailed, .loading, .slowRange, .staleRange:
             return MarketSampleData.detail()
+        case .ticking:
+            return tickingDetail()
         case .afterHours:
             return MarketSampleData.detail(
                 market: MarketSampleData.sessionAfterHours,
@@ -101,9 +126,39 @@ private struct AssetDetailSampleDataSource: AssetDetailDataSource {
             return MarketSampleData.chartEmpty(range: range)
         case .fallbackSeries:
             return MarketSampleData.chartFromFallback(range: range)
+        case .slowRange:
+            // The day chart lands at once; every other window makes the member wait,
+            // which is exactly when the chip has to say it is working.
+            if range != .oneDay { try await Task.sleep(for: .seconds(6)) }
+            return MarketSampleData.chart(range: range)
+        case .staleRange:
+            // A year of history answered under whichever chip was tapped.
+            return MarketSampleData.chart(range: .oneYear)
         default:
             return MarketSampleData.chart(range: range)
         }
+    }
+
+    /// A price that walks: up, up, down, up… deterministic, so the flash and the
+    /// digit roll can be screenshotted and compared between runs.
+    private func tickingDetail() -> AssetDetailDTO {
+        let steps: [Int64] = [0, 180_000, 420_000, -260_000, 150_000, -90_000, 520_000]
+        let drift = steps[detailCalls % steps.count]
+        let base = MarketSampleData.detail()
+        return AssetDetailDTO(
+            symbol: base.symbol,
+            name: base.name,
+            solanaMint: base.solanaMint,
+            routable: base.routable,
+            priceUsdcMicros: (base.priceUsdcMicros ?? 232_050_000) + drift,
+            change24h: base.change24h,
+            liquidity: base.liquidity,
+            marketSession: base.marketSession,
+            afterHours: base.afterHours,
+            market: base.market,
+            stats: base.stats,
+            stockVsToken: base.stockVsToken
+        )
     }
 }
 

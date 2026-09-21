@@ -147,6 +147,26 @@ final class AssetChartSeriesTests: XCTestCase {
 
     func testAnEmptySeriesHasNoChangeToShow() {
         XCTAssertNil(series(prices: []).changeRatio())
+        XCTAssertNil(series(prices: []).changeDollars())
+    }
+
+    func testTheDollarMoveIsMeasuredFromTheSameBaselineAsThePercent() throws {
+        let chart = series(
+            range: .oneDay,
+            prices: [100_000_000, 105_500_000],
+            previousClose: 100_000_000
+        )
+
+        XCTAssertEqual(chart.changeDollars(), "5.50")
+        XCTAssertEqual(chart.changeDollars(toIndex: 0), "0.00")
+        XCTAssertEqual(SignedUsdFormatter.format(try XCTUnwrap(chart.changeDollars())), "+$5.50")
+    }
+
+    func testAFallingWindowGivesASignedDollarMove() throws {
+        let chart = series(range: .oneDay, prices: [100_000_000, 98_750_000], previousClose: 100_000_000)
+
+        XCTAssertEqual(chart.changeDollars(), "-1.25")
+        XCTAssertEqual(SignedUsdFormatter.format(try XCTUnwrap(chart.changeDollars())), "−$1.25")
     }
 
     func testAnOutOfBoundsScrubIndexFallsBackToTheEndOfTheCurve() {

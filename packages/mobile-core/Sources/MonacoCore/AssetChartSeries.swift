@@ -122,6 +122,20 @@ public struct AssetChartSeries: Equatable, Sendable {
         return Self.ratioString(value / baseline - 1)
     }
 
+    /// The same move in dollars — "5.50", "-1.20" — for the badge beside the percent.
+    ///
+    /// Both legs come from the curve, never from the hero price above it: the curve is
+    /// the underlying equity's and the hero is the token's, and subtracting one from
+    /// the other would quietly fold the premium between them into the day's move.
+    public func changeDollars(toIndex index: Int? = nil) -> String? {
+        guard let baseline = baselineValue else { return nil }
+        let target = index.flatMap(point(at:)) ?? points.last
+        guard let value = target?.chartValue else { return nil }
+        let delta = value - baseline
+        guard delta.isFinite else { return nil }
+        return String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), delta)
+    }
+
     /// Fixed-point, POSIX, so no formatter downstream ever sees an exponent.
     public static func ratioString(_ ratio: Double) -> String {
         guard ratio.isFinite else { return "0.000000" }
@@ -161,6 +175,24 @@ public struct AssetChartSeries: Equatable, Sendable {
 
     public func nearestPoint(to date: Date) -> AssetChartPointDTO? {
         nearestIndex(to: date).flatMap(point(at:))
+    }
+
+    // MARK: - Whose price this is
+
+    /// "AAPL on its home exchange" — the caption under a curve drawn from the
+    /// underlying equity's candles while the hero price above it is the token's.
+    ///
+    /// The two differ by the premium the stock-vs-token card exists to show, so a
+    /// curve that ends below the price on screen is two instruments, not a bug. Nil
+    /// when the backend did not say which instrument the series is, in which case
+    /// the chart is drawn uncaptioned rather than under a guess.
+    public var basisCaption: String? {
+        guard let basisSymbol, !basisSymbol.isEmpty else { return nil }
+        switch basis {
+        case .underlying: return "\(basisSymbol) on its home exchange"
+        case .token: return "\(basisSymbol) on Solana"
+        case .unknown, nil: return nil
+        }
     }
 }
 
