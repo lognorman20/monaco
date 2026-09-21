@@ -96,6 +96,9 @@ struct GroupHeroSection: View {
             .accessibilityIdentifier("group-hero-slice")
         }
         .monacoHeroCard()
+        // A container, not a plain identifier: on a bare stack SwiftUI hands "group-hero"
+        // down to every child, which overwrites the picture control's own identifier.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("group-hero")
     }
 }
