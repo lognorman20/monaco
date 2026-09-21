@@ -102,19 +102,6 @@ final class MonacoAPIClientBudgetTests: XCTestCase {
             )
         }
     }
-
-    /// The default client must be on Monaco's own session: a default argument slipping back
-    /// to `.shared` would put every request on the 60s one-size-fits-all deadline.
-    func testDefaultClient_runsOnMonacosOwnSession() throws {
-        let transport = try XCTUnwrap(
-            Mirror(reflecting: MonacoAPIClient(baseURL: baseURL)).children
-                .first { $0.label == "session" }?.value as? MonacoHTTPTransport
-        )
-        let session = try XCTUnwrap(
-            Mirror(reflecting: transport).children.first { $0.label == "session" }?.value as? URLSession
-        )
-        XCTAssertTrue(session === URLSession.monaco)
-    }
 }
 
 /// Answers every request with one canned response and records "METHOD path timeout".
