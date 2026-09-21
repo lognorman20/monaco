@@ -58,9 +58,9 @@ struct CabalMark: View {
     }
 }
 
-/// A stock's tile: sunken fill with a hairline and the ticker's first letter. "USDC" (cash) shows a dollar sign.
+/// A stock's tile: sunken fill with a hairline and the ticker. "USDC" (cash) shows a dollar sign.
 struct StockMark: View {
-    private enum Content {
+    enum Content: Equatable {
         case letter(String)
         case symbol(String)
     }
@@ -69,13 +69,48 @@ struct StockMark: View {
     private let size: CGFloat
 
     init(symbol: String, size: CGFloat = 44) {
+        content = StockMark.content(forSymbol: symbol)
+        self.size = size
+    }
+
+    /// What the tile draws for a symbol as callers hold it. Most rows pass the wire symbol
+    /// (`AAPLc`); a few pass the display ticker already. Both go through
+    /// `AssetSymbolFormatter.display` here, once, so the token suffix never reaches the tile and
+    /// `display` being idempotent makes the already-normalised callers read the same.
+    static func content(forSymbol symbol: String) -> Content {
         let ticker = AssetSymbolFormatter.display(symbol)
         if ticker.uppercased() == "USDC" {
-            content = .symbol("dollarsign")
-        } else {
-            content = .letter(ticker.first.map { String($0).uppercased() } ?? "")
+            return .symbol("dollarsign")
         }
-        self.size = size
+        return .letter(tileText(forTicker: ticker))
+    }
+
+    /// The whole ticker, up to four characters. One letter is not an identity: nine tickers in
+    /// the catalog start with "A", so Apple, Amazon and Broadcom were three identical grey tiles.
+    ///
+    /// A class separator is dropped rather than left hanging: "BRK.B" cut at four characters is
+    /// "BRK." reading as an abbreviation of itself.
+    ///
+    /// Takes the display ticker, not the wire symbol: `content(forSymbol:)` strips the token
+    /// suffix before it gets here.
+    static func tileText(forTicker ticker: String) -> String {
+        let trimmed = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        var tile = String(trimmed.prefix(4))
+        while let last = tile.last, last == "." || last == "-" {
+            tile.removeLast()
+        }
+        return tile
+    }
+
+    /// Fraction of the tile the text is set at. Longer tickers are set smaller so the tile keeps
+    /// its weight; `minimumScaleFactor` takes the rest.
+    static func textScale(for text: String) -> CGFloat {
+        switch text.count {
+        case 0, 1: return 0.42
+        case 2: return 0.34
+        case 3: return 0.28
+        default: return 0.23
+        }
     }
 
     /// For non-stock rows, e.g. `"cpu"` for a trading bot.
@@ -96,8 +131,11 @@ struct StockMark: View {
                 switch content {
                 case .letter(let letter):
                     Text(letter)
-                        .font(.system(size: size * 0.42, weight: .semibold))
+                        .font(.system(size: size * StockMark.textScale(for: letter), weight: .semibold))
                         .foregroundStyle(MonacoTheme.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .padding(.horizontal, size * 0.08)
                 case .symbol(let name):
                     Image(systemName: name)
                         .font(.system(size: size * 0.40, weight: .semibold))

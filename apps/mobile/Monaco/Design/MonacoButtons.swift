@@ -32,6 +32,13 @@ extension View {
     }
 }
 
+/// Shared button geometry. `MonacoToastPlacement` sizes its inset against this, so the bar height
+/// and the toast's idea of the bar height cannot drift apart.
+enum MonacoButtonMetrics {
+    /// Tap-target floor for every Monaco button capsule.
+    static let minimumHeight: CGFloat = 50
+}
+
 private struct MonacoButtonLabel: ViewModifier {
     @Environment(\.monacoButtonFullWidth) private var fullWidth
 
@@ -41,7 +48,7 @@ private struct MonacoButtonLabel: ViewModifier {
             .lineLimit(1)
             .minimumScaleFactor(0.8)
             .padding(.horizontal, 20)
-            .frame(maxWidth: fullWidth ? .infinity : nil, minHeight: 50)
+            .frame(maxWidth: fullWidth ? .infinity : nil, minHeight: MonacoButtonMetrics.minimumHeight)
     }
 }
 
@@ -57,7 +64,7 @@ struct MonacoPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .monacoButtonLabel()
-            .foregroundStyle(isEnabled ? MonacoTheme.primaryButtonLabel : MonacoTheme.tertiaryText)
+            .foregroundStyle(isEnabled ? MonacoTheme.primaryButtonLabel : MonacoTheme.disabledLabel)
             .background(
                 Capsule()
                     .fill(isEnabled ? MonacoTheme.primaryButtonFill : MonacoTheme.surfaceSunken)
@@ -73,7 +80,7 @@ struct MonacoSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .monacoButtonLabel()
-            .foregroundStyle(isEnabled ? MonacoTheme.secondaryButtonLabel : MonacoTheme.tertiaryText)
+            .foregroundStyle(isEnabled ? MonacoTheme.secondaryButtonLabel : MonacoTheme.disabledLabel)
             .background(Capsule().fill(MonacoTheme.secondaryButtonFill))
             .overlay {
                 Capsule()
@@ -90,7 +97,7 @@ struct MonacoDestructiveButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .monacoButtonLabel()
-            .foregroundStyle(isEnabled ? MonacoTheme.destructive : MonacoTheme.tertiaryText)
+            .foregroundStyle(isEnabled ? MonacoTheme.destructive : MonacoTheme.disabledLabel)
             .background(Capsule().fill(MonacoTheme.surface))
             .overlay {
                 Capsule()
@@ -144,14 +151,46 @@ struct BottomCTA<Content: View>: View {
     }
 }
 
-/// 56pt brand-tinted disc with a symbol and a 13pt label below (Group detail action row).
+/// Ceilings for `CircleAction`'s disc and glyph.
+///
+/// The disc is a container, not type, and it shares a row with three others: `GroupActionRow` puts
+/// four `CircleAction`s in an `HStack(spacing: 0)` with each in a `.frame(maxWidth: .infinity)`
+/// column — about 97pt on a 390pt screen. Scaled without a ceiling, a 56pt disc reaches ~99pt at
+/// AX1 and ~189pt at AX5, so the four main money actions draw over each other from AX1 upwards.
+/// A 2x2 grid would only raise the column to ~195pt, so it does not remove the need for a ceiling.
+///
+/// The glyph keeps scaling up to its own ceiling, so the control still grows with Dynamic Type —
+/// it just stops growing before it outgrows the space it has. Past the ceiling the label below,
+/// which is uncapped, carries the rest of the size increase.
+enum CircleActionMetrics {
+    /// Fits the ~97pt column the four-across row gives each action on the narrowest phone.
+    static let maximumDiscSize: CGFloat = 88
+
+    /// Keeps the symbol proportionate inside a capped disc (20/56 of the disc, as at the base size).
+    static let maximumGlyphSize: CGFloat = 30
+
+    static func discSize(scaled: CGFloat) -> CGFloat { min(scaled, maximumDiscSize) }
+
+    static func glyphSize(scaled: CGFloat) -> CGFloat { min(scaled, maximumGlyphSize) }
+}
+
+/// Brand-tinted disc with a symbol and a footnote label below (Group detail action row).
 /// A wash rather than a solid fill: four solid brand discs in a row would spend the accent.
+/// The disc, the glyph and the label all scale with Dynamic Type — these are the main money
+/// actions, and they used to stay at 13pt while every label around them grew. The disc and the
+/// glyph stop at `CircleActionMetrics`' ceilings so they stay inside their column; the label does not.
 struct CircleAction: View {
     private let title: String
     private let systemImage: String
     private let action: () -> Void
 
     @Environment(\.isEnabled) private var isEnabled
+    @ScaledMetric(relativeTo: .footnote) private var scaledDiscSize: CGFloat = 56
+    @ScaledMetric(relativeTo: .footnote) private var scaledGlyphSize: CGFloat = 20
+
+    private var discSize: CGFloat { CircleActionMetrics.discSize(scaled: scaledDiscSize) }
+
+    private var glyphSize: CGFloat { CircleActionMetrics.glyphSize(scaled: scaledGlyphSize) }
 
     init(_ title: String, systemImage: String, action: @escaping () -> Void) {
         self.title = title
@@ -166,14 +205,15 @@ struct CircleAction: View {
         } label: {
             VStack(spacing: MonacoTheme.Space.s) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(isEnabled ? MonacoTheme.brand : MonacoTheme.tertiaryText)
-                    .frame(width: 56, height: 56)
+                    .font(.system(size: glyphSize, weight: .semibold))
+                    .foregroundStyle(isEnabled ? MonacoTheme.brandOnWash : MonacoTheme.disabledLabel)
+                    .frame(width: discSize, height: discSize)
                     .background(Circle().fill(isEnabled ? MonacoTheme.brandWash : MonacoTheme.surfaceSunken))
                 Text(title)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(isEnabled ? MonacoTheme.ink : MonacoTheme.tertiaryText)
-                    .lineLimit(1)
+                    .font(.system(.footnote, weight: .medium))
+                    .foregroundStyle(isEnabled ? MonacoTheme.ink : MonacoTheme.disabledLabel)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.8)
             }
             .frame(minWidth: 64)
