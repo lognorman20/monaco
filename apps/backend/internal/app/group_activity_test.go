@@ -248,3 +248,113 @@ func TestListGroupActivity_sortsNewestFirst(t *testing.T) {
 		t.Fatalf("expected newest first, got %v then %v", items[0].CreatedAt, items[1].CreatedAt)
 	}
 }
+
+// A sell's transactions.amount is token atomics, not USDC. Activity must report a
+// sell's dollar figure only from its recorded proceeds, and no dollar figure at all
+// while there are none -- never the atomics.
+func TestListGroupActivity_sellAmountsAreDollarsOrAbsent(t *testing.T) {
+	t.Parallel()
+
+	h := integrationApp(t)
+	ctx := context.Background()
+	home := NewHomeService(h.Store, h.Auth, h.Wallets, h.Pyth, h.Deposits, h.Symbols)
+	governance := NewGovernanceService(h.Store, h.Auth, h.Wallets)
+
+	token := auth.AccessToken(h.ISO.UniqueToken("activity-sell-amounts"))
+	auth.RegisterToken(h.Auth, token, auth.Identity{
+		DynamicUserID: h.ISO.UniqueDynamicID("activity-sell-amounts"),
+		DisplayName:   "Sell Amounts",
+	})
+	openTestSession(t, h.ISO, NewSessionService(h.Store, h.Auth, h.Wallets), h.Auth, "activity-sell-amounts", "Sell Amounts")
+
+	group, err := governance.CreateGroupWithRules(ctx, string(token), testGroupName(h.ISO, "sell-amounts"), DefaultGroupRules())
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	h.ISO.TrackGroup(group.GroupID)
+
+	const stock = "0xb200000000000000000000c2e324d24d7eecd1fb"
+	// 12 shares, sold for $2,784.60. Read as micros, the atomics would be $1,200.00.
+	const sellAtomics int64 = 12 * 100_000_000
+	const proceeds int64 = 2_784_600_000
+
+	pending, _, err := h.Store.InsertPendingTransaction(ctx, postgres.InsertPendingTransactionParams{
+		GroupID:          group.GroupID,
+		Action:           postgres.TransactionActionSell,
+		InputToken:       stock,
+		OutputToken:      dex.USDCAddress(),
+		Amount:           sellAtomics,
+		ExecuteRequestID: testRequestID(h.ISO, "sell-pending"),
+	})
+	if err != nil {
+		t.Fatalf("insert pending sell: %v", err)
+	}
+	failed, err := h.Store.InsertFailedTransaction(ctx, group.GroupID, postgres.TransactionActionSell, stock, dex.USDCAddress(), sellAtomics, testRequestID(h.ISO, "sell-failed"))
+	if err != nil {
+		t.Fatalf("insert failed sell: %v", err)
+	}
+	confirmed, _, err := h.Store.ConfirmSellTransaction(ctx, postgres.ConfirmSellTransactionParams{
+		GroupID:          group.GroupID,
+		Amount:           sellAtomics,
+		InputToken:       stock,
+		OutputToken:      dex.USDCAddress(),
+		TxHash:           testTxHash(h.ISO, "sell-confirmed"),
+		ExecuteRequestID: testRequestID(h.ISO, "sell-confirmed"),
+		ProceedsUSDC:     proceeds,
+	})
+	if err != nil {
+		t.Fatalf("confirm sell: %v", err)
+	}
+	unrecorded, _, err := h.Store.ConfirmSellTransaction(ctx, postgres.ConfirmSellTransactionParams{
+		GroupID:          group.GroupID,
+		Amount:           sellAtomics,
+		InputToken:       stock,
+		OutputToken:      dex.USDCAddress(),
+		TxHash:           testTxHash(h.ISO, "sell-unrecorded"),
+		ExecuteRequestID: testRequestID(h.ISO, "sell-unrecorded"),
+		ProceedsUSDC:     proceeds,
+	})
+	if err != nil {
+		t.Fatalf("confirm sell to strip: %v", err)
+	}
+	// An older confirmed sell that never recorded its proceeds.
+	if _, err := h.DB.ExecContext(ctx, `UPDATE transactions SET cost_basis_price = NULL, cost_basis_amount = NULL WHERE id = $1`, unrecorded.ID); err != nil {
+		t.Fatalf("clear proceeds: %v", err)
+	}
+
+	items, err := home.ListGroupActivity(ctx, string(token), group.GroupID)
+	if err != nil {
+		t.Fatalf("ListGroupActivity: %v", err)
+	}
+	byID := map[string]GroupActivityItem{}
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+
+	cases := []struct {
+		name         string
+		id           string
+		wantAmount   int64
+		wantProceeds int64
+	}{
+		{"pending sell", pending.ID, 0, 0},
+		{"failed sell", failed.ID, 0, 0},
+		{"confirmed sell", confirmed.ID, proceeds, proceeds},
+		{"confirmed sell with no recorded proceeds", unrecorded.ID, 0, 0},
+	}
+	for _, tc := range cases {
+		item, ok := byID[tc.id]
+		if !ok {
+			t.Fatalf("%s: missing from activity", tc.name)
+		}
+		if item.AmountMicros != tc.wantAmount {
+			t.Errorf("%s: AmountMicros = %d, want %d", tc.name, item.AmountMicros, tc.wantAmount)
+		}
+		if item.ProceedsUsdcMicros != tc.wantProceeds {
+			t.Errorf("%s: ProceedsUsdcMicros = %d, want %d", tc.name, item.ProceedsUsdcMicros, tc.wantProceeds)
+		}
+		if item.TokenAmount != sellAtomics {
+			t.Errorf("%s: TokenAmount = %d, want %d", tc.name, item.TokenAmount, sellAtomics)
+		}
+	}
+}

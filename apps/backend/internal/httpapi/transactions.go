@@ -27,23 +27,29 @@ type TransactionHandlers struct {
 }
 
 type getTransactionResponse struct {
-	TransactionID    string `json:"transactionId"`
-	GroupID          string `json:"groupId"`
-	Action           string `json:"action"`
-	Status           string `json:"status"`
-	AmountMicros     int64  `json:"amountMicros"`
-	InputToken       string `json:"inputToken,omitempty"`
-	OutputToken      string `json:"outputToken,omitempty"`
-	InputSymbol      string `json:"inputSymbol,omitempty"`
-	OutputSymbol     string `json:"outputSymbol,omitempty"`
-	TxHash           string `json:"txHash,omitempty"`
-	ExecuteRequestID string `json:"executeRequestId,omitempty"`
-	ProposalID       string `json:"proposalId,omitempty"`
-	CostBasisPrice   int64  `json:"costBasisPrice,omitempty"`
-	CostBasisAmount  int64  `json:"costBasisAmount,omitempty"`
-	CreatedAt        string `json:"createdAt"`
-	ConfirmedAt      string `json:"confirmedAt,omitempty"`
-	FailureReason    string `json:"failureReason,omitempty"`
+	TransactionID string `json:"transactionId"`
+	GroupID       string `json:"groupId"`
+	Action        string `json:"action"`
+	Status        string `json:"status"`
+	// AmountMicros is the swap's value in USDC micros: what a buy spent, or what a
+	// confirmed sell received. Zero for a sell with no recorded proceeds.
+	AmountMicros int64 `json:"amountMicros"`
+	// TokenAmount is a sell's quantity in stock-token atomics (b20.TokenAtomicScale per share).
+	TokenAmount int64 `json:"tokenAmount,omitempty"`
+	// ProceedsUsdcMicros is a confirmed sell's USDC proceeds; absent until known.
+	ProceedsUsdcMicros int64  `json:"proceedsUsdcMicros,omitempty"`
+	InputToken         string `json:"inputToken,omitempty"`
+	OutputToken        string `json:"outputToken,omitempty"`
+	InputSymbol        string `json:"inputSymbol,omitempty"`
+	OutputSymbol       string `json:"outputSymbol,omitempty"`
+	TxHash             string `json:"txHash,omitempty"`
+	ExecuteRequestID   string `json:"executeRequestId,omitempty"`
+	ProposalID         string `json:"proposalId,omitempty"`
+	CostBasisPrice     int64  `json:"costBasisPrice,omitempty"`
+	CostBasisAmount    int64  `json:"costBasisAmount,omitempty"`
+	CreatedAt          string `json:"createdAt"`
+	ConfirmedAt        string `json:"confirmedAt,omitempty"`
+	FailureReason      string `json:"failureReason,omitempty"`
 }
 
 type treasuryTokenBalance struct {
@@ -171,17 +177,24 @@ func (h *TransactionHandlers) GetTransactionHandler(w http.ResponseWriter, r *ht
 }
 
 func (h *TransactionHandlers) transactionRowToResponse(ctx context.Context, row postgres.TransactionRow) getTransactionResponse {
+	usdcMicros, usdcKnown := postgres.SwapUsdcMicros(row.Action, row.Status, row.Amount, row.CostBasisAmount)
 	resp := getTransactionResponse{
 		TransactionID: row.ID,
 		GroupID:       row.GroupID,
 		Action:        row.Action,
 		Status:        row.Status,
-		AmountMicros:  row.Amount,
+		AmountMicros:  usdcMicros,
 		InputToken:    row.InputToken,
 		OutputToken:   row.OutputToken,
 		InputSymbol:   h.symbolForMint(ctx, row.InputToken),
 		OutputSymbol:  h.symbolForMint(ctx, row.OutputToken),
 		CreatedAt:     row.CreatedAt.UTC().Format(time.RFC3339),
+	}
+	if row.Action == postgres.TransactionActionSell {
+		resp.TokenAmount = row.Amount
+		if usdcKnown {
+			resp.ProceedsUsdcMicros = usdcMicros
+		}
 	}
 	if row.TxHash.Valid {
 		resp.TxHash = row.TxHash.String

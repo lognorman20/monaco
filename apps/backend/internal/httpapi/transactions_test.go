@@ -179,6 +179,107 @@ func TestGetTransactionHandler_returnsFullDetail(t *testing.T) {
 	}
 }
 
+// transactions.amount is the swap's input: USDC micros for a buy, token atomics
+// for a sell. The detail's amountMicros must be dollars either way, and a sell
+// with no recorded proceeds must carry no dollar figure rather than its atomics.
+func TestGetTransactionHandler_amountMicrosIsDollarsForBuysAndSells(t *testing.T) {
+	handlers, authHandlers, privyClient, _, iso := integrationTransactionHandlers(t)
+	ctx := context.Background()
+	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "tx-amounts", "Tx Amounts")
+
+	governance := app.NewGovernanceService(handlers.Store, handlers.Auth, handlers.Wallets)
+	created, err := governance.CreateGroupWithRules(ctx, string(token), "Tx Amounts Club "+iso.Suffix(), app.DefaultGroupRules())
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	trackCreatedGroup(iso, created.GroupID)
+
+	const stock = "0xb200000000000000000000c2e324d24d7eecd1fb"
+	// 12 shares, sold for $2,784.60. Read as micros, the atomics would be $1,200.00.
+	const sellAtomics int64 = 12 * b20.TokenAtomicScale
+	const proceeds int64 = 2_784_600_000
+
+	buy, _, err := handlers.Store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
+		GroupID:          created.GroupID,
+		Amount:           2_784_600_000,
+		InputToken:       dex.USDCAddress(),
+		OutputToken:      stock,
+		TxHash:           "sig-amounts-buy-" + iso.Suffix(),
+		ExecuteRequestID: "req-amounts-buy-" + iso.Suffix(),
+		CostBasisPrice:   2_784_600_000,
+		CostBasisAmount:  sellAtomics,
+	})
+	if err != nil {
+		t.Fatalf("confirm buy: %v", err)
+	}
+	sell, _, err := handlers.Store.ConfirmSellTransaction(ctx, postgres.ConfirmSellTransactionParams{
+		GroupID:          created.GroupID,
+		Amount:           sellAtomics,
+		InputToken:       stock,
+		OutputToken:      dex.USDCAddress(),
+		TxHash:           "sig-amounts-sell-" + iso.Suffix(),
+		ExecuteRequestID: "req-amounts-sell-" + iso.Suffix(),
+		ProceedsUSDC:     proceeds,
+	})
+	if err != nil {
+		t.Fatalf("confirm sell: %v", err)
+	}
+	pendingSell, _, err := handlers.Store.InsertPendingTransaction(ctx, postgres.InsertPendingTransactionParams{
+		GroupID:          created.GroupID,
+		Action:           postgres.TransactionActionSell,
+		InputToken:       stock,
+		OutputToken:      dex.USDCAddress(),
+		Amount:           sellAtomics,
+		ExecuteRequestID: "req-amounts-pending-sell-" + iso.Suffix(),
+	})
+	if err != nil {
+		t.Fatalf("insert pending sell: %v", err)
+	}
+
+	cases := []struct {
+		name            string
+		id              string
+		wantAmount      int64
+		wantTokenAmount int64
+		wantProceeds    int64
+	}{
+		{"confirmed buy", buy.ID, 2_784_600_000, 0, 0},
+		{"confirmed sell", sell.ID, proceeds, sellAtomics, proceeds},
+		{"sell with no recorded proceeds", pendingSell.ID, 0, sellAtomics, 0},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(http.MethodGet, "/v1/transactions/"+tc.id, nil)
+		req.SetPathValue("id", tc.id)
+		req.Header.Set("Authorization", "Bearer "+string(token))
+		rec := httptest.NewRecorder()
+		handlers.GetTransactionHandler(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, want 200; body = %s", tc.name, rec.Code, rec.Body.String())
+		}
+
+		var payload getTransactionResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("%s: decode json: %v", tc.name, err)
+		}
+		if payload.AmountMicros != tc.wantAmount {
+			t.Errorf("%s: amountMicros = %d, want %d", tc.name, payload.AmountMicros, tc.wantAmount)
+		}
+		if payload.TokenAmount != tc.wantTokenAmount {
+			t.Errorf("%s: tokenAmount = %d, want %d", tc.name, payload.TokenAmount, tc.wantTokenAmount)
+		}
+		if payload.ProceedsUsdcMicros != tc.wantProceeds {
+			t.Errorf("%s: proceedsUsdcMicros = %d, want %d", tc.name, payload.ProceedsUsdcMicros, tc.wantProceeds)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+			t.Fatalf("%s: decode raw json: %v", tc.name, err)
+		}
+		if _, present := raw["proceedsUsdcMicros"]; present != (tc.wantProceeds > 0) {
+			t.Errorf("%s: proceedsUsdcMicros present = %v, want %v", tc.name, present, tc.wantProceeds > 0)
+		}
+	}
+}
+
 func TestRetryTransactionHandler_confirmedBuy_returns409(t *testing.T) {
 	handlers, authHandlers, privyClient, _, iso := integrationTransactionHandlers(t)
 	ctx := context.Background()
