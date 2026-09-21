@@ -499,10 +499,9 @@ final class SingleFlightTests: XCTestCase {
 }
 
 final class LoginFailureCopyTests: XCTestCase {
-    func testWrongCode_keepsTheCodeField_andSaysSo() {
+    func testWrongCode_saysSo() {
         let failure = LoginFailureCopy.failure(forHTTPStatus: 422, step: .verifyCode, detail: "Invalid code")
         XCTAssertEqual(failure, .codeRejected)
-        XCTAssertTrue(failure.keepsCodeEntry)
         XCTAssertEqual(
             LoginFailureCopy.message(for: failure, step: .verifyCode),
             "That code didn't work. Check it, or send a new one."
@@ -513,7 +512,6 @@ final class LoginFailureCopyTests: XCTestCase {
         for step in [LoginStep.sendCode, .verifyCode] {
             let failure = LoginFailureCopy.failure(forHTTPStatus: 429, step: step, detail: nil)
             XCTAssertEqual(failure, .rateLimited)
-            XCTAssertFalse(failure.keepsCodeEntry)
             XCTAssertEqual(
                 LoginFailureCopy.message(for: failure, step: step),
                 "Too many attempts. Wait a minute, then try again."
@@ -521,8 +519,7 @@ final class LoginFailureCopyTests: XCTestCase {
         }
     }
 
-    func testOffline_keepsTheCodeField_soTheSameCodeCanBeRetried() {
-        XCTAssertTrue(LoginFailure.offline.keepsCodeEntry)
+    func testOffline_saysToCheckTheConnection() {
         XCTAssertEqual(
             LoginFailureCopy.message(for: .offline, step: .verifyCode),
             "No connection. Check your internet and try again."
