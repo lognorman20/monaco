@@ -4,24 +4,22 @@ import SwiftUI
 /// Threaded discussion under a proposal. Replies sit under their parent, indented up to
 /// `ProposalCommentThread.maxIndentLevel` levels.
 struct CommentThreadView: View {
-    let comments: [ProposalCommentDTO]
+    /// Already in display order. The thread is built once, where the comments are stored, so a
+    /// re-render of the detail screen does not rebuild it.
+    let rows: [ProposalCommentThreadRow]
     var isLoading = false
     var errorMessage: String?
     var onRetry: () -> Void = {}
     var onReply: (ProposalCommentDTO) -> Void
 
-    private var rows: [ProposalCommentThreadRow] {
-        ProposalCommentThread.rows(from: comments)
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             MonacoSectionHeader(
                 ProposalFeedCopy.commentsTitle,
-                trailing: comments.isEmpty ? nil : ProposalFeedCopy.commentCount(comments.count)
+                trailing: rows.isEmpty ? nil : ProposalFeedCopy.commentCount(rows.count)
             )
 
-            if isLoading && comments.isEmpty {
+            if isLoading && rows.isEmpty {
                 VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
                     ForEach(0..<2, id: \.self) { _ in
                         HStack(alignment: .top, spacing: MonacoTheme.Space.sm) {
@@ -33,7 +31,7 @@ struct CommentThreadView: View {
                         }
                     }
                 }
-            } else if let errorMessage, comments.isEmpty {
+            } else if let errorMessage, rows.isEmpty {
                 HStack {
                     Text(errorMessage)
                         .font(MonacoTheme.Typo.callout)
@@ -120,13 +118,21 @@ struct CommentRow: View {
 
 /// Bottom composer: pill field and a round send button. Posts a top-level comment, or a reply when
 /// `replyTarget` is set.
+///
+/// The draft lives here, not on the screen above: typing then invalidates the composer alone,
+/// instead of the whole proposal detail body and its comment thread on every keystroke.
 struct CommentComposer: View {
-    @Binding var text: String
     let replyTarget: ProposalCommentDTO?
     let isPosting: Bool
     let onCancelReply: () -> Void
-    let onPost: (String) -> Void
+    /// Answers whether the comment was accepted. Only then is the draft cleared and the keyboard
+    /// dropped, so the thread the comment landed in is readable again and Reply is reachable.
+    let onPost: (String) async -> Bool
+    /// Called once the composer has cleared its draft and given up focus, so the thread can scroll
+    /// to what was just posted without racing the keyboard's safe-area inset.
+    var onDidStandDown: () -> Void = {}
 
+    @State private var text = ""
     @FocusState private var focused: Bool
 
     private var draft: ProposalCommentDraft {
@@ -179,8 +185,12 @@ struct CommentComposer: View {
                 .accessibilityIdentifier("comment-composer-field")
 
                 Button {
-                    if let body = draft.body {
-                        onPost(body)
+                    guard let body = draft.body else { return }
+                    Task {
+                        guard await onPost(body) else { return }
+                        text = ""
+                        focused = false
+                        onDidStandDown()
                     }
                 } label: {
                     ZStack {

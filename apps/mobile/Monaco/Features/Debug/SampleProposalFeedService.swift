@@ -34,7 +34,7 @@ final class SampleProposalFeedService: ProposalFeedService {
     ]
 
     init(now: Date = Date()) {
-        let symbols = ["AAPLx", "NVDAx", "TSLAx", "MSFTx", "AMZNx", "GOOGLx", "METAx", "SPYx"]
+        let symbols = ["AAPLc", "NVDAc", "TSLAc", "MSFTc", "AMZNc", "GOOGLc", "METAc", "SPYc"]
         let proposers = ["Ada Park", "Ben Ortiz", "Cy Lin", "Dee Shah"]
         var built: [Record] = []
         for index in 0..<24 {
@@ -151,7 +151,9 @@ final class SampleProposalFeedService: ProposalFeedService {
 /// Root for the sample-data launch (Debug only): the feed under its real title, "Proposals", so it can be
 /// recorded as is. The launch argument, not the screen, is what marks it as sample data.
 /// Extra arguments open other proposal screens on the same sample data:
-/// `-MonacoProposeSample` (a cabal screen with the Propose sheet) and
+/// `-MonacoProposeSample` (a cabal screen with the Propose sheet),
+/// `-MonacoProposeSampleStock` (the Stock detail entry: the buy flow jumped straight to a stock,
+/// with `-MonacoProposePotFails` to make the first pot read fail) and
 /// `-MonacoProposalSampleDetail <id>` (one proposal's detail, e.g. `sample-22` for the swap tracker).
 struct SampleProposalFeedRoot: View {
     @State private var service = SampleProposalFeedService()
@@ -167,6 +169,8 @@ struct SampleProposalFeedRoot: View {
         Group {
             if arguments.contains("-MonacoProposeSample") {
                 SampleProposeRoot()
+            } else if arguments.contains("-MonacoProposeSampleStock") {
+                SampleProposeFromStockRoot()
             } else if let detailId {
                 NavigationStack {
                     ProposalDetailView(service: service, proposalId: detailId)
@@ -218,6 +222,24 @@ private struct SampleProposeRoot: View {
     }
 }
 
+/// The Stock detail entry into the buy flow: no chooser sheet, no pot handed down, and the stock
+/// already picked. With `-MonacoProposePotFails` the first pot read fails, which is the path where
+/// the amount step used to strand the member with a disabled Review button.
+private struct SampleProposeFromStockRoot: View {
+    @State private var service = SampleProposeService()
+
+    var body: some View {
+        NavigationStack {
+            ProposeBuyView(
+                service: service,
+                groupId: SampleProposeService.groupView.id,
+                pot: nil,
+                initialSymbol: "AAPLc"
+            )
+        }
+    }
+}
+
 /// In-memory propose backend: a cabal with $548.20 in the pot, popular stocks with prices,
 /// catalog search, quotes at the listed price, and proposals that always go through.
 @MainActor
@@ -228,8 +250,8 @@ final class SampleProposeService: ProposeService {
         treasuryAddress: nil,
         potTotalUsd: "548.20",
         pot: [
-            PotRowDTO(symbol: "AAPLx", units: "1.2034", markUsd: "231.40", valueUsd: "278.47", dollarPnl: "+28.47", afterHours: false, tokenAmount: "120340000"),
-            PotRowDTO(symbol: "NVDAx", units: "1.05", markUsd: "178.20", valueUsd: "187.11", dollarPnl: "+22.11", afterHours: false, tokenAmount: "105000000"),
+            PotRowDTO(symbol: "AAPLc", units: "1.2034", markUsd: "231.40", valueUsd: "278.47", dollarPnl: "+28.47", afterHours: false, tokenAmount: "120340000"),
+            PotRowDTO(symbol: "NVDAc", units: "1.05", markUsd: "178.20", valueUsd: "187.11", dollarPnl: "+22.11", afterHours: false, tokenAmount: "105000000"),
             PotRowDTO(symbol: "USDC", units: "82.62", markUsd: "1.00", valueUsd: "82.62", dollarPnl: "+0.00", afterHours: nil, tokenAmount: nil),
         ],
         you: MemberSliceDTO(shareUnits: "311500000", equityUsd: "311.50", slicePercent: "0.568", dollarPnl: "+27.40", percentReturn: "0.096"),
@@ -239,17 +261,26 @@ final class SampleProposeService: ProposeService {
     )
 
     private let catalog: [ProposeStock] = [
-        ProposeStock(symbol: "AAPLx", name: "Apple", priceMicros: 231_400_000, change24h: "0.012"),
-        ProposeStock(symbol: "NVDAx", name: "Nvidia", priceMicros: 178_200_000, change24h: "-0.008"),
-        ProposeStock(symbol: "TSLAx", name: "Tesla", priceMicros: 342_100_000, change24h: "0.034"),
-        ProposeStock(symbol: "MSFTx", name: "Microsoft", priceMicros: 438_900_000, change24h: "0.004"),
-        ProposeStock(symbol: "SPYx", name: "S&P 500", priceMicros: 612_300_000, change24h: "0.002"),
-        ProposeStock(symbol: "GOOGLx", name: "Alphabet", priceMicros: 201_000_000, change24h: "-0.015"),
-        ProposeStock(symbol: "AMBRx", name: "Amber", priceMicros: 12_400_000, change24h: nil, isTradable: false),
+        ProposeStock(symbol: "AAPLc", name: "Apple", priceMicros: 231_400_000, change24h: "0.012"),
+        ProposeStock(symbol: "NVDAc", name: "Nvidia", priceMicros: 178_200_000, change24h: "-0.008"),
+        ProposeStock(symbol: "TSLAc", name: "Tesla", priceMicros: 342_100_000, change24h: "0.034"),
+        ProposeStock(symbol: "MSFTc", name: "Microsoft", priceMicros: 438_900_000, change24h: "0.004"),
+        ProposeStock(symbol: "SPYc", name: "S&P 500", priceMicros: 612_300_000, change24h: "0.002"),
+        ProposeStock(symbol: "GOOGLc", name: "Alphabet", priceMicros: 201_000_000, change24h: "-0.015"),
+        ProposeStock(symbol: "AMBRc", name: "Amber", priceMicros: 12_400_000, change24h: nil, isTradable: false),
     ]
 
+    /// `-MonacoProposePotFails`: the first read fails, so a retry can be driven from a test.
+    private var potReads = 0
+
     func pot(groupId: String) async throws -> ProposePot {
-        ProposePot(view: Self.groupView)
+        potReads += 1
+        if potReads == 1, ProcessInfo.processInfo.arguments.contains("-MonacoProposePotFails") {
+            // The same error type `LiveProposeService` throws, so the sample harness exercises the
+            // real `ProposeErrorCopy` mapping rather than only its type-agnostic fallbacks.
+            throw Monaco.MonacoAPIError.httpStatus(503)
+        }
+        return ProposePot(view: Self.groupView)
     }
 
     func popularStocks() async throws -> [ProposeStock] {
