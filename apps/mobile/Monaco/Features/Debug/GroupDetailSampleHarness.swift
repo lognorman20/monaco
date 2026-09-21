@@ -209,11 +209,11 @@ enum GroupDetailSampleData {
         let iso = ISO8601DateFormatter()
         func ago(_ minutes: Double) -> String { iso.string(from: Date().addingTimeInterval(-minutes * 60)) }
         return [
-            GroupActivityItemDTO(id: "t1", kind: "buy", status: "pending", symbol: "AAPLc", amountMicros: 50_000_000, createdAt: ago(3), txHash: "5h1Xk", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
+            GroupActivityItemDTO(id: "t1", kind: "buy", status: "pending", symbol: "AAPLc", amountMicros: 50_000_000, createdAt: ago(3), txHash: "0xd2b6e5896a6725952fa8d534b57dd8e512ef17b23008802d0cd2c50f0b246bc0", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
             GroupActivityItemDTO(id: "t2", kind: "deposit", status: "confirmed", symbol: nil, amountMicros: 100_000_000, createdAt: ago(55), txHash: nil, tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: nil, agentDisplayName: nil),
             GroupActivityItemDTO(id: "t3", kind: "sell", status: "failed", symbol: "TSLAc", amountMicros: 0, createdAt: ago(180), txHash: nil, tokenAmount: "25000000", proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
-            GroupActivityItemDTO(id: "t4", kind: "buy", status: "confirmed", symbol: "NVDAc", amountMicros: 194_710_000, createdAt: ago(60 * 26), txHash: "3kQp", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "agent", agentDisplayName: "Scout"),
-            GroupActivityItemDTO(id: "t5", kind: "buy", status: "confirmed", symbol: "AAPLc", amountMicros: 250_000_000, createdAt: ago(60 * 50), txHash: "4mZa", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
+            GroupActivityItemDTO(id: "t4", kind: "buy", status: "confirmed", symbol: "NVDAc", amountMicros: 194_710_000, createdAt: ago(60 * 26), txHash: "0x7cd7830f88d0bbd9edd73983335e291eb9c730054f0eb2f202d340ad272607f4", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "agent", agentDisplayName: "Scout"),
+            GroupActivityItemDTO(id: "t5", kind: "buy", status: "confirmed", symbol: "AAPLc", amountMicros: 250_000_000, createdAt: ago(60 * 50), txHash: "0x9b22ec415c2cb542c689352993679a080bd71ec930d68d1afc78b5dfdfbc976e", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
             GroupActivityItemDTO(id: "t6", kind: "deposit", status: "confirmed", symbol: nil, amountMicros: 300_000_000, createdAt: ago(60 * 74), txHash: nil, tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: nil, agentDisplayName: nil),
         ]
     }
@@ -221,7 +221,7 @@ enum GroupDetailSampleData {
     static let boughtApple = TransactionDetailDTO(
         transactionId: "t5", groupId: "g1", action: "buy", status: "confirmed", amountMicros: 250_000_000,
         inputToken: nil, outputToken: nil, inputSymbol: "USDC", outputSymbol: "AAPLc",
-        txHash: "4mZaQ8nJv2kPp7sWfLr3bXy9TcHd6eUoGi1AqRsNmVtK", executeRequestId: nil, proposalId: "p1",
+        txHash: "0x9b22ec415c2cb542c689352993679a080bd71ec930d68d1afc78b5dfdfbc976e", executeRequestId: nil, proposalId: "p1",
         costBasisPrice: 250_000_000, costBasisAmount: 108_034_000, createdAt: "2026-09-16T14:02:00Z",
         confirmedAt: "2026-09-16T14:02:09Z", failureReason: nil, proceedsUsdcMicros: nil
     )
