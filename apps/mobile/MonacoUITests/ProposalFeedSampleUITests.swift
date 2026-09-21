@@ -92,11 +92,12 @@ final class ProposalFeedSampleUITests: XCTestCase {
         capture("05-comment-posted")
 
         // Reply to Ben's comment. The software keyboard stays up after posting and covers the
-        // thread, so put it away first, as a user would, then bring the Reply button on screen.
+        // thread, so put it away first, as a user would, then scroll the Reply button clear of the
+        // composer bar: behind the bar it still reports hittable, but a tap lands on the bar.
         dismissKeyboard()
         let reply = element("comment-reply-c-1")
         var replySwipes = 0
-        while !reply.isHittable && replySwipes < 6 {
+        while (!reply.isHittable || reply.frame.maxY > field.frame.minY - 16) && replySwipes < 6 {
             app.swipeUp()
             replySwipes += 1
         }
