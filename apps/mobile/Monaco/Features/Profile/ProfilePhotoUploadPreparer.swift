@@ -15,7 +15,7 @@ nonisolated enum ProfilePhotoUploadPreparer {
     /// Backend accepts at most 2MB for the photo bytes; leave room for multipart framing.
     static let maxBytes = (2 * 1024 * 1024) - 4096
     /// Longest edge kept, in pixels. Avatars are drawn at 320px at most
-    /// (`MonacoAvatarImageStore.maxPixelSize`), so this is already generous.
+    /// (`MonacoRemoteImageStore.avatarMaxPixelSize`), so this is already generous.
     static let maxPixelSize = 1024
 
     /// Why a pick could not be turned into an upload. The two cases read differently to the
