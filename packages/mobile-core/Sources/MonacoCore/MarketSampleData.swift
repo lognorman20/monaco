@@ -274,6 +274,28 @@ public enum MarketSampleData {
         }
     }
 
+    /// The catalogue's logo URL for a ticker, in the shape the xStocks metadata host
+    /// publishes: `https://xstocks-metadata.backed.fi/logos/tokens/AAPLx.png`.
+    ///
+    /// Sample rows carry no logo by default, so a screen rendered from this data is
+    /// deterministic and needs no network — which is what the UI tests rely on. A
+    /// demo or a screenshot that wants the real marks opts in with
+    /// `-MonacoSampleLogos`, and `sampleLogosRequested` reports that.
+    public static func logoURL(forSymbol symbol: String) -> String {
+        "https://xstocks-metadata.backed.fi/logos/tokens/\(symbol).png"
+    }
+
+    /// Whether this process was launched asking sample rows to carry real logos.
+    public static var sampleLogosRequested: Bool {
+        ProcessInfo.processInfo.arguments.contains("-MonacoSampleLogos")
+    }
+
+    /// `logoUrl` as given, or the catalogue URL when the process asked for real logos.
+    public static func resolvedLogoURL(explicit: String?, symbol: String) -> String? {
+        if let explicit { return explicit }
+        return sampleLogosRequested ? logoURL(forSymbol: symbol) : nil
+    }
+
     public static func listAsset(
         symbol: String,
         name: String,
@@ -302,7 +324,7 @@ public enum MarketSampleData {
             sparkBasisSymbol: series.isEmpty ? nil : String(symbol.dropLast()),
             changeBasis: change24h == nil ? nil : .token,
             changeBasisSymbol: change24h == nil ? nil : symbol,
-            logoUrl: logoUrl
+            logoUrl: Self.resolvedLogoURL(explicit: logoUrl, symbol: symbol)
         )
     }
 
