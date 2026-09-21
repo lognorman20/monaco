@@ -96,6 +96,12 @@ struct HomeView: View {
         .refreshable {
             await pullToRefresh()
         }
+        .onAppear {
+            // A Home built after the store already holds a board: take the store's pick, then
+            // make sure the rows on screen are that range's.
+            leaderboard.adoptOwnedRange(from: leaderboardSource)
+            leaderboard.reconcile(from: leaderboardSource)
+        }
         .onChange(of: loadedLeaderboardRange) { _, _ in
             leaderboard.reconcile(from: leaderboardSource)
         }

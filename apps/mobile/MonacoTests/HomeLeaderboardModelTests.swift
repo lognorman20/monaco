@@ -10,6 +10,8 @@ import Testing
 private final class StubLeaderboardSource: HomeLeaderboardDashboardSource {
     private(set) var requested: [HomeLeaderboardRange] = []
     var loadedRange: HomeLeaderboardRange?
+    /// The store's own record of the member's pick; nil for a store that keeps none.
+    var ownedRange: HomeLeaderboardRange?
     /// Ranges whose read fails; the dashboard keeps whatever it held.
     var failing: Set<HomeLeaderboardRange> = []
     /// Ranges answered with an echo this build cannot read — a range added server-side, or a
@@ -211,6 +213,58 @@ struct HomeLeaderboardModelTests {
 
         #expect(model.failed == false)
         #expect(source.requested == [.oneWeek])
+    }
+
+    /// A Home built again — a new sign-in, a rebuilt tab — makes a fresh model. The store
+    /// already holds the member's 1W pick and every poll asks for it, so a model that
+    /// started from all-time would show the wrong chip and then reload all-time over it.
+    @Test func aFreshModelStartsFromTheStoresPick() async {
+        let source = StubLeaderboardSource()
+        source.loadedRange = .oneWeek
+        source.ownedRange = .oneWeek
+        let model = HomeLeaderboardModel()
+
+        model.adoptOwnedRange(from: source)
+        model.reconcile(from: source)
+
+        #expect(model.selectedRange == .oneWeek)
+        #expect(source.requested.isEmpty)
+        #expect(model.failed == false)
+    }
+
+    /// A store that keeps no pick of its own leaves the model's choice standing.
+    @Test func aStoreWithoutAPickLeavesTheModelsChoice() async {
+        let source = StubLeaderboardSource()
+        source.loadedRange = .all
+        let model = HomeLeaderboardModel()
+
+        model.select(.oneDay, from: source)
+        await source.awaitRead()
+        model.adoptOwnedRange(from: source)
+
+        #expect(model.selectedRange == .oneDay)
+        #expect(source.requested == [.oneDay])
+    }
+
+    /// The member's newest tap is still in flight: the store has not recorded it yet, so its
+    /// older pick must not take the chip back.
+    @Test func aReadInFlightIsNotOverruledByTheStoresOlderPick() async {
+        let source = StubLeaderboardSource()
+        source.loadedRange = .all
+        source.ownedRange = .all
+        source.parks = [.oneMonth]
+        let model = HomeLeaderboardModel()
+
+        model.select(.oneMonth, from: source)
+        await source.awaitRequest(.oneMonth)
+        model.adoptOwnedRange(from: source)
+
+        #expect(model.selectedRange == .oneMonth)
+
+        source.release(.oneMonth)
+        await source.awaitRead()
+        #expect(model.selectedRange == .oneMonth)
+        #expect(model.failed == false)
     }
 
     @Test func tappingTheSelectedChipAsksForNothing() async {

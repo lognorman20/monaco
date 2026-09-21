@@ -11,6 +11,11 @@ protocol HomeLeaderboardDashboardSource {
     /// The range the dashboard currently on screen was built with, as the server echoed it.
     var loadedRange: HomeLeaderboardRange? { get }
 
+    /// The range the store keeps as the member's pick, when it keeps one. The store outlives
+    /// Home: a new sign-in or a rebuilt tab makes a fresh model, which starts from this
+    /// rather than from all-time. Nil when the store keeps no selection of its own.
+    var ownedRange: HomeLeaderboardRange? { get }
+
     /// Reloads the dashboard for `range`. Returns once the store has written the payload —
     /// or given up, which shows as `loadedRange` still naming the old range.
     func loadDashboard(range: HomeLeaderboardRange) async
@@ -24,6 +29,12 @@ struct LiveHomeLeaderboardDashboardSource: HomeLeaderboardDashboardSource {
     var loadedRange: HomeLeaderboardRange? {
         session.dashboard.flatMap { HomeLeaderboardRange(rawValue: $0.leaderboard.range) }
     }
+
+    /// `AppSessionStore` on this build keeps only the range its last dashboard was read with,
+    /// privately, and a refresh from any other tab resets that to all-time, so it is not the
+    /// member's pick. The session-store range owner (`AppSessionStore.leaderboardRange`) is
+    /// what this reads once the store has it.
+    var ownedRange: HomeLeaderboardRange? { nil }
 
     func loadDashboard(range: HomeLeaderboardRange) async {
         await session.refreshDashboard(auth: auth, leaderboardRange: range)
@@ -59,6 +70,15 @@ final class HomeLeaderboardModel {
         selectedRange = range
         failed = false
         reload(from: source)
+    }
+
+    /// Takes the store's selection as this model's own, so the chip on a Home that was just
+    /// built says what the store will keep asking the server for. A read in flight is left
+    /// alone: it carries the member's newest pick, which the store is about to record.
+    func adoptOwnedRange(from source: HomeLeaderboardDashboardSource) {
+        guard !isLoading, let owned = source.ownedRange, owned != selectedRange else { return }
+        selectedRange = owned
+        failed = false
     }
 
     func retry(from source: HomeLeaderboardDashboardSource) {
