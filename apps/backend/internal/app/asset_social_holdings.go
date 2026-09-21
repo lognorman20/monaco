@@ -52,7 +52,7 @@ func (h *HomeService) assetHoldingsForGroups(
 	if err != nil {
 		return nil, 0, err
 	}
-	matches := h.holdingsOfSymbol(ctx, ledger, symbol)
+	matches, tickerByMint := h.holdingsOfSymbol(ctx, ledger, symbol)
 	if len(matches) == 0 {
 		return empty, 0, nil
 	}
@@ -78,7 +78,7 @@ func (h *HomeService) assetHoldingsForGroups(
 		return nil, 0, err
 	}
 
-	marks := h.marksForHoldings(ctx, matches)
+	marks := h.marksForHoldings(ctx, matches, tickerByMint)
 
 	holdings := make([]AssetSocialHolding, 0, len(matches))
 	unvalued := 0
@@ -148,28 +148,38 @@ func (h *HomeService) assetHoldingsForGroups(
 	return holdings, unvalued, nil
 }
 
-// holdingsOfSymbol keeps the ledger rows whose mint is this ticker.
+// holdingsOfSymbol keeps the ledger rows whose mint is this ticker, and returns the
+// catalog's own spelling of it for each matching mint.
 //
 // A mint is resolved once for the whole request, not once per cabal that holds it:
-// the catalog lookup behind SymbolForMint is the same answer every time.
-func (h *HomeService) holdingsOfSymbol(ctx context.Context, ledger []postgres.GroupSymbolHolding, symbol string) []postgres.GroupSymbolHolding {
+// the catalog lookup behind SymbolForMint is the same answer every time, and it can
+// go off-process. The catalog's spelling travels on rather than the caller's, because
+// the price feed is looked up by ticker and the caller's path segment is whatever
+// they typed.
+func (h *HomeService) holdingsOfSymbol(
+	ctx context.Context,
+	ledger []postgres.GroupSymbolHolding,
+	symbol string,
+) ([]postgres.GroupSymbolHolding, map[string]string) {
 	symbol = strings.TrimSpace(symbol)
-	symbolByMint := make(map[string]string, len(ledger))
+	resolvedByMint := make(map[string]string, len(ledger))
+	tickerByMint := make(map[string]string)
 	matches := make([]postgres.GroupSymbolHolding, 0, len(ledger))
 	for _, row := range ledger {
 		if row.Units <= 0 {
 			continue
 		}
-		resolved, seen := symbolByMint[row.Mint]
+		resolved, seen := resolvedByMint[row.Mint]
 		if !seen {
-			resolved = symbolForOutputMint(ctx, h.symbols, row.Mint)
-			symbolByMint[row.Mint] = resolved
+			resolved = strings.TrimSpace(symbolForOutputMint(ctx, h.symbols, row.Mint))
+			resolvedByMint[row.Mint] = resolved
 		}
-		if strings.EqualFold(strings.TrimSpace(resolved), symbol) {
+		if strings.EqualFold(resolved, symbol) {
 			matches = append(matches, row)
+			tickerByMint[row.Mint] = resolved
 		}
 	}
-	return matches
+	return matches, tickerByMint
 }
 
 // marksForHoldings resolves one mark per mint for the whole request, keyed by mint.
@@ -178,7 +188,11 @@ func (h *HomeService) holdingsOfSymbol(ctx context.Context, ledger []postgres.Gr
 // it is asked once. A mint with no usable mark is absent from the map and each cabal
 // falls back to its own cost basis, independently: one denied feed must not drag
 // every cabal's number to cost.
-func (h *HomeService) marksForHoldings(ctx context.Context, matches []postgres.GroupSymbolHolding) map[string]pyth.MarkedHolding {
+func (h *HomeService) marksForHoldings(
+	ctx context.Context,
+	matches []postgres.GroupSymbolHolding,
+	tickerByMint map[string]string,
+) map[string]pyth.MarkedHolding {
 	out := make(map[string]pyth.MarkedHolding)
 	if h.pyth == nil || len(matches) == 0 {
 		return out
@@ -188,16 +202,15 @@ func (h *HomeService) marksForHoldings(ctx context.Context, matches []postgres.G
 	// checks a live price against what was paid; across a set of cabals the fair
 	// reference is what they all paid together, not whichever one happened to be first.
 	type aggregate struct {
-		symbol string
-		units  int64
-		usdc   int64
+		units int64
+		usdc  int64
 	}
 	order := make([]string, 0, len(matches))
 	byMint := make(map[string]*aggregate, len(matches))
 	for _, match := range matches {
 		agg, seen := byMint[match.Mint]
 		if !seen {
-			agg = &aggregate{symbol: symbolForOutputMint(ctx, h.symbols, match.Mint)}
+			agg = &aggregate{}
 			byMint[match.Mint] = agg
 			order = append(order, match.Mint)
 		}
@@ -209,7 +222,7 @@ func (h *HomeService) marksForHoldings(ctx context.Context, matches []postgres.G
 	for _, mint := range order {
 		agg := byMint[mint]
 		costBasis = append(costBasis, pyth.CostBasis{
-			Symbol: agg.symbol,
+			Symbol: tickerByMint[mint],
 			Mint:   mint,
 			Units:  agg.units,
 			Price:  agg.usdc,

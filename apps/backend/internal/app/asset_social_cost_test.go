@@ -14,7 +14,7 @@ import (
 const (
 	assetSocialTestSymbol = "AAPLx"
 	// 12 AAPLx bought for $2,600, marked at $232.05.
-	assetSocialTestUnits     = int64(12 * jupiter.XStockAtomicScale)
+	assetSocialTestUnits    = int64(12 * jupiter.XStockAtomicScale)
 	assetSocialTestCostUsdc = int64(2_600_000_000)
 	assetSocialTestMarkUsdc = int64(232_050_000)
 	// The viewer put $3,000 in and the cabal spent $2,600 of it on stock, so the
