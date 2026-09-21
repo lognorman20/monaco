@@ -10,19 +10,23 @@ Money is integer USDC micros (1 USDC = 1,000,000). Timestamps are RFC 3339 in UT
 ## Three instruments, three sources
 
 A B20 token (for example `AAPLc`) is a Coinbase-issued ERC-20 on Base that tracks a
-US equity. Coinbase's B20 docs define its price as the equity's price times the
-token's **multiplier**; cash dividends are converted into more of the underlying and
-show up as a multiplier increase rather than as a cash payment, and splits move the
-multiplier the other way. So the token and the share are different units.
+US equity. Chainlink's documentation for the Base tokenized-equity feeds
+(<https://docs.chain.link/data-feeds/tokenized-equity-feeds/coinbase>) defines the
+feed's total-return value as the equity's market price times the token's
+**multiplier**, read from Coinbase's on-chain registry. A cash dividend is converted
+into shares of the underlying and shows up as a multiplier increase rather than as a
+cash payment; a split moves the multiplier the other way. So the token and the share
+are different units. The same page says the feeds run 24/5 (pre-market, regular,
+post-market and overnight) and hold the last close off-hours with no heartbeat.
 
 | Figure | Source | Unit |
 |---|---|---|
 | `priceUsdcMicros` (list, popular, detail hero) | Chainlink total-return (TRV) feed on Base, `latestRoundData()` | per token, multiplier included. The same mark pot NAV uses |
 | `chart` | Pyth Benchmarks history for `Equity.US.<TICKER>/USD`; Hermes per-sample history as fallback; the token's own Chainlink rounds last | per share (`basis: "underlying"`), or per token for the Chainlink fallback (`basis: "token"`) |
-| `stats` | Pyth (candles and the latest equity price's confidence interval) and the Kyber spread | per share |
-| `change24h` | Pyth: the latest 1D price against the previous regular-session close | the stock's day move, not the token's |
+| `stats` | Pyth Benchmarks candles and the latest equity price's confidence interval | per share |
+| `change24h` | Pyth Benchmarks: the latest 1D price against the previous regular-session close. Ships with `change24hBasis: "underlying"` and `change24hBasisSymbol: "AAPL"` | the stock's day move, not the token's |
 | `stockVsToken.token` | Kyber: the mid of a 1 USDC buy probe and a 1-token sell probe | per token |
-| `stockVsToken.mark` | the Chainlink TRV mark (equals the hero price) | per token |
+| `stockVsToken.mark` | the Chainlink TRV mark (equals the hero price), with the round's `updatedAt` as `publishedAt` | per token |
 | `stockVsToken.equity` | Pyth Hermes latest price for the underlying | per share |
 
 Pyth publishes no feed for B20 tokens. **Pyth is for charts and display; never NAV.**
@@ -35,7 +39,13 @@ Pyth publishes no feed for B20 tokens. **Pyth is for charts and display; never N
   `not_configured`, `no_route`, `upstream_error`) and no price.
 - A Pyth price whose publish time froze or is more than five minutes old is
   `status: "stale"` with the `publishedAt` it froze at.
+- The Chainlink mark is `status: "stale"` when its round is past the feed's 25-hour
+  heartbeat, when it has no round time, or when the exchange calendar has no
+  session running and the round is no newer than the last session's post-market
+  close (weekends and holidays, when the feed holds the last close).
 - A Kyber quote has no publish time and no confidence interval, and none is sent.
+  The token line carries `probedAt`, when we took the probes; they are shared for up
+  to 60 s, so it can be up to a minute older than `asOf`.
 
 ## `market`
 
@@ -70,13 +80,18 @@ Adds to the existing detail:
 - `stats`: `openUsdcMicros`, `highUsdcMicros`, `lowUsdcMicros` (the regular cash
   session, 09:30–16:00 ET or 13:00 on a half day), `previousCloseUsdcMicros`,
   `week52HighUsdcMicros`, `week52LowUsdcMicros`, `confUsdcMicros` (Pyth's confidence
-  interval), `spreadBps`, and `basis`/`basisSymbol`. A hero price above
-  `stats.highUsdcMicros` is two instruments, not an error.
-- `stockVsToken`: `token` (source `dex_kyber`, with `bidUsdcMicros` / `askUsdcMicros`),
-  `mark` (source `chainlink_trv`), `equity` (source `pyth_equity`), `equitySymbol`,
-  `premiumBps` (token against mark; absent unless both are priced), `spreadBps` and
-  `asOf`. No premium is computed against the equity line: it is per share and the mark
-  is per token.
+  interval), and `basis`/`basisSymbol`. A hero price above `stats.highUsdcMicros` is
+  two instruments, not an error. The candle cells come only from Benchmarks: when
+  Benchmarks is down they are omitted, never folded from the sparse Hermes sampler.
+  The Kyber spread is the token's, so it is not in this grid.
+- `change24h`, `change24hBasis`, `change24hBasisSymbol` (also on list and popular
+  rows).
+- `stockVsToken`, present only when both Kyber probes routed: `token` (source
+  `dex_kyber`, with `bidUsdcMicros` / `askUsdcMicros` / `probedAt`), `mark` (source
+  `chainlink_trv`), `equity` (source `pyth_equity`), `equitySymbol`, `premiumBps`
+  (token against mark; absent unless both are priced **and live**, so a stale mark
+  has no premium), `spreadBps` and `asOf`. No premium is computed against the equity
+  line: it is per share and the mark is per token.
 - `liquidity.spreadBps`: `(ask - bid) / mid` of the two Kyber probes, in basis points.
   A 1 USDC probe includes pool fees and price impact, so thin pools read wide.
 
@@ -89,8 +104,16 @@ Adds to the existing detail:
 
 ## Caching and budgets
 
-- Chart series: 1 min for 1D, 10 min for longer ranges, empty answers at most 2 min.
-  An outage is not cached; a failed Benchmarks call opens a 60 s breaker.
+- Chart series: 1 min for 1D, 10 min for longer ranges, empty answers at most 2 min,
+  keyed on the equity feed. An outage is not cached; a Benchmarks outage (a
+  transport error, a non-200, an upstream timeout) opens a 60 s breaker. The
+  caller's own deadline or a cancelled request does not, and a per-symbol
+  `"s":"error"` is cached as that symbol's empty answer. A Hermes sampler run cut
+  short by the deadline is discarded, and one with failed samples is served but
+  not cached.
+- The previous close is the close of the last bar stamped strictly before the
+  previous session's bell (16:00 ET, or 13:00 on a half day): bars are stamped
+  with their open time, so the bar at the bell is post-market.
 - Equity quote: 10 s. Kyber probes: 60 s per token, and a probe that errored is not
   cached.
 - The detail's reads run concurrently under a 4 s bound; the list's day changes run
