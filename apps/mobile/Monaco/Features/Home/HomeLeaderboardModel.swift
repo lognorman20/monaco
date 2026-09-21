@@ -30,11 +30,9 @@ struct LiveHomeLeaderboardDashboardSource: HomeLeaderboardDashboardSource {
         session.dashboard.flatMap { HomeLeaderboardRange(rawValue: $0.leaderboard.range) }
     }
 
-    /// `AppSessionStore` on this build keeps only the range its last dashboard was read with,
-    /// privately, and a refresh from any other tab resets that to all-time, so it is not the
-    /// member's pick. The session-store range owner (`AppSessionStore.leaderboardRange`) is
-    /// what this reads once the store has it.
-    var ownedRange: HomeLeaderboardRange? { nil }
+    /// `AppSessionStore.leaderboardRange` is the member's pick: the store changes it only when
+    /// a range is passed explicitly, so a refresh from another tab keeps it.
+    var ownedRange: HomeLeaderboardRange? { session.leaderboardRange }
 
     func loadDashboard(range: HomeLeaderboardRange) async {
         await session.refreshDashboard(auth: auth, leaderboardRange: range)
