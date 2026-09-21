@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -458,4 +459,66 @@ func TestGroupView_staysDecodableByAClientThatDoesNotKnowThePictureFields(t *tes
 	if legacy.ID != c.ID || legacy.Name != c.Name {
 		t.Fatalf("legacy decode lost fields: %+v", legacy)
 	}
+}
+
+// Every board that draws a cabal's mark reads the picture from its own payload,
+// so each one has to carry it: the home board, the dashboard's "your cabals"
+// rows and search.
+func TestGroupPicture_reachesEveryPayloadThatDrawsTheMark(t *testing.T) {
+	f := newPictureFixture(t)
+	owner := f.signIn(t, "pic-boards", "Boards Owner")
+	c := f.createClub(t, owner, "Boards Club")
+	f.deposit(t, owner, c, 5_000_000)
+
+	uploaded := decodeBody[groupPictureResponse](t, f.upload(t, owner, c.ID, samplePicture(t, 32, 32)))
+	if uploaded.PictureURL == nil {
+		t.Fatalf("upload returned no pictureUrl")
+	}
+	want := *uploaded.PictureURL
+
+	homeRow, found := homeGroupRow(f.home(t, owner).Groups, c.ID)
+	if !found {
+		t.Fatalf("club %s missing from GET /v1/home groups", c.ID)
+	}
+	if got := derefOrNil(homeRow.PictureURL); got != want {
+		t.Fatalf("home board pictureUrl = %q, want %q", got, want)
+	}
+
+	myGroup := findMyGroup(t, f.dashboard(t, owner).MyGroups, c)
+	if got := derefOrNil(myGroup.PictureURL); got != want {
+		t.Fatalf("dashboard myGroups pictureUrl = %q, want %q", got, want)
+	}
+
+	tab := &GroupsTabHandlers{GroupsTab: app.NewGroupsTabService(f.Groups.Home, f.Store)}
+	search := f.call(t, tab.SearchGroupsHandler, http.MethodGet,
+		"/v1/groups/search?q="+url.QueryEscape(c.Name), owner.Token, "")
+	requireStatus(t, search, http.StatusOK, "GET /v1/groups/search")
+	var searchRow *groupDiscoveryRowResponse
+	for _, row := range decodeBody[groupSearchResponse](t, search).Groups {
+		if row.GroupID == c.ID {
+			searchRow = &row
+		}
+	}
+	if searchRow == nil {
+		t.Fatalf("club %s missing from search; body = %s", c.ID, search.Body.String())
+	}
+	if got := derefOrNil(searchRow.PictureURL); got != want {
+		t.Fatalf("search pictureUrl = %q, want %q", got, want)
+	}
+
+	// A cabal with no picture sends an explicit null, not a blank string.
+	requireStatus(t, f.remove(t, owner, c.ID), http.StatusOK, "remove")
+	cleared, _ := homeGroupRow(f.home(t, owner).Groups, c.ID)
+	if cleared.PictureURL != nil {
+		t.Fatalf("home board pictureUrl = %q after removal, want null", *cleared.PictureURL)
+	}
+}
+
+func homeGroupRow(rows []homeGroupBoardRowResponse, groupID string) (homeGroupBoardRowResponse, bool) {
+	for _, row := range rows {
+		if row.GroupID == groupID {
+			return row, true
+		}
+	}
+	return homeGroupBoardRowResponse{}, false
 }
