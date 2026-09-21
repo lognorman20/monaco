@@ -24,7 +24,7 @@ entries() { # name<TAB>args, comments and blank lines dropped
 in_manifest() { # every argument appears, in order, on one manifest line
   local pattern="(^|[[:space:]])$1"; shift
   local arg
-  for arg in "$@"; do pattern="$pattern[[:space:]]+$arg"; done
+  for arg in "$@"; do pattern="${pattern}[[:space:]]+${arg}"; done
   entries | cut -f2 | grep -qE "$pattern([[:space:]]|\$)"
 }
 

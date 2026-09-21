@@ -36,7 +36,7 @@ if [[ -z "${MONACO_QA_KEEP_AWAKE:-}" ]] && command -v caffeinate >/dev/null 2>&1
 fi
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$root"
+cd "$root" || exit 1
 
 rounds=1
 until_time=""
@@ -186,7 +186,8 @@ ui_classes() {
 }
 
 run_ui_class() { # round class
-  local round="$1" class="$2" clip="$out/clips/r${round}-${class}.mp4" rec attempt
+  local round="$1" class="$2" rec attempt
+  local clip="$out/clips/r${round}-${class}.mp4"
   for attempt in 1 2; do
     xcrun simctl io "$sim" recordVideo --codec=h264 --force "$clip" >/dev/null 2>&1 &
     rec=$!
