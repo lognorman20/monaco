@@ -149,20 +149,39 @@ func (c *HermesClient) DayChange(ctx context.Context, symbol string) *string {
 	return DayChange(series)
 }
 
-// seriesFromSource asks the one-call history source for the range. A failure opens
-// a short breaker so an outage costs one timeout rather than one per chart load.
-// The second result is false when the source could not answer at all.
+// seriesFromSource asks the one-call history source for the range. An outage of
+// the source opens a short breaker so it costs one timeout rather than one per
+// chart load. The second result is false when the source could not answer at all.
+//
+// Only an outage trips the breaker. The breaker is process-wide, so tripping it
+// on a failure that says nothing about the source would blank the day change on
+// every stock for everyone:
+//   - the caller's own context ending (a list page's 4 s budget, a detail
+//     fan-out's deadline, a client that hung up) is the caller running out of
+//     time, not Benchmarks failing;
+//   - a per-symbol error status is Benchmarks answering about that symbol, and is
+//     returned as that symbol's empty answer.
 func (c *HermesClient) seriesFromSource(ctx context.Context, symbol string, chartRange ChartRange, now time.Time) (AssetChartSeries, bool) {
 	if c.seriesSource == nil || !c.seriesBreaker.allows(now) {
 		return AssetChartSeries{}, false
 	}
 	series, err := c.seriesSource.Series(ctx, symbol, chartRange, now)
-	if err != nil {
+	switch {
+	case err == nil:
+	case ctx.Err() != nil:
+		logSeriesSource(symbol, chartRange, err)
+		return AssetChartSeries{}, false
+	case IsSymbolHistoryError(err):
+		logSeriesSource(symbol, chartRange, err)
+		series = AssetChartSeries{}
+	default:
 		c.seriesBreaker.trip(now)
 		logSeriesSource(symbol, chartRange, err)
 		return AssetChartSeries{}, false
 	}
-	c.seriesBreaker.reset()
+	if err == nil {
+		c.seriesBreaker.reset()
+	}
 	series.Range = chartRange
 	series.Source = ChartSourceBenchmarks
 	series.Basis = PriceBasisUnderlying
@@ -179,7 +198,8 @@ func (c *HermesClient) seriesFromSource(ctx context.Context, symbol string, char
 // seriesFromHermes is the fallback: one request per sample against the historical
 // price endpoint. It is coarse, but it keeps charts alive when Benchmarks is down.
 // The second result says whether Hermes gave an answer worth caching; a missing
-// key, a denied entitlement or a run of failed samples is not one.
+// key, a denied entitlement, a run cut short by the caller's deadline or a run
+// with any failed sample is not one.
 func (c *HermesClient) seriesFromHermes(ctx context.Context, symbol string, chartRange ChartRange, now time.Time) (AssetChartSeries, bool) {
 	empty := AssetChartSeries{EmptyReason: EmptyReasonNoHistory, Range: chartRange}
 	// Every Hermes request is authenticated. Without a key there is nothing to ask,
@@ -216,9 +236,21 @@ func (c *HermesClient) seriesFromHermes(ctx context.Context, symbol string, char
 		// a single number presented as a range.
 		return empty, false
 	}
+	if ctx.Err() != nil {
+		// The caller's deadline cut the run short. The samples go oldest first, so
+		// what came back is the start of the window and none of its end: a "1Y"
+		// chart that stops months ago. It is not served, and not cached as the
+		// range's answer.
+		return empty, false
+	}
 	// The sampler reads the same equity feed Benchmarks does. It ships no previous
 	// close: its first sample is a point on the curve, not a close, and sending it
 	// under that name would draw the baseline straight through the first point.
+	//
+	// A run where some samples failed is still drawn, with gaps, but it is only
+	// cached when every sample came back: a partial run is this request's best
+	// effort, not the range's answer for the next ten minutes.
+	complete := len(points) == len(samples)
 	return AssetChartSeries{
 		Points:       points,
 		Range:        chartRange,
@@ -227,7 +259,7 @@ func (c *HermesClient) seriesFromHermes(ctx context.Context, symbol string, char
 		BasisSymbol:  UnderlyingTicker(symbol),
 		RegularOpen:  window.regularOpen,
 		RegularClose: window.regularClose,
-	}, true
+	}, complete
 }
 
 // chartSampleTimes is the sampler's grid. Every range is capped at roughly 30

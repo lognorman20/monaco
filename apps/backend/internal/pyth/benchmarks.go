@@ -3,6 +3,7 @@ package pyth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -30,6 +31,25 @@ const (
 // SeriesSource fetches a whole chart range in one upstream call.
 type SeriesSource interface {
 	Series(ctx context.Context, symbol string, chartRange ChartRange, now time.Time) (AssetChartSeries, error)
+}
+
+// SymbolHistoryError is a history source answering, for one symbol, that it has
+// no series to give: Benchmarks' `"s":"error"` status on a 200. The source is up;
+// the symbol is the problem. Callers must not treat it as an outage.
+type SymbolHistoryError struct {
+	Symbol string
+	Detail string
+}
+
+func (e *SymbolHistoryError) Error() string {
+	return fmt.Sprintf("pyth benchmarks history %s: status %q", e.Symbol, e.Detail)
+}
+
+// IsSymbolHistoryError reports whether err is an answer about one symbol rather
+// than a failure of the source.
+func IsSymbolHistoryError(err error) bool {
+	var symbolErr *SymbolHistoryError
+	return errors.As(err, &symbolErr)
 }
 
 // BenchmarksClient reads OHLC history from the Pyth Benchmarks TradingView shim.
@@ -134,11 +154,15 @@ func (c *BenchmarksClient) history(ctx context.Context, querySymbol, resolution 
 		// also return nothing.
 		return nil, nil
 	default:
+		// Benchmarks answered 200 with an error about this one symbol (an unknown
+		// ticker, a feed it does not serve). The service itself is up, so this is
+		// an answer about the symbol, not an outage, and it must not be reported as
+		// one.
 		detail := strings.TrimSpace(payload.ErrMsg)
 		if detail == "" {
 			detail = strings.TrimSpace(payload.Status)
 		}
-		return nil, fmt.Errorf("pyth benchmarks history %s: status %q", querySymbol, detail)
+		return nil, &SymbolHistoryError{Symbol: querySymbol, Detail: detail}
 	}
 
 	return decodeBars(payload)
