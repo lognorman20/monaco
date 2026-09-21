@@ -86,6 +86,7 @@ var apiRoutes = []string{
 	"GET /v1/assets",
 	"GET /v1/assets/popular",
 	"GET /v1/assets/{symbol}/chart",
+	"GET /v1/assets/{symbol}/social",
 	"GET /v1/assets/{symbol}",
 	"POST /v1/groups/{id}/quotes",
 	"GET /v1/groups/{id}/proposals",
@@ -222,6 +223,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	auth := &httpapi.AuthHandlers{Sessions: sessions}
 	me := &httpapi.MeHandlers{Sessions: sessions, ProfilePhoto: profilePhotos}
 	homeHandlers := &httpapi.HomeHandlers{Home: home}
+	assetSocialHandlers := &httpapi.AssetSocialHandlers{Home: home}
 	groupHandlers := &httpapi.GroupHandlers{Groups: groups, Governance: governance, Home: home, Redeem: redeem}
 	groupsTabHandlers := &httpapi.GroupsTabHandlers{GroupsTab: app.NewGroupsTabService(home, store)}
 	executeOnPass := app.NewExecuteOnPassService(swap, store)
@@ -334,6 +336,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/assets", assetsHandlers.ListAssetsHandler)
 	mux.HandleFunc("GET /v1/assets/popular", assetsHandlers.PopularAssetsHandler)
 	mux.HandleFunc("GET /v1/assets/{symbol}/chart", assetsHandlers.GetAssetChartHandler)
+	mux.HandleFunc("GET /v1/assets/{symbol}/social", assetSocialHandlers.GetAssetSocialHandler)
 	mux.HandleFunc("GET /v1/assets/{symbol}", assetsHandlers.GetAssetHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/quotes", quoteHandlers.QuoteHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/proposals", proposalHandlers.ListGroupProposalsHandler)

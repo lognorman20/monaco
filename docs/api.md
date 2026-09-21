@@ -122,6 +122,7 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/assets/popular` | Popular assets with prices and the market session. |
 | `GET /v1/assets/{symbol}` | Asset detail: price, liquidity, market session, the stats grid, and the underlying equity against the token (`stockVsToken`). |
 | `GET /v1/assets/{symbol}/chart` | Price history. `range` is `1D`, `1W`, `1M`, `3M`, `1Y` or `ALL` (default `1D`); the response echoes the range, names its `source`, and carries the `previousCloseUsdcMicros` baseline. |
+| `GET /v1/assets/{symbol}/social` | What the caller's own cabals are doing with one stock: `holdings` (units, value, cost basis, P&L and the caller's slice), `openProposals` (tally, the caller's ballot and who voted) and `activity` (proposals and fills). Scoped to the caller's memberships, so a non-member never appears in another cabal's answer. `unvaluedGroups` counts cabals that could not be priced on this pass. |
 | `POST /v1/groups/{id}/quotes` | Check that a buy or sell can route, and at what price. |
 | `GET /v1/groups/{id}/proposals` | List proposals. |
 | `POST /v1/groups/{id}/proposals` ● | Open a proposal: buy, sell, or add, pause, resume, revoke an agent. |
