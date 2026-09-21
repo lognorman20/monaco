@@ -1,8 +1,10 @@
 # Monaco
 
-iOS app: friends pool USDC and buy tokenized US stocks on Base. Product rules: [`docs/product.md`](docs/product.md). Milestone backlog: [`docs/index.md`](docs/index.md).
+iOS app: friends pool **USDC on Base** and buy tokenized US stocks (B20). Auth is Dynamic. Relayer fees are **ETH on Base**. Product rules: [`docs/product.md`](docs/product.md). Milestone backlog: [`docs/index.md`](docs/index.md).
 
 Monaco lets you create a hedge fund with friends by pooling money to buy stocks together. Members propose and vote on trades, and approved trades execute for the group; as the pool profits, each member’s stake increases in value through NAV. You can even add an agent to your cabal to trade on your behalf. Built as a social trading app, Monaco turns investing into an easy group game anyone can join simply by depositing money.
+
+**Chain.** Base mainnet (chain id `8453`). Deposits and pots are USDC `0x833589fcd6edb6e08f4c7c32d4f71b54bda02913`. The fee payer spends ETH on Base, not ETH on Ethereum mainnet. Swaps are Kyber on Base. Dynamic holds the member inbox and group treasury. Do not send tokens on any other chain.
 
 ## Prereqs
 
@@ -20,25 +22,21 @@ Do not wrap `just` with `dotenvx run` yourself. Recipes that need secrets re-exe
 
 Local DB is Docker Compose Postgres only (`monaco`, host port `54322`). Never point `just run` / `just test backend` at hosted or production Supabase.
 
-## Dynamic test logins
+## Sign in
 
-Fixed OTP. Dashboard Login Methods must have **Email** and **SMS** on. Product path is OTP, not a password field. iOS bundle `com.monaco.app` must be on the Dynamic iOS client or `sendCode` returns 403 `invalid_native_app_id`. Sign out in-app to switch users.
+Dashboard Login Methods must have **Email** and **SMS** on. Product path is OTP, not a password. iOS bundle `com.monaco.app` must be on the Dynamic iOS client or `sendCode` returns 403 `invalid_native_app_id`. Sign out in-app to switch users.
 
-| Name        | Phone Number       | Login                                     | OTP      |
-| ----------- | ------------ | ----------------------------------------- | -------- |
-| Alfred      | `+1 555 555 7177` | `test-8081@dynamic.io` | `465354` |
-| Bartholomez | `+1 555 555 9638` | `test-4952@dynamic.io` | `648588` |
-| Cayman      | `+1 555 555 8215` | `test-3510@dynamic.io` | `115543` |
+Use a real phone or email. Dynamic sends a new OTP each time; there are no fixed test codes.
 
 ## Deposits
 
 You can fund a group from **personal external wallet** (iOS app or browser extension). That is your wallet, not the [agent MCP wallet](#agent-qa-phantom-mcp). No Cursor or coding agent required.
 
-1. `just run`. Sign in (OTP above).
+1. `just run`. Sign in with SMS or email OTP.
 2. Join or create a group → **Add money**. Copy the **Dynamic member** deposit address (deposit inbox). Not the group treasury.
-3. In external wallet, send **USDC on Base**. Mint must be `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. USDC on Ethereum or Base is a different token; the poller will not see it.
+3. In an external wallet, switch the network to **Base**. Send **USDC on Base** (`0x833589fcd6edb6e08f4c7c32d4f71b54bda02913`). USDC on Ethereum mainnet is a different token; the poller will not see it.
 4. The backend poller detects USDC in the member wallet, **sweeps** it into the group treasury, then credits share units. Watch API logs or the group view. Do not treat USDC sitting only in the member wallet as credited pot — wait for sweep confirm.
-5. Member wallet and vault do not need ETH (relayer pays fees).
+5. Member wallet and vault do not need ETH (the relayer pays Base gas). The **sender** still needs a little ETH on Base if they are paying their own gas.
 
 To pull leftover QA cash back out, use in-app **redeem** (external wallet cannot spend Dynamic wallets). Agent-driven deposit and refund: [Agent QA: agent wallet](#agent-qa-phantom-mcp).
 
@@ -66,7 +64,7 @@ To pull leftover QA cash back out, use in-app **redeem** (external wallet cannot
 | `just test mobile`           | Host `swift test` in `packages/mobile-core` — fast, no secrets                                                                                                         |
 | `just build backend`         | `go build` only — no dotenvx                                                                                                                                           |
 | `just build mobile`          | Dynamic xcconfig, then `xcodebuild` on the resolved sim                                                                                                                  |
-| `just relayer balance`       | Fee payer pubkey + mainnet ETH and USDC (dotenvx; no private key)                                                                                                      |
+| `just relayer balance`       | Fee payer address + Base ETH and USDC (dotenvx; no private key)                                                                                                      |
 | `./scripts/ios-sim`          | Monaco run with Dynamic env. Falls back to a stock sim if slim is missing                                                                                                |
 | `./scripts/ios-build`        | Monaco compile with Dynamic xcconfig                                                                                                                                     |
 | `./scripts/sweep-wallets.sh` | **Ops.** Sweep USDC out of Dynamic wallets. See **[Ops: sweep USDC](#ops-sweep-usdc-out-of-dynamic-wallets)**                                                              |
@@ -98,16 +96,16 @@ A pre-commit hook checks **staged** `.env*` files only (not `.worktrees` or the 
 
 ## Relayer (fee payer)
 
-The app **fee payer** is a dedicated Base keypair from `RELAYER_PRIVATE_KEY` (base58 secret in `.env.local`). Not a Dynamic wallet. Clones that decrypt the same shared env share the same fee payer. Never commit or log the private key.
+The app **fee payer** is a dedicated Base EOA from `RELAYER_PRIVATE_KEY` (`0x` + 64 hex in `.env.local`). Not a Dynamic wallet. Clones that decrypt the same shared env share the same fee payer. Never commit or log the private key.
 
-At API startup the backend derives the public key and refuses to boot unless that address holds **more than 0.001 SOL** on mainnet.
+At API startup the backend derives the address and refuses to boot unless that address holds **at least 0.002 ETH** on Base.
 
 | Item            | Value                                                                                                                    |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Env (secret)    | `RELAYER_PRIVATE_KEY` — base58 Base secret key (not a JSON `[1,2,...]` array)                                          |
-| Pubkey          | Derived at startup from the secret; logged as `pubkey=` on boot (no private key)                                         |
-| Role            | Kyber swap `payer`; relayer on deposit sweeps (Dynamic `SubmitSweep`)                                                    |
-| ETH requirement | Balance **> 0.001 SOL** (`1_000_000` lamports). Fund on [Base](https://solscan.io/) before `just run backend`. |
+| Env (secret)    | `RELAYER_PRIVATE_KEY` — `0x` + 64 hex (not a JSON `[1,2,...]` array)                                                     |
+| Address         | Derived at startup from the secret; logged as `address=` on boot (no private key)                                         |
+| Role            | Kyber swap fee payer; relayer on deposit sweeps                                                                          |
+| ETH requirement | Balance **≥ 0.002 ETH**. Fund on [Base](https://basescan.org) before `just run backend`.                                 |
 
 ```bash
 just relayer balance
@@ -116,9 +114,8 @@ just relayer balance
 Example:
 
 ```text
-address  EpeyGQXFY9vhkxPUZbz1wVRhs5vphRQt8SeJN2Gx1DrX
-sol      0.003044217
-usdc     0.00
+address  0x…
+eth_wei  3000000000000000
 ```
 
 ## Demo data (faker seed)
@@ -131,7 +128,7 @@ Two profiles:
 - **scale**: six fake clubs (Ridgewood Value Club, Night Shift Traders, Harbor Street Fund, plus the
   smaller Dorm 4B fund, Rent money and Index huggers).
   Each has a fake creator, five depositors, deposits spread over the last week, a confirmed
-  AAPLx/TSLAx buy, a governed sell (Ridgewood and Night Shift), failed and open proposals, votes,
+  AAPLc/TSLAc buy, a governed sell (Ridgewood and Night Shift), failed and open proposals, votes,
   and NAV history for charts. Any signed-in user sees them on Home (group board and people
   leaderboard) and the Cabals tab (search, leaderboard, P&L history) and can open them read-only. You are never added as a member. Join, fund/deposit,
   quote, propose (buy, sell, or agent), vote, agent intents, and leave/withdraw return
@@ -251,7 +248,7 @@ Never insert `FAKE*` wallet rows in local Postgres. The poller will break.
 
 ### Create a external wallet wallet
 
-Personal wallet first — that is how you buy SOL/USDC and top up the agent address.
+Personal wallet first — that is how you buy ETH/USDC on Base and top up the agent address.
 
 1. Download only from [phantom.com/download](https://phantom.com/download) (iOS, Android, Chrome, Brave, Firefox, Edge). App Store: [external wallet](https://apps.apple.com/us/app/phantom-trade-markets/id1598432977). Play: [external wallet](https://play.google.com/store/apps/details?id=app.phantom).
 2. Follow [How to create a new external wallet wallet](https://phantom.com/learn/guides/how-to-create-a-new-wallet): Create a New Wallet → Google or Apple, or a secret recovery phrase.
@@ -283,7 +280,7 @@ Restart Cursor. First wallet tool call opens a browser for Google/Apple device-c
 
 **Claude Code:** `claude mcp add phantom -- npx -y @phantom/mcp-server@latest`
 
-On auth, external wallet mints a **new agent wallet**. It is not your extension wallet. Ask the agent for Base addresses (`wallet_addresses` / `get_wallet_addresses`). Copy the Base pubkey. That string is the refund target for leftover QA USDC. Each developer has their own; do not hardcode someone else’s address in the repo.
+On auth, external wallet mints a **new agent wallet**. It is not your extension wallet. Ask the agent for Base addresses (`wallet_addresses` / `get_wallet_addresses`). Copy the Base address. That string is the refund target for leftover QA USDC. Each developer has their own; do not hardcode someone else’s address in the repo.
 
 ### Fund the agent wallet (~$1 ETH + ~$4 USDC on Base)
 
@@ -291,10 +288,10 @@ The agent cannot transact on an empty wallet.
 
 | Asset                     | Why                                                                                                 | Ballpark            |
 | ------------------------- | --------------------------------------------------------------------------------------------------- | ------------------- |
-| ETH on **Base** | Fees when the agent sends USDC to a member inbox (and ATA rent if the dest has no USDC account yet) | about **$1** of ETH |
+| ETH on **Base** | Fees when the agent sends USDC to a member inbox | about **$1** of ETH |
 | USDC on **Base**        | What the app actually credits after sweep                                                           | about **$4**        |
 
-Buy or swap inside personal external wallet, then send **SOL** and **Base USDC** to the **agent** Base address. Confirm mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. Ask the agent for `wallet_balances` before the first transfer.
+Buy or swap inside personal external wallet, then send **ETH** and **Base USDC** to the **agent** Base address. Confirm token `0x833589fcd6edb6e08f4c7c32d4f71b54bda02913`. Ask the agent for `wallet_balances` before the first transfer.
 
 Product path does **not** need ETH on the member wallet or vault (relayer pays). The **agent** still needs ETH because the agent is the sender.
 
@@ -306,7 +303,7 @@ Same deposit path from **personal external wallet** works without MCP; see [Depo
 2. Join or create a group → Add money. Copy the **Dynamic member** address (deposit inbox). Not the group treasury.
 3. In Cursor: transfer **small** USDC on `base:mainnet` to that address, mint above. MCP `transfer` / `transfer_tokens` simulates first; approve only if dest matches the copied inbox.
 4. Poller detects member USDC, **sweeps** to the group treasury, then credits shares. Watch API logs / group view. Do not treat member-wallet balance as credited pot.
-5. Explorer: [solscan.io](https://solscan.io) on the sweep signature.
+5. Explorer: [basescan.org](https://basescan.org) on the sweep hash.
 
 ### Sweep leftover back to the agent wallet (vault → external wallet)
 
@@ -349,7 +346,7 @@ Product path is poller member-inbox → treasury, then **in-app redeem**. Use th
 | *(omit both)*      | Source = local `member_wallets` + `treasuries` for the `DATABASE_URL` in `.env.local`.   |
 | `--dry-run`        | Print balances and `would sweep` lines. No txs. No confirm prompt.                       |
 
-Needs `.env.local` (`PRIVY_*`, `RELAYER_PRIVATE_KEY`, `DATABASE_URL`). Wrapper is `scripts/with-dotenv-local.sh`. Amounts are micro-USDC (`1000000` = $1). Zero-balance wallets skip. Destination equal to a source skips.
+Needs `.env.local` (`DYNAMIC_*`, `RELAYER_PRIVATE_KEY`, `DATABASE_URL`). Wrapper is `scripts/with-dotenv-local.sh`. Amounts are micro-USDC (`1000000` = $1). Zero-balance wallets skip. Destination equal to a source skips.
 
 Code: `apps/backend/cmd/sweep-member-to-address`. Full notes: [`docs/ops-sweep-wallets.md`](docs/ops-sweep-wallets.md).
 
@@ -394,7 +391,7 @@ API_ADDR=0.0.0.0:8080 MIGRATIONS_DIR=/path/to/supabase/migrations ./bin/monaco-a
 ```
 
 - Migrations in `supabase/migrations` are applied at boot, in filename order, before the server listens. `go run ./cmd/migrate` (from `apps/backend`) applies them without starting the API.
-- Required env: `DATABASE_URL`, `PRIVY_APP_ID`, `PRIVY_APP_SECRET`, `RELAYER_PRIVATE_KEY`. The full list with comments is in `.env.example`. Use separate Dynamic apps, relayer keys and databases per environment; production values go in `.env.production` (dotenvx-encrypted), never in the image.
+- Required env: `DATABASE_URL`, `DYNAMIC_ENVIRONMENT_ID`, `DYNAMIC_API_TOKEN`, `RELAYER_PRIVATE_KEY`, signer secrets. The full list with comments is in `.env.example`. Use separate Dynamic environments, relayer keys and databases per environment; production values go in `.env.production` (dotenvx-encrypted), never in the image.
 - The relayer address must hold more than 0.001 ETH or the API exits at boot. See [Relayer](#relayer-fee-payer).
 - The API listens on `API_ADDR` (default `127.0.0.1:8080`). `GET /health` returns `{"status":"ok"}` once it is up; it does not probe Postgres or upstream APIs.
 - The deposit sweep poller and the execute-on-pass poller run inside the API process. Running more than one instance has not been tested.

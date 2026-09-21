@@ -49,8 +49,8 @@ On-chain governance is out of scope. Votes live in Postgres. The Go API is the s
 
 Constants:
 
-- USDC mint: `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
-- B20 token mints: `GET https://api.xstocks.fi/api/v2/public/assets/{symbol}` then `deployments` where `network == Base` then `address`. Examples: `AAPLx` is `XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp`. `TSLAx` is `XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB`.
+- USDC on Base: `0x833589fcd6edb6e08f4c7c32d4f71b54bda02913`
+- B20 token addresses: pinned catalog in `apps/backend/internal/b20/pinned.go`. Example: `AAPLc` is `0xb200000000000000000000c2e324d24d7eecd1fb`.
 
 The B20 public API is mint metadata only. It is not an execution rail. Poll `/execute` for confirmation. Do not use a Kyber WebSocket. Do not use Dynamic production webhooks (Enterprise-only).
 
@@ -58,7 +58,7 @@ The B20 public API is mint metadata only. It is not an execution rail. Poll `/ex
 
 No custom on-chain vault. Dynamic server wallets hold assets. Supabase Postgres holds member share units, votes, NAV snapshots, and P&L inputs (net USDC in). A Go API talks to Dynamic and Kyber.
 
-Base transaction fees are paid by an **app relayer**. Treasuries may hold no SOL. Users never see gas. Relayer env and funding: [README](../README.md#relayer-fee-payer).
+Base transaction fees are paid by an **app relayer**. Treasuries may hold no ETH. Users never see gas. Relayer env and funding: [README](../README.md#relayer-fee-payer).
 
 The backend can sign the treasury. That custodial fact is accepted for the hackathon. Demo the buy. Do not spend UX on a trust explainer.
 
@@ -74,10 +74,10 @@ SwiftUI (iOS 17+)
 
 ### Wallets
 
-A **wallet** is a keypair on a chain. On Base the public key is the **address** (base58). The private key **signs** transactions. The address holds:
+A **wallet** is a keypair on a chain. On Base the public key is the **0x address**. The private key **signs** transactions. The address holds:
 
-- **SOL** — native token. Every tx burns a tiny amount as a fee. No ETH → send fails even if you hold USDC.
-- **SPL tokens** — e.g. USDC. Same address, different mint. Monaco USDC mint: `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` ([Base USDC](https://solscan.io/token/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v)). USDC on Ethereum or Base is a different token; the deposit poller will not see it.
+- **ETH** — native token. Every tx burns a tiny amount as a fee. No ETH on the relayer → send fails even if you hold USDC.
+- **ERC-20 tokens** — e.g. USDC. Same address, different contract. Monaco USDC on Base: `0x833589fcd6edb6e08f4c7c32d4f71b54bda02913` ([Base USDC](https://basescan.org/token/0x833589fcd6edb6e08f4c7c32d4f71b54bda02913)). USDC on Ethereum or Solana is a different token; the deposit poller will not see it.
 
 You do not “log into Base.” You hold keys that can move whatever sits at that address. Whoever can sign, spends.
 
@@ -109,7 +109,7 @@ NAV means **net asset value**. It is the dollar value of the whole group pot rig
 
 Two numbers, keep them distinct:
 
-- **Pot NAV.** USDC sitting in the treasury, plus every tokenized stock marked at its current price. Example: $40 USDC + 0.1 AAPLx worth $60 = $100 pot.
+- **Pot NAV.** USDC sitting in the treasury, plus every tokenized stock marked at its current price. Example: $40 USDC + 0.1 AAPLc worth $60 = $100 pot.
 - **NAV per share** (share price). `pot NAV / total shares`. This is what one share unit is worth. On an empty group there are no shares yet, so the first deposit uses a share price of **$1**.
 
 A **share unit** is a claim ticket, not a dollar IOU. The ledger stores how many tickets each member holds, not "Alex is owed $100." Your dollars in the app are:
@@ -128,8 +128,8 @@ Worked numbers (ignore Kyber slippage for the story):
 
 1. Empty group. Share price $1.
 2. Alex deposits $100. He gets 100 shares. Pot $100. Total shares 100. Share price $1.
-3. The group buys AAPLx with the $100. Pot still about $100, now in stock.
-4. AAPLx rises 10%. Pot $110. Alex still has 100 shares. His equity is $110. Share price is $1.10.
+3. The group buys AAPLc with the $100. Pot still about $100, now in stock.
+4. AAPLc rises 10%. Pot $110. Alex still has 100 shares. His equity is $110. Share price is $1.10.
 5. Blair deposits $110. She gets `110 / 1.10 = 100` shares. Pot $220. Total shares 200. Each still owns half.
 6. Blair redeems 50 shares. That is `50 / 200` of the pot = $55 USDC. She keeps 50 shares. Alex still has 100.
 
@@ -209,7 +209,7 @@ Judges should spend most of the live pass on P&L. Show the in-group member board
 1. Create a group. Set join policy (open or password), voter set, threshold, and expiry.
 2. Join from a second account. Two names on the in-group board.
 3. Both deposit mainnet USDC → sweep → share credit. Boards show 0% until a mark moves.
-4. Search B20, propose a buy, pass the vote, Kyber `/execute` success (prefer `AAPLx` on stage).
+4. Search B20, propose a buy, pass the vote, Kyber `/execute` success (prefer `AAPLc` on stage).
 5. Group screen: pot composition, both slices, dollar P&L, in-group percent board.
 6. App home: this group on the group board, both people on the people board (second group optional if time).
 7. One member partial-redeems to USDC at a verified payout address. In-group board, group board, and people board update. The other member still in.
@@ -234,4 +234,4 @@ These were not locked in the spec session. Do not invent them in code until they
 
 ## Notes for production (not blockers for demo)
 
-Tokenized stock exposure (`AAPLx`) is on-chain tracker exposure, not DTCC shares. Pooled custody and trade execution trigger broker-dealer, adviser, and money-transmitter questions in the US. Confirm the path with securities and fintech counsel before a consumer launch. Geo-fencing and licensed partner rails may be required for US persons depending on asset issuer terms.
+Tokenized stock exposure (`AAPLc`) is on-chain tracker exposure, not DTCC shares. Pooled custody and trade execution trigger broker-dealer, adviser, and money-transmitter questions in the US. Confirm the path with securities and fintech counsel before a consumer launch. Geo-fencing and licensed partner rails may be required for US persons depending on asset issuer terms.

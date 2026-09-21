@@ -46,12 +46,18 @@ func TestExecuteBuy_approvesWhenAllowanceShort_thenSwaps(t *testing.T) {
 	chain.SetAllowance(dex.USDCAddress(), treasury.Address, "0xrouter", big.NewInt(0))
 	wallets.SetNextTreasuryTxHashes(h.Wallets, "0xapprovehash0000000000000000000000000001", "0xswaphash00000000000000000000000000000002")
 	chain.SetReceipt("0xapprovehash0000000000000000000000000001", evm.Receipt{Status: 1})
-	chain.SetReceipt("0xswaphash00000000000000000000000000000002", evm.Receipt{Status: 1})
+	chain.SetReceipt("0xswaphash00000000000000000000000000000002", evm.Receipt{
+		Status: 1,
+		Logs:   []evm.Log{evm.ERC20TransferLog(execAAPL, "0xrouter", treasury.Address, big.NewInt(500_000))},
+	})
 	if _, err := h.Swap.DevExecuteBuy(ctx, DevExecuteBuyRequest{GroupID: groupID, UserID: userID, Symbol: "AAPLc", USDCAmount: 2_000_000}); err != nil {
 		t.Fatal(err)
 	}
 	if wallets.TreasuryTxCount(h.Wallets) != 2 {
 		t.Fatalf("txs = %d, want 2", wallets.TreasuryTxCount(h.Wallets))
+	}
+	if dex.QuoteBuyCallCount(h.Jupiter) != 2 {
+		t.Fatalf("quotes = %d, want 2 after approve", dex.QuoteBuyCallCount(h.Jupiter))
 	}
 }
 
@@ -61,11 +67,19 @@ func TestExecuteBuy_skipsApproveWhenAllowanceSufficient(t *testing.T) {
 	ctx := context.Background()
 	treasury, _ := h.Wallets.EnsureTreasury(ctx, wallets.GroupID(groupID))
 	chain.SetAllowance(dex.USDCAddress(), treasury.Address, "0xrouter", big.NewInt(2_000_000))
+	wallets.SetNextTreasuryTxHashes(h.Wallets, "0xswaphash00000000000000000000000000000003")
+	chain.SetReceipt("0xswaphash00000000000000000000000000000003", evm.Receipt{
+		Status: 1,
+		Logs:   []evm.Log{evm.ERC20TransferLog(execAAPL, "0xrouter", treasury.Address, big.NewInt(500_000))},
+	})
 	if _, err := h.Swap.DevExecuteBuy(ctx, DevExecuteBuyRequest{GroupID: groupID, UserID: userID, Symbol: "AAPLc", USDCAmount: 2_000_000}); err != nil {
 		t.Fatal(err)
 	}
 	if wallets.TreasuryTxCount(h.Wallets) != 1 {
 		t.Fatalf("txs = %d, want 1", wallets.TreasuryTxCount(h.Wallets))
+	}
+	if dex.QuoteBuyCallCount(h.Jupiter) != 1 {
+		t.Fatalf("quotes = %d, want 1 when allowance is already enough", dex.QuoteBuyCallCount(h.Jupiter))
 	}
 }
 

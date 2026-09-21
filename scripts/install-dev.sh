@@ -138,7 +138,7 @@ if [[ ! -f .env.keys ]] && [[ -z "${DOTENV_PRIVATE_KEY:-}" ]]; then
 fi
 
 if have dotenvx && [[ -f .env.local ]]; then
-  for key in DYNAMIC_ENVIRONMENT_ID SIGNER_SHARED_SECRET WALLET_SHARES_KEY RELAYER_PRIVATE_KEY; do
+  for key in DYNAMIC_ENVIRONMENT_ID SIGNER_SHARED_SECRET WALLET_SHARES_KEY RELAYER_PRIVATE_KEY DYNAMIC_WALLET_PASSWORD; do
     if ! dotenvx get "$key" -f .env.local >/dev/null 2>&1; then
       missing_required=1
       err "dotenvx cannot read $key from .env.local. check .env.keys and that the file is encrypted for that key."

@@ -3,6 +3,7 @@ package wallets
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 )
@@ -28,8 +29,10 @@ type StoredTreasury struct {
 // WalletStore persists member and treasury wallets.
 type WalletStore interface {
 	GetMemberWalletByUserID(ctx context.Context, userID string) (StoredWallet, bool, error)
+	GetMemberWalletByAddress(ctx context.Context, address string) (StoredWallet, bool, error)
 	InsertMemberWalletFull(ctx context.Context, w StoredWallet) (StoredWallet, error)
 	GetTreasuryByGroupID(ctx context.Context, groupID string) (StoredTreasury, bool, error)
+	GetTreasuryByAddress(ctx context.Context, address string) (StoredTreasury, bool, error)
 	InsertTreasuryFull(ctx context.Context, t StoredTreasury) (StoredTreasury, error)
 	SetTreasuryGasToppedUpAt(ctx context.Context, groupID string, at time.Time) error
 }
@@ -56,6 +59,18 @@ func (m *memoryStore) GetMemberWalletByUserID(ctx context.Context, userID string
 	return w, ok, nil
 }
 
+func (m *memoryStore) GetMemberWalletByAddress(ctx context.Context, address string) (StoredWallet, bool, error) {
+	_ = ctx
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, w := range m.members {
+		if strings.EqualFold(w.Address, address) {
+			return w, true, nil
+		}
+	}
+	return StoredWallet{}, false, nil
+}
+
 func (m *memoryStore) InsertMemberWalletFull(ctx context.Context, w StoredWallet) (StoredWallet, error) {
 	_ = ctx
 	m.mu.Lock()
@@ -70,6 +85,18 @@ func (m *memoryStore) GetTreasuryByGroupID(ctx context.Context, groupID string) 
 	defer m.mu.Unlock()
 	t, ok := m.treasuries[groupID]
 	return t, ok, nil
+}
+
+func (m *memoryStore) GetTreasuryByAddress(ctx context.Context, address string) (StoredTreasury, bool, error) {
+	_ = ctx
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.treasuries {
+		if strings.EqualFold(t.Address, address) {
+			return t, true, nil
+		}
+	}
+	return StoredTreasury{}, false, nil
 }
 
 func (m *memoryStore) InsertTreasuryFull(ctx context.Context, t StoredTreasury) (StoredTreasury, error) {

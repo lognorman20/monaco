@@ -80,7 +80,7 @@ struct ProposeBuyView: View {
         .monacoToast($toast)
         .task {
             applyInitialSymbolIfNeeded()
-            await loadPopular()
+            await loadPopular(force: true)
         }
         .task(id: trimmedQuery) {
             guard !trimmedQuery.isEmpty else {
@@ -210,7 +210,7 @@ struct ProposeBuyView: View {
     }
 
     private func loadPopular(force: Bool = false) async {
-        if !force, let cached = session?.popularAssets, !cached.isEmpty {
+        if !force, let cached = session?.popularAssets, cached.contains(where: \.canBuy) {
             popular = cached.map(ProposeStock.init(market:))
             return
         }

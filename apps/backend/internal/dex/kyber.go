@@ -18,6 +18,9 @@ const kyberRoutesPath = "/base/api/v1/routes"
 const kyberBuildPath = "/base/api/v1/route/build"
 const defaultKyberBase = "https://aggregator-api.kyberswap.com"
 
+// kyberSlippageBps is 2%. Thin B20 size + the ERC-20 approve wait stale a 0.5% route.
+const kyberSlippageBps = 200
+
 type kyberClient struct {
 	http     *http.Client
 	clientID string
@@ -106,8 +109,10 @@ func (k *kyberClient) quote(ctx context.Context, tokenIn, tokenOut string, amoun
 }
 
 func amountOutFromSummary(raw json.RawMessage) *big.Int {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
 	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err != nil {
+	if err := dec.Decode(&obj); err != nil {
 		return nil
 	}
 	for _, key := range []string{"amountOut", "outputAmount"} {
@@ -118,8 +123,11 @@ func amountOutFromSummary(raw json.RawMessage) *big.Int {
 				if ok {
 					return n
 				}
-			case float64:
-				return big.NewInt(int64(t))
+			case json.Number:
+				n, ok := new(big.Int).SetString(t.String(), 10)
+				if ok {
+					return n
+				}
 			}
 		}
 	}
@@ -149,7 +157,7 @@ func (k *kyberClient) BuildSwap(ctx context.Context, q Quote, sender, recipient 
 		RouteSummary:      q.RouteSummary,
 		Sender:            sender,
 		Recipient:         recipient,
-		SlippageTolerance: 50,
+		SlippageTolerance: kyberSlippageBps,
 		Deadline:          time.Now().Add(20 * time.Minute).Unix(),
 		Source:            k.clientID,
 	})
@@ -168,17 +176,23 @@ func (k *kyberClient) BuildSwap(ctx context.Context, q Quote, sender, recipient 
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return SwapCall{}, fmt.Errorf("kyber build status %d", resp.StatusCode)
+	}
 	var parsed kyberBuildResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return SwapCall{}, err
+	}
+	if parsed.Code != 0 {
+		return SwapCall{}, fmt.Errorf("kyber build code %d", parsed.Code)
 	}
 	data := parsed.Data.Data
 	if strings.HasPrefix(data, "0x") {
 		data = data[2:]
 	}
 	raw, err := hex.DecodeString(data)
-	if err != nil {
-		raw = []byte(parsed.Data.Data)
+	if err != nil || len(raw) == 0 || parsed.Data.RouterAddress == "" {
+		return SwapCall{}, fmt.Errorf("kyber build missing calldata")
 	}
 	min := big.NewInt(1)
 	if parsed.Data.AmountOutMin != "" {

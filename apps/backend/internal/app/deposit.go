@@ -595,7 +595,7 @@ func (d *DepositService) GetMemberPosition(ctx context.Context, accessToken, gro
 	return positionFromRowPostgres(positionRow), nil
 }
 
-// GetTreasuryUSDCBalance returns treasury USDC balance via Privy for read API.
+// GetTreasuryUSDCBalance returns treasury USDC balance via Dynamic wallet balance for read API.
 func (d *DepositService) GetTreasuryUSDCBalance(ctx context.Context, accessToken, groupID string) (int64, string, error) {
 	identity, err := d.auth.VerifySession(ctx, auth.AccessToken(accessToken))
 	if err != nil {
@@ -617,7 +617,7 @@ func (d *DepositService) GetTreasuryUSDCBalance(ctx context.Context, accessToken
 	if err != nil {
 		return 0, "", err
 	}
-	// Faker treasuries are dummy rows (#153): never read them through Privy.
+	// Faker treasuries are dummy rows (#153): never read them through Dynamic/RPC.
 	if !found || group.IsFaker {
 		return 0, "", ErrGroupNotFound
 	}

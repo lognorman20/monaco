@@ -27,6 +27,14 @@ func (p *postgresWalletStore) GetMemberWalletByUserID(ctx context.Context, userI
 	return StoredWallet{UserID: m.UserID, WalletID: m.WalletID, Address: m.Address, Metadata: m.Metadata, KeySharesEnc: m.KeySharesEnc}, true, nil
 }
 
+func (p *postgresWalletStore) GetMemberWalletByAddress(ctx context.Context, address string) (StoredWallet, bool, error) {
+	m, ok, err := p.store.GetMemberWalletMaterialByAddress(ctx, address)
+	if err != nil || !ok {
+		return StoredWallet{}, ok, err
+	}
+	return StoredWallet{UserID: m.UserID, WalletID: m.WalletID, Address: m.Address, Metadata: m.Metadata, KeySharesEnc: m.KeySharesEnc}, true, nil
+}
+
 func (p *postgresWalletStore) InsertMemberWalletFull(ctx context.Context, w StoredWallet) (StoredWallet, error) {
 	m, err := p.store.InsertMemberWalletMaterial(ctx, postgres.WalletMaterial{
 		UserID: w.UserID, WalletID: w.WalletID, Address: w.Address, Metadata: w.Metadata, KeySharesEnc: w.KeySharesEnc,
@@ -39,6 +47,14 @@ func (p *postgresWalletStore) InsertMemberWalletFull(ctx context.Context, w Stor
 
 func (p *postgresWalletStore) GetTreasuryByGroupID(ctx context.Context, groupID string) (StoredTreasury, bool, error) {
 	m, ok, err := p.store.GetTreasuryMaterial(ctx, groupID)
+	if err != nil || !ok {
+		return StoredTreasury{}, ok, err
+	}
+	return StoredTreasury{GroupID: m.GroupID, WalletID: m.WalletID, Address: m.Address, Metadata: m.Metadata, KeySharesEnc: m.KeySharesEnc}, true, nil
+}
+
+func (p *postgresWalletStore) GetTreasuryByAddress(ctx context.Context, address string) (StoredTreasury, bool, error) {
+	m, ok, err := p.store.GetTreasuryMaterialByAddress(ctx, address)
 	if err != nil || !ok {
 		return StoredTreasury{}, ok, err
 	}

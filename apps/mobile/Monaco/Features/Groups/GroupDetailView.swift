@@ -176,7 +176,7 @@ struct GroupDetailView: View {
                 decidingRequestIDs: decidingRequestIDs,
                 onRoute: { route = $0 },
                 onPropose: { showProposeSheet = true },
-                onRetry: { item in Task { await retryTransaction(item) } },
+                onRetry: { item in await retryTransaction(item) },
                 onDecideJoinRequest: { request, approve in
                     Task { await decideJoinRequest(request, approve: approve) }
                 },
@@ -264,7 +264,7 @@ struct GroupDetailView: View {
                 auth: auth,
                 items: activityItems,
                 retryingTransactionIDs: retryingTransactionIDs,
-                onRetry: { item in Task { await retryTransaction(item) } }
+                onRetry: { item in await retryTransaction(item) }
             )
         }
     }
@@ -406,12 +406,12 @@ struct GroupDetailView: View {
         }
     }
 
-    private func retryTransaction(_ item: GroupActivityItemDTO) async {
+    private func retryTransaction(_ item: GroupActivityItemDTO) async -> RetryTransactionResponse? {
         guard let token = auth.accessToken else {
             toast = MonacoToast(message: "Sign in again to retry.")
-            return
+            return nil
         }
-        guard !retryingTransactionIDs.contains(item.id) else { return }
+        guard !retryingTransactionIDs.contains(item.id) else { return nil }
 
         retryingTransactionIDs.insert(item.id)
         defer { retryingTransactionIDs.remove(item.id) }
@@ -419,20 +419,25 @@ struct GroupDetailView: View {
         do {
             let result = try await apiClient.retryTransaction(accessToken: token, transactionId: item.id)
             await loadActivity(showLoadingIndicator: false)
+            await loadGroup()
             if result.status.lowercased() == "confirmed" {
                 let done = item.kind.lowercased() == "sell" ? "Sold" : "Bought"
                 toast = MonacoToast(message: "\(done). Holdings updated", isSuccess: true)
             } else if result.status.lowercased() == "failed" {
                 toast = MonacoToast(message: "It didn't go through again. Try later")
             }
+            return result
         } catch is CancellationError {
-            return
+            return nil
         } catch MonacoAPIError.httpStatus(let code) where code == 409 {
             toast = MonacoToast(message: "This one can't be retried")
+            return nil
         } catch MonacoAPIError.httpStatus {
             toast = MonacoToast(message: "Retry didn't go through. Try again")
+            return nil
         } catch {
             toast = MonacoToast(message: "Retry didn't go through. Try again")
+            return nil
         }
     }
 
@@ -515,7 +520,7 @@ struct GroupDetailContent: View {
     let decidingRequestIDs: Set<String>
     let onRoute: (GroupDetailRoute) -> Void
     let onPropose: () -> Void
-    let onRetry: (GroupActivityItemDTO) -> Void
+    let onRetry: (GroupActivityItemDTO) async -> RetryTransactionResponse?
     let onDecideJoinRequest: (JoinRequestDTO, Bool) -> Void
     let onToast: (MonacoToast) -> Void
     var onHeroScrolledAway: (Bool) -> Void = { _ in }

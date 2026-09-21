@@ -21,7 +21,7 @@ just build mobile
 | `apps/backend/internal/httpapi/multi_user_authz_test.go` `TestMultiUserAuthz_nonMember_cannotReadOrMutateClub` | Non-member C gets 404 or 403 on every cabal-scoped read and write: view, cabal, proposals, proposal detail, deposit detail, treasury, assets, quotes, fund, propose, vote and join-requests. C has enough account balance to fund, so membership alone is what stops C. C's refused vote records no ballot, and C's refused fund leaves no pending deposit. C's home and dashboard contain nothing from the cabal. |
 | `…TestMultiUserAuthz_member_cannotActOutsideClubRules` | A member outside a named voter set cannot vote or propose, and a non-admin cannot list join requests. |
 
-The tests run in-process against the `*_test` database only. The fake Privy wallets (`FAKE…` addresses) and their balances exist only there, and `TestIsolation` deletes them when the tests finish. Do not seed `FAKE*` `member_wallets` rows into the dev database, because the sweep poller would try to sweep them.
+The tests run in-process against the `*_test` database only. The fake wallets (`FAKE…` addresses) and their balances exist only there, and `TestIsolation` deletes them when the tests finish. Do not seed `FAKE*` `member_wallets` rows into the dev database, because the sweep poller would try to sweep them.
 
 ## Prerequisites (manual pass)
 
@@ -41,17 +41,17 @@ Accounts:
 
 | Role | Login | Notes |
 | --- | --- | --- |
-| User A (creator) | `test-8081@privy.io`, email OTP `465354` | M1 email OTP path, the same account as the M5 demo script |
-| User B (joiner) | A second Privy login: the Privy dashboard test phone number, or a teammate's real email/SMS | Must be a different Privy user, which gives a different `users.privy_user_id` and member wallet, so a separate account balance |
-| User C (outsider, optional) | Any third Privy login | Only needed for step 11 |
+| User A (creator) | A real Dynamic email or SMS | Same account you use to develop |
+| User B (joiner) | A second Dynamic login (different phone or email) | Different `users.dynamic_user_id` and member wallet, so a separate account balance |
+| User C (outsider, optional) | Any third Dynamic login | Only needed for step 11 |
 
-To switch accounts on one simulator, use **Settings → Sign out**, then sign in again. `just stop mobile` also uninstalls `com.monaco.app` to clear the Privy session. For side-by-side sessions, clone the slimmed gold simulator once (see the skill) and sign in as B on the clone. MobAI Free drives one device at a time.
+To switch accounts on one simulator, use **Settings → Sign out**, then sign in again. `just stop mobile` also uninstalls `com.monaco.app` to clear the Dynamic session.
 
 ## Checklist
 
 1. **Sign in as A.** Use the email OTP. The session gate loads Home. Check the network log for `POST /v1/auth/session` → 200 with A's `userId`.
 2. **Create a cabal as A.** Go to Cabals → Create cabal and keep the defaults (open join, all members vote, majority). Copy the cabal id from the cabal screen. API: `POST /v1/groups`.
-3. **Fund A.** Go to Home → Add money and send USDC on Solana to A's deposit address. The Account balance card updates (`GET /v1/me/balance`). Open the cabal → **Fund this cabal**, then enter an amount up to the available balance (`POST /v1/groups/{id}/fund`). Wait for the sweep: the pending "funding a cabal" line clears. A's "You" slice shows the funded amount with `+0.00`. API: `GET /v1/groups/{id}/view`.
+3. **Fund A.** Go to Home → Add money and send USDC on Base to A's deposit address. The Account balance card updates (`GET /v1/me/balance`). Open the cabal → **Fund this cabal**, then enter an amount up to the available balance (`POST /v1/groups/{id}/fund`). Wait for the sweep: the pending "funding a cabal" line clears. A's "You" slice shows the funded amount with `+0.00`. API: `GET /v1/groups/{id}/view`.
 4. **Switch to B.** Go to Settings → Sign out, then sign in as B. **Auth isolation check:** before any pull-to-refresh, Home, Cabals and Profile must not show A's net worth, account balance, cabals or name. B starts with no cabals, a `0.00` net worth and B's own (empty) account balance. API: `GET /v1/home/dashboard` and `GET /v1/me/balance` with B's token return B's projection only.
 5. **Join by id as B.** Go to Cabals → Join cabal, paste the id, and join. API: `POST /v1/groups/{id}/join` → 204. The cabal opens, and the member board lists A and B. B shows `+0.00` and no percent. B can open the cabal treasury (`GET /v1/groups/{id}`, `GET /v1/groups/{id}/treasury/usdc` → 200, not 404).
 6. **Check isolation with only A funded.** On B's device, B's "You" slice is `0.00` and B's Home net worth is `0.00`. B's row on the Home leaderboard shows `+0.00` with no percent. A's row shows A's own P&L.
@@ -78,4 +78,4 @@ To switch accounts on one simulator, use **Settings → Sign out**, then sign in
 
 ## Done when
 
-Every checklist step passes on the gold simulator with two distinct Privy accounts, and `just test backend` is green. Record failures with a screenshot, the MobAI `ui_tree`, and the request/response of the failing call.
+Every checklist step passes on the gold simulator with two distinct Dynamic accounts, and `just test backend` is green. Record failures with a screenshot, the MobAI `ui_tree`, and the request/response of the failing call.

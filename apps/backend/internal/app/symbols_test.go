@@ -7,32 +7,17 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/b20"
 )
 
-func TestSymbolResolver_TSLAxMint_returnsTickerNotPubkey(t *testing.T) {
+func TestSymbolResolver_KnownSymbol_skipsSolanaMint(t *testing.T) {
 	t.Parallel()
-
-	catalog := b20.NewFakeCatalog()
-	b20.RegisterAsset(catalog, b20.Asset{
-		Symbol:       "TSLAx",
-		Name:         "Tesla",
-		TokenAddress: "0xb2000000000000000000000000000000000004",
-	})
-	resolver := NewSymbolResolver(catalog)
-
-	got := resolver.SymbolForMint(context.Background(), "0xb2000000000000000000000000000000000004")
-	if got != "TSLAx" {
-		t.Fatalf("SymbolForMint = %q, want TSLAx", got)
+	r := NewSymbolResolver(b20.NewPinnedCatalog())
+	if _, ok := r.KnownSymbol(context.Background(), "So11111111111111111111111111111111111111112"); ok {
+		t.Fatal("expected unknown Solana mint")
 	}
-	if got == "0xb2000000000000000000000000000000000004" {
-		t.Fatalf("SymbolForMint returned raw mint")
+	if r.SymbolForMint(context.Background(), "So11111111111111111111111111111111111111112") != unknownStockSymbol {
+		t.Fatal("display fallback")
 	}
-}
-
-func TestSymbolResolver_unknownMint_returnsUnknownStock(t *testing.T) {
-	t.Parallel()
-
-	resolver := NewSymbolResolver(nil)
-	got := resolver.SymbolForMint(context.Background(), "7GCihgDB8fe6KNjn2MYtkzZcRjQy3V9kP8qK9mN3vLxW")
-	if got != unknownStockSymbol {
-		t.Fatalf("SymbolForMint = %q, want %q", got, unknownStockSymbol)
+	sym, ok := r.KnownSymbol(context.Background(), "0xb200000000000000000000c2e324d24d7eecd1fb")
+	if !ok || sym != "AAPLc" {
+		t.Fatalf("got %q ok=%v", sym, ok)
 	}
 }

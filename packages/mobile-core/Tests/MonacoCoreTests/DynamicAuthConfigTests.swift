@@ -23,6 +23,14 @@ final class DynamicAuthConfigTests: XCTestCase {
         }
     }
 
+    func testFromEnvironment_emailDefaultsOn() throws {
+        let config = try DynamicAuthConfig.fromEnvironment([
+            "DYNAMIC_ENVIRONMENT_ID": "env-123",
+        ])
+        XCTAssertTrue(config.smsLoginEnabled)
+        XCTAssertTrue(config.emailLoginEnabled)
+    }
+
     func testFromEnvironment_canDisableLoginMethods() throws {
         let config = try DynamicAuthConfig.fromEnvironment([
             "DYNAMIC_ENVIRONMENT_ID": "env-123",

@@ -25,45 +25,44 @@ flowchart LR
   end
 
   PG[("Postgres<br/>supabase/migrations")]
-  Privy["Privy<br/>auth, member wallets,<br/>one treasury wallet per cabal"]
-  Jup["Jupiter<br/>Swap API v2, Price API v3"]
-  XS["xStocks API<br/>symbol → Solana mint"]
-  Pyth["Pyth Hermes<br/>equity marks for NAV"]
-  Sol[("Solana mainnet<br/>USDC + xStock tokens")]
+  Dyn["Dynamic<br/>auth, member wallets,<br/>one treasury wallet per cabal"]
+  Kyber["KyberSwap<br/>Base aggregator"]
+  B20["B20 catalog<br/>symbol → Base ERC-20"]
+  CL["Chainlink TRV<br/>equity marks for NAV"]
+  Base[("Base mainnet<br/>USDC + B20 tokens")]
 
-  iOS -->|"Privy login"| Privy
+  iOS -->|"Dynamic login"| Dyn
   iOS -->|"Bearer access token"| HTTP
   Bot -->|"X-Monaco-Agent-Key"| HTTP
-  Bot -->|"public prices"| Jup
   HTTP --> App --> Domain
   Workers --> App
   App --> PG
-  App -->|"verify session, sign treasury tx"| Privy
-  App -->|"order / execute / poll"| Jup
-  App --> XS
-  App --> Pyth
-  Privy -->|"signed tx"| Sol
-  Jup -->|"swap"| Sol
+  App -->|"verify session, sign treasury tx"| Dyn
+  App -->|"quote / execute"| Kyber
+  App --> B20
+  App --> CL
+  Dyn -->|"signed tx"| Base
+  Kyber -->|"swap"| Base
 ```
 
-- There is no custom on-chain program. Assets sit in Privy wallets: one per member, one
+- There is no custom on-chain program. Assets sit in Dynamic Base wallets: one per member, one
   treasury per cabal. Postgres is the ledger for shares, votes, and the transaction log.
-- A dedicated relayer keypair pays Solana fees, so members and treasuries never hold SOL
-  (`internal/config/relayer.go`; the API refuses to boot if the relayer is under 0.001 SOL).
+- A dedicated relayer EOA pays Base fees, so members and treasuries never hold ETH
+  (`internal/evm/constants.go`; the API refuses to boot if the relayer is under 0.002 ETH).
 - The backend can sign for treasuries. That is custodial, and we accepted it for the hackathon.
 
 ## Vote → execution
 
 1. A member posts a proposal (`POST /v1/groups/{id}/proposals`): kind `buy` or `sell`, a
-   symbol, an amount. A buy is only accepted if Jupiter can quote a route for it
+   symbol, an amount. A buy is only accepted if Kyber can quote a route for it
    (`internal/app/start_buy.go`).
 2. Members vote yes/no (`POST /v1/proposals/{id}/votes`). Every vote re-runs
    `domain.TallyProposal` (`packages/domain/votes.go`): **majority** passes once yes votes beat
    no votes plus everyone yet to vote, and fails once it cannot; **unanimous** fails on the
    first no. Proposals expire (24h by default). Defaults are all members vote, majority wins.
 3. `ProposalExecutePoller` (`internal/worker`, every 15s) picks up passed proposals that have
-   no confirmed swap and runs `ExecuteOnPass`: Jupiter order → treasury signature from Privy
-   through the `TreasurySigner` interface → Jupiter execute → poll until confirmed → write
+   no confirmed swap and runs `ExecuteOnPass`: Kyber quote → treasury signature from Dynamic
+   through the `TreasurySigner` interface → Kyber execute → poll until confirmed → write
    the transaction row. A failed swap can be retried with
    `POST /v1/transactions/{id}/retry`.
 4. The fill shows up in the cabal's activity feed and holdings.
@@ -72,7 +71,7 @@ flowchart LR
 
 All of this is pure integer math in `packages/domain`, tested without a database.
 
-- **Pot NAV** = treasury USDC + Σ (xStock units × mark), marks from Pyth (`nav.go`,
+- **Pot NAV** = treasury USDC + Σ (B20 units × mark), marks from Chainlink (`nav.go`,
   `internal/app/marked_pot.go`). **NAV per share** = pot NAV ÷ total shares, or $1.00 before
   any shares exist.
 - **Deposit**: USDC is swept from the member's wallet to the treasury, then
@@ -90,8 +89,8 @@ them through the same swap path a passed vote uses.
 
 ```
 GET  /v1/groups/{id}/assets            list tradable symbols
-POST /v1/groups/{id}/agents/intents    {"side":"buy","symbol":"GOOGLx","usdcMicros":1000000}
-                                       {"side":"sell","symbol":"GOOGLx","tokenAmount":50000000}
+POST /v1/groups/{id}/agents/intents    {"side":"buy","symbol":"GOOGLc","usdcMicros":1000000}
+                                       {"side":"sell","symbol":"GOOGLc","tokenAmount":50000000}
 Header: X-Monaco-Agent-Key
 ```
 
@@ -124,17 +123,9 @@ and comments on proposals, a cabal leaderboard, per-member P&L.
 
 Flash status, stated exactly:
 
-- A Flash swap provider is implemented in **PR #233** (open, not merged into `main`) behind
-  `SWAP_PROVIDER=flash`. Jupiter stays the default. `SwapService` calls a provider interface,
-  so vote execution, agent intents, and redeem sells all route through Flash when the flag is set.
-- The flow is quote → one-time on-chain setup (token account + SPL approve, relayer pays) →
-  treasury signs Flash's order message via Privy → `POST /order` → poll the order. The provider
-  refuses to sign a message that does not commit to the exact mint and amount requested.
-- It is tested against fakes: unit tests for the HTTP unhappy paths, and integration tests with
-  a fake Flash server and a real Postgres.
-- Read-only quotes against the live Flash API were checked for xStocks (AAPLx buy and sell).
-- **It has not been run live.** No order has been submitted and nothing has been signed with a
-  real treasury. One small real buy and sell on a throwaway cabal is needed before turning it on.
+- Execution is **Kyber on Base**, not Jupiter. `SwapService` talks to the aggregator; vote
+  execution, agent intents, and redeem sells share that path.
+- Treasuries sign via Dynamic server wallets (signer sidecar), not Privy.
 
 ### Dynamic — Best Agentic Wallet or Payment Experience
 
@@ -142,17 +133,12 @@ What exists today: the agentic payment experience is the agent flow above. A gro
 votes to delegate a spending limit to software, the server enforces that limit on every
 intent, and the group can pause or revoke it by vote.
 
-What an "agent wallet" is today: a **budget-capped allocation of the cabal's Privy treasury**.
+What an "agent wallet" is today: a **budget-capped allocation of the cabal's Dynamic treasury**.
 The agent has no wallet of its own. Its trades are signed by the same treasury wallet as member
 trades, and its fills stay in the treasury.
 
-Roadmap, not built: a **Dynamic server wallet per agent**. The seam is the `TreasurySigner`
-interface in `apps/backend/internal/app/treasury_signer.go` —
-`SignTreasuryTransaction(ctx, walletID, unsignedTxBase64)` — which today has one production
-implementation, `PrivyTreasurySigner`. A Dynamic-backed signer would plug in there. When an
-`add_agent` vote passes, Monaco would create a Dynamic wallet for the agent and move the voted
-budget into it, so the cap is also enforced by what the wallet holds, and a revoke vote sweeps
-the balance back to the treasury. There is no Dynamic code in this repository yet.
+The seam is the `TreasurySigner` interface in `apps/backend/internal/app/treasury_signer.go`.
+Production signing goes through the Dynamic signer sidecar (`apps/signer`).
 
 ## Run it
 

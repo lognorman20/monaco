@@ -171,18 +171,19 @@ func (g *GovernanceService) CreateGroupWithRules(ctx context.Context, accessToke
 			return CreateGroupResult{}, err
 		}
 	}
-	treasuryRef, err := g.wallets.EnsureTreasury(ctx, wallets.GroupID(group.ID))
-	if err != nil {
-		return CreateGroupResult{}, fmt.Errorf("privy ensure treasury: %w", err)
-	}
-	if _, err = g.store.InsertTreasuryTx(ctx, tx, group.ID, treasuryRef.WalletID, treasuryRef.Address); err != nil {
-		return CreateGroupResult{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		logGovernanceBranchError("governance create group commit failed", err, "user_id", user.ID, "name", name)
 		return CreateGroupResult{}, fmt.Errorf("commit create group: %w", err)
 	}
 	committed = true
+	treasuryRef, err := g.wallets.EnsureTreasury(ctx, wallets.GroupID(group.ID))
+	if err != nil {
+		_ = g.store.DeleteUnprovisionedGroup(ctx, group.ID)
+		return CreateGroupResult{}, fmt.Errorf("ensure treasury: %w", err)
+	}
+	if err := persistTreasuryIfMissing(ctx, g.store, group.ID, treasuryRef.WalletID, treasuryRef.Address); err != nil {
+		return CreateGroupResult{}, err
+	}
 	logGovernanceCreateGroupSuccess(group.ID, user.ID, name)
 	return CreateGroupResult{GroupID: group.ID, Name: group.Name, TreasuryAddress: treasuryRef.Address}, nil
 }

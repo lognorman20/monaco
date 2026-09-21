@@ -34,16 +34,16 @@ func (values *sourceFlagValues) Set(raw string) error {
 func parseSweepFlags(args []string, errOut io.Writer) (sweepFlags, error) {
 	fs := flag.NewFlagSet("sweep-member-to-address", flag.ContinueOnError)
 	fs.SetOutput(errOut)
-	dest := fs.String("destination", "", "Solana address that receives all swept USDC")
-	all := fs.Bool("all", false, "use Privy as source of truth: every Solana wallet in this app")
+	dest := fs.String("destination", "", "Base address that receives all swept USDC")
+	all := fs.Bool("all", false, "sweep every member wallet and treasury in the local database")
 	dryRun := fs.Bool("dry-run", false, "list balances and planned sweeps; send no transactions")
 	var sources sourceFlagValues
-	fs.Var(&sources, "source", "Solana wallet to drain (repeatable; comma-separated in one value)")
+	fs.Var(&sources, "source", "Base wallet to drain (repeatable; comma-separated in one value)")
 	fs.Usage = func() {
 		fmt.Fprintf(errOut, "usage: %s --destination <wallet_address> [--source <addr>] [--all] [--dry-run]\n", fs.Name())
 		fmt.Fprintln(errOut, "default: sweep DB member wallets + group treasuries")
 		fmt.Fprintln(errOut, "--source: drain only the listed wallet(s); repeat or comma-separate")
-		fmt.Fprintln(errOut, "--all: sweep every Solana wallet Privy returns for this app")
+		fmt.Fprintln(errOut, "--all: sweep every member wallet and treasury in the local database")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {

@@ -50,6 +50,28 @@ func TestTransferAuthorizationTypedData_matchesUSDCDomain(t *testing.T) {
 	}
 }
 
+func TestWaitReceipt_returnsWhenFound(t *testing.T) {
+	chain := NewFakeClient()
+	chain.SetReceipt("0xabc", Receipt{Status: 1})
+	got, err := WaitReceipt(t.Context(), chain, "0xabc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Found || got.Status != 1 {
+		t.Fatalf("receipt = %+v", got)
+	}
+}
+
+func TestDecodeHex_oddLength(t *testing.T) {
+	b, err := decodeHex("0xf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) != 1 || b[0] != 0x0f {
+		t.Fatalf("got %x", b)
+	}
+}
+
 func TestEncodeTransferWithAuthorization_selector(t *testing.T) {
 	data, err := EncodeTransferWithAuthorization(
 		"0x1111111111111111111111111111111111111111",

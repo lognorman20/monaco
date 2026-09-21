@@ -34,6 +34,21 @@ FROM member_wallets WHERE user_id = $1`
 	return m, true, nil
 }
 
+func (s *Store) GetMemberWalletMaterialByAddress(ctx context.Context, address string) (WalletMaterial, bool, error) {
+	const q = `
+SELECT user_id, wallet_id, address, COALESCE(wallet_metadata, '{}'::jsonb), COALESCE(key_shares_enc, '')
+FROM member_wallets WHERE lower(address) = lower($1)`
+	var m WalletMaterial
+	err := s.db.QueryRowContext(ctx, q, address).Scan(&m.UserID, &m.WalletID, &m.Address, &m.Metadata, &m.KeySharesEnc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return WalletMaterial{}, false, nil
+	}
+	if err != nil {
+		return WalletMaterial{}, false, fmt.Errorf("get member wallet material by address: %w", err)
+	}
+	return m, true, nil
+}
+
 func (s *Store) InsertMemberWalletMaterial(ctx context.Context, m WalletMaterial) (WalletMaterial, error) {
 	if m.Metadata == nil {
 		m.Metadata = json.RawMessage(`{}`)
@@ -41,10 +56,21 @@ func (s *Store) InsertMemberWalletMaterial(ctx context.Context, m WalletMaterial
 	const q = `
 INSERT INTO member_wallets (user_id, wallet_id, address, wallet_metadata, key_shares_enc)
 VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (user_id) DO NOTHING
 RETURNING user_id, wallet_id, address, COALESCE(wallet_metadata, '{}'::jsonb), COALESCE(key_shares_enc, '')`
 	var out WalletMaterial
 	err := s.db.QueryRowContext(ctx, q, m.UserID, m.WalletID, m.Address, m.Metadata, m.KeySharesEnc).
 		Scan(&out.UserID, &out.WalletID, &out.Address, &out.Metadata, &out.KeySharesEnc)
+	if errors.Is(err, sql.ErrNoRows) {
+		existing, ok, getErr := s.GetMemberWalletMaterial(ctx, m.UserID)
+		if getErr != nil {
+			return WalletMaterial{}, getErr
+		}
+		if !ok {
+			return WalletMaterial{}, fmt.Errorf("insert member wallet material: conflict with no row")
+		}
+		return existing, nil
+	}
 	if err != nil {
 		return WalletMaterial{}, fmt.Errorf("insert member wallet material: %w", err)
 	}
@@ -66,6 +92,21 @@ FROM treasuries WHERE group_id = $1`
 	return m, true, nil
 }
 
+func (s *Store) GetTreasuryMaterialByAddress(ctx context.Context, address string) (WalletMaterial, bool, error) {
+	const q = `
+SELECT group_id, wallet_id, address, COALESCE(wallet_metadata, '{}'::jsonb), COALESCE(key_shares_enc, '')
+FROM treasuries WHERE lower(address) = lower($1)`
+	var m WalletMaterial
+	err := s.db.QueryRowContext(ctx, q, address).Scan(&m.GroupID, &m.WalletID, &m.Address, &m.Metadata, &m.KeySharesEnc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return WalletMaterial{}, false, nil
+	}
+	if err != nil {
+		return WalletMaterial{}, false, fmt.Errorf("get treasury material by address: %w", err)
+	}
+	return m, true, nil
+}
+
 func (s *Store) InsertTreasuryMaterial(ctx context.Context, m WalletMaterial) (WalletMaterial, error) {
 	if m.Metadata == nil {
 		m.Metadata = json.RawMessage(`{}`)
@@ -73,10 +114,21 @@ func (s *Store) InsertTreasuryMaterial(ctx context.Context, m WalletMaterial) (W
 	const q = `
 INSERT INTO treasuries (group_id, wallet_id, address, wallet_metadata, key_shares_enc)
 VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (group_id) DO NOTHING
 RETURNING group_id, wallet_id, address, COALESCE(wallet_metadata, '{}'::jsonb), COALESCE(key_shares_enc, '')`
 	var out WalletMaterial
 	err := s.db.QueryRowContext(ctx, q, m.GroupID, m.WalletID, m.Address, m.Metadata, m.KeySharesEnc).
 		Scan(&out.GroupID, &out.WalletID, &out.Address, &out.Metadata, &out.KeySharesEnc)
+	if errors.Is(err, sql.ErrNoRows) {
+		existing, ok, getErr := s.GetTreasuryMaterial(ctx, m.GroupID)
+		if getErr != nil {
+			return WalletMaterial{}, getErr
+		}
+		if !ok {
+			return WalletMaterial{}, fmt.Errorf("insert treasury material: conflict with no row")
+		}
+		return existing, nil
+	}
 	if err != nil {
 		return WalletMaterial{}, fmt.Errorf("insert treasury material: %w", err)
 	}

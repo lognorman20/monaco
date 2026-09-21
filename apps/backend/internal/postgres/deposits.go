@@ -225,7 +225,7 @@ WHERE user_id = $1 AND status = 'pending'`
 }
 
 // ListPendingDeposits returns pending deposit rows the sweep poller may act on.
-// Faker users and faker groups (#153) are excluded: their rows must never reach Privy/RPC.
+// Faker users and faker groups (#153) are excluded: their rows must never reach Dynamic/RPC.
 func (s *Store) ListPendingDeposits(ctx context.Context) ([]DepositRow, error) {
 	const selectSQL = `
 SELECT d.id, d.user_id, d.group_id, d.amount, d.from_address, d.status, d.tx_hash, d.created_at

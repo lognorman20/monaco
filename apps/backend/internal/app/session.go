@@ -203,6 +203,15 @@ func (s *SessionService) EnsureMemberWallet(ctx context.Context, dynamicUserID s
 		return MemberWallet{}, fmt.Errorf("ensure member wallet: %w", err)
 	}
 
+	existing, found, err = s.store.GetMemberWalletByUserID(ctx, userID)
+	if err != nil {
+		return MemberWallet{}, err
+	}
+	if found {
+		logSessionEnsureWalletCreated(userID)
+		return memberWalletFromStore(existing), nil
+	}
+
 	inserted, err := s.store.InsertMemberWallet(ctx, userID, ref.WalletID, ref.Address)
 	if err != nil {
 		return MemberWallet{}, err

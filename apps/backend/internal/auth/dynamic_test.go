@@ -47,6 +47,28 @@ func TestDynamicVerifier_validToken_returnsIdentity(t *testing.T) {
 	}
 }
 
+func TestDynamicVerifier_httpsIssuer_accepted(t *testing.T) {
+	key, jwks, kid := testRSAJWKS(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(jwks)
+	}))
+	t.Cleanup(srv.Close)
+
+	v := NewDynamicVerifier("env-1", srv.Client()).(*DynamicVerifier)
+	v.SetJWKSURL(srv.URL)
+	tok := signDynamicJWT(t, key, kid, jwt.MapClaims{
+		"iss":   "https://app.dynamicauth.com/env-1",
+		"sub":   "dyn-user-1",
+		"scope": "user:basic",
+		"exp":   time.Now().Add(time.Hour).Unix(),
+		"iat":   time.Now().Unix(),
+	})
+	if _, err := v.VerifySession(context.Background(), AccessToken(tok)); err != nil {
+		t.Fatalf("VerifySession: %v", err)
+	}
+}
+
 func TestDynamicVerifier_wrongIssuer_rejects(t *testing.T) {
 	key, jwks, kid := testRSAJWKS(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

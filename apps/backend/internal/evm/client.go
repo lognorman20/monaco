@@ -22,6 +22,7 @@ type Receipt struct {
 
 // RoundData is a Chainlink latestRoundData answer.
 type RoundData struct {
+	RoundID   *big.Int
 	Answer    *big.Int
 	UpdatedAt time.Time
 }
@@ -35,4 +36,6 @@ type Client interface {
 	Receipt(ctx context.Context, txHash string) (Receipt, error)
 	IsConfirmed(ctx context.Context, txHash string) (bool, error)
 	ChainlinkLatestRoundData(ctx context.Context, feed string) (RoundData, error)
+	ChainlinkLatestRoundDataMany(ctx context.Context, feeds []string) (map[string]RoundData, error)
+	ChainlinkRoundHistory(ctx context.Context, feed string, limit int) ([]RoundData, error)
 }

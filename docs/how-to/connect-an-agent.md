@@ -70,8 +70,7 @@ How it behaves:
 
 - **Symbols come from the cabal.** It reads `GET /v1/groups/{id}/assets` with the agent key
   and only watches routable assets. Without `--symbols` it takes the first five.
-- **Prices are public.** Jupiter's Price API v3, keyed by each asset's Solana mint — the same
-  API the backend prices the asset list with. Override with `JUPITER_PRICE_URL`.
+- **Prices are public.** Chainlink marks on the backend; the agent reads cabal assets from the API, not a Solana mint list.
 - **Two caps of its own**, `--trade-usd` per buy and `--max-spend-usd` per run. Set the total
   below the budget the cabal voted; the server enforces that budget either way. The total is
   per process: it resets on restart, the server's count does not.
@@ -103,5 +102,5 @@ against `httptest` servers).
 - **The cabal keeps control after install.** Pause, resume, and revoke are each their own
   vote — pausing keeps the key valid but blocks trades, revoking kills the key outright.
 - **Same execution path as a member's vote.** Agent trades settle through the identical
-  Jupiter + Privy treasury flow a human-approved buy uses — fills land in the same cabal
+  Kyber + Dynamic treasury flow a human-approved buy uses — fills land in the same cabal
   activity feed.

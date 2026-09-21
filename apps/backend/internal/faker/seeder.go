@@ -41,12 +41,12 @@ type MixedOptions struct {
 // The server wires Pyth Hermes; nil or failures fall back to fixed reference marks.
 type MarkSource func(ctx context.Context, symbol, mint string) (int64, bool)
 
-// Seeder writes faker profiles. It only touches the database: no Privy, RPC, or Jupiter.
+// Seeder writes faker profiles. It only touches the database: no Dynamic, RPC, or Kyber.
 type Seeder struct {
 	store *postgres.Store
 	marks MarkSource
 	now   func() time.Time
-	// prefix namespaces faker keys and privy ids (tests use a per-lane prefix; production uses "").
+	// prefix namespaces faker keys and Dynamic user ids (tests use a per-lane prefix; production uses "").
 	prefix string
 	// photoBaseURL is FAKER_PHOTO_BASE_URL: ghost portraits live at <base>/<slug>.jpg. Empty = initials.
 	photoBaseURL string
@@ -69,7 +69,7 @@ func (s *Seeder) WithPhotoBaseURL(base string) *Seeder {
 	return &c
 }
 
-// WithPrefix returns a copy whose faker keys and privy ids are namespaced (tests only).
+// WithPrefix returns a copy whose faker keys and Dynamic user ids are namespaced (tests only).
 func (s *Seeder) WithPrefix(prefix string) *Seeder {
 	c := *s
 	c.prefix = prefix
@@ -105,7 +105,7 @@ type ScaleResult struct {
 	Clubs []ScaleClub `json:"clubs"`
 }
 
-func (s *Seeder) privyID(slug string) string { return "faker:user:" + s.prefix + slug }
+func (s *Seeder) fakerUserID(slug string) string { return "faker:user:" + s.prefix + slug }
 
 func (s *Seeder) inTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	tx, err := s.store.BeginTx(ctx)
@@ -343,7 +343,7 @@ RETURNING id`, club.Name, ids[club.Creator.Slug], fakerKey, createdAt).Scan(&gro
 		return ScaleClub{}, err
 	}
 
-	// Dummy treasury: schema needs one, but it is never a Privy wallet and never a FAKE* address.
+	// Dummy treasury: schema needs one, but it is never a Dynamic wallet and never a FAKE* address.
 	if _, err := tx.ExecContext(ctx, `INSERT INTO treasuries (group_id, wallet_id, address, created_at) VALUES ($1, $2, $3, $4)`,
 		groupID, "faker:treasury:"+s.prefix+club.Key, "faker-treasury-"+s.prefix+club.Key, createdAt); err != nil {
 		return ScaleClub{}, fmt.Errorf("insert dummy treasury: %w", err)
@@ -379,7 +379,7 @@ RETURNING id`, club.Name, ids[club.Creator.Slug], fakerKey, createdAt).Scan(&gro
 	return out, nil
 }
 
-// upsertPeople inserts or refreshes faker users. It never converts a real user: a privy id
+// upsertPeople inserts or refreshes faker users. It never converts a real user: a Dynamic user id
 // collision with a non-faker row fails the run.
 func (s *Seeder) upsertPeople(ctx context.Context, tx *sql.Tx, people []person, createdAt time.Time) (map[string]string, error) {
 	ids := make(map[string]string, len(people))
@@ -395,9 +395,9 @@ VALUES ($1, $2, true, $3, $4)
 ON CONFLICT (dynamic_user_id) DO UPDATE
   SET display_name = EXCLUDED.display_name, profile_photo_url = EXCLUDED.profile_photo_url
   WHERE users.is_faker
-RETURNING id`, s.privyID(p.Slug), p.Name, createdAt, photo).Scan(&id)
+RETURNING id`, s.fakerUserID(p.Slug), p.Name, createdAt, photo).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("faker: privy id %s belongs to a real user", s.privyID(p.Slug))
+			return nil, fmt.Errorf("faker: dynamic user id %s belongs to a real user", s.fakerUserID(p.Slug))
 		}
 		if err != nil {
 			return nil, fmt.Errorf("upsert faker user %s: %w", p.Slug, err)

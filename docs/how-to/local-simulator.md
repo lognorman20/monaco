@@ -19,7 +19,7 @@ that team's signing identity installed.
 codesigning entirely and produces a fully unsigned binary. iOS ties a Keychain
 item's access group to the signature of the app that created it — with no
 signature, the app can't consistently reclaim its own keychain entries, so
-the Privy session gets silently dropped on every relaunch or reinstall (the
+the Dynamic session gets silently dropped on every relaunch or reinstall (the
 user looks signed out for no reason). Ad-hoc signing (`CODE_SIGN_IDENTITY="-"`)
 still produces a real, consistent signature, so the keychain entry persists
 across relaunches and reinstalls, while `CODE_SIGNING_REQUIRED=NO` keeps the

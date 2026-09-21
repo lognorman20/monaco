@@ -180,6 +180,10 @@ func costBasisForHoldings(
 		if holding.Amount <= 0 {
 			continue
 		}
+		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(holding.Mint)), "0x") {
+			slog.Warn("skipping non-EVM holding", "mint", holding.Mint, "group_id", groupID)
+			continue
+		}
 		price, amount, found, err := fillDerivedCostBasis(ctx, store, tx, groupID, holding.Mint)
 		if err != nil {
 			return nil, err

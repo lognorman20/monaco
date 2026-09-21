@@ -94,6 +94,7 @@ func (s *SwapService) RetryFailedSwap(ctx context.Context, req RetryFailedSwapRe
 			Symbol:     symbol,
 			InputToken: tx.InputToken,
 			Amount:     tx.Amount,
+			ProposalID: proposalID,
 		})
 		if err != nil {
 			return RetryFailedSwapResult{}, err

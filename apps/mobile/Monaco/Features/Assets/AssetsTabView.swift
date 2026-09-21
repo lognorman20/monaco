@@ -105,12 +105,12 @@ struct AssetsTabView: View {
             }
         } else if !isSearching, popular.isEmpty {
             ScrollView {
-                EmptyState(title: "Popular names show up here once prices load")
-                    .accessibilityIdentifier("assets-grid-popular")
+                popularSkeleton
             }
             .refreshable {
                 await session.refreshPopular(auth: auth)
             }
+            .accessibilityIdentifier("assets-grid-popular")
         } else {
             ScrollView {
                 MonacoGroupedList {
@@ -121,8 +121,8 @@ struct AssetsTabView: View {
                             assetRow(asset, isLast: index == gridAssets.count - 1)
                         }
                         .buttonStyle(.monacoRow)
-                        .disabled(!asset.routable)
-                        .opacity(asset.routable ? 1 : 0.6)
+                        .disabled(!asset.canBuy)
+                        .opacity(asset.canBuy ? 1 : 0.6)
                         .accessibilityIdentifier(
                             isSearching ? "assets-row-\(asset.symbol)" : "assets-popular-\(asset.symbol)"
                         )
@@ -150,6 +150,25 @@ struct AssetsTabView: View {
         }
     }
 
+    private var popularSkeleton: some View {
+        MonacoGroupedList {
+            ForEach(0..<6, id: \.self) { _ in
+                HStack(spacing: MonacoTheme.Space.sm) {
+                    SkeletonBlock(width: 40, height: 40, radius: MonacoTheme.Radius.tile)
+                    VStack(alignment: .leading, spacing: 6) {
+                        SkeletonBlock(width: 120, height: 14)
+                        SkeletonBlock(width: 56, height: 12)
+                    }
+                    Spacer()
+                    SkeletonBlock(width: 64, height: 14)
+                }
+                .padding(.horizontal, MonacoTheme.Space.m)
+                .frame(minHeight: 60)
+            }
+        }
+        .accessibilityLabel("Loading stocks")
+    }
+
     private func centeredStatus<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(spacing: MonacoTheme.Space.m) {
             Spacer(minLength: 0)
@@ -163,7 +182,7 @@ struct AssetsTabView: View {
         let ticker = AssetSymbolFormatter.display(asset.symbol)
         return MonacoRow(
             title: AssetDisplayNames.name(forSymbol: asset.symbol) ?? ticker,
-            subtitle: asset.routable ? ticker : "Can't be bought right now",
+            subtitle: asset.canBuy ? ticker : "Can't be bought right now",
             isLast: isLast,
             leading: { StockMark(symbol: asset.symbol, size: 40) },
             trailing: {

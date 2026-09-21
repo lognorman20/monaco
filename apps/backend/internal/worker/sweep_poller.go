@@ -37,12 +37,13 @@ const DefaultPollInterval = 15 * time.Second
 
 // SweepPoller polls member USDC balances and submits sweeps to treasury.
 type SweepPoller struct {
-	store    *postgres.Store
-	wallets  wallets.Client
-	rpc      Confirmer
-	deposits *app.DepositService
-	relayer  string
-	clock    Clock
+	store       *postgres.Store
+	wallets     wallets.Client
+	rpc         Confirmer
+	deposits    *app.DepositService
+	relayer     string
+	clock       Clock
+	lastSurplus time.Time
 }
 
 // NewSweepPoller wires sweep polling dependencies.
@@ -109,9 +110,14 @@ func (p *SweepPoller) Tick(ctx context.Context) error {
 		}
 	}
 
-	if err := p.reconcileAllTreasurySurplus(ctx); err != nil {
-		logSweepPollerTickEnd(len(pending), err)
-		return err
+	now := p.clock.Now()
+	shouldReconcile := len(pending) > 0 || p.lastSurplus.IsZero() || now.Sub(p.lastSurplus) >= time.Minute
+	if shouldReconcile {
+		if err := p.reconcileAllTreasurySurplus(ctx); err != nil {
+			logSweepPollerTickEnd(len(pending), err)
+			return err
+		}
+		p.lastSurplus = now
 	}
 
 	logSweepPollerTickEnd(len(pending), nil)
@@ -119,7 +125,7 @@ func (p *SweepPoller) Tick(ctx context.Context) error {
 }
 
 func (p *SweepPoller) reconcileAllTreasurySurplus(ctx context.Context) error {
-	// Faker scale clubs (#153) have dummy treasuries: never read their balance via Privy.
+	// Faker scale clubs (#153) have dummy treasuries: never read their balance on chain.
 	groupIDs, err := p.store.ListRealGroupIDs(ctx)
 	if err != nil {
 		return err
@@ -131,7 +137,7 @@ func (p *SweepPoller) reconcileAllTreasurySurplus(ctx context.Context) error {
 				"stage", "reconcile_surplus",
 				"err", err,
 			)
-			return err
+			continue
 		}
 	}
 	return nil

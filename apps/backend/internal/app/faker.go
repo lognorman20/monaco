@@ -13,7 +13,7 @@ import (
 //
 // Two kinds of seeded demo rows exist:
 //   - faker scale clubs (groups.is_faker): wholly fake, dummy treasury, spectator-readable by any
-//     authenticated user, never mutable, never touched by Privy/RPC/Jupiter.
+//     authenticated user, never mutable, never touched by Dynamic/RPC/Kyber.
 //   - ghost members (users.is_faker) inside a real group: display-only positions, excluded from
 //     pot math, surplus credit, and the live voter set.
 //

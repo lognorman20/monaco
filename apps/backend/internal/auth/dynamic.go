@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"strings"
@@ -93,21 +94,26 @@ func (d *DynamicVerifier) VerifySession(ctx context.Context, token AccessToken) 
 		return key, nil
 	})
 	if err != nil || parsed == nil || !parsed.Valid {
+		slog.Warn("dynamic jwt parse failed", "err", errString(err))
 		return Identity{}, ErrUnauthorized
 	}
 
 	wantISS := "app.dynamicauth.com/" + d.environmentID
-	if claims.Issuer != wantISS {
+	iss := strings.TrimPrefix(strings.TrimSpace(claims.Issuer), "https://")
+	if iss != wantISS {
+		slog.Warn("dynamic jwt issuer mismatch", "iss", claims.Issuer, "want", wantISS)
 		return Identity{}, ErrUnauthorized
 	}
 	now := time.Now()
 	if claims.ExpiresAt == nil || !claims.ExpiresAt.After(now) {
+		slog.Warn("dynamic jwt expired or missing exp")
 		return Identity{}, ErrUnauthorized
 	}
 	if claims.IssuedAt != nil && claims.IssuedAt.Time.After(now.Add(5*time.Minute)) {
 		return Identity{}, ErrUnauthorized
 	}
 	if !scopeHasUserBasic(claims.Scope) {
+		slog.Warn("dynamic jwt missing user:basic scope", "scope", claims.Scope)
 		return Identity{}, ErrUnauthorized
 	}
 	sub := strings.TrimSpace(claims.Subject)
@@ -204,4 +210,11 @@ func rsaPublicFromJWK(nB64, eB64 string) (*rsa.PublicKey, error) {
 		return nil, fmt.Errorf("invalid exponent")
 	}
 	return &rsa.PublicKey{N: new(big.Int).SetBytes(nBytes), E: e}, nil
+}
+
+func errString(err error) string {
+	if err == nil {
+		return "invalid"
+	}
+	return err.Error()
 }

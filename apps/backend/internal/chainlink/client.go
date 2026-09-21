@@ -3,6 +3,7 @@ package chainlink
 import (
 	"context"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/b20"
@@ -47,34 +48,16 @@ func (l *liveClient) MarkedPot(ctx context.Context, treasury marks.TreasuryRef, 
 		}
 	}
 	out := marks.NavInput{TreasuryUsdc: usdc, Holdings: make([]marks.MarkedHolding, 0, len(holdings))}
-	stale := 25 * time.Hour
-	now := l.now()
 	for _, h := range holdings {
-		feed, err := l.catalog.Feed(ctx, h.Symbol)
+		price, afterHours, err := l.markSymbol(ctx, h.Symbol)
 		if err != nil {
 			return marks.NavInput{}, err
 		}
-		round, err := l.chain.ChainlinkLatestRoundData(ctx, feed)
-		if err != nil {
-			return marks.NavInput{}, err
-		}
-		if round.Answer == nil || round.Answer.Sign() <= 0 {
-			return marks.NavInput{}, marks.ErrMarkUnavailable
-		}
-		// price micros = answer * 1e6 / 1e8
-		price := new(big.Int).Mul(round.Answer, big.NewInt(1_000_000))
-		price.Div(price, big.NewInt(100_000_000))
-		if !price.IsInt64() {
-			return marks.NavInput{}, marks.ErrMarkUnavailable
-		}
-		priceMicros := price.Int64()
-		value := h.Units * priceMicros / 100_000_000
-		afterHours := now.Sub(round.UpdatedAt) > stale
 		out.Holdings = append(out.Holdings, marks.MarkedHolding{
 			Symbol:     h.Symbol,
 			Token:      h.Token,
 			Units:      h.Units,
-			MarkUsdc:   value,
+			MarkUsdc:   price,
 			CostBasis:  h.Amount,
 			AfterHours: afterHours,
 		})
@@ -83,4 +66,68 @@ func (l *liveClient) MarkedPot(ctx context.Context, treasury marks.TreasuryRef, 
 		}
 	}
 	return out, nil
+}
+
+func (l *liveClient) markSymbol(ctx context.Context, symbol string) (int64, bool, error) {
+	if l.catalog == nil || l.chain == nil {
+		return 0, false, marks.ErrMarkUnavailable
+	}
+	feed, err := l.catalog.Feed(ctx, symbol)
+	if err != nil {
+		return 0, false, err
+	}
+	round, err := l.chain.ChainlinkLatestRoundData(ctx, feed)
+	if err != nil {
+		return 0, false, err
+	}
+	return roundToMark(l.now(), round)
+}
+
+func (l *liveClient) markSymbols(ctx context.Context, symbols []string) map[string]int64 {
+	out := make(map[string]int64, len(symbols))
+	if l.catalog == nil || l.chain == nil {
+		return out
+	}
+	feeds := make([]string, 0, len(symbols))
+	symByFeed := make(map[string][]string, len(symbols))
+	for _, symbol := range symbols {
+		feed, err := l.catalog.Feed(ctx, symbol)
+		if err != nil || strings.TrimSpace(feed) == "" {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(feed))
+		if _, seen := symByFeed[key]; !seen {
+			feeds = append(feeds, key)
+		}
+		symByFeed[key] = append(symByFeed[key], symbol)
+	}
+	rounds, err := l.chain.ChainlinkLatestRoundDataMany(ctx, feeds)
+	if err != nil {
+		return out
+	}
+	now := l.now()
+	for feed, round := range rounds {
+		price, _, convErr := roundToMark(now, round)
+		if convErr != nil {
+			continue
+		}
+		for _, symbol := range symByFeed[strings.ToLower(feed)] {
+			out[symbol] = price
+		}
+	}
+	return out
+}
+
+func roundToMark(now time.Time, round evm.RoundData) (int64, bool, error) {
+	if round.Answer == nil || round.Answer.Sign() <= 0 {
+		return 0, false, marks.ErrMarkUnavailable
+	}
+	price := new(big.Int).Mul(round.Answer, big.NewInt(1_000_000))
+	price.Div(price, big.NewInt(100_000_000))
+	if !price.IsInt64() {
+		return 0, false, marks.ErrMarkUnavailable
+	}
+	stale := 25 * time.Hour
+	afterHours := now.Sub(round.UpdatedAt) > stale
+	return price.Int64(), afterHours, nil
 }

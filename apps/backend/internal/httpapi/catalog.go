@@ -91,7 +91,7 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 			Symbol:       asset.Symbol,
 			Name:         asset.Name,
 			TokenAddress: asset.TokenAddress,
-			Routable:     asset.Routable,
+			Routable:     asset.Routable || strings.TrimSpace(asset.TokenAddress) != "",
 		})
 	}
 

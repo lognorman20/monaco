@@ -353,7 +353,7 @@ func (h *TransactionHandlers) authorizeGroupMember(ctx context.Context, accessTo
 	if err != nil {
 		return "", err
 	}
-	// Faker treasuries are dummy rows (#153): never hand their address to a Privy balance read.
+	// Faker treasuries are dummy rows (#153): never hand their address to a chain balance read.
 	if !found || group.IsFaker {
 		return "", app.ErrGroupNotFound
 	}

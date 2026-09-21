@@ -39,7 +39,7 @@ struct ProposeStock: Hashable, Identifiable {
             name: Self.displayName(symbol: market.symbol, catalogName: market.name),
             priceMicros: market.priceUsdcMicros,
             change24h: market.change24h,
-            isTradable: market.routable
+            isTradable: market.canBuy
         )
     }
 

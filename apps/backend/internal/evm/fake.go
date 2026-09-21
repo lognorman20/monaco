@@ -3,6 +3,7 @@ package evm
 import (
 	"context"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 )
@@ -14,6 +15,7 @@ type fakeClient struct {
 	allowances map[string]*big.Int
 	receipts   map[string]Receipt
 	roundData  map[string]RoundData
+	roundHist  map[string][]RoundData
 }
 
 // NewFakeClient returns an in-memory EVM client for tests.
@@ -23,6 +25,7 @@ func NewFakeClient() *fakeClient {
 		allowances: make(map[string]*big.Int),
 		receipts:   make(map[string]Receipt),
 		roundData:  make(map[string]RoundData),
+		roundHist:  make(map[string][]RoundData),
 	}
 }
 
@@ -59,9 +62,19 @@ func (f *fakeClient) SetReceipt(txHash string, receipt Receipt) {
 	f.mu.Unlock()
 }
 
+func (f *fakeClient) SetRoundHistory(feed string, rounds []RoundData) {
+	f.mu.Lock()
+	copied := append([]RoundData(nil), rounds...)
+	f.roundHist[strings.ToLower(strings.TrimSpace(feed))] = copied
+	if len(copied) > 0 {
+		f.roundData[strings.ToLower(strings.TrimSpace(feed))] = copied[len(copied)-1]
+	}
+	f.mu.Unlock()
+}
+
 func (f *fakeClient) SetRoundData(feed string, data RoundData) {
 	f.mu.Lock()
-	f.roundData[feed] = data
+	f.roundData[strings.ToLower(strings.TrimSpace(feed))] = data
 	f.mu.Unlock()
 }
 
@@ -125,8 +138,41 @@ func (f *fakeClient) ChainlinkLatestRoundData(ctx context.Context, feed string) 
 	_ = ctx
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if d, ok := f.roundData[feed]; ok {
+	if d, ok := f.roundData[strings.ToLower(strings.TrimSpace(feed))]; ok {
 		return d, nil
 	}
 	return RoundData{Answer: big.NewInt(0), UpdatedAt: time.Now()}, nil
+}
+
+func (f *fakeClient) ChainlinkLatestRoundDataMany(ctx context.Context, feeds []string) (map[string]RoundData, error) {
+	out := make(map[string]RoundData, len(feeds))
+	for _, feed := range feeds {
+		data, err := f.ChainlinkLatestRoundData(ctx, feed)
+		if err != nil {
+			continue
+		}
+		out[strings.ToLower(strings.TrimSpace(feed))] = data
+	}
+	return out, nil
+}
+
+func (f *fakeClient) ChainlinkRoundHistory(ctx context.Context, feed string, limit int) ([]RoundData, error) {
+	_ = ctx
+	key := strings.ToLower(strings.TrimSpace(feed))
+	f.mu.Lock()
+	hist := append([]RoundData(nil), f.roundHist[key]...)
+	latest, hasLatest := f.roundData[key]
+	f.mu.Unlock()
+	if len(hist) > 0 {
+		if limit > 0 && len(hist) > limit {
+			hist = hist[len(hist)-limit:]
+		}
+		return hist, nil
+	}
+	if hasLatest && latest.Answer != nil && latest.Answer.Sign() > 0 {
+		earlier := latest
+		earlier.UpdatedAt = latest.UpdatedAt.Add(-time.Hour)
+		return []RoundData{earlier, latest}, nil
+	}
+	return nil, nil
 }

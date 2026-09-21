@@ -107,7 +107,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 	slog.Info("relayer loaded", "address", relayer.Address())
 
 	chain := evm.NewJSONRPCClient(cfg.BaseRPCURL)
-	if bal, err := chain.ETHBalance(ctx, relayer.Address()); err == nil && bal.Cmp(evm.FeePayerMinWei) < 0 {
+	bal, err := chain.ETHBalance(ctx, relayer.Address())
+	if err != nil {
+		return nil, fmt.Errorf("relayer ETH balance: %w", err)
+	}
+	if bal.Cmp(evm.FeePayerMinWei) < 0 {
 		return nil, fmt.Errorf("relayer ETH below minimum on Base")
 	}
 
@@ -198,9 +202,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Catalog:  catalog,
 		KeyGuard: agentKeyGuard,
 	}
-	var assetPrices pyth.AssetPriceClient
+	var assetPrices pyth.AssetPriceClient = chainlink.NewAssetPrices(chain, catalog, time.Now)
 	if hermes != nil {
-		assetPrices = hermes
+		assetPrices = pyth.WithCharts(assetPrices, hermes)
 	}
 	assetsHandlers := &httpapi.AssetsHandlers{
 		Store:   store,
@@ -210,6 +214,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Pyth:    assetPrices,
 		Dex:     dexClient,
 	}
+	go warmCatalogMarks(catalog, assetPrices)
 	quoteHandlers := &httpapi.QuoteHandlers{
 		Store:      store,
 		Auth:       authVerifier,
@@ -391,11 +396,35 @@ func registerDevFakerRoute(mux *http.ServeMux, h *httpapi.DevFakerHandlers, rout
 	return append(append([]string(nil), routes...), "POST /v1/dev/faker")
 }
 
+func warmCatalogMarks(catalog b20.Catalog, prices pyth.AssetPriceClient) {
+	if catalog == nil || prices == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	assets, err := catalog.Popular(ctx)
+	if err != nil {
+		slog.Warn("catalog mark warm skipped", "err", err.Error())
+		return
+	}
+	symbols := make([]string, 0, len(assets))
+	for _, asset := range assets {
+		symbols = append(symbols, asset.Symbol)
+	}
+	marks, err := prices.AssetMarks(ctx, symbols)
+	if err != nil {
+		slog.Warn("catalog mark warm skipped", "err", err.Error())
+		return
+	}
+	for _, symbol := range symbols {
+		if mark, ok := marks[symbol]; !ok || mark.PriceUsdcMicros <= 0 {
+			slog.Warn("catalog mark warm missed", "symbol", symbol)
+		}
+	}
+}
+
 func parseSharesKey(raw string) ([]byte, error) {
 	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return make([]byte, 32), nil
-	}
 	raw = strings.TrimPrefix(raw, "0x")
 	b, err := hex.DecodeString(raw)
 	if err != nil || len(b) != 32 {

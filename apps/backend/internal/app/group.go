@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -90,21 +91,20 @@ func (g *GroupService) CreateGroup(ctx context.Context, accessToken string, name
 		return CreateGroupResult{}, err
 	}
 
-	treasuryRef, err := g.wallets.EnsureTreasury(ctx, wallets.GroupID(group.ID))
-	if err != nil {
-		return CreateGroupResult{}, fmt.Errorf("privy ensure treasury: %w", err)
-	}
-
-	_, err = g.store.InsertTreasuryTx(ctx, tx, group.ID, treasuryRef.WalletID, treasuryRef.Address)
-	if err != nil {
-		return CreateGroupResult{}, err
-	}
-
 	if err := tx.Commit(); err != nil {
 		logGroupBranchError("group create commit failed", err, "user_id", user.ID, "name", name)
 		return CreateGroupResult{}, fmt.Errorf("commit create group: %w", err)
 	}
 	committed = true
+
+	treasuryRef, err := g.wallets.EnsureTreasury(ctx, wallets.GroupID(group.ID))
+	if err != nil {
+		_ = g.store.DeleteUnprovisionedGroup(ctx, group.ID)
+		return CreateGroupResult{}, fmt.Errorf("ensure treasury: %w", err)
+	}
+	if err := persistTreasuryIfMissing(ctx, g.store, group.ID, treasuryRef.WalletID, treasuryRef.Address); err != nil {
+		return CreateGroupResult{}, err
+	}
 
 	logGroupCreateSuccess(group.ID, user.ID, name)
 	return CreateGroupResult{
@@ -174,4 +174,19 @@ func (g *GroupService) GetGroup(ctx context.Context, accessToken string, groupID
 		Name:            group.Name,
 		TreasuryAddress: treasury.Address,
 	}, nil
+}
+
+func persistTreasuryIfMissing(ctx context.Context, store *postgres.Store, groupID, walletID, address string) error {
+	_, found, err := store.GetTreasuryByGroupID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, err = store.InsertTreasury(ctx, groupID, walletID, address)
+	if err != nil && (postgres.IsUniqueViolation(err) || errors.Is(err, sql.ErrNoRows)) {
+		return nil
+	}
+	return err
 }

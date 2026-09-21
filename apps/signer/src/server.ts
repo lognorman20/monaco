@@ -6,12 +6,17 @@ import { handle } from "./routes.js"
 const secret = process.env.SIGNER_SHARED_SECRET ?? ""
 const port = Number(process.env.SIGNER_PORT ?? "8081")
 const relayerKey = process.env.RELAYER_PRIVATE_KEY ?? ""
+const walletPassword = process.env.DYNAMIC_WALLET_PASSWORD ?? ""
 if (!secret) {
   console.error("SIGNER_SHARED_SECRET is required")
   process.exit(1)
 }
 if (!relayerKey) {
   console.error("RELAYER_PRIVATE_KEY is required")
+  process.exit(1)
+}
+if (!walletPassword) {
+  console.error("DYNAMIC_WALLET_PASSWORD is required")
   process.exit(1)
 }
 

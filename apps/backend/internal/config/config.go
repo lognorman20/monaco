@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -77,6 +78,12 @@ func Load() (*Config, error) {
 	if cfg.RelayerPrivateKey == "" {
 		return nil, fmt.Errorf("%s is required", envRelayerPrivateKey)
 	}
+	if cfg.SignerSharedSecret == "" {
+		return nil, fmt.Errorf("%s is required", envSignerSharedSecret)
+	}
+	if err := validateSharesKey(cfg.WalletSharesKey); err != nil {
+		return nil, err
+	}
 	if cfg.SignerURL == "" {
 		cfg.SignerURL = defaultSignerURL
 	}
@@ -102,4 +109,16 @@ func (c *Config) RelayerAddress() (string, error) {
 		return "", fmt.Errorf("relayer private key: %w", err)
 	}
 	return strings.ToLower(common.HexToAddress(crypto.PubkeyToAddress(key.PublicKey).Hex()).Hex()), nil
+}
+
+func validateSharesKey(raw string) error {
+	raw = strings.TrimPrefix(strings.TrimSpace(raw), "0x")
+	if raw == "" {
+		return fmt.Errorf("%s is required", envWalletSharesKey)
+	}
+	b, err := hex.DecodeString(raw)
+	if err != nil || len(b) != 32 {
+		return fmt.Errorf("%s must be 32-byte hex", envWalletSharesKey)
+	}
+	return nil
 }

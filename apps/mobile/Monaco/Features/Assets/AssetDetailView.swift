@@ -33,7 +33,7 @@ struct AssetDetailView: View {
                     .buttonStyle(.monacoSecondary)
                 } else if let detail {
                     header(detail)
-                    if !detail.liquidity.routable {
+                    if !detail.routable {
                         Text("Can't be bought right now.")
                             .font(MonacoTheme.TypeRole.caption)
                             .foregroundStyle(MonacoTheme.warning)
@@ -47,7 +47,7 @@ struct AssetDetailView: View {
         }
         .monacoCanvas()
         .foregroundStyle(MonacoTheme.ink)
-        .navigationTitle(detail?.displayTicker ?? AssetSymbolFormatter.format(symbol))
+        .navigationTitle(detail?.displayTicker ?? AssetSymbolFormatter.display(symbol))
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("asset-detail-root")
         .task {

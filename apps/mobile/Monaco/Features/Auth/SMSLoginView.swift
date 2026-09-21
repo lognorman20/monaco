@@ -31,6 +31,11 @@ struct SMSLoginView: View {
                 .authTextFieldStyle()
                 .disabled(showsOTPField)
                 .accessibilityIdentifier("smsPhoneField")
+                .onChange(of: phoneNumber) { _, _ in
+                    if case .failed = auth.phase {
+                        auth.resetLoginFlow()
+                    }
+                }
 
             if showsOTPField {
                 TextField(
@@ -112,18 +117,7 @@ struct SMSLoginView: View {
     }
 
     private var normalizedPhone: String {
-        let trimmed = phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("+") {
-            return trimmed
-        }
-        let digits = trimmed.filter(\.isNumber)
-        if digits.count == 10 {
-            return "+1\(digits)"
-        }
-        if digits.count == 11, digits.first == "1" {
-            return "+\(digits)"
-        }
-        return trimmed
+        LoginPhone.normalizedE164(phoneNumber)
     }
 
     /// "(555) 123-4567" for US numbers, otherwise what was typed.
@@ -146,7 +140,7 @@ struct SMSLoginView: View {
     }
 
     private var isSendDisabled: Bool {
-        normalizedPhone.isEmpty || auth.phase == .sendingCode
+        !LoginPhone.isComplete(phoneNumber) || auth.phase == .sendingCode
     }
 
     private var isVerifyDisabled: Bool {

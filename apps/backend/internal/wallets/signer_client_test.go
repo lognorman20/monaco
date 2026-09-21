@@ -2,6 +2,7 @@ package wallets
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"math/big"
 	"testing"
@@ -61,6 +62,50 @@ func TestSignerClient_SubmitSweep_buildsEIP3009AndRelays(t *testing.T) {
 	}
 	if signer.RelayerSendCount(sig) != 1 {
 		t.Fatalf("relayer sends = %d, want 1", signer.RelayerSendCount(sig))
+	}
+}
+
+func TestSignerClient_SubmitSweep_looksUpMemberWithoutMemoryStoreTypeAssert(t *testing.T) {
+	ctx := context.Background()
+	sig := signer.NewFakeClient()
+	inner := NewMemoryStore()
+	store := wrappingStore{WalletStore: inner}
+	c := NewSignerClient(sig, evm.NewFakeClient(), store, testSharesKey(), "0xrelayer")
+	wallet, err := c.EnsureMemberWallet(ctx, "dyn-wrap", UserID("user-wrap"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.SubmitSweep(ctx, SweepRequest{
+		MemberAddress:   wallet.Address,
+		TreasuryAddress: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+		Amount:          1_000_000,
+		IntentID:        "deposit-wrap",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type wrappingStore struct {
+	WalletStore
+}
+
+func TestSplitSignature_normalizesRecoveryID(t *testing.T) {
+	raw := make([]byte, 65)
+	raw[64] = 0
+	v, _, _, err := splitSignature("0x" + hex.EncodeToString(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != 27 {
+		t.Fatalf("v = %d, want 27", v)
+	}
+	raw[64] = 1
+	v, _, _, err = splitSignature("0x" + hex.EncodeToString(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != 28 {
+		t.Fatalf("v = %d, want 28", v)
 	}
 }
 

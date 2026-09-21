@@ -172,8 +172,7 @@ run *app:
       trap cleanup INT TERM
       echo "Starting signer, backend (background) and mobile (foreground)..."
       if [[ -f apps/signer/package.json ]]; then
-        (cd apps/signer && if [[ ! -d node_modules ]]; then npm ci; fi)
-        (cd apps/signer && npm run dev) 2>&1 | tee -a "${MONACO_LOG_DIR}/signer.log" &
+        ./scripts/ensure-signer.sh 2>&1 | tee -a "${MONACO_LOG_DIR}/signer.log" &
         sleep 1
       fi
       (cd apps/backend && go run ./cmd/api) 2>&1 | tee -a "${MONACO_LOG_DIR}/backend.log" &
@@ -206,8 +205,7 @@ run *app:
         source ./scripts/run-with-logs.sh
         monaco_init_logs
         if [[ -f apps/signer/package.json ]]; then
-          (cd apps/signer && if [[ ! -d node_modules ]]; then npm ci; fi)
-          (cd apps/signer && npm run dev) 2>&1 | tee -a "${MONACO_LOG_DIR}/signer.log" &
+          ./scripts/ensure-signer.sh 2>&1 | tee -a "${MONACO_LOG_DIR}/signer.log" &
           sleep 1
         fi
         if [[ -f apps/backend/go.mod ]]; then

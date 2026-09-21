@@ -8,7 +8,7 @@ struct GroupActivitySection: View {
     let isLoading: Bool
     let errorMessage: String?
     let retryingTransactionIDs: Set<String>
-    let onRetry: (GroupActivityItemDTO) -> Void
+    let onRetry: (GroupActivityItemDTO) async -> RetryTransactionResponse?
     var onSeeAll: () -> Void = {}
 
     static let previewLimit = 5
@@ -59,7 +59,7 @@ struct GroupActivityList: View {
     @ObservedObject var auth: DynamicAuthService
     let items: [GroupActivityItemDTO]
     let retryingTransactionIDs: Set<String>
-    let onRetry: (GroupActivityItemDTO) -> Void
+    let onRetry: (GroupActivityItemDTO) async -> RetryTransactionResponse?
 
     var body: some View {
         MonacoGroupedList {
@@ -96,7 +96,7 @@ struct GroupActivityList: View {
                 .frame(width: 44, height: 44)
                 .accessibilityIdentifier("group-activity-retry-loading-\(item.id)")
         } else {
-            Button("Retry") { onRetry(item) }
+            Button("Retry") { Task { _ = await onRetry(item) } }
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(MonacoTheme.loss)
                 .frame(minWidth: 44, minHeight: 44)

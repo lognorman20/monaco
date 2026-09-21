@@ -68,3 +68,21 @@ func TestLoad_missingDynamicEnvironmentID_returnsError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestLoad_missingWalletSharesKey_returnsError(t *testing.T) {
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+	t.Setenv("WALLET_SHARES_KEY", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestLoad_missingSignerSharedSecret_returnsError(t *testing.T) {
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+	t.Setenv("SIGNER_SHARED_SECRET", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected error")
+	}
+}

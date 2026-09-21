@@ -15,7 +15,7 @@ import (
 	"github.com/monaco/monaco/packages/domain"
 )
 
-// WithdrawToBalanceRequest withdraws deployed stake to the member Privy wallet (platform balance).
+// WithdrawToBalanceRequest withdraws deployed stake to the member Dynamic wallet (platform balance).
 type WithdrawToBalanceRequest struct {
 	AccessToken       string
 	GroupID           string
@@ -93,7 +93,7 @@ func (r *RedeemService) WithdrawToBalance(ctx context.Context, req WithdrawToBal
 		logRedeemBranchWarn("withdraw to balance rejected", "group id required")
 		return RedeemJobView{}, fmt.Errorf("group id is required")
 	}
-	// Faker scale clubs (#153) have a dummy treasury: no sells, payouts, or Privy reads.
+	// Faker scale clubs (#153) have a dummy treasury: no sells, payouts, or Dynamic reads.
 	if err := rejectFakerGroup(ctx, r.store, req.GroupID); err != nil {
 		return RedeemJobView{}, err
 	}
@@ -219,7 +219,7 @@ func (r *RedeemService) Redeem(ctx context.Context, req RedeemRequest) (RedeemJo
 		logRedeemBranchWarn("redeem rejected", "group id required")
 		return RedeemJobView{}, fmt.Errorf("group id is required")
 	}
-	// Faker scale clubs (#153) have a dummy treasury: no sells, payouts, or Privy reads.
+	// Faker scale clubs (#153) have a dummy treasury: no sells, payouts, or Dynamic reads.
 	if err := rejectFakerGroup(ctx, r.store, req.GroupID); err != nil {
 		return RedeemJobView{}, err
 	}
@@ -414,8 +414,8 @@ func (r *RedeemService) continueRedeemJob(ctx context.Context, view RedeemJobVie
 			"treasury_usdc", cash, "slice_usdc", owed)
 	}
 
-	// The transfer may never exceed the treasury's real USDC: an SPL transfer for more than the
-	// token account holds fails simulation with Custom:1 and 500s the whole cash out.
+	// The transfer may never exceed the treasury's real USDC: an ERC-20 transfer for more than
+	// the token balance reverts and 500s the whole cash out.
 	payAmount := owed
 	if cash < payAmount {
 		slog.Warn("redeem payout clamped to treasury usdc", "job_id", view.ID,
@@ -648,6 +648,13 @@ func (r *RedeemService) ensureMemberWalletAddress(ctx context.Context, dynamicUs
 	ref, err := r.wallets.EnsureMemberWallet(ctx, dynamicUserID, wallets.UserID(userID))
 	if err != nil {
 		return "", fmt.Errorf("ensure member wallet: %w", err)
+	}
+	existing, found, err = r.store.GetMemberWalletByUserID(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	if found {
+		return existing.Address, nil
 	}
 	if _, err := r.store.InsertMemberWallet(ctx, userID, ref.WalletID, ref.Address); err != nil {
 		return "", err

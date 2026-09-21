@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-var privyLabelPattern = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
+var testLabelPattern = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 
 // TestIsolation gives each test its own data lane on shared monaco_test.
 // Seed with UniqueDynamicID; call TrackUser and TrackGroup after inserts; t.Cleanup
@@ -25,7 +25,7 @@ type TestIsolation struct {
 }
 
 // PrepareTestDB registers per-test cleanup on db. Use the returned TestIsolation
-// for unique privy IDs and to track rows this test creates.
+// for unique Dynamic IDs and to track rows this test creates.
 func PrepareTestDB(t *testing.T, db *sql.DB) *TestIsolation {
 	t.Helper()
 
@@ -53,9 +53,9 @@ func (iso *TestIsolation) Suffix() string {
 	return iso.suffix
 }
 
-// UniqueDynamicID returns a privy user id unique to this test lane.
+// UniqueDynamicID returns a Dynamic user id unique to this test lane.
 func (iso *TestIsolation) UniqueDynamicID(label string) string {
-	return fmt.Sprintf("did:privy:test-%s-%s", iso.suffix, sanitizeTestLabel(label))
+	return fmt.Sprintf("did:dynamic:test-%s-%s", iso.suffix, sanitizeTestLabel(label))
 }
 
 // UniqueToken returns an access token string unique to this test lane.
@@ -118,7 +118,7 @@ func sanitizeTestLabel(label string) string {
 	if label == "" {
 		return "x"
 	}
-	label = privyLabelPattern.ReplaceAllString(label, "-")
+	label = testLabelPattern.ReplaceAllString(label, "-")
 	label = strings.Trim(label, "-")
 	if label == "" {
 		return "x"

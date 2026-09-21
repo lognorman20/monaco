@@ -23,6 +23,18 @@ function send(res: ServerResponse, status: number, body: unknown) {
 }
 
 export async function handle(req: IncomingMessage, res: ServerResponse, deps: Deps) {
+  try {
+    await handleRequest(req, res, deps)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "signer error"
+    console.error("signer request failed", err)
+    if (!res.headersSent) {
+      send(res, 500, { error: message })
+    }
+  }
+}
+
+async function handleRequest(req: IncomingMessage, res: ServerResponse, deps: Deps) {
   const secret = req.headers["x-signer-secret"]
   if (secret !== deps.secret) {
     send(res, 401, { error: "unauthorized" })
@@ -34,10 +46,13 @@ export async function handle(req: IncomingMessage, res: ServerResponse, deps: De
     return
   }
   if (req.method === "POST" && url === "/v1/wallets") {
-    const w = await deps.dynamic.createWalletAccount()
+	const w = await deps.dynamic.createWalletAccount()
+    const address = String(w.accountAddress).toLowerCase()
+    const meta = w.walletMetadata as { id?: string } | undefined
+    const walletId = typeof meta?.id === "string" && meta.id !== "" ? meta.id : address
     send(res, 200, {
-      walletId: "dyn-" + String(w.accountAddress).slice(2, 10),
-      address: String(w.accountAddress).toLowerCase(),
+      walletId,
+      address,
       metadata: w.walletMetadata,
       keyShares: w.externalServerKeyShares,
     })

@@ -18,39 +18,43 @@ type Treasury struct {
 }
 
 // InsertTreasury persists a treasury wallet row for a group.
-func (s *Store) InsertTreasury(ctx context.Context, groupID string, privyWalletID string, solanaAddress string) (Treasury, error) {
-	return insertTreasury(ctx, s.db, groupID, privyWalletID, solanaAddress)
+func (s *Store) InsertTreasury(ctx context.Context, groupID string, walletID string, address string) (Treasury, error) {
+	return insertTreasury(ctx, s.db, groupID, walletID, address)
 }
 
 // InsertTreasuryTx persists a treasury wallet row for a group within tx.
-func (s *Store) InsertTreasuryTx(ctx context.Context, tx *sql.Tx, groupID string, privyWalletID string, solanaAddress string) (Treasury, error) {
-	return insertTreasury(ctx, tx, groupID, privyWalletID, solanaAddress)
+func (s *Store) InsertTreasuryTx(ctx context.Context, tx *sql.Tx, groupID string, walletID string, address string) (Treasury, error) {
+	return insertTreasury(ctx, tx, groupID, walletID, address)
 }
 
-func insertTreasury(ctx context.Context, q queryRower, groupID string, privyWalletID string, solanaAddress string) (Treasury, error) {
+func insertTreasury(ctx context.Context, q queryRower, groupID string, walletID string, address string) (Treasury, error) {
 	if groupID == "" {
 		return Treasury{}, fmt.Errorf("group_id is required")
 	}
-	if privyWalletID == "" {
+	if walletID == "" {
 		return Treasury{}, fmt.Errorf("wallet_id is required")
 	}
-	if solanaAddress == "" {
+	if address == "" {
 		return Treasury{}, fmt.Errorf("address is required")
 	}
 
 	const insertSQL = `
 INSERT INTO treasuries (group_id, wallet_id, address)
 VALUES ($1, $2, $3)
+ON CONFLICT (group_id) DO NOTHING
 RETURNING id, group_id, wallet_id, address, created_at`
 
 	var treasury Treasury
-	err := q.QueryRowContext(ctx, insertSQL, groupID, privyWalletID, solanaAddress).Scan(
+	err := q.QueryRowContext(ctx, insertSQL, groupID, walletID, address).Scan(
 		&treasury.ID,
 		&treasury.GroupID,
 		&treasury.WalletID,
 		&treasury.Address,
 		&treasury.CreatedAt,
 	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Treasury{}, fmt.Errorf("insert treasury: %w", sql.ErrNoRows)
+	}
 	if err != nil {
 		return Treasury{}, fmt.Errorf("insert treasury: %w", err)
 	}
@@ -88,7 +92,7 @@ WHERE group_id = $1`
 }
 
 // ListTreasuries returns chain-backed group treasury wallet rows. Faker scale club (#153)
-// dummy treasuries are excluded: they are not Privy wallets and must never be swept or read.
+// dummy treasuries are excluded: they are not Dynamic wallets and must never be swept or read.
 func (s *Store) ListTreasuries(ctx context.Context) ([]Treasury, error) {
 	const selectSQL = `
 SELECT t.id, t.group_id, t.wallet_id, t.address, t.created_at

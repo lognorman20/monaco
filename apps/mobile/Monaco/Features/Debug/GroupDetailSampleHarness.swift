@@ -74,7 +74,7 @@ struct GroupDetailSampleHarness: View {
             .monacoCanvas()
             .navigationBarTitleDisplayMode(.inline)
         case .activity:
-            GroupActivityListView(auth: auth, items: GroupDetailSampleData.activity, retryingTransactionIDs: [], onRetry: { _ in })
+            GroupActivityListView(auth: auth, items: GroupDetailSampleData.activity, retryingTransactionIDs: [], onRetry: { _ in nil })
         case .loading:
             GroupDetailSkeleton()
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -102,7 +102,7 @@ struct GroupDetailSampleHarness: View {
             decidingRequestIDs: [],
             onRoute: { route = $0 },
             onPropose: { showPropose = true },
-            onRetry: { _ in },
+            onRetry: { _ in nil },
             onDecideJoinRequest: { _, _ in },
             onToast: { toast = $0 },
             onHeroScrolledAway: { heroScrolledAway = $0 }
@@ -122,7 +122,7 @@ struct GroupDetailSampleHarness: View {
             case .cashOut:
                 SellCabalView(auth: auth, groupId: view.id, maxShareUnits: Int64(view.you.shareUnits) ?? 0, equityUsd: view.you.equityUsd)
             case .activity:
-                GroupActivityListView(auth: auth, items: GroupDetailSampleData.activity, retryingTransactionIDs: [], onRetry: { _ in })
+                GroupActivityListView(auth: auth, items: GroupDetailSampleData.activity, retryingTransactionIDs: [], onRetry: { _ in nil })
             case .proposals:
                 ProposalFeedView(service: proposalService, groupId: view.id)
             case .addMoney, .chat:

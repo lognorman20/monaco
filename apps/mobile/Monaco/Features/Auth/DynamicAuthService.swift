@@ -34,6 +34,8 @@ final class DynamicAuthService: ObservableObject {
     @Published private(set) var lastSignOutReason: String?
     @Published private(set) var needsDeviceRegistration = false
     @Published private(set) var needsStepUp = false
+    @Published private(set) var loginChannel: DynamicLoginChannel = .sms
+    @Published private(set) var securityOTPMessage: String?
 
     private var sessionStore = MonacoSessionStore()
     private let tokenRefresh = SingleFlight<String?>()
@@ -42,7 +44,7 @@ final class DynamicAuthService: ObservableObject {
     private let sdk: DynamicSDK?
 
     private static var stepUpScope: TokenScope {
-        TokenScope.allCases.first(where: { $0.rawValue.contains("basic") }) ?? TokenScope.allCases[TokenScope.allCases.startIndex]
+        .userUpdate
     }
 
     init(settings: DynamicAuthSettings) {
@@ -77,11 +79,21 @@ final class DynamicAuthService: ObservableObject {
 
     private func observeSDK() {
         guard let sdk else { return }
+        sdk.auth.minAuthTokenChanges
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] token in
+                guard let self, let jwt = DynamicSessionToken.preferred(minAuthToken: token, idToken: nil) else { return }
+                self.accessToken = jwt
+            }
+            .store(in: &cancellables)
+
         sdk.auth.tokenChanges
             .receive(on: DispatchQueue.main)
             .sink { [weak self] token in
-                guard let self, self.accessToken != nil else { return }
-                self.accessToken = token
+                guard let self else { return }
+                guard self.accessToken == nil else { return }
+                guard let jwt = DynamicSessionToken.preferred(minAuthToken: nil, idToken: token) else { return }
+                self.accessToken = jwt
             }
             .store(in: &cancellables)
 
@@ -96,12 +108,8 @@ final class DynamicAuthService: ObservableObject {
             }
             .store(in: &cancellables)
 
-        sdk.deviceRegistration.isDeviceRegistrationRequiredChanges
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] required in
-                self?.needsDeviceRegistration = required
-            }
-            .store(in: &cancellables)
+        // Device registration / step-up would send a second OTP (often email).
+        // Product login is SMS only — ignore those SDK flags.
     }
 
     func restoreSessionIfNeeded() async {
@@ -122,11 +130,11 @@ final class DynamicAuthService: ObservableObject {
             phase = .restoreFailed(message: LoginFailureCopy.restoreOffline)
             return
         }
-        if let user = sdk.auth.authenticatedUser, let token = sdk.auth.token {
-            applyAuthenticated(userID: user.userId ?? "", token: token, isRestore: true)
+        if let creds = sdkSessionCredentials() {
+            applyAuthenticated(userID: creds.userID, token: creds.token, isRestore: true)
             return
         }
-        if sdk.auth.authenticatedUser == nil, sdk.auth.token == nil {
+        if sdk.auth.authenticatedUser == nil, sdkSessionJWT() == nil {
             AppLogger.session.notice("Session restore: Dynamic has no saved session")
             endSession(reason: LoginFailureCopy.sessionExpired)
             return
@@ -151,7 +159,7 @@ final class DynamicAuthService: ObservableObject {
         if sdk.auth.authenticatedUser == nil {
             return nil
         }
-        let fresh = sdk.auth.token
+        let fresh = sdkSessionJWT()
         if let fresh, fresh != rejectedToken, accessToken != nil {
             accessToken = fresh
         }
@@ -159,6 +167,7 @@ final class DynamicAuthService: ObservableObject {
     }
 
     func sendSMSCode(to phoneNumberE164: String) async {
+        loginChannel = .sms
         await sendCode {
             let phone = try E164Phone.data(from: phoneNumberE164)
             try await self.requireSDK().auth.sms.sendOTP(phoneData: phone)
@@ -172,6 +181,7 @@ final class DynamicAuthService: ObservableObject {
     }
 
     func sendEmailCode(to email: String) async {
+        loginChannel = .email
         await sendCode {
             try await self.requireSDK().auth.email.sendOTP(email: email)
         }
@@ -184,31 +194,76 @@ final class DynamicAuthService: ObservableObject {
     }
 
     func sendDeviceRegistrationCode() async {
-        await sendCode {
-            try await self.requireSDK().auth.email.resendOTP()
+        await sendFollowUpOTP {
+            try await self.resendOnLoginChannel()
         }
     }
 
     func completeDeviceRegistration(_ code: String) async {
-        await verifySecurityStep {
-            try await self.requireSDK().auth.email.verifyOTP(token: code)
-            self.refreshSecurityFlags()
+        await verifyFollowUpOTP {
+            try await self.verifyOnLoginChannel(code)
         }
     }
 
     func sendStepUpCode() async {
-        await sendCode {
+        await sendFollowUpOTP {
             _ = try await self.requireSDK().stepUpAuth.sendOtp()
         }
     }
 
     func completeStepUp(_ code: String) async {
-        await verifySecurityStep {
+        await verifyFollowUpOTP {
             try await self.requireSDK().stepUpAuth.verifyOtp(
                 verificationToken: code,
                 requestedScopes: [Self.stepUpScope]
             )
-            self.refreshSecurityFlags()
+        }
+    }
+
+    private func resendOnLoginChannel() async throws {
+        let sdk = try requireSDK()
+        switch loginChannel {
+        case .sms:
+            try await sdk.auth.sms.resendOTP()
+        case .email:
+            try await sdk.auth.email.resendOTP()
+        }
+    }
+
+    private func verifyOnLoginChannel(_ code: String) async throws {
+        let sdk = try requireSDK()
+        switch loginChannel {
+        case .sms:
+            try await sdk.auth.sms.verifyOTP(token: code)
+        case .email:
+            try await sdk.auth.email.verifyOTP(token: code)
+        }
+    }
+
+    /// Device registration / step-up must not reuse login `sendCode`, which
+    /// flips `phase` off `.authenticated` and can fire the other OTP channel.
+    private func sendFollowUpOTP(_ send: () async throws -> Void) async {
+        securityOTPMessage = nil
+        do {
+            try await send()
+            securityOTPMessage = nil
+        } catch {
+            let failure = Self.loginFailure(from: error, step: .sendCode)
+            AppLogger.session.error("Follow-up OTP send failed: \(String(describing: error), privacy: .public)")
+            securityOTPMessage = LoginFailureCopy.message(for: failure, step: .sendCode)
+        }
+    }
+
+    private func verifyFollowUpOTP(_ verify: () async throws -> Void) async {
+        securityOTPMessage = nil
+        do {
+            try await verify()
+            refreshSecurityFlags()
+            await captureAuthenticatedSession(isRestore: false)
+        } catch {
+            let failure = Self.loginFailure(from: error, step: .verifyCode)
+            AppLogger.session.error("Follow-up OTP verify failed: \(String(describing: error), privacy: .public)")
+            securityOTPMessage = LoginFailureCopy.message(for: failure, step: .verifyCode)
         }
     }
 
@@ -231,28 +286,11 @@ final class DynamicAuthService: ObservableObject {
         phase = .verifyingCode
         do {
             try await verify()
-            captureAuthenticatedSession(isRestore: false)
+            await captureAuthenticatedSession(isRestore: false)
         } catch {
             accessToken = nil
             let failure = Self.loginFailure(from: error, step: .verifyCode)
             AppLogger.session.error("Verify code failed: \(String(describing: error), privacy: .public)")
-            let message = LoginFailureCopy.message(for: failure, step: .verifyCode)
-            phase = failure.keepsCodeEntry ? .codeRejected(message: message) : .failed(message: message)
-        }
-    }
-
-    private func verifySecurityStep(_ verify: () async throws -> Void) async {
-        guard phase != .verifyingCode, phase != .sendingCode else { return }
-        phase = .verifyingCode
-        do {
-            try await verify()
-            if let user = sdk?.auth.authenticatedUser, let token = sdk?.auth.token {
-                applyAuthenticated(userID: user.userId ?? "", token: token, isRestore: false)
-            } else {
-                phase = .failed(message: LoginFailureCopy.tokenUnavailable)
-            }
-        } catch {
-            let failure = Self.loginFailure(from: error, step: .verifyCode)
             let message = LoginFailureCopy.message(for: failure, step: .verifyCode)
             phase = failure.keepsCodeEntry ? .codeRejected(message: message) : .failed(message: message)
         }
@@ -292,6 +330,7 @@ final class DynamicAuthService: ObservableObject {
         lastSignOutReason = reason
         needsDeviceRegistration = false
         needsStepUp = false
+        securityOTPMessage = nil
         phase = .idle
         sessionStore.clear()
     }
@@ -320,21 +359,43 @@ final class DynamicAuthService: ObservableObject {
         return .other(detail: nil)
     }
 
-    private func captureAuthenticatedSession(isRestore: Bool) {
-        guard let sdk, let user = sdk.auth.authenticatedUser else {
-            phase = .failed(message: LoginFailureCopy.tokenUnavailable)
+    private func captureAuthenticatedSession(isRestore: Bool) async {
+        if let creds = await waitForSessionCredentials() {
+            applyAuthenticated(userID: creds.userID, token: creds.token, isRestore: isRestore)
             return
         }
-        guard let token = sdk.auth.token else {
-            phase = .failed(message: LoginFailureCopy.tokenUnavailable)
+        if let user = sdk?.auth.authenticatedUser, let token = sdkSessionJWT(), !token.isEmpty {
+            applyAuthenticated(userID: user.userId ?? "", token: token, isRestore: isRestore)
             return
         }
-        applyAuthenticated(userID: user.userId ?? "", token: token, isRestore: isRestore)
+        phase = .failed(message: LoginFailureCopy.tokenUnavailable)
+    }
+
+    private func waitForSessionCredentials() async -> (userID: String, token: String)? {
+        for _ in 0..<40 {
+            if let creds = sdkSessionCredentials() {
+                return creds
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return sdkSessionCredentials()
+    }
+
+    private func sdkSessionCredentials() -> (userID: String, token: String)? {
+        guard let sdk, let user = sdk.auth.authenticatedUser else { return nil }
+        guard let token = sdkSessionJWT() else { return nil }
+        return (user.userId ?? "", token)
+    }
+
+    private func sdkSessionJWT() -> String? {
+        guard let sdk else { return nil }
+        return DynamicSessionToken.preferred(minAuthToken: sdk.auth.minAuthToken, idToken: sdk.auth.token)
     }
 
     private func applyAuthenticated(userID: String, token: String, isRestore: Bool) {
-        accessToken = token
+        accessToken = token.isEmpty ? nil : token
         lastSignOutReason = nil
+        securityOTPMessage = nil
         phase = .authenticated(userID: userID)
         if !isRestore {
             sessionStore.markExplicitLogin()
@@ -343,12 +404,8 @@ final class DynamicAuthService: ObservableObject {
     }
 
     private func refreshSecurityFlags() {
-        guard let sdk else { return }
-        needsDeviceRegistration = sdk.deviceRegistration.isDeviceRegistrationRequired
-        Task {
-            let required = (try? await sdk.stepUpAuth.isStepUpRequired(scope: Self.stepUpScope)) ?? false
-            self.needsStepUp = required
-        }
+        needsDeviceRegistration = false
+        needsStepUp = false
     }
 
     private func requireSDK() throws -> DynamicSDK {
@@ -360,21 +417,43 @@ final class DynamicAuthService: ObservableObject {
 }
 
 private enum E164Phone {
+    private static let prefixes: [(code: String, iso2: String)] = [
+        ("1", "US"), ("7", "RU"), ("20", "EG"), ("27", "ZA"), ("30", "GR"), ("31", "NL"),
+        ("32", "BE"), ("33", "FR"), ("34", "ES"), ("36", "HU"), ("39", "IT"), ("40", "RO"),
+        ("41", "CH"), ("43", "AT"), ("44", "GB"), ("45", "DK"), ("46", "SE"), ("47", "NO"),
+        ("48", "PL"), ("49", "DE"), ("51", "PE"), ("52", "MX"), ("53", "CU"), ("54", "AR"),
+        ("55", "BR"), ("56", "CL"), ("57", "CO"), ("58", "VE"), ("60", "MY"), ("61", "AU"),
+        ("62", "ID"), ("63", "PH"), ("64", "NZ"), ("65", "SG"), ("66", "TH"), ("81", "JP"),
+        ("82", "KR"), ("84", "VN"), ("86", "CN"), ("90", "TR"), ("91", "IN"), ("92", "PK"),
+        ("93", "AF"), ("94", "LK"), ("95", "MM"), ("98", "IR"), ("212", "MA"), ("213", "DZ"),
+        ("216", "TN"), ("218", "LY"), ("220", "GM"), ("234", "NG"), ("254", "KE"), ("255", "TZ"),
+        ("256", "UG"), ("351", "PT"), ("352", "LU"), ("353", "IE"), ("354", "IS"), ("358", "FI"),
+        ("370", "LT"), ("371", "LV"), ("372", "EE"), ("380", "UA"), ("381", "RS"), ("385", "HR"),
+        ("386", "SI"), ("420", "CZ"), ("421", "SK"), ("852", "HK"), ("853", "MO"), ("855", "KH"),
+        ("856", "LA"), ("880", "BD"), ("886", "TW"), ("960", "MV"), ("961", "LB"), ("962", "JO"),
+        ("963", "SY"), ("964", "IQ"), ("965", "KW"), ("966", "SA"), ("971", "AE"), ("972", "IL"),
+        ("973", "BH"), ("974", "QA"), ("975", "BT"), ("976", "MN"), ("977", "NP"), ("992", "TJ"),
+        ("993", "TM"), ("994", "AZ"), ("995", "GE"), ("996", "KG"), ("998", "UZ"),
+    ]
+
     static func data(from raw: String) throws -> PhoneData {
-        var digits = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var digits = LoginPhone.normalizedE164(raw)
         if digits.hasPrefix("+") {
             digits = String(digits.dropFirst())
         }
         digits = digits.filter(\.isNumber)
-        if digits.hasPrefix("1"), digits.count == 11 {
-            return PhoneData(dialCode: "+1", iso2: "US", phone: String(digits.dropFirst()))
-        }
-        if digits.hasPrefix("44"), digits.count >= 11 {
-            return PhoneData(dialCode: "+44", iso2: "GB", phone: String(digits.dropFirst(2)))
-        }
-        guard digits.count >= 8 else {
+        guard digits.count >= 11 else {
             throw DynamicAuthHTTPError(status: 422, detail: "That phone number looks incomplete.")
         }
-        return PhoneData(dialCode: "+1", iso2: "US", phone: digits)
+        let match = prefixes
+            .sorted { $0.code.count > $1.code.count }
+            .first { digits.hasPrefix($0.code) }
+        let code = match?.code ?? "1"
+        let iso2 = match?.iso2 ?? "US"
+        let national = String(digits.dropFirst(code.count))
+        guard national.count >= 6 else {
+            throw DynamicAuthHTTPError(status: 422, detail: "That phone number looks incomplete.")
+        }
+        return PhoneData(dialCode: "+" + code, iso2: iso2, phone: national)
     }
 }

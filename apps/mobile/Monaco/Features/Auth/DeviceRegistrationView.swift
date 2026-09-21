@@ -10,7 +10,7 @@ struct DeviceRegistrationView: View {
             Text("Confirm this device")
                 .font(.title2.bold())
                 .foregroundStyle(MonacoTheme.primaryText)
-            Text("We’ll text or email a code so this phone can stay signed in.")
+            Text(auth.loginChannel.deviceRegistrationCopy)
                 .authSecondaryCaption()
 
             TextField(
@@ -23,6 +23,12 @@ struct DeviceRegistrationView: View {
             .focused($focused)
             .authTextFieldStyle()
             .accessibilityIdentifier("deviceRegistrationCodeField")
+
+            if let message = auth.securityOTPMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(MonacoTheme.destructive)
+            }
 
             Button("Send code") {
                 Task { await auth.sendDeviceRegistrationCode() }
@@ -39,9 +45,6 @@ struct DeviceRegistrationView: View {
         }
         .padding(.horizontal, MonacoTheme.Space.gutter)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .task {
-            await auth.sendDeviceRegistrationCode()
-            focused = true
-        }
+        .onAppear { focused = true }
     }
 }

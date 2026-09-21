@@ -10,6 +10,12 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
 
     public var id: String { symbol }
 
+    /// Picker rows use this, not a live DEX probe. A listed token is buyable even when
+    /// `routable` was cached false from an old probe.
+    public var canBuy: Bool {
+        routable || !tokenAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     public init(
         symbol: String,
         name: String,

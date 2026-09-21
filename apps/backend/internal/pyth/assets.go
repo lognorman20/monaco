@@ -7,7 +7,6 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 )
@@ -42,6 +41,7 @@ type AssetChartSeries struct {
 // AssetPriceClient fetches standalone marks and chart history.
 type AssetPriceClient interface {
 	AssetMark(ctx context.Context, symbol string) (AssetMark, error)
+	AssetMarks(ctx context.Context, symbols []string) (map[string]AssetMark, error)
 	ChartSeries(ctx context.Context, symbol string, chartRange ChartRange) (AssetChartSeries, error)
 }
 
@@ -63,9 +63,25 @@ func (c *HermesClient) AssetMark(ctx context.Context, symbol string) (AssetMark,
 	return mark, nil
 }
 
+func (c *HermesClient) AssetMarks(ctx context.Context, symbols []string) (map[string]AssetMark, error) {
+	out := make(map[string]AssetMark, len(symbols))
+	for _, symbol := range symbols {
+		mark, err := c.AssetMark(ctx, symbol)
+		if err != nil || mark.PriceUsdcMicros <= 0 {
+			continue
+		}
+		out[symbol] = mark
+	}
+	return out, nil
+}
+
 func (c *HermesClient) ChartSeries(ctx context.Context, symbol string, chartRange ChartRange) (AssetChartSeries, error) {
+	if equityFeedsDenied() {
+		return AssetChartSeries{EmptyReason: "price history unavailable"}, nil
+	}
 	feedID, _, err := c.resolveFeedSession(ctx, symbol)
 	if err != nil {
+		markEquityDenied(err)
 		return AssetChartSeries{EmptyReason: "price history unavailable"}, nil
 	}
 
@@ -74,6 +90,9 @@ func (c *HermesClient) ChartSeries(ctx context.Context, symbol string, chartRang
 	for _, ts := range samples {
 		price, err := c.fetchHistoricalPrice(ctx, feedID, ts)
 		if err != nil {
+			if markEquityDenied(err) {
+				break
+			}
 			continue
 		}
 		points = append(points, ChartPoint{
@@ -81,7 +100,18 @@ func (c *HermesClient) ChartSeries(ctx context.Context, symbol string, chartRang
 			PriceUsdcMicros: price,
 		})
 	}
-	if len(points) == 0 {
+	if len(points) < 2 && !equityFeedsDenied() {
+		if latest, err := c.fetchLatestPrice(ctx, feedID); err == nil {
+			if price, err := priceToUSDCMicros(latest.Price.Price, latest.Price.Expo); err == nil && price > 0 {
+				now := time.Now().UTC().Unix()
+				points = []ChartPoint{
+					{Timestamp: now - 3600, PriceUsdcMicros: price},
+					{Timestamp: now, PriceUsdcMicros: price},
+				}
+			}
+		}
+	}
+	if len(points) < 2 {
 		return AssetChartSeries{EmptyReason: "price history unavailable"}, nil
 	}
 	return AssetChartSeries{Points: points}, nil
@@ -94,15 +124,20 @@ func chartSampleTimes(chartRange ChartRange, now time.Time) []time.Time {
 	case ChartRange1M:
 		return dailySamples(now, 30)
 	default:
-		return hourlySamples(now, 24)
+		return hourlySamples(now, 12)
 	}
 }
 
 func hourlySamples(now time.Time, hours int) []time.Time {
-	out := make([]time.Time, 0, hours)
-	start := now.Add(-time.Duration(hours) * time.Hour).Truncate(time.Hour)
-	for i := 0; i <= hours; i++ {
-		out = append(out, start.Add(time.Duration(i)*time.Hour))
+	out := make([]time.Time, 0, hours+1)
+	step := time.Hour
+	if hours <= 12 {
+		step = 2 * time.Hour
+	}
+	span := time.Duration(hours) * step
+	start := now.Add(-span).Truncate(step)
+	for t := start; !t.After(now); t = t.Add(step) {
+		out = append(out, t)
 	}
 	return out
 }
@@ -134,7 +169,7 @@ func formatDecimalRatio(ratio float64) string {
 }
 
 func (c *HermesClient) fetchHistoricalPrice(ctx context.Context, feedID string, at time.Time) (int64, error) {
-	endpoint := fmt.Sprintf("%s/v2/updates/price/%d?ids[]=%s", c.baseURL, at.Unix(), url.QueryEscape(feedID))
+	endpoint := c.baseURL + hermesPricePath("historical", feedID, at.Unix())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return 0, err
@@ -154,7 +189,9 @@ func (c *HermesClient) fetchHistoricalPrice(ctx context.Context, feedID string, 
 		return 0, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return 0, hermesRequestError("pyth historical price", resp.StatusCode, body)
+		histErr := hermesRequestError("pyth historical price", resp.StatusCode, body)
+		markEquityDenied(histErr)
+		return 0, histErr
 	}
 
 	var payload latestPriceResponse

@@ -349,7 +349,7 @@ func (h *HomeService) groupTreasuryUSDC(ctx context.Context, groupID string, net
 		return 0, err
 	}
 	if isFaker {
-		// Faker scale club (#153): dummy treasury, display NAV from the seeded ledger. No Privy.
+		// Faker scale club (#153): dummy treasury, display NAV from the seeded ledger. No Dynamic wallet.
 		return h.store.FakerLedgerUSDC(ctx, groupID)
 	}
 
@@ -360,7 +360,8 @@ func (h *HomeService) groupTreasuryUSDC(ctx context.Context, groupID string, net
 	if found {
 		balance, err := h.wallets.TreasuryUSDCBalance(ctx, treasury.Address)
 		if err != nil {
-			return 0, fmt.Errorf("treasury usdc balance: %w", err)
+			slog.Warn("treasury usdc balance failed; using net usdc in", "group_id", groupID, "err", err)
+			return netUsdcIn, nil
 		}
 		return balance, nil
 	}
@@ -373,7 +374,8 @@ func (h *HomeService) creditUncreditedForGroups(ctx context.Context, groupIDs []
 	}
 	for _, groupID := range groupIDs {
 		if _, err := h.deposits.CreditUncreditedTreasuryUSDC(ctx, groupID); err != nil {
-			return fmt.Errorf("credit uncredited treasury usdc for group %s: %w", groupID, err)
+			slog.Warn("credit uncredited treasury skipped", "group_id", groupID, "err", err)
+			continue
 		}
 	}
 	return nil

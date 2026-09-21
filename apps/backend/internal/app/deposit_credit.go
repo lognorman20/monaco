@@ -33,7 +33,7 @@ func (d *DepositService) shareCreditForSweep(ctx context.Context, tx *sql.Tx, gr
 		return swept, nil
 	}
 
-	// Post-sweep Privy balance includes inbound USDC; NAV for minting must use pre-credit treasury.
+	// Post-sweep on-chain balance includes inbound USDC; NAV for minting must use pre-credit treasury.
 	treasuryUsdcPreCredit := treasuryUsdc - swept
 	if treasuryUsdcPreCredit < 0 {
 		treasuryUsdcPreCredit = 0

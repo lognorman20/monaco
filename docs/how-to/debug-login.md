@@ -24,29 +24,28 @@ one of the items below.
 
 3. **Does `.env.keys` decrypt `.env.local`?**
    - `.env.local` is committed encrypted (dotenvx); `.env.keys` is the
-     gitignored private key file that decrypts it. Without it, Privy
+     gitignored private key file that decrypts it. Without it, Dynamic
      credentials and `DATABASE_URL` silently resolve to nothing.
-   - Quick check: `dotenvx get PRIVY_APP_ID -f .env.local` should print a value,
+   - Quick check: `dotenvx get DYNAMIC_ENVIRONMENT_ID -f .env.local` should print a value,
      not an error.
 
-4. **Did `scripts/ensure-ios-privy-config.sh` regenerate the iOS Privy config after you pulled?**
-   - It writes `apps/mobile/Config/Privy.local.xcconfig` and
-     `Privy.local.Info.plist` from `.env.local`. Both are gitignored, so a
-     fresh pull (or a change to `PRIVY_APP_ID`/`PRIVY_APP_CLIENT_ID` in
+4. **Did `scripts/ensure-ios-dynamic-config.sh` regenerate the iOS Dynamic config after you pulled?**
+   - It writes `apps/mobile/Config/Dynamic.local.xcconfig` and
+     `Dynamic.local.Info.plist` from `.env.local`. Both are gitignored, so a
+     fresh pull (or a change to `DYNAMIC_ENVIRONMENT_ID` in
      `.env.local`) leaves them stale until you re-run it:
      ```
-     dotenvx run -q -f .env.local -- bash scripts/ensure-ios-privy-config.sh
+     dotenvx run -q -f .env.local -- bash scripts/ensure-ios-dynamic-config.sh
      ```
    - `just run mobile` runs this for you before launching the simulator — if
      you build straight from Xcode instead, run it manually first.
 
-5. **Do the app's Privy credentials match the backend's?**
-   - `PRIVY_APP_ID` / `PRIVY_APP_CLIENT_ID` in `.env.local` (what the app
-     builds with) must point at the same Privy app as the backend's
-     `PRIVY_APP_ID` / `PRIVY_APP_SECRET` / verification key.
+5. **Do the app's Dynamic credentials match the backend's?**
+   - `DYNAMIC_ENVIRONMENT_ID` in `.env.local` (what the app
+     builds with) must be the same environment the backend verifies JWTs for.
    - A mismatch here is the classic "can't log in" cause: the app authenticates
-     against Privy fine, but `POST /v1/auth/session` then 401s because the
-     backend can't verify a token minted for a different Privy app. This now
+     against Dynamic fine, but `POST /v1/auth/session` then 401s because the
+     backend can't verify a token minted for a different environment. This now
      surfaces on the login screen as "We couldn't verify your sign-in. Try
      again." instead of silently bouncing you back — if you see that message,
      start here.
@@ -63,7 +62,7 @@ one of the items below.
      - `grep 'boot failed' .logs/<timestamp>/backend.log` — startup/migration
        problems.
      - `grep 'invalid_token' .logs/<timestamp>/backend.log` — the backend
-       rejected the access token (expired, wrong Privy app, or clock skew).
+       rejected the access token (expired, wrong Dynamic environment, or clock skew).
 
 7. **Xcode confused after a launch-screen or storyboard change?**
    - `just reset mobile` does an `xcodebuild clean` targeting the resolved
@@ -79,7 +78,7 @@ The session gate maps failures onto three user-facing messages (see
 | --- | --- | --- |
 | Can't connect at all (`URLError`) | "Can't reach Monaco. Is the server running?" | Backend not running / wrong host / wrong port. See checklist item 1. |
 | Backend returned 5xx | "Monaco's server hit a problem. Try again in a moment." | Backend crash, unhandled panic, or a downstream dependency (DB, RPC) is down. Check `backend.log`. |
-| Backend returned 401 opening the session | (shown on the **login** screen, after signing out) "We couldn't verify your sign-in. Try again." | Privy app-id / verification-key mismatch between the app build and the backend env. See checklist items 4–5. |
+| Backend returned 401 opening the session | (shown on the **login** screen, after signing out) "We couldn't verify your sign-in. Try again." | Dynamic environment mismatch between the app build and the backend env. See checklist items 4–5. |
 
 In DEBUG builds only, a small monospaced line under the message on the session
 gate adds the exact status code / `URLError` code and the API base URL the app
@@ -87,18 +86,18 @@ is hitting, so you don't have to guess.
 
 ## Staying signed in
 
-Privy access tokens last about an hour. The app never signs a user out just
+Dynamic access tokens last about an hour. The app never signs a user out just
 because one expired:
 
 - **At launch** a returning user sees a splash (`sessionRestoringView`) while
-  Privy restores the saved session — not the login form. If Privy can't be
+  Dynamic restores the saved session — not the login form. If Dynamic can't be
   reached, they get "Can't sign you in yet" with **Try again** (it also retries
   when the app comes back to the foreground). They stay signed in.
 - **While the app is open** every request goes through `MonacoHTTPTransport`
   (`packages/mobile-core/Sources/MonacoCore/Networking`). On a 401 it asks
-  `PrivyAuthService.refreshedAccessToken(replacing:)` for a fresh token and
+  `DynamicAuthService.refreshedAccessToken(replacing:)` for a fresh token and
   retries the request once. Concurrent 401s share one refresh.
-- **Only a real rejection signs out**: Privy reports no session, or the backend
+- **Only a real rejection signs out**: Dynamic reports no session, or the backend
   still answers 401 with a freshly minted token. The login screen then says
   "Your session expired. Sign in again." (or the verification message above for
   `POST /v1/auth/session`). A refresh that fails because the device is offline
@@ -114,9 +113,9 @@ If a user reports being bounced to login, check the `session` log category for
 | --- | --- | --- |
 | Wrong or expired code | "That code didn't work. Check it, or send a new one." | stays, retry or **Send a new code** |
 | Offline | "No connection. Check your internet and try again." | stays |
-| Privy rate limit (429) | "Too many attempts. Wait a minute, then try again." | back to **Send code** |
-| Anything else | "Couldn't send the code…" / "Couldn't sign you in…" plus Privy's own detail | back to **Send code** |
+| Dynamic rate limit (429) | "Too many attempts. Wait a minute, then try again." | back to **Send code** |
+| Anything else | "Couldn't send the code…" / "Couldn't sign you in…" plus Dynamic's own detail | back to **Send code** |
 
-The mapping lives in `PrivyAuthService.loginFailure(from:step:)` and
-`LoginFailureCopy` (MonacoCore). The raw Privy error is logged under the
+The mapping lives in `DynamicAuthService.loginFailure(from:step:)` and
+`LoginFailureCopy` (MonacoCore). The raw Dynamic error is logged under the
 `session` category.

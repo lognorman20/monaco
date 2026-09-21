@@ -24,6 +24,12 @@ struct StepUpAuthView: View {
             .authTextFieldStyle()
             .accessibilityIdentifier("stepUpCodeField")
 
+            if let message = auth.securityOTPMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(MonacoTheme.destructive)
+            }
+
             Button("Send code") {
                 Task { await auth.sendStepUpCode() }
             }
@@ -39,9 +45,6 @@ struct StepUpAuthView: View {
         }
         .padding(.horizontal, MonacoTheme.Space.gutter)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .task {
-            await auth.sendStepUpCode()
-            focused = true
-        }
+        .onAppear { focused = true }
     }
 }

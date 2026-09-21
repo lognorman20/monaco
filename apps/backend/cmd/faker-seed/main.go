@@ -9,8 +9,8 @@
 // pending/failed rows. -proposal-id adds two ghost comments to a real member's open proposal.
 // FAKER_PHOTO_BASE_URL (optional) gives the three ghosts profile photos at <base>/<slug>.jpg.
 //
-// It refuses non-local DATABASE_URLs, applies migrations, and never calls Privy, Solana RPC, or
-// Jupiter. PYTH_API_KEY (optional) anchors seeded cost bases near live marks.
+// It refuses non-local DATABASE_URLs, applies migrations, and never calls Dynamic, Base RPC, or
+// Kyber. PYTH_API_KEY (optional) anchors seeded cost bases near live marks.
 // Unlike POST /v1/dev/faker it has no session: whoever runs it owns the local database, so the
 // mixed profile only checks that the group exists and is real.
 package main

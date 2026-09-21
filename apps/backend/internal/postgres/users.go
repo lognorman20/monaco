@@ -30,8 +30,8 @@ type User struct {
 }
 
 // UpsertUser inserts a user keyed by dynamic_user_id or returns the existing row.
-func (s *Store) UpsertUser(ctx context.Context, privyUserID string, displayName string) (User, error) {
-	if privyUserID == "" {
+func (s *Store) UpsertUser(ctx context.Context, dynamicUserID string, displayName string) (User, error) {
+	if dynamicUserID == "" {
 		return User{}, fmt.Errorf("dynamic_user_id is required")
 	}
 
@@ -48,7 +48,7 @@ ON CONFLICT (dynamic_user_id) DO UPDATE
 RETURNING id, dynamic_user_id, display_name, profile_photo_url, created_at`
 
 	var user User
-	err := s.db.QueryRowContext(ctx, upsertSQL, privyUserID, displayNameArg).Scan(
+	err := s.db.QueryRowContext(ctx, upsertSQL, dynamicUserID, displayNameArg).Scan(
 		&user.ID,
 		&user.DynamicUserID,
 		&user.DisplayName,
@@ -62,9 +62,9 @@ RETURNING id, dynamic_user_id, display_name, profile_photo_url, created_at`
 	return user, nil
 }
 
-// GetUserByDynamicUserID returns the user for privyUserID, or false if none exists.
-func (s *Store) GetUserByDynamicUserID(ctx context.Context, privyUserID string) (User, bool, error) {
-	if privyUserID == "" {
+// GetUserByDynamicUserID returns the user for dynamicUserID, or false if none exists.
+func (s *Store) GetUserByDynamicUserID(ctx context.Context, dynamicUserID string) (User, bool, error) {
+	if dynamicUserID == "" {
 		return User{}, false, fmt.Errorf("dynamic_user_id is required")
 	}
 
@@ -74,7 +74,7 @@ FROM users
 WHERE dynamic_user_id = $1`
 
 	var user User
-	err := s.db.QueryRowContext(ctx, selectSQL, privyUserID).Scan(
+	err := s.db.QueryRowContext(ctx, selectSQL, dynamicUserID).Scan(
 		&user.ID,
 		&user.DynamicUserID,
 		&user.DisplayName,

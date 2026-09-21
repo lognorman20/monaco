@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	// Post–Pyth Core upgrade Hermes host (drop-in for hermes.marks.network).
-	defaultHermesBaseURL = "https://marks.dourolabs.app/hermes"
+	// Public Hermes host (charts). Catalog marks use Chainlink.
+	defaultHermesBaseURL = "https://hermes.pyth.network"
 	defaultTimeout       = 15 * time.Second
 )
 
@@ -204,8 +204,24 @@ func (c *HermesClient) fetchPriceFeedBySymbol(ctx context.Context, symbol string
 	return feeds[0], nil
 }
 
+func hermesPricePath(kind string, feedID string, publishTime int64) string {
+	id := url.QueryEscape(normalizeHermesFeedID(feedID))
+	if kind == "latest" {
+		return fmt.Sprintf("/v2/updates/price/latest?ids[]=%s&parsed=true", id)
+	}
+	return fmt.Sprintf("/v2/updates/price/%d?ids[]=%s&parsed=true", publishTime, id)
+}
+
+func normalizeHermesFeedID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" || strings.HasPrefix(id, "0x") {
+		return id
+	}
+	return "0x" + id
+}
+
 func (c *HermesClient) fetchLatestPrice(ctx context.Context, feedID string) (parsedPriceUpdate, error) {
-	endpoint := fmt.Sprintf("%s/v2/updates/price/latest?ids[]=%s", c.baseURL, url.QueryEscape(feedID))
+	endpoint := c.baseURL + hermesPricePath("latest", feedID, 0)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return parsedPriceUpdate{}, err
@@ -230,6 +246,7 @@ func (c *HermesClient) fetchLatestPrice(ctx context.Context, feedID string) (par
 	if resp.StatusCode != http.StatusOK {
 		priceErr := hermesRequestError("pyth latest price", resp.StatusCode, body)
 		logLatestPrice(feedID, priceErr)
+		markEquityDenied(priceErr)
 		return parsedPriceUpdate{}, priceErr
 	}
 

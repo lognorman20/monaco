@@ -83,30 +83,41 @@ ORDER BY w.created_at ASC`
 }
 
 // InsertMemberWallet persists a new member wallet row for userID.
-func (s *Store) InsertMemberWallet(ctx context.Context, userID string, privyWalletID string, solanaAddress string) (MemberWallet, error) {
+func (s *Store) InsertMemberWallet(ctx context.Context, userID string, walletID string, address string) (MemberWallet, error) {
 	if userID == "" {
 		return MemberWallet{}, fmt.Errorf("user_id is required")
 	}
-	if privyWalletID == "" {
+	if walletID == "" {
 		return MemberWallet{}, fmt.Errorf("wallet_id is required")
 	}
-	if solanaAddress == "" {
+	if address == "" {
 		return MemberWallet{}, fmt.Errorf("address is required")
 	}
 
 	const insertSQL = `
 INSERT INTO member_wallets (user_id, wallet_id, address)
 VALUES ($1, $2, $3)
+ON CONFLICT (user_id) DO NOTHING
 RETURNING id, user_id, wallet_id, address, created_at`
 
 	var wallet MemberWallet
-	err := s.db.QueryRowContext(ctx, insertSQL, userID, privyWalletID, solanaAddress).Scan(
+	err := s.db.QueryRowContext(ctx, insertSQL, userID, walletID, address).Scan(
 		&wallet.ID,
 		&wallet.UserID,
 		&wallet.WalletID,
 		&wallet.Address,
 		&wallet.CreatedAt,
 	)
+	if errors.Is(err, sql.ErrNoRows) {
+		existing, ok, getErr := s.GetMemberWalletByUserID(ctx, userID)
+		if getErr != nil {
+			return MemberWallet{}, getErr
+		}
+		if !ok {
+			return MemberWallet{}, fmt.Errorf("insert member wallet: conflict with no row")
+		}
+		return existing, nil
+	}
 	if err != nil {
 		return MemberWallet{}, fmt.Errorf("insert member wallet: %w", err)
 	}

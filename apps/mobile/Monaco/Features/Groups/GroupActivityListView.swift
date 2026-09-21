@@ -5,7 +5,7 @@ struct GroupActivityListView: View {
     @ObservedObject var auth: DynamicAuthService
     let items: [GroupActivityItemDTO]
     let retryingTransactionIDs: Set<String>
-    let onRetry: (GroupActivityItemDTO) -> Void
+    let onRetry: (GroupActivityItemDTO) async -> RetryTransactionResponse?
 
     var body: some View {
         ScrollView {

@@ -168,19 +168,17 @@ func (c *signerClient) eip3009Relay(ctx context.Context, from, to string, amount
 }
 
 func (c *signerClient) memberByAddress(ctx context.Context, addr string) (StoredWallet, error) {
-	// Tests store a single member; scan by iterating is not on the interface.
-	// Look up via Ensure paths: store is memory keyed by user. Tests insert then sweep using that address.
-	_ = ctx
-	if mem, ok := c.store.(*memoryStore); ok {
-		mem.mu.Lock()
-		defer mem.mu.Unlock()
-		for _, w := range mem.members {
-			if strings.EqualFold(w.Address, addr) {
-				return w, nil
-			}
-		}
+	if c.store == nil {
+		return StoredWallet{}, fmt.Errorf("member wallet %s not found", addr)
 	}
-	return StoredWallet{}, fmt.Errorf("member wallet %s not found", addr)
+	row, ok, err := c.store.GetMemberWalletByAddress(ctx, addr)
+	if err != nil {
+		return StoredWallet{}, err
+	}
+	if !ok {
+		return StoredWallet{}, fmt.Errorf("member wallet %s not found", addr)
+	}
+	return row, nil
 }
 
 func (c *signerClient) PayUSDC(ctx context.Context, req PayUSDCRequest) (PayUSDCResult, error) {
@@ -236,13 +234,13 @@ func (c *signerClient) treasuryRow(ctx context.Context, treasury TreasuryRef) (S
 			return row, nil
 		}
 	}
-	if mem, ok := c.store.(*memoryStore); ok {
-		mem.mu.Lock()
-		defer mem.mu.Unlock()
-		for _, t := range mem.treasuries {
-			if strings.EqualFold(t.Address, treasury.Address) {
-				return t, nil
-			}
+	if treasury.Address != "" {
+		row, ok, err := c.store.GetTreasuryByAddress(ctx, treasury.Address)
+		if err != nil {
+			return StoredTreasury{}, err
+		}
+		if ok {
+			return row, nil
 		}
 	}
 	return StoredTreasury{}, fmt.Errorf("treasury not found")
@@ -267,8 +265,12 @@ func (c *signerClient) ensureTreasuryGas(ctx context.Context, treasury TreasuryR
 	if err != nil {
 		return err
 	}
-	if _, err := c.chain.Receipt(ctx, hash); err != nil {
+	receipt, err := evm.WaitReceipt(ctx, c.chain, hash)
+	if err != nil {
 		return err
+	}
+	if receipt.Status != 1 {
+		return fmt.Errorf("treasury gas top-up failed")
 	}
 	if f, ok := c.chain.(interface {
 		SetETHBalance(string, *big.Int)
@@ -293,5 +295,12 @@ func splitSignature(sig string) (uint8, [32]byte, [32]byte, error) {
 	}
 	copy(r[:], b[0:32])
 	copy(s[:], b[32:64])
-	return b[64], r, s, nil
+	v := b[64]
+	if v == 0 || v == 1 {
+		v += 27
+	}
+	if v != 27 && v != 28 {
+		return 0, r, s, fmt.Errorf("invalid signature v %d", v)
+	}
+	return v, r, s, nil
 }

@@ -5,7 +5,7 @@ import SwiftUI
 struct TransactionDetailView: View {
     @ObservedObject var auth: DynamicAuthService
     let activityItem: GroupActivityItemDTO
-    let onRetry: ((GroupActivityItemDTO) -> Void)?
+    let onRetry: ((GroupActivityItemDTO) async -> RetryTransactionResponse?)?
     let isRetrying: Bool
 
     private let apiClient = MonacoAPIClient()
@@ -14,6 +14,7 @@ struct TransactionDetailView: View {
     @State private var deposit: GetDepositResponse?
     @State private var errorMessage: String?
     @State private var isLoading = true
+    @State private var loadedTransactionId = ""
 
     var body: some View {
         Group {
@@ -21,7 +22,7 @@ struct TransactionDetailView: View {
                 TransactionReceiptView(
                     receipt: receipt,
                     isRetrying: isRetrying,
-                    onRetry: canRetry ? { onRetry?(activityItem) } : nil
+                    onRetry: canRetry ? { Task { await performRetry() } } : nil
                 )
             } else if let errorMessage {
                 VStack(spacing: 16) {
@@ -58,7 +59,11 @@ struct TransactionDetailView: View {
     }
 
     private var loadTaskID: String {
-        "\(activityItem.id)-\(activityItem.kind)-\(auth.accessToken ?? "")"
+        "\(detailTransactionId)-\(activityItem.kind)-\(auth.accessToken ?? "")"
+    }
+
+    private var detailTransactionId: String {
+        loadedTransactionId.isEmpty ? activityItem.id : loadedTransactionId
     }
 
     private var isDeposit: Bool {
@@ -66,7 +71,12 @@ struct TransactionDetailView: View {
     }
 
     private var canRetry: Bool {
-        onRetry != nil && GroupActivityRules.canRetry(activityItem)
+        guard onRetry != nil else { return false }
+        if let transaction {
+            return transaction.status.lowercased() == "failed"
+                && ["buy", "sell"].contains(transaction.action.lowercased())
+        }
+        return GroupActivityRules.canRetry(activityItem)
     }
 
     private func loadDetail() async {
@@ -84,12 +94,20 @@ struct TransactionDetailView: View {
             if isDeposit {
                 deposit = try await apiClient.getDeposit(accessToken: token, depositId: activityItem.id)
             } else {
-                transaction = try await apiClient.getTransactionDetail(accessToken: token, transactionId: activityItem.id)
+                transaction = try await apiClient.getTransactionDetail(accessToken: token, transactionId: detailTransactionId)
             }
         } catch is CancellationError {
             return
         } catch {
             errorMessage = "Couldn't load this. Try again"
+        }
+    }
+
+    private func performRetry() async {
+        guard let onRetry else { return }
+        if let result = await onRetry(activityItem) {
+            loadedTransactionId = result.transactionId
+            await loadDetail()
         }
     }
 }

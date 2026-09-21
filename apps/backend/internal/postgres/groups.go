@@ -21,7 +21,7 @@ type Group struct {
 	CreatorUserID string
 	CreatedAt     time.Time
 	// IsFaker marks a wholly fake demo club (#153). Faker groups are read-only
-	// spectator clubs and are skipped by every chain/Privy/Jupiter path.
+	// spectator clubs and are skipped by every chain/Dynamic/Kyber path.
 	IsFaker bool
 }
 
@@ -253,4 +253,21 @@ func (s *Store) GetGroupRulesTx(ctx context.Context, tx *sql.Tx, groupID string)
 		return domain.GroupRules{}, false, err
 	}
 	return rules, true, nil
+}
+
+// DeleteUnprovisionedGroup removes a group that never got a treasury row.
+func (s *Store) DeleteUnprovisionedGroup(ctx context.Context, groupID string) error {
+	if groupID == "" {
+		return fmt.Errorf("group_id is required")
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM group_voters WHERE group_id = $1`, groupID); err != nil {
+		return fmt.Errorf("delete unprovisioned group voters: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM group_members WHERE group_id = $1`, groupID); err != nil {
+		return fmt.Errorf("delete unprovisioned group members: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM groups WHERE id = $1`, groupID); err != nil {
+		return fmt.Errorf("delete unprovisioned group: %w", err)
+	}
+	return nil
 }

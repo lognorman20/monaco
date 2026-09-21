@@ -4,7 +4,7 @@ import SwiftUI
 struct ActivityDetailDestination: View {
     @ObservedObject var auth: DynamicAuthService
     let activityItem: GroupActivityItemDTO
-    let onRetry: ((GroupActivityItemDTO) -> Void)?
+    let onRetry: ((GroupActivityItemDTO) async -> RetryTransactionResponse?)?
     let isRetrying: Bool
 
     @State private var useProposalDetail = false

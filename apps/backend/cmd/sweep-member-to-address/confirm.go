@@ -25,7 +25,7 @@ func confirmSweep(in io.Reader, out io.Writer, opts confirmOpts) error {
 		fmt.Fprintln(out, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 		fmt.Fprintln(out, "DANGER: ops USDC sweep. Can empty live wallets.")
 		fmt.Fprintln(out, "Can break prod balances, share credits, pending deposits.")
-		fmt.Fprintln(out, "Use only if you know DATABASE_URL / Privy app + dest are correct.")
+		fmt.Fprintln(out, "Use only if you know DATABASE_URL and dest are correct.")
 		fmt.Fprintln(out, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 	}
 	fmt.Fprintf(out, "DATABASE_URL=%s\n", redactDatabaseURL(opts.databaseURL))

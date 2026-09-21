@@ -51,6 +51,44 @@ func TestKyber_QuoteBuy_noRoute_returnsRoutableFalse(t *testing.T) {
 	}
 }
 
+func TestKyber_BuildSwap_httpError_returnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code":1}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := newKyberClient(srv.Client(), "monaco", srv.URL)
+	_, err := c.BuildSwap(t.Context(), Quote{RouteSummary: json.RawMessage(`{}`)}, "0xsender", "0xrecip")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestKyber_BuildSwap_usesTwoPercentSlippage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body kyberBuildRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.SlippageTolerance != kyberSlippageBps {
+			t.Fatalf("slippage = %d, want %d", body.SlippageTolerance, kyberSlippageBps)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0,
+			"data": map[string]any{
+				"data":          "0xdeadbeef",
+				"routerAddress": "0xabc0000000000000000000000000000000000001",
+				"amountOutMin":  "9",
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	c := newKyberClient(srv.Client(), "monaco", srv.URL)
+	if _, err := c.BuildSwap(t.Context(), Quote{RouteSummary: json.RawMessage(`{}`)}, "0xsender", "0xrecip"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestKyber_BuildSwap_returnsRouterAndCalldata(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/route/build") {

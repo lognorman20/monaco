@@ -9,12 +9,10 @@ struct AuthGateView: View {
             if Config.dynamic.isConfigured {
                 if hasLoginMethod {
                     if isAuthenticated {
-                        if auth.needsDeviceRegistration {
-                            DeviceRegistrationView(auth: auth)
-                        } else if auth.needsStepUp {
-                            StepUpAuthView(auth: auth)
-                        } else {
+                        if auth.accessToken != nil {
                             SessionGateView(auth: auth)
+                        } else {
+                            restoringView
                         }
                     } else if auth.phase == .restoring {
                         restoringView
@@ -72,7 +70,7 @@ struct AuthGateView: View {
 
     private var isAuthenticated: Bool {
         if case .authenticated = auth.phase {
-            return auth.accessToken != nil
+            return true
         }
         return false
     }

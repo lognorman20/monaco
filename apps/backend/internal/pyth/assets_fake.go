@@ -81,6 +81,18 @@ func (f *fakeAssetPriceClient) AssetMark(ctx context.Context, symbol string) (As
 	return mark, nil
 }
 
+func (f *fakeAssetPriceClient) AssetMarks(ctx context.Context, symbols []string) (map[string]AssetMark, error) {
+	out := make(map[string]AssetMark, len(symbols))
+	for _, symbol := range symbols {
+		mark, err := f.AssetMark(ctx, symbol)
+		if err != nil || mark.PriceUsdcMicros <= 0 {
+			continue
+		}
+		out[symbol] = mark
+	}
+	return out, nil
+}
+
 func (f *fakeAssetPriceClient) ChartSeries(ctx context.Context, symbol string, chartRange ChartRange) (AssetChartSeries, error) {
 	_ = ctx
 	key := chartKey(symbol, chartRange)

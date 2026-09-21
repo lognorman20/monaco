@@ -48,7 +48,7 @@ func (s *AgentIntentService) SubmitAgentIntent(ctx context.Context, in SubmitAge
 	if in.AgentKey == "" {
 		return SubmitAgentIntentResult{}, ErrInvalidAgentAPIKey
 	}
-	// Faker scale clubs (#153) are read-only: no agent trading, and never a Privy treasury
+	// Faker scale clubs (#153) are read-only: no agent trading, and never a Dynamic treasury
 	// balance read for the snapshot below.
 	if err := rejectFakerGroup(ctx, s.store, in.GroupID); err != nil {
 		return SubmitAgentIntentResult{}, err

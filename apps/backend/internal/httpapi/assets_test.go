@@ -367,8 +367,8 @@ func TestGET_assets_symbol_quoteFail_marksNotRoutable(t *testing.T) {
 	if payload.Liquidity.Routable {
 		t.Fatal("quote fail must not invent a routable book")
 	}
-	if payload.Routable {
-		t.Fatal("top-level routable must stay false when the Jupiter probe fails")
+	if !payload.Routable {
+		t.Fatal("listed token stays buyable when the DEX probe fails")
 	}
 }
 

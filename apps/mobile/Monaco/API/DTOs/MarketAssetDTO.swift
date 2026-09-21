@@ -9,6 +9,10 @@ struct MarketAssetDTO: Codable, Equatable, Identifiable {
     let change24h: String?
 
     var id: String { symbol }
+
+    var canBuy: Bool {
+        routable || !tokenAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 }
 
 struct ListMarketAssetsResponse: Codable, Equatable {

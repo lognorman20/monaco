@@ -7,7 +7,7 @@ import (
 
 // Faker (#153) read helpers. Seeded demo rows are flagged with users.is_faker and
 // groups.is_faker. These helpers let product code keep faker rows away from every
-// Privy / Solana RPC / Jupiter path while still showing them on read surfaces.
+// Dynamic / Base RPC / Kyber path while still showing them on read surfaces.
 
 // ListRealGroupIDs returns ids of non-faker groups (the only groups with chain-backed treasuries).
 func (s *Store) ListRealGroupIDs(ctx context.Context) ([]string, error) {
@@ -116,7 +116,7 @@ ORDER BY gm.joined_at`
 
 // FakerLedgerUSDC derives a faker club's display treasury USDC from its own ledger:
 // net deposited − USDC spent on confirmed buys + USDC received from confirmed sells.
-// Faker treasuries are dummy rows, so this replaces the Privy/RPC balance read.
+// Faker treasuries are dummy rows, so this replaces the Dynamic/RPC balance read.
 // Returns an error for non-faker groups so real treasuries can never be mis-valued.
 func (s *Store) FakerLedgerUSDC(ctx context.Context, groupID string) (int64, error) {
 	if groupID == "" {

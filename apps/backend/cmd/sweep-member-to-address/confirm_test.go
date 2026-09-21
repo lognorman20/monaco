@@ -39,9 +39,9 @@ func TestConfirmSweep_dryRunSkipsAck(t *testing.T) {
 	err := confirmSweep(strings.NewReader(""), &out, confirmOpts{
 		dest:        "Dest111",
 		databaseURL: "postgres://u:p@localhost:54322/monaco",
-		sourceNote:  "privy app wallets (--all)",
+		sourceNote:  "database member wallets (--all)",
 		dryRun:      true,
-		sources:     []sweepSource{{kind: "privy", address: "Mem111"}},
+		sources:     []sweepSource{{kind: "member", address: "Mem111"}},
 	})
 	if err != nil {
 		t.Fatalf("confirm: %v", err)

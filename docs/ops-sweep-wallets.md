@@ -1,6 +1,6 @@
 # Ops: sweep USDC out of Dynamic wallets
 
-One-off helper. Not the product deposit poller. Sells **non-USDC SPL** (B20, etc.) to USDC on Kyber, then moves **mainnet USDC** from Monaco-controlled Dynamic Base wallets to `--destination`.
+One-off helper. Not the product deposit poller. Sells **non-USDC ERC-20** (B20, etc.) to USDC on Kyber, then moves **Base USDC** from Monaco-controlled Dynamic wallets to `--destination`.
 
 Product path stays: member inbox → treasury (poller) → **in-app redeem**. Use this when funds are stuck in Dynamic and redeem cannot reach them, or when cleaning QA wallets.
 
@@ -42,7 +42,7 @@ Then paste `--destination` again. No `--yes`. Wrong phrase aborts.
 
 | Flag | Required | Meaning |
 | --- | --- | --- |
-| `--destination` | yes | Base58 Base address that receives USDC. |
+| `--destination` | yes | `0x` Base address that receives USDC. |
 | `--source` | no | Drain only this wallet. Repeatable; one value may be comma-separated. |
 | `--all` | no | Dynamic is source of truth: paginated `GET /v1/wallets?chain_type=base` (no `user_id`). |
 | `--dry-run` | no | Log planned Kyber sells + USDC sweeps. Skip sign/send. Skip confirm. |
@@ -56,7 +56,7 @@ With `--source`, only the listed wallets run through the per-wallet pipeline. Un
 Per wallet:
 
 1. Skip `RELAYER_PRIVATE_KEY` fee payer (never drain).
-2. For each non-USDC SPL balance: Kyber sell → USDC (relayer pays ETH when treasury holds 0 SOL).
+2. For each non-USDC ERC-20 balance: Kyber sell → USDC (relayer pays ETH when treasury holds 0 ETH).
 3. Sweep all USDC to `--destination`.
 
 Skips: zero USDC after sells, source address equal to destination, relayer. Native ETH is not swept. Amounts are token atomics (USDC micro-units: `1_000_000` = $1).
@@ -65,12 +65,11 @@ Skips: zero USDC after sells, source address equal to destination, relayer. Nati
 
 `.env.local` must have:
 
-- `PRIVY_APP_ID`, `PRIVY_APP_SECRET`
-- `PRIVY_AUTHORIZATION_PRIVATE_KEY`, `PRIVY_AUTHORIZATION_KEY_ID` (server sign)
-- `RELAYER_PRIVATE_KEY` (fee payer; needs SOL; never swept)
-- `SOLANA_RPC_URL` (optional; recommended for `--all` scans; defaults to public mainnet RPC)
+- `DYNAMIC_ENVIRONMENT_ID`, `DYNAMIC_API_TOKEN`
+- `RELAYER_PRIVATE_KEY` (fee payer; needs ETH on Base; never swept)
+- `BASE_RPC_URL` (optional; defaults in config)
 - `DATABASE_URL` (always loaded; classifies member/treasury when `--all` is on)
 
 ## After a sweep
 
-Explorer: [solscan.io](https://solscan.io) on printed `tx=`. Group boards will not auto-credit this path. If you drained a treasury that still has share units, fix data or treat it as ops recovery — do not pretend it was a redeem.
+Explorer: [basescan.org](https://basescan.org) on printed `tx=`. Group boards will not auto-credit this path. If you drained a treasury that still has share units, fix data or treat it as ops recovery — do not pretend it was a redeem.

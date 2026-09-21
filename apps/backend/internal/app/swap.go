@@ -157,11 +157,8 @@ func (s *SwapService) DevExecuteBuy(ctx context.Context, req DevExecuteBuyReques
 		return DevExecuteBuyResult{}, err
 	}
 
-	swapCall, err := s.dex.BuildSwap(ctx, quote, treasury.Address, treasury.Address)
+	quote, swapCall, err := s.swapCallAfterAllowance(ctx, treasury, quote, usdcIn)
 	if err != nil {
-		return DevExecuteBuyResult{}, err
-	}
-	if err := s.ensureAllowance(ctx, treasury, quote.TokenIn, swapCall.Router, usdcIn); err != nil {
 		return DevExecuteBuyResult{}, err
 	}
 
@@ -247,11 +244,8 @@ func (s *SwapService) SellToUSDC(ctx context.Context, req SellToUSDCRequest) (Se
 		return SellToUSDCResult{}, err
 	}
 
-	swapCall, err := s.dex.BuildSwap(ctx, quote, treasury.Address, treasury.Address)
+	quote, swapCall, err := s.swapCallAfterAllowance(ctx, treasury, quote, amountIn)
 	if err != nil {
-		return SellToUSDCResult{}, err
-	}
-	if err := s.ensureAllowance(ctx, treasury, quote.TokenIn, swapCall.Router, amountIn); err != nil {
 		return SellToUSDCResult{}, err
 	}
 
@@ -315,36 +309,69 @@ func (s *SwapService) ensureTreasuryGas(ctx context.Context, treasury wallets.Tr
 	return nil
 }
 
-func (s *SwapService) ensureAllowance(ctx context.Context, treasury wallets.TreasuryRef, token, spender string, amount *big.Int) error {
+func (s *SwapService) swapCallAfterAllowance(ctx context.Context, treasury wallets.TreasuryRef, quote dex.Quote, amount *big.Int) (dex.Quote, dex.SwapCall, error) {
+	swapCall, err := s.dex.BuildSwap(ctx, quote, treasury.Address, treasury.Address)
+	if err != nil {
+		return dex.Quote{}, dex.SwapCall{}, err
+	}
+	approved, err := s.ensureAllowance(ctx, treasury, quote.TokenIn, swapCall.Router, amount)
+	if err != nil {
+		return dex.Quote{}, dex.SwapCall{}, err
+	}
+	if !approved {
+		return quote, swapCall, nil
+	}
+	fresh, err := s.requote(ctx, quote, amount)
+	if err != nil {
+		return dex.Quote{}, dex.SwapCall{}, err
+	}
+	if !fresh.Routable {
+		return dex.Quote{}, dex.SwapCall{}, ErrQuoteNotRoutable
+	}
+	swapCall, err = s.dex.BuildSwap(ctx, fresh, treasury.Address, treasury.Address)
+	if err != nil {
+		return dex.Quote{}, dex.SwapCall{}, err
+	}
+	return fresh, swapCall, nil
+}
+
+func (s *SwapService) requote(ctx context.Context, q dex.Quote, amount *big.Int) (dex.Quote, error) {
+	if strings.EqualFold(q.TokenIn, dex.USDCAddress()) {
+		return s.dex.QuoteBuy(ctx, q.TokenOut, amount)
+	}
+	return s.dex.QuoteSell(ctx, q.TokenIn, amount)
+}
+
+func (s *SwapService) ensureAllowance(ctx context.Context, treasury wallets.TreasuryRef, token, spender string, amount *big.Int) (bool, error) {
 	if s.chain == nil {
-		return nil
+		return false, nil
 	}
 	if spender == "" {
 		spender = token
 	}
 	allowance, err := s.chain.Allowance(ctx, token, treasury.Address, spender)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if allowance.Cmp(amount) >= 0 {
-		return nil
+		return false, nil
 	}
 	data, err := evm.EncodeApprove(spender, amount)
 	if err != nil {
-		return err
+		return false, err
 	}
 	txHash, err := s.wallets.SendTreasuryTransaction(ctx, treasury, token, data, big.NewInt(0))
 	if err != nil {
-		return err
+		return false, err
 	}
 	receipt, err := s.waitReceipt(ctx, txHash)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if receipt.Status != 1 {
-		return fmt.Errorf("approve failed")
+		return false, fmt.Errorf("approve failed")
 	}
-	return nil
+	return true, nil
 }
 
 func (s *SwapService) waitFill(ctx context.Context, txHash, tokenOut, treasury string, quoted *big.Int) (int64, error) {
@@ -363,9 +390,6 @@ func (s *SwapService) waitFill(ctx context.Context, txHash, tokenOut, treasury s
 	}
 	fill := evm.DecodeERC20TransferLogs(receipt.Logs, tokenOut, treasury)
 	if fill.Sign() <= 0 {
-		if quoted != nil && quoted.Sign() > 0 && quoted.IsInt64() {
-			return quoted.Int64(), nil
-		}
 		return 0, fmt.Errorf("missing fill amount")
 	}
 	if !fill.IsInt64() {
@@ -375,25 +399,7 @@ func (s *SwapService) waitFill(ctx context.Context, txHash, tokenOut, treasury s
 }
 
 func (s *SwapService) waitReceipt(ctx context.Context, txHash string) (evm.Receipt, error) {
-	if s.chain == nil {
-		return evm.Receipt{Found: true, Status: 1}, nil
-	}
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		receipt, err := s.chain.Receipt(ctx, txHash)
-		if err != nil {
-			return evm.Receipt{}, err
-		}
-		if receipt.Found {
-			return receipt, nil
-		}
-		select {
-		case <-ctx.Done():
-			return evm.Receipt{}, ctx.Err()
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
-	return evm.Receipt{}, fmt.Errorf("receipt timeout")
+	return evm.WaitReceipt(ctx, s.chain, txHash)
 }
 
 func (s *SwapService) treasuryUSDCForSnapshot(ctx context.Context, treasuryAddress string) (int64, error) {

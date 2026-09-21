@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/auth"
@@ -27,7 +29,17 @@ type AssetsHandlers struct {
 	Catalog b20.Catalog
 	Pyth    pyth.AssetPriceClient
 	Dex     dex.Client
+
+	liqMu    sync.Mutex
+	liqCache map[string]cachedLiquidity
 }
+
+type cachedLiquidity struct {
+	snippet assetLiquidityResponse
+	at      time.Time
+}
+
+const liquidityProbeTTL = 60 * time.Second
 
 type marketAssetResponse struct {
 	Symbol          string  `json:"symbol"`
@@ -241,22 +253,28 @@ func (h *AssetsHandlers) authorizeUser(ctx context.Context, accessToken string) 
 }
 
 func (h *AssetsHandlers) lookupAsset(ctx context.Context, symbol string) (b20.Asset, bool, error) {
-	page, err := h.Catalog.Search(ctx, symbol, 5, 0)
+	needle := strings.ToUpper(strings.TrimSpace(symbol))
+	page, err := h.Catalog.Search(ctx, symbol, 25, 0)
 	if err != nil {
 		return b20.Asset{}, false, err
 	}
-	needle := strings.ToUpper(strings.TrimSpace(symbol))
 	for _, asset := range page.Assets {
 		if strings.EqualFold(strings.TrimSpace(asset.Symbol), needle) {
 			return asset, true, nil
 		}
 	}
-	return b20.Asset{}, false, nil
+	addr, err := h.Catalog.ResolveTokenAddress(ctx, symbol)
+	if err != nil || strings.TrimSpace(addr) == "" {
+		return b20.Asset{}, false, nil
+	}
+	asset, found, err := h.Catalog.LookupByAddress(ctx, addr)
+	if err != nil {
+		return b20.Asset{}, false, err
+	}
+	return asset, found, nil
 }
 
-// enrichAssets marks every asset with one batched Jupiter Price API call instead
-// of a per-asset round trip (Pyth or Jupiter QuoteBuy). Shared by the list and
-// popular routes — both just display current price, so both get the same source.
+// enrichAssets attaches Chainlink marks (Pyth is charts only).
 func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []b20.Asset) []marketAssetResponse {
 	prices := h.fetchPrices(ctx, assets)
 	out := make([]marketAssetResponse, 0, len(assets))
@@ -266,22 +284,34 @@ func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []b20.Asset) [
 	return out
 }
 
-// fetchPrices batches current USD marks for assets in one Jupiter Price API call.
-// A nil Price client or a failed fetch degrades to "no price" rather than erroring
-// the whole catalog response.
+// fetchPrices loads current USD marks. A nil client or a failed fetch degrades
+// to "no price" rather than erroring the whole catalog response.
 type assetPriceSnapshot struct {
 	PriceUsdcMicros int64
 	Change24h       *string
 }
 
+const catalogPriceBudget = 4 * time.Second
+
 func (h *AssetsHandlers) fetchPrices(ctx context.Context, assets []b20.Asset) map[string]assetPriceSnapshot {
 	if h.Pyth == nil {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(ctx, catalogPriceBudget)
+	defer cancel()
+
+	symbols := make([]string, 0, len(assets))
+	for _, asset := range assets {
+		symbols = append(symbols, asset.Symbol)
+	}
+	marks, err := h.Pyth.AssetMarks(ctx, symbols)
+	if err != nil {
+		marks = nil
+	}
 	out := make(map[string]assetPriceSnapshot, len(assets))
 	for _, asset := range assets {
-		mark, err := h.Pyth.AssetMark(ctx, asset.Symbol)
-		if err != nil || mark.PriceUsdcMicros <= 0 {
+		mark, ok := marks[asset.Symbol]
+		if !ok || mark.PriceUsdcMicros <= 0 {
 			continue
 		}
 		out[asset.TokenAddress] = assetPriceSnapshot{
@@ -297,7 +327,7 @@ func marketAssetResponseFor(asset b20.Asset, prices map[string]assetPriceSnapsho
 		Symbol:       asset.Symbol,
 		Name:         asset.Name,
 		TokenAddress: asset.TokenAddress,
-		Routable:     asset.Routable,
+		Routable:     asset.Routable || strings.TrimSpace(asset.TokenAddress) != "",
 	}
 	if price, ok := prices[asset.TokenAddress]; ok && price.PriceUsdcMicros > 0 {
 		resp.PriceUsdcMicros = &price.PriceUsdcMicros
@@ -311,26 +341,37 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset b20.Asset) 
 		Symbol:       asset.Symbol,
 		Name:         asset.Name,
 		TokenAddress: asset.TokenAddress,
-		Liquidity:    h.liquiditySnippet(ctx, asset, nil),
 	}
 	prices := h.fetchPrices(ctx, []b20.Asset{asset})
 	if price, ok := prices[asset.TokenAddress]; ok && price.PriceUsdcMicros > 0 {
 		detail.PriceUsdcMicros = &price.PriceUsdcMicros
 		detail.Change24h = price.Change24h
-		detail.Liquidity = h.liquiditySnippet(ctx, asset, &price.PriceUsdcMicros)
 	}
-	// Live Jupiter probe wins over a stale catalog rank (429s cache as not routable).
-	detail.Routable = detail.Liquidity.Routable
+	detail.Liquidity = h.liquiditySnippet(ctx, asset, detail.PriceUsdcMicros)
+	detail.Routable = asset.Routable || strings.TrimSpace(asset.TokenAddress) != "" || detail.Liquidity.Routable
 	return detail
 }
 
 func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset b20.Asset, markMicros *int64) assetLiquidityResponse {
+	_ = markMicros
+	key := strings.ToLower(strings.TrimSpace(asset.TokenAddress))
+	if key != "" {
+		h.liqMu.Lock()
+		if h.liqCache != nil {
+			if hit, ok := h.liqCache[key]; ok && time.Since(hit.at) < liquidityProbeTTL {
+				h.liqMu.Unlock()
+				return hit.snippet
+			}
+		}
+		h.liqMu.Unlock()
+	}
+
 	snippet := assetLiquidityResponse{
 		Label:              "Via DEX",
 		Routable:           false,
 		BuyProbeUsdcMicros: app.CatalogRoutabilityProbeMicros,
 	}
-	if h.Dex == nil || strings.TrimSpace(asset.TokenAddress) == "" {
+	if h.Dex == nil || key == "" {
 		return snippet
 	}
 
@@ -338,8 +379,6 @@ func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset b20.Asset, 
 	if err == nil && buyQuote.Routable && buyQuote.AmountOut != nil {
 		snippet.Routable = true
 		snippet.BuyProbeOutAmount = buyQuote.AmountOut.String()
-	} else {
-		snippet.Routable = false
 	}
 
 	sellQuote, err := h.Dex.QuoteSell(ctx, asset.TokenAddress, big.NewInt(b20.TokenAtomicScale))
@@ -347,8 +386,13 @@ func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset b20.Asset, 
 		snippet.SellProbeInAmount = strconv.FormatInt(b20.TokenAtomicScale, 10)
 		snippet.SellProbeOutAmount = sellQuote.AmountOut.String()
 	}
-	_ = markMicros
 
+	h.liqMu.Lock()
+	if h.liqCache == nil {
+		h.liqCache = make(map[string]cachedLiquidity)
+	}
+	h.liqCache[key] = cachedLiquidity{snippet: snippet, at: time.Now()}
+	h.liqMu.Unlock()
 	return snippet
 }
 

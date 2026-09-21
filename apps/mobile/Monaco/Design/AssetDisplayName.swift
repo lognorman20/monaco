@@ -31,7 +31,7 @@ extension MarketAssetDTO {
     }
 
     var displayTicker: String {
-        AssetSymbolFormatter.format(symbol)
+        AssetSymbolFormatter.display(symbol)
     }
 }
 
@@ -41,6 +41,6 @@ extension AssetDetailDTO {
     }
 
     var displayTicker: String {
-        AssetSymbolFormatter.format(symbol)
+        AssetSymbolFormatter.display(symbol)
     }
 }
