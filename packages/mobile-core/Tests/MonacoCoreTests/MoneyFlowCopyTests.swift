@@ -13,6 +13,9 @@ final class MoneyFlowCopyTests: XCTestCase {
             FlowErrorInput(status: 400, serverMessage: " Invalid destination address\n")
         )
         XCTAssertEqual(badAddress.message, "That destination isn't a Base address.")
+        // A Base address is 0x plus 40 hex characters; the old Solana length rule is gone.
+        XCTAssertEqual(badAddress.nextStep, "Paste the address again — it's 0x followed by 40 letters and numbers.")
+        XCTAssertFalse(badAddress.summary.contains("32 to 44"))
 
         let ownAddress = MoneyFlowCopy.cashOutFailure(
             FlowErrorInput(status: 400, serverMessage: "cannot withdraw to your deposit address")
@@ -45,6 +48,34 @@ final class MoneyFlowCopyTests: XCTestCase {
         XCTAssertFalse(failure.isRetryable)
         XCTAssertEqual(MoneyFlowCopy.fundCabalFailure(FlowErrorInput()), MoneyFlowCopy.unconfirmed)
         XCTAssertEqual(MoneyFlowCopy.sellStakeFailure(FlowErrorInput()), MoneyFlowCopy.unconfirmed)
+    }
+
+    /// The copy must not promise that a retry can only go through once: there is no
+    /// idempotency key, so a resend after an unknown outcome is a second submission. It
+    /// sends the member to their balance instead and offers no retry.
+    func testUnconfirmed_doesNotPromiseSingleExecution_andKeepsTheBalanceCheck() {
+        let step = MoneyFlowCopy.unconfirmed.nextStep ?? ""
+        XCTAssertTrue(step.lowercased().contains("balance"), "lost the balance check: \(step)")
+        XCTAssertFalse(step.lowercased().contains("only go through once"), "promises single execution: \(step)")
+        XCTAssertFalse(step.lowercased().contains("can only"), "promises single execution: \(step)")
+        XCTAssertFalse(step.lowercased().contains("send the same amount"), "invites a resend: \(step)")
+        XCTAssertFalse(MoneyFlowCopy.unconfirmed.isRetryable)
+    }
+
+    func testSignInUnavailable_saysNothingWasSent_andStaysRetryable() {
+        let failure = MoneyFlowCopy.cashOutFailure(FlowErrorInput(isSignInUnavailable: true))
+        XCTAssertEqual(failure.message, "We couldn't check your sign-in, so we didn't cash out.")
+        XCTAssertEqual(failure.nextStep, "Try again in a moment — nothing was sent.")
+        XCTAssertTrue(failure.isRetryable)
+        XCTAssertNotEqual(failure, MoneyFlowCopy.unconfirmed)
+        XCTAssertEqual(
+            MoneyFlowCopy.fundCabalFailure(FlowErrorInput(isSignInUnavailable: true)).message,
+            "We couldn't check your sign-in, so we didn't add that money."
+        )
+        XCTAssertEqual(
+            MoneyFlowCopy.sellStakeFailure(FlowErrorInput(isSignInUnavailable: true)).message,
+            "We couldn't check your sign-in, so we didn't cash out."
+        )
     }
 
     func testServerError_isRetryableWithoutClaimingNothingMoved() {
@@ -84,11 +115,43 @@ final class MoneyFlowCopyTests: XCTestCase {
         XCTAssertTrue(MoneyFlowCopy.sellStakeFailure(FlowErrorInput(status: 409)).isRetryable)
     }
 
+    /// The 409 means an earlier cash out of this cabal is still running — often the
+    /// member's own attempt that timed out. "Try again" would read as "the first one
+    /// failed", so the next step points at the balance instead.
+    func testSellStake_conflictSendsTheMemberToTheirBalance_notToARetry() {
+        let failure = MoneyFlowCopy.sellStakeFailure(
+            FlowErrorInput(status: 409, serverMessage: "withdraw already in progress")
+        )
+        XCTAssertEqual(failure.message, "Your last cash out is still finishing.")
+        XCTAssertEqual(failure.nextStep, "Give it a minute, then check your balance.")
+    }
+
     func testGeneric_sessionExpiredAndRateLimited() {
         let expired = MoneyFlowCopy.cashOutFailure(FlowErrorInput(status: 401))
         XCTAssertEqual(expired.summary, "Your session expired. Sign in again to cash out.")
         XCTAssertFalse(expired.isRetryable)
         XCTAssertTrue(MoneyFlowCopy.fundCabalFailure(FlowErrorInput(status: 429)).isRetryable)
+    }
+
+    /// Same `Retry-After` header: chat read it and the money flows threw it away, so a
+    /// throttled member was told "a moment" in one place and "60 seconds" in the other.
+    func testRateLimited_readsTheServersRetryAfter_likeChatAlreadyDoes() {
+        let counted = MoneyFlowCopy.fundCabalFailure(FlowErrorInput(status: 429, retryAfterSeconds: 60))
+        XCTAssertEqual(counted.message, "Too many tries in a row.")
+        XCTAssertEqual(counted.nextStep, "Try again in 60 seconds.")
+        XCTAssertTrue(counted.isRetryable)
+
+        XCTAssertEqual(
+            MoneyFlowCopy.cashOutFailure(FlowErrorInput(status: 429, retryAfterSeconds: 1)).nextStep,
+            "Try again in 1 second."
+        )
+        // No header, or a useless one, keeps the old wording rather than inventing a number.
+        for input in [
+            FlowErrorInput(status: 429),
+            FlowErrorInput(status: 429, retryAfterSeconds: 0),
+        ] {
+            XCTAssertEqual(MoneyFlowCopy.sellStakeFailure(input).nextStep, "Wait a moment and try again.")
+        }
     }
 
     func testMemberFacingMessage_rejectsInternalFragments() {

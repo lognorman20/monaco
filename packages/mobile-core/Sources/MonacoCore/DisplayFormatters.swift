@@ -7,6 +7,10 @@ public enum PercentReturnFormatter {
     /// Formats a backend return ratio ("0.124", "-0.036") as "+12.4%" / "−3.6%" (U+2212).
     /// Ratios that round to 0.0% render "0.0%" with no sign. Nil / empty renders "—".
     /// Strings that are already percentages ("+12.4%") pass through with the minus normalised.
+    /// Anything else that is not a finite number — "nan", "inf", or a string that is not a
+    /// number at all — renders "—" rather than being passed through. This is wider than just
+    /// the non-finite case on purpose: everything reaching here is a backend-supplied ratio,
+    /// and there is no input that is both unparseable and worth showing a member raw.
     public static func format(_ raw: String?) -> String {
         guard let raw else { return "—" }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -17,8 +21,11 @@ public enum PercentReturnFormatter {
             }
             return trimmed
         }
-        guard let value = Double(trimmed.replacingOccurrences(of: typographicMinus, with: "-")) else {
-            return trimmed
+        guard let value = Double(trimmed.replacingOccurrences(of: typographicMinus, with: "-")),
+              value.isFinite
+        else {
+            // "nan" and "inf" parse as Doubles. Neither is a return anyone can read.
+            return "—"
         }
         let pct = value * 100
         let magnitude = String(format: "%.1f", abs(pct))
@@ -29,7 +36,7 @@ public enum PercentReturnFormatter {
 
 public enum DollarPnlFormatter {
     public static func format(_ raw: String) -> String {
-        if raw.hasPrefix("-") {
+        if raw.hasPrefix("-") || raw.hasPrefix(typographicMinus) {
             return "\(raw) loss"
         }
         return raw
@@ -37,8 +44,11 @@ public enum DollarPnlFormatter {
 }
 
 public enum SlicePercentFormatter {
+    /// A NaN or infinite ratio reads as no figure, the same as `PercentReturnFormatter`.
+    /// Returning the raw string just moved the garbage: the member read "nan" in place of
+    /// "nan%".
     public static func format(_ raw: String) -> String {
-        guard let value = Double(raw) else { return raw }
+        guard let value = Double(raw), value.isFinite else { return "—" }
         return String(format: "%.1f%%", value * 100)
     }
 }
@@ -54,7 +64,8 @@ public enum AssetSymbolFormatter {
         return trimmed
     }
 
-    /// Ticker as people know it: "AAPLx" → "AAPL", "BRK.Bx" → "BRK.B". "USDC" stays; a mint → "Unknown stock".
+    /// Ticker as people know it: "AAPLc" → "AAPL", "NVDAc" → "NVDA". "USDC" stays; a 0x token address → "Unknown stock".
+    /// A trailing "x" (the retired Solana xStock symbols) is still stripped, so old rows read the same.
     /// Keep the raw symbol for API calls.
     public static func display(_ symbol: String) -> String {
         let formatted = format(symbol)
@@ -72,7 +83,8 @@ public enum AssetSymbolFormatter {
     }
 }
 
-/// Company names for the xStocks catalog, for surfaces whose DTO only carries a symbol.
+/// Company names for the tokenized-stock catalog, keyed by the underlying ticker, for
+/// surfaces whose DTO only carries a symbol.
 /// Follow-up: the API returns `assetName` on proposal rows and this table goes away.
 public enum AssetDisplayNames {
     private static let names: [String: String] = [
@@ -138,7 +150,7 @@ public enum AssetDisplayNames {
         "XOM": "Exxon Mobil",
     ]
 
-    /// "AAPLx" or "AAPL" → "Apple". Nil when the symbol is not in the table.
+    /// "AAPLc" or "AAPL" → "Apple". Nil when the symbol is not in the table.
     public static func name(forSymbol symbol: String) -> String? {
         let ticker = AssetSymbolFormatter.display(symbol).uppercased()
         return names[ticker]
@@ -163,9 +175,14 @@ public enum UsdAmountFormatter {
         var rounded = Decimal()
         var source = decimal
         NSDecimalRound(&rounded, &source, 2, .plain)
-        let number = rounded as NSDecimalNumber
+        let isNegative = rounded < 0
+        let magnitude = isNegative ? -rounded : rounded
+        let number = magnitude as NSDecimalNumber
         let body = twoDecimalFormatter.string(from: number) ?? number.stringValue
-        return "$\(body)"
+        // A negative amount reads "−$12.50", the way `compact` already writes one: the sign
+        // goes in front of the dollar sign, and it is a typographic minus, never "$-12.50".
+        guard isNegative, body != "0.00" else { return "$\(body)" }
+        return "\(typographicMinus)$\(body)"
     }
 
     /// Built once: this runs for every money label on every body pass.
@@ -234,7 +251,9 @@ public enum StakeWithdrawConverter {
 }
 
 public enum CatalogAssetNameFormatter {
-    /// User-facing catalog name without trailing xStocks branding (e.g. "Apple xStock" → "Apple").
+    /// User-facing catalog name without a trailing "xStock" brand (e.g. "Apple xStock" → "Apple").
+    /// Legacy tolerance: the Base catalogue sends plain names, but names cached or stored from
+    /// the retired Solana catalogue still carry the suffix.
     public static func format(_ catalogName: String) -> String {
         var name = catalogName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return name }
