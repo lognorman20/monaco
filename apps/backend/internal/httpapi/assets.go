@@ -112,7 +112,9 @@ type assetStatsResponse struct {
 	PreviousCloseUsdcMicros *int64 `json:"previousCloseUsdcMicros,omitempty"`
 	Week52HighUsdcMicros    *int64 `json:"week52HighUsdcMicros,omitempty"`
 	Week52LowUsdcMicros     *int64 `json:"week52LowUsdcMicros,omitempty"`
-	// SpreadBps is the round-trip trading cost implied by the Jupiter probes.
+	// SpreadBps is the signed, one-way gap between the token's routed buy price
+	// and the Pyth mark, from a single buy probe: positive is a premium over the
+	// mark, negative a discount. It is not a fee and not a round trip.
 	SpreadBps *int `json:"spreadBps,omitempty"`
 	// ConfUsdcMicros is Pyth's own confidence interval on the latest equity mark.
 	ConfUsdcMicros *int64 `json:"confUsdcMicros,omitempty"`

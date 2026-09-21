@@ -65,13 +65,8 @@ public struct AssetStatsGrid: Equatable, Sendable {
         money("52w-high", "52-week high", stats.week52HighUsdcMicros)
         money("52w-low", "52-week low", stats.week52LowUsdcMicros)
 
-        if let spreadBps = stats.spreadBps, spreadBps >= 0 {
-            cells.append(Cell(
-                id: "spread",
-                label: "Trading cost",
-                value: spreadCopy(spreadBps),
-                spokenLabel: "Round trip trading cost"
-            ))
+        if let spreadBps = stats.spreadBps {
+            cells.append(spreadCell(spreadBps))
         }
         if let conf = stats.confUsdcMicros, conf > 0 {
             // Pyth's own confidence interval, which nothing else in the app has ever
@@ -96,8 +91,37 @@ public struct AssetStatsGrid: Equatable, Sendable {
         )
     }
 
-    /// "~0.12%" — a round-trip cost, phrased as an estimate because it is one probe
-    /// at one size, not a quoted fee.
+    /// How far the token's routed buy price sits from the Pyth mark, and which way.
+    ///
+    /// `spreadBps` is `(routed buy price - mark) / mark` from a single Jupiter buy
+    /// probe at a single size. One side, one direction, one size — so it is neither
+    /// a fee nor a round trip, and naming it either roughly doubles what a member
+    /// thinks a trade costs them. The sign is real information: positive is a
+    /// premium the buyer pays over the mark, negative is a discount, which is good
+    /// news for a buyer and has no business being hidden.
+    ///
+    /// The direction lives in the label so the value stays a magnitude, which keeps
+    /// the cell readable when the text size grows.
+    static func spreadCell(_ bps: Int) -> Cell {
+        if bps < 0 {
+            return Cell(
+                id: "spread",
+                label: "Buy discount",
+                value: spreadCopy(-bps),
+                spokenLabel: "Buy discount to the mark"
+            )
+        }
+        return Cell(
+            id: "spread",
+            label: "Buy premium",
+            value: spreadCopy(bps),
+            spokenLabel: "Buy premium over the mark"
+        )
+    }
+
+    /// "~0.12%" — the size of the gap, phrased as an estimate because it is one
+    /// probe at one size, not a quoted fee. Takes a magnitude; `spreadCell` carries
+    /// the direction.
     static func spreadCopy(_ bps: Int) -> String {
         let percent = Double(bps) / 100
         if percent < 0.01 && bps > 0 { return "< 0.01%" }

@@ -28,11 +28,36 @@ final class AssetStatsGridTests: XCTestCase {
         XCTAssertNil(grid.week52Position, "no year of history means no year bar")
     }
 
-    func testTradingCost_readsAsAnEstimateAndNeverAsZero() {
+    func testSpreadMagnitude_readsAsAnEstimateAndNeverAsZero() {
         XCTAssertEqual(AssetStatsGrid.spreadCopy(12), "~0.12%")
         XCTAssertEqual(AssetStatsGrid.spreadCopy(48), "~0.48%")
         XCTAssertEqual(AssetStatsGrid.spreadCopy(1_250), "~12.50%")
         XCTAssertEqual(AssetStatsGrid.spreadCopy(0), "~0.00%")
+    }
+
+    /// The figure is one buy probe against the Pyth mark: one side, one direction.
+    /// It must not claim to be a fee or a round trip, either of which would have a
+    /// member reading roughly double the real number.
+    func testSpreadCell_namesAOneWayPremiumAndNeverARoundTrip() {
+        let premium = AssetStatsGrid.spreadCell(12)
+        XCTAssertEqual(premium.label, "Buy premium")
+        XCTAssertEqual(premium.value, "~0.12%")
+        XCTAssertEqual(premium.spoken, "Buy premium over the mark, ~0.12%")
+        XCTAssertFalse(premium.spokenLabel.lowercased().contains("round trip"))
+        XCTAssertFalse(premium.label.lowercased().contains("cost"))
+    }
+
+    /// Routing below the mark is a discount for a buyer — good news, and the old
+    /// grid dropped the cell rather than saying so.
+    func testSpreadCell_saysDiscountWhenTheTokenRoutesBelowTheMark() throws {
+        let discount = AssetStatsGrid.spreadCell(-32)
+        XCTAssertEqual(discount.label, "Buy discount")
+        XCTAssertEqual(discount.value, "~0.32%", "the label carries the sign, so the value stays a magnitude")
+        XCTAssertEqual(discount.spoken, "Buy discount to the mark, ~0.32%")
+
+        let grid = try XCTUnwrap(AssetStatsGrid.make(AssetStatsDTO(openUsdcMicros: 229_000_000, spreadBps: -32)))
+        let cell = try XCTUnwrap(grid.cells.first { $0.id == "spread" })
+        XCTAssertEqual(cell.label, "Buy discount", "a negative spread is shown, not hidden")
     }
 
     func testPriceCertainty_isTheOnlyCellWithABand() throws {
