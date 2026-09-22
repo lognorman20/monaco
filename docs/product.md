@@ -1,7 +1,7 @@
 # Monaco Product Brief
 
 
-Monaco is a social investing app. Friends form a **cabal**, pool capital, and invest that pool as one portfolio. They compete with each other and with other cabals on percent return.
+Monaco is a social investing app that allows users to start a hedge fund with their friends. Users form cabals, or groups of friends, to host a shared treasury that invests in tokenized stocks on Base. 
 
 A cabal is one treasury, not a feed of separate accounts. Members contribute USDC, get a proportional stake, propose what the treasury should buy, and vote. Approved trades execute for the group. Each member's slice moves with the pot.
 
