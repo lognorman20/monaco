@@ -1,21 +1,76 @@
-# Monaco product
+# Monaco Product Brief
 
-This is the canonical product and architecture brief. It is not legal advice.
 
-**Monaco** is an iOS app where friends form a group, pool USDC, and buy tokenized US stocks on Base.
+Monaco is a social investing app. Friends form a **cabal**, pool capital, and invest that pool as one portfolio. They compete with each other and with other cabals on percent return.
 
-How to clone, run, and operate the repo: [README](../README.md). Milestone backlog: [docs/index.md](index.md).
+A cabal is one treasury, not a feed of separate accounts. Members contribute USDC, get a proportional stake, propose what the treasury should buy, and vote. Approved trades execute for the group. Each member's slice moves with the pot.
 
-Prize target is the general Stocklana pool. Judges ask whether this could be a real app people use. The build does **not** use Meteora DBC or Clawpump. Execution is KyberSwap on **Base** with small real USDC.
+The loop is: join, contribute, decide, watch the book, decide again.
 
-## Goals
+## Cabals
 
-- **Social investing, not crypto.** Copy is "invite friends", "add money", "buy Apple". No wallets, gas, seed phrases, or "mint" in user-facing copy.
-- **Leaderboard and P&L first.** Two boards, both percent return. Inside a group: who in this pot is winning. Across the app: which groups and which people are winning. Buys and cash-out serve those screens.
-- **Real on-chain execution.** Tokenized stocks land in the group treasury via Kyber. A fiat-only mock does not meet the bar.
-- **Fair equity.** Members hold share units (claim tickets on the pot), not dollar IOUs. A redeem pays that member's slice of what the pot is worth now, in USDC, not a refund of what they put in.
-- **Cash out is a primary flow.** Partial redeem to USDC at a payout address the user proved they own. Full exit is the same path with the amount at max.
-- **Shippable Friday scope.** Native SwiftUI, Go API, Supabase Postgres, Dynamic auth and wallets, Kyber swaps. No custom Base program.
+A user creates a cabal and invites people in. Each cabal has one shared portfolio. The creator sets who can join, who votes, the pass threshold, and how long a proposal lives. Detail: [Groups and invites](#groups-and-invites).
+
+One person can belong to many cabals: a friends pot, a coworkers pot, a pot built around one thesis. Home ranks cabals and people across the app. That history is the social graph. It is tied to money in, votes, and returns.
+
+## Shared ownership
+
+You own a fraction of the pot, not a dollar IOU. The first dollars in buy shares at $1. Later dollars buy shares at the current price, so a new member does not take earlier gains. Pot up, your slice up. Pot down, your slice down. Add capital any time, or redeem shares for USDC equal to that fraction now.
+
+Formula and worked numbers: [NAV and share units](#nav-and-share-units).
+
+## Performance
+
+Two boards, both percent return. Inside a cabal: who in this pot is ahead. Across the app: which cabals and which people are ahead. The boards are why people come back and argue about the next trade. Buys and cash-out exist so those numbers are real.
+
+## Agents
+
+A cabal can vote to hand a slice of the treasury to an agent. Example: 10% of the pot, one strategy. That slice sits in the portfolio next to positions members picked and USDC left idle.
+
+Members see capital in each agent, how that slice has done, and vote to raise it, cut it, pause it, or remove it. A cabal can start with every trade as a member vote, delegate after a strategy has a record, and pull the allocation if it does not work. The agent trades only inside the budget the vote set. The cabal remains the decision layer.
+
+## Base, Dynamic, and Bankr
+
+Users see cabal, stake, and performance. Under that, three systems split the work: **Base** settles, **Dynamic** holds the keys, **Bankr** runs the strategy.
+
+### Base
+
+Settlement is Base mainnet (chain id `8453`). There is no custom contract.
+
+- Cash is USDC on Base, `0x833589fcd6edb6e08f4c7c32d4f71b54bda02913`. USDC on another chain is a different token. The deposit poller ignores it.
+- Positions are B20 tokenized US stocks on Base. `AAPLc` is `0xb200000000000000000000c2e324d24d7eecd1fb`. Pinned catalog: `apps/backend/internal/b20/pinned.go`. The B20 API is metadata only. It does not execute trades.
+- A passed member vote or a valid agent intent swaps on Kyber, from the cabal treasury. The token lands in that treasury.
+- Gas is ETH on Base, paid by the app relayer. Member wallets and treasuries need no ETH on the happy path. Funding: [README relayer](../README.md#relayer-fee-payer).
+
+Postgres holds share units, votes, NAV snapshots, and the agent budget. Base holds the assets.
+
+### Dynamic
+
+Dynamic is sign-in and custody.
+
+- Sign-in is email or SMS OTP. No password in the product path.
+- Each member gets one Dynamic wallet on Base. That address is the deposit inbox. Inbound USDC stays there as account balance until the member funds a cabal. `POST /v1/groups/{id}/fund` sweeps that amount into the treasury and credits share units at the current share price. Inbound USDC alone does not credit shares.
+- Each cabal gets one Dynamic server wallet. That wallet is the treasury. Member buys, agent fills, and redeems all sign from it.
+- The Go API signs sweeps, swaps, and payouts. Members do not approve each Base transaction. Wallet roles: [Wallets](#wallets).
+
+### Bankr
+
+Bankr is the strategy runtime. Monaco does not run the strategy process.
+
+A strategy ships as a [Bankr skill](https://skills.bankr.bot/): a package any agent host can load. The same skill can run on a laptop, a server, Cursor, Claude, the Bankr CLI, or another host. It needs the cabal agent key and a path to the Monaco API. It does not need to live next to the backend or inside the iOS app.
+
+Split of work:
+
+1. **Cabal votes the agent in.** Name plus a USDC allocation. Later votes pause, resume, or revoke. On pass, Monaco shows the proposer a 5-character API key for 15 minutes, then deletes the plaintext and keeps a hash.
+2. **The skill runs wherever it was installed.** It reads the cabal catalog (`GET /v1/groups/{id}/assets`) and posts buy or sell intents with `X-Monaco-Agent-Key`. No member JWT.
+3. **Monaco enforces the vote.** Bad or revoked key is 401. Paused is 403. Over the allocation, unknown symbol, or empty treasury is 422. Ten wrong keys is 429.
+4. **The fill uses the member-vote path.** The Go API swaps on Kyber and Dynamic signs the cabal treasury. The position lands in the shared pot and on the cabal activity feed. It does not land in a Bankr wallet. A skill that spent from its own wallet would split the pot and break share accounting.
+
+Bankr tools (prices, research, other skills in the catalog) can inform the decision. They do not sign the treasury. The only order Monaco fills is an intent inside the voted budget.
+
+`agents/momentum-bot` is the reference shape: read prices, apply one rule, POST an intent, stop on 401. Fork that loop or encode it as a Bankr skill. The API does not care which host sent the request.
+
+Operator steps: [connect an agent](how-to/connect-an-agent.md). HTTP contract: [agent trading](agent-trading.md).
 
 ## How it works
 
@@ -56,20 +111,16 @@ The B20 public API is mint metadata only. It is not an execution rail. Poll `/ex
 
 ## Architecture
 
-No custom on-chain vault. Dynamic server wallets hold assets. Supabase Postgres holds member share units, votes, NAV snapshots, and P&L inputs (net USDC in). A Go API talks to Dynamic and Kyber.
-
-Base transaction fees are paid by an **app relayer**. Treasuries may hold no ETH. Users never see gas. Relayer env and funding: [README](../README.md#relayer-fee-payer).
-
-The backend can sign the treasury. That custodial fact is accepted for the hackathon. Demo the buy. Do not spend UX on a trust explainer.
+Who does what is in [Base, Dynamic, and Bankr](#base-dynamic-and-bankr). The API signs the treasury. The product UI does not explain custody.
 
 ```
-SwiftUI (iOS 17+)
-  → Dynamic Swift (auth, member wallets)
-  → Go API (groups, invites, votes, share ledger, sweeps, swaps, P&L)
-  → Supabase Postgres DB
-  → Dynamic Base server wallet per group (treasury)
-  → App fee payer (ETH fees)
-  → KyberSwap (USDC → B20)
+SwiftUI + Dynamic OTP
+Bankr skill (any host, agent key)
+        → Go API
+            → Postgres (shares, votes, NAV, agent budget)
+            → Dynamic treasury on Base
+                → Kyber (USDC → B20)
+                → relayer pays ETH
 ```
 
 ### Wallets
@@ -83,12 +134,12 @@ You do not “log into Base.” You hold keys that can move whatever sits at tha
 
 Product copy hides this. Devs still need it for QA.
 
-| Wallet                   | Owner                            | Role                                                                                                                                    |
-| ------------------------ | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Member wallet            | One per user (Dynamic)             | Deposit inbox. Unique attribution for who funded. Backend-signable via Dynamic.                                                           |
-| Group treasury (vault)   | One per group (Dynamic, app-owned) | Holds USDC and tokenized stocks. All group trades execute from here.                                                                    |
-| Relayer / fee payer      | App                              | Pays ETH fees so treasury and member wallets need no ETH on the happy path.                                                             |
-| external wallet **agent** wallet | Coding-agent harness             | **Not product.** Funds member inboxes for mainnet QA; leftover USDC returns here. Separate keys from Dynamic and from your phone external wallet. |
+| Wallet                           | Owner                              | Role                                                                                                                                              |
+| -------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Member wallet                    | One per user (Dynamic)             | Deposit inbox. Unique attribution for who funded. Backend-signable via Dynamic.                                                                   |
+| Group treasury (vault)           | One per group (Dynamic, app-owned) | Holds USDC and tokenized stocks. All group trades execute from here.                                                                              |
+| Relayer / fee payer              | App                                | Pays ETH fees so treasury and member wallets need no ETH on the happy path.                                                                       |
+| external wallet **agent** wallet | Coding-agent harness               | **Not product.** Funds member inboxes for mainnet QA; leftover USDC returns here. Separate keys from Dynamic and from your phone external wallet. |
 
 Users never manage keys or approve individual Base transactions in the happy path. The backend signs sweeps, swaps, and payouts.
 
@@ -97,7 +148,7 @@ Do not put `PHANTOM_APP_ID` in Monaco `.env.local`. Agent wallet setup: [README 
 ### Deposit and fund
 
 1. The user funds **their** Dynamic member wallet with USDC (onramp or external transfer). Personal external wallet send to the member inbox also works; see [README Deposits](../README.md#deposits). Inbound USDC stays in the member wallet and shows as **account balance** (`GET /v1/me/balance` reads chain USDC minus in-flight fund jobs).
-2. To deploy into a cabal, the user calls **`POST /v1/groups/{id}/fund`** with an amount ≤ account balance. The backend creates a pending deposit and sweeps that exact amount member → treasury (server-signed, no second approval sheet).
+2. To deploy into a cabal, the user calls `POST /v1/groups/{id}/fund` with an amount ≤ account balance. The backend creates a pending deposit and sweeps that exact amount member → treasury (server-signed, no second approval sheet).
 3. On **confirmed sweep into treasury**, credit share units at the current share price. Idempotent on transaction signature.
 4. Do **not** credit shares when USDC only arrives in the member wallet. Do **not** auto-sweep inbound USDC without an explicit fund action.
 
@@ -191,16 +242,17 @@ They receive USDC equal to their redeemed fraction of the pot at that moment, no
 
 ## Stack
 
-| Layer            | Choice                                                                                                       |
-| ---------------- | ------------------------------------------------------------------------------------------------------------ |
-| Mobile           | SwiftUI, iOS 18+ only                                                                                        |
+| Layer            | Choice                                                                                                           |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Mobile           | SwiftUI, iOS 18+ only                                                                                            |
 | Auth and wallets | [Dynamic Swift](https://docs.dynamic.io/basics/swift/quickstart). Member wallets plus per-group server treasury. |
-| API              | Go                                                                                                           |
-| Ledger           | [Supabase](https://supabase.com/) Postgres. Share units, votes, NAV snapshots, idempotent tx log.            |
-| Execution        | [KyberSwap](https://dev.jup.ag/docs/swap) on mainnet                                               |
-| Fees             | App relayer (SOL)                                                                                            |
-| Asset metadata   | [B20 public API](https://api.xstocks.fi/api/v2/public/assets) (mints only)                               |
-| Marks            | Kyber fill + [Pyth Hermes](https://docs.pyth.network/price-feeds/core/api-instances-and-providers/hermes)  |
+| API              | Go                                                                                                               |
+| Ledger           | [Supabase](https://supabase.com/) Postgres. Share units, votes, NAV snapshots, idempotent tx log.                |
+| Execution        | KyberSwap on Base. Treasury signs via Dynamic.                                                                   |
+| Agent strategies | [Bankr skills](https://skills.bankr.bot/). Any host. Intents only. Fills stay in the Dynamic treasury.           |
+| Fees             | App relayer (ETH on Base)                                                                                        |
+| Asset metadata   | [B20 public API](https://api.xstocks.fi/api/v2/public/assets) (mints only)                                       |
+| Marks            | Kyber fill + [Pyth Hermes](https://docs.pyth.network/price-feeds/core/api-instances-and-providers/hermes)        |
 
 ## Hackathon demo checklist
 
