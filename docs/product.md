@@ -270,7 +270,6 @@ Judges should spend most of the live pass on P&L. Show the in-group member board
 
 - Custom on-chain vault or share-token program
 - On-chain voting
-- Meteora DBC, DAMM, and Clawpump prize tracks
 - Dynamic production webhooks (Enterprise)
 - Android, web client, copy-trading network
 - Primary issuer mint or redeem APIs (Backed client, institutional gates). Secondary Kyber path only.
