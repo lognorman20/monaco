@@ -30,11 +30,12 @@ struct LoginErrorClassificationTests {
         #expect(DynamicAuthService.loginFailure(from: error, step: .verifyCode) == .rateLimited)
     }
 
-    @Test func rejectedCodeKeepsTheCodeField() {
+    /// Whether the code field stays on screen is LoginFlow's decision (LoginFlowTests); this
+    /// only pins the classification it decides from.
+    @Test func rejectedCodeIsClassifiedAsRejected() {
         let error = DynamicAuthHTTPError(status: 422, detail: "Invalid code")
         let failure = DynamicAuthService.loginFailure(from: error, step: .verifyCode)
         #expect(failure == .codeRejected)
-        #expect(failure.keepsCodeEntry)
     }
 
     @Test func malformedProviderResponseFallsBackToGenericCopy() {

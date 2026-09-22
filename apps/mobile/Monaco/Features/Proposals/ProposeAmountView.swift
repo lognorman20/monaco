@@ -5,12 +5,13 @@ import SwiftUI
 struct ProposeAmountView: View {
     let groupId: String
     let stock: ProposeStock
+    /// The step is only reached with a pot: the picker above owns that load and its retry, so
+    /// "how much" is never asked without a ceiling to check the answer against.
+    let pot: ProposePot
     let onProposed: (_ proposalId: String) -> Void
 
     private let service: ProposeService
 
-    @State private var pot: ProposePot?
-    @State private var potLoadFailed = false
     @State private var priceMicros: Int64?
     @State private var amountText = ""
     @State private var reason = ""
@@ -20,12 +21,12 @@ struct ProposeAmountView: View {
     @State private var review: ProposeBuyReview?
     @FocusState private var reasonFocused: Bool
 
-    init(service: ProposeService, groupId: String, stock: ProposeStock, pot: ProposePot?, onProposed: @escaping (_ proposalId: String) -> Void) {
+    init(service: ProposeService, groupId: String, stock: ProposeStock, pot: ProposePot, onProposed: @escaping (_ proposalId: String) -> Void) {
         self.service = service
         self.groupId = groupId
         self.stock = stock
+        self.pot = pot
         self.onProposed = onProposed
-        _pot = State(initialValue: pot)
         _priceMicros = State(initialValue: stock.priceMicros)
     }
 
@@ -33,12 +34,12 @@ struct ProposeAmountView: View {
         ProposeMath.micros(fromAmountText: amountText)
     }
 
-    private var potUsd: Decimal? {
-        pot.map { ProposeMath.usd(fromMicros: $0.totalMicros) }
+    private var potUsd: Decimal {
+        ProposeMath.usd(fromMicros: pot.totalMicros)
     }
 
     private var isOverPot: Bool {
-        guard let amountMicros, let pot else { return false }
+        guard let amountMicros else { return false }
         return amountMicros > pot.totalMicros
     }
 
@@ -47,7 +48,7 @@ struct ProposeAmountView: View {
     }
 
     private var canReview: Bool {
-        amountMicros != nil && pot != nil && !isOverPot && !reasonTooLong && !isQuoting
+        amountMicros != nil && !isOverPot && !reasonTooLong && !isQuoting
     }
 
     var body: some View {
@@ -79,7 +80,6 @@ struct ProposeAmountView: View {
             ProposeReviewView(service: service, groupId: groupId, review: review, onProposed: onProposed)
         }
         .task {
-            await loadPot()
             await loadPrice()
         }
         .accessibilityIdentifier("propose-amount")
@@ -114,9 +114,8 @@ struct ProposeAmountView: View {
         .scrollDismissesKeyboard(.interactively)
     }
 
-    private var potHelper: String? {
-        if let potUsd { return ProposeFlowCopy.potHelper(UsdAmountFormatter.format(decimal: potUsd)) }
-        return potLoadFailed ? ProposeFlowCopy.potLoadFailed : nil
+    private var potHelper: String {
+        ProposeFlowCopy.potHelper(UsdAmountFormatter.format(decimal: potUsd))
     }
 
     private var header: some View {
@@ -170,23 +169,13 @@ struct ProposeAmountView: View {
         }
     }
 
-    private func loadPot() async {
-        guard pot == nil else { return }
-        potLoadFailed = false
-        do {
-            pot = try await service.pot(groupId: groupId)
-        } catch {
-            if !error.isRequestCancellation { potLoadFailed = true }
-        }
-    }
-
     private func loadPrice() async {
         guard priceMicros == nil else { return }
         priceMicros = try? await service.priceMicros(symbol: stock.symbol)
     }
 
     private func fetchQuote() async {
-        guard let amountMicros, let pot, canReview else { return }
+        guard let amountMicros, canReview else { return }
         Haptics.tap()
         isQuoting = true
         quoteError = nil

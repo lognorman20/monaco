@@ -64,17 +64,28 @@ struct CreateGroupView: View {
     @ObservedObject var auth: DynamicAuthService
     /// Present inside the signed-in shell; lightweight session patch after create.
     @Environment(AppSessionStore.self) private var session: AppSessionStore?
+    /// The cabal exists. The owner of the stack replaces this form with it, so
+    /// Back lands on the Cabals tab instead of on a form that is still armed.
+    let onCreated: (CreateGroupResponse) -> Void
 
-    private let apiClient = MonacoAPIClient()
+    private let actions: CabalsActionSource
+
+    init(
+        auth: DynamicAuthService,
+        actions: CabalsActionSource? = nil,
+        onCreated: @escaping (CreateGroupResponse) -> Void = { _ in }
+    ) {
+        self.auth = auth
+        self.actions = actions ?? LiveCabalsActionSource(auth: auth)
+        self.onCreated = onCreated
+    }
 
     @State private var groupName = ""
     @State private var joinPolicy: JoinPolicyMode = .open
     @State private var voterSet: VoterSetMode = .allMembers
     @State private var threshold: VoteThresholdMode = .majority
     @State private var voteExpiry: VoteExpiryOption = .oneDay
-    @State private var creatorUserId: String?
 
-    @State private var navigateToCreated: CreateGroupResponse?
     @State private var errorMessage: String?
     @State private var isCreating = false
 
@@ -148,47 +159,19 @@ struct CreateGroupView: View {
         .monacoFormScreen()
         .navigationTitle("New cabal")
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: auth.accessToken) {
-            await loadCreatorProfile()
-        }
-        .navigationDestination(item: $navigateToCreated) { created in
-            GroupDetailView(
-                auth: auth,
-                groupId: created.groupId,
-                groupName: created.name
-            )
-            .accessibilityIdentifier("create-group-success")
-        }
     }
 
+    /// Only the name gates the button. "Just me" needs the creator's id, but
+    /// that is a reason to say so when the member taps — not to hand them a
+    /// dead button with no explanation.
     private var canSubmit: Bool {
-        let trimmedName = groupName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else { return false }
-        if voterSet == .namedSubset {
-            return creatorUserId != nil
-        }
-        return true
-    }
-
-    private func loadCreatorProfile() async {
-        guard let accessToken = auth.accessToken else {
-            creatorUserId = nil
-            return
-        }
-        do {
-            _ = try await apiClient.openSession(accessToken: accessToken)
-            let profile = try await apiClient.me(accessToken: accessToken)
-            creatorUserId = profile.userId
-        } catch {
-            creatorUserId = nil
-        }
+        !groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func createGroup() async {
-        guard let accessToken = auth.accessToken else {
-            errorMessage = "Sign in to create a cabal."
-            return
-        }
+        // The disabled state only lands on the next render, so a fast double tap
+        // gets through it. Same guard the money screens use.
+        guard !isCreating else { return }
 
         let trimmedName = groupName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
@@ -196,21 +179,31 @@ struct CreateGroupView: View {
             return
         }
 
+        // Held for the whole run, including the profile read below, so there is
+        // no window where a second tap can start a second cabal.
+        isCreating = true
+        errorMessage = nil
+        defer { isCreating = false }
+
         var memberIds: [String] = []
         if voterSet == .namedSubset {
-            guard let creatorUserId else {
-                errorMessage = "Could not load your profile. Try again."
+            // "Just me" needs the creator's id. The signed-in profile is already
+            // in the shell; the form used to re-open a backend session and
+            // re-read /v1/me on every appearance.
+            if session?.me?.userId == nil {
+                // Recover here rather than sending them away: this form is
+                // pushed, so "pull down on Cabals" costs them what they typed.
+                await session?.refresh(auth: auth)
+            }
+            guard let creatorUserId = session?.me?.userId else {
+                errorMessage = "We couldn't confirm your profile. Check your connection, then tap Create cabal again."
                 return
             }
             memberIds = [creatorUserId]
         }
 
-        isCreating = true
-        errorMessage = nil
-
         do {
-            let created = try await apiClient.createGroup(
-                accessToken: accessToken,
+            let created = try await actions.createGroup(
                 name: trimmedName,
                 joinPolicyMode: joinPolicy.rawValue,
                 voterSetMode: voterSet.rawValue,
@@ -220,12 +213,12 @@ struct CreateGroupView: View {
             )
             // #215: patch the session locally and refresh in the background; no full reload.
             session?.refreshAfterCreate(auth: auth, created: created)
-            navigateToCreated = created
+            onCreated(created)
+        } catch MonacoAPIError.missingAccessToken {
+            errorMessage = "Sign in to create a cabal."
         } catch {
             errorMessage = "Couldn't create this cabal. Try again."
         }
-
-        isCreating = false
     }
 }
 

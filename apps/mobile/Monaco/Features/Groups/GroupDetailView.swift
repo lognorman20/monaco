@@ -4,10 +4,27 @@ import SwiftUI
 /// Screens pushed from the group screen's action row and section headers.
 enum GroupDetailRoute: Hashable {
     case addMoney
-    case cashOut
+    /// Cash out, carrying the slice as it stood when the member tapped.
+    ///
+    /// The figure travels in the route rather than being read live from the cabal, because
+    /// cashing everything out turns the slice to nothing: a screen reading it live rewrites
+    /// itself as "Nothing to cash out yet" at the very moment it succeeds, a blink before it
+    /// dismisses.
+    case cashOut(shareUnits: Int64, equityUsd: String)
     case chat
     case proposals
     case activity
+}
+
+/// What a refresh of the cabal screen is allowed to show while it runs.
+private enum GroupDetailRefreshMode {
+    /// The screen has nothing yet: a skeleton while it waits, and an error if it fails.
+    case initial
+    /// The member pulled down. No skeleton over content they can already see, but a failure is
+    /// theirs to hear about.
+    case userInitiated
+    /// Nobody asked. Write what changed, say nothing, and leave the screen alone on failure.
+    case quiet
 }
 
 /// Group screen: hero, action row, open votes, holdings, leaderboard, and activity.
@@ -27,6 +44,8 @@ struct GroupDetailView: View {
     @State private var showLeaveConfirmation = false
     @State private var showWithdrawLeaveConfirmation = false
     @State private var isLeaving = false
+    /// Which leave is running, so the progress cover can say whether the slice is being sold.
+    @State private var leavingSellsSlice = false
     @State private var activityItems: [GroupActivityItemDTO] = []
     @State private var activityLoading = true
     @State private var activityError: String?
@@ -34,8 +53,12 @@ struct GroupDetailView: View {
     @State private var errorMessage: String?
     @State private var toast: MonacoToast?
     @State private var isLoading: Bool
+    /// The blocking first load has run at least once; re-appearing is the poll loop's job.
+    @State private var didInitialLoad = false
     @State private var joinRequests: [JoinRequestDTO] = []
-    @State private var joinRequestsLoading = false
+    /// Cleared the first time the server refuses the admin-only list, so a plain member's screen
+    /// stops sending a request it already knows will be refused on every load and every tick.
+    @State private var viewerMayBeAdmin = true
     @State private var decidingRequestIDs: Set<String> = []
     @State private var proposalService: LiveProposalFeedService
     @State private var proposalRefreshCount = 0
@@ -50,14 +73,22 @@ struct GroupDetailView: View {
 
     /// Whether the open-votes preview has a proposal collecting votes right now.
     @State private var hasOpenVotes = false
+    /// A vote closed within the settling window, so its outcome is still on its way to the pot.
+    @State private var isWatchingVoteOutcome = false
+    /// Bumped each time the last open vote closes; drives the settling-window timer.
+    @State private var voteOutcomeWatch = 0
     /// Pull-to-refresh and the background poll share it, so a tick stands down while the member
     /// is refreshing by hand.
     @State private var refreshGate = RefreshGate()
 
-    /// Votes land and swaps settle in seconds; a quiet cabal only needs its balances kept current.
+    /// Votes land, swaps settle and deposits reach the pot in seconds; a quiet cabal only needs
+    /// its balances kept current.
     private var pollInterval: Duration {
-        let swapInFlight = activityItems.contains { $0.status.lowercased() == "pending" }
-        return hasOpenVotes || swapInFlight ? LiveRefreshCadence.inPlay : LiveRefreshCadence.resting
+        GroupDetailCadence.interval(for: GroupDetailCadence.Inputs(
+            hasOpenVotes: hasOpenVotes,
+            hasPendingActivity: activityItems.contains { GroupDetailCadence.isStillGoingThrough(status: $0.status) },
+            isWatchingVoteOutcome: isWatchingVoteOutcome
+        ))
     }
 
     init(
@@ -84,11 +115,12 @@ struct GroupDetailView: View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .monacoCanvas()
+            .groupLeaveProgress(isLeaving: isLeaving, isSellingSlice: leavingSellsSlice)
             // The hero carries the name; the bar only shows it once the hero scrolls away.
             .navigationTitle(groupView == nil || heroScrolledAway ? displayName : "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if groupView != nil {
+                if groupView != nil, !isLeaving {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             showDetailsSheet = true
@@ -104,25 +136,31 @@ struct GroupDetailView: View {
                 destination(for: route)
             }
             .background(DismissWhenActive(isActive: hasLeft))
+            // The first appearance loads; coming back from a pushed screen does not. The poll
+            // loop below already knows how stale its data is and ticks straight away when it is.
             .task(id: loadTaskID) {
                 if let initialView, groupView == nil {
                     groupView = initialView
                     isLoading = false
-                } else {
-                    await loadGroup()
                 }
-                await loadActivity()
-                await loadJoinRequests()
+                guard !didInitialLoad || groupView == nil else { return }
+                didInitialLoad = true
+                try? await refreshGate.runNow { try await refresh(.initial) }
             }
             .pollWhileVisible(every: pollInterval, isActive: groupView != nil && !hasLeft, gate: refreshGate) {
-                try await pollGroupAndActivity()
+                try await refresh(.quiet)
+            }
+            // A vote that just closed is still landing: keep watching closely for a little while.
+            .task(id: voteOutcomeWatch) {
+                guard voteOutcomeWatch > 0 else { return }
+                isWatchingVoteOutcome = true
+                defer { isWatchingVoteOutcome = false }
+                try? await Task.sleep(for: GroupDetailCadence.voteSettlingWindow)
             }
             .refreshable {
                 await refreshGate.runNow {
                     proposalRefreshCount += 1
-                    await loadGroup()
-                    await loadActivity()
-                    await loadJoinRequests()
+                    try? await refresh(.userInitiated)
                 }
             }
             .sheet(isPresented: $showProposeSheet, onDismiss: {
@@ -167,7 +205,7 @@ struct GroupDetailView: View {
                 currentUserId: session?.me?.userId,
                 proposalService: proposalService,
                 proposalRefreshToken: "\(proposalRefreshCount)",
-                onOpenVotesChange: { hasOpenVotes = $0 },
+                onOpenVotesChange: openVotesChanged,
                 activityItems: activityItems,
                 activityLoading: activityLoading,
                 activityError: activityError,
@@ -190,7 +228,7 @@ struct GroupDetailView: View {
                     .foregroundStyle(MonacoTheme.secondaryText)
                     .multilineTextAlignment(.center)
                 Button("Try again") {
-                    Task { await loadGroup() }
+                    Task { await refreshGate.runNow { try? await refresh(.initial) } }
                 }
                 .buttonStyle(.monacoSecondary)
             }
@@ -204,7 +242,7 @@ struct GroupDetailView: View {
                     .foregroundStyle(MonacoTheme.secondaryText)
                     .multilineTextAlignment(.center)
                 Button("Try again") {
-                    Task { await loadGroup() }
+                    Task { await refreshGate.runNow { try? await refresh(.initial) } }
                 }
                 .buttonStyle(.monacoSecondary)
             }
@@ -238,21 +276,15 @@ struct GroupDetailView: View {
                     isJoined: true
                 )],
                 preselectedGroupId: groupId,
-                onFunded: {
-                    await loadGroup()
-                    await loadActivity()
-                }
+                onFunded: { await refreshQuietly() }
             )
-        case .cashOut:
+        case .cashOut(let shareUnits, let equityUsd):
             SellCabalView(
                 auth: auth,
                 groupId: groupId,
-                maxShareUnits: Int64(groupView?.you.shareUnits ?? "") ?? 0,
-                equityUsd: groupView?.you.equityUsd ?? "0",
-                onSold: {
-                    await loadGroup()
-                    await loadActivity()
-                },
+                maxShareUnits: shareUnits,
+                equityUsd: equityUsd,
+                onSold: { await refreshQuietly() },
                 onToast: { toast = $0 }
             )
         case .chat:
@@ -270,7 +302,22 @@ struct GroupDetailView: View {
     }
 
     private var loadTaskID: String {
-        "\(groupId)-\(auth.accessToken ?? "")"
+        // Keyed on who is signed in, not on the token: Dynamic rotates the token under a
+        // session that has not changed, and that must not reload the cabal.
+        "\(groupId)-\(auth.sessionIdentity ?? "")"
+    }
+
+    /// The open-votes preview reporting what it is showing.
+    ///
+    /// A proposal leaves the open list the moment it passes, which is exactly when the swap it
+    /// decided starts. Read the cabal straight away and keep watching closely for a while, so the
+    /// pot, holdings and activity move while the member is still looking at the vote they cast.
+    private func openVotesChanged(_ nowOpen: Bool) {
+        let votesJustClosed = hasOpenVotes && !nowOpen
+        hasOpenVotes = nowOpen
+        guard votesJustClosed else { return }
+        voteOutcomeWatch += 1
+        Task { await refreshQuietly() }
     }
 
     /// Called by the propose sheet once the cabal has the proposal: close the sheet and confirm.
@@ -292,78 +339,90 @@ struct GroupDetailView: View {
         }
     }
 
-    private func loadGroup() async {
+    /// The one way this screen reads itself.
+    ///
+    /// The cabal, its activity and — for an admin — the people waiting to join are read together
+    /// rather than one after another, and written through `QuietUpdate`, so a refresh that finds
+    /// nothing new changes nothing the member can see. Every caller goes through `refreshGate`,
+    /// which is what stops a resuming poll tick from racing the appear load back into the view
+    /// with two near-identical snapshots: a tick asks with `run` and is dropped while anything
+    /// else holds the gate. It does not serialise the reads the member asks for — `runNow` marks
+    /// the gate busy but waits for nothing — so two of those (a pull-to-refresh over the
+    /// follow-up to a retry, say) can still be in flight together and land last-writer-wins.
+    ///
+    /// Failure belongs to whoever asked. A `.quiet` read rethrows so the poll loop backs off and
+    /// leaves the screen exactly as the member last saw it; the other modes say so.
+    private func refresh(_ mode: GroupDetailRefreshMode) async throws {
         guard let token = auth.accessToken else {
-            isLoading = false
-            errorMessage = "Sign in again to see this cabal."
+            if mode != .quiet {
+                isLoading = false
+                activityLoading = false
+                errorMessage = "Sign in again to see this cabal."
+            }
             return
         }
+        // Leaving owns the screen while it runs; refreshing would only race the pop.
+        guard !isLeaving, !hasLeft else { return }
 
-        isLoading = true
-        errorMessage = nil
-        defer { isLoading = false }
-
-        do {
-            groupView = try await apiClient.getGroupView(accessToken: token, groupId: groupId)
-        } catch is CancellationError {
-            return
-        } catch MonacoAPIError.httpStatus {
-            if Task.isCancelled { return }
-            errorMessage = "Couldn't load this cabal. Pull down to try again"
-        } catch {
-            if error.isRequestCancellation { return }
-            errorMessage = "Couldn't load this cabal. Pull down to try again"
-        }
-    }
-
-    private func loadActivity(showLoadingIndicator: Bool = true) async {
-        guard let token = auth.accessToken else {
-            activityLoading = false
-            activityError = "Sign in again to see activity."
-            return
-        }
-
-        if showLoadingIndicator {
+        if mode == .initial {
+            isLoading = true
             activityLoading = true
         }
-        activityError = nil
+        if mode != .quiet {
+            errorMessage = nil
+            activityError = nil
+        }
         defer {
-            if showLoadingIndicator {
+            if mode == .initial {
+                isLoading = false
                 activityLoading = false
             }
         }
 
+        async let viewLoad = apiClient.getGroupView(accessToken: token, groupId: groupId)
+        async let activityLoad = apiClient.getGroupActivity(accessToken: token, groupId: groupId)
+        async let joinLoad = readJoinRequests(token: token)
+
+        let activity = try? await activityLoad
+        let joinRequestsRead = await joinLoad
+        var loadedView: GroupViewDTO?
+        var viewFailure: Error?
         do {
-            let response = try await apiClient.getGroupActivity(accessToken: token, groupId: groupId)
-            activityItems = response.items
-            surfaceDepositFailureToasts(from: response.items)
-        } catch is CancellationError {
-            return
-        } catch MonacoAPIError.httpStatus {
-            if Task.isCancelled { return }
-            activityError = "Couldn't load activity. Pull down to try again"
+            loadedView = try await viewLoad
         } catch {
-            if error.isRequestCancellation { return }
+            viewFailure = error
+        }
+
+        guard !Task.isCancelled, !hasLeft else { return }
+
+        if let loadedView {
+            QuietUpdate.apply(loadedView, over: groupView) { groupView = $0 }
+            if errorMessage != nil { errorMessage = nil }
+        }
+        if let activity {
+            QuietUpdate.apply(activity.items, over: activityItems) { activityItems = $0 }
+            if activityError != nil { activityError = nil }
+            surfaceDepositFailureToasts(from: activity.items)
+        } else if mode != .quiet, activityItems.isEmpty {
             activityError = "Couldn't load activity. Pull down to try again"
+        }
+        apply(joinRequestsRead)
+
+        guard let viewFailure, !viewFailure.isRequestCancellation else { return }
+        if mode == .quiet { throw viewFailure }
+        if groupView == nil {
+            errorMessage = "Couldn't load this cabal. Pull down to try again"
+        } else if mode == .userInitiated {
+            toast = MonacoToast(message: "Couldn't refresh this cabal. Try again")
         }
     }
 
-    /// Background re-read of the cabal and its activity: the pot, the member's slice, holdings,
-    /// the leaderboard, and swaps settling. Writes only what changed and never a loading or error
-    /// state; a throw leaves the screen as it is and lets the loop back off.
-    private func pollGroupAndActivity() async throws {
-        guard let token = auth.accessToken, !isLeaving else { return }
-        async let viewLoad = apiClient.getGroupView(accessToken: token, groupId: groupId)
-        async let activityLoad = apiClient.getGroupActivity(accessToken: token, groupId: groupId)
-        let loadedView = try await viewLoad
-        let loadedActivity = try? await activityLoad
-        guard !Task.isCancelled, !hasLeft else { return }
-        QuietUpdate.apply(loadedView, over: groupView) { groupView = $0 }
-        if let loadedActivity {
-            QuietUpdate.apply(loadedActivity.items, over: activityItems) { activityItems = $0 }
-            if activityError != nil { activityError = nil }
-            surfaceDepositFailureToasts(from: loadedActivity.items)
-        }
+    /// The read that follows something the member just did — funding, cashing out, answering a
+    /// request, retrying a swap, a vote closing, a refused leave. It goes through the gate (so a
+    /// poll tick that lands on top of it stands down) but is never itself dropped, and it shows
+    /// nothing either way: the action it follows has already said what happened.
+    private func refreshQuietly() async {
+        try? await refreshGate.runNow { try await refresh(.quiet) }
     }
 
     private func surfaceDepositFailureToasts(from items: [GroupActivityItemDTO]) {
@@ -377,22 +436,46 @@ struct GroupDetailView: View {
 
     private func leaveGroup(withdrawStake: Bool) async {
         guard let token = auth.accessToken, !isLeaving else { return }
+        leavingSellsSlice = withdrawStake
         isLeaving = true
-        defer { isLeaving = false }
         do {
             try await apiClient.leaveGroup(accessToken: token, groupId: groupId, withdrawStake: withdrawStake)
             if withdrawStake {
                 toast = MonacoToast(message: "Cash moved to your account balance", isSuccess: true)
             }
+            // The cover stays up until the screen is on its way out. `onLeft()` is a network
+            // round trip at every call site, and clearing `isLeaving` here would hand back the
+            // action row, the back button and the details item for the length of it — on a cabal
+            // the member has just left, still showing the slice they left with, because nothing
+            // has re-read it yet. Only the failure paths below put the screen back in the
+            // member's hands, which is also all `refreshQuietly()` needs to run.
             await onLeft()
             hasLeft = true
+            return
         } catch MonacoAPIError.leaveBlocked(let reason) {
+            isLeaving = false
             toast = MonacoToast(message: leaveBlockedMessage(for: reason))
-        } catch MonacoAPIError.httpStatus {
-            toast = MonacoToast(message: "Couldn't leave this cabal. Try again")
+        } catch MonacoAPIError.missingAccessToken {
+            // Thrown before anything is sent, when the session's token is blank: the server was
+            // never asked, so nothing was sold. It is a sign-in problem, not an unconfirmed sale.
+            isLeaving = false
+            toast = MonacoToast(message: "Sign in again to leave.")
+            return
         } catch {
-            toast = MonacoToast(message: "Couldn't leave this cabal. Try again")
+            isLeaving = false
+            // No idempotency key rides on this request, so another "Sell and leave" is a new
+            // request rather than a replay of this one. When the sale may already have happened
+            // the member is told to look at their slice first, never simply to try again.
+            let failure = FlowErrorInput(error)
+            toast = MonacoToast(message: GroupDetailRefreshPolicy.leaveFailureMessage(
+                sellsSlice: withdrawStake,
+                failureStatus: failure.status,
+                neverSent: failure.isOffline
+            ))
         }
+        // A refused leave can still have sold the slice: the server sells first and checks the
+        // cabal's rules afterwards. Re-read the cabal so what is on screen is what is true now.
+        await refreshQuietly()
     }
 
     private func leaveBlockedMessage(for reason: LeaveGroupBlockReason) -> String {
@@ -418,8 +501,7 @@ struct GroupDetailView: View {
 
         do {
             let result = try await apiClient.retryTransaction(accessToken: token, transactionId: item.id)
-            await loadActivity(showLoadingIndicator: false)
-            await loadGroup()
+            await refreshQuietly()
             if result.status.lowercased() == "confirmed" {
                 let done = item.kind.lowercased() == "sell" ? "Sold" : "Bought"
                 toast = MonacoToast(message: "\(done). Holdings updated", isSuccess: true)
@@ -429,28 +511,64 @@ struct GroupDetailView: View {
             return result
         } catch is CancellationError {
             return nil
-        } catch MonacoAPIError.httpStatus(let code) where code == 409 {
-            toast = MonacoToast(message: "This one can't be retried")
-            return nil
-        } catch MonacoAPIError.httpStatus {
-            toast = MonacoToast(message: "Retry didn't go through. Try again")
+        } catch MonacoAPIError.missingAccessToken {
+            toast = MonacoToast(message: "Sign in again to retry.")
             return nil
         } catch {
-            toast = MonacoToast(message: "Retry didn't go through. Try again")
+            // A retry places a brand-new swap and leaves the failed row as it was, and no
+            // idempotency key rides on it, so tapping Retry again after a lost answer is a second
+            // swap. When this one may have gone through, re-read the activity and send the member
+            // there first rather than inviting another tap.
+            let failure = FlowErrorInput(error)
+            toast = MonacoToast(message: GroupDetailRefreshPolicy.swapRetryFailureMessage(
+                failureStatus: failure.status,
+                neverSent: failure.isOffline
+            ))
+            if GroupDetailRefreshPolicy.swapRetryMayHavePlacedSwap(
+                failureStatus: failure.status,
+                neverSent: failure.isOffline
+            ) {
+                await refreshQuietly()
+            }
             return nil
         }
     }
 
-    private func loadJoinRequests() async {
-        guard let token = auth.accessToken else { return }
-        joinRequestsLoading = true
-        defer { joinRequestsLoading = false }
+    /// What one read of the admin-only join requests found.
+    private struct JoinRequestsRead {
+        var outcome: JoinRequestsLoadOutcome
+        var requests: [JoinRequestDTO] = []
+        var viewerMayStillBeAdmin = true
+    }
+
+    /// Reads the people waiting to join. Answers with what to do rather than throwing: a dropped
+    /// request or an offline blip must never blink a pending request away from the admin who was
+    /// about to answer it.
+    private func readJoinRequests(token: String) async -> JoinRequestsRead {
+        guard viewerMayBeAdmin else { return JoinRequestsRead(outcome: .keep) }
         do {
-            joinRequests = try await apiClient.listJoinRequests(accessToken: token, groupId: groupId)
-        } catch MonacoAPIError.httpStatus(403) {
-            joinRequests = []
+            let requests = try await apiClient.listJoinRequests(accessToken: token, groupId: groupId)
+            return JoinRequestsRead(outcome: .replace, requests: requests)
         } catch {
-            joinRequests = []
+            let status = Self.httpStatus(of: error)
+            let wasCancelled = error.isRequestCancellation
+            return JoinRequestsRead(
+                outcome: GroupDetailRefreshPolicy.joinRequestsOutcome(failureStatus: status, wasCancelled: wasCancelled),
+                viewerMayStillBeAdmin: wasCancelled
+                    || GroupDetailRefreshPolicy.viewerMayBeAdmin(afterFailureStatus: status)
+            )
+        }
+    }
+
+    private func apply(_ read: JoinRequestsRead) {
+        if !read.viewerMayStillBeAdmin { viewerMayBeAdmin = false }
+        switch read.outcome {
+        case .replace:
+            QuietUpdate.apply(read.requests, over: joinRequests) { joinRequests = $0 }
+        case .clear:
+            if !joinRequests.isEmpty { joinRequests = [] }
+        case .keep:
+            break
         }
     }
 
@@ -462,18 +580,84 @@ struct GroupDetailView: View {
         guard !decidingRequestIDs.contains(request.id) else { return }
         decidingRequestIDs.insert(request.id)
         defer { decidingRequestIDs.remove(request.id) }
+        let name = request.displayName.isEmpty ? "Member" : request.displayName
         do {
             if approve {
                 try await apiClient.approveJoinRequest(accessToken: token, groupId: groupId, requestId: request.id)
             } else {
                 try await apiClient.denyJoinRequest(accessToken: token, groupId: groupId, requestId: request.id)
             }
-            toast = MonacoToast(message: approve ? "\(request.displayName.isEmpty ? "Member" : request.displayName) is in" : "Request declined", isSuccess: true)
-            await loadJoinRequests()
-            await loadGroup()
+            toast = MonacoToast(message: approve ? "\(name) is in" : "Request declined", isSuccess: true)
         } catch {
-            toast = MonacoToast(message: "Couldn't update the request. Try again")
+            if error.isRequestCancellation { return }
+            guard GroupDetailRefreshPolicy.joinRequestAlreadyAnswered(failureStatus: Self.httpStatus(of: error)) else {
+                // Still there to answer: keep the row so the admin can try again.
+                toast = MonacoToast(message: "Couldn't update the request. Try again")
+                return
+            }
+            // Answered on another device, or withdrawn. Take the row away rather than leave
+            // buttons on screen that can only ever fail.
+            joinRequests.removeAll { $0.id == request.id }
+            toast = MonacoToast(message: "\(name)'s request was already answered")
         }
+        // A new member changes the member board and everyone's slice; both come back quietly.
+        await refreshQuietly()
+    }
+
+    /// The status the server answered with, or nil when the request never reached one.
+    ///
+    /// Read through `FlowErrorInput`, the one place the app reduces its API errors to a status,
+    /// so a new error case lands there without this screen having to enumerate it.
+    private static func httpStatus(of error: Error) -> Int? {
+        FlowErrorInput(error).status
+    }
+}
+
+extension View {
+    /// The cabal screen while a leave is running.
+    ///
+    /// Leaving sells a slice and waits for the payout to confirm, which can take most of a
+    /// minute. For that whole time the screen says what is happening and takes no taps: an idle
+    /// looking screen invites a second tap, or a second money flow on a cabal being left.
+    func groupLeaveProgress(isLeaving: Bool, isSellingSlice: Bool) -> some View {
+        disabled(isLeaving)
+            // `disabled()` stops taps but leaves the rows reachable by VoiceOver swipe, so the
+            // member can still walk an action row that does nothing. Hide the content behind
+            // the cover the same way the cover hides it visually.
+            .accessibilityHidden(isLeaving)
+            .overlay {
+                if isLeaving {
+                    GroupLeaveProgressCover(isSellingSlice: isSellingSlice)
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: isLeaving)
+            .navigationBarBackButtonHidden(isLeaving)
+    }
+}
+
+struct GroupLeaveProgressCover: View {
+    let isSellingSlice: Bool
+
+    var body: some View {
+        ZStack {
+            MonacoTheme.canvas.opacity(0.94)
+                .ignoresSafeArea()
+            VStack(spacing: 14) {
+                ProgressView()
+                    .tint(MonacoTheme.ink)
+                Text(isSellingSlice ? "Selling your slice…" : "Leaving the cabal…")
+                    .font(MonacoTheme.Typo.rowTitle)
+                    .foregroundStyle(MonacoTheme.ink)
+                Text("This can take a minute. Keep the app open.")
+                    .font(.footnote)
+                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(24)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.updatesFrequently)
+        .accessibilityIdentifier("group-leaving-cover")
     }
 }
 
@@ -530,7 +714,7 @@ struct GroupDetailContent: View {
             LazyVStack(alignment: .leading, spacing: 32) {
                 VStack(spacing: 20) {
                     GroupHeroSection(view: view)
-                    GroupActionRow(onRoute: onRoute, onPropose: onPropose)
+                    GroupActionRow(slice: view.you, onRoute: onRoute, onPropose: onPropose)
                 }
 
                 if !joinRequests.isEmpty {
@@ -587,6 +771,8 @@ struct GroupDetailContent: View {
 
 /// Add money · Propose · Cash out · Chat, directly under the hero.
 struct GroupActionRow: View {
+    /// The member's slice, read here so Cash out is pushed with the figures that were on screen.
+    let slice: MemberSliceDTO
     let onRoute: (GroupDetailRoute) -> Void
     let onPropose: () -> Void
 
@@ -594,7 +780,9 @@ struct GroupActionRow: View {
         HStack(alignment: .top, spacing: 0) {
             action("Add money", systemImage: "plus", id: "group-action-fund") { onRoute(.addMoney) }
             action("Propose", systemImage: "arrow.up.right", id: "group-action-propose", perform: onPropose)
-            action("Cash out", systemImage: "arrow.down.left", id: "group-action-sell") { onRoute(.cashOut) }
+            action("Cash out", systemImage: "arrow.down.left", id: "group-action-sell") {
+                onRoute(.cashOut(shareUnits: Int64(slice.shareUnits) ?? 0, equityUsd: slice.equityUsd))
+            }
             action("Chat", systemImage: "bubble.left", id: "group-action-chat") { onRoute(.chat) }
         }
     }

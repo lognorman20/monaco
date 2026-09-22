@@ -21,6 +21,8 @@ struct ContentView: View {
             HomeSampleHarness(scenario: scenario, auth: auth)
         } else if CabalsTabSampleData.isEnabled {
             CabalsTabSampleHarness(auth: auth)
+        } else if StocksTabSampleData.isEnabled {
+            StocksTabSampleHarness(auth: auth)
         } else if let entry = GroupNavSampleEntry.requested {
             GroupNavSampleHarness(entry: entry, auth: auth)
         } else if let scenario = GroupDetailSampleScenario.requested {

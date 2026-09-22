@@ -10,15 +10,6 @@ public enum LoginFailure: Equatable, Sendable {
     case rateLimited
     /// Anything else. `detail` is provider copy, when it said something useful.
     case other(detail: String?)
-
-    /// Whether the code field should stay on screen so the user can try again
-    /// without requesting a new code.
-    public var keepsCodeEntry: Bool {
-        switch self {
-        case .codeRejected, .offline: return true
-        case .rateLimited, .other: return false
-        }
-    }
 }
 
 public enum LoginStep: Equatable, Sendable {

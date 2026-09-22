@@ -12,9 +12,14 @@ struct ProfileTabView: View {
     var initialNameDraft: String?
     /// Debug sample harness only: open the edit sheet immediately (to screenshot validation).
     var initiallyShowEditProfile = false
+    /// Debug sample harness only: stand in for the store's save so the *success* path — sheet
+    /// closes, toast lands on the uncovered screen — can be exercised without a backend.
+    var saveName: (any DisplayNameSaving)?
 
     @State private var toast: MonacoToast?
     @State private var showEditProfile = false
+    @State private var confirmSignOut = false
+    @State private var isSigningOut = false
 
     private var displayName: String {
         let name = session.me?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -55,9 +60,14 @@ struct ProfileTabView: View {
         .sheet(isPresented: $showEditProfile) {
             NavigationStack {
                 Form {
-                    ProfileNameEditor(auth: auth, initialDraft: initialNameDraft) { toast = $0 }
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
+                    ProfileNameEditor(auth: auth, initialDraft: initialNameDraft, saveName: saveName) {
+                        // Close first: the toast is an overlay on this screen, so it is
+                        // only readable once the sheet is out of the way.
+                        showEditProfile = false
+                        toast = MonacoToast(message: "Name updated.", isSuccess: true)
+                    }
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
                 }
                 .monacoFormScreen()
                 .navigationTitle("Edit profile")
@@ -70,6 +80,10 @@ struct ProfileTabView: View {
             }
             .presentationDetents([.medium])
         }
+        // `.contain` for the same reason as `profile-header` below and the chat root: a bare
+        // identifier is handed to every descendant, so the whole profile tree reported itself
+        // as "profile-root" and nothing inside it could be addressed.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("profile-root")
         .onAppear {
             if initiallyShowEditProfile { showEditProfile = true }
@@ -148,7 +162,10 @@ struct ProfileTabView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, MonacoTheme.Space.m)
-        .accessibilityElement(children: .combine)
+        // `.contain`, not `.combine`: the header holds two buttons (change photo, edit
+        // name). Combining collapsed them into one element that VoiceOver could only
+        // activate one way, and hid both identifiers from UI tests.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("profile-header")
     }
 
@@ -164,7 +181,7 @@ struct ProfileTabView: View {
             statDivider
             statItem(label: "Cabals") {
                 Text("\(cabalRows.count)")
-                    .font(MonacoTheme.Typo.moneyRow)
+                    .moneyFont(.row)
                     .foregroundStyle(MonacoTheme.ink)
             }
         }
@@ -259,13 +276,35 @@ struct ProfileTabView: View {
                 .accessibilityIdentifier("profile-advanced-link")
             }
 
+            // Signing out costs a fresh one-time code to get back in, and the button sits
+            // right under the Advanced row at the end of a scroll. Ask first, and keep it
+            // disabled afterwards so a second tap can't start a second logout.
             Button("Sign out") {
-                Task { await auth.logout() }
+                confirmSignOut = true
             }
             .buttonStyle(.monacoDestructive)
             .frame(maxWidth: .infinity)
             .padding(.top, MonacoTheme.Space.s)
+            .disabled(isSigningOut)
             .accessibilityIdentifier("profile-sign-out")
+            .confirmationDialog(ProfileSignOutCopy.title, isPresented: $confirmSignOut, titleVisibility: .visible) {
+                Button("Sign out", role: .destructive) {
+                    guard !isSigningOut else { return }
+                    isSigningOut = true
+                    Task {
+                        await auth.logout()
+                        isSigningOut = false
+                    }
+                }
+                .accessibilityIdentifier("profile-sign-out-confirm")
+                Button("Cancel", role: .cancel) {}
+                    .accessibilityIdentifier("profile-sign-out-cancel")
+            } message: {
+                Text(ProfileSignOutCopy.message(
+                    smsLoginEnabled: Config.dynamic.smsLoginEnabled,
+                    emailLoginEnabled: Config.dynamic.emailLoginEnabled
+                ))
+            }
         }
     }
 }

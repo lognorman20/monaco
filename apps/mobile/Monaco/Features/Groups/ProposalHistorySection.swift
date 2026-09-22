@@ -18,6 +18,10 @@ struct ProposalHistorySection: View {
     @State private var openProposals: [ProposalDTO] = []
     @State private var votingIDs: Set<String> = []
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let votes = ProposalVoteLedger.shared
+
     /// Proposals still waiting on this viewer come first.
     private var preview: [ProposalDTO] {
         let waiting = openProposals.filter(\.showsVoteActions)
@@ -46,7 +50,8 @@ struct ProposalHistorySection: View {
                                 destination: {
                                     ProposalDetailView(service: service, proposalId: proposal.id, initialProposal: proposal)
                                 },
-                                thesisIdentifierPrefix: "group-proposal-thesis"
+                                thesisIdentifierPrefix: "group-proposal-thesis",
+                                viewerChoice: votes.choice(for: proposal, viewerId: service.viewerId)
                             )
                         }
                     }
@@ -88,7 +93,12 @@ struct ProposalHistorySection: View {
         guard votingIDs.insert(proposal.id).inserted else { return }
         defer { votingIDs.remove(proposal.id) }
         let result = await ProposalVoting.cast(choice, proposalId: proposal.id, service: service)
-        if result.succeeded { Haptics.success() }
+        if result.succeeded {
+            Haptics.success()
+            withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.7)) {
+                votes.record(choice, for: proposal.id, viewerId: service.viewerId)
+            }
+        }
         onToast(result.toast)
         await load()
     }
