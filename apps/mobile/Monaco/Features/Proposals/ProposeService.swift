@@ -6,7 +6,6 @@ struct ProposeStock: Hashable, Identifiable {
     let symbol: String
     let name: String
     var priceMicros: Int64?
-    var change24h: String?
     var isTradable = true
 
     var id: String { symbol }
@@ -18,11 +17,10 @@ struct ProposeStock: Hashable, Identifiable {
         priceMicros.map { Decimal($0) / Decimal(1_000_000) }
     }
 
-    init(symbol: String, name: String, priceMicros: Int64? = nil, change24h: String? = nil, isTradable: Bool = true) {
+    init(symbol: String, name: String, priceMicros: Int64? = nil, isTradable: Bool = true) {
         self.symbol = symbol
         self.name = name
         self.priceMicros = priceMicros
-        self.change24h = change24h
         self.isTradable = isTradable
     }
 
@@ -38,7 +36,6 @@ struct ProposeStock: Hashable, Identifiable {
             symbol: market.symbol,
             name: Self.displayName(symbol: market.symbol, catalogName: market.name),
             priceMicros: market.priceUsdcMicros,
-            change24h: market.change24h,
             isTradable: market.canBuy
         )
     }

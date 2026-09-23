@@ -35,6 +35,32 @@ func TestNewHermesClientFromConfig_withAPIKey_returnsClient(t *testing.T) {
 	}
 }
 
+func TestNewMarketDataClientFromConfig_buildsBenchmarksWithoutAKey(t *testing.T) {
+	client := NewMarketDataClientFromConfig(&config.Config{})
+	if client.HasAPIKey() {
+		t.Fatal("no key was configured")
+	}
+	source, ok := client.seriesSource.(*BenchmarksClient)
+	if !ok || source.baseURL != defaultBenchmarksBaseURL {
+		t.Fatalf("series source = %#v, want Benchmarks on the public host", client.seriesSource)
+	}
+}
+
+func TestNewMarketDataClientFromConfig_honoursBothOverrides(t *testing.T) {
+	client := NewMarketDataClientFromConfig(&config.Config{
+		PythAPIKey:            "test-pyth-key",
+		PythHermesBaseURL:     "https://example.test/hermes",
+		PythBenchmarksBaseURL: "https://example.test/benchmarks",
+	})
+	if !client.HasAPIKey() || client.baseURL != "https://example.test/hermes" {
+		t.Fatalf("hermes = %q key=%v", client.baseURL, client.HasAPIKey())
+	}
+	source, ok := client.seriesSource.(*BenchmarksClient)
+	if !ok || source.baseURL != "https://example.test/benchmarks" {
+		t.Fatalf("series source = %#v", client.seriesSource)
+	}
+}
+
 func TestNewHermesClientFromConfig_withBaseURLOverride_usesCustomHost(t *testing.T) {
 	cfg := &config.Config{
 		PythAPIKey:        "test-pyth-key",

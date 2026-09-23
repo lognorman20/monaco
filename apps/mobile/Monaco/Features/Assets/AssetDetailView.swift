@@ -90,7 +90,6 @@ struct AssetDetailView: View {
             symbol: detail.symbol,
             name: ProposeStock.displayName(symbol: detail.symbol, catalogName: detail.name),
             priceMicros: detail.priceUsdcMicros,
-            change24h: detail.change24h,
             isTradable: detail.routable
         )
     }
@@ -130,6 +129,42 @@ struct AssetDetailView: View {
     @ViewBuilder
     private var chartSection: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            rangeChips
+
+            switch model.chartState {
+            case .loading:
+                chartPlaceholder
+                    .accessibilityLabel("Loading price history")
+                    .accessibilityIdentifier("asset-detail-chart-loading")
+            case .series(let points):
+                chart(points)
+            case .empty(let reason):
+                // The reason is the whole point for 3M and 1Y on a B20 feed: the
+                // token has only been on-chain for weeks, and saying which day it
+                // started beats an empty box that reads like a bug.
+                EmptyState(title: "No price history for this window yet", message: reason)
+                    .accessibilityIdentifier("asset-detail-chart-empty")
+            case .failed:
+                EmptyState(
+                    title: "Could not load price history",
+                    actionTitle: "Retry",
+                    action: { Task { await model.loadChart(range: model.range) } }
+                )
+                .accessibilityIdentifier("asset-detail-chart-failed")
+            }
+        }
+    }
+
+    /// Six ranges do not fit on one line. At the default text size the chips are
+    /// already ~320pt of the 335pt a 375pt device leaves inside the gutters, so one
+    /// Dynamic Type step up clipped the row and an accessibility size made it
+    /// unreadable. Scrolling horizontally is the only layout that stays correct as
+    /// the chips grow.
+    ///
+    /// The row clips at the gutter on purpose, so a half-visible chip reads as "there
+    /// is more" rather than bleeding to the edge.
+    private var rangeChips: some View {
+        ScrollView(.horizontal) {
             HStack(spacing: MonacoTheme.Space.s) {
                 ForEach(AssetChartRange.allCases, id: \.self) { range in
                     Button {
@@ -142,26 +177,14 @@ struct AssetDetailView: View {
                     .accessibilityIdentifier("asset-chart-range-\(range.rawValue)")
                 }
             }
-
-            switch model.chartState {
-            case .loading:
-                chartPlaceholder
-                    .accessibilityLabel("Loading price history")
-                    .accessibilityIdentifier("asset-detail-chart-loading")
-            case .series(let points):
-                chart(points)
-            case .empty:
-                EmptyState(title: "No price history for this window yet")
-                    .accessibilityIdentifier("asset-detail-chart-empty")
-            case .failed:
-                EmptyState(
-                    title: "Could not load price history",
-                    actionTitle: "Retry",
-                    action: { Task { await model.loadChart(range: model.range) } }
-                )
-                .accessibilityIdentifier("asset-detail-chart-failed")
-            }
+            // The capsules have a stroke, so a hairline of padding keeps the first
+            // and last chip from being shaved by the clip edge.
+            .padding(.horizontal, 1)
         }
+        .scrollIndicators(.hidden)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Chart range")
+        .accessibilityIdentifier("asset-chart-ranges")
     }
 
     private func chart(_ points: [AssetChartPointDTO]) -> some View {

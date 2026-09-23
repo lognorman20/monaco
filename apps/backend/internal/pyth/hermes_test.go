@@ -225,7 +225,7 @@ func TestHermesClient_fetchLatestPrice_notEntitled403_includesHermesBody(t *test
 	}
 }
 
-func TestHermesClient_fetchPriceFeedBySymbol_sendsBearerAuth(t *testing.T) {
+func TestHermesClient_fetchPriceFeedByQuery_sendsBearerAuth(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v2/price_feeds" {
 			http.NotFound(w, r)
@@ -240,9 +240,9 @@ func TestHermesClient_fetchPriceFeedBySymbol_sendsBearerAuth(t *testing.T) {
 	defer server.Close()
 
 	client := NewHermesClientWithHTTP(server.URL, server.Client(), "test-pyth-key")
-	feed, err := client.fetchPriceFeedBySymbol(context.Background(), "AAPLx")
+	feed, err := client.fetchPriceFeedByQuery(context.Background(), "AAPLc", EquityQuerySymbol("AAPLc"))
 	if err != nil {
-		t.Fatalf("fetchPriceFeedBySymbol: %v", err)
+		t.Fatalf("fetchPriceFeedByQuery: %v", err)
 	}
 	if feed.ID != "feed-aapl" {
 		t.Fatalf("feed ID = %q", feed.ID)

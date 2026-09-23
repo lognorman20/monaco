@@ -22,6 +22,8 @@ private final class StubAssetDetailDataSource: AssetDetailDataSource {
     /// probe error, so it can disagree with `routable`.
     var liquidityRoutable = true
     var change24h: String? = "0.05"
+    /// The backend labels `change24h` as the underlying's; nil plays an older backend.
+    var change24hBasis: MarketPriceBasis? = .underlying
     var points: [AssetChartRange: [AssetChartPointDTO]] = [:]
 
     func detail(symbol: String) async throws -> AssetDetailDTO {
@@ -34,6 +36,8 @@ private final class StubAssetDetailDataSource: AssetDetailDataSource {
             routable: routable,
             priceUsdcMicros: 185_000_000,
             change24h: change24h,
+            change24hBasis: change24hBasis,
+            change24hBasisSymbol: change24hBasis == nil ? nil : "AAPL",
             liquidity: AssetLiquidityDTO(
                 label: "Via DEX",
                 routable: liquidityRoutable,
@@ -95,7 +99,7 @@ struct AssetDetailModelTests {
 
         await model.loadChart(range: .oneWeek)
 
-        #expect(model.chartState == .empty)
+        #expect(model.chartState == .empty(reason: nil))
     }
 
     /// The bug: a slow 1M response overwrote the 1D curve the user had already switched to.
@@ -144,8 +148,22 @@ struct AssetDetailModelTests {
         await model.loadChart(range: .oneMonth)
 
         let move = try #require(model.move)
-        #expect(move.label == "Past day")
+        // The share's day move, said to be the share's: beside the token's price an unlabelled
+        // "Past day" read as the token's move.
+        #expect(move.label == "AAPL day move")
         #expect(PercentReturnFormatter.format(move.ratio) == "+5.0%")
+    }
+
+    @Test func aDayMoveWithoutItsBasisIsNotShownUnderTheTokenPrice() async throws {
+        let source = StubAssetDetailDataSource()
+        source.chartError = Monaco.MonacoAPIError.httpStatus(500)
+        source.change24hBasis = nil
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+
+        await model.loadDetail()
+        await model.loadChart(range: .oneDay)
+
+        #expect(model.move == nil)
     }
 
     /// The bug: a missing token returned before the loading flag was cleared, leaving the

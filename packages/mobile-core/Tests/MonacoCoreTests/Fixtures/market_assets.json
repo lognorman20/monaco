@@ -1,13 +1,21 @@
 {
   "assets": [
     {
-      "symbol": "AAPLx",
+      "symbol": "AAPLc",
       "name": "Apple",
-      "tokenAddress": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp",
+      "tokenAddress": "0xb200000000000000000000c2e324d24d7eecd1fb",
       "routable": true,
       "priceUsdcMicros": 185000000,
       "change24h": "0.027027"
     }
   ],
-  "hasMore": true
+  "hasMore": true,
+  "market": {
+    "session": "open",
+    "isOpen": true,
+    "afterHours": false,
+    "nextSession": "after_hours",
+    "nextTransition": "2026-09-22T20:00:00Z",
+    "asOf": "2026-09-22T14:00:00Z"
+  }
 }

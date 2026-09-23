@@ -24,6 +24,7 @@ const (
 	envKyberClientID          = "KYBER_CLIENT_ID"
 	envPythAPIKey             = "PYTH_API_KEY"
 	envPythHermesBaseURL      = "PYTH_HERMES_BASE_URL"
+	envPythBenchmarksBaseURL  = "PYTH_BENCHMARKS_BASE_URL"
 	envSupabaseURL            = "SUPABASE_URL"
 	envSupabaseServiceRoleKey = "SUPABASE_SERVICE_ROLE_KEY"
 )
@@ -42,10 +43,18 @@ type Config struct {
 	SignerURL              string
 	SignerSharedSecret     string
 	BaseRPCURL             string
+	// BaseRPCIsDefault reports that nothing set BASE_RPC_URL and the public
+	// endpoint is being used. It is not a usable production setting: every chart
+	// reads a feed's round history through it, and mainnet.base.org answers a few
+	// requests and then 429s, which costs a chart and a day change on every screen
+	// that asks. The API says so loudly at boot rather than letting it show up as
+	// intermittently missing data.
+	BaseRPCIsDefault bool
 	RelayerPrivateKey      string
 	KyberClientID          string
 	PythAPIKey             string
 	PythHermesBaseURL      string
+	PythBenchmarksBaseURL  string
 	SupabaseURL            string
 	SupabaseServiceRoleKey string
 }
@@ -65,6 +74,7 @@ func Load() (*Config, error) {
 		KyberClientID:          strings.TrimSpace(os.Getenv(envKyberClientID)),
 		PythAPIKey:             strings.TrimSpace(os.Getenv(envPythAPIKey)),
 		PythHermesBaseURL:      strings.TrimRight(strings.TrimSpace(os.Getenv(envPythHermesBaseURL)), "/"),
+		PythBenchmarksBaseURL:  strings.TrimRight(strings.TrimSpace(os.Getenv(envPythBenchmarksBaseURL)), "/"),
 		SupabaseURL:            strings.TrimSpace(os.Getenv(envSupabaseURL)),
 		SupabaseServiceRoleKey: strings.TrimSpace(os.Getenv(envSupabaseServiceRoleKey)),
 	}
@@ -89,6 +99,7 @@ func Load() (*Config, error) {
 	}
 	if cfg.BaseRPCURL == "" {
 		cfg.BaseRPCURL = defaultBaseRPCURL
+		cfg.BaseRPCIsDefault = true
 	}
 	if cfg.KyberClientID == "" {
 		cfg.KyberClientID = defaultKyberClientID
