@@ -19,16 +19,19 @@ enum HomeScreenState: Equatable {
     }
 }
 
-/// Home dashboard. Order: hero → balance row → "Needs your vote" (if any) →
-/// "Your cabals" → "Top investors". The hero is the title — no large nav title competes
-/// with it.
+/// Home dashboard. Order: **the ink fold** (money, curve, window pills, cash) → "Needs your vote"
+/// on Home's one ink band → "Your cabals" → "Top investors". The hero is the title; past 140pt the
+/// figure hands off into the nav bar so nothing competes with it.
 struct HomeView: View {
     @ObservedObject var auth: DynamicAuthService
     @Binding var selectedTab: MainTab
     @Environment(AppSessionStore.self) private var session
 
     @State private var leaderboard = HomeLeaderboardModel()
+    @State private var heroRange = HomeHeroRangeModel()
     @State private var isRetrying = false
+    /// True once the fold has scrolled past; the figure hands off into the nav bar (§4 #21).
+    @State private var heroScrolledAway = false
     @State private var toast: MonacoToast?
     /// Advanced only when a vote actually closes, so "Needs your vote" can drop an expired row
     /// between dashboard polls without putting the whole screen on a 60-second timer.
@@ -47,6 +50,18 @@ struct HomeView: View {
 
     private var leaderboardSource: LiveHomeLeaderboardDashboardSource {
         LiveHomeLeaderboardDashboardSource(auth: auth, session: session)
+    }
+
+    /// Chunk E's vote path, consumed read-only, so the deck at the top of Home posts the same
+    /// ballot the proposal screen does rather than growing a second one of its own.
+    private var voteService: LiveProposalFeedService {
+        LiveProposalFeedService(auth: auth)
+    }
+
+    /// The nav title once the fold has scrolled away. Empty while the figure is on screen.
+    private var handoffTitle: String {
+        guard heroScrolledAway, let dashboard = session.dashboard else { return "" }
+        return UsdAmountFormatter.format(decimalString: dashboard.netWorthUsd)
     }
 
     /// The range the board on screen was built with, straight from the payload.
@@ -83,7 +98,7 @@ struct HomeView: View {
             }
         }
         .monacoCanvas()
-        .navigationTitle("")
+        .navigationTitle(handoffTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -141,59 +156,98 @@ struct HomeView: View {
 
     private func dashboardScroll(_ dashboard: HomeDashboardDTO) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
-                // The 1H series loads after first paint (#217); the slot is sized from the
-                // dashboard so the layout does not move when it lands. `homePnLSeries` is nil
-                // until that read finishes, which is what tells the slot to stay silent
-                // instead of announcing an empty curve it has not asked about yet.
+            VStack(alignment: .leading, spacing: 0) {
+                // The ink fold: full-bleed, under the status bar, square top corners and a 28pt
+                // bottom radius, so paper slides up over its bottom edge. The curve's slot is
+                // sized from the dashboard so the layout does not move when a series lands (#217).
                 HomeNetWorthSection(
                     dashboard: dashboard,
                     chart: HomeHeroChart.resolve(
-                        loaded: session.homePnLSeries,
-                        embedded: dashboard.pnlSeries1H,
+                        loaded: heroRange.series(oneHourSeries: session.homePnLSeries),
+                        // The dashboard's embedded copy is a 1H series; it is not an answer about
+                        // any other window.
+                        embedded: heroRange.range == .oneHour ? dashboard.pnlSeries1H : [],
                         hasCabals: !dashboard.myGroups.isEmpty
+                    ),
+                    range: Binding(
+                        get: { heroRange.range },
+                        set: { heroRange.select($0, auth: auth, client: MonacoAPIClient()) }
+                    ),
+                    isRangeLoading: heroRange.isLoading,
+                    rangeFailed: heroRange.failed,
+                    balanceFold: HomeBalanceFold(
+                        auth: auth,
+                        balance: session.platformBalance,
+                        isBalanceLoading: session.isBalanceLoading,
+                        joinedCabals: joinedCabals,
+                        isRetryingBalance: isRetrying,
+                        // Shares `retryLoad`'s in-flight guard: retrying the balance is the same
+                        // three-request refresh, so it cannot be stacked by tapping repeatedly.
+                        onRetryBalance: { Task { await retryLoad() } }
                     )
                 )
 
-                HomeBalanceRowSection(
-                    auth: auth,
-                    balance: session.platformBalance,
-                    isBalanceLoading: session.isBalanceLoading,
-                    joinedCabals: joinedCabals,
-                    isRetryingBalance: isRetrying,
-                    // Shares `retryLoad`'s in-flight guard: retrying the balance is the same
-                    // three-request refresh, so it cannot be stacked by tapping repeatedly.
-                    onRetryBalance: { Task { await retryLoad() } }
-                )
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.section) {
+                    // Gated on the rows still open rather than on the payload: a section that
+                    // renders nothing still takes a `VStack` spacing on each side, which would
+                    // leave a doubled gap here until the next dashboard write.
+                    let openVotes = HomeMissedVotes.open(dashboard.missedProposals, now: votesClock)
+                    if !openVotes.isEmpty {
+                        HomeMissedVotesSection(
+                            rows: openVotes,
+                            onOpen: { openProposalId = $0 },
+                            onVote: { row, choice in await castVote(choice, on: row) }
+                        )
+                    }
 
-                // Gated on the rows still open rather than on the payload: a section that
-                // renders nothing still takes a `VStack` spacing on each side, which would
-                // leave a doubled gap here until the next dashboard write.
-                let openVotes = HomeMissedVotes.open(dashboard.missedProposals, now: votesClock)
-                if !openVotes.isEmpty {
-                    HomeMissedVotesSection(rows: openVotes, onOpen: { openProposalId = $0 })
+                    HomePositionsSection(
+                        auth: auth,
+                        rows: dashboard.myGroups,
+                        potValuesUsd: potValuesUsd,
+                        onLeft: { await refreshHome() },
+                        onBrowseCabals: { selectedTab = .cabals }
+                    )
+
+                    HomeLeaderboardSection(
+                        auth: auth,
+                        model: leaderboard,
+                        people: dashboard.leaderboard.people,
+                        hasCabals: !dashboard.myGroups.isEmpty,
+                        onSelect: { leaderboard.select($0, from: leaderboardSource) },
+                        onRetry: { leaderboard.retry(from: leaderboardSource) }
+                    )
                 }
-
-                HomePositionsSection(
-                    auth: auth,
-                    rows: dashboard.myGroups,
-                    potValuesUsd: potValuesUsd,
-                    onLeft: { await refreshHome() },
-                    onBrowseCabals: { selectedTab = .cabals }
-                )
-
-                HomeLeaderboardSection(
-                    auth: auth,
-                    model: leaderboard,
-                    people: dashboard.leaderboard.people,
-                    hasCabals: !dashboard.myGroups.isEmpty,
-                    onSelect: { leaderboard.select($0, from: leaderboardSource) },
-                    onRetry: { leaderboard.retry(from: leaderboardSource) }
-                )
+                .padding(.horizontal, MonacoTheme.Space.gutter)
+                .padding(.top, firstSectionClearance(dashboard))
+                .padding(.bottom, MonacoTheme.Space.l)
             }
-            .padding(.horizontal, MonacoTheme.Space.m)
-            .padding(.bottom, MonacoTheme.Space.l)
         }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentOffset.y + geometry.contentInsets.top > 140
+        } action: { _, scrolledAway in
+            guard scrolledAway != heroScrolledAway else { return }
+            heroScrolledAway = scrolledAway
+        }
+    }
+
+    /// What comes under the fold takes the section rhythm — unless it is the ink band, which
+    /// already carries 40pt of clearance of its own on both sides.
+    private func firstSectionClearance(_ dashboard: HomeDashboardDTO) -> CGFloat {
+        HomeMissedVotes.open(dashboard.missedProposals, now: votesClock).isEmpty
+            ? MonacoTheme.Space.section
+            : 0
+    }
+
+    /// Posts a ballot from the deck at the top of Home, then refreshes: the row disappears
+    /// because the server dropped it, not because this screen guessed that it would.
+    private func castVote(_ choice: ProposalVoteChoice, on row: HomeMissedProposalRowDTO) async -> Bool {
+        let outcome = await ProposalVoting.cast(choice, proposalId: row.proposalId, service: voteService)
+        toast = outcome.toast
+        if outcome.succeeded {
+            Haptics.success()
+            await refreshHome()
+        }
+        return outcome.succeeded
     }
 
     /// The failed state lives in a ScrollView, so the "pull down to try again" the store asks
@@ -213,12 +267,12 @@ struct HomeView: View {
                 .disabled(isRetrying)
                 if isRetrying {
                     ProgressView()
-                        .tint(MonacoTheme.ink)
+                        .tint(MonacoTheme.controlTint)
                         .accessibilityLabel("Loading")
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, MonacoTheme.Space.m)
+            .padding(.horizontal, MonacoTheme.Space.gutter)
             .padding(.top, MonacoTheme.Space.xl)
         }
         .scrollBounceBehavior(.always)
@@ -269,7 +323,7 @@ struct HomeView: View {
     }
 }
 
-/// Skeleton hero + three rows, per the plan's Home loading spec.
+/// Skeleton fold + three rows, per the plan's Home loading spec.
 private struct HomeSkeletonView: View {
     var body: some View {
         ScrollView {
@@ -279,15 +333,15 @@ private struct HomeSkeletonView: View {
                     SkeletonBlock(width: 180, height: 44)
                 }
 
-                SkeletonBlock(height: 64, radius: MonacoTheme.Radius.card)
+                SkeletonBlock(height: 64, radius: MonacoTheme.Radius.container)
 
                 VStack(spacing: MonacoTheme.Space.s) {
                     ForEach(0..<3, id: \.self) { _ in
-                        SkeletonBlock(height: 60, radius: MonacoTheme.Radius.card)
+                        SkeletonBlock(height: 60, radius: MonacoTheme.Radius.container)
                     }
                 }
             }
-            .padding(.horizontal, MonacoTheme.Space.m)
+            .padding(.horizontal, MonacoTheme.Space.gutter)
             .padding(.top, MonacoTheme.Space.m)
         }
         .accessibilityIdentifier("home-loading")

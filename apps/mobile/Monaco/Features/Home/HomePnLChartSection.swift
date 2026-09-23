@@ -5,12 +5,48 @@ import SwiftUI
 /// few NAV snapshots, so this (and the caller) hide the whole section under 3 points
 /// rather than show a scrub-able chart that would read as broken.
 ///
-/// `onInk` is the Home hero variant: it sits inside the deep ink money card, so it uses the
+/// `onInk` is the ink-fold variant: it sits on the slab that opens Home, so it uses the
 /// saturated P&L pair and a heavier gradient area fill that reads against ink.
+///
+/// The curve draws on **only when the range changes** (§4 #6). A poll landing three more points
+/// must not re-sweep a curve the member is already reading, and under Reduce Motion the mask is
+/// not applied at all — the curve is simply drawn complete.
 struct HomePnLChartSection: View {
     let points: [HomePnLSeriesPointDTO]
     var onInk = false
     var height: CGFloat = 120
+    /// Overrides the gain/loss colour. Used where the curve belongs to something with an
+    /// identity of its own — a cabal's tint on Profile — rather than to a direction.
+    var tint: Color?
+    /// The window the curve describes, when the caller wants this component to say so. Purely a
+    /// redraw trigger here: the caller owns the fetch.
+    var range: HomeLeaderboardRange?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// 0 → 1 across the plot width. Re-run on a range change, never on a data poll.
+    @State private var sweep: CGFloat = 0
+
+    init(
+        points: [HomePnLSeriesPointDTO],
+        onInk: Bool = false,
+        height: CGFloat = 120,
+        tint: Color? = nil,
+        range: HomeLeaderboardRange? = nil
+    ) {
+        self.points = points
+        self.onInk = onInk
+        self.height = height
+        self.tint = tint
+        self.range = range
+    }
+
+    /// Cross-chunk contract 2 — Chunk F reuses the Home curve on Profile.
+    ///
+    /// The binding is the caller's: Profile owns which window it is asking the API for, exactly
+    /// as Home does. This initialiser exists so the two cannot drift into two curves.
+    init(points: [HomePnLSeriesPointDTO], range: Binding<HomeLeaderboardRange>, tint: Color) {
+        self.init(points: points, onInk: false, height: 120, tint: tint, range: range.wrappedValue)
+    }
 
     /// The window's own direction — where the curve ends against where it starts — not the
     /// lifetime sign. A portfolio down over the hour but up all time drew a green falling
@@ -25,10 +61,12 @@ struct HomePnLChartSection: View {
     /// What the line says, in one sentence, for VoiceOver — naming the same window the caption
     /// above the curve names, so the two do not disagree.
     private var accessibilitySummary: String {
-        PnLSpeech.dollars(String(format: "%+.2f", windowChange)) + " over the past hour"
+        let phrase = range?.windowPhrase ?? "the past hour"
+        return PnLSpeech.dollars(String(format: "%+.2f", windowChange)) + " over \(phrase)"
     }
 
     private var chartTint: Color {
+        if let tint { return tint }
         if onInk {
             return isUp ? MonacoTheme.profitVivid : MonacoTheme.lossVivid
         }
@@ -50,6 +88,25 @@ struct HomePnLChartSection: View {
     var body: some View {
         if points.count >= 3 {
             chart
+                .mask(alignment: .leading) { sweepMask }
+                .onChange(of: range) { _, _ in
+                    guard !reduceMotion else { return }
+                    sweep = 0
+                    withAnimation(.easeOut(duration: 0.55)) { sweep = 1 }
+                }
+                .onAppear {
+                    guard !reduceMotion else { return }
+                    withAnimation(.easeOut(duration: 0.55)) { sweep = 1 }
+                }
+        }
+    }
+
+    /// Left-to-right reveal. Under Reduce Motion — and any time `sweep` has already finished —
+    /// this is a full-width rectangle, which costs nothing.
+    private var sweepMask: some View {
+        GeometryReader { proxy in
+            Rectangle()
+                .frame(width: reduceMotion ? proxy.size.width : proxy.size.width * sweep)
         }
     }
 

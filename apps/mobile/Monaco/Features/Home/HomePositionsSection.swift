@@ -11,7 +11,7 @@ struct HomePositionsSection: View {
     var onBrowseCabals: () -> Void = {}
 
     var body: some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
             MonacoSectionHeader("Your cabals")
 
             if rows.isEmpty {

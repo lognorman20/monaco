@@ -4,7 +4,11 @@ import SwiftUI
 /// "Top investors": the cross-cabal people board for the selected window.
 ///
 /// The rows come from the shared dashboard; `model` owns which window they describe, so the
-/// chip, the rows and the copy under an empty board can never disagree (#275, #276).
+/// control, the rows and the copy under an empty board can never disagree (#275, #276).
+///
+/// The hand-rolled range chips are gone: this is `MonacoSegmented` over the same
+/// `HomeLeaderboardRange`, so the app has **one** selection vocabulary rather than a pill row here
+/// and a segmented control three screens away.
 struct HomeLeaderboardSection: View {
     @ObservedObject var auth: DynamicAuthService
     let model: HomeLeaderboardModel
@@ -15,10 +19,15 @@ struct HomeLeaderboardSection: View {
     let onRetry: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
             MonacoSectionHeader("Top investors")
 
-            rangeChips
+            MonacoSegmented(
+                HomeLeaderboardRange.allCases,
+                selection: Binding(get: { model.selectedRange }, set: onSelect)
+            ) { $0.label }
+            .accessibilityLabel("Leaderboard window")
+            .accessibilityIdentifier("home-leaderboard-range")
 
             if model.failed {
                 EmptyState(
@@ -33,43 +42,6 @@ struct HomeLeaderboardSection: View {
             } else {
                 board
             }
-        }
-    }
-
-    private var rangeChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(HomeLeaderboardRange.allCases, id: \.self) { option in
-                    let isSelected = model.selectedRange == option
-                    Button {
-                        onSelect(option)
-                    } label: {
-                        RangeChip(title: option.label, isSelected: isSelected)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(option.accessibilityName)
-                    .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-                    .accessibilityIdentifier("home-leaderboard-range-\(option.rawValue)")
-                }
-            }
-        }
-    }
-
-    /// A range pill on `surfaceSunken`, 44 pt tall so it can be hit, unlike the caption-sized
-    /// chip it replaces.
-    private struct RangeChip: View {
-        let title: String
-        let isSelected: Bool
-
-        var body: some View {
-            Text(title)
-                .font(MonacoTheme.Typo.callout.weight(.semibold))
-                .foregroundStyle(isSelected ? MonacoTheme.primaryButtonLabel : MonacoTheme.muted)
-                .lineLimit(1)
-                .padding(.horizontal, 16)
-                .frame(minWidth: 56, minHeight: 44)
-                .background(Capsule().fill(isSelected ? MonacoTheme.primaryButtonFill : MonacoTheme.surfaceSunken))
-                .contentShape(Capsule())
         }
     }
 
@@ -97,7 +69,7 @@ struct HomeLeaderboardSection: View {
     private var loadingBoard: some View {
         VStack(spacing: MonacoTheme.Space.s) {
             ForEach(0..<3, id: \.self) { _ in
-                SkeletonBlock(height: 60, radius: MonacoTheme.Radius.card)
+                SkeletonBlock(height: 60, radius: MonacoTheme.Radius.container)
             }
         }
         .accessibilityIdentifier("home-leaderboard-loading")
@@ -107,7 +79,7 @@ struct HomeLeaderboardSection: View {
     /// last window's numbers as this one's.
     private var board: some View {
         MonacoGroupedList {
-            ForEach(people) { row in
+            ForEach(Array(people.enumerated()), id: \.element.userId) { index, row in
                 NavigationLink {
                     UserProfileGroupsView(
                         auth: auth,
@@ -120,12 +92,20 @@ struct HomeLeaderboardSection: View {
                         title: row.displayName,
                         chevron: true,
                         isLast: row.userId == people.last?.userId,
-                        leading: { MonacoAvatar(photoURL: row.profilePhotoUrl, displayName: row.displayName, size: 44) },
+                        leading: {
+                            MonacoAvatar(photoURL: row.profilePhotoUrl, displayName: row.displayName, size: 44)
+                                .overlay(alignment: .bottomLeading) {
+                                    RankBadge(rank: index + 1, seed: row.userId)
+                                        .offset(x: -4, y: 4)
+                                }
+                        },
                         trailing: {
                             PercentText(percentReturn: row.percentReturn, style: .row)
                             PnLText(dollarPnl: row.dollarPnl, style: .caption)
                         }
                     )
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Number \(index + 1), \(row.displayName)")
                 }
                 .buttonStyle(.monacoRow)
                 .accessibilityIdentifier("home-leaderboard-row-\(row.userId)")
@@ -138,11 +118,40 @@ struct HomeLeaderboardSection: View {
                 // thing as an empty board loading, and a UI test matching one identifier for
                 // both could not tell them apart.
                 ProgressView()
-                    .tint(MonacoTheme.ink)
+                    .tint(MonacoTheme.controlTint)
                     .accessibilityIdentifier("home-leaderboard-refreshing")
             }
         }
         .animation(.easeInOut(duration: 0.15), value: model.isLoading)
         .disabled(model.isLoading)
+    }
+}
+
+/// The podium badge on the leaderboard avatar.
+///
+/// Ranks 1–3 only, and on `CabalTint.cta` rather than `fill`: this is a 13pt bold numeral, which
+/// is **not** "large text" under WCAG, so it needs the 4.5:1 ramp. Ranks 4 and beyond keep a grey
+/// numeral — a board where everything is decorated has no podium.
+///
+/// The tint is hashed from the person's own id, so a member's badge is the same colour every time
+/// the board is drawn and two people next to each other are unlikely to share one. It is never the
+/// only signal: the numeral is the rank, and the name is right beside it.
+private struct RankBadge: View {
+    let rank: Int
+    let seed: String
+
+    private var isPodium: Bool { rank <= 3 }
+
+    var body: some View {
+        Text("\(rank)")
+            .font(.system(size: 13, weight: .bold).monospacedDigit())
+            .foregroundStyle(isPodium ? Color.white : MonacoTheme.fgMuted)
+            .frame(width: 22, height: 22)
+            .background {
+                Circle()
+                    .fill(isPodium ? MonacoTheme.CabalTint.forGroupId(seed).cta : MonacoTheme.fillQuiet)
+            }
+            .overlay(Circle().strokeBorder(MonacoTheme.bgRaised, lineWidth: 2))
+            .accessibilityHidden(true)
     }
 }
