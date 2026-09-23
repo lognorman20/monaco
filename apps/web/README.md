@@ -5,7 +5,7 @@ Waitlist landing page. Static HTML plus two Vercel serverless functions. No buil
 | Path | What it is |
 |---|---|
 | `index.html` | The page |
-| `api/waitlist.js` | `POST` signup: validates, then calls the `join_waitlist()` database function |
+| `api/waitlist.js` | `POST` signup to the Supabase `waitlist` table |
 | `api/health.js` | `GET` status of Supabase and config |
 | `lib/waitlist.js` | Signup logic, tested in `test/` |
 | `assets/demo.mp4` | Drop the launch video here. The page shows a placeholder until it exists |
@@ -22,15 +22,10 @@ cd apps/web && npx vercel dev
 
 ## Deploy
 
-The waitlist lives in the main Monaco Supabase project. Its schema is one migration, `supabase/migrations/000019_waitlist.sql`, applied like every other migration: at backend boot, or with `go run ./cmd/migrate` from `apps/backend`. Nothing is run by hand in the SQL editor.
-
-The landing page holds only the anon key, which can call `join_waitlist()` and nothing else. It never gets the service role key. The database function enforces the limits: 5 signups per network per hour, and 60 per minute across everyone.
-
-1. Merge the PR. The migration applies on the next backend deploy or `cmd/migrate` run.
-2. Import the repo in Vercel with root directory `apps/web`, framework "Other".
-3. Set the env vars below for Production and Preview.
-4. Add `trymonaco.xyz` and `www.trymonaco.xyz` under Domains and point DNS at Vercel.
-5. Check that `https://trymonaco.xyz/api/health` returns `"status": "ok"`. It reports `waitlist table missing` until the migration has run.
+1. Import the repo in Vercel with root directory `apps/web`, framework "Other".
+2. Set the env vars below for Production and Preview.
+3. Add `trymonaco.xyz` and `www.trymonaco.xyz` under Domains and point DNS at Vercel.
+4. Check that `https://trymonaco.xyz/api/health` returns `"status": "ok"`.
 
 | Env var | Value |
 |---|---|
