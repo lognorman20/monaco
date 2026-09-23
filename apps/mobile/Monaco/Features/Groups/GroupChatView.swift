@@ -11,8 +11,28 @@ import MonacoCore
 struct GroupChatView: View {
     let groupId: String
     let groupName: String?
+    /// The cabal's members, for the avatars beside each run and the face stack in the toolbar.
+    ///
+    /// Resolved entirely client-side, with no backend work at all: `GroupMessageDTO.authorId`
+    /// joins against the `GroupViewDTO.members` array the cabal screen has already loaded, and
+    /// `LeaderboardRowDTO` carries `userId`, `displayName` and `profilePhotoUrl`. A member who is
+    /// not in the array — someone who left after writing — falls back to the message's own
+    /// `authorName`, which is the only honest answer there is.
+    var members: [LeaderboardRowDTO] = []
+    /// This cabal's resolved tint. Your own bubbles take it, which is the clearest possible
+    /// signal of which room you are standing in.
+    var tint: MonacoTheme.CabalTint?
     /// Returns the chat transport for the current session, or nil when signed out.
     let makeService: () -> (any GroupChatService)?
+
+    /// Author id to member, built once per members change rather than per bubble.
+    private var membersById: [String: LeaderboardRowDTO] {
+        Dictionary(members.map { ($0.userId, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    private var resolvedTint: MonacoTheme.CabalTint {
+        tint ?? .forGroupId(groupId)
+    }
 
     @State private var timeline = GroupChatTimeline()
     @State private var isLoadingOlder = false
@@ -70,12 +90,24 @@ struct GroupChatView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 8) {
-                    CabalMark(groupId: groupId, name: GroupChatCopy.title(groupName: groupName), size: 28)
+                    CabalMark(tint: resolvedTint, name: GroupChatCopy.title(groupName: groupName), size: 28)
                         .accessibilityHidden(true)
-                    Text(GroupChatCopy.title(groupName: groupName))
-                        .font(.headline)
-                        .foregroundStyle(MonacoTheme.ink)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(GroupChatCopy.title(groupName: groupName))
+                            .font(.headline)
+                            .foregroundStyle(MonacoTheme.fgPrimary)
+                            .lineLimit(1)
+                        // Who is in the room, under its name. Initials until the members'
+                        // photos are there; `MonacoAvatar` already renders them.
+                        MonacoFaceStack(
+                            faces: members.map {
+                                MonacoFace(id: $0.userId, displayName: $0.displayName, photoURL: $0.profilePhotoUrl)
+                            },
+                            size: 16,
+                            maxVisible: 5,
+                            ringColor: MonacoTheme.bgBase
+                        )
+                    }
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isHeader)
@@ -124,7 +156,7 @@ struct GroupChatView: View {
             } else {
                 statusMessage {
                     ProgressView("Loading messages…")
-                        .tint(MonacoTheme.accent)
+                        .tint(MonacoTheme.controlTint)
                         .foregroundStyle(MonacoTheme.secondaryText)
                 }
                 .accessibilityIdentifier("group-chat-loading")
@@ -145,7 +177,8 @@ struct GroupChatView: View {
     }
 
     private var thread: some View {
-        ScrollViewReader { proxy in
+        let dayLabels = GroupChatDayDivider.labels(for: timeline.rows)
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 3) {
                     if timeline.hasOlder {
@@ -153,18 +186,27 @@ struct GroupChatView: View {
                     }
 
                     ForEach(timeline.rows) { row in
-                        if let separator = row.timeSeparatorLabel() {
+                        if let separator = dayLabels[row.id] {
+                            // A day divider, not a stray caption: a capsule on the quiet fill,
+                            // centred, so the eye reads it as a break in the conversation.
                             Text(separator)
                                 .font(MonacoTheme.Typo.micro)
-                                .foregroundStyle(MonacoTheme.muted)
+                                .foregroundStyle(MonacoTheme.fgMuted)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(Capsule().fill(MonacoTheme.fillQuiet))
                                 .frame(maxWidth: .infinity)
-                                .padding(.top, row.id == timeline.rows.first?.id ? 8 : 16)
-                                .padding(.bottom, 4)
+                                .padding(.top, row.id == timeline.rows.first?.id ? 8 : 20)
+                                .padding(.bottom, 6)
                                 .accessibilityIdentifier("group-chat-separator-\(row.id)")
                         }
-                        GroupChatBubble(row: row)
-                            .padding(.top, row.startsRun && !row.showsTimeSeparator ? 10 : 0)
-                            .id(row.id)
+                        GroupChatBubble(
+                            row: row,
+                            author: membersById[row.message.authorId],
+                            tint: resolvedTint
+                        )
+                        .padding(.top, row.startsRun && !row.showsTimeSeparator ? 10 : 0)
+                        .id(row.id)
                     }
 
                     Color.clear.frame(height: 1).id(Self.bottomAnchor)
@@ -284,14 +326,14 @@ struct GroupChatView: View {
             Task { await loadOlder() }
         } label: {
             if isLoadingOlder {
-                ProgressView().tint(MonacoTheme.accent)
+                ProgressView().tint(MonacoTheme.controlTint)
             } else {
                 Text(GroupChatCopy.loadEarlier)
                     .font(.footnote.weight(.semibold))
             }
         }
         .buttonStyle(.borderless)
-        .foregroundStyle(MonacoTheme.accent)
+        .foregroundStyle(MonacoTheme.brand)
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .disabled(isLoadingOlder)
@@ -331,7 +373,7 @@ struct GroupChatView: View {
 
             Button("Try again") { Task { await loadNewest() } }
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(MonacoTheme.accent)
+                .foregroundStyle(MonacoTheme.brand)
                 .accessibilityIdentifier("group-chat-closed-retry")
         }
         .padding(.horizontal, 16)
@@ -497,8 +539,14 @@ private enum GroupChatSendOutcome {
 
 extension GroupChatView {
     /// Chat screen wired to the live API using the current session token.
-    init(auth: DynamicAuthService, groupId: String, groupName: String?) {
-        self.init(groupId: groupId, groupName: groupName) { [weak auth] in
+    init(
+        auth: DynamicAuthService,
+        groupId: String,
+        groupName: String?,
+        members: [LeaderboardRowDTO] = [],
+        tint: MonacoTheme.CabalTint? = nil
+    ) {
+        self.init(groupId: groupId, groupName: groupName, members: members, tint: tint) { [weak auth] in
             guard let token = auth?.accessToken, !token.isEmpty else { return nil }
             return MonacoCore.MonacoAPIClient(baseURL: Config.apiBaseURL, accessTokenProvider: { token })
         }
@@ -527,6 +575,9 @@ private struct GroupChatComposer: View {
                 TextField(GroupChatCopy.composerPlaceholder, text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .focused(focus)
+                    // The caret is ink, deliberately not brand: blue means tap, and a caret is
+                    // not a thing you tap.
+                    .tint(MonacoTheme.controlTint)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 11)
                     .frame(minHeight: 44)
@@ -601,34 +652,146 @@ private struct GroupChatComposer: View {
     }
 }
 
+/// The centred label that breaks a thread into days.
+///
+/// `GroupChatRow.timeSeparatorLabel()` returns the day **and** the clock time ("Yesterday
+/// 5:52 PM"), which was right when the thread showed no times anywhere else. Now that the end of
+/// every run carries its own stamp, that put the time on screen twice, six inches apart, and the
+/// divider stopped reading as a day break. This is the day alone; the stamp under the last
+/// bubble of a run is the time.
+enum GroupChatDayDivider {
+    /// Which rows open a new day, keyed by row id.
+    ///
+    /// `showsTimeSeparator` marks a *gap in the conversation*, not a new day — two messages four
+    /// hours apart on the same afternoon both carry it. That was right when the label included
+    /// the clock time; with a day-only label it printed "Today" twice down one screen. A day
+    /// divider is drawn where the day actually changes, and nowhere else.
+    static func labels(for rows: [GroupChatRow], now: Date = Date()) -> [String: String] {
+        let calendar = Calendar.current
+        var labels: [String: String] = [:]
+        var lastDay: Date?
+        for row in rows {
+            guard let date = row.date else { continue }
+            let day = calendar.startOfDay(for: date)
+            if day != lastDay {
+                labels[row.id] = label(for: date, now: now)
+                lastDay = day
+            }
+        }
+        return labels
+    }
+
+    static func label(for date: Date, now: Date = Date()) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        // Inside the last week, the weekday is what a member actually remembers; past that, the
+        // date. Neither carries a year: a chat thread nobody has opened in a year is not a case
+        // worth a wider label.
+        if let days = calendar.dateComponents([.day], from: date, to: now).day, days < 7 {
+            return date.formatted(.dateTime.weekday(.wide))
+        }
+        return date.formatted(.dateTime.day().month(.abbreviated))
+    }
+}
+
 private struct GroupChatBubble: View {
     let row: GroupChatRow
+    /// The member who wrote it, joined client-side. Nil for someone who has left the cabal.
+    let author: LeaderboardRowDTO?
+    /// The cabal's colour. Your own bubbles carry it, so the room you are standing in is
+    /// readable from a single bubble.
+    let tint: MonacoTheme.CabalTint
+
+    @Environment(\.colorScheme) private var colorScheme
 
     private var message: GroupMessageDTO { row.message }
 
+    /// The avatar column, reserved on every row from another member whether or not a face is
+    /// drawn, so a run's second bubble does not shift left and nothing reflows when a photo
+    /// finishes loading.
+    private static let avatarSize: CGFloat = 24
+    private static let avatarGutter: CGFloat = 32
+
+    /// `cta`, not `fill`: a bubble carries body text at 17pt, which is not "large text" under
+    /// WCAG, and only the deeper pair clears 4.5:1 against white in both schemes.
+    private var mineFill: Color { tint.cta }
+
     var body: some View {
-        HStack {
-            if message.mine { Spacer(minLength: 56) }
-            VStack(alignment: message.mine ? .trailing : .leading, spacing: 4) {
-                if !message.mine, row.startsRun {
-                    Text(message.authorName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(MonacoTheme.muted)
-                        .padding(.horizontal, 14)
-                }
-                Text(message.body)
-                    .font(.body)
-                    .foregroundStyle(message.mine ? MonacoTheme.primaryButtonLabel : MonacoTheme.ink)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(bubbleShape.fill(message.mine ? MonacoTheme.primaryButtonFill : MonacoTheme.surface))
+        VStack(alignment: message.mine ? .trailing : .leading, spacing: 4) {
+            if !message.mine, row.startsRun {
+                Text(author?.displayName ?? message.authorName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(MonacoTheme.fgMuted)
+                    .padding(.leading, Self.avatarGutter + 14)
             }
-            if !message.mine { Spacer(minLength: 56) }
+            // The avatar is level with the bubble, not with the name above it and not with the
+            // timestamp below it — so it belongs in an HStack with the bubble alone.
+            HStack(alignment: .bottom, spacing: 0) {
+                if message.mine {
+                    Spacer(minLength: 56)
+                } else {
+                    avatarColumn
+                }
+                bubble
+                if !message.mine { Spacer(minLength: 56) }
+            }
+            if row.endsRun, let timestamp {
+                // The thread showed no time at all before v3 — it existed only in the VoiceOver
+                // label. One stamp at the end of a run, not one per bubble.
+                Text(timestamp)
+                    .font(MonacoTheme.Typo.micro)
+                    .foregroundStyle(MonacoTheme.fgSubtle)
+                    .padding(.leading, message.mine ? 0 : Self.avatarGutter + 6)
+                    .padding(.trailing, message.mine ? 6 : 0)
+                    .accessibilityHidden(true)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: message.mine ? .trailing : .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
         .accessibilityIdentifier("group-chat-message-\(message.id)")
+    }
+
+    private var bubble: some View {
+        Text(message.body)
+            .font(.body)
+            .foregroundStyle(message.mine ? Color.white : MonacoTheme.fgPrimary)
+            .textSelection(.enabled)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(bubbleShape.fill(message.mine ? mineFill : MonacoTheme.bgRaised))
+            .overlay {
+                // A `bgRaised` bubble on `bgBase` is a 1.2:1 step in dark and would be an
+                // invisible bubble; in light the two are already separable.
+                if !message.mine, colorScheme == .dark {
+                    bubbleShape.strokeBorder(MonacoTheme.line, lineWidth: 1)
+                }
+            }
+    }
+
+    private var timestamp: String? {
+        row.date?.formatted(date: .omitted, time: .shortened)
+    }
+
+    @ViewBuilder
+    private var avatarColumn: some View {
+        Group {
+            if row.startsRun {
+                MonacoAvatar(
+                    photoURL: author?.profilePhotoUrl,
+                    displayName: author?.displayName ?? message.authorName,
+                    size: Self.avatarSize
+                )
+            } else {
+                Color.clear.frame(width: Self.avatarSize, height: 1)
+            }
+        }
+        // Reserved on every row from another member, drawn only on the first of a run. The
+        // gutter is what stops a run's second bubble sliding left, and a photo finishing loading
+        // from reflowing the thread under the reader's thumb.
+        .frame(width: Self.avatarGutter, alignment: .leading)
+        .accessibilityHidden(true)
     }
 
     /// Rounded 20 all round, with a tighter corner on the sender's side at the end of a run.

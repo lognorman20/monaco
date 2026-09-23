@@ -296,7 +296,14 @@ struct GroupDetailView: View {
                 onToast: { toast = $0 }
             )
         case .chat:
-            GroupChatView(auth: auth, groupId: groupId, groupName: displayName)
+            GroupChatView(
+                auth: auth,
+                groupId: groupId,
+                groupName: displayName,
+                // Joined client-side against the members this screen already holds. No endpoint.
+                members: groupView?.members ?? [],
+                tint: cabalTint
+            )
         case .proposals:
             ProposalFeedView(service: proposalService, groupId: groupId)
         case .activity:
