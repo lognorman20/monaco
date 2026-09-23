@@ -72,7 +72,13 @@ struct AssetDetailView: View {
             Task { await loadChart() }
         }
         .navigationDestination(item: $pickerKind) { kind in
-            GroupPickerForProposalView(auth: auth, symbol: activeSymbol, kind: kind)
+            GroupPickerForProposalView(
+                auth: auth,
+                symbol: activeSymbol,
+                assetKind: detail?.resolvedKind ?? .stock,
+                tokenDecimals: detail?.resolvedDecimals ?? AssetCatalogDefaults.decimals,
+                kind: kind
+            )
         }
         .monacoFrameStats("AssetDetail")
     }

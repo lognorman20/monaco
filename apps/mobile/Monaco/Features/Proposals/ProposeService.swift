@@ -20,12 +20,22 @@ struct ProposeStock: Hashable, Identifiable {
         priceMicros.map { Decimal($0) / Decimal(1_000_000) }
     }
 
-    init(symbol: String, name: String, priceMicros: Int64? = nil, change24h: String? = nil, isTradable: Bool = true) {
+    init(
+        symbol: String,
+        name: String,
+        priceMicros: Int64? = nil,
+        change24h: String? = nil,
+        isTradable: Bool = true,
+        assetKind: AssetKind = .stock,
+        tokenDecimals: Int = AssetCatalogDefaults.decimals
+    ) {
         self.symbol = symbol
         self.name = name
         self.priceMicros = priceMicros
         self.change24h = change24h
         self.isTradable = isTradable
+        self.assetKind = assetKind
+        self.tokenDecimals = tokenDecimals
     }
 
     static func displayName(symbol: String, catalogName: String? = nil, kind: AssetKind = .stock) -> String {
@@ -54,8 +64,13 @@ struct ProposeStock: Hashable, Identifiable {
         )
     }
 
-    init(symbol: String) {
-        self.init(symbol: symbol, name: Self.displayName(symbol: symbol))
+    init(symbol: String, kind: AssetKind = .stock, tokenDecimals: Int = AssetCatalogDefaults.decimals) {
+        self.init(
+            symbol: symbol,
+            name: Self.displayName(symbol: symbol, kind: kind),
+            assetKind: kind,
+            tokenDecimals: tokenDecimals
+        )
     }
 }
 

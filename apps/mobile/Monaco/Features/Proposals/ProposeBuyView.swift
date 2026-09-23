@@ -6,6 +6,8 @@ import SwiftUI
 struct ProposeBuyView: View {
     let groupId: String
     var initialSymbol: String?
+    var initialKind: AssetKind = .stock
+    var initialDecimals: Int = AssetCatalogDefaults.decimals
     var onProposed: ((_ proposalId: String) -> Void)?
 
     private let service: ProposeService
@@ -29,8 +31,23 @@ struct ProposeBuyView: View {
 
     /// Entry from Stock detail's cabal picker (no chooser sheet): on success the flow pops back
     /// here and confirms with a toast.
-    init(auth: PrivyAuthService, groupId: String, initialSymbol: String? = nil, onProposed: ((_ proposalId: String) -> Void)? = nil) {
-        self.init(service: LiveProposeService(auth: auth), groupId: groupId, pot: nil, initialSymbol: initialSymbol, onProposed: onProposed)
+    init(
+        auth: PrivyAuthService,
+        groupId: String,
+        initialSymbol: String? = nil,
+        initialKind: AssetKind = .stock,
+        initialDecimals: Int = AssetCatalogDefaults.decimals,
+        onProposed: ((_ proposalId: String) -> Void)? = nil
+    ) {
+        self.init(
+            service: LiveProposeService(auth: auth),
+            groupId: groupId,
+            pot: nil,
+            initialSymbol: initialSymbol,
+            initialKind: initialKind,
+            initialDecimals: initialDecimals,
+            onProposed: onProposed
+        )
     }
 
     init(
@@ -38,11 +55,15 @@ struct ProposeBuyView: View {
         groupId: String,
         pot: ProposePot?,
         initialSymbol: String? = nil,
+        initialKind: AssetKind = .stock,
+        initialDecimals: Int = AssetCatalogDefaults.decimals,
         onProposed: ((_ proposalId: String) -> Void)? = nil
     ) {
         self.service = service
         self.groupId = groupId
         self.initialSymbol = initialSymbol
+        self.initialKind = initialKind
+        self.initialDecimals = initialDecimals
         self.onProposed = onProposed
         _pot = State(initialValue: pot)
     }
@@ -190,7 +211,8 @@ struct ProposeBuyView: View {
         guard !didApplyInitialSymbol, let initialSymbol, !initialSymbol.isEmpty else { return }
         didApplyInitialSymbol = true
         let known = (session?.popularAssets ?? []).first { $0.symbol.caseInsensitiveCompare(initialSymbol) == .orderedSame }
-        picked = known.map(ProposeStock.init(market:)) ?? ProposeStock(symbol: initialSymbol)
+        picked = known.map(ProposeStock.init(market:))
+            ?? ProposeStock(symbol: initialSymbol, kind: initialKind, tokenDecimals: initialDecimals)
     }
 
     /// Without a chooser sheet to dismiss, pop back to the picker and confirm here.

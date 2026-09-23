@@ -298,12 +298,12 @@ struct ProposeBuyReview: Hashable, Identifiable {
     }
 
     var shares: Decimal? {
-        quote.outputAmount.flatMap { ProposeMath.shares(fromAtomics: $0, decimals: stock.tokenDecimals) }
+        quote.outputAmount.flatMap { ProposeMath.shares(fromAtomics: $0, decimals: quote.resolvedDecimals) }
     }
 
     var sharesLabel: String? {
         quote.outputAmount.map {
-            ProposalShareFormatter.sharesLabel(fromAtomics: $0, decimals: stock.tokenDecimals, kind: stock.assetKind)
+            ProposalShareFormatter.sharesLabel(fromAtomics: $0, decimals: quote.resolvedDecimals, kind: quote.resolvedAssetKind)
         }
     }
 }
