@@ -5,7 +5,7 @@ import SwiftUI
 ///
 /// Launch arguments (Debug builds only):
 /// - `-MonacoDesignGallery` — opens the gallery instead of the app.
-/// - `-MonacoDesignGalleryTab <primitives|money|controls|toast>` — initial tab.
+/// - `-MonacoDesignGalleryTab <primitives|money|controls|toast|world>` — initial tab.
 enum MonacoDesignGallery {
     static var isEnabled: Bool { ProcessInfo.processInfo.arguments.contains("-MonacoDesignGallery") }
 
@@ -199,7 +199,7 @@ private struct GalleryPushedPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
                 Text(name)
-                    .font(MonacoTheme.Typo.display)
+                    .displayFont(.display)
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
                 ForEach(0..<12, id: \.self) { index in
@@ -424,6 +424,7 @@ private struct GalleryWorldPage: View {
                     MonacoSegmented(Range.allCases, selection: $inkRange) { $0.rawValue }
                         .padding(.top, MonacoTheme.Space.s)
                 }
+                .padding(.top, 72)
                 .monacoInkSlab()
 
                 VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
@@ -546,9 +547,15 @@ private struct GalleryWorldPage: View {
             .padding(.horizontal, MonacoTheme.Space.gutter)
             .padding(.bottom, MonacoTheme.Space.xl)
         }
+        // The fold: the scroll view starts above the bar, so the slab genuinely runs under it —
+        // this page is Chunk B's acceptance shot for `.monacoInkNavBar()`. Take the modifier off
+        // and the title is `fgPrimary` on `Ink.base` (1.0:1 in light) with a `brand` chevron at
+        // 3.12:1; nothing else in the app compensates.
+        .ignoresSafeArea(edges: .top)
         .monacoCanvas()
         .navigationTitle("World")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
+        .monacoInkNavBar()
     }
 }
 

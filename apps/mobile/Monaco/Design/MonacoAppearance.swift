@@ -47,6 +47,12 @@ enum MonacoAppearance {
         standard.setBackIndicatorImage(backImage, transitionMaskImage: backImage)
 
         // At rest (scroll edge): transparent, no hairline, so an ink slab runs up under it.
+        //
+        // The title and bar buttons configured here are the *paper* pair, which is right for the
+        // paper canvas and wrong over a slab: `fgPrimary` on `Ink.base` in light measures 1.0:1
+        // and `brand` measures 3.12:1. A screen that opens on a slab applies `.monacoInkNavBar()`
+        // (below), which flips the bar to the ink pair. Nothing else compensates, so a slab
+        // without that modifier ships an unreadable bar.
         let scrollEdge = UINavigationBarAppearance()
         scrollEdge.configureWithTransparentBackground()
         scrollEdge.titleTextAttributes = titleAttributes
@@ -78,6 +84,21 @@ enum MonacoAppearance {
         tabItem.normal.titleTextAttributes = [.foregroundColor: muted]
         tabItem.selected.iconColor = brand
         tabItem.selected.titleTextAttributes = [.foregroundColor: brand]
+        // Badge: amber, not systemRed. §1.6 reserves the danger ramp for "this went wrong with
+        // your money" — a failed transfer, a refused withdrawal. A vote still waiting on you has
+        // not gone wrong; it is `warning`. The label is composed from the two tokens that clear
+        // AA against the amber pair: white on `#9A5B13` is 5.41:1, `Ink.base` on `#E0A458` is
+        // 8.57:1. White on the dark amber would be 2.18:1, which is why this flips with the scheme.
+        let warningFill = UIColor(MonacoTheme.warning)
+        let onWarning = UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(MonacoTheme.Ink.base)
+                : UIColor(MonacoTheme.Ink.fgPrimary)
+        }
+        for state in [tabItem.normal, tabItem.selected, tabItem.focused, tabItem.disabled] {
+            state.badgeBackgroundColor = warningFill
+            state.badgeTextAttributes = [.foregroundColor: onWarning]
+        }
         tabBar.stackedLayoutAppearance = tabItem
         tabBar.inlineLayoutAppearance = tabItem
         tabBar.compactInlineLayoutAppearance = tabItem
@@ -138,6 +159,31 @@ extension View {
                     )
                 )
             )
+    }
+
+    /// Nav chrome for a screen that opens on an ink slab (§5.5, §6.1) — the hook the ink fold
+    /// needs, and the reason the scroll-edge appearance above can afford to be transparent.
+    ///
+    /// The bar at rest is transparent so the slab runs up under it, but its title and bar buttons
+    /// come from the paper pair. Measured over `Ink.base`, in **light mode**: title `fgPrimary`
+    /// `#0B1220` on `#0B1220` is **1.0:1** — invisible — and the chevron `brand` `#1652F0` is
+    /// **3.12:1**, under the 4.5:1 text bar. `MonacoPalette.ink` already states that brand cannot
+    /// carry a tappable label on ink, which is why `Ink.accent` exists.
+    ///
+    /// This flips the bar to its dark materials — the title attributes are `Color.adaptive`
+    /// values, so they resolve to `#F3F6FB` under a dark bar — and takes `Ink.accent` (7.98:1 on
+    /// `Ink.base`) for bar buttons and the back chevron.
+    ///
+    /// **Apply it at the screen root, above the scroll view.** The tint is an environment value,
+    /// so the paper content below the fold inherits `Ink.accent` for *system* controls unless it
+    /// re-declares its own; Monaco's own components set explicit colours and are unaffected. A
+    /// screen with a system control on its paper half wraps that section in
+    /// `.tint(MonacoTheme.controlTint)`.
+    ///
+    /// Callers: Home (Chunk C) and stock detail (Chunk F). See the cross-chunk contract.
+    func monacoInkNavBar() -> some View {
+        toolbarColorScheme(.dark, for: .navigationBar)
+            .tint(MonacoTheme.Ink.accent)
     }
 
     /// Toolbar / nav bar SF Symbol. Brand, because a toolbar glyph is a tap target and blue means tap.
