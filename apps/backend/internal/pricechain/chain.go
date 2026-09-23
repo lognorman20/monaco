@@ -173,6 +173,8 @@ func (c *Chain) markHolding(ctx context.Context, treasury pyth.TreasuryRef, hold
 		Mint:      holding.Mint,
 		Units:     holding.Units,
 		CostBasis: holding.Price,
+		Decimals:  holding.Decimals,
+		Kind:      holding.Kind,
 	}
 
 	mark := c.marketMark(ctx, holding.Symbol, holding.Mint)
@@ -190,7 +192,7 @@ func (c *Chain) markHolding(ctx context.Context, treasury pyth.TreasuryRef, hold
 		return out, nil
 	}
 
-	costMark, err := costBasisMarkPerUnitMicros(holding.Price, holding.Amount)
+	costMark, err := pyth.CostBasisMarkPerUnitMicros(holding.Price, holding.Amount, holding.Decimals)
 	if err != nil {
 		return pyth.MarkedHolding{}, fmt.Errorf("no live price for %s and %w", holding.Symbol, err)
 	}
@@ -370,7 +372,7 @@ func (c *Chain) checkJupiterPrice(key string, price jupiter.TokenPrice) error {
 // checkAgainstCostBasis is the only sanity reference on a cold start, when no market
 // mark has been accepted yet.
 func (c *Chain) checkAgainstCostBasis(priceMicros int64, holding pyth.CostBasis) error {
-	costMark, err := costBasisMarkPerUnitMicros(holding.Price, holding.Amount)
+	costMark, err := pyth.CostBasisMarkPerUnitMicros(holding.Price, holding.Amount, holding.Decimals)
 	if err != nil {
 		// No usable cost basis to compare against (e.g. a catalog probe); nothing to check.
 		return nil
@@ -383,23 +385,6 @@ func (c *Chain) checkAgainstCostBasis(priceMicros int64, holding pyth.CostBasis)
 		return fmt.Errorf("price is outside %dx of cost basis mark %d", multiple, costMark)
 	}
 	return nil
-}
-
-func costBasisMarkPerUnitMicros(totalUSDCMicros, tokenAtomics int64) (int64, error) {
-	if totalUSDCMicros < 0 {
-		return 0, errors.New("cost basis usdc must be non-negative")
-	}
-	if tokenAtomics <= 0 {
-		return 0, errors.New("cost basis token amount must be positive")
-	}
-	mark, err := domain.MulDivFloor(totalUSDCMicros, jupiter.XStockAtomicScale, tokenAtomics)
-	if err != nil {
-		return 0, fmt.Errorf("derive mark per unit: %w", err)
-	}
-	if mark <= 0 {
-		return 0, errors.New("derived mark per unit must be positive")
-	}
-	return mark, nil
 }
 
 // AssetMark passes through to Pyth; catalog display prices come from Jupiter directly.

@@ -182,7 +182,7 @@ func marksForLedgerHoldings(groupID string, ledger []pyth.CostBasis, marked []py
 			return nil, fmt.Errorf("%w: %s has no live price (group %s)", ErrPotMarkUnavailable, holding.Symbol, groupID)
 		}
 		if !found || mark.MarkUsdc <= 0 {
-			costMark, err := costBasisMarkPerUnitMicros(holding.Price, holding.Amount)
+			costMark, err := pyth.CostBasisMarkPerUnitMicros(holding.Price, holding.Amount, holding.Decimals)
 			if err != nil {
 				return nil, err
 			}
@@ -192,6 +192,8 @@ func marksForLedgerHoldings(groupID string, ledger []pyth.CostBasis, marked []py
 		mark.Mint = holding.Mint
 		mark.Units = holding.Units
 		mark.CostBasis = holding.Price
+		mark.Decimals = holding.Decimals
+		mark.Kind = holding.Kind
 		out = append(out, mark)
 	}
 	return out, nil

@@ -38,10 +38,16 @@ type StartBuyResult struct {
 	Quote      jupiter.BuyQuote
 }
 
+// MintCatalog resolves mint addresses to catalog rows (decimals, kind).
+type MintCatalog interface {
+	LookupByMint(ctx context.Context, mint string) (xstocks.CatalogAsset, bool, error)
+}
+
 // BuyService gates treasury buys behind quote availability.
 type BuyService struct {
 	jupiter jupiter.Client
 	xstocks xstocks.Resolver
+	catalog MintCatalog
 }
 
 // NewBuyService wires Jupiter quote and xStocks mint resolution.
@@ -50,6 +56,14 @@ func NewBuyService(jupiterClient jupiter.Client, resolver xstocks.Resolver) *Buy
 		jupiter: jupiterClient,
 		xstocks: resolver,
 	}
+}
+
+// SetMintCatalog attaches a catalog for ResolveAsset decimals (optional until wiring).
+func (s *BuyService) SetMintCatalog(catalog MintCatalog) {
+	if s == nil {
+		return
+	}
+	s.catalog = catalog
 }
 
 // JupiterCatalogRoutabilityProber probes Jupiter for USDC→xStock routes during catalog ranking.
@@ -84,7 +98,28 @@ func (p *JupiterCatalogRoutabilityProber) IsRoutable(ctx context.Context, asset 
 
 // ResolveOutputMint returns the Solana mint for a catalog symbol.
 func (s *BuyService) ResolveOutputMint(ctx context.Context, symbol string) (string, error) {
-	return s.xstocks.ResolveSolanaMint(ctx, symbol)
+	asset, err := s.ResolveAsset(ctx, symbol)
+	if err != nil {
+		return "", err
+	}
+	return asset.SolanaMint, nil
+}
+
+// ResolveAsset returns the catalog row for a symbol, including token decimals.
+func (s *BuyService) ResolveAsset(ctx context.Context, symbol string) (xstocks.CatalogAsset, error) {
+	if s == nil || s.xstocks == nil {
+		return xstocks.CatalogAsset{}, fmt.Errorf("buy service is not configured")
+	}
+	mint, err := s.xstocks.ResolveSolanaMint(ctx, symbol)
+	if err != nil {
+		return xstocks.CatalogAsset{}, err
+	}
+	if s.catalog != nil {
+		if asset, found, lookupErr := s.catalog.LookupByMint(ctx, mint); lookupErr == nil && found {
+			return asset.Normalize(), nil
+		}
+	}
+	return xstocks.CatalogAssetFromXStockNode(symbol, "", mint), nil
 }
 
 // StartBuy resolves the xStock mint and refuses when Jupiter has no route.
