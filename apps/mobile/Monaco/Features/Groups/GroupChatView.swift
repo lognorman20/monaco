@@ -365,7 +365,7 @@ struct GroupChatView: View {
         .buttonStyle(.plain)
         .padding(.bottom, 10)
         .transition(.move(edge: .bottom).combined(with: .opacity))
-        .animation(.snappy, value: unreadCount)
+        .animation(MonacoMotion.snap.reduced(reduceMotion), value: unreadCount)
         .accessibilityIdentifier("group-chat-new-messages")
     }
 

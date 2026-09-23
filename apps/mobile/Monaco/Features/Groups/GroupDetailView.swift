@@ -646,7 +646,21 @@ extension View {
     /// minute. For that whole time the screen says what is happening and takes no taps: an idle
     /// looking screen invites a second tap, or a second money flow on a cabal being left.
     func groupLeaveProgress(isLeaving: Bool, isSellingSlice: Bool) -> some View {
-        disabled(isLeaving)
+        modifier(GroupLeaveProgressModifier(isLeaving: isLeaving, isSellingSlice: isSellingSlice))
+    }
+}
+
+/// A modifier rather than a plain `View` extension so the cover's fade can read Reduce Motion:
+/// an extension on `View` has no environment of its own to read it from.
+private struct GroupLeaveProgressModifier: ViewModifier {
+    let isLeaving: Bool
+    let isSellingSlice: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content
+            .disabled(isLeaving)
             // `disabled()` stops taps but leaves the rows reachable by VoiceOver swipe, so the
             // member can still walk an action row that does nothing. Hide the content behind
             // the cover the same way the cover hides it visually.
@@ -656,7 +670,7 @@ extension View {
                     GroupLeaveProgressCover(isSellingSlice: isSellingSlice)
                 }
             }
-            .animation(.easeInOut(duration: 0.2), value: isLeaving)
+            .animation(MonacoMotion.glide.reduced(reduceMotion), value: isLeaving)
             .navigationBarBackButtonHidden(isLeaving)
     }
 }
