@@ -23,6 +23,9 @@ struct ProposalFeedView: View {
     @State private var closedIsStale = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The viewer's cabals, for the resolved tint. Optional: the sample harness runs this screen
+    /// with no session behind it.
+    @Environment(AppSessionStore.self) private var session: AppSessionStore?
 
     private let votes = ProposalVoteLedger.shared
 
@@ -51,8 +54,9 @@ struct ProposalFeedView: View {
         }
         .background(MonacoTheme.canvas.ignoresSafeArea())
         // One cabal's feed, so one colour: every card's rail and every thesis wash comes from
-        // here rather than from each card hashing the id again.
-        .cabalTint(.forGroupId(groupId))
+        // here rather than from each card resolving the id again. Resolved against the viewer's
+        // own cabals, so this cabal is the same colour here as it is on the Cabals tab.
+        .cabalTint(ProposalCabalTint.tint(forGroupId: groupId, in: session))
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .task {
