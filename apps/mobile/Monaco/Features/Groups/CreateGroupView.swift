@@ -13,6 +13,21 @@ enum JoinPolicyMode: String, CaseIterable, Identifiable {
         case .request: "I approve"
         }
     }
+
+    /// What it means in the member's own words, under the label.
+    var detail: String {
+        switch self {
+        case .open: "Share the invite code and they're in."
+        case .request: "Requests wait for you to say yes."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .open: "link"
+        case .request: "hand.raised"
+        }
+    }
 }
 
 enum VoterSetMode: String, CaseIterable, Identifiable {
@@ -25,6 +40,20 @@ enum VoterSetMode: String, CaseIterable, Identifiable {
         switch self {
         case .allMembers: "Everyone"
         case .namedSubset: "Just me"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .allMembers: "Every member gets a vote on every buy."
+        case .namedSubset: "You decide; everyone else can still fund the pot."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .allMembers: "person.2"
+        case .namedSubset: "person"
         }
     }
 }
@@ -59,7 +88,36 @@ enum VoteExpiryOption: Int64, CaseIterable, Identifiable {
     }
 }
 
-/// Product create-group flow: join policy, voter set, threshold, and vote expiry.
+/// Copy the create flow says out loud, kept pure so it can be read without a view.
+enum CreateCabalCopy {
+    /// The rule in a sentence a member would say, rather than a picker value they have to
+    /// translate. "Everyone has to say yes before a buy goes through."
+    static func passingSentence(voterSet: VoterSetMode, threshold: VoteThresholdMode) -> String {
+        switch (voterSet, threshold) {
+        case (.namedSubset, _):
+            return "You're the only voter, so a buy goes through when you say yes."
+        case (.allMembers, .majority):
+            return "More than half the members have to say yes before a buy goes through."
+        case (.allMembers, .unanimous):
+            return "Every member has to say yes before a buy goes through."
+        }
+    }
+
+    static func windowSentence(_ expiry: VoteExpiryOption) -> String {
+        switch expiry {
+        case .oneHour: return "A vote is open for an hour, then it closes."
+        case .oneDay: return "A vote is open for a day, then it closes."
+        case .sevenDays: return "A vote is open for a week, then it closes."
+        }
+    }
+}
+
+/// Start a cabal: name it, say who can join, say how a buy passes.
+///
+/// This was four wheel pickers in a `Form`. It is the moment a founder brings their friends into
+/// the product, so it is three designed steps — with the mark recolouring and re-initialling live
+/// as the name is typed, which is where the tint system stops being an implementation detail and
+/// becomes a feature you can see.
 struct CreateGroupView: View {
     @ObservedObject var auth: DynamicAuthService
     /// Present inside the signed-in shell; lightweight session patch after create.
@@ -89,83 +147,162 @@ struct CreateGroupView: View {
     @State private var errorMessage: String?
     @State private var isCreating = false
 
+    private var trimmedName: String {
+        groupName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The preview mark's colour, hashed from what has been typed so far.
+    ///
+    /// The real tint is hashed from the cabal's **id**, which the server has not issued yet, so
+    /// this is a stand-in and the copy under it never claims otherwise. The initials are the
+    /// honest half and they are the half that matters: "Semis or bust" becomes SB, not SO.
+    private var previewTint: MonacoTheme.CabalTint {
+        .forGroupId(trimmedName.isEmpty ? "monaco" : trimmedName)
+    }
+
     var body: some View {
-        Form {
-            Section {
-                TextField("Cabal name", text: $groupName)
-                    .textInputAutocapitalization(.words)
-                    .disabled(isCreating)
-                    .accessibilityIdentifier("create-group-name")
-            } header: {
-                Text("Name your cabal")
-            } footer: {
-                Text("Pick a name your friends will recognize.")
-            }
-
-            Section("Who can join?") {
-                Picker("Join policy", selection: $joinPolicy) {
-                    ForEach(JoinPolicyMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
+        MonacoScreen {
+            ScrollView {
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.section) {
+                    nameStep
+                    joinStep
+                    votesStep
+                    if let errorMessage {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                            .font(MonacoTheme.Typo.caption)
+                            .foregroundStyle(MonacoTheme.warningOnWash)
+                            .padding(MonacoTheme.Space.sm)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                MonacoTheme.warningWash,
+                                in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.container, style: .continuous)
+                            )
+                            .accessibilityIdentifier("create-group-error")
                     }
                 }
-                .pickerStyle(.inline)
-                .disabled(isCreating)
-
+                .padding(.horizontal, MonacoTheme.Space.gutter)
+                .padding(.bottom, MonacoTheme.Space.l)
             }
-
-            Section("Who votes on buys?") {
-                Picker("Voter set", selection: $voterSet) {
-                    ForEach(VoterSetMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-                .pickerStyle(.inline)
-                .disabled(isCreating)
-            }
-
-            Section("Passing a buy proposal") {
-                Picker("Threshold", selection: $threshold) {
-                    ForEach(VoteThresholdMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-                .pickerStyle(.inline)
-                .disabled(isCreating)
-
-                Picker("Vote window", selection: $voteExpiry) {
-                    ForEach(VoteExpiryOption.allCases) { option in
-                        Text(option.label).tag(option)
-                    }
-                }
-                .disabled(isCreating)
-            }
-
-            Section {
+            .scrollDismissesKeyboard(.interactively)
+        }
+        .safeAreaInset(edge: .bottom) {
+            BottomCTA {
                 Button(isCreating ? "Creating…" : "Create cabal") {
                     Task { await createGroup() }
                 }
+                .buttonStyle(.monacoPrimary)
                 .disabled(isCreating || !canSubmit)
                 .accessibilityIdentifier("create-group-submit")
             }
-
-            if let errorMessage {
-                Section {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                }
-            }
         }
-        .monacoFormScreen()
         .navigationTitle("New cabal")
         .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("create-group-root")
+    }
+
+    // MARK: - Step 1
+
+    private var nameStep: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
+            CreateStepHeader(number: 1, title: "Name your cabal")
+            HStack(spacing: MonacoTheme.Space.m) {
+                CabalMark(tint: previewTint, name: trimmedName.isEmpty ? "?" : trimmedName, size: 56)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(trimmedName.isEmpty ? "Your cabal" : trimmedName)
+                        .displayFont(.section)
+                        .foregroundStyle(trimmedName.isEmpty ? MonacoTheme.fgSubtle : MonacoTheme.fgPrimary)
+                        .lineLimit(2)
+                    Text("Every cabal gets a colour and a mark of its own")
+                        .font(MonacoTheme.Typo.caption)
+                        .foregroundStyle(MonacoTheme.fgMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .accessibilityElement(children: .combine)
+
+            MonacoTextField("Cabal name", text: $groupName)
+                .disabled(isCreating)
+                .accessibilityIdentifier("create-group-name")
+            Text("Pick a name your friends will recognize.")
+                .font(MonacoTheme.Typo.caption)
+                .foregroundStyle(MonacoTheme.fgMuted)
+        }
+    }
+
+    // MARK: - Step 2
+
+    private var joinStep: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
+            CreateStepHeader(number: 2, title: "Who can join?")
+            VStack(spacing: MonacoTheme.Space.s) {
+                ForEach(JoinPolicyMode.allCases) { mode in
+                    CreateChoiceCard(
+                        title: mode.label,
+                        detail: mode.detail,
+                        systemImage: mode.systemImage,
+                        isSelected: joinPolicy == mode
+                    ) { joinPolicy = mode }
+                    .accessibilityIdentifier("create-group-join-\(mode.rawValue)")
+                }
+            }
+            .disabled(isCreating)
+        }
+    }
+
+    // MARK: - Step 3
+
+    private var votesStep: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
+            CreateStepHeader(number: 3, title: "How a buy passes")
+            VStack(spacing: MonacoTheme.Space.s) {
+                ForEach(VoterSetMode.allCases) { mode in
+                    CreateChoiceCard(
+                        title: mode.label,
+                        detail: mode.detail,
+                        systemImage: mode.systemImage,
+                        isSelected: voterSet == mode
+                    ) { voterSet = mode }
+                    .accessibilityIdentifier("create-group-voters-\(mode.rawValue)")
+                }
+            }
+
+            if voterSet == .allMembers {
+                MonacoSegmented(VoteThresholdMode.allCases, selection: $threshold) { $0.label }
+                    .accessibilityIdentifier("create-group-threshold")
+            }
+
+            MonacoSegmented(VoteExpiryOption.allCases, selection: $voteExpiry) { $0.label }
+                .accessibilityIdentifier("create-group-expiry")
+
+            // The rule, in a sentence, rather than three picker values the founder has to
+            // translate for themselves. It rewrites as the choices above it change.
+            VStack(alignment: .leading, spacing: 4) {
+                Text(CreateCabalCopy.passingSentence(voterSet: voterSet, threshold: threshold))
+                Text(CreateCabalCopy.windowSentence(voteExpiry))
+                    .foregroundStyle(MonacoTheme.fgMuted)
+            }
+            .font(MonacoTheme.Typo.callout)
+            .foregroundStyle(MonacoTheme.fgPrimary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(MonacoTheme.Space.m)
+            .background(
+                MonacoTheme.bgSunken,
+                in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.container, style: .continuous)
+            )
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("create-group-summary")
+        }
+        .disabled(isCreating)
     }
 
     /// Only the name gates the button. "Just me" needs the creator's id, but
     /// that is a reason to say so when the member taps — not to hand them a
     /// dead button with no explanation.
     private var canSubmit: Bool {
-        !groupName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !trimmedName.isEmpty
     }
 
     private func createGroup() async {
@@ -173,7 +310,7 @@ struct CreateGroupView: View {
         // gets through it. Same guard the money screens use.
         guard !isCreating else { return }
 
-        let trimmedName = groupName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedName = self.trimmedName
         guard !trimmedName.isEmpty else {
             errorMessage = "Cabal name is required."
             return
@@ -219,6 +356,89 @@ struct CreateGroupView: View {
         } catch {
             errorMessage = "Couldn't create this cabal. Try again."
         }
+    }
+}
+
+/// A numbered step heading. The numeral is the only thing on this screen that says "there are
+/// three of these and you are on the second", which is what a wheel picker never told anybody.
+private struct CreateStepHeader: View {
+    let number: Int
+    let title: String
+
+    var body: some View {
+        HStack(spacing: MonacoTheme.Space.s) {
+            Text("\(number)")
+                .font(.system(size: 12, weight: .bold).monospacedDigit())
+                .foregroundStyle(MonacoTheme.brandOnWash)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(MonacoTheme.brandWash))
+            Text(title)
+                .displayFont(.section)
+                .foregroundStyle(MonacoTheme.fgPrimary)
+                .accessibilityAddTraits(.isHeader)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Step \(number). \(title)")
+    }
+}
+
+/// One large selectable card. Selection is a brand stroke and a check, never a tint: blue means
+/// tap, and this is a control.
+private struct CreateChoiceCard: View {
+    let title: String
+    let detail: String
+    let systemImage: String
+    let isSelected: Bool
+    let select: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button {
+            Haptics.selection()
+            select()
+        } label: {
+            HStack(alignment: .top, spacing: MonacoTheme.Space.sm) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isSelected ? MonacoTheme.brandOnWash : MonacoTheme.fgMuted)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(isSelected ? MonacoTheme.brandWash : MonacoTheme.fillQuiet))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(MonacoTheme.Typo.rowTitle)
+                        .foregroundStyle(MonacoTheme.fgPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(detail)
+                        .font(MonacoTheme.Typo.caption)
+                        .foregroundStyle(MonacoTheme.fgMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18))
+                    .foregroundStyle(isSelected ? MonacoTheme.brand : MonacoTheme.line)
+                    .padding(.top, 6)
+            }
+            .multilineTextAlignment(.leading)
+            .padding(MonacoTheme.Space.m)
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+            .background(
+                MonacoTheme.bgRaised,
+                in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.container, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: MonacoTheme.Radius.container, style: .continuous)
+                    .strokeBorder(
+                        isSelected ? MonacoTheme.brand : MonacoTheme.line,
+                        lineWidth: isSelected ? 2 : 1
+                    )
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .animation(MonacoMotion.snap.reduced(reduceMotion), value: isSelected)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }
 

@@ -100,54 +100,96 @@ struct JoinGroupView: View {
     }
 
     var body: some View {
-        Form {
-            if let groupName {
-                Section {
-                    Text(groupName)
-                        .font(MonacoTheme.TypeRole.title)
-                        .accessibilityIdentifier("join-group-name")
-                } footer: {
-                    Text(joinMode == .request
-                        ? "The cabal admin approves new members. You'll show up once they say yes."
-                        : "Anyone can join this cabal. You can add money after you're in.")
-                }
-            } else {
-                Section {
-                    HStack {
-                        TextField(JoinCabalCopy.codeLabel, text: $groupId)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .font(.body.monospaced())
-                            .disabled(isJoining || requestPending)
-                            .accessibilityIdentifier("join-group-id")
-                        PasteButton(payloadType: String.self) { strings in
-                            guard let pasted = strings.first else { return }
-                            Task { @MainActor in
-                                groupId = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
-                            }
-                        }
-                        .labelStyle(.iconOnly)
-                        .buttonBorderShape(.capsule)
-                        .accessibilityIdentifier("join-group-paste")
+        MonacoScreen {
+            ScrollView {
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
+                    if let groupName {
+                        cabalCard(name: groupName)
+                    } else {
+                        codeEntry
                     }
-                } footer: {
-                    Text(trimmedId.isEmpty || isCodeWellFormed
-                        ? JoinCabalCopy.codeFooter
-                        : JoinCabalCopy.malformedCode)
                 }
+                .padding(.horizontal, MonacoTheme.Space.gutter)
+                .padding(.top, MonacoTheme.Space.m)
+                .padding(.bottom, MonacoTheme.Space.l)
             }
-            Section {
+            .scrollDismissesKeyboard(.interactively)
+        }
+        .safeAreaInset(edge: .bottom) {
+            BottomCTA {
                 Button(actionTitle) {
                     Task { await joinGroup() }
                 }
+                .buttonStyle(.monacoPrimary)
                 .disabled(isJoining || requestPending || !canSubmit)
                 .accessibilityIdentifier("join-group-submit")
             }
         }
-        .monacoFormScreen()
         .monacoToast($toast)
         .navigationTitle(joinMode == .request ? "Ask to join" : "Join cabal")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// The cabal, as the cabal — its mark and its name, at the size they are everywhere else.
+    ///
+    /// There is no pot, no P&L and no member faces here, and that is not an omission of taste:
+    /// a row on the board or in search carries the id, the name and the join mode, and nothing
+    /// is fetched for a cabal the viewer is not in. `GET /v1/groups/{id}/preview` is the API
+    /// follow-up that would let this screen show what they are joining.
+    private func cabalCard(name: String) -> some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+            CabalMark(groupId: trimmedId, name: name, size: 64)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(name)
+                    .displayFont(.title)
+                    .foregroundStyle(MonacoTheme.fgPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("join-group-name")
+                Text(joinMode == .request
+                    ? "The cabal admin approves new members. You'll show up once they say yes."
+                    : "Anyone can join this cabal. You can add money after you're in.")
+                    .font(MonacoTheme.Typo.body)
+                    .foregroundStyle(MonacoTheme.fgMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(MonacoTheme.Space.l)
+        .monacoElevation(.card)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var codeEntry: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+            Text(JoinCabalCopy.codeLabel)
+                .displayFont(.eyebrow)
+                .foregroundStyle(MonacoTheme.fgSubtle)
+            HStack(spacing: MonacoTheme.Space.s) {
+                MonacoTextField(JoinCabalCopy.codeLabel, text: $groupId)
+                    .disabled(isJoining || requestPending)
+                    .accessibilityIdentifier("join-group-id")
+                PasteButton(payloadType: String.self) { strings in
+                    guard let pasted = strings.first else { return }
+                    Task { @MainActor in
+                        groupId = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                }
+                .labelStyle(.iconOnly)
+                .buttonBorderShape(.capsule)
+                .tint(MonacoTheme.brand)
+                .accessibilityIdentifier("join-group-paste")
+            }
+            Text(trimmedId.isEmpty || isCodeWellFormed
+                ? JoinCabalCopy.codeFooter
+                : JoinCabalCopy.malformedCode)
+                .font(MonacoTheme.Typo.caption)
+                .foregroundStyle(
+                    trimmedId.isEmpty || isCodeWellFormed
+                        ? MonacoTheme.fgMuted
+                        : MonacoTheme.warningOnWash
+                )
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func joinGroup() async {
