@@ -10,6 +10,15 @@ import (
 	"github.com/monaco/monaco/packages/domain"
 )
 
+const defaultTokenDecimals = 8
+
+func normalizeTokenDecimals(decimals int) int {
+	if decimals == 0 {
+		return defaultTokenDecimals
+	}
+	return decimals
+}
+
 // ProposalRow is a row in proposals.
 type ProposalRow struct {
 	ID                   string
@@ -19,6 +28,8 @@ type ProposalRow struct {
 	Kind                 domain.ProposalKind
 	UsdcMicros           int64
 	TokenAmount          int64
+	TokenDecimals        int
+	PremiumBps           *int
 	AgentDisplayName     string
 	AllocationUsdcMicros int64
 	Thesis               string
@@ -35,19 +46,22 @@ type InsertProposalParams struct {
 	Kind                 domain.ProposalKind
 	UsdcMicros           int64
 	TokenAmount          int64
+	TokenDecimals        int
+	PremiumBps           *int
 	AgentDisplayName     string
 	AllocationUsdcMicros int64
 	Thesis               string
 	ExpiresAt            time.Time
 }
 
-const proposalSelectColumns = `id, group_id, proposer_id, symbol, kind, usdc_micros, token_amount,
+const proposalSelectColumns = `id, group_id, proposer_id, symbol, kind, usdc_micros, token_amount, token_decimals, premium_bps,
   agent_display_name, allocation_usdc_micros, thesis, status, expires_at, created_at`
 
 func scanProposalRow(scanner interface{ Scan(dest ...any) error }) (ProposalRow, error) {
 	var row ProposalRow
 	var kindRaw, statusRaw string
 	var usdc, token, allocation sql.NullInt64
+	var premiumBps sql.NullInt64
 	var agentName, thesis sql.NullString
 	if err := scanner.Scan(
 		&row.ID,
@@ -57,6 +71,8 @@ func scanProposalRow(scanner interface{ Scan(dest ...any) error }) (ProposalRow,
 		&kindRaw,
 		&usdc,
 		&token,
+		&row.TokenDecimals,
+		&premiumBps,
 		&agentName,
 		&allocation,
 		&thesis,
@@ -90,6 +106,10 @@ func scanProposalRow(scanner interface{ Scan(dest ...any) error }) (ProposalRow,
 	}
 	if thesis.Valid {
 		row.Thesis = thesis.String
+	}
+	if premiumBps.Valid {
+		v := int(premiumBps.Int64)
+		row.PremiumBps = &v
 	}
 	return row, nil
 }
@@ -178,11 +198,17 @@ func (s *Store) InsertProposalTx(ctx context.Context, tx *sql.Tx, params InsertP
 	if params.Thesis != "" {
 		thesis = params.Thesis
 	}
+	tokenDecimals := normalizeTokenDecimals(params.TokenDecimals)
+	var premiumBps any
+	if params.PremiumBps != nil {
+		premiumBps = *params.PremiumBps
+	}
+
 	insertSQL := `
 INSERT INTO proposals (
-  group_id, proposer_id, symbol, kind, usdc_micros, token_amount,
+  group_id, proposer_id, symbol, kind, usdc_micros, token_amount, token_decimals, premium_bps,
   agent_display_name, allocation_usdc_micros, thesis, status, expires_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'open', $10)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open', $12)
 RETURNING ` + proposalSelectColumns
 
 	row, err := scanProposalRow(tx.QueryRowContext(ctx, insertSQL,
@@ -192,6 +218,8 @@ RETURNING ` + proposalSelectColumns
 		string(kind),
 		usdc,
 		token,
+		tokenDecimals,
+		premiumBps,
 		agentName,
 		allocation,
 		thesis,
