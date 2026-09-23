@@ -100,6 +100,12 @@ struct HomeView: View {
         .monacoCanvas()
         .navigationTitle(handoffTitle)
         .navigationBarTitleDisplayMode(.inline)
+        // The fold runs to the top of the screen: the nav bar is the slab's own chrome, in both
+        // schemes, so ink is continuous from the status bar down. It is also where the figure
+        // lands once the fold has scrolled away (§4 #21).
+        .toolbarBackground(MonacoTheme.Ink.base, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 profileButton
@@ -186,6 +192,9 @@ struct HomeView: View {
                         onRetryBalance: { Task { await retryLoad() } }
                     )
                 )
+                // `.monacoInkSlab()` cancels the screen gutter from the inside, so the slab has
+                // to sit inside one. Without this its content hangs 20pt off both edges.
+                .padding(.horizontal, MonacoTheme.Space.gutter)
 
                 VStack(alignment: .leading, spacing: MonacoTheme.Space.section) {
                     // Gated on the rows still open rather than on the payload: a section that

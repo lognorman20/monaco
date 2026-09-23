@@ -67,9 +67,16 @@ struct HomeNetWorthSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-                Text("Your money in cabals")
-                    .displayFont(.eyebrow)
-                    .foregroundStyle(MonacoTheme.Ink.fgSubtle)
+                HStack(alignment: .center, spacing: MonacoTheme.Space.s) {
+                    Text("Your money in cabals")
+                        .displayFont(.eyebrow)
+                        .foregroundStyle(MonacoTheme.Ink.fgSubtle)
+                    Spacer(minLength: MonacoTheme.Space.s)
+                    // Post-auth the brand stops vanishing. At 10% it is a watermark, not a logo,
+                    // and it sits on the eyebrow line rather than in the corner, where it would
+                    // collide with the cash fold's capsules.
+                    MonacoMark(size: 22, monochrome: Color.white.opacity(0.10))
+                }
 
                 // Rule 3: a money figure never counts up. It appears at its value.
                 MoneyText(decimalString: dashboard.netWorthUsd, style: .hero, color: MonacoTheme.Ink.fgPrimary)
@@ -98,10 +105,6 @@ struct HomeNetWorthSection: View {
                 .padding(.top, MonacoTheme.Space.m)
         }
         .padding(.top, MonacoTheme.Space.m)
-        .overlay(alignment: .bottomTrailing) {
-            // Post-auth the brand stops vanishing. At 10% it is a watermark, not a logo.
-            MonacoMark(size: 20, monochrome: Color.white.opacity(0.10))
-        }
         .monacoInkSlab()
     }
 

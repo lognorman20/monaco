@@ -184,7 +184,11 @@ private struct HomeMissedVoteCard: View {
                                 .font(MonacoTheme.Typo.caption)
                                 .foregroundStyle(MonacoTheme.Ink.fgSubtle)
                         }
-                        Spacer(minLength: 0)
+                        Spacer(minLength: MonacoTheme.Space.s)
+                        // Closing soon is a header-trailing chip, not a grey footnote.
+                        if let countdown {
+                            countdownChip(countdown)
+                        }
                     }
 
                     HStack(spacing: MonacoTheme.Space.s) {
@@ -194,9 +198,6 @@ private struct HomeMissedVoteCard: View {
                             .foregroundStyle(tint.onInk)
                             .lineLimit(1)
                         Spacer(minLength: 0)
-                        if let countdown {
-                            countdownChip(countdown)
-                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
