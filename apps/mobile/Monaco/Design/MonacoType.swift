@@ -1,7 +1,12 @@
 import SwiftUI
 import UIKit
 
-/// The display voice: SF Pro's **width** axis, not a second typeface.
+/// The display voice: Avenir Next.
+///
+/// A humanist sans with real character in its capitals, and the face this app has always led
+/// with. SF Pro's expanded width axis was tried here and read as novelty rather than authority —
+/// the wrong register for a screen showing somebody's money. Avenir Next ships with iOS, so this
+/// costs no bundle and no licence, and it keeps Dynamic Type.
 ///
 /// `display` and `title` are what a screen leads with, `section` heads a group of rows, and
 /// `eyebrow` is the tracked uppercase label above a figure — "YOUR MONEY IN CABALS", "IN THE POT",
@@ -41,10 +46,13 @@ enum DisplayRole: CaseIterable {
     /// of drifting into a gap at AX5.
     var trackingEm: CGFloat {
         switch self {
-        case .display: return -0.02
-        case .title: return -0.01
-        case .section: return 0
-        case .eyebrow: return 0.06
+        // Avenir Next sets tightly on its own. The negative tracking here was tuned for SF Pro's
+        // expanded width and closed the counters up at display sizes, so only the uppercase
+        // eyebrow is tracked now — which it needs to stay readable.
+        case .display, .title, .section: return 0
+        // Small uppercase needs a little air to stay legible, but 0.06em read as stretched-out
+        // and was the other half of the "expanded" look. 0.03em is the least that still works.
+        case .eyebrow: return 0.03
         }
     }
 
@@ -52,9 +60,32 @@ enum DisplayRole: CaseIterable {
     /// so VoiceOver reads the original sentence.
     var isUppercased: Bool { self == .eyebrow }
 
-    /// SF Pro Expanded at this role's weight and a given rendered size.
+    /// The Avenir Next face for this role's weight, at a given already-scaled size.
+    ///
+    /// `size` has been through `@ScaledMetric` already, so this asks for a fixed size rather than
+    /// `relativeTo:` — scaling it twice would compound.
     func font(size: CGFloat) -> Font {
-        Font.system(size: size, weight: weight).width(.expanded)
+        Font.custom(Self.faceName(for: weight), size: size)
+    }
+
+    /// Avenir Next names its weights rather than taking a numeric axis.
+    static func faceName(for weight: Font.Weight) -> String {
+        switch weight {
+        case .bold, .heavy, .black: return "AvenirNext-Bold"
+        case .semibold: return "AvenirNext-DemiBold"
+        case .medium: return "AvenirNext-Medium"
+        default: return "AvenirNext-Regular"
+        }
+    }
+
+    /// The UIKit equivalent, for the nav-bar appearance proxy.
+    static func uiFaceName(for weight: UIFont.Weight) -> String {
+        switch weight {
+        case .bold, .heavy, .black: return "AvenirNext-Bold"
+        case .semibold: return "AvenirNext-DemiBold"
+        case .medium: return "AvenirNext-Medium"
+        default: return "AvenirNext-Regular"
+        }
     }
 
     /// The `UIFontMetrics` pre-scaled font, for the deprecated `MonacoTheme.Typo` statics and for
@@ -121,20 +152,20 @@ enum MonacoNavType {
     static let largeSize: CGFloat = 30
     static let largeCap: CGFloat = 40
 
-    /// SF Pro Expanded Semibold 17, capped at 22.
+    /// Avenir Next DemiBold 17, capped at 22.
     static var inlineTitle: UIFont {
         scaled(size: inlineSize, weight: .semibold, textStyle: .headline, cap: inlineCap)
     }
 
-    /// SF Pro Expanded Bold 30, capped at 40.
+    /// Avenir Next Bold 30, capped at 40.
     static var largeTitle: UIFont {
         scaled(size: largeSize, weight: .bold, textStyle: .largeTitle, cap: largeCap)
     }
 
-    /// Tracking in points for a nav title at `size`, matching `DisplayRole`'s −0.02/−0.01em.
-    static func inlineTracking(size: CGFloat) -> CGFloat { size * -0.01 }
+    /// Nav titles are untracked, matching `DisplayRole`'s display and title roles.
+    static func inlineTracking(size: CGFloat) -> CGFloat { 0 }
 
-    static func largeTracking(size: CGFloat) -> CGFloat { size * -0.02 }
+    static func largeTracking(size: CGFloat) -> CGFloat { 0 }
 
     private static func scaled(
         size: CGFloat,
@@ -142,7 +173,10 @@ enum MonacoNavType {
         textStyle: UIFont.TextStyle,
         cap: CGFloat
     ) -> UIFont {
-        let base = UIFont.systemFont(ofSize: size, weight: weight, width: .expanded)
+        // Avenir Next ships with iOS, so this lookup cannot fail on device; the system face is a
+        // belt-and-braces fallback rather than an expected path.
+        let base = UIFont(name: DisplayRole.uiFaceName(for: weight), size: size)
+            ?? UIFont.systemFont(ofSize: size, weight: weight)
         return UIFontMetrics(forTextStyle: textStyle).scaledFont(for: base, maximumPointSize: cap)
     }
 }
