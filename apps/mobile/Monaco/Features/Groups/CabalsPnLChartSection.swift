@@ -207,7 +207,26 @@ struct CabalsPnLChartSection: View {
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
             ForEach(series, id: \.id) { line in
                 lineMarks(for: line)
-                terminus(for: line, labelOffset: offsets[line.groupID] ?? 0)
+                // The terminus stays inside the `Chart` builder: lifted into a function of its
+                // own, `PointMark(x:y:)` resolves to the 3D chart's mark, which has no
+                // `annotation`. The label and the line marks are what the type checker needed
+                // taking out of here, and both are below.
+                ForEach(terminals(of: line), id: \.id) { last in
+                    PointMark(
+                        x: .value("Time", last.at),
+                        y: .value("P&L", last.chartValue)
+                    )
+                    .foregroundStyle(color(forGroupID: line.groupID))
+                    .symbolSize(28)
+                    .annotation(
+                        position: .trailing,
+                        alignment: .leading,
+                        spacing: 4,
+                        overflowResolution: .init(x: .fitToChart, y: .fitToChart)
+                    ) {
+                        terminusLabel(line, offset: offsets[line.groupID] ?? 0)
+                    }
+                }
             }
         }
         .chartLegend(.hidden)
@@ -248,32 +267,19 @@ struct CabalsPnLChartSection: View {
         }
     }
 
-    /// The end of one cabal's line, carrying its name.
+    /// The last point of a line, as a zero-or-one collection so the `Chart` builder can walk it
+    /// with a `ForEach` instead of an `if let` — which is what keeps the mark below inside the
+    /// two-dimensional chart's world.
+    private func terminals(of line: GroupPnLSeriesDTO) -> [GroupPnLPointDTO] {
+        line.points.last.map { [$0] } ?? []
+    }
+
+    /// The name at the end of one cabal's line.
     ///
     /// The hand-built swatch legend is gone: a legend makes colour the only identity carrier and
     /// then asks the reader to hold seven of them in their head. A terminus sits at the plot's
     /// right edge by definition, so the label needs both somewhere to go — the gutter reserved on
     /// the x scale — and an overflow rule, or the chart clips its own only non-colour signal.
-    @ChartContentBuilder
-    private func terminus(for line: GroupPnLSeriesDTO, labelOffset: CGFloat) -> some ChartContent {
-        if let last = line.points.last {
-            PointMark(
-                x: .value("Time", last.at),
-                y: .value("P&L", last.chartValue)
-            )
-            .foregroundStyle(color(forGroupID: line.groupID))
-            .symbolSize(28)
-            .annotation(
-                position: .trailing,
-                alignment: .leading,
-                spacing: 4,
-                overflowResolution: .init(x: .fitToChart, y: .fitToChart)
-            ) {
-                terminusLabel(line, offset: labelOffset)
-            }
-        }
-    }
-
     private func terminusLabel(_ line: GroupPnLSeriesDTO, offset: CGFloat) -> some View {
         Text(line.name)
             .font(MonacoTheme.Typo.micro)
