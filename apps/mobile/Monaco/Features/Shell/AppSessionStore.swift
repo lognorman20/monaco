@@ -95,6 +95,38 @@ final class AppSessionStore {
         (home?.groups ?? []).filter(\.isJoined)
     }
 
+    // MARK: - Cabal tints
+
+    /// The last id list the tints were resolved from, and the answer. Observation-ignored on
+    /// purpose: this is a cache of a pure function of `home`, not state a view may depend on, and
+    /// writing tracked state from inside a getter is a mutation during a view update.
+    @ObservationIgnored private var resolvedTintIDs: [String] = []
+    @ObservationIgnored private var resolvedTints: [String: MonacoTheme.CabalTint] = [:]
+
+    /// Tints for the viewer's own cabals, resolved so no two of them collide.
+    ///
+    /// Hashing alone is not enough — with seven buckets a member of four cabals still has a real
+    /// chance that two share a colour, and on the strip and the multi-line chart the tint carries
+    /// most of the identity. `CabalTintAssignment.resolve` walks the viewer's cabals in id order
+    /// and takes the next free tint clockwise on a collision, so the answer is stable across
+    /// launches and across the order the API happens to return.
+    ///
+    /// Read it through `cabalTint(forGroupId:)` unless you genuinely want the whole map: that
+    /// accessor normalises the id and falls back to the plain hash for a cabal outside the set,
+    /// so a leaderboard row for a cabal you are not in still gets the same colour everywhere.
+    var cabalTints: [String: MonacoTheme.CabalTint] {
+        let ids = joinedCabals.map(\.groupId)
+        guard ids != resolvedTintIDs else { return resolvedTints }
+        resolvedTintIDs = ids
+        resolvedTints = CabalTintAssignment.resolve(orderedGroupIds: ids)
+        return resolvedTints
+    }
+
+    /// This cabal's tint, resolved against the viewer's own set where it is one of them.
+    func cabalTint(forGroupId groupId: String) -> MonacoTheme.CabalTint {
+        CabalTintAssignment.tint(forGroupId: groupId, in: cabalTints)
+    }
+
     func bootstrap(auth: SessionAuthenticating) async {
         await bootstrap(auth: auth, retryingRejectedToken: true)
     }

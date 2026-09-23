@@ -19,6 +19,9 @@ struct CabalsTabView: View {
     /// `stripState` compute `.unavailable` and render the hard error for a frame
     /// before anything had even been attempted.
     @State private var isLoadingCabals = true
+    /// The strip card → cabal hero zoom. One namespace for the tab, so the card the member
+    /// actually tapped is the thing that grows into the screen they land on.
+    @Namespace private var cabalZoom
 
     private let actions: CabalsActionSource
 
@@ -49,7 +52,7 @@ struct CabalsTabView: View {
     var body: some View {
         MonacoScreen {
             ScrollView {
-                VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.section) {
                     MonacoSearchField(placeholder: "Find a cabal by name", text: $searchText)
                         .accessibilityIdentifier("cabals-search-field")
 
@@ -59,14 +62,24 @@ struct CabalsTabView: View {
                         CabalsStripSection(
                             rows: session.joinedCabals,
                             state: stripState,
+                            tints: session.cabalTints,
+                            zoomNamespace: cabalZoom,
                             onSelect: { route = $0 },
                             onRetry: { Task { await loadCabals() } }
                         )
-                        CabalsPnLChartSection(model: model, hasCabals: !session.joinedCabals.isEmpty)
-                        CabalsLeaderboardSection(model: model, onSelect: { route = $0 })
+                        CabalsPnLChartSection(
+                            model: model,
+                            hasCabals: !session.joinedCabals.isEmpty,
+                            tints: session.cabalTints
+                        )
+                        CabalsLeaderboardSection(
+                            model: model,
+                            tints: session.cabalTints,
+                            onSelect: { route = $0 }
+                        )
                     }
                 }
-                .padding(.horizontal, MonacoTheme.Space.m)
+                .padding(.horizontal, MonacoTheme.Space.gutter)
                 .padding(.bottom, MonacoTheme.Space.l)
             }
             .scrollDismissesKeyboard(.interactively)
@@ -118,7 +131,8 @@ struct CabalsTabView: View {
                 onJoined: { groupId, groupName in
                     model.markJoined(groupID: groupId)
                     self.route = .cabal(id: groupId, name: groupName)
-                }
+                },
+                zoomNamespace: cabalZoom
             )
         }
         .refreshable {
@@ -168,36 +182,76 @@ private struct NewCabalSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: MonacoTheme.Space.s) {
+            VStack(spacing: MonacoTheme.Space.sm) {
                 Button(action: onCreate) {
-                    MonacoRowCard(
+                    NewCabalChoice(
                         systemImage: "plus",
                         title: "Start a cabal",
-                        subtitle: "Name it and invite friends",
-                        trailing: nil
+                        subtitle: "Name it and invite friends"
                     )
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("new-cabal-create-row")
 
                 Button(action: onJoin) {
-                    MonacoRowCard(
+                    NewCabalChoice(
                         systemImage: "person.badge.plus",
                         title: "Join with an invite code",
-                        subtitle: "Paste a code your friend shared",
-                        trailing: nil
+                        subtitle: "Paste a code your friend shared"
                     )
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("new-cabal-join-row")
             }
-            .padding(MonacoTheme.Space.m)
-            .padding(.top, MonacoTheme.Space.m)
+            .padding(MonacoTheme.Space.gutter)
             .frame(maxHeight: .infinity, alignment: .top)
             .monacoCanvas()
             .navigationTitle("New cabal")
             .navigationBarTitleDisplayMode(.inline)
         }
+    }
+}
+
+/// One of the two ways into a cabal. A card, not a row: there are exactly two of these and the
+/// sheet exists to make the choice feel like a choice.
+private struct NewCabalChoice: View {
+    let systemImage: String
+    let title: String
+    let subtitle: String
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        HStack(alignment: .top, spacing: MonacoTheme.Space.m) {
+            Image(systemName: systemImage)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(MonacoTheme.brand)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(MonacoTheme.brandWash))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .displayFont(.section)
+                    .foregroundStyle(MonacoTheme.fgPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(subtitle)
+                    .font(MonacoTheme.Typo.caption)
+                    .foregroundStyle(MonacoTheme.fgMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if !dynamicTypeSize.isAccessibilitySize {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(MonacoTheme.fgSubtle)
+                    .padding(.top, 14)
+            }
+        }
+        .multilineTextAlignment(.leading)
+        .padding(MonacoTheme.Space.m)
+        .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+        .monacoElevation(.card)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }
 

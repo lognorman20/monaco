@@ -15,16 +15,25 @@ extension GroupPnLRange {
     }
 }
 
-/// One P&L line per cabal the viewer belongs to.
+/// One P&L line per cabal the viewer belongs to, on the tab's one ink band.
+///
+/// Ink is where money is held, and this is the only full-bleed object on the Cabals tab — which
+/// is what makes it read as the screen's subject rather than another card. The tinted lines are
+/// drawn on `Ink.sunken` so they glow; every line carries its cabal's name at its right terminus,
+/// so colour is never the only thing telling two cabals apart.
 struct CabalsPnLChartSection: View {
     let model: CabalsTabModel
     let hasCabals: Bool
+    /// Resolved across the viewer's own cabals, so a line here is the same colour as that
+    /// cabal's mark, its strip card band and its hero.
+    var tints: [String: MonacoTheme.CabalTint] = [:]
 
-    /// Each line takes its cabal's identity tint, so a cabal is the same colour here as in
-    /// its mark, its strip card and its hero. Gain/loss stays with the figures in the legend:
-    /// on a multi-cabal comparison, colouring every line green or red would say nothing.
-    private static func color(forGroupID groupID: String) -> Color {
-        MonacoTheme.CabalTint.stroke(forGroupId: groupID)
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private func color(forGroupID groupID: String) -> Color {
+        // `onInk` rather than `stroke`: this plot is deep ink in both schemes, so the light-mode
+        // fill would be reading against the wrong surface half the time.
+        CabalTintAssignment.tint(forGroupId: groupID, in: tints).onInk
     }
 
     private var drawable: [GroupPnLSeriesDTO] {
@@ -37,36 +46,34 @@ struct CabalsPnLChartSection: View {
         CabalsTabModel.isChartable(model.series)
     }
 
-    var body: some View {
-        if model.showsChartSection(hasCabals: hasCabals) {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-                Text("Your cabals' P&L")
-                    .font(MonacoTheme.Typo.section)
-                    .foregroundStyle(MonacoTheme.ink)
-                rangePicker
-
-                MonacoCard {
-                    content
-                        .frame(maxWidth: .infinity, minHeight: 180)
-                }
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("cabals-pnl-section")
-        }
+    private var rangeSelection: Binding<GroupPnLRange> {
+        Binding(get: { model.range }, set: { model.selectRange($0) })
     }
 
-    private var rangePicker: some View {
-        HStack(spacing: 6) {
-            ForEach(GroupPnLRange.allCases, id: \.self) { option in
-                Button {
-                    model.selectRange(option)
-                } label: {
-                    MonacoChip(title: option.label, isSelected: model.range == option)
+    var body: some View {
+        if model.showsChartSection(hasCabals: hasCabals) {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Your cabals")
+                        .displayFont(.eyebrow)
+                        .foregroundStyle(MonacoTheme.Ink.fgSubtle)
+                    Text("P&L")
+                        .displayFont(.title)
+                        .foregroundStyle(MonacoTheme.Ink.fgPrimary)
+                        .accessibilityAddTraits(.isHeader)
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("cabals-pnl-range-\(option.rawValue)")
-                .accessibilityAddTraits(model.range == option ? .isSelected : [])
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Your cabals' P&L")
+
+                MonacoSegmented(GroupPnLRange.allCases, selection: rangeSelection) { $0.label }
+                    .accessibilityIdentifier("cabals-pnl-range")
+
+                content
+                    .frame(maxWidth: .infinity, minHeight: 200)
             }
+            .monacoInkBand()
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("cabals-pnl-section")
         }
     }
 
@@ -74,7 +81,8 @@ struct CabalsPnLChartSection: View {
     private var content: some View {
         if model.isChartLoading {
             ProgressView()
-                .tint(MonacoTheme.ink)
+                .tint(MonacoTheme.Ink.fgPrimary)
+                .frame(maxWidth: .infinity, minHeight: 200)
                 .accessibilityIdentifier("cabals-pnl-loading")
         } else if model.chartFailed, model.series.isEmpty {
             emptyMessage("Couldn't load the chart. Pull down to try again.", id: "cabals-pnl-error")
@@ -83,9 +91,9 @@ struct CabalsPnLChartSection: View {
         } else {
             chart
                 // A range switch keeps the old lines on screen; dim them so the
-                // highlighted chip and the drawing agree about what is showing.
+                // highlighted segment and the drawing agree about what is showing.
                 .opacity(model.isChartReloading ? 0.4 : 1)
-                .animation(.easeInOut(duration: 0.15), value: model.isChartReloading)
+                .animation(MonacoMotion.glide.reduced(reduceMotion), value: model.isChartReloading)
         }
     }
 
@@ -93,72 +101,82 @@ struct CabalsPnLChartSection: View {
         VStack(spacing: MonacoTheme.Space.s) {
             Image(systemName: "chart.xyaxis.line")
                 .font(.title2)
-                .foregroundStyle(MonacoTheme.muted)
+                .foregroundStyle(MonacoTheme.Ink.fgSubtle)
             Text(text)
-                .font(MonacoTheme.TypeRole.body)
-                .foregroundStyle(MonacoTheme.muted)
+                .font(MonacoTheme.Typo.body)
+                .foregroundStyle(MonacoTheme.Ink.fgMuted)
                 .multilineTextAlignment(.center)
         }
+        .frame(maxWidth: .infinity, minHeight: 200)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier(id)
     }
 
     private var chart: some View {
         let series = drawable
-        return VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            Chart {
-                RuleMark(y: .value("Break even", 0))
-                    .foregroundStyle(MonacoTheme.hairline)
-                    .lineStyle(StrokeStyle(lineWidth: 1))
-                ForEach(series, id: \.id) { line in
-                    ForEach(line.points) { point in
-                        LineMark(
-                            x: .value("Time", point.at),
-                            y: .value("P&L", point.chartValue),
-                            series: .value("Cabal", line.groupID)
-                        )
-                        .foregroundStyle(Self.color(forGroupID: line.groupID))
-                        .interpolationMethod(.monotone)
-                        .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+        return Chart {
+            RuleMark(y: .value("Break even", 0))
+                .foregroundStyle(MonacoTheme.Ink.lineStrong)
+                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            ForEach(series, id: \.id) { line in
+                ForEach(line.points) { point in
+                    LineMark(
+                        x: .value("Time", point.at),
+                        y: .value("P&L", point.chartValue),
+                        series: .value("Cabal", line.groupID)
+                    )
+                    .foregroundStyle(color(forGroupID: line.groupID))
+                    .interpolationMethod(.monotone)
+                    .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                }
+                // The terminus carries the name. The hand-built swatch legend is gone: a legend
+                // makes colour the only identity carrier and then asks the reader to hold seven
+                // of them in their head.
+                if let last = line.points.last {
+                    PointMark(
+                        x: .value("Time", last.at),
+                        y: .value("P&L", last.chartValue)
+                    )
+                    .foregroundStyle(color(forGroupID: line.groupID))
+                    .symbolSize(28)
+                    .annotation(position: .trailing, alignment: .leading, spacing: 4) {
+                        Text(line.name)
+                            .font(MonacoTheme.Typo.micro)
+                            .foregroundStyle(color(forGroupID: line.groupID))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: 88, alignment: .leading)
+                            .accessibilityHidden(true)
                     }
                 }
             }
-            .chartLegend(.hidden)
-            .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 3)) { _ in
-                    AxisValueLabel(format: .dateTime.month(.abbreviated).day())
-                        .foregroundStyle(MonacoTheme.tertiaryText)
-                }
-            }
-            .chartYAxis(.hidden)
-            .frame(height: 180)
-            .accessibilityIdentifier("cabals-pnl-chart")
-
-            legend(series: series)
         }
+        .chartLegend(.hidden)
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 3)) { _ in
+                AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                    .foregroundStyle(MonacoTheme.Ink.fgSubtle)
+            }
+        }
+        .chartYAxis(.hidden)
+        .chartPlotStyle { plot in
+            plot
+                .background(MonacoTheme.Ink.sunken)
+                .clipShape(RoundedRectangle(cornerRadius: MonacoTheme.Radius.container, style: .continuous))
+        }
+        .frame(height: 200)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Self.chartLabel(series: series, range: model.range))
+        .accessibilityIdentifier("cabals-pnl-chart")
     }
 
-    private func legend(series: [GroupPnLSeriesDTO]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(series, id: \.id) { line in
-                HStack(spacing: MonacoTheme.Space.s) {
-                    Capsule()
-                        .fill(Self.color(forGroupID: line.groupID))
-                        .frame(width: 18, height: 3)
-                    Text(line.name)
-                        .font(MonacoTheme.TypeRole.caption)
-                        .foregroundStyle(MonacoTheme.ink)
-                        .lineLimit(1)
-                    Spacer()
-                    if let last = line.points.last {
-                        Text(SignedUsdFormatter.format(last.dollarPnl))
-                            .font(MonacoTheme.TypeRole.caption.monospacedDigit())
-                            .foregroundStyle(SignedUsdFormatter.isLoss(last.dollarPnl) ? MonacoTheme.loss : MonacoTheme.profit)
-                    }
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("cabals-pnl-legend-\(line.groupID)")
-            }
+    /// The whole chart in one sentence, because the lines themselves carry nothing to VoiceOver.
+    static func chartLabel(series: [GroupPnLSeriesDTO], range: GroupPnLRange) -> String {
+        let lines = series.compactMap { line -> String? in
+            guard let last = line.points.last else { return nil }
+            return "\(line.name) \(PnLSpeech.dollars(last.dollarPnl))"
         }
+        guard !lines.isEmpty else { return "Your cabals' P&L over \(range.spokenWindow)" }
+        return "Your cabals' P&L over \(range.spokenWindow). " + lines.joined(separator: ", ")
     }
 }

@@ -50,11 +50,15 @@ struct CabalsRouteDestination: View {
     var onCreated: (CreateGroupResponse) -> Void
     /// The viewer is now a member; the owner replaces this screen with the cabal.
     var onJoined: (_ groupId: String, _ groupName: String?) -> Void
+    /// The strip's zoom namespace, when the pushing screen has one. A cabal pushed from search
+    /// or from a code has no card to grow out of, and passes nil.
+    var zoomNamespace: Namespace.ID?
 
     var body: some View {
         switch route {
         case let .cabal(id, name):
             GroupDetailView(auth: auth, groupId: id, groupName: name, onLeft: onChanged)
+                .zoomDestination(id: id, in: zoomNamespace)
         case let .join(id, name, mode):
             JoinGroupView(
                 auth: auth, groupId: id, groupName: name, joinMode: mode,

@@ -1,7 +1,12 @@
 import MonacoCore
 import SwiftUI
 
-/// A cabal's identity: saturated tile (tint from the group id) with 1–2 initials in white.
+/// A cabal's identity: saturated tile with 1–2 initials in white.
+///
+/// The tint is never the only identity signal — the initials are always drawn with it, and a
+/// caller putting two marks side by side owes them names as well. Where the viewer's own cabal
+/// list is in hand, pass the tint `CabalTintAssignment.resolve` handed back rather than the group
+/// id: hashing alone lets two of your own cabals land on the same colour.
 struct CabalMark: View {
     private let tint: MonacoTheme.CabalTint
     private let initials: String
@@ -12,12 +17,20 @@ struct CabalMark: View {
     /// `onInk` brightens the tile and drops the initials to deep ink, so the mark still
     /// carries the cabal's identity on a deep ink hero card.
     init(groupId: String, name: String, size: CGFloat = 44, onInk: Bool = false) {
-        tint = .forGroupId(groupId)
+        self.init(tint: .forGroupId(groupId), name: name, size: size, onInk: onInk)
+    }
+
+    /// The resolved-tint entry point. Every surface that already knows which cabal it belongs to
+    /// — the hero, the strip card, the chat toolbar — comes through here.
+    init(tint: MonacoTheme.CabalTint, name: String, size: CGFloat = 44, onInk: Bool = false) {
+        self.tint = tint
         initials = CabalMark.initials(for: name)
         self.name = name
         self.size = size
         self.onInk = onInk
     }
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         RoundedRectangle(cornerRadius: MarkGeometry.radius(for: size), style: .continuous)
@@ -25,12 +38,19 @@ struct CabalMark: View {
             .frame(width: size, height: size)
             .overlay {
                 Text(initials)
-                    .font(.custom("AvenirNext-DemiBold", fixedSize: size * (initials.count > 1 ? 0.36 : 0.42)))
+                    // SF Pro Bold, not Avenir Next. The display voice is SF Pro's width axis, and
+                    // a second typeface at tile scale was the loudest templated signal left.
+                    .font(.system(size: size * (initials.count > 1 ? 0.36 : 0.42), weight: .bold))
                     .foregroundStyle(onInk ? MonacoTheme.heroInk : tint.onFill)
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
                     .padding(size * 0.08)
+                    .contentTransition(.opacity)
             }
+            // Recolours live while a founder types a cabal's name, so the tint system is a visible
+            // feature at the moment it is first met. Instant swap under Reduce Motion.
+            .animation(MonacoMotion.glide.reduced(reduceMotion), value: tint)
+            .animation(MonacoMotion.glide.reduced(reduceMotion), value: initials)
             .accessibilityHidden(true)
     }
 
@@ -104,12 +124,17 @@ struct StockMark: View {
 
     /// Fraction of the tile the text is set at. Longer tickers are set smaller so the tile keeps
     /// its weight; `minimumScaleFactor` takes the rest.
+    ///
+    /// Retuned for SF Pro **Expanded** Bold, whose glyphs are wider than the semibold standard
+    /// width this used to draw: the three-character ticker — the modal case in the catalog —
+    /// lands on the spec's 0.30 × tile, and the ladder stays strictly descending either side of
+    /// it so a four-character ticker still fits without leaning on the scale factor.
     static func textScale(for text: String) -> CGFloat {
         switch text.count {
-        case 0, 1: return 0.42
+        case 0, 1: return 0.40
         case 2: return 0.34
-        case 3: return 0.28
-        default: return 0.23
+        case 3: return 0.30
+        default: return 0.24
         }
     }
 
@@ -119,27 +144,37 @@ struct StockMark: View {
         self.size = size
     }
 
+    /// The tile lives in both worlds — a holdings row on paper, a proposal deck card on ink — so
+    /// it resolves its fill, its edge and its ticker colour from the world it was placed in
+    /// rather than assuming paper and drawing a light grey square on a deep ink band.
+    @Environment(\.monacoPalette) private var palette
+
     var body: some View {
         RoundedRectangle(cornerRadius: MarkGeometry.radius(for: size), style: .continuous)
-            .fill(MonacoTheme.surfaceSunken)
+            .fill(palette.quietFill)
             .frame(width: size, height: size)
             .overlay {
                 RoundedRectangle(cornerRadius: MarkGeometry.radius(for: size), style: .continuous)
-                    .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+                    .strokeBorder(palette.line, lineWidth: 1)
             }
             .overlay {
                 switch content {
                 case .letter(let letter):
                     Text(letter)
-                        .font(.system(size: size * StockMark.textScale(for: letter), weight: .semibold))
-                        .foregroundStyle(MonacoTheme.ink)
+                        // Expanded bold: a four-character ticker on a quiet fill is a handsome
+                        // resting state, and it is the same width axis the display voice uses.
+                        .font(
+                            .system(size: size * StockMark.textScale(for: letter), weight: .bold)
+                                .width(.expanded)
+                        )
+                        .foregroundStyle(palette.fgPrimary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
-                        .padding(.horizontal, size * 0.08)
+                        .padding(.horizontal, size * 0.06)
                 case .symbol(let name):
                     Image(systemName: name)
                         .font(.system(size: size * 0.40, weight: .semibold))
-                        .foregroundStyle(MonacoTheme.ink)
+                        .foregroundStyle(palette.fgPrimary)
                 }
             }
             .accessibilityHidden(true)
