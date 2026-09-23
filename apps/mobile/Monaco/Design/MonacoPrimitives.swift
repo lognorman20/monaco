@@ -83,6 +83,14 @@ struct MonacoCard<Content: View>: View {
 /// Filter / range pill. A `Capsule()`, never a radius approximation, on the world's quiet fill —
 /// the inert raised control fill, not a stroked card surface. Both remaining call sites are
 /// ranges, which is exactly what `MonacoSegmented` is for, so the type goes when they move.
+///
+/// **The unselected pill keeps its 1pt stroke, and it is load-bearing.** `fillQuiet` on `bgBase`
+/// measures 1.05:1 in light — invisible — and both live call sites sit directly on the screen
+/// canvas rather than inside a card: `CabalsPnLChartSection.swift:57` renders its range row
+/// outside the card, and `AssetDetailView.swift:131` renders it on the canvas. Without the
+/// stroke the pill shape disappears and only the label is left, so the control stops reading as
+/// tappable on two shipping screens. The stroke goes when those two sites move to
+/// `MonacoSegmented`, not before.
 @available(*, deprecated, message: "Use MonacoSegmented. Last sites: CabalsPnLChartSection.swift:64 (Chunk D), AssetDetailView.swift:138 (Chunk F).")
 struct MonacoChip: View {
     let title: String
@@ -97,6 +105,9 @@ struct MonacoChip: View {
             .padding(.horizontal, 14)
             .frame(minHeight: 36)
             .background(Capsule().fill(isSelected ? MonacoTheme.primaryButtonFill : palette.quietFill))
+            .overlay(
+                Capsule().strokeBorder(isSelected ? .clear : palette.line, lineWidth: 1)
+            )
     }
 }
 

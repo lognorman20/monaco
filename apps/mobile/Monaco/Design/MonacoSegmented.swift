@@ -6,7 +6,8 @@ import SwiftUI
 /// It reads `\.monacoWorld`, so the same control works on paper and inside an ink band: the track
 /// takes the world's quiet fill (`fillQuiet` on paper, `Ink.sunken` on ink, because a track inside
 /// an ink band is a *well*, not a raised control) and the unselected labels take the world's muted
-/// foreground. The thumb stays brand in both worlds — blue means tap, everywhere.
+/// foreground. The thumb stays brand in both worlds — blue means tap, everywhere. The track also
+/// carries a 1pt `line` edge, because its fill alone is 1.05:1 on the light canvas.
 struct MonacoSegmented<T: Hashable>: View {
     private let options: [T]
     @Binding private var selection: T
@@ -56,5 +57,12 @@ struct MonacoSegmented<T: Hashable>: View {
         .padding(4)
         .frame(minHeight: 44)
         .background(Capsule().fill(palette.quietFill))
+        // The track keeps a 1pt edge, and it is the same decision as `MonacoChip`'s: `fillQuiet`
+        // `#EDF1F7` on `bgBase` `#F4F6FA` measures **1.05:1** in light, so a segmented control
+        // sitting straight on the canvas — which is where most of them sit — shows nothing but a
+        // brand thumb floating in space, and the unselected options stop reading as a control at
+        // all. On a card (`bgRaised` `#FFFFFF`) the fill does carry itself, but a control that
+        // only has an edge on half the surfaces it lands on is a control nobody can place.
+        .overlay(Capsule().strokeBorder(palette.line, lineWidth: 1))
     }
 }
