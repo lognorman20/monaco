@@ -144,7 +144,12 @@ public struct HeldAssetsResponseDTO: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         held = try container.decodeIfPresent([HeldAssetDTO].self, forKey: .held) ?? []
         upForVote = try container.decodeIfPresent([VotableAssetDTO].self, forKey: .upForVote) ?? []
-        market = try container.decodeIfPresent(MarketStatusDTO.self, forKey: .market)
+        // Same rule the market list and the detail follow: the session chip is
+        // decoration carrying two timestamps that throw on any spelling the shared
+        // ISO8601 parser rejects. This route feeds two of the Stocks tab's four
+        // sections, and losing both because a chip would not parse is not a trade
+        // anyone would make.
+        market = (try? container.decodeIfPresent(MarketStatusDTO.self, forKey: .market)) ?? nil
     }
 }
 

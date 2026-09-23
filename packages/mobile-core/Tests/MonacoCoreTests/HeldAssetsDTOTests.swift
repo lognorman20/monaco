@@ -86,6 +86,29 @@ final class HeldAssetsDTOTests: XCTestCase {
         XCTAssertNil(decoded.market)
     }
 
+    func testAMalformedSessionChipDoesNotTakeTheSectionsDown() throws {
+        // This route feeds two of the Stocks tab's four sections. The chip is
+        // decoration, and the market list and the detail both already drop an
+        // unparseable one rather than fail the payload.
+        let json = """
+        {
+          "held": [{
+            "asset": {"symbol": "AAPLc", "name": "Apple", "tokenAddress": "0xb201", "routable": true},
+            "totalValueUsd": "974.61", "totalDollarPnl": "112.40", "mySliceUsd": "243.65"
+          }],
+          "upForVote": [{
+            "asset": {"symbol": "NVDAc", "name": "NVIDIA", "tokenAddress": "0xb202", "routable": true},
+            "openProposals": 2
+          }],
+          "market": {"session": "open", "isOpen": true, "asOf": "never"}
+        }
+        """
+        let decoded = try JSONDecoder().decode(HeldAssetsResponseDTO.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.held.count, 1)
+        XCTAssertEqual(decoded.upForVote.count, 1)
+        XCTAssertNil(decoded.market)
+    }
+
     func testMissingMoneyFieldsFallBackToZeroRatherThanFailing() throws {
         let json = """
         {"held": [{"asset": {"symbol": "AAPLc", "name": "Apple", "tokenAddress": "0xb2", "routable": true}}]}
