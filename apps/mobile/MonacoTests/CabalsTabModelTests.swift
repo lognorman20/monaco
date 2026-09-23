@@ -488,13 +488,26 @@ struct CabalsChartLabelLayoutTests {
         #expect(abs((placed["low"] ?? 0) - (15 - pointsApart)) < 0.001)
     }
 
-    /// Three identical termini — three cabals all flat at zero, which is what a new set of
-    /// cabals looks like — stack at one separation each rather than collapsing into one label.
+    /// Three identical termini — three cabals all flat on the same number — stack at one
+    /// separation each rather than collapsing into one unreadable label.
     @Test func aStackOfIdenticalTerminiSpreadsEvenly() {
-        let placed = offsets([("a", 0), ("b", 0), ("c", 0)])
-        let steps = placed.values.sorted()
+        let placed = offsets([("a", 60), ("b", 60), ("c", 60)])
 
-        #expect(steps == [0, 15, 30])
+        #expect(placed.values.sorted() == [0, 15, 30])
+    }
+
+    /// A stack that would run off the bottom of the plot is walked back up until it ends inside
+    /// it, keeping its separations. Without this the overflow rule and the offset fight: Charts
+    /// places the annotation inside the plot and the offset then carries it back out.
+    @Test func aStackAtTheBottomIsWalkedBackIntoThePlot() {
+        // Three cabals all at the domain's floor: every label wants the last row of the plot.
+        let placed = offsets([("a", -20), ("b", -20), ("c", -20)])
+        let wanted = plotHeight  // value == domain.lowerBound maps to the plot's bottom edge
+        let finals = placed.values.map { wanted + $0 }.sorted()
+
+        #expect(finals.allSatisfy { $0 >= 0 && $0 <= plotHeight })
+        #expect(abs(finals[1] - finals[0] - 15) < 0.001)
+        #expect(abs(finals[2] - finals[1] - 15) < 0.001)
     }
 
     /// Order is by value, not by arrival: the input is whatever the series array happens to hold.

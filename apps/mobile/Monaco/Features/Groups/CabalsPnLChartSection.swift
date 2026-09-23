@@ -61,13 +61,18 @@ struct CabalsPnLChartSection: View {
         return (low - pad)...(high + pad)
     }
 
-    /// Where each cabal's name label sits, in points below its own terminus.
+    /// Where each cabal's name label sits, in points from its own terminus.
     ///
-    /// The name is the only non-colour identity carrier on this chart (§1.8), so two cabals whose
-    /// lines end within a label's height of each other cannot be allowed to draw their names on
-    /// top of one another. Termini are walked from the top down and each label is pushed just far
-    /// enough below the one above it to clear it — the topmost never moves, so a label is always
-    /// nearest the line it names.
+    /// Every line ends at the same instant, so the labels share one column, and the name is the
+    /// only non-colour identity carrier on this chart (§1.8) — two cabals with similar P&L must
+    /// not print their names on top of each other. Two passes:
+    ///
+    /// 1. Top down, each label pushed just far enough below the one above it to clear it. The
+    ///    topmost does not move, so a name is always nearest the line it belongs to.
+    /// 2. If that pushed the lowest label past the bottom of the plot, walk back up until the
+    ///    stack ends inside it, then bring the whole stack down again if it has cleared the top.
+    ///    With seven cabals at 15pt apart the stack is 90pt in a 176pt plot, so it cannot
+    ///    overflow both ends.
     static func labelOffsets(
         terminals: [(id: String, value: Double)],
         domain: ClosedRange<Double>,
@@ -75,18 +80,35 @@ struct CabalsPnLChartSection: View {
         minimumSeparation: CGFloat = 15
     ) -> [String: CGFloat] {
         let span = domain.upperBound - domain.lowerBound
-        guard span > 0 else { return [:] }
+        guard span > 0, !terminals.isEmpty else { return [:] }
         // Value space runs up, point space runs down.
         func y(_ value: Double) -> CGFloat {
             CGFloat((domain.upperBound - value) / span) * plotHeight
         }
+
+        let ordered = terminals.sorted { $0.value > $1.value }
+        let wanted = ordered.map { y($0.value) }
+        var placed = wanted
+        for index in placed.indices.dropFirst() {
+            placed[index] = max(placed[index], placed[index - 1] + minimumSeparation)
+        }
+
+        let bottom = plotHeight - minimumSeparation / 2
+        let top = minimumSeparation / 2
+        if let last = placed.last, last > bottom {
+            placed[placed.count - 1] = bottom
+            for index in placed.indices.dropLast().reversed() {
+                placed[index] = min(placed[index], placed[index + 1] - minimumSeparation)
+            }
+            if let first = placed.first, first < top {
+                let shift = top - first
+                for index in placed.indices { placed[index] += shift }
+            }
+        }
+
         var offsets: [String: CGFloat] = [:]
-        var nextFree: CGFloat?
-        for terminal in terminals.sorted(by: { $0.value > $1.value }) {
-            let wanted = y(terminal.value)
-            let placed = max(wanted, nextFree ?? wanted)
-            offsets[terminal.id] = placed - wanted
-            nextFree = placed + minimumSeparation
+        for (index, terminal) in ordered.enumerated() {
+            offsets[terminal.id] = placed[index] - wanted[index]
         }
         return offsets
     }
@@ -116,8 +138,12 @@ struct CabalsPnLChartSection: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Your cabals' P&L")
 
-                InkSegmented(GroupPnLRange.allCases, selection: rangeSelection) { $0.label }
-                    .accessibilityIdentifier("cabals-pnl-range")
+                InkSegmented(
+                    GroupPnLRange.allCases,
+                    selection: rangeSelection,
+                    identifierPrefix: "cabals-pnl-range"
+                ) { $0.label }
+                .accessibilityIdentifier("cabals-pnl-range")
 
                 content
                     .frame(maxWidth: .infinity, minHeight: 200)
@@ -174,7 +200,7 @@ struct CabalsPnLChartSection: View {
             plotHeight: Self.plotHeight
         )
         return Chart {
-            RuleMark(y: .value("Break even", 0))
+            RuleMark(y: .value("Break even", 0.0))
                 .foregroundStyle(MonacoTheme.Ink.lineStrong)
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
             ForEach(series, id: \.id) { line in
@@ -269,13 +295,23 @@ private struct InkSegmented<T: Hashable>: View {
     private let options: [T]
     @Binding private var selection: T
     private let label: (T) -> String
+    /// Each option is addressable as `<prefix>-<label>`. An identifier on the container alone is
+    /// the container's, not its buttons', so without this a test can see the control but cannot
+    /// tap a range in it.
+    private let identifierPrefix: String?
 
     @Namespace private var thumb
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(_ options: [T], selection: Binding<T>, label: @escaping (T) -> String) {
+    init(
+        _ options: [T],
+        selection: Binding<T>,
+        identifierPrefix: String? = nil,
+        label: @escaping (T) -> String
+    ) {
         self.options = options
         _selection = selection
+        self.identifierPrefix = identifierPrefix
         self.label = label
     }
 
@@ -310,10 +346,29 @@ private struct InkSegmented<T: Hashable>: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+                .modifier(OptionalIdentifier(identifierPrefix.map { "\($0)-\(label(option))" }))
             }
         }
         .padding(4)
         .frame(minHeight: 44)
         .background(Capsule().fill(MonacoTheme.Ink.sunken))
+    }
+}
+
+
+/// Applies an accessibility identifier only when there is one to apply, so a caller that passes
+/// none is left exactly as it was rather than being handed an empty string.
+private struct OptionalIdentifier: ViewModifier {
+    let identifier: String?
+
+    init(_ identifier: String?) { self.identifier = identifier }
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let identifier {
+            content.accessibilityIdentifier(identifier)
+        } else {
+            content
+        }
     }
 }
