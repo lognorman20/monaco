@@ -149,11 +149,11 @@ public struct MarketRowData: Identifiable, Equatable, Sendable {
     /// backend did not say whose move it is.
     public var dayMove: StockDayMove? { asset.stockDayMove }
 
-    /// The price the pill's dollar face is measured on: the underlying's latest
-    /// price, per share, which is the last close of the line when the line is the
-    /// underlying's. Never the token's price: the day move is the share's, and the
-    /// token's price carries its multiplier, so a dollar figure from it would be a
-    /// move of neither. Nil leaves the pill on percent.
+    /// The price the pill's dollar face is measured on: the last close of the row's
+    /// line, when the line and the move are the same instrument. Never a price in
+    /// the other instrument's unit — the token carries a multiplier the share does
+    /// not, so a share's move taken on a token price is a move of neither. Nil
+    /// leaves the pill on percent.
     public var dayMoveReferencePriceUsdcMicros: Int64? {
         DayChangeFigures.referencePrice(
             sparkUsdcMicros: asset.sparkUsdcMicros,
@@ -187,16 +187,23 @@ public enum DayChangeFigures {
     }
 
     /// The price a day move's dollar face is measured on: the last close of the
-    /// row's line, when the line and the move are both the underlying's. The line's
-    /// last point is the same latest price the backend measured the move with, so
-    /// the dollar face is the share's own move. Nil otherwise, which leaves the pill
-    /// on percent rather than pricing the share's move at the token's price.
+    /// row's line, when the line and the move are about the *same* instrument. The
+    /// line's last point is then the same latest price the backend measured the
+    /// move with, so the dollar face is that instrument's own move.
+    ///
+    /// The rule used to name the instrument — both had to be the underlying's —
+    /// which was the same rule written down for the only case that could arise
+    /// then. It is the agreement that matters, not which of the two it is: a
+    /// token move on a token line is measured on token prices and is correct, and
+    /// a share's move priced at the token's price is wrong whichever way round it
+    /// is written. Nil when they disagree or the line is unlabelled, which leaves
+    /// the pill on percent rather than showing a figure of neither.
     public static func referencePrice(
         sparkUsdcMicros: [Int64],
         sparkBasis: MarketPriceBasis?,
         dayMove: StockDayMove?
     ) -> Int64? {
-        guard dayMove != nil, sparkBasis == .underlying,
+        guard let dayMove, let sparkBasis, sparkBasis == dayMove.basis,
               let last = sparkUsdcMicros.last(where: { $0 > 0 })
         else { return nil }
         return last

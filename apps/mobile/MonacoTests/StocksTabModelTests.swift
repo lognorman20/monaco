@@ -75,6 +75,25 @@ private final class StubStocksDataSource: StocksTabDataSource {
             sparkBasisSymbol: spark.isEmpty ? nil : AssetSymbolFormatter.display(symbol)
         )
     }
+
+    /// The same row as the backend sends it when Pyth cannot answer for the equity:
+    /// the move and the line are both the token's own Chainlink feed, per token, and
+    /// both say so.
+    static func tokenBasisAsset(symbol: String, change24h: String? = "0.012") -> MarketAssetDTO {
+        MarketAssetDTO(
+            symbol: symbol,
+            name: "\(symbol) Inc.",
+            tokenAddress: "0xb2000000000000000000000000000000000000aa",
+            routable: true,
+            priceUsdcMicros: 110_000_000,
+            change24h: change24h,
+            change24hBasis: change24h == nil ? nil : .token,
+            change24hBasisSymbol: change24h == nil ? nil : symbol,
+            sparkUsdcMicros: [100_000_000, 110_000_000],
+            sparkBasis: .token,
+            sparkBasisSymbol: symbol
+        )
+    }
 }
 
 @MainActor
@@ -526,6 +545,46 @@ struct StocksTabModelTests {
         #expect(
             DayChangeFigures.dollarText(change24h: row.dayMove?.ratio, priceUsdcMicros: row.dayMoveReferencePriceUsdcMicros) == "+$10.00",
             "$110 now against a $100 close; the token's $185 must not price it"
+        )
+    }
+
+    /// The tab on a crypto-only Pyth key, which is the live one: Benchmarks answers
+    /// nothing for an equity, so the backend draws the row from the token's own
+    /// Chainlink feed and labels it `token`. The row used to drop such a move
+    /// entirely, which left every pill on the tab blank. It is shown now, captioned
+    /// as the token's, and its dollar face is measured on the token line's own last
+    /// close — the same unit as the price above it.
+    @Test func aTokenBasisRowStillShowsItsPillAndSaysWhoseMoveItIs() async throws {
+        let source = StubStocksDataSource()
+        source.popularAssets = [StubStocksDataSource.tokenBasisAsset(symbol: "AAPLc", change24h: "0.1")]
+        let model = StocksTabModel(dataSource: source)
+
+        await model.loadPopular()
+
+        let row = try #require(model.popularRows.first)
+        #expect(row.dayMove?.basis == .token)
+        #expect(row.dayMove?.caption == "AAPL token day move")
+        #expect(row.dayMoveReferencePriceUsdcMicros == 110_000_000)
+        #expect(
+            DayChangeFigures.dollarText(change24h: row.dayMove?.ratio, priceUsdcMicros: row.dayMoveReferencePriceUsdcMicros) == "+$10.00"
+        )
+        // The line and the pill are one instrument, so the line still takes the
+        // move's tone rather than falling back to its own ends.
+        #expect(row.asset.sparkAndChangeDisagreeOnInstrument == false)
+    }
+
+    /// The footnote is the only place a sighted reader is told whose move the pill
+    /// is, so it follows the rows instead of asserting the equity every time.
+    @Test func theFootnoteFollowsWhicheverInstrumentTheRowsCarry() async throws {
+        let source = StubStocksDataSource()
+        source.popularAssets = [StubStocksDataSource.tokenBasisAsset(symbol: "AAPLc", change24h: "0.1")]
+        let model = StocksTabModel(dataSource: source)
+
+        await model.loadPopular()
+
+        #expect(
+            MarketFiguresFootnote.text(for: model.popularRows.map(\.dayMove))
+                == "Prices are per token on Base. The day move is the token's own, on Base."
         )
     }
 

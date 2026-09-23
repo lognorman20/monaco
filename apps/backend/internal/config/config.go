@@ -43,6 +43,13 @@ type Config struct {
 	SignerURL              string
 	SignerSharedSecret     string
 	BaseRPCURL             string
+	// BaseRPCIsDefault reports that nothing set BASE_RPC_URL and the public
+	// endpoint is being used. It is not a usable production setting: every chart
+	// reads a feed's round history through it, and mainnet.base.org answers a few
+	// requests and then 429s, which costs a chart and a day change on every screen
+	// that asks. The API says so loudly at boot rather than letting it show up as
+	// intermittently missing data.
+	BaseRPCIsDefault bool
 	RelayerPrivateKey      string
 	KyberClientID          string
 	PythAPIKey             string
@@ -92,6 +99,7 @@ func Load() (*Config, error) {
 	}
 	if cfg.BaseRPCURL == "" {
 		cfg.BaseRPCURL = defaultBaseRPCURL
+		cfg.BaseRPCIsDefault = true
 	}
 	if cfg.KyberClientID == "" {
 		cfg.KyberClientID = defaultKyberClientID

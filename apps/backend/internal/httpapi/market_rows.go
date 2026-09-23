@@ -43,9 +43,10 @@ const (
 // Where each figure comes from:
 //   - priceUsdcMicros is the Chainlink total-return mark, per token, the same
 //     mark pot valuation uses;
-//   - change24h and spark are both read from one Pyth 1D Benchmarks series of the
-//     underlying equity, per share, so they are the same instrument over the same
-//     window and each carries its basis;
+//   - change24h and spark are both read from one 1D series — Pyth Benchmarks'
+//     underlying equity per share when it can answer, the token's own Chainlink
+//     feed per token when it cannot — so they are the same instrument over the
+//     same window, and each carries the basis of whichever source answered;
 //   - logoUrl is the image the issuer publishes in the token's own ERC-7572
 //     contractURI metadata, only when it is https on the issuer's metadata host.
 //
@@ -57,9 +58,17 @@ type MarketRowSource struct {
 	// Marks serves the hero price (Chainlink, with Pyth charts in front of its
 	// rounds). Only AssetMarks is read here.
 	Marks pyth.AssetPriceClient
-	// Charts is Pyth history alone. A row never falls back to Chainlink rounds for
-	// its day move or its line: a token curve beside an equity change would be two
-	// instruments under one row.
+	// Charts is Pyth history alone: the underlying equity, which is what "AAPL is
+	// up 1.2% today" means, so it is asked first.
+	//
+	// It is no longer the only source. Pyth Benchmarks' history endpoint 404s and
+	// our key is crypto-only, so for an equity it answers nothing at all, and a
+	// row with no line and no pill is not a more honest row than one drawn from
+	// the token's own feed — it is an empty one. When Pyth cannot answer, the row
+	// falls back to the same Chainlink series the chart and the price beside it
+	// come from, through Marks, and labels it as the token's. What it never does
+	// is mix the two: the change and the line on one row always come from one
+	// series, so they are the same instrument over the same window.
 	Charts pyth.MarketDataClient
 	// Logos resolves each token's logo from the issuer's on-chain ERC-7572
 	// metadata (b20.NewContractLogos). Nil ships rows without logoUrl, and the app
@@ -167,10 +176,17 @@ func (s *MarketRowSource) Prices(ctx context.Context, assets []b20.Asset) map[st
 // line and a change that are not labelled is how a row ends up drawing one
 // instrument and tinting it by another.
 type rowDay struct {
-	change      *string
-	spark       []int64
-	basis       string
-	basisSymbol string
+	change *string
+	// changeBasis and changeBasisSymbol name the instrument the change is about,
+	// read off the series it was measured on rather than assumed. On a Pyth series
+	// that is the equity ("underlying", "AAPL"); on the Chainlink fallback it is
+	// the token, and saying so is the difference between a real day move and a
+	// mislabelled one.
+	changeBasis       string
+	changeBasisSymbol string
+	spark             []int64
+	basis             string
+	basisSymbol       string
 }
 
 // DaySeries reads each asset's 1D Pyth series once, under a bounded fan-out, and
@@ -178,7 +194,7 @@ type rowDay struct {
 // prices. An asset whose series is late, empty or unusable simply has neither.
 func (s *MarketRowSource) DaySeries(ctx context.Context, assets []b20.Asset) map[string]rowDay {
 	out := make(map[string]rowDay, len(assets))
-	if s == nil || s.Charts == nil || len(assets) == 0 {
+	if s == nil || len(assets) == 0 || (s.Charts == nil && s.Marks == nil) {
 		return out
 	}
 	var (
@@ -201,11 +217,7 @@ func (s *MarketRowSource) DaySeries(ctx context.Context, assets []b20.Asset) map
 				return
 			}
 			defer func() { <-sem }()
-			series, ok := s.Charts.DaySeries(ctx, symbol)
-			if !ok {
-				return
-			}
-			day, ok := rowDayFrom(series)
+			day, ok := s.dayFor(ctx, symbol)
 			if !ok {
 				return
 			}
@@ -218,8 +230,46 @@ func (s *MarketRowSource) DaySeries(ctx context.Context, assets []b20.Asset) map
 	return out
 }
 
-func rowDayFrom(series pyth.AssetChartSeries) (rowDay, bool) {
-	day := rowDay{change: pyth.DayChange(series)}
+// dayFor is one row's day series, Pyth first and the token's own feed after.
+//
+// Pyth is the equity, so it wins whenever it can answer. On a crypto-only key it
+// cannot answer for any equity, and the fallback is the same Chainlink series the
+// chart route draws from — reached through Marks, which is the marks client with
+// Pyth charts in front of its own rounds, so this second read costs nothing extra
+// when Pyth is healthy. Whichever answers, the change and the line come from that
+// one series, and it says which instrument it is about.
+func (s *MarketRowSource) dayFor(ctx context.Context, symbol string) (rowDay, bool) {
+	if s.Charts != nil {
+		if series, ok := s.Charts.DaySeries(ctx, symbol); ok {
+			if day, ok := rowDayFrom(symbol, series); ok {
+				return day, true
+			}
+		}
+	}
+	if s.Marks == nil {
+		return rowDay{}, false
+	}
+	series, err := s.Marks.ChartSeries(ctx, symbol, pyth.ChartRange1D)
+	if err != nil {
+		return rowDay{}, false
+	}
+	return rowDayFrom(symbol, series)
+}
+
+// rowDayFrom folds one series into the row's two figures, each labelled with the
+// instrument that series is about.
+//
+// The change is measured by the same helper the detail route uses, so a row and
+// the stock screen cannot disagree about whose move a ratio is. A series that
+// names no instrument ships no change: the basis is not decoration, and an
+// unlabelled ratio beside a per-token price says nothing about which of the two
+// moved. The line is laxer, because an unlabelled line is still a real shape and
+// the app already declines to tint one it cannot match to the move.
+func rowDayFrom(symbol string, series pyth.AssetChartSeries) (rowDay, bool) {
+	var day rowDay
+	if move := dayMoveFrom(symbol, series); move.ratio != nil {
+		day.change, day.changeBasis, day.changeBasisSymbol = move.ratio, move.basis, move.basisSymbol
+	}
 	if spark := pyth.SparkFromSeries(series, pyth.DefaultSparkPoints); len(spark) > 1 {
 		day.spark = spark
 		day.basis = series.Basis
@@ -340,7 +390,10 @@ func marketAssetResponseFor(asset b20.Asset, prices map[string]assetPriceSnapsho
 		resp.PriceUsdcMicros = &price.PriceUsdcMicros
 	}
 	if day, ok := days[key]; ok {
-		resp.Change24h, resp.Change24hBasis, resp.Change24hBasisSymbol = dayChangeFields(asset.Symbol, day.change)
+		// dayMove.fields() is the base's "both travel together or neither ships"
+		// rule, not a second copy of it here.
+		move := dayMove{ratio: day.change, basis: day.changeBasis, basisSymbol: day.changeBasisSymbol}
+		resp.Change24h, resp.Change24hBasis, resp.Change24hBasisSymbol = move.fields()
 		if len(day.spark) > 1 {
 			resp.Spark = day.spark
 			resp.SparkBasis = day.basis

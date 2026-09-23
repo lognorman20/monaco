@@ -95,9 +95,19 @@ func TestMarketRowSource_theRowNamesTheInstrumentBehindEachFigure(t *testing.T) 
 	}
 }
 
-// A series that is not the underlying's (a token-basis source) can still be
-// drawn, labelled as what it is, but it is never a day move of the stock.
-func TestMarketRowSource_aTokenSeriesIsLabelledAndIsNoDayMove(t *testing.T) {
+// A series that is not the underlying's is the token's own move, labelled as the
+// token's — not nothing.
+//
+// This test used to assert the opposite, back when Pyth was expected to serve
+// every equity and a token series could only mean something had gone sideways.
+// Benchmarks' history endpoint 404s and our key is crypto-only, so for an equity
+// Pyth answers nothing at all; refusing a token-basis change now means refusing
+// every pill on the tab. The token's rounds are a real move of the thing the
+// member actually holds, and saying whose move it is was always the rule that
+// mattered. What is still forbidden is mixing: both ends of the ratio come from
+// one series, so the pill and the line name the same instrument and SparkTint
+// can still match them.
+func TestMarketRowSource_aTokenSeriesIsTheTokensOwnDayMove(t *testing.T) {
 	t.Parallel()
 	source, charts := newMarketRowSource(t)
 	asset := registerRowApple(t, source)
@@ -107,11 +117,67 @@ func TestMarketRowSource_aTokenSeriesIsLabelledAndIsNoDayMove(t *testing.T) {
 	pyth.RegisterChartSeries(charts, "AAPLc", pyth.ChartRange1D, series)
 
 	row := source.Enrich(context.Background(), []b20.Asset{asset})[0]
-	if row.Change24h != nil || row.Change24hBasis != "" {
-		t.Fatalf("change = %v/%q, want none from a token series", row.Change24h, row.Change24hBasis)
+	if row.Change24h == nil {
+		t.Fatal("change24h missing: a token series carries a real move of the token")
+	}
+	if row.Change24hBasis != pyth.PriceBasisToken || row.Change24hBasisSymbol != "AAPLc" {
+		t.Fatalf("change basis = %q/%q, want token/AAPLc", row.Change24hBasis, row.Change24hBasisSymbol)
 	}
 	if len(row.Spark) == 0 || row.SparkBasis != pyth.PriceBasisToken || row.SparkBasisSymbol != "AAPLc" {
 		t.Fatalf("spark = %d points basis %q/%q, want a token-labelled line", len(row.Spark), row.SparkBasis, row.SparkBasisSymbol)
+	}
+	if row.Change24hBasis != row.SparkBasis {
+		t.Fatalf("pill %q and line %q disagree about the instrument", row.Change24hBasis, row.SparkBasis)
+	}
+}
+
+// The fall-through the Chainlink chart source exists for: Pyth has nothing for
+// this symbol, and the row is drawn from the token's own feed instead of coming
+// back blank. It is reached through Marks, the marks client with Pyth charts in
+// front of its own rounds, which is the same series the chart route draws.
+func TestMarketRowSource_aRowFallsThroughToTheTokensOwnFeed(t *testing.T) {
+	t.Parallel()
+	source, _ := newMarketRowSource(t)
+	asset := registerRowApple(t, source)
+	// Nothing on Charts: Benchmarks could not answer, as it cannot for any equity
+	// on a crypto-only key.
+	series := underlyingDayCandles(40)
+	series.Source = pyth.ChartSourceChainlink
+	series.Basis = pyth.PriceBasisToken
+	series.BasisSymbol = "AAPLc"
+	pyth.RegisterChartSeries(source.Marks, "AAPLc", pyth.ChartRange1D, series)
+
+	row := source.Enrich(context.Background(), []b20.Asset{asset})[0]
+	if row.Change24h == nil {
+		t.Fatal("change24h missing: the token's own feed can answer when Pyth cannot")
+	}
+	if row.Change24hBasis != pyth.PriceBasisToken || row.Change24hBasisSymbol != "AAPLc" {
+		t.Fatalf("change basis = %q/%q, want token/AAPLc", row.Change24hBasis, row.Change24hBasisSymbol)
+	}
+	if len(row.Spark) == 0 || row.SparkBasis != pyth.PriceBasisToken {
+		t.Fatalf("spark = %d points basis %q, want a token-labelled line", len(row.Spark), row.SparkBasis)
+	}
+}
+
+// Pyth still wins when it can answer: the fallback is a fallback, not a
+// replacement. An equity move is what "AAPL is up 1.2% today" means, and it must
+// not be displaced by the token's because the token's read happened to be warm.
+func TestMarketRowSource_pythWinsOverTheTokensOwnFeed(t *testing.T) {
+	t.Parallel()
+	source, charts := newMarketRowSource(t)
+	asset := registerRowApple(t, source)
+	pyth.RegisterChartSeries(charts, "AAPLc", pyth.ChartRange1D, underlyingDayCandles(78))
+	token := underlyingDayCandles(40)
+	token.Basis = pyth.PriceBasisToken
+	token.BasisSymbol = "AAPLc"
+	pyth.RegisterChartSeries(source.Marks, "AAPLc", pyth.ChartRange1D, token)
+
+	row := source.Enrich(context.Background(), []b20.Asset{asset})[0]
+	if row.Change24hBasis != pyth.PriceBasisUnderlying || row.Change24hBasisSymbol != "AAPL" {
+		t.Fatalf("change basis = %q/%q, want underlying/AAPL", row.Change24hBasis, row.Change24hBasisSymbol)
+	}
+	if row.SparkBasis != pyth.PriceBasisUnderlying {
+		t.Fatalf("spark basis = %q, want underlying", row.SparkBasis)
 	}
 }
 

@@ -138,8 +138,11 @@ struct AssetDetailView: View {
                     .accessibilityIdentifier("asset-detail-chart-loading")
             case .series(let points):
                 chart(points)
-            case .empty:
-                EmptyState(title: "No price history for this window yet")
+            case .empty(let reason):
+                // The reason is the whole point for 3M and 1Y on a B20 feed: the
+                // token has only been on-chain for weeks, and saying which day it
+                // started beats an empty box that reads like a bug.
+                EmptyState(title: "No price history for this window yet", message: reason)
                     .accessibilityIdentifier("asset-detail-chart-empty")
             case .failed:
                 EmptyState(

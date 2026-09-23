@@ -108,6 +108,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}
 	slog.Info("relayer loaded", "address", relayer.Address())
 
+	if cfg.BaseRPCIsDefault {
+		slog.Warn("BASE_RPC_URL is unset: falling back to the public Base endpoint",
+			"url", cfg.BaseRPCURL,
+			"impact", "chart history and NAV marks will be rate-limited (429)",
+			"fix", "set BASE_RPC_URL to a keyed Alchemy / QuickNode / CDP Base endpoint")
+	}
 	chain := evm.NewJSONRPCClient(cfg.BaseRPCURL)
 	bal, err := chain.ETHBalance(ctx, relayer.Address())
 	if err != nil {

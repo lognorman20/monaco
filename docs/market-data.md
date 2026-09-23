@@ -25,7 +25,7 @@ post-market and overnight) and hold the last close off-hours with no heartbeat.
 | `priceUsdcMicros` (list, popular, detail hero) | Chainlink total-return (TRV) feed on Base, `latestRoundData()` | per token, multiplier included. The same mark pot NAV uses |
 | `chart` | Pyth Benchmarks history for `Equity.US.<TICKER>/USD`; Hermes per-sample history as fallback; the token's own Chainlink rounds last | per share (`basis: "underlying"`), or per token for the Chainlink fallback (`basis: "token"`) |
 | `stats` | Pyth Benchmarks candles and the latest equity price's confidence interval | per share |
-| `change24h` | Pyth Benchmarks: the latest 1D price against the previous regular-session close. Ships with `change24hBasis: "underlying"` and `change24hBasisSymbol: "AAPL"` | the stock's day move, not the token's |
+| `change24h` | The latest 1D price against the previous regular-session close, on one series: Pyth Benchmarks when it can answer (`"underlying"` / `"AAPL"`), the token's own Chainlink rounds when it cannot (`"token"` / `"AAPLc"`). Both ends of the ratio always come from the same series | whichever `change24hBasis` names — the stock's day move, or the token's |
 | `stockVsToken.token` | Kyber: the mid of a 1 USDC buy probe and a 1-token sell probe | per token |
 | `stockVsToken.mark` | the Chainlink TRV mark (equals the hero price), with the round's `updatedAt` as `publishedAt` | per token |
 | `stockVsToken.equity` | Pyth Hermes latest price for the underlying | per share |
@@ -66,16 +66,19 @@ it lists one.
 | Field | Meaning |
 |---|---|
 | `priceUsdcMicros` | The Chainlink TRV mark, per token. Not on holdings rows, which already carry the cabal's own `markUsd` (the same mark). |
-| `change24h`, `change24hBasis`, `change24hBasisSymbol` | The underlying's move against its previous regular-session close, from Pyth Benchmarks: `"underlying"` / `"AAPL"`. |
+| `change24h`, `change24hBasis`, `change24hBasisSymbol` | The move against the previous regular-session close of whichever series answered: Pyth Benchmarks' underlying (`"underlying"` / `"AAPL"`), or the token's own Chainlink rounds (`"token"` / `"AAPLc"`). The basis is not decoration — a row ships no change without it. |
 | `spark` | About two dozen closes of the same Pyth 1D series, oldest first, for the row's sparkline. Omitted when no series could be read in budget or it had fewer than two usable closes: the row then draws no line rather than a flat one. |
 | `sparkBasis`, `sparkBasisSymbol` | Which instrument `spark` is about. Set exactly when `spark` is. |
 | `logoUrl` | The company icon the issuer publishes in the token's own on-chain metadata: B20 tokens implement ERC-7572 `contractURI()`, which returns an inline `data:application/json` document whose `image` is on `metadata.coinbase.com`. Read with one `eth_call` per token, cached 24 h (a failed read backs off 5 min). Only an `https` URL on that host is sent, because the app loads whatever it is given. Omitted when unreadable; the app then draws a ticker tile. |
 
-On Base, `spark` and `change24h` come from one read of one series, so both bases say
-`underlying` and the app tints the line by the day move. The bases still ship because
-the rule the app follows is "tint by the change only when both figures are the same
-instrument; otherwise by the line's own first and last close". Without the labels a
-line from one instrument could be tinted by a move measured on another.
+`spark` and `change24h` come from one read of one series, so their bases always agree
+and the app tints the line by the day move. Which basis that is depends on who
+answered: Pyth Benchmarks' history endpoint 404s and our key is crypto-only, so today
+it is `token` for every equity. The labels still ship, because the rule the app follows
+is "tint by the change only when both figures are the same instrument; otherwise by the
+line's own first and last close", and the same agreement decides whether the pill can
+show dollars — a share's move must never be priced at the token's price. The tab's
+footnote is read off the rows for the same reason.
 
 A row with no series is a row with a price and no line. Past 40 symbols in one
 response, a row ships with its symbol only.

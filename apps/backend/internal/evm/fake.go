@@ -3,6 +3,7 @@ package evm
 import (
 	"context"
 	"math/big"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ type fakeClient struct {
 	receipts   map[string]Receipt
 	roundData  map[string]RoundData
 	roundHist  map[string][]RoundData
+	roundErrs  map[string]error
 }
 
 // NewFakeClient returns an in-memory EVM client for tests.
@@ -26,6 +28,7 @@ func NewFakeClient() *fakeClient {
 		receipts:   make(map[string]Receipt),
 		roundData:  make(map[string]RoundData),
 		roundHist:  make(map[string][]RoundData),
+		roundErrs:  make(map[string]error),
 	}
 }
 
@@ -138,6 +141,9 @@ func (f *fakeClient) ChainlinkLatestRoundData(ctx context.Context, feed string) 
 	_ = ctx
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err, ok := f.roundErrs[strings.ToLower(strings.TrimSpace(feed))]; ok {
+		return RoundData{}, err
+	}
 	if d, ok := f.roundData[strings.ToLower(strings.TrimSpace(feed))]; ok {
 		return d, nil
 	}
@@ -156,23 +162,57 @@ func (f *fakeClient) ChainlinkLatestRoundDataMany(ctx context.Context, feeds []s
 	return out, nil
 }
 
-func (f *fakeClient) ChainlinkRoundHistory(ctx context.Context, feed string, limit int) ([]RoundData, error) {
+// ChainlinkRoundsSince replays the registered history, narrowed the way the live
+// client narrows it: rounds at or after `since`, plus the one round before it so
+// a caller can still find a previous close.
+func (f *fakeClient) ChainlinkRoundsSince(ctx context.Context, feed string, since time.Time, maxRounds int) (RoundHistory, error) {
 	_ = ctx
 	key := strings.ToLower(strings.TrimSpace(feed))
 	f.mu.Lock()
+	if err, ok := f.roundErrs[key]; ok {
+		f.mu.Unlock()
+		return RoundHistory{}, err
+	}
 	hist := append([]RoundData(nil), f.roundHist[key]...)
 	latest, hasLatest := f.roundData[key]
 	f.mu.Unlock()
-	if len(hist) > 0 {
-		if limit > 0 && len(hist) > limit {
-			hist = hist[len(hist)-limit:]
+
+	if len(hist) == 0 {
+		if !hasLatest || latest.Answer == nil || latest.Answer.Sign() <= 0 {
+			return RoundHistory{}, nil
 		}
-		return hist, nil
+		hist = []RoundData{latest}
 	}
-	if hasLatest && latest.Answer != nil && latest.Answer.Sign() > 0 {
-		earlier := latest
-		earlier.UpdatedAt = latest.UpdatedAt.Add(-time.Hour)
-		return []RoundData{earlier, latest}, nil
+	sort.Slice(hist, func(i, j int) bool { return hist[i].UpdatedAt.Before(hist[j].UpdatedAt) })
+	out := RoundHistory{Complete: true}
+	if len(hist) > 0 {
+		out.FirstRoundAt = hist[0].UpdatedAt.UTC()
 	}
-	return nil, nil
+	for i, round := range hist {
+		if round.Answer == nil || round.Answer.Sign() <= 0 || round.UpdatedAt.IsZero() {
+			continue
+		}
+		round.UpdatedAt = round.UpdatedAt.UTC()
+		if !since.IsZero() && round.UpdatedAt.Before(since) {
+			// Keep the last round before the window, the way a live walk overshoots
+			// its cutoff by one round.
+			if i+1 < len(hist) && !hist[i+1].UpdatedAt.Before(since) {
+				out.Rounds = append(out.Rounds, round)
+			}
+			continue
+		}
+		out.Rounds = append(out.Rounds, round)
+	}
+	if maxRounds > 0 && len(out.Rounds) > maxRounds {
+		out.Rounds = out.Rounds[len(out.Rounds)-maxRounds:]
+		out.Complete = false
+	}
+	return out, nil
+}
+
+// SetRoundError makes every round read for a feed fail, for the RPC-down paths.
+func (f *fakeClient) SetRoundError(feed string, err error) {
+	f.mu.Lock()
+	f.roundErrs[strings.ToLower(strings.TrimSpace(feed))] = err
+	f.mu.Unlock()
 }

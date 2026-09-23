@@ -99,7 +99,9 @@ struct AssetDetailModelTests {
 
         await model.loadChart(range: .oneWeek)
 
-        #expect(model.chartState == .empty)
+        // `.empty` gained its reason payload when the chart moved to the Chainlink
+        // feed; the server said nothing here, so there is nothing to caption it with.
+        #expect(model.chartState == .empty(reason: nil))
     }
 
     /// The bug: a slow 1M response overwrote the 1D curve the user had already switched to.

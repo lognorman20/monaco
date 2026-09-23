@@ -120,11 +120,77 @@ final class MarketDataDTOTests: XCTestCase {
         XCTAssertEqual(unlabelled.change24h, "0.015000")
         XCTAssertNil(unlabelled.stockDayMove)
 
+        // Nor a basis this build has never heard of. The decoder maps an
+        // unrecognised string to .unknown on purpose, and an unknown instrument is
+        // as unlabelled as none at all.
+        let strange = try decode(MarketAssetDTO.self, """
+        {"symbol":"AAPLc","name":"Apple","tokenAddress":"0xb200000000000000000000c2e324d24d7eecd1fb","routable":true,
+         "change24h":"0.015000","change24hBasis":"moonbeam","change24hBasisSymbol":"AAPL"}
+        """)
+        XCTAssertNil(strange.stockDayMove)
+    }
+
+    /// This assertion used to be `XCTAssertNil`: only the underlying's move counted
+    /// as a day move at all. Pyth Benchmarks' history endpoint 404s and our key is
+    /// crypto-only, so for an equity it answers nothing and the backend now falls
+    /// through to the token's own Chainlink feed. Refusing that move leaves every
+    /// pill on the tab blank; it is a real move of the thing the member holds, in
+    /// the same unit as the price beside it. So it is shown, and the caption says
+    /// which instrument it is, because the display ticker is "AAPL" either way.
+    func testDayMove_aTokenBasisIsTheTokensOwnMoveAndSaysSo() throws {
         let tokenBasis = try decode(MarketAssetDTO.self, """
         {"symbol":"AAPLc","name":"Apple","tokenAddress":"0xb200000000000000000000c2e324d24d7eecd1fb","routable":true,
          "change24h":"0.015000","change24hBasis":"token","change24hBasisSymbol":"AAPLc"}
         """)
-        XCTAssertNil(tokenBasis.stockDayMove, "only the underlying's move is the stock's day move")
+        let move = try XCTUnwrap(tokenBasis.stockDayMove)
+        XCTAssertEqual(move.basis, .token)
+        XCTAssertEqual(move.ratio, "0.015000")
+        XCTAssertEqual(move.caption, "AAPL token day move")
+    }
+
+    /// The footnote is the only place a sighted reader is told whose move the pill
+    /// is, so it is read off the rows rather than fixed.
+    func testFiguresFootnote_namesWhicheverInstrumentTheRowsCarry() {
+        let equity = StockDayMove(ratio: "0.01", basis: .underlying, basisSymbol: "AAPL")
+        let token = StockDayMove(ratio: "0.01", basis: .token, basisSymbol: "AAPLc")
+
+        XCTAssertEqual(
+            MarketFiguresFootnote.text(for: [equity, equity]),
+            "Prices are per token on Base. The day move is the stock's own, on its exchange."
+        )
+        XCTAssertEqual(
+            MarketFiguresFootnote.text(for: [token, token]),
+            "Prices are per token on Base. The day move is the token's own, on Base."
+        )
+        XCTAssertEqual(
+            MarketFiguresFootnote.text(for: [equity, token]),
+            "Prices are per token on Base. Each day move is the stock's own where its exchange can be read, and the token's otherwise."
+        )
+        // Nothing to say about a move nobody shipped.
+        XCTAssertEqual(MarketFiguresFootnote.text(for: [nil, nil]), "Prices are per token on Base.")
+    }
+
+    /// The dollar face is measured on the line's last close, and only when the line
+    /// and the move are the same instrument. That used to be spelled "both are the
+    /// underlying's", which was the only case that could arise then.
+    func testDayChangeDollars_needTheLineAndTheMoveToBeOneInstrument() throws {
+        let closes: [Int64] = [230_000_000, 232_050_000]
+        let token = try XCTUnwrap(StockDayMove(ratio: "0.01", basis: .token, basisSymbol: "AAPLc"))
+        let equity = try XCTUnwrap(StockDayMove(ratio: "0.01", basis: .underlying, basisSymbol: "AAPL"))
+
+        XCTAssertEqual(
+            DayChangeFigures.referencePrice(sparkUsdcMicros: closes, sparkBasis: .token, dayMove: token),
+            232_050_000,
+            "a token move on a token line is measured in the token's own unit"
+        )
+        XCTAssertNil(
+            DayChangeFigures.referencePrice(sparkUsdcMicros: closes, sparkBasis: .token, dayMove: equity),
+            "the share's move must never be priced at the token's price"
+        )
+        XCTAssertNil(
+            DayChangeFigures.referencePrice(sparkUsdcMicros: closes, sparkBasis: nil, dayMove: token),
+            "an unlabelled line cannot be shown to be the move's own unit"
+        )
     }
 
     // MARK: - Stock vs token
@@ -643,6 +709,34 @@ final class MarketDataDTOTests: XCTestCase {
         XCTAssertEqual(sample.source, .chainlink)
         XCTAssertEqual(sample.basis, .token)
         XCTAssertFalse(sample.points.contains(where: \.hasCandle))
+        // The rounds do know a previous close: the last round of the session before
+        // the window, which is not a point the curve draws.
+        XCTAssertNotNil(sample.previousCloseUsdcMicros)
+    }
+
+    func testAssetChart_emptyMessageOnlySurfacesAReasonWorthReading() throws {
+        // The catch-all repeats what an empty chart already shows.
+        let generic = try decode(AssetChartDTO.self, """
+        {"points":[],"emptyReason":"price history unavailable","range":"1Y"}
+        """)
+        XCTAssertNil(generic.emptyMessage)
+
+        // A reason that names the day the feed starts answers the question an
+        // empty 1Y chip raises: whether the app is broken.
+        let dated = try decode(AssetChartDTO.self, """
+        {"points":[],"emptyReason":"Only on-chain since 5 Aug 2026","range":"1Y","source":"chainlink"}
+        """)
+        XCTAssertEqual(dated.emptyMessage, "Only on-chain since 5 Aug 2026")
+
+        let silent = try decode(AssetChartDTO.self, """
+        {"points":[],"range":"1Y"}
+        """)
+        XCTAssertNil(silent.emptyMessage)
+
+        XCTAssertEqual(
+            MarketSampleData.chartBeforeTheFeedExisted(range: .oneYear).emptyMessage,
+            "Only on-chain since 5 Aug 2026"
+        )
     }
 
     func testSampleData_premiumIsTheKyberMidAgainstTheMark() throws {

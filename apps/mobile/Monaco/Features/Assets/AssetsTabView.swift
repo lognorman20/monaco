@@ -267,10 +267,10 @@ struct AssetsTabView: View {
     private var popularSection: some View {
         section("Popular", identifier: "assets-popular") {
             assetList(model.popularRows, identifierPrefix: "assets-popular")
-            // Said once for the whole tab rather than on every row: the price is the
-            // token's and the pill is the share's, and a reader who is not told reads
-            // the pill as the token's move.
-            Text(AssetsTabView.figuresFootnote)
+            // Said once for the whole tab rather than on every row: the price is
+            // per token and the pill may be the share's, and a reader who is not
+            // told reads the pill as the token's move whichever it is.
+            Text(figuresFootnote)
                 .font(MonacoTheme.Typo.caption)
                 .foregroundStyle(MonacoTheme.muted)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -279,7 +279,13 @@ struct AssetsTabView: View {
         }
     }
 
-    static let figuresFootnote = "Prices are per token on Base. The day move is the stock's own, on its exchange."
+    /// Read off the rows rather than fixed, because whose move `change24h` is is
+    /// the backend's answer now: the equity's while Pyth can serve equities, the
+    /// token's own feed when it cannot. A constant sentence would be false in
+    /// whichever case it was not written for.
+    var figuresFootnote: String {
+        MarketFiguresFootnote.text(for: model.popularRows.map(\.dayMove))
+    }
 
     private func section<Content: View>(
         _ title: String,

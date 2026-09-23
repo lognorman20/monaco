@@ -37,5 +37,7 @@ type Client interface {
 	IsConfirmed(ctx context.Context, txHash string) (bool, error)
 	ChainlinkLatestRoundData(ctx context.Context, feed string) (RoundData, error)
 	ChainlinkLatestRoundDataMany(ctx context.Context, feeds []string) (map[string]RoundData, error)
-	ChainlinkRoundHistory(ctx context.Context, feed string, limit int) ([]RoundData, error)
+	// ChainlinkRoundsSince reads a feed's round history back to an instant, so a
+	// caller asks for a window rather than for a round count it cannot translate.
+	ChainlinkRoundsSince(ctx context.Context, feed string, since time.Time, maxRounds int) (RoundHistory, error)
 }

@@ -2,13 +2,16 @@ package httpapi
 
 import (
 	"encoding/json"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/b20"
+	"github.com/monaco/monaco/apps/backend/internal/chainlink"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
+	"github.com/monaco/monaco/apps/backend/internal/evm"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
@@ -448,6 +451,135 @@ func TestGET_assets_symbol_chart_emptySeries_returnsReason(t *testing.T) {
 	}
 	if payload.EmptyReason == "" {
 		t.Fatal("expected emptyReason when history is missing")
+	}
+}
+
+// The wiring this whole change exists for: Pyth has nothing for the range — on a
+// crypto-only key it has nothing for any equity range — and the route falls
+// through to the token's Chainlink rounds and returns a drawable curve, labelled
+// as the token.
+func TestGET_assets_symbol_chart_fallsThroughToChainlinkRounds(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, walletClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
+	const feed = "0x787f13dea48db0897cbcdd985de77809d837f988"
+	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
+		Symbol:       "AAPLc",
+		Name:         "Apple",
+		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
+		FeedAddress:  feed,
+	})
+
+	// Seven weeks of hourly rounds, which is the live shape of a B20 feed.
+	chain := evm.NewFakeClient()
+	var rounds []evm.RoundData
+	price := int64(30_000_000_000)
+	for at := assetsTestClock.AddDate(0, 0, -49); !at.After(assetsTestClock); at = at.Add(time.Hour) {
+		rounds = append(rounds, evm.RoundData{Answer: big.NewInt(price), UpdatedAt: at})
+		price += 100_000_000
+	}
+	chain.SetRoundHistory(feed, rounds)
+	handlers.Pyth = pyth.WithCharts(
+		chainlink.NewAssetPrices(chain, handlers.Catalog, func() time.Time { return assetsTestClock }),
+		pyth.NewFakeAssetPriceClient(),
+	)
+
+	chart := func(t *testing.T, chartRange string) assetChartResponse {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLc/chart?range="+chartRange, nil)
+		req.SetPathValue("symbol", "AAPLc")
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		handlers.GetAssetChartHandler(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d; body = %s", chartRange, rec.Code, rec.Body.String())
+		}
+		var payload assetChartResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("%s: decode json: %v", chartRange, err)
+		}
+		return payload
+	}
+
+	for _, chartRange := range []string{"1D", "1W", "1M", "ALL"} {
+		payload := chart(t, chartRange)
+		if len(payload.Points) < 2 {
+			t.Fatalf("%s: points = %d, want a curve", chartRange, len(payload.Points))
+		}
+		if payload.Source != pyth.ChartSourceChainlink {
+			t.Fatalf("%s: source = %q, want chainlink", chartRange, payload.Source)
+		}
+		if payload.Basis != pyth.PriceBasisToken || payload.BasisSymbol != "AAPLc" {
+			t.Fatalf("%s: basis = %q/%q, want the token's own", chartRange, payload.Basis, payload.BasisSymbol)
+		}
+		if payload.EmptyReason != "" {
+			t.Fatalf("%s: emptyReason = %q on a drawn chart", chartRange, payload.EmptyReason)
+		}
+		for _, point := range payload.Points {
+			if point.PriceUsdcMicros <= 0 || point.Timestamp <= 0 {
+				t.Fatalf("%s: undrawable point %+v", chartRange, point)
+			}
+		}
+	}
+
+	// And the ranges the feed is too young for say so by date instead of drawing
+	// seven weeks across a year.
+	for _, chartRange := range []string{"3M", "1Y"} {
+		payload := chart(t, chartRange)
+		if len(payload.Points) != 0 {
+			t.Fatalf("%s: %d points, want none", chartRange, len(payload.Points))
+		}
+		if payload.EmptyReason != "Only on-chain since 4 Aug 2026" {
+			t.Fatalf("%s: emptyReason = %q", chartRange, payload.EmptyReason)
+		}
+	}
+}
+
+// The day change follows the same fall-through, and arrives labelled as the
+// token's move rather than the equity's.
+func TestGET_assets_symbol_dayChangeComesFromTheTokensOwnRounds(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, walletClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
+	const feed = "0x787f13dea48db0897cbcdd985de77809d837f988"
+	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
+		Symbol:       "AAPLc",
+		Name:         "Apple",
+		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
+		FeedAddress:  feed,
+	})
+	chain := evm.NewFakeClient()
+	var rounds []evm.RoundData
+	price := int64(30_000_000_000)
+	for at := assetsTestClock.AddDate(0, 0, -49); !at.After(assetsTestClock); at = at.Add(time.Hour) {
+		rounds = append(rounds, evm.RoundData{Answer: big.NewInt(price), UpdatedAt: at})
+		price += 100_000_000
+	}
+	chain.SetRoundHistory(feed, rounds)
+	handlers.Pyth = pyth.WithCharts(
+		chainlink.NewAssetPrices(chain, handlers.Catalog, func() time.Time { return assetsTestClock }),
+		pyth.NewFakeAssetPriceClient(),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLc", nil)
+	req.SetPathValue("symbol", "AAPLc")
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handlers.GetAssetHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+	}
+	var payload assetDetailResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if payload.Change24h == nil {
+		t.Fatal("change24h = nil: the token's rounds can date a previous close")
+	}
+	if payload.Change24hBasis != pyth.PriceBasisToken || payload.Change24hBasisSymbol != "AAPLc" {
+		t.Fatalf("basis = %q/%q, want the token's", payload.Change24hBasis, payload.Change24hBasisSymbol)
 	}
 }
 

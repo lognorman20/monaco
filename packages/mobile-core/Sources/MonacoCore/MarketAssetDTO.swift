@@ -143,31 +143,77 @@ public enum MarketRowBasis {
     }
 }
 
-/// The underlying equity's day move, labelled as the stock's.
+/// A day move, labelled with the instrument it is actually about.
 ///
-/// `change24h` is Pyth's price for the equity against its previous regular-session
-/// close. It sits beside the token's Chainlink price, which is a different unit
-/// (the token carries a multiplier) and trades on different hours, so an unlabelled
-/// percentage there reads as the token's move. This only exists when the backend
-/// said the figure is the underlying's; without that it is not shown at all.
+/// It sits beside the token's Chainlink price, which is a different unit from the
+/// share (the token carries a multiplier) and trades on different hours, so an
+/// unlabelled percentage there reads as the token's move whatever it is. The rule
+/// has always been that a move without a stated instrument is not shown at all.
+///
+/// Two instruments can reach it. `underlying` is Pyth's price for the equity
+/// against its previous regular-session close — the move people mean by "AAPL is
+/// up today". `token` is the B20 token's own Chainlink feed on Base, which is what
+/// the backend falls through to: Pyth Benchmarks' history endpoint 404s and our
+/// key is crypto-only, so for an equity it answers nothing, and refusing a
+/// token-basis move would leave every pill on the tab blank rather than honest.
+/// A token move is a real move of the thing the member holds, priced in the same
+/// unit as the row's own price, so it is shown — saying so.
 public struct StockDayMove: Equatable, Sendable {
     /// Decimal ratio string, "0.012345" for +1.23%.
     public let ratio: String
-    /// The equity's display ticker: "AAPL".
+    /// The display ticker: "AAPL" either way, since `AssetSymbolFormatter.display`
+    /// strips the token's trailing "c". The basis is what tells the two apart, not
+    /// this.
     public let symbol: String
+    /// Whose move it is. Callers that measure dollars need it, because the price a
+    /// dollar figure is taken on has to be in this instrument's unit.
+    public let basis: MarketPriceBasis
 
     public init?(ratio: String?, basis: MarketPriceBasis?, basisSymbol: String?) {
-        guard basis == .underlying,
+        guard let basis, basis == .underlying || basis == .token,
               let ratio, !ratio.isEmpty,
               let basisSymbol, !basisSymbol.isEmpty
         else { return nil }
         self.ratio = ratio
         self.symbol = AssetSymbolFormatter.display(basisSymbol)
+        self.basis = basis
     }
 
     /// "AAPL day move": the share's move over its last session, which on a weekend
     /// is Friday's, so the caption does not say "today".
-    public var caption: String { "\(symbol) day move" }
+    ///
+    /// "AAPL token day move" when it is the token's, because the display ticker is
+    /// the same for both and a caption that did not distinguish them would be a
+    /// label that labels nothing.
+    public var caption: String {
+        basis == .token ? "\(symbol) token day move" : "\(symbol) day move"
+    }
+}
+
+/// The line under the Stocks tab's lists saying what its figures are.
+///
+/// Derived from the rows on screen rather than asserted, because which instrument
+/// a day move is about is now the backend's answer and not a constant: it is the
+/// equity's when Pyth can serve the equity, and the token's own when it cannot.
+/// A fixed sentence would be wrong in whichever case it was not written for, and
+/// this is the only place a sighted reader is told — the per-row caption is
+/// VoiceOver's.
+public enum MarketFiguresFootnote {
+    public static let prices = "Prices are per token on Base."
+
+    public static func text(for moves: [StockDayMove?]) -> String {
+        let bases = Set(moves.compactMap { $0?.basis })
+        if bases == [.underlying] {
+            return prices + " The day move is the stock's own, on its exchange."
+        }
+        if bases == [.token] {
+            return prices + " The day move is the token's own, on Base."
+        }
+        if bases.isEmpty {
+            return prices
+        }
+        return prices + " Each day move is the stock's own where its exchange can be read, and the token's otherwise."
+    }
 }
 
 public struct ListMarketAssetsResponseDTO: Codable, Equatable, Sendable {
@@ -706,9 +752,10 @@ public struct AssetChartDTO: Codable, Equatable, Sendable {
     /// The close of the regular session before this window: the baseline a day
     /// chart draws its dashed line at and measures its change against.
     ///
-    /// Absent when the source does not know one. The Hermes sampler and the
-    /// Chainlink rounds never do — any number they could offer would be a point
-    /// already drawn in `points`. Draw nothing rather than a line through t0.
+    /// Absent when the source does not know one. The Hermes sampler never does.
+    /// The Chainlink rounds do: the baseline is the last round of the previous
+    /// session, which is a round outside the drawn window, not a point already in
+    /// `points`. When it is absent, draw nothing rather than a line through t0.
     public let previousCloseUsdcMicros: Int64?
     /// The range this series was built for. A response that names a range the user
     /// has already tapped away from should be discarded, not drawn.
@@ -743,6 +790,23 @@ public struct AssetChartDTO: Codable, Equatable, Sendable {
     /// Caption for the curve, e.g. "AAPL on its home exchange".
     public var basisCaption: String? {
         MarketPriceBasisCaption.caption(basis: basis, symbol: basisSymbol)
+    }
+
+    /// The catch-all the backend sends for a window a source could have covered
+    /// and had nothing in.
+    public static let genericEmptyReason = "price history unavailable"
+
+    /// The reason worth showing a reader, or nil.
+    ///
+    /// An empty chart already says there is no history, so repeating the
+    /// catch-all under it is noise. A reason that names a date is not: "Only
+    /// on-chain since 5 Aug 2026" answers the question the empty 1Y chip raises,
+    /// which is whether the app is broken.
+    public var emptyMessage: String? {
+        guard let emptyReason, !emptyReason.isEmpty, emptyReason != Self.genericEmptyReason else {
+            return nil
+        }
+        return emptyReason
     }
 
     private enum CodingKeys: String, CodingKey {
