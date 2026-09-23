@@ -11,17 +11,92 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
-// CatalogAsset is a backend-resolved xStock catalog row for mobile search.
+// AssetKind classifies catalog rows (listed stock vs pre-IPO token).
+type AssetKind string
+
+const (
+	AssetKindStock  AssetKind = "stock"
+	AssetKindPreIPO AssetKind = "pre_ipo"
+)
+
+// AssetSource identifies which catalog API populated a row.
+type AssetSource string
+
+const (
+	AssetSourceXStocks AssetSource = "xstocks"
+	AssetSourceTessera AssetSource = "tessera"
+)
+
+// CatalogAsset is a backend-resolved catalog row for mobile search.
 type CatalogAsset struct {
 	Symbol     string
 	Name       string
 	SolanaMint string
 	Routable   bool
+
+	Kind           AssetKind
+	Source         AssetSource
+	Decimals       int
+	TransferFeeBps int
+	Sector         string
+	LogoURL        string
+	UnderlyingID   string
+	Issuer         string
+
+	ReferenceMarkUsdcMicros *int64
+	ReferenceValuationUsd   *int64
+	ReferenceUpdatedAt      *time.Time
+	ReferenceSource         string
+	Holders                 *int
+
+	LiquidityUsd int64
+}
+
+// Normalize applies stock/xStocks defaults for unset kind, source, and decimals.
+func (a CatalogAsset) Normalize() CatalogAsset {
+	if a.Kind == "" {
+		a.Kind = AssetKindStock
+	}
+	if a.Decimals == 0 {
+		a.Decimals = jupiter.XStockDecimals
+	}
+	if a.Source == "" {
+		a.Source = AssetSourceXStocks
+	}
+	return a
+}
+
+// AtomicScale returns 10^Decimals for this asset.
+func (a CatalogAsset) AtomicScale() int64 {
+	return jupiter.AtomicScale(a.Normalize().Decimals)
+}
+
+// CatalogAssetFromXStockNode builds a normalized xStocks catalog row.
+func CatalogAssetFromXStockNode(symbol, name, solanaMint string) CatalogAsset {
+	symbol = strings.TrimSpace(symbol)
+	return CatalogAsset{
+		Symbol:       symbol,
+		Name:         strings.TrimSpace(name),
+		SolanaMint:   strings.TrimSpace(solanaMint),
+		Kind:         AssetKindStock,
+		Source:       AssetSourceXStocks,
+		Decimals:     jupiter.XStockDecimals,
+		Issuer:       string(AssetSourceXStocks),
+		UnderlyingID: UnderlyingIDFromXStockSymbol(symbol),
+	}.Normalize()
+}
+
+// UnderlyingIDFromXStockSymbol derives the company slug from an xStock ticker.
+func UnderlyingIDFromXStockSymbol(symbol string) string {
+	s := strings.ToLower(strings.TrimSpace(symbol))
+	return strings.TrimSuffix(s, "x")
 }
 
 // CatalogSearchPage is one page of catalog search results.
@@ -141,11 +216,8 @@ func (s *HTTPCatalogSearcher) searchBySymbol(ctx context.Context, query string) 
 		if err != nil {
 			continue
 		}
-		return &CatalogAsset{
-			Symbol:     strings.TrimSpace(node.Symbol),
-			Name:       strings.TrimSpace(node.Name),
-			SolanaMint: mint,
-		}, nil
+		asset := CatalogAssetFromXStockNode(node.Symbol, node.Name, mint)
+		return &asset, nil
 	}
 	return nil, nil
 }
@@ -174,11 +246,7 @@ func (s *HTTPCatalogSearcher) searchPaginatedList(ctx context.Context, query str
 			if err != nil {
 				continue
 			}
-			matches = append(matches, CatalogAsset{
-				Symbol:     strings.TrimSpace(node.Symbol),
-				Name:       strings.TrimSpace(node.Name),
-				SolanaMint: mint,
-			})
+			matches = append(matches, CatalogAssetFromXStockNode(node.Symbol, node.Name, mint))
 		}
 
 		hasNextPage = list.Page.HasNextPage
@@ -313,11 +381,7 @@ func catalogAssetsFromListResponse(body []byte, query string) ([]CatalogAsset, e
 		if err != nil {
 			continue
 		}
-		assets = append(assets, CatalogAsset{
-			Symbol:     strings.TrimSpace(node.Symbol),
-			Name:       strings.TrimSpace(node.Name),
-			SolanaMint: mint,
-		})
+		assets = append(assets, CatalogAssetFromXStockNode(node.Symbol, node.Name, mint))
 	}
 	return assets, nil
 }

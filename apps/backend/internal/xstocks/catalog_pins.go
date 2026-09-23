@@ -40,6 +40,11 @@ func pinnedCatalogOrder(symbol string) (rank int, pinned bool) {
 	return rank, pinned
 }
 
+// PinnedCatalogOrder returns the pinned display rank for an xStock symbol, if pinned.
+func PinnedCatalogOrder(symbol string) (rank int, pinned bool) {
+	return pinnedCatalogOrder(symbol)
+}
+
 // sortCatalogMatches orders by routability, pinned popularity proxy, then symbol.
 func sortCatalogMatches(matches []CatalogAsset) {
 	sort.SliceStable(matches, func(i, j int) bool {
