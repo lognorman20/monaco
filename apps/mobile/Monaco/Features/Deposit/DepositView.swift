@@ -157,10 +157,12 @@ struct DepositView: View {
             .font(MonacoTheme.Typo.callout)
             .foregroundStyle(MonacoTheme.warningOnInk)
 
-            Button("Try again") {
+            Button {
                 Task { await loadDepositAddress() }
+            } label: {
+                InkCapsuleLabel(title: "Try again", isProminent: false)
             }
-            .buttonStyle(.monacoSecondary)
+            .buttonStyle(InkPressStyle())
             .accessibilityIdentifier("deposit-address-retry")
         }
     }

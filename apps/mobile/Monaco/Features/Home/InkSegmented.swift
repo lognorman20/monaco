@@ -21,6 +21,7 @@ struct InkSegmented<T: Hashable>: View {
 
     @Namespace private var thumb
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(
         _ options: [T],
@@ -34,46 +35,85 @@ struct InkSegmented<T: Hashable>: View {
         self.accessibilityName = accessibilityName ?? label
     }
 
+    /// Five options across one track cannot hold their labels at accessibility sizes: at AX5 the
+    /// row read "1… 1… 1… 1… …", which is a control nobody can use to pick a window. Past that
+    /// threshold the track stacks, exactly as the cash fold above it and the vote deck below it
+    /// do — one full-width row per window, every label whole.
+    private var isStacked: Bool { dynamicTypeSize.isAccessibilitySize }
+
     var body: some View {
-        HStack(spacing: 0) {
+        let layout = isStacked
+            ? AnyLayout(VStackLayout(spacing: 4))
+            : AnyLayout(HStackLayout(spacing: 0))
+
+        layout {
             ForEach(options, id: \.self) { option in
-                let isSelected = option == selection
-                Button {
-                    guard option != selection else { return }
-                    Haptics.selection()
-                    withAnimation(MonacoMotion.snap.reduced(reduceMotion)) {
-                        selection = option
-                    }
-                } label: {
-                    Text(label(option))
-                        .font(MonacoTheme.Typo.callout.weight(.semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .foregroundStyle(isSelected ? MonacoTheme.Ink.fgPrimary : MonacoTheme.Ink.fgMuted)
-                        // 36/12, matching `MonacoSegmented` exactly: the per-option tap target
-                        // is the smaller of the two boxes, and 32 inside a 44pt track put it
-                        // under the 44pt floor.
-                        .padding(.horizontal, 12)
-                        .frame(maxWidth: .infinity, minHeight: 36)
-                        .background {
-                            if isSelected {
-                                Capsule()
-                                    .fill(MonacoTheme.Ink.lineStrong)
-                                    .matchedGeometryEffect(id: "ink-thumb", in: thumb)
-                            }
-                        }
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(accessibilityName(option))
-                .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+                optionButton(option)
             }
         }
         .padding(4)
         .frame(minHeight: 44)
-        .background(Capsule().fill(MonacoTheme.Ink.sunken))
-        .overlay(Capsule().strokeBorder(MonacoTheme.Ink.line, lineWidth: 1))
+        .background(shape.fill(MonacoTheme.Ink.sunken))
+        .overlay(shape.strokeBorder(MonacoTheme.Ink.line, lineWidth: 1))
     }
+
+    /// A stacked track is a rounded container, not a pill: a capsule around five rows would
+    /// bow its ends away from the options inside it.
+    private var shape: AnyInsettableShape {
+        isStacked
+            ? AnyInsettableShape(RoundedRectangle(cornerRadius: MonacoTheme.Radius.container, style: .continuous))
+            : AnyInsettableShape(Capsule())
+    }
+
+    private func optionButton(_ option: T) -> some View {
+        let isSelected = option == selection
+        return Button {
+            guard option != selection else { return }
+            Haptics.selection()
+            withAnimation(MonacoMotion.snap.reduced(reduceMotion)) {
+                selection = option
+            }
+        } label: {
+            Text(label(option))
+                .font(MonacoTheme.Typo.callout.weight(.semibold))
+                .lineLimit(isStacked ? nil : 1)
+                .minimumScaleFactor(isStacked ? 1 : 0.8)
+                .foregroundStyle(isSelected ? MonacoTheme.Ink.fgPrimary : MonacoTheme.Ink.fgMuted)
+                // 36/12, matching `MonacoSegmented` exactly: the per-option tap target is the
+                // smaller of the two boxes, and 32 inside a 44pt track put it under the 44pt
+                // floor.
+                .padding(.horizontal, 12)
+                .padding(.vertical, isStacked ? 8 : 0)
+                .frame(maxWidth: .infinity, minHeight: 36)
+                .background {
+                    if isSelected {
+                        Capsule()
+                            .fill(MonacoTheme.Ink.lineStrong)
+                            .matchedGeometryEffect(id: "ink-thumb", in: thumb)
+                    }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityName(option))
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+}
+
+/// A type-erased `InsettableShape`, so the track can be a capsule in one layout and a rounded
+/// rectangle in the other without the two branches having different view types.
+struct AnyInsettableShape: InsettableShape {
+    private let pathBuilder: (CGRect) -> Path
+    private let insetBuilder: (CGFloat) -> AnyInsettableShape
+
+    init<S: InsettableShape>(_ shape: S) {
+        pathBuilder = { shape.path(in: $0) }
+        insetBuilder = { AnyInsettableShape(shape.inset(by: $0)) }
+    }
+
+    func path(in rect: CGRect) -> Path { pathBuilder(rect) }
+
+    func inset(by amount: CGFloat) -> AnyInsettableShape { insetBuilder(amount) }
 }
 
 #Preview {

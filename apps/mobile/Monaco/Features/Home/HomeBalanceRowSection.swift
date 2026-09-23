@@ -138,7 +138,12 @@ struct HomeBalanceFold: View {
 /// `isStacked` is the accessibility-size layout: the capsule takes the full width of the fold and
 /// the label is allowed to wrap, because at AX3 and up "Add money" does not fit on one line at a
 /// size anybody set the text that large to read.
-private struct InkCapsuleLabel: View {
+///
+/// This and `InkPressStyle` are general ink primitives and belong in `Design/` beside the button
+/// styles; they are parked here because `Design/MonacoButtons.swift` is Chunk B's file. Deposit's
+/// retry uses this rather than `.monacoSecondary`, whose fill is a paper surface — a near-white
+/// capsule on an ink band, and the loudest object on it.
+struct InkCapsuleLabel: View {
     let title: String
     let isProminent: Bool
     var isStacked: Bool = false
