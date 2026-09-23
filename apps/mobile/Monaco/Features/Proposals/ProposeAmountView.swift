@@ -110,6 +110,7 @@ struct ProposeAmountView: View {
                 .monacoInkScheme()
 
                 reasonField
+                livePreview
                 if let quoteError {
                     Text(quoteError)
                         .font(MonacoTheme.Typo.callout)
@@ -184,6 +185,49 @@ struct ProposeAmountView: View {
         }
     }
 
+    /// The exact card the cabal will open, updating as the amount and the reason are typed.
+    ///
+    /// It is the real `ProposalCardView`, not a mock of one, so it cannot drift from what gets
+    /// sent. What it does **not** show is a tally: the proposal does not exist yet, so there are
+    /// no ballots and no pass rule to state, and a preview that showed "0 of 5 voted" would be
+    /// describing a vote nobody has been asked for. It appears once there is an amount, because
+    /// before that there is nothing to preview.
+    @ViewBuilder
+    private var livePreview: some View {
+        if let amountMicros {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
+                Text(ProposeAmountCopy.previewTitle)
+                    .displayFont(.eyebrow)
+                    .foregroundStyle(MonacoTheme.fgMuted)
+                ProposalCardView(
+                    proposal: previewProposal(amountMicros: amountMicros),
+                    cabal: ProposalCardCabal(
+                        id: pot.groupId.isEmpty ? groupId : pot.groupId,
+                        name: pot.name
+                    )
+                )
+                .allowsHitTesting(false)
+            }
+            .accessibilityIdentifier("propose-live-preview")
+        }
+    }
+
+    /// The draft as a proposal. Nothing on it is invented: the amount and the reason are what the
+    /// member typed, the symbol is the stock they picked, and every field the flow does not know
+    /// yet — the id, the ballots, the proposer's name — is left off.
+    private func previewProposal(amountMicros: Int64) -> ProposalDTO {
+        ProposalDTO(
+            id: "preview",
+            symbol: stock.symbol,
+            status: "open",
+            kind: "buy",
+            usdcMicros: String(amountMicros),
+            canVote: false,
+            thesis: reason.trimmingCharacters(in: .whitespacesAndNewlines),
+            createdAt: ISO8601DateFormatter().string(from: Date())
+        )
+    }
+
     private func loadPrice() async {
         guard priceMicros == nil else { return }
         priceMicros = try? await service.priceMicros(symbol: stock.symbol)
@@ -226,6 +270,7 @@ enum ProposeAmountCopy {
     /// uppercases it for the eye and leaves it alone for VoiceOver.
     static let proposingABuy = "Proposing a buy"
     static let proposingASell = "Proposing a sell"
+    static let previewTitle = "What the cabal sees"
 }
 
 /// The optional reason on a buy or sell amount step: a growing field on `surfaceSunken` with an ink

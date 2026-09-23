@@ -616,7 +616,8 @@ enum ProposalVoteFaces {
         let named = proposal.votes ?? []
         if named.isEmpty {
             guard let dots = progress.dots else { return [] }
-            return dots.enumerated().map { MonacoVote(id: "ballot-\($0.offset)", state: $0.element) }
+            let ballots = proposal.isOpen ? dots : dots.filter { $0 != .pending }
+            return ballots.enumerated().map { MonacoVote(id: "ballot-\($0.offset)", state: $0.element) }
         }
 
         let cast = named.prefix(progress.eligibleCount).map { vote in
@@ -626,6 +627,9 @@ enum ProposalVoteFaces {
                 face: MonacoFace(id: vote.voterId, displayName: vote.displayName)
             )
         }
+        // A settled proposal shows the ballots that were cast and nothing else. An empty slot on
+        // a closed vote reads as a member who still owes one, and nobody owes anything now.
+        guard proposal.isOpen else { return cast }
         let pending = max(progress.eligibleCount - cast.count, 0)
         return cast + (0..<pending).map { MonacoVote(id: "pending-\($0)", state: .pending) }
     }
