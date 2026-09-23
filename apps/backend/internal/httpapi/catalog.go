@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
@@ -20,6 +21,7 @@ type CatalogHandlers struct {
 	Store   *postgres.Store
 	Privy   privy.Client
 	Catalog xstocks.CatalogSearcher
+	Price   jupiter.PriceClient
 	// KeyGuard throttles wrong agent keys. Nil disables throttling.
 	KeyGuard *AgentKeyGuard
 }
@@ -29,6 +31,7 @@ type catalogAssetResponse struct {
 	Name       string `json:"name"`
 	SolanaMint string `json:"solanaMint"`
 	Routable   bool   `json:"routable"`
+	assetCatalogJSONFields
 }
 
 type searchAssetsResponse struct {
@@ -74,7 +77,13 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	page, err := h.Catalog.Search(ctx, query, limit, offset)
+	kind, kindErr := parseCatalogKindQuery(r.URL.Query().Get("kind"))
+	if kindErr != nil {
+		logJSONError(ctx, log, "invalid_catalog_kind", w, http.StatusBadRequest, "invalid catalog kind", "group_id", groupID, "query", query)
+		return
+	}
+
+	page, err := catalogSearch(ctx, h.Catalog, query, kind, limit, offset)
 	if err != nil {
 		if errors.Is(err, xstocks.ErrInvalidResponse) {
 			logJSONError(ctx, log, "invalid_catalog_query", w, http.StatusBadRequest, "invalid catalog query", "group_id", groupID, "query", query)
@@ -84,23 +93,49 @@ func (h *CatalogHandlers) SearchAssetsHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	prices := fetchCatalogPrices(ctx, h.Price, page.Assets)
 	resp := searchAssetsResponse{
 		Assets:  make([]catalogAssetResponse, 0, len(page.Assets)),
 		HasMore: page.HasMore,
 	}
 	for _, asset := range page.Assets {
-		resp.Assets = append(resp.Assets, catalogAssetResponse{
-			Symbol:     asset.Symbol,
-			Name:       asset.Name,
-			SolanaMint: asset.SolanaMint,
-			Routable:   asset.Routable,
-		})
+		n := asset.Normalize()
+		row := catalogAssetResponse{
+			Symbol:     n.Symbol,
+			Name:       n.Name,
+			SolanaMint: n.SolanaMint,
+			Routable:   n.Routable,
+		}
+		var pricePtr *jupiter.TokenPrice
+		if price, ok := prices[n.SolanaMint]; ok {
+			priceCopy := price
+			pricePtr = &priceCopy
+		}
+		row.assetCatalogJSONFields = catalogJSONFields(n, pricePtr, variantCountFor(ctx, h.Catalog, n))
+		resp.Assets = append(resp.Assets, row)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
 	logJSONOK(ctx, log, "ok", "group_id", groupID, "query", query, "limit", limit, "offset", offset, "result_count", len(resp.Assets), "has_more", resp.HasMore)
+}
+
+func fetchCatalogPrices(ctx context.Context, price jupiter.PriceClient, assets []xstocks.CatalogAsset) map[string]jupiter.TokenPrice {
+	if price == nil || len(assets) == 0 {
+		return nil
+	}
+	mints := make([]string, 0, len(assets))
+	for _, asset := range assets {
+		if mint := strings.TrimSpace(asset.SolanaMint); mint != "" {
+			mints = append(mints, mint)
+		}
+	}
+	prices, err := price.Prices(ctx, mints)
+	if err != nil {
+		return nil
+	}
+	return prices
 }
 
 func parseCatalogLimit(raw string) int {

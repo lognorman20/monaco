@@ -19,6 +19,8 @@ type ProposalListItem struct {
 	Kind        domain.ProposalKind
 	UsdcMicros  int64
 	TokenAmount int64
+	TokenDecimals int
+	PremiumBps    *int
 	// AgentDisplayName and AllocationUsdcMicros are set on agent governance proposals.
 	AgentDisplayName     string
 	AllocationUsdcMicros int64
@@ -67,6 +69,8 @@ type ProposalDetailResult struct {
 	Kind                 domain.ProposalKind
 	UsdcMicros           int64
 	TokenAmount          int64
+	TokenDecimals        int
+	PremiumBps           *int
 	AgentDisplayName     string
 	AllocationUsdcMicros int64
 	MintedAgentKey       string
@@ -164,6 +168,8 @@ func (g *GovernanceService) ListGroupProposals(ctx context.Context, accessToken,
 			Kind:                 row.Kind,
 			UsdcMicros:           row.UsdcMicros,
 			TokenAmount:          row.TokenAmount,
+			TokenDecimals:        row.TokenDecimals,
+			PremiumBps:           row.PremiumBps,
 			AgentDisplayName:     row.AgentDisplayName,
 			AllocationUsdcMicros: row.AllocationUsdcMicros,
 			Thesis:               row.Thesis,
@@ -356,6 +362,8 @@ func (g *GovernanceService) GetProposalDetail(ctx context.Context, accessToken, 
 		Kind:                 row.Kind,
 		UsdcMicros:           row.UsdcMicros,
 		TokenAmount:          row.TokenAmount,
+		TokenDecimals:        row.TokenDecimals,
+		PremiumBps:           row.PremiumBps,
 		AgentDisplayName:     row.AgentDisplayName,
 		AllocationUsdcMicros: row.AllocationUsdcMicros,
 		MintedAgentKey:       mintedKey,

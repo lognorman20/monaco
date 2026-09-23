@@ -36,6 +36,7 @@ type marketAssetResponse struct {
 	Routable        bool    `json:"routable"`
 	PriceUsdcMicros *int64  `json:"priceUsdcMicros,omitempty"`
 	Change24h       *string `json:"change24h,omitempty"`
+	assetCatalogJSONFields
 }
 
 type listAssetsResponse struct {
@@ -65,6 +66,8 @@ type assetDetailResponse struct {
 	PriceUsdcMicros *int64                 `json:"priceUsdcMicros,omitempty"`
 	Change24h       *string                `json:"change24h,omitempty"`
 	Liquidity       assetLiquidityResponse `json:"liquidity"`
+	assetCatalogJSONFields
+	Variants []assetVariantResponse `json:"variants,omitempty"`
 }
 
 type assetChartResponse struct {
@@ -90,8 +93,13 @@ func (h *AssetsHandlers) ListAssetsHandler(w http.ResponseWriter, r *http.Reques
 	query := strings.TrimSpace(r.URL.Query().Get("query"))
 	limit := parseCatalogLimit(r.URL.Query().Get("limit"))
 	offset := parseCatalogOffset(r.URL.Query().Get("offset"))
+	kind, kindErr := parseCatalogKindQuery(r.URL.Query().Get("kind"))
+	if kindErr != nil {
+		logJSONError(ctx, log, "invalid_catalog_kind", w, http.StatusBadRequest, "invalid catalog kind", "query", query)
+		return
+	}
 
-	page, err := h.Catalog.Search(ctx, query, limit, offset)
+	page, err := catalogSearch(ctx, h.Catalog, query, kind, limit, offset)
 	if err != nil {
 		if errors.Is(err, xstocks.ErrInvalidResponse) {
 			logJSONError(ctx, log, "invalid_catalog_query", w, http.StatusBadRequest, "invalid catalog query", "query", query)
@@ -102,7 +110,7 @@ func (h *AssetsHandlers) ListAssetsHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	resp := listAssetsResponse{
-		Assets:  h.enrichAssets(ctx, page.Assets),
+		Assets:  h.enrichAssets(ctx, page.Assets, true),
 		HasMore: page.HasMore,
 	}
 	writeMarketJSON(ctx, log, w, http.StatusOK, resp, "ok", "query", query, "limit", limit, "offset", offset, "result_count", len(resp.Assets))
@@ -130,7 +138,7 @@ func (h *AssetsHandlers) PopularAssetsHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	resp := popularAssetsResponse{Assets: h.enrichAssets(ctx, assets)}
+	resp := popularAssetsResponse{Assets: h.enrichAssets(ctx, assets, true)}
 	writeMarketJSON(ctx, log, w, http.StatusOK, resp, "ok", "limit", limit, "result_count", len(resp.Assets))
 }
 
@@ -262,13 +270,12 @@ func chartSeries(ctx context.Context, client pyth.AssetPriceClient, q pyth.Chart
 }
 
 func (h *AssetsHandlers) lookupAsset(ctx context.Context, symbol string) (xstocks.CatalogAsset, bool, error) {
-	page, err := h.Catalog.Search(ctx, symbol, 5, 0)
+	page, err := h.Catalog.Search(ctx, symbol, 25, 0)
 	if err != nil {
 		return xstocks.CatalogAsset{}, false, err
 	}
-	needle := strings.ToUpper(strings.TrimSpace(symbol))
 	for _, asset := range page.Assets {
-		if strings.EqualFold(strings.TrimSpace(asset.Symbol), needle) {
+		if assetMatchesLookup(asset, symbol) {
 			return asset, true, nil
 		}
 	}
@@ -278,11 +285,11 @@ func (h *AssetsHandlers) lookupAsset(ctx context.Context, symbol string) (xstock
 // enrichAssets marks every asset with one batched Jupiter Price API call instead
 // of a per-asset round trip (Pyth or Jupiter QuoteBuy). Shared by the list and
 // popular routes — both just display current price, so both get the same source.
-func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []xstocks.CatalogAsset) []marketAssetResponse {
+func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []xstocks.CatalogAsset, withVariantCount bool) []marketAssetResponse {
 	prices := h.fetchPrices(ctx, assets)
 	out := make([]marketAssetResponse, 0, len(assets))
 	for _, asset := range assets {
-		out = append(out, marketAssetResponseFor(asset, prices))
+		out = append(out, marketAssetResponseFor(ctx, h.Catalog, asset, prices, withVariantCount))
 	}
 	return out
 }
@@ -307,68 +314,88 @@ func (h *AssetsHandlers) fetchPrices(ctx context.Context, assets []xstocks.Catal
 	return prices
 }
 
-func marketAssetResponseFor(asset xstocks.CatalogAsset, prices map[string]jupiter.TokenPrice) marketAssetResponse {
+func marketAssetResponseFor(ctx context.Context, catalog xstocks.CatalogSearcher, asset xstocks.CatalogAsset, prices map[string]jupiter.TokenPrice, withVariantCount bool) marketAssetResponse {
+	n := asset.Normalize()
 	resp := marketAssetResponse{
-		Symbol:     asset.Symbol,
-		Name:       asset.Name,
-		SolanaMint: asset.SolanaMint,
-		Routable:   asset.Routable,
+		Symbol:     n.Symbol,
+		Name:       n.Name,
+		SolanaMint: n.SolanaMint,
+		Routable:   n.Routable,
 	}
-	if price, ok := prices[asset.SolanaMint]; ok && price.PriceUsdcMicros > 0 {
-		resp.PriceUsdcMicros = &price.PriceUsdcMicros
-		resp.Change24h = price.Change24h
+	var pricePtr *jupiter.TokenPrice
+	if price, ok := prices[n.SolanaMint]; ok {
+		priceCopy := price
+		pricePtr = &priceCopy
+		if price.PriceUsdcMicros > 0 {
+			resp.PriceUsdcMicros = &price.PriceUsdcMicros
+			resp.Change24h = price.Change24h
+		}
 	}
+	variantCount := 0
+	if withVariantCount {
+		variantCount = variantCountFor(ctx, catalog, n)
+	}
+	resp.assetCatalogJSONFields = catalogJSONFields(n, pricePtr, variantCount)
 	return resp
 }
 
 func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset xstocks.CatalogAsset) assetDetailResponse {
+	n := asset.Normalize()
 	detail := assetDetailResponse{
-		Symbol:     asset.Symbol,
-		Name:       asset.Name,
-		SolanaMint: asset.SolanaMint,
-		Routable:   asset.Routable,
-		Liquidity:  h.liquiditySnippet(ctx, asset, nil),
+		Symbol:     n.Symbol,
+		Name:       n.Name,
+		SolanaMint: n.SolanaMint,
+		Routable:   n.Routable,
+		Liquidity:  h.liquiditySnippet(ctx, n, nil),
 	}
-	prices := h.fetchPrices(ctx, []xstocks.CatalogAsset{asset})
-	if price, ok := prices[asset.SolanaMint]; ok && price.PriceUsdcMicros > 0 {
-		detail.PriceUsdcMicros = &price.PriceUsdcMicros
-		detail.Change24h = price.Change24h
-		detail.Liquidity = h.liquiditySnippet(ctx, asset, &price.PriceUsdcMicros)
+	prices := h.fetchPrices(ctx, []xstocks.CatalogAsset{n})
+	var pricePtr *jupiter.TokenPrice
+	if price, ok := prices[n.SolanaMint]; ok {
+		priceCopy := price
+		pricePtr = &priceCopy
+		if price.PriceUsdcMicros > 0 {
+			detail.PriceUsdcMicros = &price.PriceUsdcMicros
+			detail.Change24h = price.Change24h
+			detail.Liquidity = h.liquiditySnippet(ctx, n, &price.PriceUsdcMicros)
+		}
 	}
+	detail.assetCatalogJSONFields = catalogJSONFields(n, pricePtr, variantCountFor(ctx, h.Catalog, n))
+	detail.Variants = variantResponses(ctx, h.Catalog, h.Price, n)
 	// Live Jupiter probe wins over a stale catalog rank (429s cache as not routable).
 	detail.Routable = detail.Liquidity.Routable
 	return detail
 }
 
 func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset xstocks.CatalogAsset, markMicros *int64) assetLiquidityResponse {
+	n := asset.Normalize()
 	snippet := assetLiquidityResponse{
 		Label:              "Via Jupiter",
-		Routable:           asset.Routable,
+		Routable:           n.Routable,
 		BuyProbeUsdcMicros: app.CatalogRoutabilityProbeMicros,
 	}
-	if h.Jupiter == nil || strings.TrimSpace(asset.SolanaMint) == "" {
+	if h.Jupiter == nil || strings.TrimSpace(n.SolanaMint) == "" {
 		return snippet
 	}
 
 	buyQuote, err := h.Jupiter.QuoteBuy(ctx, jupiter.QuoteBuyParams{
-		Symbol:     asset.Symbol,
-		OutputMint: asset.SolanaMint,
+		Symbol:     n.Symbol,
+		OutputMint: n.SolanaMint,
 		USDCAmount: app.CatalogRoutabilityProbeMicros,
 	})
 	if err == nil && buyQuote.Routable {
 		snippet.Routable = true
 		snippet.BuyProbeOutAmount = buyQuote.OutAmount
 		if markMicros != nil {
-			snippet.SpreadBps = pyth.MidSpreadBps(*markMicros, buyQuote.OutAmount, app.CatalogRoutabilityProbeMicros, jupiter.XStockDecimals)
+			snippet.SpreadBps = pyth.MidSpreadBps(*markMicros, buyQuote.OutAmount, app.CatalogRoutabilityProbeMicros, int32(n.Decimals))
 		}
 	} else {
 		snippet.Routable = false
 	}
 
 	sellQuote, err := h.Jupiter.QuoteSell(ctx, jupiter.QuoteSellParams{
-		Symbol:    asset.Symbol,
-		InputMint: asset.SolanaMint,
-		Amount:    jupiter.XStockAtomicScale,
+		Symbol:    n.Symbol,
+		InputMint: n.SolanaMint,
+		Amount:    jupiter.AtomicScale(n.Decimals),
 	})
 	if err == nil && sellQuote.Routable {
 		snippet.SellProbeInAmount = sellQuote.InAmount

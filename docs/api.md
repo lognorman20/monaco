@@ -88,12 +88,12 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/groups/{id}/treasury/tokens` | Treasury USDC plus token holdings. |
 | `GET /v1/groups/{id}/cost-basis/{symbol}` | Fill-derived cost basis for one symbol. |
 | `POST /v1/groups/{id}/withdraw-to-balance` ● | Cash out a slice of the cabal to the account balance. |
-| `GET /v1/groups/{id}/assets` | Tradable catalog for a cabal. Bearer or agent key. |
-| `GET /v1/assets` | Catalog search with prices. |
+| `GET /v1/groups/{id}/assets` | Tradable catalog for a cabal. Bearer or agent key. Optional `kind=stock\|pre_ipo`. Rows include `kind`, `tokenDecimals`, Tessera reference fields, `premiumBps`, `variantCount`. |
+| `GET /v1/assets` | Catalog search with prices. Optional `kind=stock\|pre_ipo`. Same catalog fields as group assets. |
 | `GET /v1/assets/popular` | Popular assets with prices. |
-| `GET /v1/assets/{symbol}` | Asset detail. |
+| `GET /v1/assets/{symbol}` | Asset detail plus `variants[]` when multiple issuers share an `underlyingId`. |
 | `GET /v1/assets/{symbol}/chart` | Price history. |
-| `POST /v1/groups/{id}/quotes` | Check that a buy or sell can route, and at what price. |
+| `POST /v1/groups/{id}/quotes` | Check that a buy or sell can route, and at what price. Buy responses add `tokenDecimals`, asset `kind`, and live `premiumBps` when a fresh Jupiter reference exists. |
 | `GET /v1/groups/{id}/proposals` | List proposals. |
 | `POST /v1/groups/{id}/proposals` ● | Open a proposal: buy, sell, or add, pause, resume, revoke an agent. |
 | `GET /v1/proposals/{id}` | Proposal detail, votes and execution state. |

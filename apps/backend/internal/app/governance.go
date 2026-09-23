@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/packages/domain"
@@ -21,6 +22,7 @@ type GovernanceService struct {
 	swap   *SwapService
 	home   *HomeService
 	redeem *RedeemService
+	price  jupiter.PriceClient
 	now    func() time.Time
 }
 
@@ -46,6 +48,11 @@ func (g *GovernanceService) SetHomeService(home *HomeService) {
 // SetRedeemService wires withdraw-to-balance for leave-with-stake.
 func (g *GovernanceService) SetRedeemService(redeem *RedeemService) {
 	g.redeem = redeem
+}
+
+// SetPriceClient wires Jupiter marks for proposal premium persistence.
+func (g *GovernanceService) SetPriceClient(price jupiter.PriceClient) {
+	g.price = price
 }
 
 // SetClock overrides time.Now for tests.
@@ -726,6 +733,22 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		return Proposal{}, fmt.Errorf("invalid proposal kind")
 	}
 
+	tokenDecimals := 8
+	var premiumBps *int
+	if (kind == domain.ProposalKindBuy || kind == domain.ProposalKindSell) && g.buy != nil && strings.TrimSpace(in.Symbol) != "" {
+		if asset, err := g.buy.ResolveAsset(ctx, in.Symbol); err == nil {
+			n := asset.Normalize()
+			tokenDecimals = n.Decimals
+			if kind == domain.ProposalKindBuy && g.price != nil {
+				if prices, err := g.price.Prices(ctx, []string{n.SolanaMint}); err == nil {
+					if price, ok := prices[n.SolanaMint]; ok {
+						premiumBps = proposalPremiumBpsForStore(n.Kind, price)
+					}
+				}
+			}
+		}
+	}
+
 	now := g.now().UTC()
 	expiresAt := now.Add(time.Duration(rules.VoteExpirySeconds) * time.Second)
 
@@ -747,6 +770,8 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		Kind:                 kind,
 		UsdcMicros:           in.UsdcMicros,
 		TokenAmount:          in.TokenAmount,
+		TokenDecimals:        tokenDecimals,
+		PremiumBps:           premiumBps,
 		AgentDisplayName:     in.AgentDisplayName,
 		AllocationUsdcMicros: in.AllocationUsdcMicros,
 		Thesis:               thesis,
