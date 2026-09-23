@@ -1,9 +1,9 @@
 # Market data on the asset routes
 
-What `GET /v1/assets`, `/v1/assets/popular`, `/v1/assets/{symbol}` and
-`/v1/assets/{symbol}/chart` return, and where every number comes from. `docs/api.md`
-is not on `main` yet; when the API reference comes back, this becomes its market
-section.
+What `GET /v1/assets`, `/v1/assets/popular`, `/v1/assets/{symbol}`,
+`/v1/assets/{symbol}/chart` and `/v1/assets/{symbol}/social` return, and where every
+number comes from. `docs/api.md` is not on `main` yet; when the API reference comes
+back, this becomes its market section.
 
 Money is integer USDC micros (1 USDC = 1,000,000). Timestamps are RFC 3339 in UTC.
 
@@ -94,6 +94,32 @@ Adds to the existing detail:
   line: it is per share and the mark is per token.
 - `liquidity.spreadBps`: `(ask - bid) / mid` of the two Kyber probes, in basis points.
   A 1 USDC probe includes pool fees and price impact, so thin pools read wide.
+
+## `GET /v1/assets/{symbol}/social` ●
+
+The one asset route that is not market data: what the **caller's own** cabals are
+doing with this stock. Authenticated; the caller's membership list is the only
+authorization the queries perform, so a non-member never appears in another cabal's
+answer.
+
+- `holdings`: one row per cabal that holds the symbol, biggest position first —
+  `units`, `tokenAmount`, `markUsd`, `valueUsd`, `costBasisUsd`, `dollarPnl`,
+  `percentReturn` (null with no cost basis), `mySliceUsd`, `mySlicePercent`,
+  `afterHours`. The mark is the token's Chainlink TRV mark, one read per token for
+  the whole request; a cabal whose token has no usable mark carries the position at
+  what it paid.
+- `mySliceUsd` divides by `SumShareUnitsByGroup`, the same share base Home and the
+  group view use, so one member's slice cannot read differently on two screens.
+- `openProposals`: open votes on this symbol in those cabals, with the tally,
+  `memberCount`, the caller's own `myVote` (absent when they have not voted) and
+  `voters`.
+- `activity`: proposals and **confirmed** fills, newest first, capped at 20. A
+  sell's dollar figure comes from its recorded proceeds; a sell with none sends
+  `usdcMicros: 0` and the row shows its share count rather than reading token
+  atomics as dollars.
+- `unvaluedGroups` counts the caller's cabals that could not be priced on this pass.
+  It is never folded into silence: a short list with no caveat would tell a member
+  their other cabals hold nothing.
 
 ## Configuration
 
