@@ -277,7 +277,8 @@ private struct HomeMissedVoteCard: View {
                 }
                 .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        // §4 #1. The app's most important social action should not feel dead under the thumb.
+        .buttonStyle(InkPressStyle())
         .accessibilityLabel("Vote \(title.lowercased()) on \(stockName)")
         .accessibilityIdentifier("home-missed-vote-\(choice.rawValue)-\(row.proposalId)")
     }

@@ -221,11 +221,11 @@ struct OTPLoginForm: View {
     }
 
     private var statusColor: Color {
+        // Green means profit and nothing else (§0 rule 1), so there is no success colour here:
+        // a signed-in status line is muted ink like every other non-failure phase.
         switch auth.phase {
         case .failed:
             return MonacoTheme.lossOnHero
-        case .authenticated:
-            return MonacoTheme.profitOnHero
         default:
             return MonacoTheme.Ink.fgMuted
         }

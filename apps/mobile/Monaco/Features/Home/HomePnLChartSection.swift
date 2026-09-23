@@ -22,6 +22,12 @@ struct HomePnLChartSection: View {
     /// redraw trigger here: the caller owns the fetch.
     var range: HomeLeaderboardRange?
 
+    /// The draw-on sweep (§4 #6). Longer than any of `MonacoMotion`'s four curves on purpose —
+    /// this is a curve being drawn, not a control responding — and it goes through `.reduced(_:)`
+    /// like every other animation in the app, so the Reduce Motion gate is visible at the call
+    /// site rather than hidden in a `guard`.
+    private static let drawOn = Animation.easeOut(duration: 0.55)
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// 0 → 1 across the plot width. Re-run on a range change, never on a data poll.
     @State private var sweep: CGFloat = 0
@@ -90,13 +96,11 @@ struct HomePnLChartSection: View {
             chart
                 .mask(alignment: .leading) { sweepMask }
                 .onChange(of: range) { _, _ in
-                    guard !reduceMotion else { return }
                     sweep = 0
-                    withAnimation(.easeOut(duration: 0.55)) { sweep = 1 }
+                    withAnimation(Self.drawOn.reduced(reduceMotion)) { sweep = 1 }
                 }
                 .onAppear {
-                    guard !reduceMotion else { return }
-                    withAnimation(.easeOut(duration: 0.55)) { sweep = 1 }
+                    withAnimation(Self.drawOn.reduced(reduceMotion)) { sweep = 1 }
                 }
         }
     }

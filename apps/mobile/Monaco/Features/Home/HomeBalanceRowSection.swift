@@ -46,7 +46,10 @@ struct HomeBalanceFold: View {
     var body: some View {
         if dynamicTypeSize.isAccessibilitySize {
             // At AX sizes the figure and two capsules cannot share a line without one of them
-            // shrinking into unreadability, so the fold stacks instead of scaling.
+            // shrinking into unreadability, so the fold stacks instead of scaling — and the two
+            // capsules stack with it. Stacking the figure above a still-horizontal pair only
+            // moved the problem: "Add money" and "Cash out" went on sharing one line and the
+            // slab's one brand CTA truncated to "Add mone…".
             VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
                 cash
                 actions
@@ -80,24 +83,33 @@ struct HomeBalanceFold: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// Side by side at normal sizes; stacked full-width at accessibility sizes, where two
+    /// capsules on one line cannot hold their labels.
+    @ViewBuilder
     private var actions: some View {
-        HStack(spacing: MonacoTheme.Space.s) {
+        let isStacked = dynamicTypeSize.isAccessibilitySize
+        let layout = isStacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: MonacoTheme.Space.s))
+            : AnyLayout(HStackLayout(spacing: MonacoTheme.Space.s))
+
+        layout {
             NavigationLink {
                 DepositView(auth: auth, joinedCabals: joinedCabals)
             } label: {
-                InkCapsuleLabel(title: "Add money", isProminent: true)
+                InkCapsuleLabel(title: "Add money", isProminent: true, isStacked: isStacked)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(InkPressStyle())
             .accessibilityIdentifier("home-add-money-link")
 
             NavigationLink {
                 WithdrawView(auth: auth)
             } label: {
-                InkCapsuleLabel(title: "Cash out", isProminent: false)
+                InkCapsuleLabel(title: "Cash out", isProminent: false, isStacked: isStacked)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(InkPressStyle())
             .accessibilityIdentifier("home-cash-out-link")
         }
+        .frame(maxWidth: isStacked ? .infinity : nil, alignment: .leading)
     }
 
     /// A dash, not a figure — and its own identifier, so nothing (a UI test included) can read
@@ -122,21 +134,43 @@ struct HomeBalanceFold: View {
 
 /// A capsule action on ink. `isProminent` is the one brand fill the slab is allowed; everything
 /// else is an ink wash with a white label.
+///
+/// `isStacked` is the accessibility-size layout: the capsule takes the full width of the fold and
+/// the label is allowed to wrap, because at AX3 and up "Add money" does not fit on one line at a
+/// size anybody set the text that large to read.
 private struct InkCapsuleLabel: View {
     let title: String
     let isProminent: Bool
+    var isStacked: Bool = false
 
     var body: some View {
         Text(title)
             .font(MonacoTheme.Typo.callout.weight(.semibold))
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
+            .lineLimit(isStacked ? nil : 1)
+            .minimumScaleFactor(isStacked ? 1 : 0.8)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: isStacked)
             .foregroundStyle(isProminent ? MonacoTheme.onBrand : MonacoTheme.Ink.fgPrimary)
             .padding(.horizontal, MonacoTheme.Space.m)
-            .frame(minHeight: 44)
+            .padding(.vertical, isStacked ? MonacoTheme.Space.s : 0)
+            .frame(maxWidth: isStacked ? .infinity : nil, minHeight: 44, alignment: .leading)
             .background(
                 Capsule().fill(isProminent ? MonacoTheme.brandFill : Color.white.opacity(0.12))
             )
             .contentShape(Capsule())
+    }
+}
+
+/// §4 #1 on ink: press scales to 0.97 on `snap`, and drops to 0.80 opacity with no animation
+/// under Reduce Motion. `MonacoPressEffect` in `Design/MonacoButtons.swift` is the same feel, but
+/// it is `private` to that file; this folds into it the moment Chunk B exposes it.
+struct InkPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .opacity(configuration.isPressed && reduceMotion ? 0.8 : 1)
+            .animation(MonacoMotion.snap.reduced(reduceMotion), value: configuration.isPressed)
     }
 }

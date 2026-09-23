@@ -62,6 +62,11 @@ struct HomeNetWorthSection: View {
     /// The cash fold under the hairline. Everything this needs is the balance row's, moved in.
     let balanceFold: HomeBalanceFold
 
+    /// True once the fold has scrolled past and the nav bar has taken the figure (§4 #21).
+    /// The figure fades out as the title fades in, so the handoff is one movement rather than
+    /// two things swapping places. `HomeView` owns the flag and the curve on both sides of it.
+    var isHandedOff = false
+
     private static let chartHeight: CGFloat = 104
 
     var body: some View {
@@ -78,8 +83,10 @@ struct HomeNetWorthSection: View {
                     MonacoMark(size: 22, monochrome: Color.white.opacity(0.10))
                 }
 
-                // Rule 3: a money figure never counts up. It appears at its value.
+                // Rule 3: a money figure never counts up. It appears at its value — the opacity
+                // here is the handoff into the nav bar, never the figure arriving.
                 MoneyText(decimalString: dashboard.netWorthUsd, style: .hero, color: MonacoTheme.Ink.fgPrimary)
+                    .opacity(isHandedOff ? 0 : 1)
 
                 HStack(spacing: MonacoTheme.Space.s) {
                     PnLBadge(

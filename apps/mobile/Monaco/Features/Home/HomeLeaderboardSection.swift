@@ -95,7 +95,7 @@ struct HomeLeaderboardSection: View {
                         leading: {
                             MonacoAvatar(photoURL: row.profilePhotoUrl, displayName: row.displayName, size: 44)
                                 .overlay(alignment: .bottomLeading) {
-                                    RankBadge(rank: index + 1, seed: row.userId)
+                                    RankBadge(rank: index + 1)
                                         .offset(x: -4, y: 4)
                                 }
                         },
@@ -104,8 +104,6 @@ struct HomeLeaderboardSection: View {
                             PnLText(dollarPnl: row.dollarPnl, style: .caption)
                         }
                     )
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Number \(index + 1), \(row.displayName)")
                 }
                 .buttonStyle(.monacoRow)
                 .accessibilityIdentifier("home-leaderboard-row-\(row.userId)")
@@ -129,29 +127,49 @@ struct HomeLeaderboardSection: View {
 
 /// The podium badge on the leaderboard avatar.
 ///
-/// Ranks 1–3 only, and on `CabalTint.cta` rather than `fill`: this is a 13pt bold numeral, which
-/// is **not** "large text" under WCAG, so it needs the 4.5:1 ramp. Ranks 4 and beyond keep a grey
-/// numeral — a board where everything is decorated has no podium.
+/// Ranks 1–3 get **one** treatment, keyed off the rank itself: an ink disc, with `trophy.fill`
+/// on rank 1 (§5.2.3). Ranks 4 and beyond keep a grey numeral — a board where everything is
+/// decorated has no podium.
 ///
-/// The tint is hashed from the person's own id, so a member's badge is the same colour every time
-/// the board is drawn and two people next to each other are unlikely to share one. It is never the
-/// only signal: the numeral is the rank, and the name is right beside it.
+/// It is deliberately *not* tinted. §1.8 scopes `CabalTint` to cabal identity, and hashing a
+/// person's id through that ramp made the colour mean nothing: rank 1 sage, rank 2 peach, at
+/// random, with two adjacent rows free to land on the same tint. Position is the content here,
+/// so the badge says position and nothing else. Ink is also the neutral emphasis the palette
+/// already has — brand would claim a tap and green would claim a profit.
+///
+/// The disc and the numeral both scale with Dynamic Type, capped so the badge stays a badge
+/// rather than outgrowing the 44pt avatar it is pinned to.
+///
+/// VoiceOver reads it: the row's own `.accessibilityElement(children: .combine)` picks this up
+/// ahead of the name and the returns, so the board speaks "Number 1, Ana, up 12.4 percent, …".
+/// Hiding it was what cost the figures their place in the label.
 private struct RankBadge: View {
     let rank: Int
-    let seed: String
+
+    @ScaledMetric(relativeTo: .footnote) private var scaledDisc: CGFloat = 22
+    @ScaledMetric(relativeTo: .footnote) private var scaledNumeral: CGFloat = 13
 
     private var isPodium: Bool { rank <= 3 }
+    private var disc: CGFloat { min(scaledDisc, 34) }
+    private var numeral: CGFloat { min(scaledNumeral, 20) }
 
     var body: some View {
-        Text("\(rank)")
-            .font(.system(size: 13, weight: .bold).monospacedDigit())
-            .foregroundStyle(isPodium ? Color.white : MonacoTheme.fgMuted)
-            .frame(width: 22, height: 22)
-            .background {
-                Circle()
-                    .fill(isPodium ? MonacoTheme.CabalTint.forGroupId(seed).cta : MonacoTheme.fillQuiet)
+        Group {
+            if rank == 1 {
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: numeral * 0.85, weight: .bold))
+            } else {
+                Text("\(rank)")
+                    .font(.system(size: numeral, weight: .bold).monospacedDigit())
             }
-            .overlay(Circle().strokeBorder(MonacoTheme.bgRaised, lineWidth: 2))
-            .accessibilityHidden(true)
+        }
+        .foregroundStyle(isPodium ? MonacoTheme.bgRaised : MonacoTheme.fgMuted)
+        .frame(width: disc, height: disc)
+        .background {
+            Circle()
+                .fill(isPodium ? MonacoTheme.fgPrimary : MonacoTheme.fillQuiet)
+        }
+        .overlay(Circle().strokeBorder(MonacoTheme.bgRaised, lineWidth: 2))
+        .accessibilityLabel("Number \(rank)")
     }
 }

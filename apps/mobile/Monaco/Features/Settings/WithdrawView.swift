@@ -89,7 +89,9 @@ struct WithdrawView: View {
                         if let addressProblemMessage {
                             Text(addressProblemMessage)
                                 .font(MonacoTheme.Typo.caption)
-                                .foregroundStyle(MonacoTheme.warningOnWash)
+                                // Amber text on the plain canvas, so it is `warning`, not the
+                                // on-wash pair — there is no wash behind this line (§1.6).
+                                .foregroundStyle(MonacoTheme.warning)
                                 .accessibilityIdentifier("withdraw-address-problem")
                         }
                     }

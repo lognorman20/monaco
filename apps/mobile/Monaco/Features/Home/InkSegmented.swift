@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// `MonacoSegmented`'s ink-world twin: a capsule track on `Ink.sunken` with a neutral
-/// `#FFFFFF`@0.14 thumb and white labels.
+/// `Ink.lineStrong` (`#FFFFFF`@0.18) thumb and white labels.
 ///
 /// Two reasons it is not just `MonacoSegmented` today. First, that control fills its track with
 /// `surfaceSunken`, which is `#EDF1F7` in light mode — a near-white capsule sitting on an ink slab
@@ -50,12 +50,15 @@ struct InkSegmented<T: Hashable>: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                         .foregroundStyle(isSelected ? MonacoTheme.Ink.fgPrimary : MonacoTheme.Ink.fgMuted)
-                        .padding(.horizontal, 10)
-                        .frame(maxWidth: .infinity, minHeight: 32)
+                        // 36/12, matching `MonacoSegmented` exactly: the per-option tap target
+                        // is the smaller of the two boxes, and 32 inside a 44pt track put it
+                        // under the 44pt floor.
+                        .padding(.horizontal, 12)
+                        .frame(maxWidth: .infinity, minHeight: 36)
                         .background {
                             if isSelected {
                                 Capsule()
-                                    .fill(Color.white.opacity(0.14))
+                                    .fill(MonacoTheme.Ink.lineStrong)
                                     .matchedGeometryEffect(id: "ink-thumb", in: thumb)
                             }
                         }

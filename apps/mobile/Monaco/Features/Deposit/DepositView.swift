@@ -21,6 +21,11 @@ struct DepositView: View {
     @State private var lastAnnouncedBalanceMicros: Int64?
     @State private var toast: MonacoToast?
 
+    /// The step disc and its numeral scale with Dynamic Type, capped — `Font.system(size:)` alone
+    /// would leave a 13pt step number beside 53pt body copy at AX5 (§2.1).
+    @ScaledMetric(relativeTo: .footnote) private var scaledStepDisc: CGFloat = 22
+    @ScaledMetric(relativeTo: .footnote) private var scaledStepNumeral: CGFloat = 13
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.section) {
@@ -115,7 +120,12 @@ struct DepositView: View {
     @ViewBuilder
     private func addressBlock(_ address: String) -> some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
-            MonacoWalletAddressText(address: address)
+            // The address is drawn by a `UITextView`, which resolves its colour against the
+            // app's trait collection rather than `\.monacoWorld`, so it cannot inherit ink from
+            // the band around it. Left on its default it is `fgPrimary` — near-black on
+            // `Ink.sunken` in light mode, which is the whole point of this screen rendered as a
+            // black block. The ink foreground is passed explicitly.
+            MonacoWalletAddressText(address: address, foreground: MonacoTheme.Ink.fgPrimary)
                 .padding(MonacoTheme.Space.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
@@ -158,9 +168,9 @@ struct DepositView: View {
     private func stepRow(number: Int, text: String) -> some View {
         HStack(alignment: .top, spacing: MonacoTheme.Space.sm) {
             Text("\(number)")
-                .font(.system(size: 13, weight: .bold).monospacedDigit())
+                .font(.system(size: min(scaledStepNumeral, 20), weight: .bold).monospacedDigit())
                 .foregroundStyle(MonacoTheme.brandOnWash)
-                .frame(width: 22, height: 22)
+                .frame(width: min(scaledStepDisc, 34), height: min(scaledStepDisc, 34))
                 .background(Circle().fill(MonacoTheme.brandWash))
             Text(text)
                 .font(MonacoTheme.Typo.callout)

@@ -40,6 +40,11 @@ struct HomeView: View {
     /// screen outlives both the countdown's tick and the row's own expiry.
     @State private var openProposalId: String?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The nav-title handoff crossfade (§4 #21).
+    private static let handoff = Animation.easeInOut(duration: 0.20)
+
     private var joinedCabals: [HomeGroupBoardRowDTO] {
         session.joinedCabals
     }
@@ -92,7 +97,17 @@ struct HomeView: View {
                 // Skeleton until the dashboard lands (#217: session and dashboard load separately).
                 HomeSkeletonView()
             case .loaded(let dashboard):
+                // The ink chrome belongs to the fold, not to Home. It sits on this branch and
+                // nowhere else: the skeleton and the failed screen are paper on a paper canvas,
+                // and a solid near-black bar floating over them in light mode — the first frame
+                // of every cold launch, and the whole offline state — is not the fold, it is a
+                // mistake. Under the fold the bar is the slab's own chrome, in both schemes, so
+                // ink is continuous from the status bar down; it is also where the figure lands
+                // once the fold has scrolled away (§4 #21).
                 dashboardScroll(dashboard)
+                    .toolbarBackground(MonacoTheme.Ink.base, for: .navigationBar)
+                    .toolbarBackground(.visible, for: .navigationBar)
+                    .toolbarColorScheme(.dark, for: .navigationBar)
             case .failed(let message):
                 failedScroll(message)
             }
@@ -100,12 +115,6 @@ struct HomeView: View {
         .monacoCanvas()
         .navigationTitle(handoffTitle)
         .navigationBarTitleDisplayMode(.inline)
-        // The fold runs to the top of the screen: the nav bar is the slab's own chrome, in both
-        // schemes, so ink is continuous from the status bar down. It is also where the figure
-        // lands once the fold has scrolled away (§4 #21).
-        .toolbarBackground(MonacoTheme.Ink.base, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 profileButton
@@ -190,7 +199,8 @@ struct HomeView: View {
                         // Shares `retryLoad`'s in-flight guard: retrying the balance is the same
                         // three-request refresh, so it cannot be stacked by tapping repeatedly.
                         onRetryBalance: { Task { await retryLoad() } }
-                    )
+                    ),
+                    isHandedOff: heroScrolledAway
                 )
                 // `.monacoInkSlab()` cancels the screen gutter from the inside, so the slab has
                 // to sit inside one. Without this its content hangs 20pt off both edges.
@@ -234,8 +244,13 @@ struct HomeView: View {
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.contentOffset.y + geometry.contentInsets.top > 140
         } action: { _, scrolledAway in
+            // Keyed on the Bool, not on the offset, so the crossfade cannot chatter while a
+            // finger hovers on the threshold (§4 #21). The figure fades out as the nav title
+            // fades in, both over 0.20s; under Reduce Motion it is an instant swap.
             guard scrolledAway != heroScrolledAway else { return }
-            heroScrolledAway = scrolledAway
+            withAnimation(Self.handoff.reduced(reduceMotion)) {
+                heroScrolledAway = scrolledAway
+            }
         }
     }
 
