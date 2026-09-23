@@ -69,7 +69,7 @@ never raw paths, so ids do not become time series.
 | `monaco_http_request_duration_seconds` | `route`, `method` | Latency. Trade and cash out routes confirm on chain inside the request, so tens of seconds is normal there. |
 | `monaco_money_events_total` | `event`, `outcome` | `event`: `deposit_sweep`, `swap_buy`, `swap_sell`, `redeem`, `redeem_recovery`, `agent_intent`. `outcome`: `ok`, `rejected` (caller's fault: bad input, over budget, paused bot), `error` (ours or an upstream's), `canceled`, `replayed` (idempotent retry of a swap that already landed). `deposit_sweep` also reports why a fund intent did not land: `rejected` (Privy refused the sweep before broadcast), `failed_on_chain`, `dropped` (blockhash expired unseen; the sweep is re-submitted), `expired` (dropped too many times; deposit failed) and `retries_exhausted` (upstream kept erroring before anything was broadcast; deposit failed). |
 | `monaco_money_volume_usdc_micros_total` | `event` | USDC moved by successful events. Replays are not counted. |
-| `monaco_upstream_requests_total` | `service`, `outcome` | `service`: `jupiter`, `pyth`, `privy`, `solana_rpc`, `xstocks`, `flash`, `supabase_storage`. `outcome`: `ok`, `client_error`, `rate_limited` (429), `server_error`, `transport_error`. |
+| `monaco_upstream_requests_total` | `service`, `outcome` | `service`: `jupiter`, `pyth`, `privy`, `solana_rpc`, `xstocks`, `tessera`, `flash`, `supabase_storage`. `outcome`: `ok`, `client_error`, `rate_limited` (429), `server_error`, `transport_error`. |
 | `monaco_upstream_request_duration_seconds` | `service` | Upstream latency. |
 | `monaco_poller_ticks_total` | `poller`, `outcome` | `outcome`: `ok`, `error`, `panic`. |
 | `monaco_poller_last_tick_timestamp_seconds` | `poller` | Alert when `time() - value` keeps growing. |
@@ -143,6 +143,11 @@ written with a request context. `http response` lines carry `route`, `status` an
 Every agent intent writes one service-layer line: `agent intent executed`, `agent intent rejected`
 or `agent intent failed`, with `group_id`, `intent_id`, `side`, `symbol`, amounts and the outcome.
 The agent key is never logged.
+
+After a treasury buy, `swap buy fill reconciliation` logs `quoted_out`, `received_out`, and
+`fee_bps_observed` when the post-transaction token balance delta is available. When Privy or RPC
+cannot read that delta, `fill reconciliation unavailable` warns and cost basis falls back to
+Jupiter's quoted output amount.
 
 Known gap: service and poller log lines below the HTTP layer do not carry `request_id` yet,
 because those helpers do not take a context. Correlate through `group_id`, `deposit_id`, `job_id`

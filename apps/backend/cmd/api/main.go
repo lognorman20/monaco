@@ -15,6 +15,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/catalog"
 	"github.com/monaco/monaco/apps/backend/internal/config"
 	"github.com/monaco/monaco/apps/backend/internal/faker"
 	"github.com/monaco/monaco/apps/backend/internal/flash"
@@ -27,6 +28,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/solana/balance"
 	"github.com/monaco/monaco/apps/backend/internal/storage"
 	"github.com/monaco/monaco/apps/backend/internal/swapprovider"
+	"github.com/monaco/monaco/apps/backend/internal/tessera"
 	"github.com/monaco/monaco/apps/backend/internal/worker"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
@@ -168,7 +170,13 @@ func boot(ctx context.Context) (*bootResult, error) {
 		xstocks.NewRoutabilityCache(xstocks.DefaultRoutabilityCacheTTL),
 	)
 	catalogSearcher.SetRoutabilityProber(catalogRoutability)
-	symbols := app.NewSymbolResolver(catalogSearcher)
+	var tesseraSource catalog.Source
+	if cfg.TesseraEnabled {
+		tesseraSource = tessera.NewHTTPCatalogWithClient(cfg.TesseraAPIBaseURL, nil)
+	}
+	catalogComposite := catalog.NewComposite(catalogSearcher, tesseraSource, catalogRoutability)
+	slog.Info("catalog sources ready", "xstocks", true, "tessera", cfg.TesseraEnabled)
+	symbols := app.NewSymbolResolver(catalogComposite)
 	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
 	platformWithdrawals := app.NewPlatformWithdrawService(store, privyClient, deposits, solanaRPC, relayer.PrivateKey())
 	sessions := app.NewSessionService(store, privyClient).
@@ -192,7 +200,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}
 	platformWithdrawHandlers := &httpapi.PlatformWithdrawHandlers{Withdrawals: platformWithdrawals}
 	xstocksResolver := xstocks.NewHTTPResolver()
-	buy := app.NewBuyService(jupiterClient, xstocksResolver)
+	mintResolver := catalog.NewResolver(xstocksResolver, tesseraSource)
+	buy := app.NewBuyService(jupiterClient, mintResolver)
+	buy.SetMintCatalog(catalogComposite)
 	signer := app.NewPrivyTreasurySigner(privyClient)
 	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, relayer.PrivateKey(), symbols)
 	swap.SetPriceClient(pythClient)
@@ -219,21 +229,22 @@ func boot(ctx context.Context) (*bootResult, error) {
 	transactionHandlers := &httpapi.TransactionHandlers{
 		Store:   store,
 		Privy:   privyClient,
-		XStocks: xstocksResolver,
+		XStocks: mintResolver,
 		Swap:    swap,
 		Symbols: symbols,
+		Catalog: catalogComposite,
 	}
 	agentKeyGuard := httpapi.NewAgentKeyGuard(trustProxyHeaders())
 	catalogHandlers := &httpapi.CatalogHandlers{
 		Store:    store,
 		Privy:    privyClient,
-		Catalog:  catalogSearcher,
+		Catalog:  catalogComposite,
 		KeyGuard: agentKeyGuard,
 	}
 	assetsHandlers := &httpapi.AssetsHandlers{
 		Store:   store,
 		Privy:   privyClient,
-		Catalog: catalogSearcher,
+		Catalog: catalogComposite,
 		Pyth:    priceChain,
 		Jupiter: jupiterClient,
 		Price:   jupiterPriceClient,
