@@ -25,8 +25,24 @@ var ChartRanges = []ChartRange{
 	ChartRange1D, ChartRange1W, ChartRange1M, ChartRange3M, ChartRange1Y, ChartRangeAll,
 }
 
-// EmptyReasonNoHistory is the single empty-series reason the app renders.
+// EmptyReasonNoHistory is the reason for a window a source could have covered and
+// had nothing in.
 const EmptyReasonNoHistory = "price history unavailable"
+
+// EmptyReasonBefore names the other case: the window starts before the price
+// existed anywhere we can read it. A B20 feed that went live seven weeks ago has
+// no 1Y chart and never will have one until a year has passed, and stretching the
+// seven weeks across a year axis would be a chart of something else. The reason
+// carries the date so the app can say which day the history starts, rather than
+// repeating "unavailable" at a user who can see the 1M chart working.
+//
+// The date is the feed's own first round, read from the chain, never a constant.
+func EmptyReasonBefore(first time.Time) string {
+	if first.IsZero() {
+		return EmptyReasonNoHistory
+	}
+	return "only on-chain since " + first.UTC().Format("2 Jan 2006")
+}
 
 // ParseChartRange validates a chart range query param. An empty value means 1D, so
 // a build that only ever sends 1D, 1W or 1M keeps working unchanged.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -322,16 +323,30 @@ func strideSamples(now time.Time, days, strideDays int) []time.Time {
 // a token mark over an equity close — would fold the token's multiplier into a
 // "move" that never happened.
 func DayChange(day AssetChartSeries) *string {
-	if day.Basis != PriceBasisUnderlying || day.PreviousCloseUsdcMicros == nil || len(day.Points) == 0 {
+	if day.Basis != PriceBasisUnderlying {
 		return nil
+	}
+	change, _, _ := DayChangeFields(day)
+	return change
+}
+
+// DayChangeFields is the same move for a series of any basis, with the basis it
+// is about. The ratio is always taken inside one instrument — both ends come from
+// the same series — so a token series yields the token's move labelled as the
+// token's, and an equity series the equity's. Everything is nil and empty when the
+// series has no previous close to measure against, which is the honest answer for
+// a feed whose history does not reach back to the last close.
+func DayChangeFields(day AssetChartSeries) (change *string, basis, basisSymbol string) {
+	if day.PreviousCloseUsdcMicros == nil || len(day.Points) == 0 || day.Basis == "" {
+		return nil, "", ""
 	}
 	previous := *day.PreviousCloseUsdcMicros
 	latest := day.Points[len(day.Points)-1].PriceUsdcMicros
 	if previous <= 0 || latest <= 0 {
-		return nil
+		return nil, "", ""
 	}
-	change := formatDecimalRatio(float64(latest-previous) / float64(previous))
-	return &change
+	ratio := formatDecimalRatio(float64(latest-previous) / float64(previous))
+	return &ratio, day.Basis, strings.TrimSpace(day.BasisSymbol)
 }
 
 func formatDecimalRatio(ratio float64) string {
