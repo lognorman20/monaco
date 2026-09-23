@@ -13,11 +13,16 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/telemetry/telemetrytest"
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
 const (
-	testMint   = jupiter.AAPLxMint
-	testSymbol = "AAPLx"
+	testMint        = jupiter.AAPLxMint
+	testSymbol      = "AAPLx"
+	preIpoMint      = "TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v"
+	preIpoSymbol    = "tSpaceX"
+	jupiterPreIpo   = 774_000_000
+	preIpoLiquidity = 250_000.0
 )
 
 type fakeClock struct {
@@ -120,6 +125,24 @@ func testHolding() pyth.CostBasis {
 	return pyth.CostBasis{Symbol: testSymbol, Mint: testMint, Units: 100_000_000, Price: 200_000_000, Amount: 100_000_000}
 }
 
+func preIpoHolding() pyth.CostBasis {
+	return pyth.CostBasis{
+		Symbol:   preIpoSymbol,
+		Mint:     preIpoMint,
+		Units:    1_000_000_000,
+		Price:    500_000_000,
+		Amount:   1_000_000_000,
+		Decimals: 9,
+		Kind:     xstocks.AssetKindPreIPO,
+	}
+}
+
+func jupiterWithPreIpoPrice(micros int64, liquidity float64) jupiter.PriceClient {
+	client := jupiter.NewFakePriceClient()
+	jupiter.RegisterPrice(client, preIpoMint, jupiter.TokenPrice{PriceUsdcMicros: micros, LiquidityUsd: liquidity})
+	return client
+}
+
 func jupiterWithPrice(micros int64, liquidity float64) jupiter.PriceClient {
 	client := jupiter.NewFakePriceClient()
 	jupiter.RegisterPrice(client, testMint, jupiter.TokenPrice{PriceUsdcMicros: micros, LiquidityUsd: liquidity})
@@ -137,6 +160,82 @@ func markOne(t *testing.T, chain *Chain) pyth.MarkedHolding {
 	}
 	if input.TreasuryUsdc != 5 {
 		t.Fatalf("treasury usdc = %d, want 5", input.TreasuryUsdc)
+	}
+	return input.Holdings[0]
+}
+
+func TestChain_preIpoHolding_skipsPythAndMarksFromJupiter(t *testing.T) {
+	clock := newFakeClock()
+	source := &fakePythSource{mark: pyth.EquityMark{PriceUsdcMicros: 999_000_000, PublishedAt: clock.Now(), MarketOpen: true}}
+	jup := jupiterWithPreIpoPrice(jupiterPreIpo, preIpoLiquidity)
+	chain := New(source, jup, nil, testConfig(clock))
+
+	input, err := chain.MarkedPot(context.Background(), pyth.TreasuryRef{GroupID: "g1"}, []pyth.CostBasis{preIpoHolding()})
+	if err != nil {
+		t.Fatalf("MarkedPot: %v", err)
+	}
+	holding := input.Holdings[0]
+	if source.callCount() != 0 {
+		t.Fatalf("pyth called %d times, want 0 for pre-IPO", source.callCount())
+	}
+	if holding.MarkUsdc != jupiterPreIpo {
+		t.Fatalf("mark = %d, want jupiter %d", holding.MarkUsdc, jupiterPreIpo)
+	}
+	if holding.Source != pyth.MarkSourceJupiter {
+		t.Fatalf("source = %s, want jupiter", holding.Source)
+	}
+	if holding.AfterHours {
+		t.Fatal("pre-IPO holding must never be after-hours")
+	}
+	if input.AfterHours {
+		t.Fatal("pot AfterHours must be false when only pre-IPO is marked")
+	}
+}
+
+func TestChain_preIpoHolding_jupiterDown_fallsToCostBasisWithNineDecimals(t *testing.T) {
+	clock := newFakeClock()
+	source := &fakePythSource{mark: pyth.EquityMark{PriceUsdcMicros: 999_000_000, PublishedAt: clock.Now(), MarketOpen: true}}
+	jup := jupiter.NewFakePriceClient()
+	jupiter.RegisterPriceError(jup, errors.New("jupiter down"))
+	chain := New(source, jup, nil, testConfig(clock))
+
+	holding := markOnePreIpo(t, chain)
+	if source.callCount() != 0 {
+		t.Fatalf("pyth called %d times, want 0", source.callCount())
+	}
+	if holding.Source != pyth.MarkSourceCostBasis {
+		t.Fatalf("source = %s, want cost_basis", holding.Source)
+	}
+	if holding.MarkUsdc != 500_000_000 {
+		t.Fatalf("mark = %d, want $500/token from 9-decimal cost basis", holding.MarkUsdc)
+	}
+}
+
+func TestChartSeriesQuery_preIpo_doesNotCallPyth(t *testing.T) {
+	charts := &fakeCharts{}
+	chain := New(nil, nil, charts, DefaultConfig())
+
+	series, err := chain.ChartSeriesQuery(context.Background(), pyth.ChartQuery{
+		Symbol: preIpoSymbol,
+		Kind:   xstocks.AssetKindPreIPO,
+		Range:  pyth.ChartRange1D,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if charts.calls.Load() != 0 {
+		t.Fatalf("pyth chart calls = %d, want 0", charts.calls.Load())
+	}
+	if len(series.Points) != 0 || series.EmptyReason == "" {
+		t.Fatalf("series = %+v, want empty with a reason", series)
+	}
+}
+
+func markOnePreIpo(t *testing.T, chain *Chain) pyth.MarkedHolding {
+	t.Helper()
+	input, err := chain.MarkedPot(context.Background(), pyth.TreasuryRef{GroupID: "g1"}, []pyth.CostBasis{preIpoHolding()})
+	if err != nil {
+		t.Fatalf("MarkedPot: %v", err)
 	}
 	return input.Holdings[0]
 }

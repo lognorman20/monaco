@@ -15,6 +15,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -39,6 +40,7 @@ type Config struct {
 	// FailureCooldown keeps a source closed after an outage-style failure.
 	FailureCooldown time.Duration
 	// MinLiquidityUsd rejects a Jupiter price backed by a pool thin enough to push around.
+	// Tessera pre-IPO pools measured $120k–$520k on 2026-09-22; the floor stays $10k.
 	MinLiquidityUsd float64
 	// MaxDeviationBps rejects a Jupiter price this far from the last accepted market mark.
 	MaxDeviationBps int64
@@ -177,7 +179,7 @@ func (c *Chain) markHolding(ctx context.Context, treasury pyth.TreasuryRef, hold
 		Kind:      holding.Kind,
 	}
 
-	mark := c.marketMark(ctx, holding.Symbol, holding.Mint)
+	mark := c.marketMark(ctx, holding.Symbol, holding.Mint, holding.Kind)
 	if mark.ok && mark.source == pyth.MarkSourceJupiter {
 		if err := c.checkAgainstCostBasis(mark.priceMicros, holding); err != nil {
 			c.warn("cost-basis-bound:"+markKey(holding.Symbol, holding.Mint), "jupiter price rejected against cost basis",
@@ -188,6 +190,9 @@ func (c *Chain) markHolding(ctx context.Context, treasury pyth.TreasuryRef, hold
 	if mark.ok {
 		out.MarkUsdc = mark.priceMicros
 		out.AfterHours = mark.afterHours
+		if holding.Kind == xstocks.AssetKindPreIPO {
+			out.AfterHours = false
+		}
 		out.Source = mark.source
 		return out, nil
 	}
@@ -206,7 +211,7 @@ func (c *Chain) markHolding(ctx context.Context, treasury pyth.TreasuryRef, hold
 
 // marketMark returns the shared live mark for a holding, resolving it at most once per
 // MarkTTL no matter how many callers ask concurrently.
-func (c *Chain) marketMark(ctx context.Context, symbol, mint string) marketMark {
+func (c *Chain) marketMark(ctx context.Context, symbol, mint string, kind xstocks.AssetKind) marketMark {
 	key := markKey(symbol, mint)
 	if mark, ok := c.cachedMark(key); ok {
 		return mark
@@ -219,7 +224,7 @@ func (c *Chain) marketMark(ctx context.Context, symbol, mint string) marketMark 
 		// callers sharing this resolution.
 		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.cfg.FetchTimeout)
 		defer cancel()
-		mark := c.resolveMarketMark(fetchCtx, symbol, mint)
+		mark := c.resolveMarketMark(fetchCtx, symbol, mint, kind)
 		mark.fetchedAt = c.cfg.Now()
 		c.mu.Lock()
 		c.marks[key] = mark
@@ -242,10 +247,12 @@ func (c *Chain) cachedMark(key string) (marketMark, bool) {
 	return mark, true
 }
 
-func (c *Chain) resolveMarketMark(ctx context.Context, symbol, mint string) marketMark {
-	if mark, ok := c.pythMark(ctx, symbol); ok {
-		slog.Info("price chain mark", "symbol", symbol, "mint", mint, "source", mark.source, "price_usdc_micros", mark.priceMicros)
-		return mark
+func (c *Chain) resolveMarketMark(ctx context.Context, symbol, mint string, kind xstocks.AssetKind) marketMark {
+	if kind != xstocks.AssetKindPreIPO {
+		if mark, ok := c.pythMark(ctx, symbol); ok {
+			slog.Info("price chain mark", "symbol", symbol, "mint", mint, "source", mark.source, "price_usdc_micros", mark.priceMicros)
+			return mark
+		}
 	}
 	if mark, ok := c.jupiterMark(ctx, symbol, mint); ok {
 		slog.Info("price chain mark", "symbol", symbol, "mint", mint, "source", mark.source, "price_usdc_micros", mark.priceMicros)
@@ -395,15 +402,22 @@ func (c *Chain) AssetMark(ctx context.Context, symbol string) (pyth.AssetMark, e
 	return c.charts.AssetMark(ctx, symbol)
 }
 
-// ChartSeries serves Pyth price history. Hermes samples a chart with one request per
-// point and reports a denied feed as an empty series, so the chain first confirms the
-// feed is entitled (one shared, breaker-guarded mark lookup) instead of letting every
-// chart load fire 25-31 requests that are all going to be refused.
+// ChartSeries serves Pyth price history for stocks. Pre-IPO history uses ChartSeriesQuery.
 func (c *Chain) ChartSeries(ctx context.Context, symbol string, chartRange pyth.ChartRange) (pyth.AssetChartSeries, error) {
+	return c.ChartSeriesQuery(ctx, pyth.ChartQuery{Symbol: symbol, Range: chartRange})
+}
+
+// ChartSeriesQuery serves price history when the caller knows the asset kind.
+func (c *Chain) ChartSeriesQuery(ctx context.Context, q pyth.ChartQuery) (pyth.AssetChartSeries, error) {
 	unavailable := pyth.AssetChartSeries{EmptyReason: "price history unavailable"}
+	if q.Kind == xstocks.AssetKindPreIPO {
+		return unavailable, nil
+	}
 	if c.charts == nil {
 		return unavailable, nil
 	}
+	symbol := q.Symbol
+	chartRange := q.Range
 	cacheKey := normalizeSymbol(symbol) + "|" + string(chartRange)
 	if series, ok := c.cachedChart(cacheKey); ok {
 		return series, nil

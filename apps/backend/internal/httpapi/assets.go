@@ -196,7 +196,8 @@ func (h *AssetsHandlers) GetAssetChartHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if _, found, err := h.lookupAsset(ctx, symbol); err != nil {
+	asset, found, err := h.lookupAsset(ctx, symbol)
+	if err != nil {
 		logJSONError(ctx, log, "asset_lookup_failed", w, http.StatusInternalServerError, "internal server error", "symbol", symbol, "err", err.Error())
 		return
 	} else if !found {
@@ -206,7 +207,11 @@ func (h *AssetsHandlers) GetAssetChartHandler(w http.ResponseWriter, r *http.Req
 
 	var series pyth.AssetChartSeries
 	if h.Pyth != nil {
-		series, err = h.Pyth.ChartSeries(ctx, symbol, chartRange)
+		series, err = chartSeries(ctx, h.Pyth, pyth.ChartQuery{
+			Symbol: symbol,
+			Kind:   asset.Normalize().Kind,
+			Range:  chartRange,
+		})
 		if err != nil {
 			logJSONError(ctx, log, "chart_failed", w, http.StatusInternalServerError, "internal server error", "symbol", symbol, "err", err.Error())
 			return
@@ -245,6 +250,15 @@ func (h *AssetsHandlers) authorizeUser(ctx context.Context, accessToken string) 
 		return "", app.ErrUserNotFound
 	}
 	return user.ID, nil
+}
+
+func chartSeries(ctx context.Context, client pyth.AssetPriceClient, q pyth.ChartQuery) (pyth.AssetChartSeries, error) {
+	if querier, ok := client.(interface {
+		ChartSeriesQuery(context.Context, pyth.ChartQuery) (pyth.AssetChartSeries, error)
+	}); ok {
+		return querier.ChartSeriesQuery(ctx, q)
+	}
+	return client.ChartSeries(ctx, q.Symbol, q.Range)
 }
 
 func (h *AssetsHandlers) lookupAsset(ctx context.Context, symbol string) (xstocks.CatalogAsset, bool, error) {
