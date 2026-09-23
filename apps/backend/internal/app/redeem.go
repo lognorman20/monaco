@@ -506,7 +506,7 @@ func (r *RedeemService) sellRedeemShortfall(ctx context.Context, view *RedeemJob
 	shortfall := owed - cash
 
 	for _, holding := range holdings {
-		sellAmount := jupiter.RedeemShortfallSellAmount(holding.Amount, shortfall, stockValue)
+		sellAmount := jupiter.RedeemShortfallSellAmount(holding.Amount, shortfall, stockValue, jupiter.RedeemSellSlippageBufferBps)
 		if sellAmount <= 0 {
 			continue
 		}
