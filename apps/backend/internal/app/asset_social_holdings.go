@@ -187,8 +187,13 @@ func (h *HomeService) holdingsOfSymbol(
 //
 // Every cabal holding the same stock is asking the price source the same question, so
 // it is asked once. A token with no usable mark is absent from the map and each cabal
-// falls back to its own cost basis, independently: one denied feed must not drag
-// every cabal's number to cost.
+// then carries its holding at its own cost basis.
+//
+// This card is about one symbol, so in practice there is one feed behind the whole
+// map: marks.Client fails the batch if any symbol fails, and when it does every
+// cabal falls back together. That is the same thing the group screens do with a
+// mark they could not read, and it is why the fallback is per cabal rather than a
+// single shared number -- each cabal paid its own price.
 //
 // The treasury reference is deliberately empty. marks.Client reads a treasury's
 // on-chain USDC balance when it is given an address, and this card never shows a
