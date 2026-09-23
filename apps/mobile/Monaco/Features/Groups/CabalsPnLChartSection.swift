@@ -420,7 +420,7 @@ extension ChartContent {
             position: .trailing,
             alignment: .leading,
             spacing: 4,
-            overflowResolution: .init(x: .fitToChart, y: .fitToChart)
+            overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))
         ) {
             Text(line.name)
                 .font(MonacoTheme.Typo.micro)
