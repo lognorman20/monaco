@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
 // GroupHandlers serves group HTTP routes.
@@ -18,6 +20,8 @@ type GroupHandlers struct {
 	Governance *app.GovernanceService
 	Home       *app.HomeService
 	Redeem     *app.RedeemService
+	Catalog    xstocks.CatalogSearcher
+	Price      jupiter.PriceClient
 }
 
 type joinPolicyRequest struct {
@@ -376,13 +380,16 @@ func (h *GroupHandlers) GetGroupHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 type groupViewPotRowResponse struct {
-	Symbol      string `json:"symbol"`
-	Units       string `json:"units"`
-	MarkUsd     string `json:"markUsd"`
-	ValueUsd    string `json:"valueUsd"`
-	DollarPnL   string `json:"dollarPnl"`
-	AfterHours  *bool  `json:"afterHours"`
-	TokenAmount string `json:"tokenAmount,omitempty"`
+	Symbol        string `json:"symbol"`
+	Units         string `json:"units"`
+	MarkUsd       string `json:"markUsd"`
+	ValueUsd      string `json:"valueUsd"`
+	DollarPnL     string `json:"dollarPnl"`
+	AfterHours    *bool  `json:"afterHours"`
+	TokenAmount   string `json:"tokenAmount,omitempty"`
+	TokenDecimals int    `json:"tokenDecimals,omitempty"`
+	AssetKind     string `json:"assetKind,omitempty"`
+	PremiumBps    *int   `json:"premiumBps,omitempty"`
 }
 
 type groupViewMemberSliceResponse struct {
@@ -455,15 +462,7 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 
 	pot := make([]groupViewPotRowResponse, 0, len(result.Pot))
 	for _, row := range result.Pot {
-		pot = append(pot, groupViewPotRowResponse{
-			Symbol:      row.Symbol,
-			Units:       row.Units,
-			MarkUsd:     row.MarkUsd,
-			ValueUsd:    row.ValueUsd,
-			DollarPnL:   row.DollarPnL,
-			AfterHours:  row.AfterHours,
-			TokenAmount: row.TokenAmount,
-		})
+		pot = append(pot, h.enrichPotRow(ctx, row))
 	}
 	members := make([]groupViewMemberRowResponse, 0, len(result.Members))
 	for _, row := range result.Members {
@@ -527,6 +526,8 @@ type groupActivityItemResponse struct {
 	TxSignature        string `json:"txSignature,omitempty"`
 	InitiatedBy        string `json:"initiatedBy,omitempty"`
 	AgentDisplayName   string `json:"agentDisplayName,omitempty"`
+	TokenDecimals      int    `json:"tokenDecimals,omitempty"`
+	AssetKind          string `json:"assetKind,omitempty"`
 }
 
 type groupActivityResponse struct {
@@ -582,6 +583,12 @@ func (h *GroupHandlers) ListGroupActivityHandler(w http.ResponseWriter, r *http.
 		}
 		if item.ProceedsUsdcMicros > 0 {
 			resp.ProceedsUsdcMicros = strconv.FormatInt(item.ProceedsUsdcMicros, 10)
+		}
+		if item.Symbol != "" && item.Symbol != "USDC" {
+			resp.AssetKind = assetKindForSymbol(ctx, h.Catalog, item.Symbol)
+			if asset, ok := lookupCatalogAssetBySymbol(ctx, h.Catalog, item.Symbol); ok {
+				resp.TokenDecimals = asset.Decimals
+			}
 		}
 		respItems = append(respItems, resp)
 	}

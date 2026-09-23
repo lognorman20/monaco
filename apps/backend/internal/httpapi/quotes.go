@@ -22,6 +22,7 @@ type QuoteHandlers struct {
 	Privy      privy.Client
 	Buy        *app.BuyService
 	Governance *app.GovernanceService
+	Price      jupiter.PriceClient
 }
 
 type quoteRequest struct {
@@ -40,6 +41,10 @@ type quoteResponse struct {
 	OutputAmount     string `json:"outputAmount,omitempty"`
 	OutputUsdcMicros string `json:"outputUsdcMicros,omitempty"`
 	PriceUsdcMicros  string `json:"priceUsdcMicros,omitempty"`
+	TokenDecimals    int    `json:"tokenDecimals,omitempty"`
+	PremiumBps       *int   `json:"premiumBps,omitempty"`
+	// AssetKind is stock or pre_ipo. Kind stays buy/sell.
+	AssetKind string `json:"assetKind,omitempty"`
 }
 
 // ProposalQuoteInput is the quote gate input shared with proposal create (M4-T13).
@@ -216,14 +221,25 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	n := asset.Normalize()
 	resp := quoteResponse{
-		Symbol:       req.Symbol,
-		USDCMicros:   strconv.FormatInt(req.USDC, 10),
-		Routable:     result.Quote.Routable,
-		OutputAmount: strings.TrimSpace(result.Quote.OutAmount),
+		Symbol:        req.Symbol,
+		USDCMicros:    strconv.FormatInt(req.USDC, 10),
+		Routable:      result.Quote.Routable,
+		OutputAmount:  strings.TrimSpace(result.Quote.OutAmount),
+		TokenDecimals: n.Decimals,
+		AssetKind:     string(n.Kind),
 	}
-	if price, ok := quotePriceUsdcMicros(req.USDC, resp.OutputAmount, asset.Decimals); ok {
+	if price, ok := quotePriceUsdcMicros(req.USDC, resp.OutputAmount, n.Decimals); ok {
 		resp.PriceUsdcMicros = strconv.FormatInt(price, 10)
+	}
+	if h.Price != nil {
+		if prices, err := h.Price.Prices(ctx, []string{n.SolanaMint}); err == nil {
+			if p, ok := prices[n.SolanaMint]; ok {
+				fields := catalogJSONFields(n, &p, 0)
+				resp.PremiumBps = fields.PremiumBps
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

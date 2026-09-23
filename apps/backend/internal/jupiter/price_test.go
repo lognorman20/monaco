@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHTTPPriceClient_Prices_sendsIDsAndAPIKey(t *testing.T) {
@@ -65,6 +66,34 @@ func TestHTTPPriceClient_Prices_noAPIKey_omitsHeader(t *testing.T) {
 	}
 	if sawHeader {
 		t.Fatal("expected no x-api-key header when apiKey is empty")
+	}
+}
+
+func TestHTTPPriceClient_Prices_parsesStockData(t *testing.T) {
+	t.Parallel()
+
+	updated := time.Now().UTC().Unix()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"mint1": {
+				"usdPrice": 562,
+				"stockData": {"price": 774, "mcap": 2030000000000, "updatedAt": ` + fmt.Sprintf("%d", updated) + `}
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewHTTPPriceClientWithBaseURL(server.URL, server.Client(), "")
+	prices, err := client.Prices(context.Background(), []string{"mint1"})
+	if err != nil {
+		t.Fatalf("Prices: %v", err)
+	}
+	price, ok := prices["mint1"]
+	if !ok || price.StockData == nil {
+		t.Fatal("expected stockData on price")
+	}
+	if price.StockData.Price != 774 || price.PriceUsdcMicros != 562_000_000 {
+		t.Fatalf("price = %+v", price)
 	}
 }
 
