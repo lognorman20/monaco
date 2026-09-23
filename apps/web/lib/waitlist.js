@@ -1,4 +1,5 @@
-// Waitlist signup: validation, abuse limits, and the Supabase write.
+// Waitlist signup: validation and origin checks here; the rate limit and write
+// happen atomically in the join_waitlist() database function.
 // Pure logic with injected fetch/env/clock so every unhappy path is testable.
 
 import { createHash } from "node:crypto";
@@ -6,7 +7,6 @@ import { createHash } from "node:crypto";
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const MAX_EMAIL = 254;
 const MAX_SOURCE = 64;
-const RATE_LIMIT_PER_HOUR = 5;
 const DEFAULT_ORIGINS = ["https://trymonaco.xyz", "https://www.trymonaco.xyz"];
 
 export function allowedOrigins(env) {
@@ -32,39 +32,28 @@ export function hashIp(ip, salt) {
 }
 
 function supabaseHeaders(env, extra = {}) {
+  // Anon (publishable) key only. It can call join_waitlist() and nothing else useful.
   return {
-    apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-    Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+    apikey: env.SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${env.SUPABASE_ANON_KEY}`,
+    "Content-Type": "application/json",
     ...extra,
   };
 }
 
-async function recentSignups({ fetch, env, ipHash, since }) {
-  const url = `${env.SUPABASE_URL}/rest/v1/waitlist?select=id&ip_hash=eq.${ipHash}&created_at=gte.${encodeURIComponent(since.toISOString())}`;
-  const res = await fetch(url, {
-    method: "GET",
-    headers: supabaseHeaders(env, { Prefer: "count=exact", Range: "0-0" }),
-  });
-  if (!res.ok && res.status !== 416) throw new Error(`rate-limit lookup failed: ${res.status}`);
-  const range = res.headers.get("content-range") || "*/0";
-  const total = Number(range.split("/")[1]);
-  return Number.isFinite(total) ? total : 0;
-}
-
-async function insertSignup({ fetch, env, row }) {
-  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/waitlist?on_conflict=email`, {
+async function rpc({ fetch, env, name, args, timeoutMs = 5000 }) {
+  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/${name}`, {
     method: "POST",
-    headers: supabaseHeaders(env, {
-      "Content-Type": "application/json",
-      Prefer: "resolution=ignore-duplicates,return=minimal",
-    }),
-    body: JSON.stringify(row),
+    headers: supabaseHeaders(env),
+    body: JSON.stringify(args),
+    signal: AbortSignal.timeout(timeoutMs),
   });
-  if (!res.ok) throw new Error(`insert failed: ${res.status}`);
+  if (!res.ok) throw new Error(`rpc ${name} failed: ${res.status}`);
+  return res.json();
 }
 
 // Returns { status, body } for the HTTP layer to send.
-export async function handleSignup({ method, headers, body, env, fetch, now = () => new Date(), log = console }) {
+export async function handleSignup({ method, headers, body, env, fetch, log = console }) {
   if (method !== "POST") return { status: 405, body: { error: "Use POST." } };
 
   const origin = headers.origin;
@@ -72,7 +61,7 @@ export async function handleSignup({ method, headers, body, env, fetch, now = ()
     return { status: 403, body: { error: "Signups are only accepted from trymonaco.xyz." } };
   }
 
-  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY || !env.IP_HASH_SALT) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY || !env.WAITLIST_WRITER_SECRET || !env.IP_HASH_SALT) {
     log.error(JSON.stringify({ event: "waitlist_misconfigured" }));
     return { status: 500, body: { error: "Waitlist is not configured." } };
   }
@@ -96,17 +85,26 @@ export async function handleSignup({ method, headers, body, env, fetch, now = ()
   const ua = typeof headers["user-agent"] === "string" ? headers["user-agent"].slice(0, 256) : null;
   const ipHash = hashIp(clientIp(headers), env.IP_HASH_SALT);
 
+  let result;
   try {
-    const since = new Date(now().getTime() - 60 * 60 * 1000);
-    const count = await recentSignups({ fetch, env, ipHash, since });
-    if (count >= RATE_LIMIT_PER_HOUR) {
-      log.warn(JSON.stringify({ event: "waitlist_rate_limited", ipHash: ipHash.slice(0, 12) }));
-      return { status: 429, body: { error: "Too many signups from this network. Try again in an hour." } };
-    }
-    await insertSignup({ fetch, env, row: { email, source: source || null, ip_hash: ipHash, user_agent: ua } });
+    result = await rpc({
+      fetch, env, name: "join_waitlist",
+      args: { p_secret: env.WAITLIST_WRITER_SECRET, p_email: email, p_source: source || null, p_ip_hash: ipHash, p_user_agent: ua },
+    });
   } catch (err) {
     log.error(JSON.stringify({ event: "waitlist_store_failed", message: String(err && err.message || err) }));
     return { status: 502, body: { error: "The waitlist is having trouble right now. Try again in a minute." } };
+  }
+
+  if (result === "rate_limited") {
+    log.warn(JSON.stringify({ event: "waitlist_rate_limited", ipHash: ipHash.slice(0, 12) }));
+    return { status: 429, body: { error: "Too many signups from this network. Try again in an hour." } };
+  }
+  if (result === "invalid_email") return { status: 400, body: { error: "Enter a valid email, like you@email.com." } };
+  if (result !== "ok") {
+    // forbidden or not_configured: our secret or the database setup is wrong, not the visitor.
+    log.error(JSON.stringify({ event: "waitlist_rejected_by_db", result }));
+    return { status: 500, body: { error: "The waitlist is having trouble right now. Try again in a minute." } };
   }
 
   log.info(JSON.stringify({ event: "waitlist_signup", source: source || null }));
@@ -115,18 +113,19 @@ export async function handleSignup({ method, headers, body, env, fetch, now = ()
 }
 
 export async function checkHealth({ env, fetch }) {
-  const deps = { supabase: "unconfigured" };
-  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
+  const deps = {
+    supabase: "unconfigured",
+    writerSecret: env.WAITLIST_WRITER_SECRET ? "ok" : "missing",
+    ipHashSalt: env.IP_HASH_SALT ? "ok" : "missing",
+  };
+  if (env.SUPABASE_URL && env.SUPABASE_ANON_KEY) {
     try {
-      const res = await fetch(`${env.SUPABASE_URL}/rest/v1/waitlist?select=id&limit=1`, {
-        headers: supabaseHeaders(env),
-        signal: AbortSignal.timeout(3000),
-      });
-      deps.supabase = res.ok ? "ok" : `error ${res.status}`;
+      const ready = await rpc({ fetch, env, name: "waitlist_ready", args: {}, timeoutMs: 3000 });
+      deps.supabase = ready === true ? "ok" : "secret not set in database";
     } catch (err) {
       deps.supabase = "unreachable";
     }
   }
-  const ok = deps.supabase === "ok" && Boolean(env.IP_HASH_SALT);
-  return { status: ok ? 200 : 503, body: { status: ok ? "ok" : "degraded", dependencies: { ...deps, ipHashSalt: env.IP_HASH_SALT ? "ok" : "missing" } } };
+  const ok = Object.values(deps).every((v) => v === "ok");
+  return { status: ok ? 200 : 503, body: { status: ok ? "ok" : "degraded", dependencies: deps } };
 }
