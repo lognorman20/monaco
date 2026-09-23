@@ -194,8 +194,15 @@ struct AssetDetailModelTests {
     }
 
     /// The bug: the header always showed the 24h move, unlabelled, under a 1W or 1M curve.
+    ///
+    /// The curve is the token's here so the dollar leg is a figure this screen is allowed
+    /// to show: the hero is the token's mark, and dollars are only shown when the curve is
+    /// in that same unit. The window and its label are what this test is about, and they
+    /// do not depend on the basis.
     @Test func theHeaderFigureMeasuresTheWindowTheCurveDraws() async throws {
         let source = StubAssetDetailDataSource()
+        source.basis = .token
+        source.basisSymbol = "AAPLc"
         source.points[.oneWeek] = StubAssetDetailDataSource.series(from: 100, to: 110)
         let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
         model.range = .oneWeek

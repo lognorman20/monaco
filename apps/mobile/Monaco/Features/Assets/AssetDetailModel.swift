@@ -255,7 +255,7 @@ final class AssetDetailModel {
     /// presence rather than its value is how the chip came to claim a market the same
     /// payload had already priced at nothing. `routesBothWays` asks for a positive sell.
     private var tokenRoutesBothWays: Bool {
-        detail?.liquidity?.routesBothWays ?? false
+        detail?.liquidity.routesBothWays ?? false
     }
 
     /// True while the exchange behind the curve is still printing. The chart's
