@@ -12,6 +12,7 @@ const (
 	UpstreamPrivy     = "privy"
 	UpstreamSolanaRPC = "solana_rpc"
 	UpstreamXStocks   = "xstocks"
+	UpstreamTessera   = "tessera"
 	UpstreamFlash     = "flash"
 	UpstreamSupabase  = "supabase_storage"
 )
