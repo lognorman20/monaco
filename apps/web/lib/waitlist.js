@@ -32,7 +32,7 @@ export function hashIp(ip, salt) {
 }
 
 function supabaseHeaders(env, extra = {}) {
-  // Anon (publishable) key only. It can call join_waitlist() and nothing else useful.
+  // Anon (publishable) key only. It can call join_waitlist() and nothing else.
   return {
     apikey: env.SUPABASE_ANON_KEY,
     Authorization: `Bearer ${env.SUPABASE_ANON_KEY}`,
@@ -61,7 +61,7 @@ export async function handleSignup({ method, headers, body, env, fetch, log = co
     return { status: 403, body: { error: "Signups are only accepted from trymonaco.xyz." } };
   }
 
-  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY || !env.WAITLIST_WRITER_SECRET || !env.IP_HASH_SALT) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY || !env.IP_HASH_SALT) {
     log.error(JSON.stringify({ event: "waitlist_misconfigured" }));
     return { status: 500, body: { error: "Waitlist is not configured." } };
   }
@@ -89,7 +89,7 @@ export async function handleSignup({ method, headers, body, env, fetch, log = co
   try {
     result = await rpc({
       fetch, env, name: "join_waitlist",
-      args: { p_secret: env.WAITLIST_WRITER_SECRET, p_email: email, p_source: source || null, p_ip_hash: ipHash, p_user_agent: ua },
+      args: { p_email: email, p_source: source || null, p_ip_hash: ipHash, p_user_agent: ua },
     });
   } catch (err) {
     log.error(JSON.stringify({ event: "waitlist_store_failed", message: String(err && err.message || err) }));
@@ -100,9 +100,13 @@ export async function handleSignup({ method, headers, body, env, fetch, log = co
     log.warn(JSON.stringify({ event: "waitlist_rate_limited", ipHash: ipHash.slice(0, 12) }));
     return { status: 429, body: { error: "Too many signups from this network. Try again in an hour." } };
   }
+  if (result === "busy") {
+    log.warn(JSON.stringify({ event: "waitlist_global_limit" }));
+    return { status: 503, body: { error: "Lots of people are signing up right now. Try again in a minute." } };
+  }
   if (result === "invalid_email") return { status: 400, body: { error: "Enter a valid email, like you@email.com." } };
   if (result !== "ok") {
-    // forbidden or not_configured: our secret or the database setup is wrong, not the visitor.
+    // invalid_request or anything unexpected: our request or the database is wrong, not the visitor.
     log.error(JSON.stringify({ event: "waitlist_rejected_by_db", result }));
     return { status: 500, body: { error: "The waitlist is having trouble right now. Try again in a minute." } };
   }
@@ -115,13 +119,12 @@ export async function handleSignup({ method, headers, body, env, fetch, log = co
 export async function checkHealth({ env, fetch }) {
   const deps = {
     supabase: "unconfigured",
-    writerSecret: env.WAITLIST_WRITER_SECRET ? "ok" : "missing",
     ipHashSalt: env.IP_HASH_SALT ? "ok" : "missing",
   };
   if (env.SUPABASE_URL && env.SUPABASE_ANON_KEY) {
     try {
       const ready = await rpc({ fetch, env, name: "waitlist_ready", args: {}, timeoutMs: 3000 });
-      deps.supabase = ready === true ? "ok" : "secret not set in database";
+      deps.supabase = ready === true ? "ok" : "waitlist table missing";
     } catch (err) {
       deps.supabase = "unreachable";
     }
