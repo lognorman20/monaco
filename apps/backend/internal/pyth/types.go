@@ -63,9 +63,20 @@ type NavInput struct {
 	AfterHours   bool
 }
 
-// PotAfterHours reports whether any holding uses a frozen equity mark.
+// ChartQuery selects asset price history. Empty Kind uses the stock (Pyth) path.
+type ChartQuery struct {
+	Symbol string
+	Range  ChartRange
+	Kind   xstocks.AssetKind
+}
+
+// PotAfterHours reports whether any stock holding uses a frozen equity mark.
+// Pre-IPO tokens trade around the clock and are excluded from the pot flag.
 func PotAfterHours(holdings []MarkedHolding) bool {
 	for _, holding := range holdings {
+		if holding.Kind == xstocks.AssetKindPreIPO {
+			continue
+		}
 		if holding.AfterHours {
 			return true
 		}
