@@ -35,6 +35,14 @@ type Wallet struct {
 	SolanaAddress string
 }
 
+// AssetKind mirrors catalog kind for swap sizing (stock vs pre-IPO).
+type AssetKind string
+
+const (
+	AssetKindStock  AssetKind = "stock"
+	AssetKindPreIPO AssetKind = "pre_ipo"
+)
+
 // Request describes one treasury swap. Amount is in atomic units of InputMint.
 type Request struct {
 	GroupID        string
@@ -45,6 +53,8 @@ type Request struct {
 	OutputMint     string
 	InputDecimals  int
 	OutputDecimals int
+	Kind           AssetKind
+	TransferFeeBps int
 	Amount         int64
 	Wallet         Wallet
 }
@@ -56,6 +66,10 @@ type Submission struct {
 	// Receipt is provider-private state AwaitFill needs to poll (opaque to callers).
 	Receipt string
 	Request Request
+	// QuotedOutputAmount is the Jupiter order outAmount for buys.
+	QuotedOutputAmount int64
+	// QuotedInputAmount is the Jupiter order inAmount for sells.
+	QuotedInputAmount int64
 }
 
 // Fill is the terminal result of a swap. Amounts are atomic units of the input and output mints.
@@ -68,6 +82,10 @@ type Fill struct {
 	Code         int
 	InputAmount  int64
 	OutputAmount int64
+	// QuotedOutputAmount is the Jupiter order outAmount (buy) before slippage lands.
+	QuotedOutputAmount int64
+	// QuotedInputAmount is the Jupiter order inAmount (sell) the venue quoted.
+	QuotedInputAmount int64
 }
 
 // PollConfig controls how long AwaitFill polls. The zero value means provider default.

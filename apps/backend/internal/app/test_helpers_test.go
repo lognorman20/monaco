@@ -76,8 +76,9 @@ func integrationApp(t *testing.T) integrationHarness {
 	pythClient := pyth.NewFakeClient()
 	jupiterClient := jupiter.NewFakeClient()
 	xstocksResolver := xstocks.NewFakeResolver()
-	buy := NewBuyService(jupiterClient, xstocksResolver)
 	catalog := xstocks.NewFakeCatalogSearcher()
+	buy := NewBuyService(jupiterClient, xstocksResolver)
+	buy.SetMintCatalog(catalog)
 	xstocks.RegisterCatalogAsset(catalog, xstocks.CatalogAsset{
 		Symbol:     "AAPLx",
 		Name:       "Apple",

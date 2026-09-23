@@ -66,6 +66,18 @@ func (s *BuyService) SetMintCatalog(catalog MintCatalog) {
 	s.catalog = catalog
 }
 
+// LookupAssetByMint resolves a mint to a catalog row for sell sizing and decimals.
+func (s *BuyService) LookupAssetByMint(ctx context.Context, mint string) (xstocks.CatalogAsset, bool) {
+	if s == nil || s.catalog == nil || strings.TrimSpace(mint) == "" {
+		return xstocks.CatalogAsset{}, false
+	}
+	asset, found, err := s.catalog.LookupByMint(ctx, mint)
+	if err != nil || !found {
+		return xstocks.CatalogAsset{}, false
+	}
+	return asset.Normalize(), true
+}
+
 // JupiterCatalogRoutabilityProber probes Jupiter for USDC→xStock routes during catalog ranking.
 type JupiterCatalogRoutabilityProber struct {
 	jupiter jupiter.Client

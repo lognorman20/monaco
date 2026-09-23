@@ -731,12 +731,15 @@ RETURNING ` + transactionSelectColumns
 }
 
 func (s *Store) confirmPendingBuyTransaction(ctx context.Context, transactionID string, params ConfirmBuyTransactionParams) (TransactionRow, bool, error) {
+	tokenDecimals := normalizeTokenDecimals(params.TokenDecimals)
+
 	const updateSQL = `
 UPDATE transactions
 SET status = 'confirmed',
     tx_signature = $2,
     cost_basis_price = $3,
     cost_basis_amount = $4,
+    token_decimals = $5,
     confirmed_at = now()
 WHERE id = $1 AND status = 'pending'
 RETURNING ` + transactionSelectColumns
@@ -748,6 +751,7 @@ RETURNING ` + transactionSelectColumns
 		params.TxSignature,
 		params.CostBasisPrice,
 		params.CostBasisAmount,
+		tokenDecimals,
 	))
 	if err != nil {
 		return TransactionRow{}, false, fmt.Errorf("confirm pending buy transaction: %w", err)
@@ -756,12 +760,15 @@ RETURNING ` + transactionSelectColumns
 }
 
 func (s *Store) confirmPendingSellTransaction(ctx context.Context, transactionID string, params ConfirmSellTransactionParams) (TransactionRow, bool, error) {
+	tokenDecimals := normalizeTokenDecimals(params.TokenDecimals)
+
 	const updateSQL = `
 UPDATE transactions
 SET status = 'confirmed',
     tx_signature = $2,
     cost_basis_price = $3,
     cost_basis_amount = $4,
+    token_decimals = $5,
     confirmed_at = now()
 WHERE id = $1 AND status = 'pending'
 RETURNING ` + transactionSelectColumns
@@ -773,9 +780,30 @@ RETURNING ` + transactionSelectColumns
 		params.TxSignature,
 		params.ProceedsUSDC,
 		params.ProceedsUSDC,
+		tokenDecimals,
 	))
 	if err != nil {
 		return TransactionRow{}, false, fmt.Errorf("confirm pending sell transaction: %w", err)
 	}
 	return row, true, nil
+}
+
+// MaxTokenDecimalsForGroupMint returns the largest token_decimals recorded for mint in the group.
+func (s *Store) MaxTokenDecimalsForGroupMint(ctx context.Context, groupID, mint string) (int, bool, error) {
+	if groupID == "" || mint == "" {
+		return 0, false, fmt.Errorf("group_id and mint are required")
+	}
+	const selectSQL = `
+SELECT COALESCE(MAX(token_decimals), 0)
+FROM transactions
+WHERE group_id = $1 AND status = 'confirmed' AND (input_mint = $2 OR output_mint = $2)`
+
+	var decimals int
+	if err := s.db.QueryRowContext(ctx, selectSQL, groupID, mint).Scan(&decimals); err != nil {
+		return 0, false, fmt.Errorf("max token decimals for mint: %w", err)
+	}
+	if decimals <= 0 {
+		return 0, false, nil
+	}
+	return decimals, true, nil
 }
