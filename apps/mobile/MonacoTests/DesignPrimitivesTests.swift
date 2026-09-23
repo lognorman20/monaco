@@ -91,6 +91,44 @@ struct AmountEntryTextTests {
         #expect(AmountEntryText.plain(Decimal(string: "12.50")!) == "12.5")
         #expect(AmountEntryText.roundDownToCents(Decimal(string: "548.209")!) == Decimal(string: "548.2")!)
     }
+
+    /// The figure over the pad renders "$1,250.50", so that is what comes back on a paste.
+    /// Reading every comma as a decimal point turned it into $1.25.
+    @Test(arguments: [
+        ("1,250.50", "1250.50"),
+        ("$1,250.50", "1250.50"),
+        ("1,250", "1250"),
+        ("1,250,000", "1250000"),
+        // Both separators present: the one that comes last is the decimal point.
+        ("1.250,50", "1250.50"),
+    ])
+    func pastedGroupingKeepsItsValue(raw: String, expected: String) {
+        #expect(AmountEntryText.sanitize(raw) == expected)
+    }
+
+    /// A decimal pad in a comma-decimal locale types a comma. One comma that cannot be grouping
+    /// still reads as a decimal point.
+    @Test(arguments: [("12,", "12."), ("12,5", "12.5"), ("12,50", "12.50")])
+    func typedCommaIsStillADecimalPoint(raw: String, expected: String) {
+        #expect(AmountEntryText.sanitize(raw) == expected)
+    }
+
+    /// Commas that are not in the shape of grouping separators are decimal-point attempts — a
+    /// double tap on a comma-decimal pad — and the extras are dropped exactly as extra dots are.
+    /// Reading them as grouping instead made "1,250,5" into 12505, a hundredfold error.
+    @Test(arguments: [("1,2,5", "1.25"), ("1,250,5", "1.25"), ("12,,5", "12.5"), ("1234,567", "1234.56")])
+    func strayCommasReadLikeStrayDots(raw: String, expected: String) {
+        #expect(AmountEntryText.sanitize(raw) == expected)
+    }
+
+    /// One conversion for Add money, Cash out and Withdraw, which each carried their own copy.
+    @Test func microsRoundsToTheNearestMicro() {
+        #expect(AmountEntryText.micros("12.34") == 12_340_000)
+        #expect(AmountEntryText.micros("0.10") == 100_000)
+        #expect(AmountEntryText.micros("1250.50") == 1_250_500_000)
+        #expect(AmountEntryText.micros("") == nil)
+        #expect(AmountEntryText.micros("abc") == nil)
+    }
 }
 
 struct PnLSpeechTests {
