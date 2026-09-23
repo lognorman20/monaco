@@ -34,23 +34,23 @@ final class HomeHeroRangeModel {
     }
 
     /// A pill tap. Re-tapping the selected pill is a no-op.
-    func select(_ next: HomeLeaderboardRange, auth: DynamicAuthService, client: AppSessionDataSource) {
+    func select(_ next: HomeLeaderboardRange, accessToken: String?, client: AppSessionDataSource) {
         guard next != range else { return }
         range = next
         failed = false
-        load(auth: auth, client: client)
+        load(accessToken: accessToken, client: client)
     }
 
     /// Loads the selected window if it is not already in hand. Ranges are immutable windows over
     /// history, so one read each is enough for a session on this screen.
-    func load(auth: DynamicAuthService, client: AppSessionDataSource) {
+    func load(accessToken: String?, client: AppSessionDataSource) {
         loadTask?.cancel()
         let wanted = range
         guard wanted != .oneHour, cache[wanted] == nil else {
             isLoading = false
             return
         }
-        guard let token = auth.accessToken else {
+        guard let token = accessToken else {
             // No token is not a failed read: the gate is about to replace this screen.
             isLoading = false
             return

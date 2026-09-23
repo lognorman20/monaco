@@ -177,7 +177,7 @@ struct HomeView: View {
                     ),
                     range: Binding(
                         get: { heroRange.range },
-                        set: { heroRange.select($0, auth: auth, client: MonacoAPIClient()) }
+                        set: { heroRange.select($0, accessToken: auth.accessToken, client: MonacoAPIClient()) }
                     ),
                     isRangeLoading: heroRange.isLoading,
                     rangeFailed: heroRange.failed,
