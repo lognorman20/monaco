@@ -25,13 +25,20 @@ struct CabalTintTests {
         #expect(MonacoTheme.CabalTint.forGroupId(UUID(uuidString: id)!.uuidString) == tint)
     }
 
+    /// Pinned so a change to the hash or the case list is a deliberate, visible decision.
+    ///
+    /// These moved in v3: the ramp went from five tints to seven, and the case order is now the
+    /// resolver's clockwise walk rather than the order the cases were written in. Both change the
+    /// mapping, so every existing cabal is reassigned once — a cabal that has been sage since
+    /// launch becomes olive. That is an accepted one-time regression, not an oversight: the hash
+    /// is mod-N and keeping the first five in order does not avoid it. Take it before the ramp is
+    /// final and never again.
     @Test func tintIsPinnedForKnownIds() {
-        // Pinned so a change to the hash or the case list is a deliberate, visible decision.
-        #expect(MonacoTheme.CabalTint.forGroupId("") == .butter)
-        #expect(MonacoTheme.CabalTint.forGroupId("a") == .peach)
+        #expect(MonacoTheme.CabalTint.forGroupId("") == .sky)
+        #expect(MonacoTheme.CabalTint.forGroupId("a") == .olive)
     }
 
-    @Test func tintsSpreadAcrossAllFive() {
+    @Test func tintsSpreadAcrossEveryBucket() {
         let ids = (0..<200).map { "group-\($0)" }
         let used = Set(ids.map { MonacoTheme.CabalTint.forGroupId($0) })
         #expect(used.count == MonacoTheme.CabalTint.allCases.count)

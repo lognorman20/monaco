@@ -80,7 +80,23 @@ private struct Pair {
 }
 
 struct MonacoContrastTests {
-    private static let surfaces: [Color] = [MonacoTheme.canvas, MonacoTheme.surface, MonacoTheme.surfaceSunken]
+    /// The four paper surfaces text can land on. `bgSunken` joined the list when the sunken token
+    /// split in two: a well is a surface text sits on, and it was never measured before because
+    /// it did not exist as a separate value.
+    private static let surfaces: [Color] = [
+        MonacoTheme.bgBase,
+        MonacoTheme.bgRaised,
+        MonacoTheme.bgSunken,
+        MonacoTheme.fillQuiet,
+    ]
+
+    /// Ink is dark in both schemes, so every ink pair is measured in both — not because the
+    /// values change, but because a regression here would be a value that *started* changing.
+    private static let inkSurfaces: [Color] = [
+        MonacoTheme.Ink.base,
+        MonacoTheme.Ink.raised,
+        MonacoTheme.Ink.sunken,
+    ]
 
     private static var textPairs: [Pair] {
         var pairs: [Pair] = []
@@ -130,6 +146,53 @@ struct MonacoContrastTests {
         ))
         // The toast.
         pairs.append(Pair("toastLabel", MonacoTheme.toastLabel, on: [MonacoTheme.toastFill]))
+        pairs.append(contentsOf: v3TextPairs)
+        return pairs
+    }
+
+    /// Every §1 pair the v3 token layer adds, measured on every surface it can land on.
+    ///
+    /// The existing table above is role-based and covers the pairs that existed before. These are
+    /// the new ones, and they are listed exhaustively rather than sampled: a wash is measured
+    /// *through* the wash onto the surface below it, which is the only way a wash pair can be
+    /// checked at all, and it is where a tinted chip quietly drops below AA.
+    private static var v3TextPairs: [Pair] {
+        var pairs: [Pair] = []
+        for surface in surfaces {
+            // Paper foreground under its canonical names.
+            pairs.append(Pair("fgPrimary", MonacoTheme.fgPrimary, on: [surface]))
+            pairs.append(Pair("fgMuted", MonacoTheme.fgMuted, on: [surface]))
+            pairs.append(Pair("fgSubtle", MonacoTheme.fgSubtle, on: [surface]))
+            // The intent ramp, none of it green.
+            pairs.append(Pair("warningOnWash", MonacoTheme.warningOnWash, on: [surface, MonacoTheme.warningWash]))
+            pairs.append(Pair("dangerOnWash", MonacoTheme.dangerOnWash, on: [surface, MonacoTheme.dangerWash]))
+            // A passed proposal is ink wash, never green. If this pair fails, the alternative on
+            // the day is a green chip, so it is pinned on every surface a card can sit on.
+            pairs.append(Pair("fgPrimary on inkWash", MonacoTheme.fgPrimary, on: [surface, MonacoTheme.inkWash]))
+        }
+        for surface in inkSurfaces {
+            pairs.append(Pair("Ink.fgPrimary", MonacoTheme.Ink.fgPrimary, on: [surface]))
+            pairs.append(Pair("Ink.fgMuted", MonacoTheme.Ink.fgMuted, on: [surface]))
+            // White @0.48, not @0.45: at 0.45 this measures 4.41:1 on Ink.raised and fails.
+            pairs.append(Pair("Ink.fgSubtle", MonacoTheme.Ink.fgSubtle, on: [surface]))
+            pairs.append(Pair("Ink.accent", MonacoTheme.Ink.accent, on: [surface]))
+            pairs.append(Pair("warningOnInk", MonacoTheme.warningOnInk, on: [surface]))
+            pairs.append(Pair("profitOnHero on ink", MonacoTheme.profitOnHero, on: [surface]))
+            pairs.append(Pair("lossOnHero on ink", MonacoTheme.lossOnHero, on: [surface]))
+        }
+        // The two washes that only exist on ink.
+        pairs.append(Pair(
+            "Ink.accent on brandWashOnInk",
+            MonacoTheme.Ink.accent,
+            on: [MonacoTheme.Ink.base, MonacoTheme.brandWashOnInk]
+        ))
+        pairs.append(Pair(
+            "warningOnInk on warningWashOnInk",
+            MonacoTheme.warningOnInk,
+            on: [MonacoTheme.Ink.base, MonacoTheme.warningWashOnInk]
+        ))
+        // White on the brand fill, the one saturated CTA.
+        pairs.append(Pair("onBrand on brandFill", MonacoTheme.onBrand, on: [MonacoTheme.brandFill]))
         return pairs
     }
 
@@ -149,6 +212,16 @@ struct MonacoContrastTests {
             pairs.append(Pair("\(tint) onFill", tint.onFill, on: [tint.fill], minimum: 3))
             // The same mark on a deep ink hero card.
             pairs.append(Pair("\(tint) onInk", tint.onInk, on: [MonacoTheme.heroInk], minimum: 3))
+        }
+        // `MonacoVoteFace`'s three rings. These *are* the state on a screen deciding whether real
+        // money gets spent, so they are held to the graphical bar on every surface a proposal card
+        // can sit on — including the pending ring, which is the slot that says someone still has
+        // to vote. `lineStrong` was the obvious token for it and measures 1.48:1 here; a tally
+        // that renders four voters as three is a wrong count, so the ring is `fgSubtle`.
+        for surface in [MonacoTheme.bgRaised, MonacoTheme.bgBase] {
+            pairs.append(Pair("vote yes ring", MonacoTheme.brand, on: [surface], minimum: 3))
+            pairs.append(Pair("vote no ring", MonacoTheme.loss, on: [surface], minimum: 3))
+            pairs.append(Pair("vote pending ring", MonacoTheme.fgSubtle, on: [surface], minimum: 3))
         }
         return pairs
     }

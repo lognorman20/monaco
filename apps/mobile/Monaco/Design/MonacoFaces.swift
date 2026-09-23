@@ -120,7 +120,14 @@ struct MonacoVote: Identifiable, Equatable {
 /// |---|---|
 /// | yes | 22pt avatar + 2pt `brand` ring |
 /// | no | 22pt avatar + 2pt `loss` ring |
-/// | pending | hollow 22pt circle, 1.5pt `lineStrong`, dashed |
+/// | pending | hollow 22pt circle, 1.5pt `fgSubtle`, dashed |
+///
+/// The pending ring is `fgSubtle`, not `lineStrong`. `lineStrong` is a *structural edge* — the E2
+/// stroke in dark — and it measures 1.48:1 on a card in light and 1.68:1 in dark, which is a slot
+/// a member cannot see. A tally that renders four voters as three is a wrong count on a money
+/// screen. `fgSubtle` is the token whose documented job is quiet-but-real content, it measures
+/// 4.54–6.11:1 on every surface a card sits on, and asking one token to be both a card's edge and
+/// a state indicator is the same defect the `bgSunken`/`fillQuiet` split just undid.
 ///
 /// Colour is never the only carrier: yes and no are both filled circles with a ring, pending is
 /// hollow and dashed, and the "2 of 5 voted · 3 yes to pass" caption remains the VoiceOver label
@@ -150,7 +157,7 @@ struct MonacoVoteFace: View {
         case .pending:
             Circle()
                 .strokeBorder(
-                    MonacoTheme.lineStrong,
+                    MonacoTheme.fgSubtle,
                     style: StrokeStyle(lineWidth: 1.5, dash: [3, 3])
                 )
                 .frame(width: size, height: size)
@@ -161,7 +168,7 @@ struct MonacoVoteFace: View {
         switch vote.state {
         case .yes: return MonacoTheme.brand
         case .no: return MonacoTheme.loss
-        case .pending: return MonacoTheme.lineStrong
+        case .pending: return MonacoTheme.fgSubtle
         }
     }
 }
@@ -185,6 +192,9 @@ struct MonacoVoteDot: View {
         switch state {
         case .yes: return MonacoTheme.brand
         case .no: return MonacoTheme.loss
+        // The 8pt dot keeps the value it has always had, so the fallback is pixel-identical to
+        // what ships today. It measures ~2.7:1, below the 3:1 graphical bar — carried by the
+        // caption, which is the accessible name for the whole tally.
         case .pending: return MonacoTheme.fgSubtle.opacity(0.7)
         }
     }
