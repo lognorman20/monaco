@@ -110,37 +110,6 @@
   .step h3 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.015em; }
   .step p { margin: 0; color: var(--ink-2); font-size: 16px; }
 
-  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; }
-  .feats { margin-top: 36px; display: grid; gap: 22px; }
-  .feat { display: grid; grid-template-columns: 28px 1fr; gap: 14px; }
-  .feat svg { width: 22px; height: 22px; margin-top: 3px; color: var(--green); }
-  .feat b { display: block; font-weight: 600; font-size: 18px; letter-spacing: -0.01em; }
-  .feat span { color: var(--ink-2); font-size: 16px; }
-
-  /* Leaderboard example */
-  .board { background: var(--bg-2); border: 1px solid var(--line); border-radius: 22px; padding: 22px; box-shadow: 0 30px 80px -40px rgba(15, 41, 28, 0.35); }
-  .board-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 4px 18px; }
-  .board-h b { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
-  .board-h small { display: block; color: var(--ink-3); font-size: 13px; }
-  .tag { font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); border: 1px solid var(--line); border-radius: 999px; padding: 4px 9px; }
-  .pot { display: flex; align-items: baseline; justify-content: space-between; padding: 16px 18px; border-radius: 14px; background: var(--green-soft); margin-bottom: 10px; }
-  .pot .v { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-  .pot .d { color: var(--up); font-weight: 600; font-variant-numeric: tabular-nums; }
-  .pot small { display: block; color: var(--ink-3); font-size: 13px; }
-  .rows { list-style: none; margin: 0; padding: 0; }
-  .rows li { display: grid; grid-template-columns: 22px 36px 1fr auto; align-items: center; gap: 12px; padding: 12px 6px; border-top: 1px solid var(--line); }
-  .rows li:first-child { border-top: 0; }
-  .rk { color: var(--ink-3); font-size: 14px; font-variant-numeric: tabular-nums; text-align: center; }
-  .av { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-weight: 600; font-size: 14px; color: var(--ink); }
-  .nm b { display: block; font-weight: 500; font-size: 16px; }
-  .nm small { color: var(--ink-3); font-size: 13px; }
-  .pct { font-weight: 600; font-variant-numeric: tabular-nums; }
-  .pct.up { color: var(--up); } .pct.dn { color: var(--down); }
-  .vote { margin-top: 12px; padding: 14px 16px; border-radius: 14px; border: 1px dashed var(--line-strong); display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 15px; }
-  .vote .bar { flex: 1; height: 6px; border-radius: 3px; background: rgba(15, 41, 28, 0.08); overflow: hidden; max-width: 120px; }
-  .vote .bar i { display: block; height: 100%; width: 75%; background: var(--green); border-radius: 3px; }
-  .vote small { color: var(--ink-3); }
-
   /* CTA + footer */
   .cta { padding-block: 112px; border-top: 1px solid var(--line); text-align: center; background: radial-gradient(50% 70% at 50% 100%, rgba(191, 230, 200, 0.6), transparent 70%); }
   .cta .wrap { display: grid; justify-items: center; gap: 22px; }
@@ -150,7 +119,6 @@
   footer p { margin: 0; }
 
   @media (max-width: 860px) {
-    .split { grid-template-columns: 1fr; gap: 48px; }
     .steps { grid-template-columns: 1fr; }
     .step, .step + .step { padding: 24px 0; border-left: 0; }
     .step + .step { border-top: 1px solid var(--line); }
@@ -163,8 +131,6 @@
     .field { flex-direction: column; border-radius: 18px; padding: 6px; }
     .field input { padding: 12px 12px; }
     .field .btn { justify-content: center; }
-    .rows li { grid-template-columns: 18px 32px 1fr auto; gap: 10px; }
-    .av { width: 32px; height: 32px; }
   }
   @media (prefers-reduced-motion: no-preference) {
     .rise { animation: rise .7s cubic-bezier(.2, .7, .2, 1) both; }
@@ -226,42 +192,6 @@
         <div class="step"><span class="n">1</span><h3>Start a cabal</h3><p>Invite your friends with a link. Keep it open, or lock it with a password.</p></div>
         <div class="step"><span class="n">2</span><h3>Pool in</h3><p>Everyone adds what they want. You get share units, so your slice grows with the pot.</p></div>
         <div class="step"><span class="n">3</span><h3>Vote, then buy</h3><p>Anyone proposes a stock. When the vote passes, the cabal buys it together.</p></div>
-      </div>
-    </div>
-  </section>
-
-  <section class="sec" id="why">
-    <div class="wrap split">
-      <div>
-        <p class="eyebrow">Why Monaco</p>
-        <h2>Finally find out who's <em>actually</em> good at this.</h2>
-        <div class="feats">
-          <div class="feat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4zM17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg><div><b>Leaderboards that settle it</b><span>Percent return inside your cabal, and across every cabal on Monaco.</span></div></div>
-          <div class="feat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg><div><b>Nothing moves without a vote</b><span>The creator sets the rules: who votes, majority or unanimous, and how long a proposal stays open.</span></div></div>
-          <div class="feat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><div><b>Cash out your slice anytime</b><span>Take some or all of your share at what the pot is worth now. No asking permission.</span></div></div>
-          <div class="feat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg><div><b>Real stocks, real ownership</b><span>Apple, Nvidia, Tesla and more as tokenized shares. What the cabal buys is actually held.</span></div></div>
-        </div>
-      </div>
-
-      <div class="board" aria-label="Example cabal">
-        <div class="board-h">
-          <div><b>Friday Night Cabal</b><small>5 members · majority vote</small></div>
-          <span class="tag">Example</span>
-        </div>
-        <div class="pot">
-          <div><small>Pot value</small><span class="v">$4,812.40</span></div>
-          <span class="d">+18.6%</span>
-        </div>
-        <ol class="rows">
-          <li><span class="rk">1</span><span class="av" style="background:#E8C77A">MA</span><span class="nm"><b>Maya</b><small>Proposed NVDA</small></span><span class="pct up">+24.1%</span></li>
-          <li><span class="rk">2</span><span class="av" style="background:#A9C2A4">JO</span><span class="nm"><b>Jordan</b><small>Proposed AAPL</small></span><span class="pct up">+15.3%</span></li>
-          <li><span class="rk">3</span><span class="av" style="background:#9DB9D9">SA</span><span class="nm"><b>Sam</b><small>Joined last week</small></span><span class="pct up">+6.8%</span></li>
-          <li><span class="rk">4</span><span class="av" style="background:#E3A99A">LE</span><span class="nm"><b>Leo</b><small>Proposed TSLA</small></span><span class="pct dn">−3.2%</span></li>
-        </ol>
-        <div class="vote">
-          <span><b>Buy $500 of AMZN?</b><br><small>3 of 4 voted yes · closes in 6h</small></span>
-          <span class="bar" aria-hidden="true"><i></i></span>
-        </div>
       </div>
     </div>
   </section>
