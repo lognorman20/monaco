@@ -67,17 +67,17 @@ func TestWithCharts_fallsThroughWhenPythHasNothing(t *testing.T) {
 	}
 }
 
-// Two empty answers are not equally useful: "only on-chain since 5 Aug 2026"
+// Two empty answers are not equally useful: "Only on-chain since 5 Aug 2026"
 // tells the reader something, "price history unavailable" does not.
 func TestWithCharts_keepsTheEmptyAnswerThatExplainsItself(t *testing.T) {
 	t.Parallel()
 	charts := &stubCharts{series: AssetChartSeries{EmptyReason: EmptyReasonNoHistory}}
-	marks := &stubMarks{stubCharts{series: AssetChartSeries{EmptyReason: "only on-chain since 5 Aug 2026", Range: ChartRange1Y}}}
+	marks := &stubMarks{stubCharts{series: AssetChartSeries{EmptyReason: "Only on-chain since 5 Aug 2026", Range: ChartRange1Y}}}
 	got, err := WithCharts(marks, charts).ChartSeries(context.Background(), "AAPLc", ChartRange1Y)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.EmptyReason != "only on-chain since 5 Aug 2026" {
+	if got.EmptyReason != "Only on-chain since 5 Aug 2026" {
 		t.Fatalf("reason = %q", got.EmptyReason)
 	}
 	if got.Range != ChartRange1Y {

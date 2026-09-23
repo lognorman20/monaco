@@ -45,7 +45,9 @@ final class AssetDetailModel {
     enum ChartState: Equatable {
         case loading
         case series([AssetChartPointDTO])
-        case empty
+        /// Empty, with the server's reason when it said something the reader did
+        /// not already know from the empty chart itself.
+        case empty(reason: String?)
         case failed
     }
 
@@ -173,7 +175,7 @@ final class AssetDetailModel {
         }
         do {
             let chart = try await dataSource.chart(symbol: symbol, range: range)
-            charts[range] = chart.points.count >= 2 ? .series(chart.points) : .empty
+            charts[range] = chart.points.count >= 2 ? .series(chart.points) : .empty(reason: chart.emptyMessage)
         } catch {
             handle(error) {
                 if case .series = charts[range] { return }

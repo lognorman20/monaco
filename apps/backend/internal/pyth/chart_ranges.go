@@ -41,7 +41,9 @@ func EmptyReasonBefore(first time.Time) string {
 	if first.IsZero() {
 		return EmptyReasonNoHistory
 	}
-	return "only on-chain since " + first.UTC().Format("2 Jan 2006")
+	// Sentence case: the app renders this under the empty state's title, as its
+	// own line, not inside another sentence.
+	return "Only on-chain since " + first.UTC().Format("2 Jan 2006")
 }
 
 // ParseChartRange validates a chart range query param. An empty value means 1D, so

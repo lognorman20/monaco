@@ -336,6 +336,18 @@ public enum MarketSampleData {
 
     /// The last fallback: the token's own Chainlink rounds, per token. Only a few
     /// days reach back, so the backend serves it for 1D/1W/1M and nothing longer.
+    /// What a B20 feed's own rounds look like for a range it is too young to
+    /// serve: no points, and the day its history starts instead of the catch-all.
+    public static func chartBeforeTheFeedExisted(range: AssetChartRange) -> AssetChartDTO {
+        AssetChartDTO(
+            points: [],
+            emptyReason: "Only on-chain since 5 Aug 2026",
+            range: range,
+            source: .chainlink,
+            market: sessionOpen
+        )
+    }
+
     public static func chartFromChainlink(range: AssetChartRange) -> AssetChartDTO {
         let dense = chart(
             range: range,
@@ -347,7 +359,9 @@ public enum MarketSampleData {
             points: dense.points.map {
                 AssetChartPointDTO(timestamp: $0.timestamp, priceUsdcMicros: $0.priceUsdcMicros)
             },
-            previousCloseUsdcMicros: nil,
+            // The rounds do carry a baseline: the last round of the previous
+            // session, which is outside the window the curve draws.
+            previousCloseUsdcMicros: 231_400_000,
             range: range,
             source: .chainlink,
             basis: .token,

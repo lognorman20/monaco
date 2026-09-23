@@ -530,7 +530,7 @@ func TestGET_assets_symbol_chart_fallsThroughToChainlinkRounds(t *testing.T) {
 		if len(payload.Points) != 0 {
 			t.Fatalf("%s: %d points, want none", chartRange, len(payload.Points))
 		}
-		if payload.EmptyReason != "only on-chain since 4 Aug 2026" {
+		if payload.EmptyReason != "Only on-chain since 4 Aug 2026" {
 			t.Fatalf("%s: emptyReason = %q", chartRange, payload.EmptyReason)
 		}
 	}

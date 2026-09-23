@@ -186,8 +186,8 @@ func TestChartSeries_rangesOlderThanTheFeedSayWhenItStarted(t *testing.T) {
 		firstRound time.Time
 		want       string
 	}{
-		{testNow.AddDate(0, 0, -49), "only on-chain since 5 Aug 2026"},
-		{testNow.AddDate(0, 0, -30), "only on-chain since 24 Aug 2026"},
+		{testNow.AddDate(0, 0, -49), "Only on-chain since 5 Aug 2026"},
+		{testNow.AddDate(0, 0, -30), "Only on-chain since 24 Aug 2026"},
 	} {
 		catalog := b20.NewPinnedCatalog()
 		feed := feedFor(t, catalog, "AAPLc")
@@ -227,7 +227,7 @@ func TestChartSeries_aYoungFeedHasNoMonthEither(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(month.Points) != 0 || !strings.HasPrefix(month.EmptyReason, "only on-chain since") {
+	if len(month.Points) != 0 || !strings.HasPrefix(month.EmptyReason, "Only on-chain since") {
 		t.Fatalf("1M = %d points, reason %q", len(month.Points), month.EmptyReason)
 	}
 	// The session it does have still draws.

@@ -643,6 +643,34 @@ final class MarketDataDTOTests: XCTestCase {
         XCTAssertEqual(sample.source, .chainlink)
         XCTAssertEqual(sample.basis, .token)
         XCTAssertFalse(sample.points.contains(where: \.hasCandle))
+        // The rounds do know a previous close: the last round of the session before
+        // the window, which is not a point the curve draws.
+        XCTAssertNotNil(sample.previousCloseUsdcMicros)
+    }
+
+    func testAssetChart_emptyMessageOnlySurfacesAReasonWorthReading() throws {
+        // The catch-all repeats what an empty chart already shows.
+        let generic = try decode(AssetChartDTO.self, """
+        {"points":[],"emptyReason":"price history unavailable","range":"1Y"}
+        """)
+        XCTAssertNil(generic.emptyMessage)
+
+        // A reason that names the day the feed starts answers the question an
+        // empty 1Y chip raises: whether the app is broken.
+        let dated = try decode(AssetChartDTO.self, """
+        {"points":[],"emptyReason":"Only on-chain since 5 Aug 2026","range":"1Y","source":"chainlink"}
+        """)
+        XCTAssertEqual(dated.emptyMessage, "Only on-chain since 5 Aug 2026")
+
+        let silent = try decode(AssetChartDTO.self, """
+        {"points":[],"range":"1Y"}
+        """)
+        XCTAssertNil(silent.emptyMessage)
+
+        XCTAssertEqual(
+            MarketSampleData.chartBeforeTheFeedExisted(range: .oneYear).emptyMessage,
+            "Only on-chain since 5 Aug 2026"
+        )
     }
 
     func testSampleData_premiumIsTheKyberMidAgainstTheMark() throws {

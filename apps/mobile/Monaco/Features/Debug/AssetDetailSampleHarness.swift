@@ -125,10 +125,13 @@ private struct AssetDetailSampleDataSource: AssetDetailDataSource {
         case .fallbackSeries:
             return MarketSampleData.chartFromFallback(range: range)
         case .chainlinkSeries:
-            // The rounds only reach back days, so the backend serves no long range from them.
+            // The feed holds every round it ever published, which on a B20 token is
+            // weeks, not months: the session, the week, the month and the whole
+            // history draw, and the two ranges older than the feed say which day it
+            // started rather than repeating "unavailable".
             switch range {
-            case .oneDay, .oneWeek, .oneMonth: return MarketSampleData.chartFromChainlink(range: range)
-            case .threeMonths, .oneYear, .all: return MarketSampleData.chartEmpty(range: range)
+            case .oneDay, .oneWeek, .oneMonth, .all: return MarketSampleData.chartFromChainlink(range: range)
+            case .threeMonths, .oneYear: return MarketSampleData.chartBeforeTheFeedExisted(range: range)
             }
         default:
             return MarketSampleData.chart(range: range)
