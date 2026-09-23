@@ -325,11 +325,15 @@ final class AssetDetailModel {
     /// token's. Without a basis from the backend there is no figure at all.
     var windowMove: Move? {
         if let series, let ratio = windowRatio {
-            // Unscrubbed, the hero is the token's mark. Dollars measured on the share's curve
-            // do not hold across the token's multiplier, so under the token's price only the
-            // ratio (which does) is shown. A scrub puts the share's price in the hero, and
-            // the dollars come back with it.
-            let dollars = series.underlyingDisplaySymbol == nil ? series.changeDollars() : nil
+            // Unscrubbed, the hero is the token's Chainlink mark, per token. Dollars are
+            // shown only when the curve is in that same unit — `basis == .token` — because
+            // a delta from any other curve would be subtracted under a price it was not
+            // measured in. That rules out the underlying's per-share curve (the token's
+            // multiplier would land in the day's move) and equally a curve the backend did
+            // not name: `.unknown` and a missing basis are unit-unknown, not "the token".
+            // The ratio holds across the multiplier, so it is shown either way. A scrub
+            // puts the curve's own sample in the hero, and the dollars come back with it.
+            let dollars = series.basis == .token ? series.changeDollars() : nil
             return curveMove(series, ratio: ratio, label: windowLabel(series), dollars: dollars)
         }
         guard let dayMove = detail?.stockDayMove else { return nil }

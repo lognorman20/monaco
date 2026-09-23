@@ -1064,6 +1064,55 @@ struct AssetDetailModelTests {
         #expect(unnamed.move?.basisSymbol == nil)
     }
 
+    /// Going untagged is not the same as being in the hero's unit, and only the hero's
+    /// unit earns dollars.
+    ///
+    /// `loadDetail` first, so the token's Chainlink mark is actually in the hero — without
+    /// it there is no price for a dollar figure to sit under and the bug cannot be seen.
+    /// A curve the backend names as the token's is that same per-token unit, so its
+    /// dollars are a real subtraction. A curve the backend does not name is not: an
+    /// unrecognised basis decodes to `.unknown` and a missing one stays nil, and neither
+    /// says "token". Both must come back ratio-only, the way the share's curve does.
+    @Test func onlyTheTokensOwnCurveGetsDollarsUnderTheTokensMark() async throws {
+        func model(basis: MarketPriceBasis?, symbol: String?) async -> AssetDetailModel {
+            let source = StubAssetDetailDataSource()
+            source.basis = basis
+            source.basisSymbol = symbol
+            let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+            await model.loadDetail()
+            await model.loadChart(range: .oneDay)
+            return model
+        }
+
+        // The hero is the token's mark, and the curve is the token's too: same unit.
+        let token = await model(basis: .token, symbol: "AAPLc")
+        #expect(token.detail?.priceUsdcMicros != nil)
+        #expect(token.move?.dollars != nil)
+
+        // The share's curve, per share, under a per-token price: ratio only.
+        let underlying = await model(basis: .underlying, symbol: "AAPL")
+        #expect(underlying.move?.ratio != nil)
+        #expect(underlying.move?.dollars == nil)
+
+        // A basis the backend never sent. Unit unknown, so no dollars.
+        let unnamed = await model(basis: nil, symbol: nil)
+        #expect(unnamed.move?.ratio != nil)
+        #expect(unnamed.move?.dollars == nil)
+
+        // A basis a later backend added that this build does not know. `MarketPriceBasis`
+        // decodes it to `.unknown` on purpose, so this is a live path, not a hypothetical.
+        let unknown = await model(basis: .unknown, symbol: "AAPL-NEW")
+        #expect(unknown.move?.ratio != nil)
+        #expect(unknown.move?.dollars == nil)
+    }
+
+    /// An unrecognised basis string really does land on `.unknown` rather than failing
+    /// the decode — the premise the test above rests on.
+    @Test func anUnrecognisedBasisDecodesToUnknown() throws {
+        let decoded = try JSONDecoder().decode(MarketPriceBasis.self, from: Data("\"wrapped_share\"".utf8))
+        #expect(decoded == .unknown)
+    }
+
     // MARK: - Walking out of a scrub
 
     /// VoiceOver's adjustable action has no release, so walking forward off the last
