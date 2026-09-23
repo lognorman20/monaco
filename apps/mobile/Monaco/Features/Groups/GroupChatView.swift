@@ -70,6 +70,7 @@ struct GroupChatView: View {
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private let pageSize = 30
     private let pollInterval: Duration = .seconds(4)
@@ -105,14 +106,21 @@ struct GroupChatView: View {
                             .lineLimit(1)
                         // Who is in the room, under its name. Initials until the members'
                         // photos are there; `MonacoAvatar` already renders them.
-                        MonacoFaceStack(
-                            faces: members.map {
-                                MonacoFace(id: $0.userId, displayName: $0.displayName, photoURL: $0.profilePhotoUrl)
-                            },
-                            size: 16,
-                            maxVisible: 5,
-                            ringColor: MonacoTheme.bgBase
-                        )
+                        //
+                        // Dropped at an accessibility text size: a principal toolbar item does
+                        // not grow, so the name and the faces would fight over one bar's height
+                        // and the name is the half that has to survive. The members are on the
+                        // cabal screen one tap back, where they do stack.
+                        if !dynamicTypeSize.isAccessibilitySize {
+                            MonacoFaceStack(
+                                faces: members.map {
+                                    MonacoFace(id: $0.userId, displayName: $0.displayName, photoURL: $0.profilePhotoUrl)
+                                },
+                                size: 16,
+                                maxVisible: 5,
+                                ringColor: MonacoTheme.bgBase
+                            )
+                        }
                     }
                 }
                 .accessibilityElement(children: .combine)
