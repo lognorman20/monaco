@@ -261,13 +261,13 @@ final class SampleProposeService: ProposeService {
     )
 
     private let catalog: [ProposeStock] = [
-        ProposeStock(symbol: "AAPLc", name: "Apple", priceMicros: 231_400_000, change24h: "0.012"),
-        ProposeStock(symbol: "NVDAc", name: "Nvidia", priceMicros: 178_200_000, change24h: "-0.008"),
-        ProposeStock(symbol: "TSLAc", name: "Tesla", priceMicros: 342_100_000, change24h: "0.034"),
-        ProposeStock(symbol: "MSFTc", name: "Microsoft", priceMicros: 438_900_000, change24h: "0.004"),
-        ProposeStock(symbol: "SPYc", name: "S&P 500", priceMicros: 612_300_000, change24h: "0.002"),
-        ProposeStock(symbol: "GOOGLc", name: "Alphabet", priceMicros: 201_000_000, change24h: "-0.015"),
-        ProposeStock(symbol: "AMBRc", name: "Amber", priceMicros: 12_400_000, change24h: nil, isTradable: false),
+        ProposeStock(symbol: "AAPLc", name: "Apple", priceMicros: 231_400_000),
+        ProposeStock(symbol: "NVDAc", name: "Nvidia", priceMicros: 178_200_000),
+        ProposeStock(symbol: "TSLAc", name: "Tesla", priceMicros: 342_100_000),
+        ProposeStock(symbol: "MSFTc", name: "Microsoft", priceMicros: 438_900_000),
+        ProposeStock(symbol: "SPYc", name: "S&P 500", priceMicros: 612_300_000),
+        ProposeStock(symbol: "GOOGLc", name: "Alphabet", priceMicros: 201_000_000),
+        ProposeStock(symbol: "AMBRc", name: "Amber", priceMicros: 12_400_000, isTradable: false),
     ]
 
     /// `-MonacoProposePotFails`: the first read fails, so a retry can be driven from a test.

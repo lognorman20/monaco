@@ -8,7 +8,6 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/evm"
-	"github.com/monaco/monaco/apps/backend/internal/pyth"
 )
 
 func TestAssetPrices_AssetMark_usesChainlinkAnswer(t *testing.T) {
@@ -31,6 +30,49 @@ func TestAssetPrices_AssetMark_usesChainlinkAnswer(t *testing.T) {
 	}
 	if mark.PriceUsdcMicros != 248_500_000 {
 		t.Fatalf("price = %d, want 248500000", mark.PriceUsdcMicros)
+	}
+}
+
+func TestAssetPrices_AssetMark_carriesTheRoundTimeAndTheHeartbeatVerdict(t *testing.T) {
+	t.Parallel()
+	catalog := b20.NewPinnedCatalog()
+	fresh, err := catalog.Feed(context.Background(), "AAPLc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := catalog.Feed(context.Background(), "TSLAc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Monday 09:00 ET: AAPLc's round is from an hour ago, TSLAc's from Friday's
+	// close, which is past the feed's 25-hour heartbeat.
+	now := time.Date(2026, time.September, 21, 13, 0, 0, 0, time.UTC)
+	friday := time.Date(2026, time.September, 18, 20, 0, 0, 0, time.UTC)
+	chain := evm.NewFakeClient()
+	chain.SetRoundData(fresh, evm.RoundData{Answer: big.NewInt(23_205_000_000), UpdatedAt: now.Add(-time.Hour)})
+	chain.SetRoundData(old, evm.RoundData{Answer: big.NewInt(24_850_000_000), UpdatedAt: friday})
+	prices := NewAssetPrices(chain, catalog, func() time.Time { return now })
+
+	single, err := prices.AssetMark(context.Background(), "TSLAc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !single.UpdatedAt.Equal(friday) || !single.AfterHours {
+		t.Fatalf("TSLAc mark = %+v, want Friday's round time and after-hours", single)
+	}
+
+	marks, err := prices.AssetMarks(context.Background(), []string{"AAPLc", "TSLAc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := marks["AAPLc"]; !got.UpdatedAt.Equal(now.Add(-time.Hour)) || got.AfterHours {
+		t.Fatalf("AAPLc mark = %+v, want the round time an hour ago and not after-hours", got)
+	}
+	if got := marks["TSLAc"]; !got.UpdatedAt.Equal(friday) || !got.AfterHours {
+		t.Fatalf("TSLAc mark = %+v, want Friday's round time and after-hours", got)
+	}
+	if got := marks["TSLAc"].UpdatedAt.Location(); got != time.UTC {
+		t.Fatalf("round time location = %v, want UTC", got)
 	}
 }
 
@@ -61,33 +103,6 @@ func TestAssetPrices_AssetMarks_fillsEveryPinnedSymbol(t *testing.T) {
 	}
 	if len(marks) != len(symbols) {
 		t.Fatalf("marks = %d, want %d (%v)", len(marks), len(symbols), marks)
-	}
-}
-
-func TestAssetPrices_ChartSeries_usesRoundHistory(t *testing.T) {
-	t.Parallel()
-	catalog := b20.NewPinnedCatalog()
-	feed, err := catalog.Feed(context.Background(), "AAPLc")
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	chain := evm.NewFakeClient()
-	chain.SetRoundHistory(feed, []evm.RoundData{
-		{Answer: big.NewInt(18_000_000_000), UpdatedAt: now.Add(-2 * time.Hour)},
-		{Answer: big.NewInt(19_000_000_000), UpdatedAt: now.Add(-time.Hour)},
-		{Answer: big.NewInt(20_000_000_000), UpdatedAt: now},
-	})
-	prices := NewAssetPrices(chain, catalog, func() time.Time { return now })
-	series, err := prices.ChartSeries(context.Background(), "AAPLc", pyth.ChartRange1D)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(series.Points) != 3 {
-		t.Fatalf("points = %d, want 3 (%+v)", len(series.Points), series)
-	}
-	if series.Points[2].PriceUsdcMicros != 200_000_000 {
-		t.Fatalf("last price = %d", series.Points[2].PriceUsdcMicros)
 	}
 }
 

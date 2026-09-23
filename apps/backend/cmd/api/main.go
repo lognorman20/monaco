@@ -106,6 +106,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}
 	slog.Info("relayer loaded", "address", relayer.Address())
 
+	if cfg.BaseRPCIsDefault {
+		slog.Warn("BASE_RPC_URL is unset: falling back to the public Base endpoint",
+			"url", cfg.BaseRPCURL,
+			"impact", "chart history and NAV marks will be rate-limited (429)",
+			"fix", "set BASE_RPC_URL to a keyed Alchemy / QuickNode / CDP Base endpoint")
+	}
 	chain := evm.NewJSONRPCClient(cfg.BaseRPCURL)
 	bal, err := chain.ETHBalance(ctx, relayer.Address())
 	if err != nil {
@@ -143,15 +149,16 @@ func boot(ctx context.Context) (*bootResult, error) {
 	catalog := b20.NewPinnedCatalog()
 	dexClient := dex.NewKyberClient(http.DefaultClient, cfg.KyberClientID)
 	marksClient := chainlink.NewClient(chain, catalog, time.Now)
-	var hermes *pyth.HermesClient
-	if cfg.PythAPIKey != "" {
-		hermes, err = pyth.NewHermesClientFromConfig(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("pyth hermes: %w", err)
-		}
-		slog.Info("pyth hermes ready")
+	// Stock-screen display data from Pyth; never NAV. Benchmarks history is keyless
+	// and always wired. Building it inside a PYTH_API_KEY branch would cost every
+	// chart on a deployment without a key; only the Hermes calls need the key, and
+	// the client short-circuits them to "unavailable" when there is none.
+	marketData := pyth.NewMarketDataClientFromConfig(cfg)
+	if marketData.HasAPIKey() {
+		slog.Info("pyth market data ready", "hermes", true, "benchmarks", true)
 	} else {
-		slog.Info("pyth hermes skipped", "reason", "PYTH_API_KEY unset")
+		slog.Info("pyth market data ready", "hermes", false, "benchmarks", true,
+			"reason", "PYTH_API_KEY unset; charts use Benchmarks, the equity reference line is unavailable")
 	}
 	symbols := app.NewSymbolResolver(catalog)
 	deposits := app.NewDepositService(store, authVerifier, walletClient, marksClient, symbols)
@@ -202,16 +209,17 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Catalog:  catalog,
 		KeyGuard: agentKeyGuard,
 	}
-	var assetPrices pyth.AssetPriceClient = chainlink.NewAssetPrices(chain, catalog, time.Now)
-	if hermes != nil {
-		assetPrices = pyth.WithCharts(assetPrices, hermes)
-	}
+	// Hero prices are the Chainlink total-return marks; charts go Benchmarks, then
+	// the Hermes sampler, then the token's own Chainlink rounds.
+	assetPrices := pyth.WithCharts(chainlink.NewAssetPrices(chain, catalog, time.Now), marketData)
 	assetsHandlers := &httpapi.AssetsHandlers{
 		Store:   store,
 		Auth:    authVerifier,
 		Wallets: walletClient,
 		Catalog: catalog,
 		Pyth:    assetPrices,
+		Charts:  marketData,
+		Quotes:  marketData,
 		Dex:     dexClient,
 	}
 	go warmCatalogMarks(catalog, assetPrices)

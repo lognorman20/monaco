@@ -11,7 +11,7 @@ func clearConfigEnv(t *testing.T) {
 	for _, k := range []string{
 		"DATABASE_URL", "DYNAMIC_ENVIRONMENT_ID", "DYNAMIC_API_TOKEN", "DYNAMIC_WALLET_PASSWORD",
 		"WALLET_SHARES_KEY", "SIGNER_URL", "SIGNER_SHARED_SECRET", "BASE_RPC_URL", "RELAYER_PRIVATE_KEY",
-		"KYBER_CLIENT_ID", "PYTH_API_KEY", "PYTH_HERMES_BASE_URL",
+		"KYBER_CLIENT_ID", "PYTH_API_KEY", "PYTH_HERMES_BASE_URL", "PYTH_BENCHMARKS_BASE_URL",
 	} {
 		t.Setenv(k, "")
 	}
@@ -48,6 +48,28 @@ func TestLoad_returnsConfigWhenAllRequiredEnvVarsSet(t *testing.T) {
 	}
 	if _, err := cfg.RelayerAddress(); err != nil {
 		t.Fatalf("RelayerAddress: %v", err)
+	}
+}
+
+func TestLoad_pythBenchmarksBaseURLIsOptionalAndTrimmed(t *testing.T) {
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.PythBenchmarksBaseURL != "" {
+		t.Fatalf("PythBenchmarksBaseURL = %q, want empty (the public host is the client's default)", cfg.PythBenchmarksBaseURL)
+	}
+
+	t.Setenv("PYTH_BENCHMARKS_BASE_URL", " https://benchmarks.example.test/ ")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.PythBenchmarksBaseURL != "https://benchmarks.example.test" {
+		t.Fatalf("PythBenchmarksBaseURL = %q", cfg.PythBenchmarksBaseURL)
 	}
 }
 

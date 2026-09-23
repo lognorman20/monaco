@@ -100,7 +100,47 @@ func (f *fakeAssetPriceClient) ChartSeries(ctx context.Context, symbol string, c
 	series, ok := f.charts[key]
 	f.mu.Unlock()
 	if !ok {
-		return AssetChartSeries{EmptyReason: "price history unavailable"}, nil
+		return AssetChartSeries{EmptyReason: EmptyReasonNoHistory}, nil
 	}
 	return series, nil
+}
+
+// DayChange derives the day change from the registered 1D series, the way the
+// real client does from Benchmarks.
+func (f *fakeAssetPriceClient) DayChange(ctx context.Context, symbol string) *string {
+	series, _ := f.ChartSeries(ctx, symbol, ChartRange1D)
+	return DayChange(series)
+}
+
+type fakeEquityQuoteClient struct {
+	mu     sync.Mutex
+	quotes map[string]ReferenceQuote
+}
+
+// NewFakeEquityQuoteClient returns an in-memory equity reference client for tests.
+// An unconfigured symbol answers as a symbol with no Pyth feed.
+func NewFakeEquityQuoteClient() EquityQuoteClient {
+	return &fakeEquityQuoteClient{quotes: make(map[string]ReferenceQuote)}
+}
+
+// RegisterEquityQuote configures the equity reference line for a symbol.
+func RegisterEquityQuote(client EquityQuoteClient, symbol string, quote ReferenceQuote) {
+	fake, ok := client.(*fakeEquityQuoteClient)
+	if !ok {
+		panic("pyth: RegisterEquityQuote requires NewFakeEquityQuoteClient")
+	}
+	fake.mu.Lock()
+	fake.quotes[normalizeSymbol(symbol)] = quote
+	fake.mu.Unlock()
+}
+
+func (f *fakeEquityQuoteClient) EquityQuote(ctx context.Context, symbol string) ReferenceQuote {
+	_ = ctx
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	quote, ok := f.quotes[normalizeSymbol(symbol)]
+	if !ok {
+		return unavailableQuote(QuoteSourcePythEquity, QuoteReasonNoFeed)
+	}
+	return quote
 }

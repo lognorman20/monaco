@@ -68,23 +68,48 @@ func (l *liveClient) MarkedPot(ctx context.Context, treasury marks.TreasuryRef, 
 	return out, nil
 }
 
+// roundMark is one symbol's latest round as a mark: the price, when the round
+// was struck, and whether that is older than the feed's heartbeat.
+type roundMark struct {
+	price      int64
+	updatedAt  time.Time
+	afterHours bool
+}
+
 func (l *liveClient) markSymbol(ctx context.Context, symbol string) (int64, bool, error) {
+	mark, err := l.markRoundSymbol(ctx, symbol)
+	if err != nil {
+		return 0, false, err
+	}
+	return mark.price, mark.afterHours, nil
+}
+
+func (l *liveClient) markRoundSymbol(ctx context.Context, symbol string) (roundMark, error) {
 	if l.catalog == nil || l.chain == nil {
-		return 0, false, marks.ErrMarkUnavailable
+		return roundMark{}, marks.ErrMarkUnavailable
 	}
 	feed, err := l.catalog.Feed(ctx, symbol)
 	if err != nil {
-		return 0, false, err
+		return roundMark{}, err
 	}
 	round, err := l.chain.ChainlinkLatestRoundData(ctx, feed)
 	if err != nil {
-		return 0, false, err
+		return roundMark{}, err
 	}
-	return roundToMark(l.now(), round)
+	return roundToRoundMark(l.now(), round)
 }
 
 func (l *liveClient) markSymbols(ctx context.Context, symbols []string) map[string]int64 {
-	out := make(map[string]int64, len(symbols))
+	rounds := l.markRoundSymbols(ctx, symbols)
+	out := make(map[string]int64, len(rounds))
+	for symbol, mark := range rounds {
+		out[symbol] = mark.price
+	}
+	return out
+}
+
+func (l *liveClient) markRoundSymbols(ctx context.Context, symbols []string) map[string]roundMark {
+	out := make(map[string]roundMark, len(symbols))
 	if l.catalog == nil || l.chain == nil {
 		return out
 	}
@@ -107,15 +132,23 @@ func (l *liveClient) markSymbols(ctx context.Context, symbols []string) map[stri
 	}
 	now := l.now()
 	for feed, round := range rounds {
-		price, _, convErr := roundToMark(now, round)
+		mark, convErr := roundToRoundMark(now, round)
 		if convErr != nil {
 			continue
 		}
 		for _, symbol := range symByFeed[strings.ToLower(feed)] {
-			out[symbol] = price
+			out[symbol] = mark
 		}
 	}
 	return out
+}
+
+func roundToRoundMark(now time.Time, round evm.RoundData) (roundMark, error) {
+	price, afterHours, err := roundToMark(now, round)
+	if err != nil {
+		return roundMark{}, err
+	}
+	return roundMark{price: price, updatedAt: round.UpdatedAt.UTC(), afterHours: afterHours}, nil
 }
 
 func roundToMark(now time.Time, round evm.RoundData) (int64, bool, error) {

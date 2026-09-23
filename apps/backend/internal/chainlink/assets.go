@@ -2,7 +2,6 @@ package chainlink
 
 import (
 	"context"
-	"sort"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/b20"
@@ -12,6 +11,10 @@ import (
 
 type assetPrices struct {
 	live *liveClient
+	// charts caches one resolved series per symbol and range, so the chart route,
+	// the list's day change and the detail screen share one walk of the chain
+	// instead of each paying for it.
+	charts *chartCache
 }
 
 // NewAssetPrices returns catalog marks from Chainlink TRV feeds.
@@ -19,100 +22,41 @@ func NewAssetPrices(chain evm.Client, catalog b20.Catalog, now func() time.Time)
 	if now == nil {
 		now = time.Now
 	}
-	return &assetPrices{live: &liveClient{chain: chain, catalog: catalog, now: now}}
+	return &assetPrices{
+		live:   &liveClient{chain: chain, catalog: catalog, now: now},
+		charts: newChartCache(now),
+	}
 }
 
+// AssetMark and AssetMarks carry the round's updatedAt and the after-hours verdict
+// along with the price. A total-return feed updates on deviation and on a daily
+// heartbeat, so from Friday's close to Monday's open it holds Friday's price while
+// the token's pools keep trading. Anything that compares the mark with a live
+// price (the stock-vs-token premium) has to know how old it is.
 func (a *assetPrices) AssetMark(ctx context.Context, symbol string) (pyth.AssetMark, error) {
-	price, _, err := a.live.markSymbol(ctx, symbol)
+	mark, err := a.live.markRoundSymbol(ctx, symbol)
 	if err != nil {
 		return pyth.AssetMark{}, err
 	}
-	return pyth.AssetMark{PriceUsdcMicros: price}, nil
+	return assetMarkFor(mark), nil
 }
 
 func (a *assetPrices) AssetMarks(ctx context.Context, symbols []string) (map[string]pyth.AssetMark, error) {
-	prices := a.live.markSymbols(ctx, symbols)
-	out := make(map[string]pyth.AssetMark, len(prices))
-	for symbol, price := range prices {
-		if price <= 0 {
+	marks := a.live.markRoundSymbols(ctx, symbols)
+	out := make(map[string]pyth.AssetMark, len(marks))
+	for symbol, mark := range marks {
+		if mark.price <= 0 {
 			continue
 		}
-		out[symbol] = pyth.AssetMark{PriceUsdcMicros: price}
+		out[symbol] = assetMarkFor(mark)
 	}
 	return out, nil
 }
 
-func (a *assetPrices) ChartSeries(ctx context.Context, symbol string, chartRange pyth.ChartRange) (pyth.AssetChartSeries, error) {
-	if a.live == nil || a.live.catalog == nil || a.live.chain == nil {
-		return pyth.AssetChartSeries{EmptyReason: "price history unavailable"}, nil
+func assetMarkFor(mark roundMark) pyth.AssetMark {
+	return pyth.AssetMark{
+		PriceUsdcMicros: mark.price,
+		UpdatedAt:       mark.updatedAt,
+		AfterHours:      mark.afterHours,
 	}
-	feed, err := a.live.catalog.Feed(ctx, symbol)
-	if err != nil {
-		return pyth.AssetChartSeries{EmptyReason: "price history unavailable"}, nil
-	}
-	rounds, err := a.live.chain.ChainlinkRoundHistory(ctx, feed, 48)
-	if err != nil || len(rounds) == 0 {
-		return pyth.AssetChartSeries{EmptyReason: "price history unavailable"}, nil
-	}
-	now := a.live.now()
-	cutoff := now.Add(-chartWindow(chartRange))
-	points := make([]pyth.ChartPoint, 0, len(rounds))
-	for _, round := range rounds {
-		price, _, convErr := roundToMark(now, round)
-		if convErr != nil {
-			continue
-		}
-		if round.UpdatedAt.Before(cutoff) {
-			continue
-		}
-		points = append(points, pyth.ChartPoint{
-			Timestamp:       round.UpdatedAt.Unix(),
-			PriceUsdcMicros: price,
-		})
-	}
-	if len(points) < 2 {
-		points = points[:0]
-		for _, round := range rounds {
-			price, _, convErr := roundToMark(now, round)
-			if convErr != nil {
-				continue
-			}
-			points = append(points, pyth.ChartPoint{
-				Timestamp:       round.UpdatedAt.Unix(),
-				PriceUsdcMicros: price,
-			})
-		}
-	}
-	sort.Slice(points, func(i, j int) bool { return points[i].Timestamp < points[j].Timestamp })
-	points = dedupeChartPoints(points)
-	if len(points) < 2 {
-		return pyth.AssetChartSeries{EmptyReason: "price history unavailable"}, nil
-	}
-	return pyth.AssetChartSeries{Points: points}, nil
-}
-
-func chartWindow(chartRange pyth.ChartRange) time.Duration {
-	switch chartRange {
-	case pyth.ChartRange1W:
-		return 7 * 24 * time.Hour
-	case pyth.ChartRange1M:
-		return 30 * 24 * time.Hour
-	default:
-		return 24 * time.Hour
-	}
-}
-
-func dedupeChartPoints(points []pyth.ChartPoint) []pyth.ChartPoint {
-	if len(points) == 0 {
-		return points
-	}
-	out := points[:1]
-	for _, p := range points[1:] {
-		if p.Timestamp == out[len(out)-1].Timestamp {
-			out[len(out)-1] = p
-			continue
-		}
-		out = append(out, p)
-	}
-	return out
 }

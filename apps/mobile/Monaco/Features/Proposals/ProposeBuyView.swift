@@ -306,7 +306,9 @@ private struct ProposePotUnavailable: View {
     }
 }
 
-/// Stock row for the pick step: mark, name over ticker (or why it can't be bought), price over 24h move.
+/// Stock row for the pick step: mark, name over ticker (or why it can't be bought), and the
+/// token's price. No day move: the backend's `change24h` is the share's move on its exchange,
+/// and beside the token's price it would read as the token's.
 struct ProposeStockRow: View {
     let stock: ProposeStock
     var isLast = false
@@ -322,9 +324,6 @@ struct ProposeStockRow: View {
         } trailing: {
             if let micros = stock.priceMicros {
                 MoneyText(micros: micros, style: .row)
-                if let change = stock.change24h, !change.isEmpty {
-                    PercentText(percentReturn: change, style: .caption)
-                }
             }
         }
         .opacity(stock.isTradable ? 1 : 0.45)

@@ -240,9 +240,10 @@ struct AssetsTabView: View {
                 } else {
                     Text("—").moneyFont(.row).foregroundStyle(MonacoTheme.muted)
                 }
-                if let change = asset.change24h, !change.isEmpty {
-                    PercentText(percentReturn: change, style: .caption)
-                }
+                // No day pill here yet. `change24h` is the share's move on its exchange,
+                // and under the token's price an unlabelled percentage reads as the
+                // token's. The labelled pill (`asset.stockDayMove`) lands with the
+                // stocks-list row redesign.
             }
         )
     }

@@ -27,6 +27,8 @@ struct ContentView: View {
             GroupNavSampleHarness(entry: entry, auth: auth)
         } else if let scenario = GroupDetailSampleScenario.requested {
             GroupDetailSampleHarness(scenario: scenario, auth: auth)
+        } else if let scenario = AssetDetailSampleScenario.requested {
+            AssetDetailSampleHarness(scenario: scenario, auth: auth)
         } else if SampleProposalFeedService.isRequested {
             SampleProposalFeedRoot()
         } else {

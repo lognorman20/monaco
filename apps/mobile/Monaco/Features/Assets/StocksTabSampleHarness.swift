@@ -46,7 +46,10 @@ enum StocksTabSampleData {
             tokenAddress: "0xb2000000000000000000000000000000000000" + suffix,
             routable: true,
             priceUsdcMicros: micros,
-            change24h: change
+            change24h: change,
+            // As the backend sends it: the share's day move, labelled as such.
+            change24hBasis: .underlying,
+            change24hBasisSymbol: AssetSymbolFormatter.display(symbol)
         )
     }
 
@@ -89,6 +92,9 @@ enum StocksTabSampleData {
             case .oneDay: return (3_600, [-4_000_000, -2_500_000, -3_000_000, -1_000_000, 0])
             case .oneWeek: return (86_400, [9_000_000, 7_000_000, 8_000_000, 3_000_000, 0])
             case .oneMonth: return (6 * 86_400, [0, 5_000_000, -3_000_000, 2_000_000, 0])
+            case .threeMonths: return (18 * 86_400, [-12_000_000, -6_000_000, -9_000_000, -2_000_000, 0])
+            case .oneYear: return (73 * 86_400, [-40_000_000, -25_000_000, -30_000_000, -8_000_000, 0])
+            case .all: return (365 * 86_400, [-120_000_000, -90_000_000, -60_000_000, -20_000_000, 0])
             }
         }()
         let points = deltas.enumerated().map { index, delta in
@@ -131,6 +137,8 @@ enum StocksTabSampleData {
                 routable: true,
                 priceUsdcMicros: asset.priceUsdcMicros,
                 change24h: asset.change24h,
+                change24hBasis: asset.change24hBasis,
+                change24hBasisSymbol: asset.change24hBasisSymbol,
                 liquidity: AssetLiquidityDTO(
                     label: "Via DEX",
                     routable: true,

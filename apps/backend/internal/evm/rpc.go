@@ -25,8 +25,8 @@ type cachedBalance struct {
 }
 
 type cachedHistory struct {
-	rounds []RoundData
-	at     time.Time
+	history RoundHistory
+	at      time.Time
 }
 
 type rpcClient struct {
@@ -37,13 +37,14 @@ type rpcClient struct {
 	rounds  map[string]cachedRound
 	histMu  sync.Mutex
 	hists   map[string]cachedHistory
+	firstMu sync.Mutex
+	firsts  map[string]cachedFirstRound
 	balMu   sync.Mutex
 	bals    map[string]cachedBalance
 }
 
 const chainlinkRoundTTL = 90 * time.Second
 const chainlinkHistoryTTL = 2 * time.Minute
-const chainlinkHistoryLimit = 48
 const erc20BalanceTTL = 15 * time.Second
 const rpcRateLimitAttempts = 2
 
@@ -343,76 +344,6 @@ func (c *rpcClient) ChainlinkLatestRoundDataMany(ctx context.Context, feeds []st
 		out[feed] = data
 	}
 	return out, nil
-}
-
-func (c *rpcClient) ChainlinkRoundHistory(ctx context.Context, feed string, limit int) ([]RoundData, error) {
-	key := strings.ToLower(strings.TrimSpace(feed))
-	if limit <= 0 {
-		limit = chainlinkHistoryLimit
-	}
-	if limit > chainlinkHistoryLimit {
-		limit = chainlinkHistoryLimit
-	}
-	c.histMu.Lock()
-	if cached, ok := c.hists[key]; ok && time.Since(cached.at) < chainlinkHistoryTTL && len(cached.rounds) >= 2 {
-		out := append([]RoundData(nil), cached.rounds...)
-		c.histMu.Unlock()
-		return out, nil
-	}
-	c.histMu.Unlock()
-
-	latest, err := c.ChainlinkLatestRoundData(ctx, feed)
-	if err != nil {
-		return nil, err
-	}
-	rounds := []RoundData{latest}
-	if latest.RoundID == nil || latest.RoundID.Sign() <= 0 || limit == 1 {
-		return rounds, nil
-	}
-
-	targets := make([]string, 0, limit-1)
-	datas := make([][]byte, 0, limit-1)
-	for i := 1; i < limit; i++ {
-		id := new(big.Int).Sub(latest.RoundID, big.NewInt(int64(i)))
-		if id.Sign() <= 0 {
-			break
-		}
-		targets = append(targets, key)
-		datas = append(datas, encodeGetRoundData(id))
-	}
-	if len(targets) == 0 {
-		return rounds, nil
-	}
-	payload, err := encodeAggregate3Calls(targets, datas)
-	if err != nil {
-		return rounds, nil
-	}
-	raw, err := c.Call(ctx, Multicall3Address, payload)
-	if err != nil {
-		return rounds, nil
-	}
-	results, err := decodeAggregate3(raw)
-	if err != nil {
-		return rounds, nil
-	}
-	for _, result := range results {
-		if !result.Success {
-			continue
-		}
-		data, parseErr := parseLatestRoundData(result.ReturnData)
-		if parseErr != nil || data.Answer == nil || data.Answer.Sign() <= 0 {
-			continue
-		}
-		rounds = append(rounds, data)
-	}
-
-	c.histMu.Lock()
-	if c.hists == nil {
-		c.hists = make(map[string]cachedHistory)
-	}
-	c.hists[key] = cachedHistory{rounds: append([]RoundData(nil), rounds...), at: time.Now()}
-	c.histMu.Unlock()
-	return rounds, nil
 }
 
 func leftPadAddress(addr string) []byte {
