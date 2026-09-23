@@ -82,4 +82,68 @@ final class MarketAssetDTOTests: XCTestCase {
         XCTAssertEqual(dto.points, [])
         XCTAssertEqual(dto.emptyReason, "price history unavailable")
     }
+
+    // MARK: - Whether a Kyber probe actually pays out
+
+    /// The backend writes `sellProbeOutAmount` for any routable quote that carried an
+    /// amount out, so "0" is a real value on the wire. Its own pricing step rejects it
+    /// (`microsPerToken` wants `Sign() > 0`) and reports the token leg unavailable, so a
+    /// caller that only checks the field is present would claim a market the same
+    /// response has already priced at nothing.
+    func testSellRoutePaysOut_rejectsAZeroPayoutFromARoutableQuote() {
+        let zero = AssetLiquidityDTO(
+            label: "Kyber",
+            routable: true,
+            buyProbeUsdcMicros: 100_000_000,
+            buyProbeOutAmount: "100000000",
+            sellProbeInAmount: "100000000",
+            sellProbeOutAmount: "0"
+        )
+        XCTAssertFalse(zero.sellRoutePaysOut)
+        XCTAssertFalse(zero.routesBothWays)
+    }
+
+    func testSellRoutePaysOut_acceptsAPositivePayout() {
+        let paid = AssetLiquidityDTO(
+            label: "Kyber",
+            routable: true,
+            buyProbeUsdcMicros: 100_000_000,
+            buyProbeOutAmount: "100000000",
+            sellProbeInAmount: "100000000",
+            sellProbeOutAmount: "185000000"
+        )
+        XCTAssertTrue(paid.sellRoutePaysOut)
+        XCTAssertTrue(paid.routesBothWays)
+    }
+
+    /// The buy side is `routable`'s own business; with no sell route at all there is no
+    /// way out and the pair is still half a market.
+    func testRoutesBothWays_needsASellSide() {
+        let buyOnly = AssetLiquidityDTO(
+            label: "Kyber",
+            routable: true,
+            buyProbeUsdcMicros: 100_000_000,
+            buyProbeOutAmount: "100000000",
+            sellProbeInAmount: nil,
+            sellProbeOutAmount: nil
+        )
+        XCTAssertFalse(buyOnly.routesBothWays)
+    }
+
+    /// Atomic amounts come off a `big.Int`, so they are matched digit-wise. A value past
+    /// `Int64.max` is a large payout, not a parse failure to be read as "no route".
+    func testIsPositiveAtomicAmount_handlesTheWireFormat() {
+        XCTAssertTrue(AssetLiquidityDTO.isPositiveAtomicAmount("1"))
+        XCTAssertTrue(AssetLiquidityDTO.isPositiveAtomicAmount("  185000000  "))
+        XCTAssertTrue(AssetLiquidityDTO.isPositiveAtomicAmount("+42"))
+        XCTAssertTrue(AssetLiquidityDTO.isPositiveAtomicAmount("99999999999999999999999999"))
+        XCTAssertFalse(AssetLiquidityDTO.isPositiveAtomicAmount("0"))
+        XCTAssertFalse(AssetLiquidityDTO.isPositiveAtomicAmount("000"))
+        XCTAssertFalse(AssetLiquidityDTO.isPositiveAtomicAmount("-5"))
+        XCTAssertFalse(AssetLiquidityDTO.isPositiveAtomicAmount("1.5"))
+        XCTAssertFalse(AssetLiquidityDTO.isPositiveAtomicAmount(""))
+        XCTAssertFalse(AssetLiquidityDTO.isPositiveAtomicAmount("   "))
+        XCTAssertFalse(AssetLiquidityDTO.isPositiveAtomicAmount(nil))
+        XCTAssertFalse(AssetLiquidityDTO.isPositiveAtomicAmount("1e9"))
+    }
 }

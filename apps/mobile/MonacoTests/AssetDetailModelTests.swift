@@ -857,6 +857,24 @@ struct AssetDetailModelTests {
         #expect(model.sessionChip?.detail == nil)
     }
 
+    /// A sell route that pays nothing is not a way out. The backend fills
+    /// `sellProbeOutAmount` for any routable quote that came back with an amount, so a
+    /// whole token priced at nothing ships as "0" — and the same response's own pricing
+    /// step rejects it, reporting the token leg unavailable. The chip has to agree with
+    /// that rather than read the field's presence as a market.
+    @Test func aSellRouteThatPaysNothingDoesNotSayTheTokenTrades() async throws {
+        let source = StubAssetDetailDataSource()
+        source.market = MarketSampleData.sessionAfterHours
+        source.liquidityRoutable = true
+        source.sellProbeOutAmount = "0"
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+
+        await model.loadDetail()
+
+        #expect(model.sessionChip?.title == "After hours")
+        #expect(model.sessionChip?.detail == nil)
+    }
+
     /// A backend that sends only the mirrored session still gets a chip.
     @Test func aMirroredSessionIsEnoughForAChip() async throws {
         let source = StubAssetDetailDataSource()

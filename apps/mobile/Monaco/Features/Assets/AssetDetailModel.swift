@@ -241,10 +241,14 @@ final class AssetDetailModel {
         MarketSessionCopy.chip(for: marketStatus, tokenRoutable: tokenRoutesBothWays)
     }
 
+    /// A route out means a *payout*, not just a field on the response. The backend
+    /// writes `sellProbeOutAmount` for any routable quote that carried an amount, so a
+    /// route that values a whole token at nothing arrives as "0"; its own pricing step
+    /// then throws that away and reports the token leg unavailable. Reading the string's
+    /// presence rather than its value is how the chip came to claim a market the same
+    /// payload had already priced at nothing. `routesBothWays` asks for a positive sell.
     private var tokenRoutesBothWays: Bool {
-        guard let liquidity = detail?.liquidity, liquidity.routable else { return false }
-        let sellOut = liquidity.sellProbeOutAmount?.trimmingCharacters(in: .whitespaces) ?? ""
-        return !sellOut.isEmpty
+        detail?.liquidity?.routesBothWays ?? false
     }
 
     /// True while the exchange behind the curve is still printing. The chart's
