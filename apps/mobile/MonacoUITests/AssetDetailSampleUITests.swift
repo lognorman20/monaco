@@ -58,13 +58,10 @@ final class AssetDetailSampleUITests: XCTestCase {
     /// Every scenario reaches a drawn screen, with the chart state that scenario
     /// serves for 1D. One screenshot per scenario is attached.
     ///
-    /// What this does not check: the stats grid and the stock-vs-token card are not drawn
-    /// by this branch's screen (they land with stocks-detail-cards). `noRoute` and
-    /// `notEntitled` differ from `open` only there, so they are left out rather than
-    /// paying for a launch to re-assert what `open` already covers; they come back with
-    /// the cards. `weekend` stays, because it does differ here — see
-    /// `testTheWeekendHeroSaysWhenItsMarkLastPrinted`. `loading` is covered by the
-    /// skeleton, not here: it never finishes.
+    /// What this does not check: the cards below the chart, which have their own file
+    /// (`AssetDetailCardsUITests`) because they need scrolling rather than a screenshot
+    /// of the top of the screen. `loading` is covered by the skeleton, not here: it
+    /// never finishes.
     @MainActor
     func testEveryScenarioReachesItsChartState() throws {
         let chartIdentifierByScenario: [(String, String)] = [
@@ -74,6 +71,8 @@ final class AssetDetailSampleUITests: XCTestCase {
             ("weekend", "asset-detail-chart"),
             ("holiday", "asset-detail-chart"),
             ("sparse", "asset-detail-chart"),
+            ("noRoute", "asset-detail-chart"),
+            ("notEntitled", "asset-detail-chart"),
             ("fallbackSeries", "asset-detail-chart"),
             ("chainlinkSeries", "asset-detail-chart"),
             ("emptyChart", "asset-detail-chart-empty"),
