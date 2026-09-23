@@ -103,6 +103,25 @@ func TestCompositeSearch_emptyQuery_appendsPreIpoRows(t *testing.T) {
 	}
 }
 
+func TestCompositeSearch_emptyQuery_fullXStockPage_keepsPreIpoRows(t *testing.T) {
+	ctx := context.Background()
+	xs := xstocks.NewFakeCatalogSearcher()
+	xstocks.RegisterCatalogAsset(xs, xStockAAPL())
+	tessera := NewFakeSource(tesseraSpaceX())
+	c := NewComposite(xs, tessera, nil)
+
+	page, err := c.Search(ctx, "", 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Assets) < 2 {
+		t.Fatalf("pre-IPO row dropped from a full xStocks page: %d assets", len(page.Assets))
+	}
+	if page.Assets[len(page.Assets)-1].Kind != xstocks.AssetKindPreIPO {
+		t.Fatalf("pre-IPO row = %+v", page.Assets[len(page.Assets)-1])
+	}
+}
+
 func TestCompositeSearch_tesseraDown_returnsXStocksOnly(t *testing.T) {
 	ctx := context.Background()
 	xs := xstocks.NewFakeCatalogSearcher()

@@ -62,15 +62,37 @@ func (c *Composite) SearchKind(ctx context.Context, query string, kind xstocks.A
 	var hasMore bool
 
 	if query == "" {
+		// xStocks is already paged. Pre-IPO rows are appended on the first page
+		// and are not trimmed back to limit, so a full xStocks page cannot hide them.
+		// Later pages are xStocks only. A pre_ipo filter pages the Tessera list itself.
+		if kind == xstocks.AssetKindPreIPO {
+			tesseraRows := c.tesseraRows(ctx)
+			probeAndRankTessera(ctx, c.prober, tesseraRows)
+			merged = c.collapseByUnderlying(ctx, tesseraRows)
+			hasMore = len(merged) > offset+limit
+			return pageSlice(merged, offset, limit, hasMore), nil
+		}
 		xsPage, err := c.xstocks.Search(ctx, "", limit, offset)
 		if err != nil {
 			return xstocks.CatalogSearchPage{}, err
 		}
 		merged = append(merged, xsPage.Assets...)
-		hasMore = xsPage.HasMore
-		tesseraRows := c.tesseraRows(ctx)
-		probeAndRankTessera(ctx, c.prober, tesseraRows)
-		merged = append(merged, tesseraRows...)
+		if offset == 0 && kind == "" {
+			tesseraRows := c.tesseraRows(ctx)
+			probeAndRankTessera(ctx, c.prober, tesseraRows)
+			merged = append(merged, tesseraRows...)
+		}
+		if kind != "" {
+			filtered := make([]xstocks.CatalogAsset, 0, len(merged))
+			for _, asset := range merged {
+				if asset.Normalize().Kind == kind {
+					filtered = append(filtered, asset)
+				}
+			}
+			merged = filtered
+		}
+		merged = c.collapseByUnderlying(ctx, merged)
+		return xstocks.CatalogSearchPage{Assets: merged, HasMore: xsPage.HasMore}, nil
 	} else {
 		xsPage, err := c.xstocks.Search(ctx, query, searchMergeLimit, 0)
 		if err != nil {
@@ -108,6 +130,17 @@ func (c *Composite) SearchKind(ctx context.Context, query string, kind xstocks.A
 		Assets:  merged[offset:end],
 		HasMore: hasMore,
 	}, nil
+}
+
+func pageSlice(merged []xstocks.CatalogAsset, offset, limit int, hasMore bool) xstocks.CatalogSearchPage {
+	if offset >= len(merged) {
+		return xstocks.CatalogSearchPage{HasMore: hasMore}
+	}
+	end := offset + limit
+	if end > len(merged) {
+		end = len(merged)
+	}
+	return xstocks.CatalogSearchPage{Assets: merged[offset:end], HasMore: hasMore}
 }
 
 // SearchVariants returns every catalog row sharing an underlying company id.
