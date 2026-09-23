@@ -71,12 +71,16 @@ struct ProfilePhotoPicker: View {
             onResult(MonacoToast(message: "Could not read that photo.", isSuccess: false))
             return
         }
-        guard let (prepared, mimeType) = ProfilePhotoUploadPreparer.prepare(from: data) else {
-            onResult(MonacoToast(message: "That photo could not be shrunk under 2MB. Try another.", isSuccess: false))
+        let prepared: ProfilePhotoUploadPreparer.Prepared
+        switch await ProfilePhotoUploadPreparer.prepared(from: data) {
+        case .success(let ready):
+            prepared = ready
+        case .failure(let failure):
+            onResult(MonacoToast(message: failure.memberMessage, isSuccess: false))
             return
         }
 
-        switch await session.uploadProfilePhoto(prepared, mimeType: mimeType, auth: auth) {
+        switch await session.uploadProfilePhoto(prepared.data, mimeType: prepared.mimeType, auth: auth) {
         case .saved, .unchanged:
             onResult(MonacoToast(message: "Profile photo updated.", isSuccess: true))
         case .failed(let message):
