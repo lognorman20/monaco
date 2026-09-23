@@ -33,12 +33,17 @@ struct ProposeReviewView: View {
                 MonacoGroupedList {
                     if let price = review.priceMicros {
                         ReceiptRow(label: ProposeFlowCopy.priceRow) {
-                            Text(ProposeFlowCopy.perShare(UsdAmountFormatter.format(micros: price)))
+                            Text(
+                                review.stock.assetKind == .preIpo
+                                    ? "\(UsdAmountFormatter.format(micros: price)) a \(PreIpoCopy.tokenLabelSingular)"
+                                    : ProposeFlowCopy.perShare(UsdAmountFormatter.format(micros: price))
+                            )
                                 .font(MonacoTheme.Typo.body.monospacedDigit())
                         }
                     }
                     if let shares = review.sharesLabel {
-                        ReceiptRow(label: ProposeFlowCopy.sharesRow) {
+                        let rowLabel = review.stock.assetKind == .preIpo ? PreIpoCopy.tokensRowLabel : ProposeFlowCopy.sharesRow
+                        ReceiptRow(label: rowLabel) {
                             Text(ProposeFlowCopy.aboutShares(shares))
                                 .font(MonacoTheme.Typo.body.monospacedDigit())
                         }

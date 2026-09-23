@@ -8,51 +8,69 @@ struct ProposeStock: Hashable, Identifiable {
     var priceMicros: Int64?
     var change24h: String?
     var isTradable = true
+    var assetKind: AssetKind = .stock
+    var tokenDecimals: Int = AssetCatalogDefaults.decimals
 
     var id: String { symbol }
 
     /// Ticker without the xStock suffix, e.g. "AAPL".
-    var ticker: String { AssetSymbolFormatter.display(symbol) }
+    var ticker: String { AssetSymbolFormatter.display(symbol, kind: assetKind) }
 
     var priceUsd: Decimal? {
         priceMicros.map { Decimal($0) / Decimal(1_000_000) }
     }
 
-    init(symbol: String, name: String, priceMicros: Int64? = nil, change24h: String? = nil, isTradable: Bool = true) {
+    init(
+        symbol: String,
+        name: String,
+        priceMicros: Int64? = nil,
+        change24h: String? = nil,
+        isTradable: Bool = true,
+        assetKind: AssetKind = .stock,
+        tokenDecimals: Int = AssetCatalogDefaults.decimals
+    ) {
         self.symbol = symbol
         self.name = name
         self.priceMicros = priceMicros
         self.change24h = change24h
         self.isTradable = isTradable
+        self.assetKind = assetKind
+        self.tokenDecimals = tokenDecimals
     }
 
-    /// Name from the static table first, then the catalog name, then the ticker.
-    static func displayName(symbol: String, catalogName: String? = nil) -> String {
-        if let known = AssetDisplayNames.name(forSymbol: symbol) { return known }
-        if let catalogName, !catalogName.isEmpty { return AssetDisplayName.format(catalogName: catalogName) }
-        return AssetSymbolFormatter.display(symbol)
+    static func displayName(symbol: String, catalogName: String? = nil, kind: AssetKind = .stock) -> String {
+        AssetCatalogDisplayName.format(catalogName: catalogName ?? "", symbol: symbol, kind: kind)
     }
 
     init(market: MarketAssetDTO) {
         self.init(
             symbol: market.symbol,
-            name: Self.displayName(symbol: market.symbol, catalogName: market.name),
+            name: Self.displayName(symbol: market.symbol, catalogName: market.name, kind: market.resolvedKind),
             priceMicros: market.priceUsdcMicros,
             change24h: market.change24h,
-            isTradable: market.routable
+            isTradable: market.routable,
+            assetKind: market.resolvedKind,
+            tokenDecimals: market.resolvedDecimals
         )
     }
 
     init(catalog: CatalogAssetDTO) {
         self.init(
             symbol: catalog.symbol,
-            name: Self.displayName(symbol: catalog.symbol, catalogName: catalog.name),
-            isTradable: catalog.isTradable
+            name: Self.displayName(symbol: catalog.symbol, catalogName: catalog.name, kind: catalog.resolvedKind),
+            isTradable: catalog.isTradable,
+            assetKind: catalog.resolvedKind,
+            tokenDecimals: catalog.resolvedDecimals
         )
     }
 
-    init(symbol: String) {
-        self.init(symbol: symbol, name: Self.displayName(symbol: symbol))
+    init(symbol: String, kind: AssetKind = .stock, tokenDecimals: Int = AssetCatalogDefaults.decimals) {
+        self.init(
+            symbol: symbol,
+            name: Self.displayName(symbol: symbol, kind: kind),
+            assetKind: kind,
+            tokenDecimals: tokenDecimals
+        )
     }
 }
 
@@ -91,6 +109,7 @@ protocol ProposeService: AnyObject {
     func searchStocks(groupId: String, query: String, offset: Int, limit: Int) async throws -> (stocks: [ProposeStock], hasMore: Bool)
     /// Latest price per share in USDC micros, nil when the market has none.
     func priceMicros(symbol: String) async throws -> Int64?
+    func assetDetail(symbol: String) async throws -> AssetDetailDTO
     func buyQuote(groupId: String, symbol: String, usdcMicros: Int64) async throws -> BuyQuoteDTO
     func sellQuote(groupId: String, symbol: String, tokenAmount: Int64) async throws -> BuyQuoteDTO
     /// Creates the proposal and returns its id. `submission` belongs to the screen so a retry
@@ -129,6 +148,10 @@ final class LiveProposeService: ProposeService {
 
     func priceMicros(symbol: String) async throws -> Int64? {
         try await client.getMarketAsset(accessToken: try token(), symbol: symbol).priceUsdcMicros
+    }
+
+    func assetDetail(symbol: String) async throws -> AssetDetailDTO {
+        try await client.getMarketAsset(accessToken: try token(), symbol: symbol)
     }
 
     func buyQuote(groupId: String, symbol: String, usdcMicros: Int64) async throws -> BuyQuoteDTO {
@@ -212,7 +235,10 @@ enum ProposeErrorCopy {
 /// Fixed-point conversions for the propose flows. USDC has 6 decimals; xStock tokens have 8.
 enum ProposeMath {
     static let usdcScale = Decimal(1_000_000)
-    static let shareScale = Decimal(sign: .plus, exponent: ProposalShareFormatter.decimals, significand: 1)
+
+    static func shareScale(decimals: Int) -> Decimal {
+        Decimal(sign: .plus, exponent: decimals, significand: 1)
+    }
 
     static func micros(fromUsd raw: String) -> Int64? {
         guard let value = Decimal(string: raw.trimmingCharacters(in: .whitespaces), locale: Locale(identifier: "en_US_POSIX")) else {
@@ -238,24 +264,25 @@ enum ProposeMath {
         return micros
     }
 
-    static func shares(fromAtomics raw: String) -> Decimal? {
-        guard let atomics = Decimal(string: raw, locale: Locale(identifier: "en_US_POSIX")) else { return nil }
-        return atomics / shareScale
+    static func shares(fromAtomics raw: String, decimals: Int = ProposalShareFormatter.defaultDecimals) -> Decimal? {
+        TokenQuantityFormatter.quantity(fromAtomics: raw, decimals: decimals)
     }
 
     /// Token atomics for a dollar amount of a holding at its mark, rounded down so a sell never
     /// asks for more than the cabal holds.
-    static func atomics(forUsd usd: Decimal, markUsd: Decimal, ceiling: Int64) -> Int64? {
+    static func atomics(forUsd usd: Decimal, markUsd: Decimal, ceiling: Int64, decimals: Int = ProposalShareFormatter.defaultDecimals) -> Int64? {
         guard markUsd > 0, usd > 0 else { return nil }
-        let raw = rounded(usd / markUsd * shareScale, mode: .down) ?? 0
+        let scale = shareScale(decimals: decimals)
+        let raw = rounded(usd / markUsd * scale, mode: .down) ?? 0
         let clamped = min(raw, ceiling)
         return clamped > 0 ? clamped : nil
     }
 
-    static func atomics(fromShares text: String) -> Int64? {
+    static func atomics(fromShares text: String, decimals: Int = ProposalShareFormatter.defaultDecimals) -> Int64? {
         let trimmed = text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
         guard let value = Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX")), value > 0 else { return nil }
-        let atomics = rounded(value * shareScale, mode: .down) ?? 0
+        let scale = shareScale(decimals: decimals)
+        let atomics = rounded(value * scale, mode: .down) ?? 0
         return atomics > 0 ? atomics : nil
     }
 

@@ -8,8 +8,13 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
     public let dollarPnl: String
     public let afterHours: Bool?
     public let tokenAmount: String?
+    public let assetKind: AssetKind?
+    public let tokenDecimals: Int?
+    public let premiumBps: Int?
 
     public var id: String { symbol }
+    public var resolvedAssetKind: AssetKind { assetKind ?? .stock }
+    public var resolvedTokenDecimals: Int { tokenDecimals ?? AssetCatalogDefaults.decimals }
 
     public init(
         symbol: String,
@@ -18,7 +23,10 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
         valueUsd: String,
         dollarPnl: String,
         afterHours: Bool?,
-        tokenAmount: String? = nil
+        tokenAmount: String? = nil,
+        assetKind: AssetKind? = nil,
+        tokenDecimals: Int? = nil,
+        premiumBps: Int? = nil
     ) {
         self.symbol = symbol
         self.units = units
@@ -27,6 +35,9 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
         self.dollarPnl = dollarPnl
         self.afterHours = afterHours
         self.tokenAmount = tokenAmount
+        self.assetKind = assetKind
+        self.tokenDecimals = tokenDecimals
+        self.premiumBps = premiumBps
     }
 }
 

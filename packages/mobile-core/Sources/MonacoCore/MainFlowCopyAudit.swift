@@ -27,8 +27,17 @@ public enum MainFlowCopyAudit {
     public static func stringsAreClean(_ strings: [String]) -> Bool {
         strings.allSatisfy { string in
             let lowered = string.lowercased()
-            return !forbiddenTerms.contains { term in lowered.contains(term) }
+            return !forbiddenTerms.contains { term in
+                if term == "nav" {
+                    return containsWholeWord("nav", in: lowered)
+                }
+                return lowered.contains(term)
+            }
         }
+    }
+
+    private static func containsWholeWord(_ word: String, in haystack: String) -> Bool {
+        haystack.split { !$0.isLetter }.contains { $0 == word }
     }
 }
 
@@ -72,5 +81,5 @@ public enum MainFlowCopyManifest {
         GroupChatCopy.emptyState,
         GroupChatCopy.composerPlaceholder,
         GroupChatCopy.loadEarlier,
-    ]
+    ] + PreIpoCopy.auditedStrings
 }
