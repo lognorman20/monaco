@@ -15,7 +15,7 @@ struct CabalsSearchResultsSection: View {
                 hint("Type at least \(GroupSearchQuery.minimumLength) letters.", id: "cabals-search-too-short")
             case .loading:
                 ProgressView()
-                    .tint(MonacoTheme.accent)
+                    .tint(MonacoTheme.controlTint)
                     .frame(maxWidth: .infinity, minHeight: 80)
                     .accessibilityIdentifier("cabals-search-loading")
             case .empty:
@@ -69,7 +69,7 @@ struct CabalsSearchResultsSection: View {
                     model.loadMore()
                 } label: {
                     if model.isLoadingMore {
-                        ProgressView().tint(MonacoTheme.accent)
+                        ProgressView().tint(MonacoTheme.controlTint)
                     } else {
                         Text(model.loadMoreFailed ? "Try again" : "Show more cabals")
                     }

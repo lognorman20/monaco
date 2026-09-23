@@ -258,13 +258,24 @@ struct GroupDetailView: View {
     }
 
     /// Scrollable so pull-to-refresh works from the error state too.
+    ///
+    /// An E1 card with the cabal's own mark disc on it, not a bare centred `VStack`: a screen
+    /// that fails should still look like the product, and the disc is the one thing that says
+    /// *which* cabal could not be loaded.
     private func statusCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         ScrollView {
-            VStack(spacing: 16) {
+            VStack(spacing: MonacoTheme.Space.m) {
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(cabalTint.fill)
+                    .frame(width: 56, height: 56)
+                    .background(Circle().fill(cabalTint.soft))
                 content()
             }
-            .padding(24)
+            .padding(MonacoTheme.Space.l)
             .frame(maxWidth: .infinity)
+            .monacoElevation(.card)
+            .padding(.horizontal, MonacoTheme.Space.gutter)
             .padding(.top, 48)
         }
     }
@@ -659,7 +670,7 @@ struct GroupLeaveProgressCover: View {
                 .ignoresSafeArea()
             VStack(spacing: 14) {
                 ProgressView()
-                    .tint(MonacoTheme.ink)
+                    .tint(MonacoTheme.controlTint)
                 Text(isSellingSlice ? "Selling your slice…" : "Leaving the cabal…")
                     .font(MonacoTheme.Typo.rowTitle)
                     .foregroundStyle(MonacoTheme.ink)
@@ -931,44 +942,20 @@ struct GroupJoinRequestsCard: View {
     let decidingRequestIDs: Set<String>
     let onDecide: (JoinRequestDTO, Bool) -> Void
 
+    /// A name and two buttons on one line is four elements fighting for 358pt. At an
+    /// accessibility size they lost — the name drew straight through "Deny" and the avatar. The
+    /// answer is the same one `MonacoRowLayout` already uses: stop being a row.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
             MonacoSectionHeader(requests.count == 1 ? "1 person wants to join" : "\(requests.count) people want to join")
             VStack(spacing: 0) {
                 ForEach(requests) { request in
-                    let name = request.displayName.isEmpty ? "Member" : request.displayName
-                    HStack(spacing: 8) {
-                        MonacoAvatar(photoURL: request.profilePhotoUrl, displayName: name, size: 36)
-                        Text(name)
-                            .font(MonacoTheme.Typo.rowTitle)
-                            .foregroundStyle(MonacoTheme.ink)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .layoutPriority(1)
-                        Button("Deny") { onDecide(request, false) }
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-                            .fixedSize()
-                            .foregroundStyle(MonacoTheme.muted)
-                            .frame(minWidth: 44, minHeight: 44)
-                            .accessibilityIdentifier("join-request-deny-\(request.id)")
-                        Button("Approve") {
-                            Haptics.success()
-                            onDecide(request, true)
-                        }
-                            .font(.subheadline.weight(.semibold))
-                            .lineLimit(1)
-                            .fixedSize()
-                            .foregroundStyle(MonacoTheme.primaryButtonLabel)
-                            .padding(.horizontal, 14)
-                            .frame(minHeight: 36)
-                            .background(Capsule().fill(MonacoTheme.primaryButtonFill))
-                            .frame(minHeight: 44)
-                            .accessibilityIdentifier("join-request-approve-\(request.id)")
-                    }
-                    .disabled(decidingRequestIDs.contains(request.id))
-                    .opacity(decidingRequestIDs.contains(request.id) ? 0.5 : 1)
-                    .padding(.vertical, 6)
+                    row(request)
+                        .disabled(decidingRequestIDs.contains(request.id))
+                        .opacity(decidingRequestIDs.contains(request.id) ? 0.5 : 1)
+                        .padding(.vertical, 6)
                 }
             }
             .padding(.horizontal, MonacoTheme.Space.m)
@@ -976,6 +963,53 @@ struct GroupJoinRequestsCard: View {
             .monacoElevation(.card)
         }
         .accessibilityIdentifier("group-join-requests")
+    }
+
+    @ViewBuilder
+    private func row(_ request: JoinRequestDTO) -> some View {
+        let name = request.displayName.isEmpty ? "Member" : request.displayName
+        let who = HStack(spacing: MonacoTheme.Space.s) {
+            MonacoAvatar(photoURL: request.profilePhotoUrl, displayName: name, size: 36)
+            Text(name)
+                .font(MonacoTheme.Typo.rowTitle)
+                .foregroundStyle(MonacoTheme.fgPrimary)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        let decisions = HStack(spacing: MonacoTheme.Space.s) {
+            Button("Deny") { onDecide(request, false) }
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .fixedSize()
+                .foregroundStyle(MonacoTheme.fgMuted)
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityIdentifier("join-request-deny-\(request.id)")
+            Button("Approve") {
+                Haptics.success()
+                onDecide(request, true)
+            }
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .fixedSize()
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, 14)
+                .frame(minHeight: 36)
+                .background(Capsule().fill(MonacoTheme.brandFill))
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("join-request-approve-\(request.id)")
+        }
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                who
+                decisions.frame(maxWidth: .infinity, alignment: .leading)
+            }
+        } else {
+            HStack(spacing: MonacoTheme.Space.s) {
+                who
+                decisions
+            }
+        }
     }
 }
 

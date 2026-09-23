@@ -18,6 +18,12 @@ struct GroupHeroSection: View {
         cabalTint ?? .forGroupId(view.id)
     }
 
+    /// At an accessibility text size an eyebrow is 30pt of tracked uppercase, and two of them
+    /// side by side break mid-word. Every side-by-side pair in the hero stacks instead.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var stacksPairs: Bool { dynamicTypeSize.isAccessibilitySize }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 12) {
@@ -35,29 +41,33 @@ struct GroupHeroSection: View {
                     .fill(tint.onInk)
                     .frame(width: 44, height: 2)
                     .accessibilityHidden(true)
-                HStack(spacing: 8) {
-                    GroupMemberAvatarStack(members: view.members, ringColor: MonacoTheme.Ink.base)
-                    Text(view.members.count == 1 ? "1 member" : "\(view.members.count) members")
-                        .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.Ink.fgMuted)
-                }
-                .accessibilityElement(children: .combine)
+                memberLine
+                    .accessibilityElement(children: .combine)
             }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("In the pot")
                     .displayFont(.eyebrow)
                     .foregroundStyle(MonacoTheme.Ink.fgSubtle)
+                    .fixedSize(horizontal: false, vertical: true)
                 MoneyText(decimalString: view.resolvedPotTotalUsd, style: .hero, color: MonacoTheme.Ink.fgPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
                     .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .accessibilityIdentifier("pot-total-value")
-                HStack(spacing: 8) {
-                    PnLBadge(dollarPnl: GroupHeroMath.potDollarPnl(view.pot), percentReturn: nil, onInk: true)
-                    Text("all time")
-                        .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.Ink.fgMuted)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        PnLBadge(dollarPnl: GroupHeroMath.potDollarPnl(view.pot), percentReturn: nil, onInk: true)
+                        Text("all time")
+                            .font(MonacoTheme.Typo.caption)
+                            .foregroundStyle(MonacoTheme.Ink.fgMuted)
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        PnLBadge(dollarPnl: GroupHeroMath.potDollarPnl(view.pot), percentReturn: nil, onInk: true)
+                        Text("all time")
+                            .font(MonacoTheme.Typo.caption)
+                            .foregroundStyle(MonacoTheme.Ink.fgMuted)
+                    }
                 }
             }
             .accessibilityElement(children: .combine)
@@ -66,30 +76,62 @@ struct GroupHeroSection: View {
                 .fill(MonacoTheme.Ink.line)
                 .frame(height: 1)
 
-            HStack(alignment: .lastTextBaseline, spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Your slice")
-                        .displayFont(.eyebrow)
-                        .foregroundStyle(MonacoTheme.Ink.fgSubtle)
-                    MoneyText(decimalString: view.you.equityUsd, style: .row, color: MonacoTheme.Ink.fgPrimary)
-                }
-                Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(GroupHeroMath.sliceCaption(view.you))
-                        .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.Ink.fgMuted)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    if GroupHeroMath.hasSlice(view.you) {
-                        PnLText(dollarPnl: view.you.dollarPnl, style: .caption, onInk: true)
-                    }
-                }
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("group-hero-slice")
+            sliceRow
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("group-hero-slice")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityIdentifier("group-hero")
+    }
+
+    @ViewBuilder
+    private var memberLine: some View {
+        let caption = Text(view.members.count == 1 ? "1 member" : "\(view.members.count) members")
+            .font(MonacoTheme.Typo.caption)
+            .foregroundStyle(MonacoTheme.Ink.fgMuted)
+        if stacksPairs {
+            VStack(alignment: .leading, spacing: 6) {
+                GroupMemberAvatarStack(members: view.members, ringColor: MonacoTheme.Ink.base)
+                caption.fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            HStack(spacing: 8) {
+                GroupMemberAvatarStack(members: view.members, ringColor: MonacoTheme.Ink.base)
+                caption
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sliceRow: some View {
+        let mine = VStack(alignment: .leading, spacing: 2) {
+            Text("Your slice")
+                .displayFont(.eyebrow)
+                .foregroundStyle(MonacoTheme.Ink.fgSubtle)
+                .fixedSize(horizontal: false, vertical: true)
+            MoneyText(decimalString: view.you.equityUsd, style: .row, color: MonacoTheme.Ink.fgPrimary)
+        }
+        let share = VStack(alignment: stacksPairs ? .leading : .trailing, spacing: 2) {
+            Text(GroupHeroMath.sliceCaption(view.you))
+                .font(MonacoTheme.Typo.caption)
+                .foregroundStyle(MonacoTheme.Ink.fgMuted)
+                .lineLimit(stacksPairs ? nil : 1)
+                .minimumScaleFactor(0.8)
+                .fixedSize(horizontal: false, vertical: true)
+            if GroupHeroMath.hasSlice(view.you) {
+                PnLText(dollarPnl: view.you.dollarPnl, style: .caption, onInk: true)
+            }
+        }
+        if stacksPairs {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) { mine; share }
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(alignment: .lastTextBaseline, spacing: 8) {
+                mine
+                Spacer(minLength: 8)
+                share
+            }
+        }
     }
 }
 

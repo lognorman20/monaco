@@ -92,7 +92,7 @@ struct GroupActivityList: View {
     private func retryControl(_ item: GroupActivityItemDTO) -> some View {
         if retryingTransactionIDs.contains(item.id) {
             ProgressView()
-                .tint(MonacoTheme.ink)
+                .tint(MonacoTheme.controlTint)
                 .frame(width: 44, height: 44)
                 .accessibilityIdentifier("group-activity-retry-loading-\(item.id)")
         } else {

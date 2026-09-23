@@ -40,7 +40,7 @@ struct TransactionDetailView: View {
                 .accessibilityIdentifier("transaction-detail-error")
             } else {
                 ProgressView()
-                    .tint(MonacoTheme.ink)
+                    .tint(MonacoTheme.controlTint)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -343,7 +343,7 @@ struct TransactionReceiptView: View {
                     Group {
                         if isRetrying {
                             ProgressView()
-                                .tint(MonacoTheme.ink)
+                                .tint(MonacoTheme.controlTint)
                                 .frame(minHeight: 50)
                                 .accessibilityIdentifier("transaction-detail-retry-loading")
                         } else {
