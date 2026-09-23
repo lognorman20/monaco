@@ -54,7 +54,9 @@ struct CabalsPnLChartSection: View {
     /// Zero is always in range: the break-even rule is drawn at zero and a chart that hides it is
     /// a chart that does not say whether a cabal is up.
     private var yDomain: ClosedRange<Double> {
-        let values = drawable.flatMap { $0.points.map(\.chartValue) } + [0]
+        // Typed: `[Double] + [0]` infers `[Any]`, and every comparison below then fails.
+        var values: [Double] = drawable.flatMap { $0.points.map(\.chartValue) }
+        values.append(0)
         guard let low = values.min(), let high = values.max() else { return -1...1 }
         guard high > low else { return (low - 1)...(high + 1) }
         let pad = (high - low) * 0.12
@@ -204,45 +206,8 @@ struct CabalsPnLChartSection: View {
                 .foregroundStyle(MonacoTheme.Ink.lineStrong)
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
             ForEach(series, id: \.id) { line in
-                ForEach(line.points) { point in
-                    LineMark(
-                        x: .value("Time", point.at),
-                        y: .value("P&L", point.chartValue),
-                        series: .value("Cabal", line.groupID)
-                    )
-                    .foregroundStyle(color(forGroupID: line.groupID))
-                    .interpolationMethod(.monotone)
-                    .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-                }
-                // The terminus carries the name. The hand-built swatch legend is gone: a legend
-                // makes colour the only identity carrier and then asks the reader to hold seven
-                // of them in their head.
-                if let last = line.points.last {
-                    PointMark(
-                        x: .value("Time", last.at),
-                        y: .value("P&L", last.chartValue)
-                    )
-                    .foregroundStyle(color(forGroupID: line.groupID))
-                    .symbolSize(28)
-                    // A terminus sits at the plot's right edge by definition, so the label needs
-                    // both somewhere to go — the reserved gutter on the x scale below — and an
-                    // overflow rule, or the chart clips its own only non-colour identity signal.
-                    .annotation(
-                        position: .trailing,
-                        alignment: .leading,
-                        spacing: 4,
-                        overflowResolution: .init(x: .fitToChart, y: .fitToChart)
-                    ) {
-                        Text(line.name)
-                            .font(MonacoTheme.Typo.micro)
-                            .foregroundStyle(color(forGroupID: line.groupID))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .frame(maxWidth: Self.labelWidth, alignment: .leading)
-                            .offset(y: offsets[line.groupID] ?? 0)
-                            .accessibilityHidden(true)
-                    }
-                }
+                lineMarks(for: line)
+                terminus(for: line, labelOffset: offsets[line.groupID] ?? 0)
             }
         }
         .chartLegend(.hidden)
@@ -265,6 +230,59 @@ struct CabalsPnLChartSection: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Self.chartLabel(series: series, range: model.range))
         .accessibilityIdentifier("cabals-pnl-chart")
+    }
+
+    /// One cabal's line. Split out of the `Chart` builder because the whole thing in one
+    /// expression is past what the type checker will do in reasonable time.
+    @ChartContentBuilder
+    private func lineMarks(for line: GroupPnLSeriesDTO) -> some ChartContent {
+        ForEach(line.points) { point in
+            LineMark(
+                x: .value("Time", point.at),
+                y: .value("P&L", point.chartValue),
+                series: .value("Cabal", line.groupID)
+            )
+            .foregroundStyle(color(forGroupID: line.groupID))
+            .interpolationMethod(.monotone)
+            .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+        }
+    }
+
+    /// The end of one cabal's line, carrying its name.
+    ///
+    /// The hand-built swatch legend is gone: a legend makes colour the only identity carrier and
+    /// then asks the reader to hold seven of them in their head. A terminus sits at the plot's
+    /// right edge by definition, so the label needs both somewhere to go — the gutter reserved on
+    /// the x scale — and an overflow rule, or the chart clips its own only non-colour signal.
+    @ChartContentBuilder
+    private func terminus(for line: GroupPnLSeriesDTO, labelOffset: CGFloat) -> some ChartContent {
+        if let last = line.points.last {
+            PointMark(
+                x: .value("Time", last.at),
+                y: .value("P&L", last.chartValue)
+            )
+            .foregroundStyle(color(forGroupID: line.groupID))
+            .symbolSize(28)
+            .annotation(
+                position: .trailing,
+                alignment: .leading,
+                spacing: 4,
+                overflowResolution: .init(x: .fitToChart, y: .fitToChart)
+            ) {
+                terminusLabel(line, offset: labelOffset)
+            }
+        }
+    }
+
+    private func terminusLabel(_ line: GroupPnLSeriesDTO, offset: CGFloat) -> some View {
+        Text(line.name)
+            .font(MonacoTheme.Typo.micro)
+            .foregroundStyle(color(forGroupID: line.groupID))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: Self.labelWidth, alignment: .leading)
+            .offset(y: offset)
+            .accessibilityHidden(true)
     }
 
     /// The whole chart in one sentence, because the lines themselves carry nothing to VoiceOver.
