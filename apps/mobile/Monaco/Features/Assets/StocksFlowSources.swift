@@ -8,6 +8,7 @@ import Foundation
 struct StocksFlowSources {
     var tab: StocksTabDataSource?
     var detail: AssetDetailDataSource?
+    var social: AssetSocialDataSource?
     var holdings: CabalHoldingsDataSource?
     var propose: ProposeService?
 
