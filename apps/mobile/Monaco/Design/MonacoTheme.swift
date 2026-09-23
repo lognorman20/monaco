@@ -344,14 +344,14 @@ enum MonacoTheme {
         return muted
     }
 
-    /// One voice: SF Pro. Display type uses the *width* axis (`.expanded`) via
-    /// `.displayFont(_:)`; money and UI type use standard width.
+    /// Two voices. Avenir Next leads — display, titles and section heads, via `.displayFont(_:)`.
+    /// SF Pro with tabular digits carries money and UI type.
     ///
-    /// Avenir Next is gone. It is system-bundled, it reads as picked-from-a-list, and it was the
-    /// loudest templated signal left in the app. SF Pro's width axis takes most of the display
-    /// gain for zero bundle, zero licence risk, free Dynamic Type, and — unlike a bundled face —
-    /// no silent-fallback failure mode where a bad `Info.plist` ships an app that looks subtly
-    /// wrong and reports nothing.
+    /// SF Pro's expanded width axis was tried as the display voice in v3 and reverted: it read as
+    /// novelty rather than authority, which is the wrong register for a screen showing somebody's
+    /// money. Avenir Next is the serious, brokerage-like voice this app has always had. It ships
+    /// with iOS, so there is no bundle cost, no licence to verify, and no silent-fallback failure
+    /// mode from a bad `Info.plist`.
     enum Typo {
         /// Prefer `.moneyFont(_:)`. These statics pre-scale with `UIFontMetrics`, so they ignore a
         /// `.dynamicTypeSize` cap on the view tree and do not re-render when the text size changes.
@@ -435,13 +435,13 @@ enum MonacoTheme {
     }
 
     /// Scheduled for deletion once its five remaining call sites migrate to `.displayFont(_:)`.
-    /// Repointed at SF Pro Expanded here so no surface is still rendering Avenir Next while they do.
+    /// Uses the same Avenir Next faces meanwhile, so no surface is rendering a different voice.
     enum TypeRole {
         @available(*, deprecated, message: "Use .displayFont(.display)")
-        static var display: Font { Font.system(size: 28, weight: .bold).width(.expanded) }
+        static var display: Font { Font.custom("AvenirNext-Bold", size: 28) }
 
         @available(*, deprecated, message: "Use .displayFont(.title)")
-        static var title: Font { Font.system(size: 20, weight: .bold).width(.expanded) }
+        static var title: Font { Font.custom("AvenirNext-Bold", size: 20) }
 
         static let body = Font.system(.body)
         static let caption = Font.system(.footnote)

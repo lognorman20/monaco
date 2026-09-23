@@ -47,22 +47,25 @@ struct DisplayRoleTests {
         }
     }
 
-    /// The display voice is SF Pro's width axis, not a bundled face. `Font.custom` falls back to
-    /// the system face *silently*, so a bad `Info.plist` would ship an app that looks subtly wrong
-    /// and reports nothing — which is exactly why Avenir Next is gone and nothing replaced it.
-    @Test func displayTypeResolvesToAnExpandedSystemFace() {
+    /// The display voice is Avenir Next, which ships with iOS.
+    ///
+    /// `UIFont(name:size:)` returns nil when a face is missing and `Font.custom` falls back to the
+    /// system face *silently*, so a missing face would ship an app that looks subtly wrong and
+    /// reports nothing. This is the guard against that: every display weight must resolve to a
+    /// real Avenir Next face, not to a fallback.
+    @Test func displayTypeResolvesToAvenirNext() {
         for role in DisplayRole.allCases {
-            let uiFont = UIFont.systemFont(ofSize: role.baseSize, weight: role.uiWeight, width: .expanded)
-            let standard = UIFont.systemFont(ofSize: role.baseSize, weight: role.uiWeight)
+            let name = DisplayRole.faceName(for: role.weight)
+            let font = UIFont(name: name, size: role.baseSize)
+            #expect(font != nil, "\(role) asked for \(name), which did not resolve")
             #expect(
-                uiFont.familyName == standard.familyName,
-                "\(role) is not on the system family any more"
+                font?.familyName == "Avenir Next",
+                "\(role) resolved to \(font?.familyName ?? "nil"), not Avenir Next"
             )
-            // Expanded is wider than standard at the same size and weight. If the width axis ever
-            // stops resolving, this is the difference that disappears.
-            let expandedWidth = ("MONACO" as NSString).size(withAttributes: [.font: uiFont]).width
-            let standardWidth = ("MONACO" as NSString).size(withAttributes: [.font: standard]).width
-            #expect(expandedWidth > standardWidth, "\(role) is not rendering expanded")
+            #expect(
+                font?.familyName != UIFont.systemFont(ofSize: role.baseSize).familyName,
+                "\(role) fell back to the system face"
+            )
         }
     }
 
@@ -70,14 +73,14 @@ struct DisplayRoleTests {
     /// at AX5 pushes the whole screen down before the content has said anything.
     @Test func navTitlesAreCapped() {
         let large = UIFontMetrics(forTextStyle: .largeTitle).scaledFont(
-            for: UIFont.systemFont(ofSize: MonacoNavType.largeSize, weight: .bold, width: .expanded),
+            for: UIFont(name: DisplayRole.uiFaceName(for: .bold), size: MonacoNavType.largeSize)!,
             maximumPointSize: MonacoNavType.largeCap,
             compatibleWith: UITraitCollection(preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge)
         )
         #expect(large.pointSize <= MonacoNavType.largeCap)
 
         let inline = UIFontMetrics(forTextStyle: .headline).scaledFont(
-            for: UIFont.systemFont(ofSize: MonacoNavType.inlineSize, weight: .semibold, width: .expanded),
+            for: UIFont(name: DisplayRole.uiFaceName(for: .semibold), size: MonacoNavType.inlineSize)!,
             maximumPointSize: MonacoNavType.inlineCap,
             compatibleWith: UITraitCollection(preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge)
         )
