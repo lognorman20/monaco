@@ -189,6 +189,11 @@ struct CreateGroupView: View {
                 .padding(.bottom, MonacoTheme.Space.l)
             }
             .scrollDismissesKeyboard(.interactively)
+            // On the scroll view, not on the screen: an identifier applied after the bottom
+            // inset propagates into it and overwrites the Create button's own, so the one
+            // control that finishes this flow could not be addressed. `GroupChatView` carries
+            // the same note for the same reason.
+            .accessibilityIdentifier("create-group-root")
         }
         .safeAreaInset(edge: .bottom) {
             BottomCTA {
@@ -202,7 +207,6 @@ struct CreateGroupView: View {
         }
         .navigationTitle("New cabal")
         .navigationBarTitleDisplayMode(.inline)
-        .accessibilityIdentifier("create-group-root")
     }
 
     // MARK: - Step 1

@@ -139,12 +139,15 @@ struct CabalsPnLChartSection: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Your cabals' P&L")
 
+                // No identifier on the control itself: one applied here propagates down and
+                // overwrites the buttons' own, which is how `cabals-pnl-range-1D` came to be a
+                // name nothing on screen answered to. Each range is addressable; the picker as a
+                // whole is not, and nothing needs it to be.
                 InkSegmented(
                     GroupPnLRange.allCases,
                     selection: rangeSelection,
                     identifierPrefix: "cabals-pnl-range"
                 ) { $0.label }
-                .accessibilityIdentifier("cabals-pnl-range")
 
                 content
                     .frame(maxWidth: .infinity, minHeight: 200)
