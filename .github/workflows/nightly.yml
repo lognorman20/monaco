@@ -1,0 +1,140 @@
+name: Nightly QA
+
+# scripts/qa/night.sh, the same runner as `just qa-night` on a laptop, run on a GitHub macOS
+# runner against main every night. A failing night opens (or comments on) one GitHub issue
+# labelled nightly-failure; the next passing night comments and closes it.
+on:
+  schedule:
+    # 07:00 UTC = 03:00 US Eastern in summer (EDT), 02:00 in winter (EST).
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+  # A change to this workflow or to the QA scripts runs it on its own PR. PR runs never
+  # touch issues: the alert job only prints what it would have done.
+  pull_request:
+    paths:
+      - .github/workflows/nightly.yml
+      - scripts/qa/**
+
+concurrency:
+  group: nightly-qa-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  qa:
+    name: night.sh (backend, host tests, app, sample UI tests, screenshots)
+    runs-on: macos-15
+    timeout-minutes: 180
+    env:
+      # Same database and URL as the go job in ci.yml. Service containers only run on Linux
+      # runners, so the same Postgres 16 is started from Homebrew below instead.
+      DATABASE_URL: postgres://monaco:monaco@localhost:5432/monaco?sslmode=disable
+      MONACO_QA_DATABASE_URL: postgres://monaco:monaco@localhost:5432/monaco?sslmode=disable
+      MONACO_QA_IOS_CONFIG: placeholder
+      MONACO_QA_SCREENSHOTS: "1"
+      MONACO_QA_DERIVED_DATA: ${{ github.workspace }}/../DerivedData
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: scripts/ci/select-xcode.sh
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: |
+            apps/backend/go.sum
+            packages/domain/go.sum
+
+      - name: Start Postgres 16
+        run: |
+          brew install postgresql@16
+          bin="$(brew --prefix postgresql@16)/bin"
+          brew services start postgresql@16
+          for _ in $(seq 1 30); do "$bin/pg_isready" -h localhost -p 5432 -q && break; sleep 1; done
+          "$bin/psql" -h localhost -d postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE monaco WITH LOGIN SUPERUSER PASSWORD 'monaco'"
+          "$bin/createdb" -h localhost -O monaco monaco
+          "$bin/pg_isready" -d "$DATABASE_URL"
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.MONACO_QA_DERIVED_DATA }}/SourcePackages
+          key: spm-nightly-${{ runner.os }}-${{ hashFiles('apps/mobile/Monaco.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: spm-nightly-${{ runner.os }}-
+
+      - name: Run night.sh
+        id: night
+        run: scripts/qa/night.sh
+
+      - name: Write report to the job summary
+        if: always()
+        run: |
+          dir="$(find .logs/qa -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | tail -1)"
+          if [[ -n "$dir" && -f "$dir/report.md" ]]; then
+            cat "$dir/report.md" >> "$GITHUB_STEP_SUMMARY"
+            shots="$(find "$dir/screens" -name '*.png' 2>/dev/null | wc -l | tr -d ' ')"
+            {
+              echo
+              echo "Artifacts: \`nightly-qa-report\` (report, logs, per-class recordings) and \`nightly-qa-screens\` (${shots} sample screens)."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "night.sh wrote no report; see the step logs." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report, logs and recordings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-qa-report
+          path: |
+            .logs/qa/
+            !.logs/qa/*/screens/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload screenshot gallery
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-qa-screens
+          path: .logs/qa/*/screens/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  alert:
+    name: Open, update or close the nightly-failure issue
+    needs: qa
+    if: always() && (needs.qa.result == 'success' || needs.qa.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/qa
+
+      - name: Download report
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: nightly-qa-report
+          path: qa-report
+
+      - name: Update the nightly-failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QA_RESULT: ${{ needs.qa.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Only the scheduled run, or a manual run on main, speaks for main.
+          DRY_RUN: ${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && '0' || '1' }}
+        run: |
+          dir="$(find qa-report -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | tail -1)"
+          scripts/qa/nightly-alert.sh "$dir"

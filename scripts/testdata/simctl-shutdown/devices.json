@@ -1,0 +1,28 @@
+{
+  "devices": {
+    "com.apple.CoreSimulator.SimRuntime.iOS-17-5": [
+      {
+        "udid": "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC",
+        "name": "iPhone 15",
+        "state": "Shutdown",
+        "isAvailable": true
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-26-0": [
+      {
+        "udid": "DDDDDDDD-DDDD-DDDD-DDDD-DDDDDDDDDDDD",
+        "name": "iPhone 17",
+        "state": "Shutdown",
+        "isAvailable": true
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-18-6": [
+      {
+        "udid": "EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE",
+        "name": "iPhone 16",
+        "state": "Shutdown",
+        "isAvailable": true
+      }
+    ]
+  }
+}
