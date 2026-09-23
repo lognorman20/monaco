@@ -185,23 +185,30 @@ func decodeBars(payload benchmarksHistoryResponse) ([]ohlcBar, error) {
 		if !ok || payload.Timestamp[i] <= 0 {
 			continue
 		}
+		// Open/high/low stay zero when the shim omits them, rather than borrowing
+		// the close. A feed that only publishes a close has no open: substituting
+		// one puts a close in the grid's "Open" cell, and makes every bar look like
+		// a candle whose four prices happen to be identical, which the app would
+		// dutifully draw. Zero means "not published", and both the grid and the
+		// chart already have a close-only path to fall through to.
 		bar := ohlcBar{timestamp: payload.Timestamp[i], close: closeMicros}
-		bar.open = optionalMicros(payload.Open, i, closeMicros)
-		bar.high = optionalMicros(payload.High, i, closeMicros)
-		bar.low = optionalMicros(payload.Low, i, closeMicros)
+		bar.open = optionalMicros(payload.Open, i)
+		bar.high = optionalMicros(payload.High, i)
+		bar.low = optionalMicros(payload.Low, i)
 		bars = append(bars, bar)
 	}
 	sort.Slice(bars, func(i, j int) bool { return bars[i].timestamp < bars[j].timestamp })
 	return bars, nil
 }
 
-func optionalMicros(values []float64, index int, fallback int64) int64 {
+// optionalMicros reads one OHLC leg, or zero when the shim did not publish it.
+func optionalMicros(values []float64, index int) int64 {
 	if index >= len(values) {
-		return fallback
+		return 0
 	}
 	micros, ok := usdToMicros(values[index])
 	if !ok {
-		return fallback
+		return 0
 	}
 	return micros
 }

@@ -408,10 +408,28 @@ func TestBenchmarks_Series_partialPayloadKeepsUsableBars(t *testing.T) {
 	if len(series.Points) != 2 {
 		t.Fatalf("points = %d, want the 2 priced bars", len(series.Points))
 	}
+	// A close-only payload has no candles in it. Borrowing the close for the other
+	// three legs would put a close in the grid's "Open" cell and would satisfy the
+	// app's hasCandle, which then draws a candle for data that has none.
 	for _, point := range series.Points {
-		if point.OpenUsdcMicros != point.PriceUsdcMicros {
-			t.Fatalf("open = %d, want the close when the shim omits opens", point.OpenUsdcMicros)
+		if point.OpenUsdcMicros != 0 || point.HighUsdcMicros != 0 || point.LowUsdcMicros != 0 {
+			t.Fatalf(
+				"o/h/l = %d/%d/%d, want zero when the shim publishes only closes",
+				point.OpenUsdcMicros, point.HighUsdcMicros, point.LowUsdcMicros,
+			)
 		}
+		if point.PriceUsdcMicros <= 0 {
+			t.Fatalf("price = %d, want the published close", point.PriceUsdcMicros)
+		}
+	}
+	// The grid still folds such a series: its open falls through to the first
+	// regular-session close, and its high and low to the extremes of the closes.
+	stats := SessionStats(series)
+	if stats.OpenUsdcMicros == nil || *stats.OpenUsdcMicros != 229_400_000 {
+		t.Fatalf("stats open = %v, want the first close 229400000", stats.OpenUsdcMicros)
+	}
+	if stats.HighUsdcMicros == nil || *stats.HighUsdcMicros != 231_400_000 {
+		t.Fatalf("stats high = %v, want 231400000", stats.HighUsdcMicros)
 	}
 }
 

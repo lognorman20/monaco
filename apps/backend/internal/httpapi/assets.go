@@ -154,7 +154,9 @@ type assetStatsResponse struct {
 	PreviousCloseUsdcMicros *int64 `json:"previousCloseUsdcMicros,omitempty"`
 	Week52HighUsdcMicros    *int64 `json:"week52HighUsdcMicros,omitempty"`
 	Week52LowUsdcMicros     *int64 `json:"week52LowUsdcMicros,omitempty"`
-	// ConfUsdcMicros is Pyth's own confidence interval on the latest equity price.
+	// ConfUsdcMicros is Pyth's own confidence interval on the latest equity price,
+	// and only while that price is live. Omitted once the feed goes stale, because
+	// the grid carries no freshness of its own.
 	ConfUsdcMicros *int64 `json:"confUsdcMicros,omitempty"`
 	// Basis is "underlying"; BasisSymbol names it ("AAPL").
 	Basis       string `json:"basis,omitempty"`
@@ -659,8 +661,14 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset b20.Asset) 
 	now := h.now()
 	detail.StockVsToken = stockVsTokenResponseFor(asset.Symbol, tokenLeg, pyth.MarkQuote(mark, now), equity, now)
 
+	// Live only. Priced() is also true for a stale quote — the frozen last print
+	// Pyth keeps republishing after the bell — and its confidence interval is the
+	// confidence of that frozen print, not of anything current. The grid has no
+	// freshness field to say so, and the cell would sit unlabelled beside
+	// Benchmarks candles for the session in progress while the same price on the
+	// card is explicitly marked stale. A number we cannot date is left out.
 	var confMicros *int64
-	if equity.Priced() && equity.ConfUsdcMicros > 0 {
+	if equity.Status == pyth.QuoteStatusLive && equity.ConfUsdcMicros > 0 {
 		conf := equity.ConfUsdcMicros
 		confMicros = &conf
 	}
