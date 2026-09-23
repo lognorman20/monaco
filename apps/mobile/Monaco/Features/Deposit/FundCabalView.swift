@@ -137,16 +137,52 @@ struct FundCabalView: View {
         }
     }
 
+    /// Which pot the money is going into, as the cabals themselves — mark, name and tint — rather
+    /// than a system menu that shows one name and hides the rest behind a chevron. A cabal is
+    /// always tint *plus* initials, so two cabals that happen to share a colour are still
+    /// tellable apart.
     private var cabalPicker: some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
             MonacoSectionHeader("Cabal")
-            Picker("Cabal", selection: $selectedGroupId) {
-                ForEach(joinedCabals) { cabal in
-                    Text(cabal.name).tag(Optional(cabal.groupId))
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: MonacoTheme.Space.s) {
+                    ForEach(joinedCabals) { cabal in
+                        let isSelected = selectedGroupId == cabal.groupId
+                        Button {
+                            guard !isSelected else { return }
+                            Haptics.selection()
+                            selectedGroupId = cabal.groupId
+                        } label: {
+                            HStack(spacing: MonacoTheme.Space.s) {
+                                CabalMark(groupId: cabal.groupId, name: cabal.name, size: 24)
+                                Text(cabal.name)
+                                    .font(MonacoTheme.Typo.callout.weight(.semibold))
+                                    .foregroundStyle(MonacoTheme.fgPrimary)
+                                    .lineLimit(1)
+                            }
+                            .padding(.leading, MonacoTheme.Space.s)
+                            .padding(.trailing, MonacoTheme.Space.m)
+                            .frame(minHeight: 44)
+                            .background(Capsule().fill(MonacoTheme.fillQuiet))
+                            .overlay {
+                                // The selected pot is named by an edge, not by a fill: blue means
+                                // tap, and a money surface carries one saturated fill at most.
+                                Capsule().strokeBorder(
+                                    isSelected ? MonacoTheme.brand : Color.clear,
+                                    lineWidth: 2
+                                )
+                            }
+                            .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(cabal.name)
+                        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+                        .accessibilityIdentifier("fund-cabal-option-\(cabal.groupId)")
+                    }
                 }
+                .padding(.horizontal, MonacoTheme.Space.gutter)
             }
-            .pickerStyle(.menu)
-            .tint(MonacoTheme.controlTint)
+            .padding(.horizontal, -MonacoTheme.Space.gutter)
             .accessibilityIdentifier("fund-cabal-picker")
         }
     }
