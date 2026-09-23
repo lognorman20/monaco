@@ -93,30 +93,40 @@ func TestPotRowsFromPythInput_perAssetDollarPnL(t *testing.T) {
 }
 
 func TestTokenAtomicsToDecimalUnits_usesEightDecimals(t *testing.T) {
-	got, err := tokenAtomicsToDecimalUnits(75_000_000)
+	got, err := pyth.TokenAtomicsToDecimalUnits(75_000_000, jupiter.XStockDecimals)
 	if err != nil {
-		t.Fatalf("tokenAtomicsToDecimalUnits: %v", err)
+		t.Fatalf("TokenAtomicsToDecimalUnits: %v", err)
 	}
 	if got != "0.75" {
 		t.Fatalf("units = %q, want 0.75", got)
 	}
 }
 
-func TestCostBasisMarkPerUnitMicros_largeBasisDoesNotWrap(t *testing.T) {
+func TestMarkedPot_nineDecimalHolding_valuesOnceNotTenTimes(t *testing.T) {
 	t.Parallel()
-	// Arrange: $200k paid for 1,000 shares. 2e11 micros x 1e8 scale overflows int64.
-	totalUSDC := int64(200_000_000_000)
-	tokenAtomics := int64(1_000) * jupiter.XStockAtomicScale
 
-	// Act
-	mark, err := costBasisMarkPerUnitMicros(totalUSDC, tokenAtomics)
-
-	// Assert
-	if err != nil {
-		t.Fatalf("costBasisMarkPerUnitMicros: %v", err)
+	// 1 whole token at 9 dp with a $500 mark must value to $500, not $5,000.
+	input := pyth.NavInput{
+		Holdings: []pyth.MarkedHolding{{
+			Symbol:   "tSpaceX",
+			Units:    1_000_000_000,
+			MarkUsdc: 500_000_000,
+			Decimals: 9,
+		}},
 	}
-	if mark != 200_000_000 {
-		t.Fatalf("mark = %d, want 200_000_000 ($200/share)", mark)
+
+	rows, err := potRowsFromPythInput(input)
+	if err != nil {
+		t.Fatalf("potRowsFromPythInput: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2 (USDC + holding)", len(rows))
+	}
+	if rows[1].ValueUsd != "500.00" {
+		t.Fatalf("value = %q, want 500.00", rows[1].ValueUsd)
+	}
+	if rows[1].Units != "1" {
+		t.Fatalf("units = %q, want 1", rows[1].Units)
 	}
 }
 

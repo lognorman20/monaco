@@ -5,45 +5,15 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"math/big"
 	"strconv"
 	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 	"github.com/monaco/monaco/packages/domain"
 )
-
-func tokenAtomicsToDecimalUnits(atomics int64) (domain.ShareUnits, error) {
-	if atomics < 0 {
-		return "", fmt.Errorf("token atomics must be non-negative")
-	}
-	if atomics == 0 {
-		return domain.ShareUnits("0"), nil
-	}
-	r := new(big.Rat).SetFrac(big.NewInt(atomics), big.NewInt(jupiter.XStockAtomicScale))
-	s := strings.TrimRight(r.FloatString(8), "0")
-	s = strings.TrimRight(s, ".")
-	return domain.ShareUnits(s), nil
-}
-
-func costBasisMarkPerUnitMicros(totalUSDCMicros, tokenAtomics int64) (int64, error) {
-	if totalUSDCMicros < 0 {
-		return 0, fmt.Errorf("cost basis usdc must be non-negative")
-	}
-	if tokenAtomics <= 0 {
-		return 0, fmt.Errorf("cost basis token amount must be positive")
-	}
-	mark, err := domain.MulDivFloor(totalUSDCMicros, jupiter.XStockAtomicScale, tokenAtomics)
-	if err != nil {
-		return 0, fmt.Errorf("derive mark per unit: %w", err)
-	}
-	if mark <= 0 {
-		return 0, fmt.Errorf("derived mark per unit must be positive")
-	}
-	return mark, nil
-}
 
 // groupPotView is marked treasury NAV plus per-asset pot rows for group screens.
 type groupPotView struct {
@@ -171,12 +141,19 @@ func costBasisForHoldings(
 		if !found || amount <= 0 {
 			return nil, fmt.Errorf("cost basis not found for mint %s", holding.Mint)
 		}
+		decimals := pyth.NormalizeTokenDecimals(holding.TokenDecimals)
+		kind := xstocks.AssetKindStock
+		if decimals == 9 {
+			kind = xstocks.AssetKindPreIPO
+		}
 		out = append(out, pyth.CostBasis{
-			Symbol: symbolForOutputMint(ctx, symbols, holding.Mint),
-			Mint:   holding.Mint,
-			Units:  holding.Amount,
-			Price:  price,
-			Amount: amount,
+			Symbol:   symbolForOutputMint(ctx, symbols, holding.Mint),
+			Mint:     holding.Mint,
+			Units:    holding.Amount,
+			Price:    price,
+			Amount:   amount,
+			Decimals: decimals,
+			Kind:     kind,
 		})
 	}
 	return out, nil
@@ -197,7 +174,7 @@ func fillDerivedCostBasis(
 func costBasisMarkedPotInput(treasuryUSDC int64, costBasis []pyth.CostBasis) (pyth.NavInput, error) {
 	marked := make([]pyth.MarkedHolding, 0, len(costBasis))
 	for _, holding := range costBasis {
-		markPerUnit, err := costBasisMarkPerUnitMicros(holding.Price, holding.Amount)
+		markPerUnit, err := pyth.CostBasisMarkPerUnitMicros(holding.Price, holding.Amount, holding.Decimals)
 		if err != nil {
 			return pyth.NavInput{}, err
 		}
@@ -208,6 +185,8 @@ func costBasisMarkedPotInput(treasuryUSDC int64, costBasis []pyth.CostBasis) (py
 			MarkUsdc:  markPerUnit,
 			CostBasis: holding.Price,
 			Source:    pyth.MarkSourceCostBasis,
+			Decimals:  holding.Decimals,
+			Kind:      holding.Kind,
 		})
 	}
 	return pyth.NavInput{
@@ -220,7 +199,7 @@ func costBasisMarkedPotInput(treasuryUSDC int64, costBasis []pyth.CostBasis) (py
 func domainNavInputFromPyth(input pyth.NavInput, totalShares domain.ShareUnits) (domain.NavInput, error) {
 	holdings := make([]domain.MarkedHolding, 0, len(input.Holdings))
 	for _, holding := range input.Holdings {
-		units, err := tokenAtomicsToDecimalUnits(holding.Units)
+		units, err := pyth.TokenAtomicsToDecimalUnits(holding.Units, holding.Decimals)
 		if err != nil {
 			return domain.NavInput{}, err
 		}
@@ -257,11 +236,12 @@ func potRowsFromPythInput(input pyth.NavInput) ([]GroupViewPotRow, error) {
 		if holding.Units <= 0 {
 			continue
 		}
-		units, err := tokenAtomicsToDecimalUnits(holding.Units)
+		decimals := pyth.NormalizeTokenDecimals(holding.Decimals)
+		units, err := pyth.TokenAtomicsToDecimalUnits(holding.Units, decimals)
 		if err != nil {
 			return nil, err
 		}
-		valueMicros, err := domain.MulDivFloor(holding.Units, holding.MarkUsdc, jupiter.XStockAtomicScale)
+		valueMicros, err := domain.MulDivFloor(holding.Units, holding.MarkUsdc, jupiter.AtomicScale(decimals))
 		if err != nil {
 			return nil, fmt.Errorf("value %s holding: %w", holding.Symbol, err)
 		}

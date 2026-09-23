@@ -174,6 +174,16 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	asset, assetErr := h.Buy.ResolveAsset(ctx, req.Symbol)
+	if assetErr != nil {
+		if errors.Is(assetErr, xstocks.ErrNotFound) {
+			logJSONError(ctx, log, "symbol_not_found", w, http.StatusNotFound, "symbol not found", "group_id", groupID, "symbol", req.Symbol, "user_id", userID)
+			return
+		}
+		logJSONError(ctx, log, "quote_check_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "symbol", req.Symbol, "user_id", userID, "err", assetErr.Error())
+		return
+	}
+
 	result, err := h.Buy.StartBuy(ctx, app.StartBuyRequest{
 		GroupID:    groupID,
 		UserID:     userID,
@@ -212,7 +222,7 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 		Routable:     result.Quote.Routable,
 		OutputAmount: strings.TrimSpace(result.Quote.OutAmount),
 	}
-	if price, ok := quotePriceUsdcMicros(req.USDC, resp.OutputAmount); ok {
+	if price, ok := quotePriceUsdcMicros(req.USDC, resp.OutputAmount, asset.Decimals); ok {
 		resp.PriceUsdcMicros = strconv.FormatInt(price, 10)
 	}
 
@@ -228,7 +238,7 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
-func quotePriceUsdcMicros(usdcMicros int64, outputAmount string) (int64, bool) {
+func quotePriceUsdcMicros(usdcMicros int64, outputAmount string, decimals int) (int64, bool) {
 	outputAmount = strings.TrimSpace(outputAmount)
 	if usdcMicros <= 0 || outputAmount == "" {
 		return 0, false
@@ -237,8 +247,11 @@ func quotePriceUsdcMicros(usdcMicros int64, outputAmount string) (int64, bool) {
 	if err != nil || outAtomics <= 0 {
 		return 0, false
 	}
-	// USDC micros (6 dp) per whole xStock share; Jupiter outAmount uses 8 dp atomics.
-	return (usdcMicros * jupiter.XStockAtomicScale) / outAtomics, true
+	if decimals == 0 {
+		decimals = jupiter.XStockDecimals
+	}
+	// USDC micros (6 dp) per whole token; Jupiter outAmount uses token atomics at decimals.
+	return (usdcMicros * jupiter.AtomicScale(decimals)) / outAtomics, true
 }
 
 func (h *QuoteHandlers) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {
