@@ -109,7 +109,7 @@ func TestListGroupHoldings_dropsFullyExitedPositions(t *testing.T) {
 	}
 }
 
-// One query answers for several cabals and several mints at once, and keeps each
+// One query answers for several cabals and several tokens at once, and keeps each
 // cabal's units with that cabal.
 func TestListGroupHoldings_keepsEachCabalsUnitsSeparate(t *testing.T) {
 	t.Parallel()
