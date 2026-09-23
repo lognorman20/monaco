@@ -38,7 +38,7 @@ struct ProposalFeedView: View {
             tabPicker
                 .padding(.horizontal, MonacoTheme.Space.gutter)
             ScrollView {
-                LazyVStack(spacing: MonacoTheme.Space.sm) {
+                LazyVStack(spacing: MonacoTheme.Space.m) {
                     content
                 }
                 .padding(.horizontal, MonacoTheme.Space.gutter)
@@ -50,6 +50,9 @@ struct ProposalFeedView: View {
             }
         }
         .background(MonacoTheme.canvas.ignoresSafeArea())
+        // One cabal's feed, so one colour: every card's rail and every thesis wash comes from
+        // here rather than from each card hashing the id again.
+        .cabalTint(.forGroupId(groupId))
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -110,6 +113,12 @@ struct ProposalFeedView: View {
                     viewerChoice: votes.choice(for: proposal, viewerId: service.viewerId),
                     highlight: proposal.id == highlightProposalId
                 )
+                .transition(
+                    .asymmetric(
+                        insertion: .push(from: .top).combined(with: .opacity),
+                        removal: .opacity
+                    )
+                )
             }
         }
     }
@@ -148,7 +157,7 @@ struct ProposalFeedView: View {
 
     private func apply(_ fresh: [ProposalDTO], to tab: ProposalFeedTab) {
         QuietUpdate.apply(fresh, over: proposals[tab]) { value in
-            withAnimation(reduceMotion ? nil : .snappy) { proposals[tab] = value }
+            withAnimation(MonacoMotion.settle.reduced(reduceMotion)) { proposals[tab] = value }
         }
         // Only write when it changes: a mutating call on @State invalidates the view either way.
         if failedTabs.contains(tab) { failedTabs.remove(tab) }
@@ -158,7 +167,7 @@ struct ProposalFeedView: View {
         loadGeneration += 1
         do {
             let loaded = try await service.listProposals(groupId: groupId, tab: tab)
-            withAnimation(reduceMotion ? nil : .snappy) {
+            withAnimation(MonacoMotion.settle.reduced(reduceMotion)) {
                 proposals[tab] = loaded
             }
             failedTabs.remove(tab)
@@ -178,7 +187,7 @@ struct ProposalFeedView: View {
         toast = result.toast
         if result.succeeded {
             Haptics.success()
-            withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.7)) {
+            withAnimation(MonacoMotion.settle.reduced(reduceMotion)) {
                 votes.record(choice, for: proposal.id, viewerId: service.viewerId)
             }
         }
@@ -214,24 +223,31 @@ enum ProposalFeedPolling {
     }
 }
 
-/// Placeholder in the shape of a proposal card.
+/// Placeholder in the shape of a v3 proposal card: the proposer's line, the stock and its amount,
+/// the thesis and the tally. It carries the same elevation as the card that replaces it, so the
+/// list does not visibly change depth when the proposals land.
 struct ProposalCardSkeleton: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+            HStack(spacing: MonacoTheme.Space.s) {
+                SkeletonBlock(width: 28, height: 28, radius: 14)
+                SkeletonBlock(width: 90, height: 12)
+            }
             HStack(spacing: MonacoTheme.Space.sm) {
-                SkeletonBlock(width: 40, height: 40, radius: 13)
+                SkeletonBlock(width: 44, height: 44, radius: 14)
                 VStack(alignment: .leading, spacing: 6) {
-                    SkeletonBlock(width: 110, height: 14)
+                    SkeletonBlock(width: 110, height: 16)
                     SkeletonBlock(width: 70, height: 11)
                 }
+                Spacer(minLength: 0)
+                SkeletonBlock(width: 84, height: 24)
             }
-            SkeletonBlock(width: 120, height: 28)
-            SkeletonBlock(height: 12)
+            SkeletonBlock(height: 36, radius: MonacoTheme.Radius.field)
             SkeletonBlock(width: 180, height: 12)
         }
         .padding(MonacoTheme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
+        .monacoElevation(.raised)
         .accessibilityLabel("Loading")
     }
 }

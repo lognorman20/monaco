@@ -71,6 +71,12 @@ struct ProposePot: Equatable {
     /// Buy ceiling: the whole pot (cash plus holdings), matching the backend rule.
     let totalMicros: Int64
     let holdings: [PotRowDTO]
+    /// Who would be asked to vote on a proposal made into this pot.
+    ///
+    /// Straight off `GroupViewDTO.members`, which already carries `userId`, `displayName` and
+    /// `profilePhotoUrl` — the review step shows real people, or, when the payload carries no
+    /// member list, nobody. It never shows a placeholder crowd.
+    let members: [ProposeMember]
 
     init(view: GroupViewDTO) {
         groupId = view.id
@@ -79,6 +85,20 @@ struct ProposePot: Equatable {
         holdings = view.pot.filter { row in
             row.symbol.uppercased() != "USDC" && (Int64(row.tokenAmount ?? "0") ?? 0) > 0
         }
+        members = view.members.map {
+            ProposeMember(id: $0.userId, displayName: $0.displayName, photoURL: $0.profilePhotoUrl)
+        }
+    }
+}
+
+/// One member of the cabal being proposed to.
+struct ProposeMember: Equatable, Hashable {
+    let id: String
+    let displayName: String
+    let photoURL: String?
+
+    var face: MonacoFace {
+        MonacoFace(id: id, displayName: displayName, photoURL: photoURL)
     }
 }
 

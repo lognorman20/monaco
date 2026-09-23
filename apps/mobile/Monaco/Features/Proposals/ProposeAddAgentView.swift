@@ -142,13 +142,13 @@ struct ProposeAgentLifecycleView: View {
             HStack(spacing: MonacoTheme.Space.sm) {
                 StockMark(systemImage: "cpu", size: 56)
                 Text(botName)
-                    .font(MonacoTheme.Typo.title)
-                    .foregroundStyle(MonacoTheme.ink)
+                    .displayFont(.title)
+                    .foregroundStyle(MonacoTheme.fgPrimary)
                     .lineLimit(1)
             }
             Text(ProposeFlowCopy.lifecycleTitle(kind: kind))
-                .font(MonacoTheme.Typo.display)
-                .foregroundStyle(MonacoTheme.ink)
+                .displayFont(.display)
+                .foregroundStyle(MonacoTheme.fgPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             Text(ProposeFlowCopy.lifecycleMessage(kind: kind, botName: botName))
                 .font(MonacoTheme.Typo.body)

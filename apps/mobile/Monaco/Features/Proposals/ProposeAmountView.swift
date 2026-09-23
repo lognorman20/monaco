@@ -20,6 +20,7 @@ struct ProposeAmountView: View {
     @State private var quoteError: String?
     @State private var review: ProposeBuyReview?
     @FocusState private var reasonFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(service: ProposeService, groupId: String, stock: ProposeStock, pot: ProposePot, onProposed: @escaping (_ proposalId: String) -> Void) {
         self.service = service
@@ -88,15 +89,26 @@ struct ProposeAmountView: View {
     private var form: some View {
         ScrollView {
             VStack(spacing: MonacoTheme.Space.l) {
-                header
-                AmountEntry(
-                    amountText: $amountText,
-                    max: potUsd,
-                    presets: [.dollars(25), .dollars(50), .dollars(100), .fraction(1, label: "Max")],
-                    helper: potHelper,
-                    overLimitHelper: ProposeFlowCopy.overPot
-                )
-                .onChange(of: amountText) { _, _ in quoteError = nil }
+                // The figure is the screen, so the figure gets the ink. This is the one band on
+                // this step: the stock, the amount, the presets and the ceiling as a single dark
+                // object, with the optional reason on paper below it.
+                VStack(spacing: MonacoTheme.Space.l) {
+                    header
+                    AmountEntry(
+                        amountText: $amountText,
+                        max: potUsd,
+                        presets: [.dollars(25), .dollars(50), .dollars(100), .fraction(1, label: "Max")],
+                        helper: potHelper,
+                        overLimitHelper: ProposeFlowCopy.overPot
+                    )
+                    .onChange(of: amountText) { _, _ in quoteError = nil }
+                }
+                .monacoInkBand()
+                // `AmountEntry` is built from the paper ramp and belongs to another chunk.
+                // Resolved dark it is exactly right on ink — near-white figure, quiet chips, a
+                // brand-filled selected chip — and resolved light it is black type on black.
+                .monacoInkScheme()
+
                 reasonField
                 if let quoteError {
                     Text(quoteError)
@@ -108,7 +120,6 @@ struct ProposeAmountView: View {
                 }
             }
             .padding(.horizontal, MonacoTheme.Space.gutter)
-            .padding(.top, MonacoTheme.Space.m)
             .padding(.bottom, MonacoTheme.Space.l)
         }
         .scrollDismissesKeyboard(.interactively)
@@ -120,25 +131,29 @@ struct ProposeAmountView: View {
 
     private var header: some View {
         HStack(spacing: MonacoTheme.Space.sm) {
-            StockMark(symbol: stock.symbol, size: 56)
+            StockMark(symbol: stock.symbol, size: 44)
             VStack(alignment: .leading, spacing: 2) {
+                Text(ProposeAmountCopy.proposingABuy)
+                    .displayFont(.eyebrow)
+                    .foregroundStyle(MonacoTheme.Ink.fgSubtle)
                 Text(stock.name)
-                    .font(MonacoTheme.Typo.title)
-                    .foregroundStyle(MonacoTheme.ink)
+                    .displayFont(.section)
+                    .foregroundStyle(MonacoTheme.Ink.fgPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                 HStack(spacing: 6) {
                     Text(stock.ticker)
                         .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.muted)
+                        .foregroundStyle(MonacoTheme.Ink.fgMuted)
                     if let priceMicros {
-                        Text("·").font(MonacoTheme.Typo.caption).foregroundStyle(MonacoTheme.tertiaryText)
-                        MoneyText(micros: priceMicros, style: .caption, color: MonacoTheme.muted)
+                        Text("·").font(MonacoTheme.Typo.caption).foregroundStyle(MonacoTheme.Ink.fgSubtle)
+                        MoneyText(micros: priceMicros, style: .caption, color: MonacoTheme.Ink.fgMuted)
                     }
                 }
             }
             Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 
@@ -154,12 +169,12 @@ struct ProposeAmountView: View {
             )
         } else {
             Button {
-                withAnimation(.snappy) { showsReason = true }
+                withAnimation(MonacoMotion.snap.reduced(reduceMotion)) { showsReason = true }
                 reasonFocused = true
             } label: {
                 Label(ProposeFlowCopy.addReason, systemImage: "plus")
                     .font(MonacoTheme.Typo.callout.weight(.semibold))
-                    .foregroundStyle(MonacoTheme.ink)
+                    .foregroundStyle(MonacoTheme.brand)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
             }
@@ -194,6 +209,7 @@ struct ProposeAmountView: View {
                 fallbackPriceMicros: priceMicros,
                 cabalId: pot.groupId.isEmpty ? groupId : pot.groupId,
                 cabalName: pot.name,
+                cabalMembers: pot.members,
                 thesis: reason.trimmingCharacters(in: .whitespacesAndNewlines)
             )
         } catch {
@@ -202,6 +218,14 @@ struct ProposeAmountView: View {
             Haptics.warning()
         }
     }
+}
+
+/// Copy this step needs that `ProposeFlowCopy` does not carry yet.
+enum ProposeAmountCopy {
+    /// Eyebrow over the stock on the ink band. Sentence case in the source: `DisplayRole.eyebrow`
+    /// uppercases it for the eye and leaves it alone for VoiceOver.
+    static let proposingABuy = "Proposing a buy"
+    static let proposingASell = "Proposing a sell"
 }
 
 /// The optional reason on a buy or sell amount step: a growing field on `surfaceSunken` with an ink
@@ -222,20 +246,21 @@ struct ProposeReasonField: View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             TextField(placeholder, text: $text, axis: .vertical)
                 .font(MonacoTheme.Typo.body)
-                .foregroundStyle(MonacoTheme.ink)
+                .foregroundStyle(MonacoTheme.fgPrimary)
                 .lineLimit(lineLimit)
                 .focused(focused)
                 .padding(MonacoTheme.Space.m)
-                .background(MonacoTheme.surfaceSunken, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous))
+                .background(MonacoTheme.fillQuiet, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous)
-                        .strokeBorder(focused.wrappedValue ? MonacoTheme.ink : .clear, lineWidth: 1)
+                        .strokeBorder(focused.wrappedValue ? MonacoTheme.brand : .clear, lineWidth: 1)
                 }
+                .tint(MonacoTheme.controlTint)
                 .accessibilityIdentifier(identifier)
             if length >= ProposeFlowCopy.reasonCounterFrom {
                 Text(ProposeFlowCopy.reasonCounter(length))
                     .font(MonacoTheme.Typo.caption.monospacedDigit())
-                    .foregroundStyle(length > ProposeFlowCopy.reasonMax ? MonacoTheme.loss : MonacoTheme.muted)
+                    .foregroundStyle(length > ProposeFlowCopy.reasonMax ? MonacoTheme.loss : MonacoTheme.fgMuted)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
@@ -251,6 +276,8 @@ struct ProposeBuyReview: Hashable, Identifiable {
     let fallbackPriceMicros: Int64?
     let cabalId: String
     let cabalName: String
+    /// Who the cabal will ask. Empty when the group payload carried no member list.
+    let cabalMembers: [ProposeMember]
     let thesis: String
 
     var id: String { "\(stock.symbol)-\(usdcMicros)-\(thesis.hashValue)" }

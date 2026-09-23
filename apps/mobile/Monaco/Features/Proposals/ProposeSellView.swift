@@ -200,39 +200,51 @@ struct ProposeSellAmountView: View {
 
     private var form: some View {
         ScrollView {
-            VStack(spacing: MonacoTheme.Space.xl) {
-                HStack(spacing: MonacoTheme.Space.sm) {
-                    StockMark(symbol: holding.symbol, size: 56)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(name)
-                            .font(MonacoTheme.Typo.title)
-                            .foregroundStyle(MonacoTheme.ink)
-                            .lineLimit(1)
-                        Text(ProposalShareFormatter.sharesLabel(fromAtomics: holding.tokenAmount ?? "0"))
-                            .font(MonacoTheme.Typo.caption.monospacedDigit())
-                            .foregroundStyle(MonacoTheme.muted)
+            VStack(spacing: MonacoTheme.Space.l) {
+                // The same ink band the buy step opens on, so the two halves of the propose flow
+                // are one flow. `AmountEntry` and `StockMark` are paper-ramp components this
+                // chunk does not own: resolved dark they are right on ink, resolved light they
+                // are invisible on it.
+                VStack(spacing: MonacoTheme.Space.l) {
+                    HStack(spacing: MonacoTheme.Space.sm) {
+                        StockMark(symbol: holding.symbol, size: 44)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(ProposeAmountCopy.proposingASell)
+                                .displayFont(.eyebrow)
+                                .foregroundStyle(MonacoTheme.Ink.fgSubtle)
+                            Text(name)
+                                .displayFont(.section)
+                                .foregroundStyle(MonacoTheme.Ink.fgPrimary)
+                                .lineLimit(1)
+                            Text(ProposalShareFormatter.sharesLabel(fromAtomics: holding.tokenAmount ?? "0"))
+                                .font(MonacoTheme.Typo.caption.monospacedDigit())
+                                .foregroundStyle(MonacoTheme.Ink.fgMuted)
+                        }
+                        Spacer(minLength: 0)
                     }
-                    Spacer(minLength: 0)
-                }
-                .accessibilityElement(children: .combine)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityElement(children: .combine)
 
-                if entersDollars, let valueUsd {
-                    AmountEntry(
-                        amountText: $amountText,
-                        max: valueUsd,
-                        presets: [.fraction(0.25, label: "25%"), .fraction(0.5, label: "50%"), .fraction(1, label: "All")],
-                        helper: ProposeFlowCopy.sellHelper(UsdAmountFormatter.format(decimal: valueUsd)),
-                        overLimitHelper: ProposeFlowCopy.overHoldings
-                    )
-                } else {
-                    VStack(spacing: MonacoTheme.Space.s) {
-                        MonacoTextField(ProposeFlowCopy.sharesRow, text: $amountText, keyboard: .decimalPad)
-                            .accessibilityIdentifier("proposal-sell-amount")
-                        Text(isOverHoldings ? ProposeFlowCopy.overHoldings : ProposalShareFormatter.sharesLabel(fromAtomics: holding.tokenAmount ?? "0"))
-                            .font(MonacoTheme.Typo.callout)
-                            .foregroundStyle(isOverHoldings ? MonacoTheme.loss : MonacoTheme.muted)
+                    if entersDollars, let valueUsd {
+                        AmountEntry(
+                            amountText: $amountText,
+                            max: valueUsd,
+                            presets: [.fraction(0.25, label: "25%"), .fraction(0.5, label: "50%"), .fraction(1, label: "All")],
+                            helper: ProposeFlowCopy.sellHelper(UsdAmountFormatter.format(decimal: valueUsd)),
+                            overLimitHelper: ProposeFlowCopy.overHoldings
+                        )
+                    } else {
+                        VStack(spacing: MonacoTheme.Space.s) {
+                            MonacoTextField(ProposeFlowCopy.sharesRow, text: $amountText, keyboard: .decimalPad)
+                                .accessibilityIdentifier("proposal-sell-amount")
+                            Text(isOverHoldings ? ProposeFlowCopy.overHoldings : ProposalShareFormatter.sharesLabel(fromAtomics: holding.tokenAmount ?? "0"))
+                                .font(MonacoTheme.Typo.callout)
+                                .foregroundStyle(isOverHoldings ? MonacoTheme.loss : MonacoTheme.Ink.fgMuted)
+                        }
                     }
                 }
+                .monacoInkBand()
+                .monacoInkScheme()
 
                 ProposeReasonField(
                     placeholder: ProposeFlowCopy.reasonPlaceholderSell,
@@ -251,7 +263,6 @@ struct ProposeSellAmountView: View {
                 }
             }
             .padding(.horizontal, MonacoTheme.Space.gutter)
-            .padding(.top, MonacoTheme.Space.m)
             .padding(.bottom, MonacoTheme.Space.l)
         }
         .scrollDismissesKeyboard(.interactively)
@@ -330,19 +341,23 @@ struct ProposeSellReviewView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: MonacoTheme.Space.xl) {
-                ProposeReceiptHeader(
-                    caption: ProposeFlowCopy.youreSelling,
-                    amount: Group {
-                        if let estimate = review.estimateMicros {
-                            MoneyText(micros: estimate, style: .hero)
-                        } else {
-                            Text(review.sharesLabel).moneyFont(.hero)
-                        }
-                    },
+            VStack(spacing: MonacoTheme.Space.section) {
+                ProposeInkReceipt(
+                    symbol: review.symbol,
+                    eyebrow: ProposeFlowCopy.youreSelling,
                     stockName: review.name,
-                    detail: review.estimateMicros == nil ? nil : ProposeFlowCopy.aboutShares(review.sharesLabel)
-                )
+                    detail: review.estimateMicros == nil ? nil : ProposeFlowCopy.aboutShares(review.sharesLabel),
+                    cabalId: review.cabalId,
+                    cabalName: review.cabalName
+                ) {
+                    if let estimate = review.estimateMicros {
+                        MoneyText(micros: estimate, style: .hero, color: MonacoTheme.Ink.fgPrimary)
+                    } else {
+                        Text(review.sharesLabel)
+                            .moneyFont(.hero)
+                            .foregroundStyle(MonacoTheme.Ink.fgPrimary)
+                    }
+                }
                 .accessibilityLabel(
                     ProposeFlowCopy.sellSummary(
                         amount: review.estimateMicros.map(UsdAmountFormatter.format(micros:)) ?? review.sharesLabel,
@@ -352,19 +367,11 @@ struct ProposeSellReviewView: View {
                 )
 
                 MonacoGroupedList {
-                    ReceiptRow(label: ProposeFlowCopy.sharesRow) {
+                    ReceiptRow(label: ProposeFlowCopy.sharesRow, isLast: review.thesis.isEmpty) {
                         Text(review.sharesLabel).font(MonacoTheme.Typo.body.monospacedDigit())
                     }
-                    if let cabalName = review.cabalName {
-                        ReceiptRow(label: ProposeFlowCopy.cabalRow, isLast: review.thesis.isEmpty) {
-                            HStack(spacing: MonacoTheme.Space.s) {
-                                CabalMark(groupId: review.cabalId, name: cabalName, size: 28)
-                                Text(cabalName).font(MonacoTheme.Typo.body).lineLimit(1)
-                            }
-                        }
-                    }
                     if !review.thesis.isEmpty {
-                        ReceiptReasonRow(text: review.thesis)
+                        ReceiptReasonRow(text: review.thesis, tint: .forGroupId(review.cabalId))
                     }
                 }
 
@@ -377,7 +384,7 @@ struct ProposeSellReviewView: View {
                 }
             }
             .padding(.horizontal, MonacoTheme.Space.gutter)
-            .padding(.vertical, MonacoTheme.Space.l)
+            .padding(.bottom, MonacoTheme.Space.l)
         }
         .background(MonacoTheme.canvas.ignoresSafeArea())
         .navigationTitle(ProposeFlowCopy.review)
