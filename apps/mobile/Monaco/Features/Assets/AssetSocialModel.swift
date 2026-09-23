@@ -75,9 +75,18 @@ final class AssetSocialModel {
 
     var holdings: [AssetHoldingDTO] { social?.holdings ?? [] }
 
-    /// A new session starts with no rejection on record.
+    /// A new sign-in starts knowing nothing about *this* member's cabals.
+    ///
+    /// The holdings and the votes are the signed-in member's own, unlike the price
+    /// and the curve, so they are dropped rather than left on screen until the new
+    /// read lands. Keeping them would show one member another member's position --
+    /// briefly, and only if a sign-in could happen under this screen, but the cost
+    /// of being sure is a line. The state goes back to `.loading`, which is the one
+    /// state that asserts nothing either way.
     func beginSession() {
         rejectedSession = nil
+        social = nil
+        state = .loading
     }
 
     /// Issue order of reads, so only the newest one may write. The same marker the

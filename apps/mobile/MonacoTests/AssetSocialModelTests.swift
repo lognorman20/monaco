@@ -315,3 +315,41 @@ struct AssetTradeBarWiringTests {
         #expect(bar.buyDisabledReason != nil)
     }
 }
+
+/// A new sign-in must not leave the previous member's cabals on screen.
+@Suite("Asset social model sessions")
+struct AssetSocialModelSessionTests {
+    @Test("A new session drops the previous member's answer")
+    @MainActor
+    func newSessionClearsTheAnswer() async {
+        let source = StubAssetSocialDataSource()
+        let model = model(source)
+
+        await model.load()
+        #expect(model.holdings.count == 3)
+        #expect(model.state == .answered)
+
+        model.beginSession()
+
+        #expect(model.holdings.isEmpty, "one member was shown another member's position")
+        #expect(model.summary == nil)
+        #expect(model.state == .loading, "nothing is known about the new member's cabals yet")
+        #expect(!model.hasFailed, "a fresh session is not a failed read")
+    }
+
+    /// And it clears a rejection, so a 401 from the session that just ended cannot
+    /// sign the new one out.
+    @Test("A new session clears a rejection from the old one")
+    @MainActor
+    func newSessionClearsTheRejection() async {
+        let source = StubAssetSocialDataSource()
+        source.error = RejectedSession(token: "old-token")
+        let model = model(source)
+
+        await model.load()
+        #expect(model.rejectedSession != nil)
+
+        model.beginSession()
+        #expect(model.rejectedSession == nil)
+    }
+}
