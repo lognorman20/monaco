@@ -68,6 +68,20 @@ jobs:
           go vet ./...
           go test -race ./...
 
+  web:
+    name: Web (landing page)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+
   swift:
     name: Swift (mobile-core)
     runs-on: macos-15
