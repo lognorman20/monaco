@@ -63,11 +63,7 @@ func (s *HTTPCatalogSearcher) ensureMintIndex(ctx context.Context) error {
 			if err != nil {
 				continue
 			}
-			byMint[mint] = CatalogAsset{
-				Symbol:     strings.TrimSpace(node.Symbol),
-				Name:       strings.TrimSpace(node.Name),
-				SolanaMint: mint,
-			}
+			byMint[mint] = CatalogAssetFromXStockNode(node.Symbol, node.Name, mint)
 		}
 		hasNextPage = list.Page.HasNextPage
 	}

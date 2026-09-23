@@ -1,5 +1,7 @@
 package jupiter
 
+import "fmt"
+
 // ExecuteStatus values returned by Jupiter /execute.
 const (
 	ExecuteStatusPending = "Pending"
@@ -18,6 +20,18 @@ const XStockDecimals = 8
 
 // XStockAtomicScale is 10^XStockDecimals for Jupiter outAmount atomics → whole shares.
 const XStockAtomicScale int64 = 100_000_000
+
+// AtomicScale returns 10^decimals for token atomics conversion.
+func AtomicScale(decimals int) int64 {
+	if decimals < 0 || decimals > 12 {
+		panic(fmt.Sprintf("jupiter: AtomicScale decimals out of range: %d", decimals))
+	}
+	scale := int64(1)
+	for i := 0; i < decimals; i++ {
+		scale *= 10
+	}
+	return scale
+}
 
 // ExecuteResult is a parsed Jupiter /execute response.
 type ExecuteResult struct {
