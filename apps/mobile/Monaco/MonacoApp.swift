@@ -29,6 +29,10 @@ struct MonacoApp: App {
         #if DEBUG
         if MonacoDesignGallery.isEnabled {
             MonacoDesignGallery.rootView()
+        } else if TabShellSample.isEnabled {
+            // The tab shell has to be entered above `ContentView`: every other harness replaces a
+            // screen inside the shell, and this one *is* the shell.
+            TabShellSample.rootView(auth: auth)
         } else if ChatSampleQA.isEnabled {
             ChatSampleQA.rootView()
         } else {

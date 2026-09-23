@@ -28,13 +28,20 @@ struct MainTabView: View {
 
     private var monogramSource: String? {
         let name = session?.me?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return name.isEmpty ? nil : name
+        if !name.isEmpty { return name }
+        #if DEBUG
+        // The tab-shell harness has no session; it passes the name it wants the glyph drawn from.
+        return TabShellSample.displayName
+        #else
+        return nil
+        #endif
     }
 
     var body: some View {
         TabView(selection: $selectedTab) {
             NavigationStack {
                 HomeView(auth: auth, selectedTab: $selectedTab)
+                    .tint(MonacoTheme.controlTint)
             }
             .tabItem {
                 Label {
@@ -49,6 +56,7 @@ struct MainTabView: View {
 
             NavigationStack {
                 CabalsTabView(auth: auth)
+                    .tint(MonacoTheme.controlTint)
             }
             .tabItem {
                 Label("Cabals", systemImage: "person.2.fill")
@@ -60,6 +68,7 @@ struct MainTabView: View {
 
             NavigationStack {
                 AssetsTabView(auth: auth)
+                    .tint(MonacoTheme.controlTint)
             }
             .tabItem {
                 Label("Stocks", systemImage: "chart.xyaxis.line")
@@ -70,6 +79,7 @@ struct MainTabView: View {
 
             NavigationStack {
                 ProfileTabView(auth: auth)
+                    .tint(MonacoTheme.controlTint)
             }
             .tabItem {
                 Label {
@@ -82,6 +92,13 @@ struct MainTabView: View {
             .tag(MainTab.profile)
             .environment(\.hostMainTab, .profile)
         }
+        // Brand blue is the selected tab, said once and out loud. `MonacoAppearance` configures
+        // the same colour on `UITabBarAppearance`, but SwiftUI's tint beats the proxy and the
+        // iOS 26 tab bar reads the tint rather than the proxy at all — so leaving it unset would
+        // put the app back on the undefined behaviour that made the accent disappear in the first
+        // place. Each stack's content takes `controlTint` above, so this reaches the tab bar and
+        // nothing else; a control inside a screen that wants brand asks for it at its own site.
+        .tint(MonacoTheme.brand)
         // Each stack knows its tab (`hostMainTab`) and which one is showing, so screens in a tab
         // the member switched away from stop polling. See `pollWhileVisible`.
         .environment(\.selectedMainTab, selectedTab)

@@ -416,8 +416,11 @@ private struct GalleryWorldPage: View {
                     Text("Your money in cabals")
                         .displayFont(.eyebrow)
                         .foregroundStyle(MonacoTheme.Ink.fgSubtle)
-                    MoneyText(decimalString: "12480.55", style: .hero)
-                    PnLText(dollarPnl: "+482.10", style: .row)
+                    // Money and P&L are told their world explicitly: `MoneyText` defaults to the
+                    // paper foreground and `PnLText` to the paper pair, so an ink surface passes
+                    // `color:` / `onInk:` rather than hoping a `.foregroundStyle` reaches them.
+                    MoneyText(decimalString: "12480.55", style: .hero, color: MonacoTheme.Ink.fgPrimary)
+                    PnLText(dollarPnl: "+482.10", style: .row, onInk: true)
                     MonacoSegmented(Range.allCases, selection: $inkRange) { $0.rawValue }
                         .padding(.top, MonacoTheme.Space.s)
                 }
