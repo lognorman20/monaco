@@ -5,7 +5,8 @@ import SwiftUI
 /// Debug-only: the group screen and its pushed screens on canned data, no sign-in or backend.
 /// Launch with `-MonacoGroupDetailSample <scenario>`:
 /// `populated` · `empty` · `loading` · `details` (Cabal details sheet open) · `propose` (chooser sheet open)
-/// · `cashOut` · `receipt` (bought) · `receiptFailed` (failed sell) · `activity` (full list).
+/// · `cashOut` · `receipt` (bought) · `receiptFailed` (failed sell) · `activity` (full list)
+/// · `sellAndLeave` (the screen while the slice is being sold).
 enum GroupDetailSampleScenario: String, CaseIterable {
     case populated
     case empty
@@ -16,6 +17,7 @@ enum GroupDetailSampleScenario: String, CaseIterable {
     case receipt
     case receiptFailed
     case activity
+    case sellAndLeave
 
     static let launchArgument = "-MonacoGroupDetailSample"
 
@@ -49,6 +51,10 @@ struct GroupDetailSampleHarness: View {
     @State private var toast: MonacoToast?
     @State private var heroScrolledAway = false
 
+    /// The one scenario that stands in for a leave in flight, read wherever the product reads
+    /// `isLeaving`, so the harness and the product gate on the same thing.
+    private var isLeaving: Bool { scenario == .sellAndLeave }
+
     var body: some View {
         NavigationStack {
             root
@@ -81,7 +87,7 @@ struct GroupDetailSampleHarness: View {
                 .monacoCanvas()
                 .navigationTitle("Weekend investors")
                 .navigationBarTitleDisplayMode(.inline)
-        case .populated, .empty, .details, .propose:
+        case .populated, .empty, .details, .propose, .sellAndLeave:
             groupScreen(scenario == .empty ? GroupDetailSampleData.emptyView : GroupDetailSampleData.view)
         }
     }
@@ -109,18 +115,26 @@ struct GroupDetailSampleHarness: View {
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .monacoCanvas()
+        // The same cover the real screen puts up while a leave is running.
+        .groupLeaveProgress(isLeaving: isLeaving, isSellingSlice: true)
         .navigationTitle(heroScrolledAway ? view.name : "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { showDetails = true } label: { Image(systemName: "info.circle") }
-                    .accessibilityLabel("Cabal details")
+            // `GroupDetailView` drops this item entirely while a leave runs, so the harness
+            // drops it under the same condition. Rendering it regardless would leave the
+            // leave-in-progress test asserting against an item the product never shows.
+            if !isLeaving {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showDetails = true } label: { Image(systemName: "info.circle") }
+                        .accessibilityLabel("Cabal details")
+                        .accessibilityIdentifier("group-details-button")
+                }
             }
         }
         .navigationDestination(item: $route) { route in
             switch route {
-            case .cashOut:
-                SellCabalView(auth: auth, groupId: view.id, maxShareUnits: Int64(view.you.shareUnits) ?? 0, equityUsd: view.you.equityUsd)
+            case .cashOut(let shareUnits, let equityUsd):
+                SellCabalView(auth: auth, groupId: view.id, maxShareUnits: shareUnits, equityUsd: equityUsd)
             case .activity:
                 GroupActivityListView(auth: auth, items: GroupDetailSampleData.activity, retryingTransactionIDs: [], onRetry: { _ in nil })
             case .proposals:
@@ -154,8 +168,8 @@ enum GroupDetailSampleData {
         potTotalUsd: "548.20",
         pot: [
             PotRowDTO(symbol: "USDC", units: "82.62", markUsd: "1.00", valueUsd: "82.62", dollarPnl: "+0.00", afterHours: nil, tokenAmount: nil),
-            PotRowDTO(symbol: "AAPLx", units: "1.2034", markUsd: "231.40", valueUsd: "278.47", dollarPnl: "+28.47", afterHours: false, tokenAmount: "120340000"),
-            PotRowDTO(symbol: "NVDAx", units: "1.05", markUsd: "178.20", valueUsd: "187.11", dollarPnl: "-7.60", afterHours: true, tokenAmount: "105000000"),
+            PotRowDTO(symbol: "AAPLc", units: "1.2034", markUsd: "231.40", valueUsd: "278.47", dollarPnl: "+28.47", afterHours: false, tokenAmount: "120340000"),
+            PotRowDTO(symbol: "NVDAc", units: "1.05", markUsd: "178.20", valueUsd: "187.11", dollarPnl: "-7.60", afterHours: true, tokenAmount: "105000000"),
         ],
         you: MemberSliceDTO(shareUnits: "311500000", equityUsd: "311.50", slicePercent: "0.568", dollarPnl: "+27.40", percentReturn: "0.096"),
         members: [
@@ -195,26 +209,26 @@ enum GroupDetailSampleData {
         let iso = ISO8601DateFormatter()
         func ago(_ minutes: Double) -> String { iso.string(from: Date().addingTimeInterval(-minutes * 60)) }
         return [
-            GroupActivityItemDTO(id: "t1", kind: "buy", status: "pending", symbol: "AAPLx", amountMicros: 50_000_000, createdAt: ago(3), txHash: "5h1Xk", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
+            GroupActivityItemDTO(id: "t1", kind: "buy", status: "pending", symbol: "AAPLc", amountMicros: 50_000_000, createdAt: ago(3), txHash: "0xd2b6e5896a6725952fa8d534b57dd8e512ef17b23008802d0cd2c50f0b246bc0", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
             GroupActivityItemDTO(id: "t2", kind: "deposit", status: "confirmed", symbol: nil, amountMicros: 100_000_000, createdAt: ago(55), txHash: nil, tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: nil, agentDisplayName: nil),
-            GroupActivityItemDTO(id: "t3", kind: "sell", status: "failed", symbol: "TSLAx", amountMicros: 0, createdAt: ago(180), txHash: nil, tokenAmount: "25000000", proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
-            GroupActivityItemDTO(id: "t4", kind: "buy", status: "confirmed", symbol: "NVDAx", amountMicros: 194_710_000, createdAt: ago(60 * 26), txHash: "3kQp", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "agent", agentDisplayName: "Scout"),
-            GroupActivityItemDTO(id: "t5", kind: "buy", status: "confirmed", symbol: "AAPLx", amountMicros: 250_000_000, createdAt: ago(60 * 50), txHash: "4mZa", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
+            GroupActivityItemDTO(id: "t3", kind: "sell", status: "failed", symbol: "TSLAc", amountMicros: 0, createdAt: ago(180), txHash: nil, tokenAmount: "25000000", proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
+            GroupActivityItemDTO(id: "t4", kind: "buy", status: "confirmed", symbol: "NVDAc", amountMicros: 194_710_000, createdAt: ago(60 * 26), txHash: "0x7cd7830f88d0bbd9edd73983335e291eb9c730054f0eb2f202d340ad272607f4", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "agent", agentDisplayName: "Scout"),
+            GroupActivityItemDTO(id: "t5", kind: "buy", status: "confirmed", symbol: "AAPLc", amountMicros: 250_000_000, createdAt: ago(60 * 50), txHash: "0x9b22ec415c2cb542c689352993679a080bd71ec930d68d1afc78b5dfdfbc976e", tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: "member", agentDisplayName: nil),
             GroupActivityItemDTO(id: "t6", kind: "deposit", status: "confirmed", symbol: nil, amountMicros: 300_000_000, createdAt: ago(60 * 74), txHash: nil, tokenAmount: nil, proceedsUsdcMicros: nil, initiatedBy: nil, agentDisplayName: nil),
         ]
     }
 
     static let boughtApple = TransactionDetailDTO(
         transactionId: "t5", groupId: "g1", action: "buy", status: "confirmed", amountMicros: 250_000_000,
-        inputToken: nil, outputToken: nil, inputSymbol: "USDC", outputSymbol: "AAPLx",
-        txHash: "4mZaQ8nJv2kPp7sWfLr3bXy9TcHd6eUoGi1AqRsNmVtK", executeRequestId: nil, proposalId: "p1",
+        inputToken: nil, outputToken: nil, inputSymbol: "USDC", outputSymbol: "AAPLc",
+        txHash: "0x9b22ec415c2cb542c689352993679a080bd71ec930d68d1afc78b5dfdfbc976e", executeRequestId: nil, proposalId: "p1",
         costBasisPrice: 250_000_000, costBasisAmount: 108_034_000, createdAt: "2026-09-16T14:02:00Z",
         confirmedAt: "2026-09-16T14:02:09Z", failureReason: nil, proceedsUsdcMicros: nil
     )
 
     static let failedSell = TransactionDetailDTO(
         transactionId: "t3", groupId: "g1", action: "sell", status: "failed", amountMicros: 25_000_000,
-        inputToken: nil, outputToken: nil, inputSymbol: "TSLAx", outputSymbol: "USDC",
+        inputToken: nil, outputToken: nil, inputSymbol: "TSLAc", outputSymbol: "USDC",
         txHash: nil, executeRequestId: nil, proposalId: "p2",
         costBasisPrice: nil, costBasisAmount: nil, createdAt: "2026-09-18T11:40:00Z",
         confirmedAt: nil, failureReason: "slippage", proceedsUsdcMicros: nil
