@@ -259,15 +259,23 @@ public enum SignedUsdFormatter {
 
     /// True when the amount is below zero after rounding to cents (drives loss styling).
     public static func isLoss(_ raw: String) -> Bool {
-        guard let value = parse(raw), !isZero(raw) else { return false }
-        return value < 0
+        guard let value = parse(raw) else { return false }
+        return value < 0 && !roundsToZero(value)
     }
 
     /// True when the amount rounds to $0.00, including negative zero and dust. False for unparseable input.
     public static func isZero(_ raw: String) -> Bool {
         guard let value = parse(raw) else { return false }
-        let magnitude = value < 0 ? -value : value
-        return UsdAmountFormatter.format(decimal: magnitude) == "$0.00"
+        return roundsToZero(value)
+    }
+
+    /// Rounding to cents, without building a money string to compare against: every row
+    /// asks this on every body pass.
+    private static func roundsToZero(_ value: Decimal) -> Bool {
+        var rounded = Decimal()
+        var source = value < 0 ? -value : value
+        NSDecimalRound(&rounded, &source, 2, .plain)
+        return rounded == 0
     }
 
     /// Signed decimal from a server string ("+48.2", "-0.001", "−7.60", "$3"). Nil when unparseable.
@@ -285,8 +293,11 @@ public enum SignedUsdFormatter {
         if trimmed.hasPrefix("$") { trimmed.removeFirst() }
         guard !trimmed.isEmpty,
               trimmed.allSatisfy({ $0.isASCII && ($0.isNumber || $0 == ".") }),
-              let magnitude = Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX"))
+              let magnitude = Decimal(string: trimmed, locale: posix)
         else { return nil }
         return negative ? -magnitude : magnitude
     }
+
+    /// Built once: `parse` runs for every signed figure on every body pass.
+    private static let posix = Locale(identifier: "en_US_POSIX")
 }

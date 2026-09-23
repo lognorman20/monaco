@@ -22,7 +22,7 @@ public struct FlowFailure: Equatable, Sendable {
     }
 }
 
-/// A transport failure reduced to the three things the copy actually depends on.
+/// A transport failure reduced to the few things the copy actually depends on.
 /// Both API client flavours (`MonacoCore.MonacoAPIError` and the app's own) map onto this,
 /// so the wording of a failed cash out lives in one tested place.
 public struct FlowErrorInput: Equatable, Sendable {
@@ -31,11 +31,26 @@ public struct FlowErrorInput: Equatable, Sendable {
     /// True only when the request provably never left the device. A timeout or a dropped
     /// connection is not offline: the server may have acted on it.
     public let isOffline: Bool
+    /// True when the app could not check the member's sign-in before sending: the token
+    /// refresh after a 401 failed, or there was no token at all. The server refused or never
+    /// saw the request, so nothing moved.
+    public let isSignInUnavailable: Bool
+    /// The server's `Retry-After` on a 429, when it sent one. Chat already tells the member
+    /// how long to wait; the money flows said "a moment" for the same header.
+    public let retryAfterSeconds: Int?
 
-    public init(status: Int? = nil, serverMessage: String? = nil, isOffline: Bool = false) {
+    public init(
+        status: Int? = nil,
+        serverMessage: String? = nil,
+        isOffline: Bool = false,
+        isSignInUnavailable: Bool = false,
+        retryAfterSeconds: Int? = nil
+    ) {
         self.status = status
         self.serverMessage = serverMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.isOffline = isOffline
+        self.isSignInUnavailable = isSignInUnavailable
+        self.retryAfterSeconds = retryAfterSeconds
     }
 
     public static func offline() -> FlowErrorInput { FlowErrorInput(isOffline: true) }
@@ -58,6 +73,7 @@ public enum MoneyFlowCopy {
     // MARK: - Cash out to an external wallet (POST /v1/me/withdrawals)
 
     public static func cashOutFailure(_ input: FlowErrorInput) -> FlowFailure {
+        if input.isSignInUnavailable { return signInUnavailableFailure(action: "cash out") }
         if input.isOffline { return offlineFailure(action: "cash out") }
         switch input.status {
         case 400 where matches(input, "amount exceeds available platform balance"):
@@ -70,7 +86,7 @@ public enum MoneyFlowCopy {
             return FlowFailure(
                 message: "That destination isn't a Base address.",
                 isRetryable: false,
-                nextStep: "Paste the address again — it should be 32 to 44 characters."
+                nextStep: "Paste the address again — it's 0x followed by 40 letters and numbers."
             )
         case 400 where matches(input, "cannot withdraw to your deposit address"):
             return FlowFailure(
@@ -92,6 +108,7 @@ public enum MoneyFlowCopy {
     // MARK: - Fund a cabal (POST /v1/groups/{id}/fund)
 
     public static func fundCabalFailure(_ input: FlowErrorInput) -> FlowFailure {
+        if input.isSignInUnavailable { return signInUnavailableFailure(action: "add that money") }
         if input.isOffline { return offlineFailure(action: "add that money") }
         switch input.status {
         case 400 where matches(input, "amount exceeds available platform balance"):
@@ -116,13 +133,18 @@ public enum MoneyFlowCopy {
     // MARK: - Cash out of a cabal to the account balance
 
     public static func sellStakeFailure(_ input: FlowErrorInput) -> FlowFailure {
+        if input.isSignInUnavailable { return signInUnavailableFailure(action: "cash out") }
         if input.isOffline { return offlineFailure(action: "cash out") }
         switch input.status {
+        // The server refused this one because an earlier cash out of this cabal is still
+        // running — often the member's own attempt that timed out. Nothing new moved, so a
+        // later cash out is allowed, but the next step sends them to their balance first:
+        // "try again" reads as "the first one failed" and invites cashing out twice.
         case 409:
             return FlowFailure(
                 message: "Your last cash out is still finishing.",
                 isRetryable: true,
-                nextStep: "Give it a minute, then try again."
+                nextStep: "Give it a minute, then check your balance."
             )
         case 404:
             return FlowFailure(message: "You're not a member of this cabal.", isRetryable: false)
@@ -135,6 +157,16 @@ public enum MoneyFlowCopy {
     }
 
     // MARK: - Shared shapes
+
+    /// The app never got as far as a request the server acted on: it could not confirm the
+    /// member is signed in. Nothing moved, so this is a plain retry, not an unknown outcome.
+    public static func signInUnavailableFailure(action: String) -> FlowFailure {
+        FlowFailure(
+            message: "We couldn't check your sign-in, so we didn't \(action).",
+            isRetryable: true,
+            nextStep: "Try again in a moment — nothing was sent."
+        )
+    }
 
     public static func offlineFailure(action: String) -> FlowFailure {
         FlowFailure(
@@ -154,12 +186,16 @@ public enum MoneyFlowCopy {
     }
 
     private static func generic(_ input: FlowErrorInput, action: String) -> FlowFailure {
+        // Refused by the rate limiter before the handler ran, so nothing moved. The server
+        // usually says how long to wait; chat has always shown that, and so do these now.
         if input.status == 429 {
-            return FlowFailure(
-                message: "Too many tries in a row.",
-                isRetryable: true,
-                nextStep: "Wait a moment and try again."
-            )
+            let wait: String
+            if let seconds = input.retryAfterSeconds, seconds > 0 {
+                wait = "Try again in \(seconds) second\(seconds == 1 ? "" : "s")."
+            } else {
+                wait = "Wait a moment and try again."
+            }
+            return FlowFailure(message: "Too many tries in a row.", isRetryable: true, nextStep: wait)
         }
         if input.status == 401 {
             return FlowFailure(
@@ -181,7 +217,9 @@ public enum MoneyFlowCopy {
     }
 
     /// No status at all (timeout, dropped connection, unreadable reply): the request may
-    /// have gone through, so a blind retry could move the money twice.
+    /// have gone through, so a blind retry could move the money twice. The API carries no
+    /// idempotency key, so a resend is always a second submission: the copy sends the member
+    /// to their balance and never promises that trying again is safe.
     public static let unconfirmed = FlowFailure(
         message: "We couldn't confirm that went through.",
         isRetryable: false,
