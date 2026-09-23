@@ -1,0 +1,242 @@
+#if DEBUG
+import MonacoCore
+import SwiftUI
+
+/// Debug-only Stocks flow on fixed sample data (launch argument `-MonacoStocksTabSample`).
+///
+/// No sign-in and no backend: the Stocks tab, the stock detail, the cabal picker and the amount
+/// step all read from `StocksTabSampleData`, so `StocksTabSampleUITests` and its screenshots are
+/// reproducible. Three joined cabals: one holds Apple, one holds only cash, and one never answers,
+/// which is the partial answer the picker has to be honest about.
+enum StocksTabSampleData {
+    static let launchArgument = "-MonacoStocksTabSample"
+
+    static var isEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains(launchArgument)
+    }
+
+    static let holderId = "5a0c7d10-0001-4b1e-8f00-000000000001"
+    static let cashOnlyId = "5a0c7d10-0002-4b1e-8f00-000000000002"
+    static let silentId = "5a0c7d10-0003-4b1e-8f00-000000000003"
+
+    static let home = HomeViewDTO(
+        groups: [
+            HomeGroupBoardRowDTO(groupId: holderId, name: "Weekend investors", potValueUsd: "548.20", percentReturn: "0.0964", dollarPnl: "+48.20", isJoined: true),
+            HomeGroupBoardRowDTO(groupId: cashOnlyId, name: "Rent money", potValueUsd: "212.40", percentReturn: "-0.0345", dollarPnl: "-7.60", isJoined: true),
+            HomeGroupBoardRowDTO(groupId: silentId, name: "Apple heads", potValueUsd: "91.35", percentReturn: "0.015", dollarPnl: "+1.35", isJoined: true),
+        ],
+        people: []
+    )
+
+    /// Pinned B20 catalogue subset. Addresses are placeholders in the vanity range and are never
+    /// shown on these screens.
+    static let catalog: [MarketAssetDTO] = [
+        asset("AAPLc", "Apple Inc.", 231_400_000, "0.012", suffix: "01"),
+        asset("NVDAc", "NVIDIA Corporation", 178_200_000, "-0.008", suffix: "02"),
+        asset("TSLAc", "Tesla, Inc.", 342_100_000, "0.034", suffix: "03"),
+        asset("MSFTc", "Microsoft Corporation", 438_900_000, "0.004", suffix: "04"),
+        asset("AMZNc", "Amazon.com, Inc.", 219_700_000, "-0.011", suffix: "05"),
+        asset("GOOGLc", "Alphabet Inc.", 201_000_000, "-0.015", suffix: "06"),
+    ]
+
+    private static func asset(_ symbol: String, _ name: String, _ micros: Int64, _ change: String, suffix: String) -> MarketAssetDTO {
+        MarketAssetDTO(
+            symbol: symbol,
+            name: name,
+            tokenAddress: "0xb2000000000000000000000000000000000000" + suffix,
+            routable: true,
+            priceUsdcMicros: micros,
+            change24h: change
+        )
+    }
+
+    static func groupView(_ groupId: String) -> GroupViewDTO? {
+        switch groupId {
+        case holderId:
+            return view(id: holderId, name: "Weekend investors", total: "548.20", pot: [
+                PotRowDTO(symbol: "AAPLc", units: "1.2034", markUsd: "231.40", valueUsd: "278.47", dollarPnl: "+28.47", afterHours: false, tokenAmount: "120340000"),
+                PotRowDTO(symbol: "NVDAc", units: "1.05", markUsd: "178.20", valueUsd: "187.11", dollarPnl: "+22.11", afterHours: false, tokenAmount: "105000000"),
+                PotRowDTO(symbol: "USDC", units: "82.62", markUsd: "1.00", valueUsd: "82.62", dollarPnl: "+0.00", afterHours: nil, tokenAmount: nil),
+            ])
+        case cashOnlyId:
+            return view(id: cashOnlyId, name: "Rent money", total: "212.40", pot: [
+                PotRowDTO(symbol: "USDC", units: "212.40", markUsd: "1.00", valueUsd: "212.40", dollarPnl: "+0.00", afterHours: nil, tokenAmount: nil),
+            ])
+        default:
+            return nil
+        }
+    }
+
+    private static func view(id: String, name: String, total: String, pot: [PotRowDTO]) -> GroupViewDTO {
+        GroupViewDTO(
+            id: id,
+            name: name,
+            treasuryAddress: nil,
+            potTotalUsd: total,
+            pot: pot,
+            you: MemberSliceDTO(shareUnits: "100000000", equityUsd: "100.00", slicePercent: "0.2", dollarPnl: "+0.00", percentReturn: nil),
+            members: [],
+            proposals: nil,
+            agent: nil
+        )
+    }
+
+    /// 1D rises, 1W falls, 1M ends where it started, so each header verdict has a fixture.
+    static func chart(range: AssetChartRange, priceMicros: Int64) -> AssetChartDTO {
+        let end: Int64 = 1_790_000_000
+        let (step, deltas): (Int64, [Int64]) = {
+            switch range {
+            case .oneDay: return (3_600, [-4_000_000, -2_500_000, -3_000_000, -1_000_000, 0])
+            case .oneWeek: return (86_400, [9_000_000, 7_000_000, 8_000_000, 3_000_000, 0])
+            case .oneMonth: return (6 * 86_400, [0, 5_000_000, -3_000_000, 2_000_000, 0])
+            }
+        }()
+        let points = deltas.enumerated().map { index, delta in
+            AssetChartPointDTO(
+                timestamp: end - Int64(deltas.count - 1 - index) * step,
+                priceUsdcMicros: priceMicros + delta
+            )
+        }
+        return AssetChartDTO(points: points, emptyReason: nil)
+    }
+
+    struct SampleError: Error {}
+
+    struct TabSource: StocksTabDataSource {
+        func search(query: String, offset: Int, limit: Int) async throws -> ListMarketAssetsResponse {
+            try await Task.sleep(for: .milliseconds(150))
+            let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let matches = catalog.filter {
+                $0.name.lowercased().contains(term) || AssetSymbolFormatter.display($0.symbol).lowercased().contains(term)
+            }
+            let page = Array(matches.dropFirst(offset).prefix(limit))
+            return ListMarketAssetsResponse(assets: page, hasMore: offset + page.count < matches.count)
+        }
+
+        func popular(limit: Int) async throws -> PopularAssetsResponse {
+            try await Task.sleep(for: .milliseconds(150))
+            return PopularAssetsResponse(assets: Array(catalog.prefix(limit)))
+        }
+    }
+
+    struct DetailSource: AssetDetailDataSource {
+        func detail(symbol: String) async throws -> AssetDetailDTO {
+            // Slower than the chart on purpose: the curve must not wait for it.
+            try await Task.sleep(for: .milliseconds(600))
+            guard let asset = catalog.first(where: { $0.symbol == symbol }) else { throw SampleError() }
+            return AssetDetailDTO(
+                symbol: asset.symbol,
+                name: asset.name,
+                tokenAddress: asset.tokenAddress,
+                routable: true,
+                priceUsdcMicros: asset.priceUsdcMicros,
+                change24h: asset.change24h,
+                liquidity: AssetLiquidityDTO(
+                    label: "Via DEX",
+                    routable: true,
+                    buyProbeUsdcMicros: 1_000_000,
+                    buyProbeOutAmount: nil,
+                    sellProbeInAmount: nil,
+                    sellProbeOutAmount: nil,
+                    spreadBps: nil
+                )
+            )
+        }
+
+        func chart(symbol: String, range: AssetChartRange) async throws -> AssetChartDTO {
+            try await Task.sleep(for: .milliseconds(150))
+            let price = catalog.first(where: { $0.symbol == symbol })?.priceUsdcMicros ?? 100_000_000
+            return StocksTabSampleData.chart(range: range, priceMicros: price)
+        }
+    }
+
+    struct HoldingsSource: CabalHoldingsDataSource {
+        func groupView(groupId: String) async throws -> GroupViewDTO {
+            try await Task.sleep(for: .milliseconds(200))
+            guard let view = StocksTabSampleData.groupView(groupId) else { throw SampleError() }
+            return view
+        }
+    }
+
+    final class ProposeSource: ProposeService {
+        func pot(groupId: String) async throws -> ProposePot {
+            guard let view = StocksTabSampleData.groupView(groupId) else { throw SampleError() }
+            return ProposePot(view: view)
+        }
+
+        func popularStocks() async throws -> [ProposeStock] {
+            catalog.map(ProposeStock.init(market:))
+        }
+
+        func searchStocks(groupId: String, query: String, offset: Int, limit: Int) async throws -> (stocks: [ProposeStock], hasMore: Bool) {
+            let page = try await TabSource().search(query: query, offset: offset, limit: limit)
+            return (page.assets.map(ProposeStock.init(market:)), page.hasMore)
+        }
+
+        func priceMicros(symbol: String) async throws -> Int64? {
+            catalog.first { $0.symbol == symbol }?.priceUsdcMicros
+        }
+
+        func buyQuote(groupId: String, symbol: String, usdcMicros: Int64) async throws -> BuyQuoteDTO {
+            try await Task.sleep(for: .milliseconds(300))
+            let price = catalog.first { $0.symbol == symbol }?.priceUsdcMicros ?? 100_000_000
+            let atomics = Self.mulDiv(usdcMicros, 100_000_000, price)
+            return BuyQuoteDTO(
+                symbol: symbol, kind: "buy", usdcMicros: String(usdcMicros), tokenAmount: nil,
+                routable: true, outputAmount: String(atomics), outputUsdcMicros: nil, priceUsdcMicros: String(price)
+            )
+        }
+
+        /// `a * b / c` rounded down, without the Int64 overflow the plain product hits past
+        /// about $92k of input.
+        private static func mulDiv(_ a: Int64, _ b: Int64, _ c: Int64) -> Int64 {
+            let (high, low) = a.multipliedFullWidth(by: b)
+            return c.dividingFullWidth((high, low)).quotient
+        }
+
+        func sellQuote(groupId: String, symbol: String, tokenAmount: Int64) async throws -> BuyQuoteDTO {
+            try await Task.sleep(for: .milliseconds(300))
+            let price = catalog.first { $0.symbol == symbol }?.priceUsdcMicros ?? 100_000_000
+            let usdc = Self.mulDiv(tokenAmount, price, 100_000_000)
+            return BuyQuoteDTO(
+                symbol: symbol, kind: "sell", usdcMicros: nil, tokenAmount: String(tokenAmount),
+                routable: true, outputAmount: String(usdc), outputUsdcMicros: String(usdc), priceUsdcMicros: nil
+            )
+        }
+
+        func propose(groupId: String, draft: ProposalDraft) async throws -> String {
+            try await Task.sleep(for: .milliseconds(300))
+            return UUID().uuidString
+        }
+    }
+
+    static var sources: StocksFlowSources {
+        StocksFlowSources(tab: TabSource(), detail: DetailSource(), holdings: HoldingsSource(), propose: ProposeSource())
+    }
+}
+
+struct StocksTabSampleHarness: View {
+    @ObservedObject var auth: DynamicAuthService
+    @State private var session: AppSessionStore = {
+        let session = AppSessionStore()
+        session.home = StocksTabSampleData.home
+        session.isLoading = false
+        return session
+    }()
+    @State private var sources = StocksTabSampleData.sources
+
+    var body: some View {
+        TabView {
+            NavigationStack {
+                AssetsTabView(auth: auth, sources: sources)
+            }
+            .tabItem {
+                Label("Stocks", systemImage: "chart.line.uptrend.xyaxis")
+                    .accessibilityIdentifier("tab-stocks")
+            }
+        }
+        .tint(MonacoTheme.ink)
+        .environment(session)
+    }
+}
+#endif
