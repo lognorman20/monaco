@@ -229,9 +229,10 @@ func boot(ctx context.Context) (*bootResult, error) {
 	transactionHandlers := &httpapi.TransactionHandlers{
 		Store:   store,
 		Privy:   privyClient,
-		XStocks: xstocksResolver,
+		XStocks: mintResolver,
 		Swap:    swap,
 		Symbols: symbols,
+		Catalog: catalogComposite,
 	}
 	agentKeyGuard := httpapi.NewAgentKeyGuard(trustProxyHeaders())
 	catalogHandlers := &httpapi.CatalogHandlers{
