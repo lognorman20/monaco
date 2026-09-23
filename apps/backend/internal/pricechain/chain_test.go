@@ -17,11 +17,11 @@ import (
 )
 
 const (
-	testMint       = jupiter.AAPLxMint
-	testSymbol     = "AAPLx"
-	preIpoMint     = "TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v"
-	preIpoSymbol   = "tSpaceX"
-	jupiterPreIpo  = 774_000_000
+	testMint        = jupiter.AAPLxMint
+	testSymbol      = "AAPLx"
+	preIpoMint      = "TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v"
+	preIpoSymbol    = "tSpaceX"
+	jupiterPreIpo   = 774_000_000
 	preIpoLiquidity = 250_000.0
 )
 
@@ -208,6 +208,26 @@ func TestChain_preIpoHolding_jupiterDown_fallsToCostBasisWithNineDecimals(t *tes
 	}
 	if holding.MarkUsdc != 500_000_000 {
 		t.Fatalf("mark = %d, want $500/token from 9-decimal cost basis", holding.MarkUsdc)
+	}
+}
+
+func TestChartSeriesQuery_preIpo_doesNotCallPyth(t *testing.T) {
+	charts := &fakeCharts{}
+	chain := New(nil, nil, charts, DefaultConfig())
+
+	series, err := chain.ChartSeriesQuery(context.Background(), pyth.ChartQuery{
+		Symbol: preIpoSymbol,
+		Kind:   xstocks.AssetKindPreIPO,
+		Range:  pyth.ChartRange1D,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if charts.calls.Load() != 0 {
+		t.Fatalf("pyth chart calls = %d, want 0", charts.calls.Load())
+	}
+	if len(series.Points) != 0 || series.EmptyReason == "" {
+		t.Fatalf("series = %+v, want empty with a reason", series)
 	}
 }
 
