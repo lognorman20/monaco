@@ -91,6 +91,17 @@ public struct ListMarketAssetsResponseDTO: Codable, Equatable, Sendable {
         self.hasMore = hasMore
         self.market = market
     }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        assets = try container.decode([MarketAssetDTO].self, forKey: .assets)
+        hasMore = try container.decodeIfPresent(Bool.self, forKey: .hasMore) ?? false
+        // The chip is decoration on a list of rows that decoded fine. Its two
+        // timestamps throw on anything the shared ISO8601 parser rejects, and the
+        // whole market list failing over a session chip is not a trade anyone would
+        // make.
+        market = (try? container.decodeIfPresent(MarketStatusDTO.self, forKey: .market)) ?? nil
+    }
 }
 
 public struct PopularAssetsResponseDTO: Codable, Equatable, Sendable {
@@ -100,6 +111,13 @@ public struct PopularAssetsResponseDTO: Codable, Equatable, Sendable {
     public init(assets: [MarketAssetDTO], market: MarketStatusDTO? = nil) {
         self.assets = assets
         self.market = market
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        assets = try container.decode([MarketAssetDTO].self, forKey: .assets)
+        // As on the list: an unparseable instant in the chip does not cost the rows.
+        market = (try? container.decodeIfPresent(MarketStatusDTO.self, forKey: .market)) ?? nil
     }
 }
 
@@ -505,7 +523,11 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
         change24hBasis = try container.decodeIfPresent(MarketPriceBasis.self, forKey: .change24hBasis)
         change24hBasisSymbol = try container.decodeIfPresent(String.self, forKey: .change24hBasisSymbol)
         liquidity = try container.decode(AssetLiquidityDTO.self, forKey: .liquidity)
-        market = try container.decodeIfPresent(MarketStatusDTO.self, forKey: .market)
+        // Same rule as the grid and the card below: the session chip is an optional
+        // section, and it carries two timestamps that throw on any spelling the
+        // shared ISO8601 parser rejects. One unparseable instant must not take the
+        // hero price down with it.
+        market = (try? container.decodeIfPresent(MarketStatusDTO.self, forKey: .market)) ?? nil
         marketSession = try container.decodeIfPresent(MarketSession.self, forKey: .marketSession) ?? market?.session
         afterHours = try container.decodeIfPresent(Bool.self, forKey: .afterHours) ?? market?.afterHours ?? false
         // The grid and the card are optional sections. A malformed one is dropped on
