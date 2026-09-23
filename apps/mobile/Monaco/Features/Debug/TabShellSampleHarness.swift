@@ -68,9 +68,9 @@ private extension TabShellSample {
             leaderboard: HomeLeaderboardSectionDTO(range: "24h", people: []),
             missedProposals: rows.enumerated().map { index, row in
                 HomeMissedProposalRowDTO(
-                    groupID: "8f1c2d3e-000\(index + 1)",
+                    groupId: "8f1c2d3e-000\(index + 1)",
                     groupName: row.0,
-                    proposalID: "proposal-\(index + 1)",
+                    proposalId: "proposal-\(index + 1)",
                     symbol: row.1,
                     status: "open",
                     createdAt: now.addingTimeInterval(-3600),

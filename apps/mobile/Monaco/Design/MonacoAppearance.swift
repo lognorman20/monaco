@@ -7,6 +7,71 @@ import UIKit
 /// bar has no view tree to scale inside, so it takes `MonacoNavType`'s pre-scaled, point-capped
 /// faces rather than `.displayFont(_:)`.
 enum MonacoAppearance {
+    /// Chevron-only back button: the title is drawn clear and at a near-zero size so it takes no width.
+    private static var backButtonAppearance: UIBarButtonItemAppearance {
+        let backButton = UIBarButtonItemAppearance(style: .plain)
+        let hidden: [NSAttributedString.Key: Any] = [
+            .foregroundColor: UIColor.clear,
+            .font: UIFont.systemFont(ofSize: 0.1),
+        ]
+        backButton.normal.titleTextAttributes = hidden
+        backButton.highlighted.titleTextAttributes = hidden
+        return backButton
+    }
+
+    private static let backChevron = UIImage(
+        systemName: "chevron.left",
+        withConfiguration: UIImage.SymbolConfiguration(weight: .semibold)
+    )
+
+    /// Title and large-title attributes in a given foreground.
+    ///
+    /// SF Pro Expanded, capped: an uncapped large title at AX5 pushes the whole screen down
+    /// before the content has said anything. Tracking matches `DisplayRole`'s −0.01/−0.02em and
+    /// is measured against the *scaled* size, so it does not open into a gap at AX5.
+    private static func titleAttributes(_ colour: UIColor) -> (inline: [NSAttributedString.Key: Any], large: [NSAttributedString.Key: Any]) {
+        let inlineFont = MonacoNavType.inlineTitle
+        let largeFont = MonacoNavType.largeTitle
+        return (
+            [
+                .foregroundColor: colour,
+                .font: inlineFont,
+                .kern: MonacoNavType.inlineTracking(size: inlineFont.pointSize),
+            ],
+            [
+                .foregroundColor: colour,
+                .font: largeFont,
+                .kern: MonacoNavType.largeTracking(size: largeFont.pointSize),
+            ]
+        )
+    }
+
+    /// The transparent scroll-edge bar, in a given foreground pair.
+    ///
+    /// The back chevron is pre-tinted `.alwaysOriginal` rather than left to the bar's `tintColor`:
+    /// `tintColor` is one value for the whole bar, and the ink variant has to differ from it on one
+    /// screen without reaching across to every other.
+    private static func scrollEdgeAppearance(title: UIColor, chevron: UIColor) -> UINavigationBarAppearance {
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithTransparentBackground()
+        let attributes = titleAttributes(title)
+        appearance.titleTextAttributes = attributes.inline
+        appearance.largeTitleTextAttributes = attributes.large
+        appearance.backButtonAppearance = backButtonAppearance
+        let image = backChevron?.withTintColor(chevron, renderingMode: .alwaysOriginal)
+        appearance.setBackIndicatorImage(image, transitionMaskImage: backChevron)
+        return appearance
+    }
+
+    /// The scroll-edge bar in the **ink** pair, installed per screen by `.monacoInkNavBar()`.
+    ///
+    /// White title (18.72:1 on `Ink.base`) and an `Ink.accent` chevron (7.98:1). The paper pair
+    /// the proxy configures measures 1.0:1 and 3.12:1 over a slab in light mode.
+    static let inkScrollEdge: UINavigationBarAppearance = scrollEdgeAppearance(
+        title: UIColor(MonacoTheme.Ink.fgPrimary),
+        chevron: UIColor(MonacoTheme.Ink.accent)
+    )
+
     static func configureUIKit() {
         let canvas = UIColor(MonacoTheme.bgBase)
         let surface = UIColor(MonacoTheme.bgRaised)
@@ -14,51 +79,26 @@ enum MonacoAppearance {
         let muted = UIColor(MonacoTheme.fgMuted)
         let hairline = UIColor(MonacoTheme.line)
 
-        // SF Pro Expanded, capped: an uncapped large title at AX5 pushes the whole screen down
-        // before the content has said anything. Tracking matches `DisplayRole`'s −0.01/−0.02em
-        // and is measured against the *scaled* size, so it does not open into a gap at AX5.
-        let inlineFont = MonacoNavType.inlineTitle
-        let largeFont = MonacoNavType.largeTitle
-        let titleAttributes: [NSAttributedString.Key: Any] = [
-            .foregroundColor: primaryText,
-            .font: inlineFont,
-            .kern: MonacoNavType.inlineTracking(size: inlineFont.pointSize),
-        ]
-        let largeTitleAttributes: [NSAttributedString.Key: Any] = [
-            .foregroundColor: primaryText,
-            .font: largeFont,
-            .kern: MonacoNavType.largeTracking(size: largeFont.pointSize),
-        ]
-
-        // Chevron-only back button: the title is drawn clear and at a near-zero size so it takes no width.
-        let backButton = UIBarButtonItemAppearance(style: .plain)
-        backButton.normal.titleTextAttributes = [.foregroundColor: UIColor.clear, .font: UIFont.systemFont(ofSize: 0.1)]
-        backButton.highlighted.titleTextAttributes = [.foregroundColor: UIColor.clear, .font: UIFont.systemFont(ofSize: 0.1)]
-        let backImage = UIImage(systemName: "chevron.left", withConfiguration: UIImage.SymbolConfiguration(weight: .semibold))
+        let attributes = titleAttributes(primaryText)
 
         // Scrolled: opaque canvas with a hairline, so content never slides under the title.
         let standard = UINavigationBarAppearance()
         standard.configureWithOpaqueBackground()
         standard.backgroundColor = canvas
         standard.shadowColor = hairline
-        standard.titleTextAttributes = titleAttributes
-        standard.largeTitleTextAttributes = largeTitleAttributes
-        standard.backButtonAppearance = backButton
-        standard.setBackIndicatorImage(backImage, transitionMaskImage: backImage)
+        standard.titleTextAttributes = attributes.inline
+        standard.largeTitleTextAttributes = attributes.large
+        standard.backButtonAppearance = backButtonAppearance
+        standard.setBackIndicatorImage(backChevron, transitionMaskImage: backChevron)
 
         // At rest (scroll edge): transparent, no hairline, so an ink slab runs up under it.
         //
-        // The title and bar buttons configured here are the *paper* pair, which is right for the
-        // paper canvas and wrong over a slab: `fgPrimary` on `Ink.base` in light measures 1.0:1
-        // and `brand` measures 3.12:1. A screen that opens on a slab applies `.monacoInkNavBar()`
-        // (below), which flips the bar to the ink pair. Nothing else compensates, so a slab
+        // The title and chevron here are the *paper* pair, which is right for the paper canvas and
+        // wrong over a slab: `fgPrimary` on `Ink.base` in light measures 1.0:1 and `brand`
+        // measures 3.12:1. A screen that opens on a slab applies `.monacoInkNavBar()` (below),
+        // which swaps in `inkScrollEdge` for that one screen. Nothing else compensates, so a slab
         // without that modifier ships an unreadable bar.
-        let scrollEdge = UINavigationBarAppearance()
-        scrollEdge.configureWithTransparentBackground()
-        scrollEdge.titleTextAttributes = titleAttributes
-        scrollEdge.largeTitleTextAttributes = largeTitleAttributes
-        scrollEdge.backButtonAppearance = backButton
-        scrollEdge.setBackIndicatorImage(backImage, transitionMaskImage: backImage)
+        let scrollEdge = scrollEdgeAppearance(title: primaryText, chevron: UIColor(MonacoTheme.brand))
 
         let navigationBar = UINavigationBar.appearance()
         navigationBar.standardAppearance = standard
@@ -164,32 +204,40 @@ extension View {
     /// Nav chrome for a screen that opens on an ink slab (§5.5, §6.1) — the hook the ink fold
     /// needs, and the reason the scroll-edge appearance above can afford to be transparent.
     ///
-    /// The bar at rest is transparent so the slab runs up under it, but its title and bar buttons
-    /// come from the paper pair. Measured over `Ink.base`, in **light mode**: title `fgPrimary`
+    /// The bar at rest is transparent so the slab runs up under it, but its title and chevron come
+    /// from the paper pair. Measured over `Ink.base`, in **light mode**: title `fgPrimary`
     /// `#0B1220` on `#0B1220` is **1.0:1** — invisible — and the chevron `brand` `#1652F0` is
     /// **3.12:1**, under the 4.5:1 text bar. `MonacoPalette.ink` already states that brand cannot
     /// carry a tappable label on ink, which is why `Ink.accent` exists.
     ///
-    /// This flips the bar to its dark materials — the title attributes are `Color.adaptive`
-    /// values, so they resolve to `#F3F6FB` under a dark bar — and takes `Ink.accent` (7.98:1 on
-    /// `Ink.base`) for bar buttons and the back chevron.
+    /// **Why this reaches into UIKit.** `.toolbarColorScheme(.dark, for: .navigationBar)` is the
+    /// only per-screen bar hook SwiftUI offers, and on the iOS 18 deployment target it does not
+    /// override a `titleTextAttributes` foreground set on the appearance proxy — verified on
+    /// 18.3, where the title stayed `#0B1220` over the slab. (It does work on iOS 26, which is
+    /// why it is still applied here.) `UINavigationItem.scrollEdgeAppearance` is the supported
+    /// per-screen escape hatch and UIKit scopes it to the one screen and unwinds it on its own,
+    /// so there is no appearance to restore and no state to get wrong. It lives here, once,
+    /// rather than in every chunk that opens on a slab.
     ///
     /// **Apply it at the screen root, above the scroll view.** The tint is an environment value,
     /// so the paper content below the fold inherits `Ink.accent` for *system* controls unless it
     /// re-declares its own; Monaco's own components set explicit colours and are unaffected. A
     /// screen with a system control on its paper half wraps that section in
-    /// `.tint(MonacoTheme.controlTint)`.
+    /// `.tint(MonacoTheme.controlTint)`, and a toolbar glyph over the slab takes
+    /// `.monacoToolbarIcon(onInk: true)`.
     ///
     /// Callers: Home (Chunk C) and stock detail (Chunk F). See the cross-chunk contract.
     func monacoInkNavBar() -> some View {
         toolbarColorScheme(.dark, for: .navigationBar)
             .tint(MonacoTheme.Ink.accent)
+            .background(MonacoInkNavBarInstaller().frame(width: 0, height: 0).accessibilityHidden(true))
     }
 
-    /// Toolbar / nav bar SF Symbol. Brand, because a toolbar glyph is a tap target and blue means tap.
-    func monacoToolbarIcon() -> some View {
+    /// Toolbar / nav bar SF Symbol. Brand, because a toolbar glyph is a tap target and blue means
+    /// tap — `Ink.accent` when the bar is sitting over a slab, where brand is 3.12:1.
+    func monacoToolbarIcon(onInk: Bool = false) -> some View {
         font(.body.weight(.semibold))
-            .foregroundStyle(MonacoTheme.brand)
+            .foregroundStyle(onInk ? MonacoTheme.Ink.accent : MonacoTheme.brand)
             .symbolRenderingMode(.hierarchical)
     }
 
@@ -218,5 +266,45 @@ extension View {
             .frame(maxWidth: .infinity)
             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             .listRowBackground(Color.clear)
+    }
+}
+
+
+/// Installs `MonacoAppearance.inkScrollEdge` on the enclosing screen's own `navigationItem`.
+///
+/// A zero-sized background view is the cheapest way to reach the `UIHostingController` SwiftUI
+/// put this screen in. Setting the appearance on the *item* rather than on the bar is what makes
+/// this safe: UIKit applies it while this screen is on top and puts the bar back to the proxy's
+/// paper appearance on its own when the screen is popped or covered, so there is nothing to
+/// restore and nothing to leak onto the next screen.
+private struct MonacoInkNavBarInstaller: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        InstallerView()
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        (uiView as? InstallerView)?.install()
+    }
+
+    private final class InstallerView: UIView {
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            install()
+        }
+
+        func install() {
+            guard let item = owningViewController?.navigationItem else { return }
+            item.scrollEdgeAppearance = MonacoAppearance.inkScrollEdge
+            item.compactScrollEdgeAppearance = MonacoAppearance.inkScrollEdge
+        }
+
+        private var owningViewController: UIViewController? {
+            var responder: UIResponder? = self
+            while let next = responder?.next {
+                if let controller = next as? UIViewController { return controller }
+                responder = next
+            }
+            return nil
+        }
     }
 }

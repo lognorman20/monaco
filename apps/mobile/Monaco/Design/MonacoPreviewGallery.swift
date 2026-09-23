@@ -424,7 +424,8 @@ private struct GalleryWorldPage: View {
                     MonacoSegmented(Range.allCases, selection: $inkRange) { $0.rawValue }
                         .padding(.top, MonacoTheme.Space.s)
                 }
-                .padding(.top, 72)
+                // Clears the status bar plus the 44pt inline bar the slab now runs under.
+                .padding(.top, 104)
                 .monacoInkSlab()
 
                 VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
