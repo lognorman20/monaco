@@ -58,7 +58,11 @@ struct SessionGateView: View {
         .environment(session)
         // The name landing is a real step forward, not a flicker: cross-fade it.
         .animation(.easeInOut(duration: 0.28), value: destination)
-        .task(id: auth.accessToken) {
+        // Keyed on who is signed in, not on the token: Dynamic rotates the access token, and
+        // the transport already retries with the fresh one. Keying on the token string made
+        // every rotation look like a new sign-in and re-ran the whole bootstrap — seven
+        // requests, and every screen keyed the same way reloaded under the member's hands.
+        .task(id: auth.sessionIdentity) {
             await session.bootstrap(auth: auth)
         }
     }
