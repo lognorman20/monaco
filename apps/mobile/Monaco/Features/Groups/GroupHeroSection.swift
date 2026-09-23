@@ -140,24 +140,29 @@ struct GroupHeroSection: View {
 ///
 /// One object, not three stacked rectangles: identity and the pot, then the thing a cabal is for,
 /// then the room's conversation. Tap a different cabal and the whole thing is a different colour.
-struct GroupHeroBand<Content: View>: View {
-    let tint: MonacoTheme.CabalTint
-    @ViewBuilder let content: Content
-
+/// The hero band's measurements, in a non-generic namespace so they have somewhere to live and
+/// somewhere to be quoted from — `GroupHeroBand` is generic over its content and cannot hold a
+/// stored static.
+enum GroupHeroBandMetrics {
     /// The cabal's wash over ink.
     ///
     /// `CabalTint.soft` is a *paper* wash — the deep `fill` at 12% — and over `#0B1220` it is not
-    /// there at all, which is why this reaches for the `onInk` pair instead, exactly as
-    /// `brandWashOnInk` is the light blue rather than `brand`. The opacity is held here rather
-    /// than inline so there is one number with one reason: at 10% the worst case in the ramp
-    /// (olive `#B9C93A`) lifts the band far enough that `Ink.fgSubtle` — white@0.48, 4.98:1 on
-    /// bare ink per §1.5 — still measures ~4.7:1 on the washed band, so the 11pt eyebrows hold AA.
-    /// Anything heavier is a fill, and the hero's one saturated fill is the Propose capsule.
+    /// there at all, which is why the band reaches for the `onInk` pair instead, exactly as
+    /// `brandWashOnInk` is the light blue rather than `brand`. The opacity is named here rather
+    /// than written inline so there is one number with one reason: at 10% the worst case in the
+    /// ramp (olive `#B9C93A`) lifts the band far enough that `Ink.fgSubtle` — white@0.48, 4.98:1
+    /// on bare ink per §1.5 — still measures ~4.7:1 on the washed band, so the 11pt eyebrows hold
+    /// AA. Anything heavier is a fill, and the hero's one saturated fill is the Propose capsule.
     ///
     /// This belongs in the token table as `CabalTint.softOnInk` with a contrast row of its own.
     /// That is a Chunk A edit to `MonacoTheme.swift`, which this chunk may not make; it is filed
     /// as the follow-up and named here so the value is not a bare literal in the meantime.
     static let washOpacity: Double = 0.10
+}
+
+struct GroupHeroBand<Content: View>: View {
+    let tint: MonacoTheme.CabalTint
+    @ViewBuilder let content: Content
 
     private var shape: AnyShape {
         AnyShape(RoundedRectangle(cornerRadius: MonacoTheme.Radius.object, style: .continuous))
@@ -170,7 +175,7 @@ struct GroupHeroBand<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 InkSurface(shape: shape)
-                    .overlay { shape.fill(tint.onInk.opacity(Self.washOpacity)) }
+                    .overlay { shape.fill(tint.onInk.opacity(GroupHeroBandMetrics.washOpacity)) }
             }
     }
 }
