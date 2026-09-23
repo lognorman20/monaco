@@ -375,9 +375,14 @@ public struct StockVsTokenCard: Equatable, Sendable {
                 + "is why the two can drift apart. The percentage is against \(tokenTicker)'s own mark, not "
                 + "against \(underlying)."
         }
+        // Deliberately does not say the token is worth *more* than a share. It
+        // carries a multiplier that starts at one and only moves on a split or a
+        // reinvested dividend, so for a stock that has had neither the two are the
+        // same number, and a card that insisted otherwise would be wrong about the
+        // quietest case.
         return "The percentage is \(tokenTicker) against its own mark — both per token. \(underlying) is "
-            + "per share and is shown for reference: one \(tokenTicker) is worth more than one share by the "
-            + "dividends reinvested into it."
+            + "per share and is shown for reference: one \(tokenTicker) is one share plus anything "
+            + "reinvested into it since it listed, so the two need not be the same number."
     }
 
     // MARK: - Time

@@ -207,6 +207,20 @@ final class StockVsTokenCardTests: XCTestCase {
         XCTAssertEqual(premium.caption, "AAPLc is trading in line with its mark")
     }
 
+    /// The footnote explains why the two units differ. It must not go further and
+    /// claim the token is worth *more* than a share: the multiplier starts at one and
+    /// only moves on a split or a reinvested dividend, so for a stock that has had
+    /// neither the two are the same number.
+    func testFootnote_doesNotClaimTheTokenIsWorthMoreThanAShare() throws {
+        let card = try XCTUnwrap(card(MarketSampleData.stockVsTokenLive))
+        let text = card.footnote.lowercased()
+        XCTAssertFalse(text.contains("worth more than"), card.footnote)
+        XCTAssertTrue(
+            card.footnote.contains("need not be the same number"),
+            "the footnote should say the two units can differ, without saying which way: \(card.footnote)"
+        )
+    }
+
     /// Over a weekend the mark holds Friday's close. The gap to the pools is the
     /// market's move since then, not a premium, and no pill may claim otherwise.
     func testStaleMark_hasNoPremiumAndSaysWhy() throws {

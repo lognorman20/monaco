@@ -182,20 +182,33 @@ final class AssetDetailSampleUITests: XCTestCase {
         var lastTapped = anyElement(app, "asset-chart-range-1D")
         for range in ["1D", "1W", "1M", "3M", "1Y", "ALL"] {
             let chip = anyElement(app, "asset-chart-range-\(range)")
-            XCTAssertTrue(chip.waitForExistence(timeout: 5), "\(range) chip is missing")
-            // Tapping a chip reloads the curve, which can change the card's height
-            // and carry the row back off screen.
-            scrollUntilHittable(app, chip, attempts: 3)
-            // Hittable is what makes this a real check: a chip clipped out of a fixed
-            // row would never become hittable however far the row is swiped.
+
+            // Swipe for existence, not just for hittability. At this text size each
+            // chip is wide enough that the row only builds the ones near its
+            // viewport, so a chip further along is not in the accessibility tree at
+            // all until the row has been scrolled toward it — asserting existence
+            // before swiping fails on the second chip every time.
             var swipes = 0
-            while !chip.isHittable && swipes < 4 {
+            while !chip.exists && swipes < 6 {
+                lastTapped.swipeLeft()
+                swipes += 1
+            }
+            XCTAssertTrue(chip.exists, "\(range) chip is missing after \(swipes) swipes")
+
+            // Then swipe for hittability. This is what makes it a real check: a chip
+            // clipped out of a fixed row exists and never becomes hittable however
+            // far the row is swiped, which is the regression this test guards.
+            while !chip.isHittable && swipes < 10 {
                 lastTapped.swipeLeft()
                 swipes += 1
             }
             XCTAssertTrue(chip.isHittable, "\(range) chip cannot be reached")
             chip.tap()
             lastTapped = chip
+
+            // Tapping reloads the curve, which can change the card's height and
+            // carry the row back under the trade bar.
+            scrollUntilHittable(app, chip, attempts: 2)
         }
         attachScreenshot(app, name: "asset-detail-ranges-accessibility-text")
     }
