@@ -24,7 +24,7 @@ enum MonacoDesignGallery {
 }
 
 enum GalleryTab: String {
-    case primitives, money, controls, toast
+    case primitives, money, controls, toast, world
 }
 
 private struct MonacoDesignGalleryRoot: View {
@@ -44,7 +44,37 @@ private struct MonacoDesignGalleryRoot: View {
             NavigationStack { GalleryToastPage() }
                 .tabItem { Label("Toast", systemImage: "text.bubble") }
                 .tag(GalleryTab.toast)
+            NavigationStack { GalleryWorldPage() }
+                .tabItem { Label("World", systemImage: "circle.lefthalf.filled") }
+                .tag(GalleryTab.world)
         }
+    }
+}
+
+/// A text-and-glyph chip on the world's quiet fill. The two secondary money actions live on one
+/// of these instead of a brand-wash disc, so the brand stays on the one thing you should tap.
+private struct GalleryQuietChip: View {
+    let title: String
+    let systemImage: String
+
+    @Environment(\.monacoPalette) private var palette
+
+    var body: some View {
+        Button {} label: {
+            HStack(spacing: MonacoTheme.Space.s) {
+                Image(systemName: systemImage)
+                    .font(.footnote.weight(.semibold))
+                Text(title)
+                    .font(MonacoTheme.Typo.callout.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundStyle(palette.fgPrimary)
+            .frame(maxWidth: .infinity, minHeight: MonacoButtonMetrics.minimumHeight)
+            .background(Capsule().fill(palette.quietFill))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -284,13 +314,17 @@ private struct GalleryControlsPage: View {
                     MonacoSearchField(placeholder: "Search Apple, Tesla, NVDA…", text: .constant(""))
                 }
 
-                HStack(spacing: MonacoTheme.Space.sm) {
-                    CircleAction("Add money", systemImage: "plus") {}
-                    CircleAction("Propose", systemImage: "arrow.up.right") {}
-                    CircleAction("Cash out", systemImage: "arrow.down.left") {}
-                    CircleAction("Chat", systemImage: "bubble.left") {}
+                // The v3 replacement for the four identical wash discs: one full-width capsule for
+                // the core verb, then two quiet chips. The hierarchy is stated, not implied.
+                VStack(spacing: MonacoTheme.Space.sm) {
+                    Button("Propose a buy") {}
+                        .buttonStyle(.monacoPrimary)
+                        .monacoFullWidthButtons()
+                    HStack(spacing: MonacoTheme.Space.sm) {
+                        GalleryQuietChip(title: "Add money", systemImage: "plus")
+                        GalleryQuietChip(title: "Cash out", systemImage: "arrow.down.left")
+                    }
                 }
-                .frame(maxWidth: .infinity)
 
                 VStack(spacing: MonacoTheme.Space.sm) {
                     Button("Add money") {}.buttonStyle(.monacoPrimary)
@@ -365,6 +399,156 @@ private struct GalleryToastPage: View {
     }
 }
 
+/// The v3 chrome on one screen: the two worlds, the display voice, the elevation steps, the
+/// segmented control in both worlds, and the drawn tab glyphs. Screenshot this page in light and
+/// dark and you have seen every decision Chunk B makes.
+private struct GalleryWorldPage: View {
+    enum Range: String, CaseIterable { case day = "1D", week = "1W", month = "1M", all = "All" }
+
+    @State private var paperRange: Range = .week
+    @State private var inkRange: Range = .week
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.section) {
+                // One slab per screen, and it carries the screen's most important object.
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+                    Text("Your money in cabals")
+                        .displayFont(.eyebrow)
+                        .foregroundStyle(MonacoTheme.Ink.fgSubtle)
+                    MoneyText(decimalString: "12480.55", style: .hero)
+                    PnLText(dollarPnl: "+482.10", style: .row)
+                    MonacoSegmented(Range.allCases, selection: $inkRange) { $0.rawValue }
+                        .padding(.top, MonacoTheme.Space.s)
+                }
+                .monacoInkSlab()
+
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
+                    MonacoSectionHeader("Display voice")
+                    Text("Weekend investors").displayFont(.display)
+                    Text("Weekend investors").displayFont(.title)
+                    Text("Weekend investors").displayFont(.section)
+                    Text("Up for vote")
+                        .displayFont(.eyebrow)
+                        .foregroundStyle(MonacoTheme.fgSubtle)
+                }
+
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
+                    MonacoSectionHeader("Elevation")
+                    Text("E1 is every card. E2 is the one object that outranks the rest — if two things on a screen are E2, neither of them is. Light carries elevation with shadow, dark with stroke.")
+                        .font(MonacoTheme.Typo.callout)
+                        .foregroundStyle(MonacoTheme.fgMuted)
+                    VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
+                        Text("Stats").displayFont(.section)
+                        Text("Flat canvas behind, E1 card here.")
+                            .font(MonacoTheme.Typo.callout)
+                            .foregroundStyle(MonacoTheme.fgMuted)
+                    }
+                    .padding(MonacoTheme.Space.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .monacoElevation(.card)
+
+                    VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
+                        Text("The agent").displayFont(.section)
+                        Text("Sold TSLAc · momentum broke below the 20d")
+                            .font(MonacoTheme.Typo.callout)
+                            .foregroundStyle(MonacoTheme.fgMuted)
+                    }
+                    .padding(MonacoTheme.Space.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .monacoElevation(.raised)
+                }
+
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
+                    MonacoSectionHeader("Segmented, on paper")
+                    MonacoSegmented(Range.allCases, selection: $paperRange) { $0.rawValue }
+                }
+
+                // The ink band: at most one per screen, and it is the only full-bleed thing in
+                // the app, which is the whole reason it reads as a separate object.
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+                    Text("Needs your vote")
+                        .displayFont(.eyebrow)
+                        .foregroundStyle(MonacoTheme.Ink.fgSubtle)
+                    Text("Apple · Weekend investors")
+                        .displayFont(.section)
+                    Text("Closes in 47m")
+                        .font(MonacoTheme.Typo.caption)
+                        .foregroundStyle(MonacoTheme.Ink.fgMuted)
+                    MonacoTextField("Say something", text: .constant(""))
+                }
+                .monacoInkBand()
+
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
+                    MonacoSectionHeader("Row density")
+                    MonacoGroupedList {
+                        MonacoRow(title: "Standard, 60pt", subtitle: "Labels and a figure") {
+                            StockMark(symbol: "AAPLc")
+                        } trailing: {
+                            MoneyText(decimalString: "278.47", style: .row)
+                        }
+                        MonacoRow(title: "Tall, 64pt", subtitle: "Faces or a sparkline", isLast: true, density: .tall) {
+                            StockMark(symbol: "NVDAc")
+                        } trailing: {
+                            MoneyText(decimalString: "1204.50", style: .row)
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
+                    MonacoSectionHeader("First-run empty")
+                    MonacoGroupedList {
+                        EmptyState(
+                            title: "No cabals yet",
+                            message: "The first one to fund takes the top spot.",
+                            mark: "person.2.fill",
+                            actionTitle: "Start a cabal"
+                        ) {}
+                    }
+                    .cabalTint(.sage)
+                    MonacoGroupedList {
+                        EmptyState(
+                            title: "Nothing bought yet",
+                            message: "Add money, then propose the first buy.",
+                            mark: "chart.xyaxis.line"
+                        )
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
+                    MonacoSectionHeader("Tab glyphs")
+                    Text("Drawn, not picked: the Monaco mark and the member's own monogram, rendered as alpha masks so the tab bar can tint them brand when selected.")
+                        .font(MonacoTheme.Typo.callout)
+                        .foregroundStyle(MonacoTheme.fgMuted)
+                    HStack(spacing: MonacoTheme.Space.l) {
+                        ForEach(["", "Ana Ruiz", "dev", "🚀 rocket"], id: \.self) { name in
+                            VStack(spacing: MonacoTheme.Space.xs) {
+                                Image(uiImage: MonacoTabGlyph.monogram(for: name.isEmpty ? nil : name))
+                                    .foregroundStyle(MonacoTheme.brand)
+                                Text(name.isEmpty ? "no name" : name)
+                                    .font(MonacoTheme.Typo.micro)
+                                    .foregroundStyle(MonacoTheme.fgSubtle)
+                            }
+                        }
+                        VStack(spacing: MonacoTheme.Space.xs) {
+                            Image(uiImage: MonacoTabGlyph.mark)
+                                .foregroundStyle(MonacoTheme.fgMuted)
+                            Text("Home")
+                                .font(MonacoTheme.Typo.micro)
+                                .foregroundStyle(MonacoTheme.fgSubtle)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.bottom, MonacoTheme.Space.xl)
+        }
+        .monacoCanvas()
+        .navigationTitle("World")
+        .navigationBarTitleDisplayMode(.large)
+    }
+}
+
 private extension Decimal {
     var rounded2: Decimal {
         var source = self
@@ -377,5 +561,6 @@ private extension Decimal {
 #Preview("Primitives") { NavigationStack { GalleryPrimitivesPage() } }
 #Preview("Money") { NavigationStack { GalleryMoneyPage() } }
 #Preview("Controls") { NavigationStack { GalleryControlsPage() } }
-#Preview("Toast") { MonacoDesignGallery.rootView() }
+#Preview("World") { NavigationStack { GalleryWorldPage() } }
+#Preview("Gallery") { MonacoDesignGallery.rootView() }
 #endif

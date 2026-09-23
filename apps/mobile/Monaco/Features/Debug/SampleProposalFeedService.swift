@@ -195,11 +195,16 @@ private struct SampleProposeRoot: View {
         NavigationStack {
             VStack(spacing: MonacoTheme.Space.l) {
                 CabalMark(groupId: SampleProposeService.groupView.id, name: SampleProposeService.groupView.name, size: 64)
-                CircleAction("Propose", systemImage: "arrow.up.right") { showsPropose = true }
+                // The v3 shape: the product's core verb as one full-width brand capsule, not one
+                // of four identical wash discs.
+                Button("Propose a buy") { showsPropose = true }
+                    .buttonStyle(.monacoPrimary)
+                    .monacoFullWidthButtons()
+                    .padding(.horizontal, MonacoTheme.Space.gutter)
                     .accessibilityIdentifier("group-action-propose")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(MonacoTheme.canvas.ignoresSafeArea())
+            .monacoCanvas()
             .navigationTitle(SampleProposeService.groupView.name)
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showsPropose) {

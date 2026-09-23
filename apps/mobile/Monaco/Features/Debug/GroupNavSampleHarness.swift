@@ -102,20 +102,25 @@ struct GroupNavSampleHarness: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
                 MonacoSectionHeader("Your cabals")
-                NavigationLink {
-                    cabalScreen
-                } label: {
-                    MonacoRowCard(
-                        systemImage: "person.3",
-                        title: sample.name,
-                        subtitle: "Your slice $311.50",
-                        trailing: nil
-                    )
+                MonacoGroupedList {
+                    NavigationLink {
+                        cabalScreen
+                    } label: {
+                        MonacoRow(
+                            title: sample.name,
+                            subtitle: "Your slice $311.50",
+                            chevron: true,
+                            isLast: true
+                        ) {
+                            CabalMark(groupId: sample.id, name: sample.name)
+                        }
+                    }
+                    .buttonStyle(.monacoRow)
+                    .accessibilityIdentifier("nav-sample-list-row")
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("nav-sample-list-row")
             }
-            .padding(MonacoTheme.Space.m)
+            .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.vertical, MonacoTheme.Space.m)
         }
         .monacoCanvas()
         .navigationTitle("Cabals")

@@ -1,6 +1,9 @@
 import SwiftUI
 
-/// Shared press feel: scale 0.97 on a short spring, none under Reduce Motion.
+/// Shared press feel: scale 0.97 on `MonacoMotion.snap`, opacity 0.80 and no animation under
+/// Reduce Motion. The curve used to be a hand-rolled `.spring(0.25, 0.8)` that had already
+/// drifted from the segmented thumb's `.spring(0.3, 0.85)` — the same "a control responded to my
+/// finger" moment, two curves. Both are `snap` now.
 private struct MonacoPressEffect: ViewModifier {
     let isPressed: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -9,7 +12,7 @@ private struct MonacoPressEffect: ViewModifier {
         content
             .scaleEffect(isPressed && !reduceMotion ? 0.97 : 1)
             .opacity(isPressed && reduceMotion ? 0.8 : 1)
-            .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: isPressed)
+            .animation(MonacoMotion.snap.reduced(reduceMotion), value: isPressed)
     }
 }
 
@@ -67,7 +70,7 @@ struct MonacoPrimaryButtonStyle: ButtonStyle {
             .foregroundStyle(isEnabled ? MonacoTheme.primaryButtonLabel : MonacoTheme.disabledLabel)
             .background(
                 Capsule()
-                    .fill(isEnabled ? MonacoTheme.primaryButtonFill : MonacoTheme.surfaceSunken)
+                    .fill(isEnabled ? MonacoTheme.primaryButtonFill : MonacoTheme.fillQuiet)
             )
             .contentShape(Capsule())
             .modifier(MonacoPressEffect(isPressed: configuration.isPressed))
@@ -84,7 +87,7 @@ struct MonacoSecondaryButtonStyle: ButtonStyle {
             .background(Capsule().fill(MonacoTheme.secondaryButtonFill))
             .overlay {
                 Capsule()
-                    .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+                    .strokeBorder(MonacoTheme.line, lineWidth: 1)
             }
             .contentShape(Capsule())
             .modifier(MonacoPressEffect(isPressed: configuration.isPressed))
@@ -98,10 +101,10 @@ struct MonacoDestructiveButtonStyle: ButtonStyle {
         configuration.label
             .monacoButtonLabel()
             .foregroundStyle(isEnabled ? MonacoTheme.destructive : MonacoTheme.disabledLabel)
-            .background(Capsule().fill(MonacoTheme.surface))
+            .background(Capsule().fill(MonacoTheme.bgRaised))
             .overlay {
                 Capsule()
-                    .strokeBorder(isEnabled ? MonacoTheme.destructive.opacity(0.5) : MonacoTheme.hairline, lineWidth: 1)
+                    .strokeBorder(isEnabled ? MonacoTheme.destructive.opacity(0.5) : MonacoTheme.line, lineWidth: 1)
             }
             .contentShape(Capsule())
             .modifier(MonacoPressEffect(isPressed: configuration.isPressed))
@@ -120,7 +123,11 @@ extension ButtonStyle where Self == MonacoDestructiveButtonStyle {
     static var monacoDestructive: MonacoDestructiveButtonStyle { MonacoDestructiveButtonStyle() }
 }
 
-/// Pinned action bar. Use inside `.safeAreaInset(edge: .bottom) { BottomCTA { … } }` so it rides above the keyboard.
+/// The app's one pinned-bar treatment: flat canvas, a 1pt top rule, a light-mode shadow, and
+/// `Capsule()` buttons at `MonacoButtonMetrics.minimumHeight`. There is no material anywhere in
+/// Monaco — a blur behind a money figure is decoration the loudness budget does not have room for.
+///
+/// Use inside `.safeAreaInset(edge: .bottom) { BottomCTA { … } }` so it rides above the keyboard.
 /// Buttons inside get the full width; put one primary, or a primary and a secondary side by side.
 struct BottomCTA<Content: View>: View {
     private let content: Content
@@ -139,13 +146,13 @@ struct BottomCTA<Content: View>: View {
         .padding(.top, MonacoTheme.Space.sm)
         .padding(.bottom, MonacoTheme.Space.s)
         .background {
-            MonacoTheme.canvas
+            MonacoTheme.bgBase
                 .ignoresSafeArea(edges: .bottom)
                 .shadow(color: .black.opacity(colorScheme == .dark ? 0 : 0.08), radius: 16, y: -2)
         }
         .overlay(alignment: .top) {
             Rectangle()
-                .fill(MonacoTheme.hairline)
+                .fill(MonacoTheme.line)
                 .frame(height: 1)
         }
     }
@@ -157,11 +164,7 @@ struct BottomCTA<Content: View>: View {
 /// four `CircleAction`s in an `HStack(spacing: 0)` with each in a `.frame(maxWidth: .infinity)`
 /// column — about 97pt on a 390pt screen. Scaled without a ceiling, a 56pt disc reaches ~99pt at
 /// AX1 and ~189pt at AX5, so the four main money actions draw over each other from AX1 upwards.
-/// A 2x2 grid would only raise the column to ~195pt, so it does not remove the need for a ceiling.
-///
-/// The glyph keeps scaling up to its own ceiling, so the control still grows with Dynamic Type —
-/// it just stops growing before it outgrows the space it has. Past the ceiling the label below,
-/// which is uncapped, carries the rest of the size increase.
+@available(*, deprecated, message: "Deleted with CircleAction. Last site: GroupDetailView.swift GroupActionRow (Chunk D).")
 enum CircleActionMetrics {
     /// Fits the ~97pt column the four-across row gives each action on the narrowest phone.
     static let maximumDiscSize: CGFloat = 88
@@ -174,11 +177,15 @@ enum CircleActionMetrics {
     static func glyphSize(scaled: CGFloat) -> CGFloat { min(scaled, maximumGlyphSize) }
 }
 
-/// Brand-tinted disc with a symbol and a footnote label below (Group detail action row).
-/// A wash rather than a solid fill: four solid brand discs in a row would spend the accent.
-/// The disc, the glyph and the label all scale with Dynamic Type — these are the main money
-/// actions, and they used to stay at 13pt while every label around them grew. The disc and the
-/// glyph stop at `CircleActionMetrics`' ceilings so they stay inside their column; the label does not.
+/// Brand-tinted disc with a footnote label below.
+///
+/// **On the way out.** Four identical brand-wash circles reading `plus` / `arrow.up.right` /
+/// `arrow.down.left` / `bubble.left` is the most recognisable fintech-template component shipping,
+/// and desaturating them made them generic rather than fixing them. The replacement states the
+/// hierarchy instead: one full-width brand capsule for the product's core verb ("Propose a buy"),
+/// then two text-and-glyph chips on `fillQuiet`. Chunk B has removed its own two call sites (the
+/// gallery and `SampleProposalFeedService`); the type goes when Chunk D removes the last one.
+@available(*, deprecated, message: "Use a labelled capsule plus fillQuiet chips. Last site: GroupDetailView.swift:791 (Chunk D).")
 struct CircleAction: View {
     private let title: String
     private let systemImage: String
@@ -188,9 +195,9 @@ struct CircleAction: View {
     @ScaledMetric(relativeTo: .footnote) private var scaledDiscSize: CGFloat = 56
     @ScaledMetric(relativeTo: .footnote) private var scaledGlyphSize: CGFloat = 20
 
-    private var discSize: CGFloat { CircleActionMetrics.discSize(scaled: scaledDiscSize) }
+    private var discSize: CGFloat { min(scaledDiscSize, 88) }
 
-    private var glyphSize: CGFloat { CircleActionMetrics.glyphSize(scaled: scaledGlyphSize) }
+    private var glyphSize: CGFloat { min(scaledGlyphSize, 30) }
 
     init(_ title: String, systemImage: String, action: @escaping () -> Void) {
         self.title = title
@@ -208,10 +215,10 @@ struct CircleAction: View {
                     .font(.system(size: glyphSize, weight: .semibold))
                     .foregroundStyle(isEnabled ? MonacoTheme.brandOnWash : MonacoTheme.disabledLabel)
                     .frame(width: discSize, height: discSize)
-                    .background(Circle().fill(isEnabled ? MonacoTheme.brandWash : MonacoTheme.surfaceSunken))
+                    .background(Circle().fill(isEnabled ? MonacoTheme.brandWash : MonacoTheme.fillQuiet))
                 Text(title)
                     .font(.system(.footnote, weight: .medium))
-                    .foregroundStyle(isEnabled ? MonacoTheme.ink : MonacoTheme.disabledLabel)
+                    .foregroundStyle(isEnabled ? MonacoTheme.fgPrimary : MonacoTheme.disabledLabel)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .minimumScaleFactor(0.8)

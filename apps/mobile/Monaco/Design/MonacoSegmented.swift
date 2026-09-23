@@ -1,8 +1,12 @@
 import SwiftUI
 
-/// Capsule track on `surfaceSunken` with an ink thumb that slides between options:
-/// the selected label in canvas on the thumb, the others muted on the track.
-/// Replaces `Picker(.segmented)` and its global appearance hack.
+/// The app's one selection vocabulary: a capsule track with a brand thumb that slides between
+/// options — the selected label on the thumb, the others muted on the track.
+///
+/// It reads `\.monacoWorld`, so the same control works on paper and inside an ink band: the track
+/// takes the world's quiet fill (`fillQuiet` on paper, `Ink.sunken` on ink, because a track inside
+/// an ink band is a *well*, not a raised control) and the unselected labels take the world's muted
+/// foreground. The thumb stays brand in both worlds — blue means tap, everywhere.
 struct MonacoSegmented<T: Hashable>: View {
     private let options: [T]
     @Binding private var selection: T
@@ -10,6 +14,7 @@ struct MonacoSegmented<T: Hashable>: View {
 
     @Namespace private var thumb
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.monacoPalette) private var palette
 
     init(_ options: [T], selection: Binding<T>, label: @escaping (T) -> String) {
         self.options = options
@@ -24,7 +29,7 @@ struct MonacoSegmented<T: Hashable>: View {
                 Button {
                     guard option != selection else { return }
                     Haptics.selection()
-                    withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)) {
+                    withAnimation(MonacoMotion.snap.reduced(reduceMotion)) {
                         selection = option
                     }
                 } label: {
@@ -32,7 +37,7 @@ struct MonacoSegmented<T: Hashable>: View {
                         .font(MonacoTheme.Typo.callout.weight(.semibold))
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
-                        .foregroundStyle(isSelected ? MonacoTheme.primaryButtonLabel : MonacoTheme.muted)
+                        .foregroundStyle(isSelected ? MonacoTheme.primaryButtonLabel : palette.fgMuted)
                         .padding(.horizontal, 12)
                         .frame(maxWidth: .infinity, minHeight: 36)
                         .background {
@@ -50,6 +55,6 @@ struct MonacoSegmented<T: Hashable>: View {
         }
         .padding(4)
         .frame(minHeight: 44)
-        .background(Capsule().fill(MonacoTheme.surfaceSunken))
+        .background(Capsule().fill(palette.quietFill))
     }
 }

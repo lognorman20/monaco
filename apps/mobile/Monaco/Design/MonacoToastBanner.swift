@@ -36,13 +36,20 @@ struct MonacoToastBanner: View {
         .padding(.vertical, 14)
         .frame(minHeight: 48)
         .background {
-            let shape = RoundedRectangle(cornerRadius: MonacoTheme.Radius.chip, style: .continuous)
+            let shape = RoundedRectangle(cornerRadius: MonacoTheme.Radius.container, style: .continuous)
             shape
                 .fill(MonacoTheme.toastFill)
                 .overlay { shape.strokeBorder(MonacoTheme.toastStroke, lineWidth: 1) }
         }
         .shadow(color: .black.opacity(colorScheme == .dark ? 0 : 0.08), radius: 16, y: 6)
         .padding(.horizontal, MonacoTheme.Space.gutter)
+        // The toast *declares* its world rather than reading one. It is an ink panel in both
+        // schemes and it floats over whatever screen raised it, so inheriting an ambient world
+        // would let a paper screen repaint it — and its own `toast*` tokens are the fix for
+        // regression #309, where borrowing `primaryButton*` turned an error toast into a second
+        // primary button and dropped the success glyph to 1.3:1. Declaring `.ink` only means
+        // anything the caller puts inside picks the ink pair.
+        .monacoWorld(.ink)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("monaco-toast-banner")
     }

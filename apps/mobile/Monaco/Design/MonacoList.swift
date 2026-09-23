@@ -1,10 +1,17 @@
 import SwiftUI
 
 /// Sentence-case section title with an optional trailing text button ("See all").
+///
+/// The title is the display voice at `.section` — SF Pro Expanded Semibold 18, scaling against
+/// `.title3`. Eyebrows ("IN YOUR CABALS", "UP FOR VOTE") are a different role and are set by the
+/// caller with `.displayFont(.eyebrow)`; this is the sentence-case header that sits over a run of
+/// rows.
 struct MonacoSectionHeader: View {
     private let title: String
     private let trailing: String?
     private let action: (() -> Void)?
+
+    @Environment(\.monacoPalette) private var palette
 
     init(_ title: String, trailing: String? = nil, action: (() -> Void)? = nil) {
         self.title = title
@@ -15,8 +22,8 @@ struct MonacoSectionHeader: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.s) {
             Text(title)
-                .font(MonacoTheme.Typo.section)
-                .foregroundStyle(MonacoTheme.ink)
+                .displayFont(.section)
+                .foregroundStyle(palette.fgPrimary)
                 .lineLimit(2)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: MonacoTheme.Space.s)
@@ -25,7 +32,7 @@ struct MonacoSectionHeader: View {
                     Button(action: action) {
                         Text(trailing)
                             .font(MonacoTheme.Typo.callout.weight(.semibold))
-                            .foregroundStyle(MonacoTheme.brand)
+                            .foregroundStyle(palette.accent)
                             .lineLimit(1)
                             .frame(minHeight: 44)
                             .contentShape(Rectangle())
@@ -34,7 +41,7 @@ struct MonacoSectionHeader: View {
                 } else {
                     Text(trailing)
                         .font(MonacoTheme.Typo.callout)
-                        .foregroundStyle(MonacoTheme.muted)
+                        .foregroundStyle(palette.fgMuted)
                         .lineLimit(1)
                 }
             }
@@ -43,7 +50,10 @@ struct MonacoSectionHeader: View {
     }
 }
 
-/// One surface container for a run of `MonacoRow`s. No stroke; children are clipped to the radius.
+/// One surface container for a run of `MonacoRow`s, at E1: the light-mode shadow and the
+/// dark-mode stroke both come from `.monacoElevation(.card)`, so a list never grows a hairline of
+/// its own. Children are clipped to the radius, and the shadow is drawn on the shape rather than
+/// on the clipped content, so a long lazy list does not pay for offscreen rendering.
 struct MonacoGroupedList<Content: View>: View {
     private let content: Content
 
@@ -56,8 +66,22 @@ struct MonacoGroupedList<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity)
-        .background(MonacoTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MonacoTheme.Radius.container, style: .continuous))
+        .monacoElevation(.card)
+    }
+}
+
+/// How tall a row stands. A plain row of labels and a figure is 60pt; a row carrying faces or a
+/// sparkline needs the extra 4pt so the artwork is not squeezed against the separator.
+enum MonacoRowDensity {
+    case standard
+    case tall
+
+    var minimumHeight: CGFloat {
+        switch self {
+        case .standard: return 60
+        case .tall: return 64
+        }
     }
 }
 
@@ -66,18 +90,20 @@ struct MonacoGroupedList<Content: View>: View {
 struct MonacoRow<Leading: View, Trailing: View>: View {
     private let title: String
     private let subtitle: String?
-    private let subtitleColor: Color
+    private let subtitleColor: Color?
     private let chevron: Bool
     private let isLast: Bool
+    private let density: MonacoRowDensity
     private let leading: Leading
     private let trailing: Trailing
 
     init(
         title: String,
         subtitle: String? = nil,
-        subtitleColor: Color = MonacoTheme.muted,
+        subtitleColor: Color? = nil,
         chevron: Bool = false,
         isLast: Bool = false,
+        density: MonacoRowDensity = .standard,
         @ViewBuilder leading: () -> Leading,
         @ViewBuilder trailing: () -> Trailing
     ) {
@@ -86,11 +112,13 @@ struct MonacoRow<Leading: View, Trailing: View>: View {
         self.subtitleColor = subtitleColor
         self.chevron = chevron
         self.isLast = isLast
+        self.density = density
         self.leading = leading()
         self.trailing = trailing()
     }
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.monacoPalette) private var palette
     @ScaledMetric(relativeTo: .body)
     private var titleWidthFloor: CGFloat = MonacoRowLayout.baseMinimumTitleWidth
 
@@ -105,13 +133,13 @@ struct MonacoRow<Leading: View, Trailing: View>: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(MonacoTheme.Typo.rowTitle)
-                .foregroundStyle(MonacoTheme.ink)
+                .foregroundStyle(palette.fgPrimary)
                 .lineLimit(layout.titleLineLimit)
                 .truncationMode(.tail)
             if let subtitle, !subtitle.isEmpty {
                 Text(subtitle)
                     .font(MonacoTheme.Typo.caption)
-                    .foregroundStyle(subtitleColor)
+                    .foregroundStyle(subtitleColor ?? palette.fgMuted)
                     .lineLimit(layout.subtitleLineLimit)
                     .truncationMode(.tail)
             }
@@ -122,7 +150,7 @@ struct MonacoRow<Leading: View, Trailing: View>: View {
     private var chevronGlyph: some View {
         Image(systemName: "chevron.right")
             .font(.footnote.weight(.semibold))
-            .foregroundStyle(MonacoTheme.tertiaryText)
+            .foregroundStyle(palette.fgSubtle)
             .accessibilityHidden(true)
     }
 
@@ -169,12 +197,12 @@ struct MonacoRow<Leading: View, Trailing: View>: View {
         content
             .padding(.horizontal, MonacoTheme.Space.m)
             .padding(.vertical, 8)
-            .frame(minHeight: 60)
+            .frame(minHeight: density.minimumHeight)
             .contentShape(Rectangle())
             .overlay(alignment: .bottom) {
                 if !isLast {
                     Rectangle()
-                        .fill(MonacoTheme.hairline)
+                        .fill(palette.line)
                         .frame(height: 1)
                         .padding(.leading, layout.separatorLeadingInset)
                 }
@@ -223,9 +251,10 @@ extension MonacoRow where Trailing == EmptyView {
     init(
         title: String,
         subtitle: String? = nil,
-        subtitleColor: Color = MonacoTheme.muted,
+        subtitleColor: Color? = nil,
         chevron: Bool = false,
         isLast: Bool = false,
+        density: MonacoRowDensity = .standard,
         @ViewBuilder leading: () -> Leading
     ) {
         self.init(
@@ -234,17 +263,21 @@ extension MonacoRow where Trailing == EmptyView {
             subtitleColor: subtitleColor,
             chevron: chevron,
             isLast: isLast,
+            density: density,
             leading: leading,
             trailing: { EmptyView() }
         )
     }
 }
 
-/// Pressed state for a tappable `MonacoRow`: sunken fill, no scale.
+/// Pressed state for a tappable `MonacoRow`: a quiet fill, no scale, and no animation — a row
+/// that springs under a thumb reads as a card, not a list.
 struct MonacoRowButtonStyle: ButtonStyle {
+    @Environment(\.monacoPalette) private var palette
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .background(configuration.isPressed ? MonacoTheme.surfaceSunken : Color.clear)
+            .background(configuration.isPressed ? palette.quietFill : Color.clear)
     }
 }
 
@@ -252,30 +285,69 @@ extension ButtonStyle where Self == MonacoRowButtonStyle {
     static var monacoRow: MonacoRowButtonStyle { MonacoRowButtonStyle() }
 }
 
-/// Empty state without an icon: one title, one muted line, an optional secondary action.
+/// Empty state: one title, one muted line, an optional secondary action, and — on a first-run
+/// surface only — an optional 56pt mark disc above it.
+///
+/// There are 42 of these in the app and they are **not** `ContentUnavailableView`s: that would
+/// make 42 screens look like stock iOS and throw away copy that is better than the frame it would
+/// go in ("The first one to fund takes the top spot"). `mark` is one optional parameter on the
+/// component that already exists, used on the three first-run empties and left off everywhere
+/// else. A parameter is not a new component.
 struct EmptyState: View {
     private let title: String
     private let message: String?
+    private let mark: String?
     private let actionTitle: String?
     private let action: (() -> Void)?
 
-    init(title: String, message: String? = nil, actionTitle: String? = nil, action: (() -> Void)? = nil) {
+    @Environment(\.cabalTint) private var cabalTint
+    @Environment(\.monacoPalette) private var palette
+    @ScaledMetric(relativeTo: .title2) private var markSize: CGFloat = 56
+
+    init(
+        title: String,
+        message: String? = nil,
+        mark: String? = nil,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) {
         self.title = title
         self.message = message
+        self.mark = mark
         self.actionTitle = actionTitle
         self.action = action
     }
 
+    /// A cabal surface tints its own disc; everywhere else the disc is brand wash. Both pairs are
+    /// measured in the contrast table — `fgPrimary` on `soft`, `brandOnWash` on `brandWash` — so
+    /// the glyph never falls below AA whichever of the seven tints the cabal drew.
+    private var discFill: Color {
+        cabalTint?.soft ?? MonacoTheme.brandWash
+    }
+
+    private var glyphColor: Color {
+        cabalTint == nil ? MonacoTheme.brandOnWash : palette.fgPrimary
+    }
+
     var body: some View {
         VStack(spacing: MonacoTheme.Space.s) {
+            if let mark {
+                Image(systemName: mark)
+                    .font(.system(size: markSize * 0.42, weight: .semibold))
+                    .foregroundStyle(glyphColor)
+                    .frame(width: markSize, height: markSize)
+                    .background(Circle().fill(discFill))
+                    .padding(.bottom, MonacoTheme.Space.xs)
+                    .accessibilityHidden(true)
+            }
             Text(title)
                 .font(.system(.body, weight: .semibold))
-                .foregroundStyle(MonacoTheme.ink)
+                .foregroundStyle(palette.fgPrimary)
                 .multilineTextAlignment(.center)
             if let message, !message.isEmpty {
                 Text(message)
                     .font(MonacoTheme.Typo.callout)
-                    .foregroundStyle(MonacoTheme.muted)
+                    .foregroundStyle(palette.fgMuted)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }

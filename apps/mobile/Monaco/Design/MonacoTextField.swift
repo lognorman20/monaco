@@ -1,7 +1,12 @@
 import SwiftUI
 import UIKit
 
-/// 56pt field on `surfaceSunken`, no resting stroke; a 1pt ink stroke while focused.
+/// 56pt field, no resting stroke; a 1pt stroke in the world's primary foreground while focused.
+///
+/// The fill is the world's, not a single static: `fillQuiet` on paper, `Ink.raised` inside an ink
+/// band — a field is a raised control, and on ink the sign-in flow puts it on the raised card fill
+/// rather than in a well. The caret is `controlTint`, never the brand accent: blue means tap, and
+/// a caret is not a tap target.
 struct MonacoTextField: View {
     private let placeholder: String
     @Binding private var text: String
@@ -9,6 +14,15 @@ struct MonacoTextField: View {
     private let contentType: UITextContentType?
 
     @FocusState private var focused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.monacoWorld) private var world
+    @Environment(\.monacoPalette) private var palette
+
+    /// A field is a raised control. On paper that is `fillQuiet`; on ink the raised card fill,
+    /// because `Ink.sunken` is the well a chart sits in, not the surface a control stands on.
+    private var fill: Color {
+        world == .ink ? MonacoTheme.Ink.raised : MonacoTheme.fillQuiet
+    }
 
     init(
         _ placeholder: String,
@@ -26,11 +40,11 @@ struct MonacoTextField: View {
         TextField(
             "",
             text: $text,
-            prompt: Text(placeholder).foregroundStyle(MonacoTheme.disabledLabel)
+            prompt: Text(placeholder).foregroundStyle(palette.fgSubtle)
         )
         .font(MonacoTheme.Typo.body)
-        .foregroundStyle(MonacoTheme.ink)
-        .tint(MonacoTheme.ink)
+        .foregroundStyle(palette.fgPrimary)
+        .tint(palette.controlTint)
         .keyboardType(keyboard)
         .textContentType(contentType)
         .textInputAutocapitalization(autocapitalization)
@@ -40,15 +54,15 @@ struct MonacoTextField: View {
         .frame(minHeight: 56)
         .background(
             RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous)
-                .fill(MonacoTheme.surfaceSunken)
+                .fill(fill)
         )
         .overlay {
             RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous)
-                .strokeBorder(MonacoTheme.ink, lineWidth: focused ? 1 : 0)
+                .strokeBorder(palette.fgPrimary, lineWidth: focused ? 1 : 0)
         }
         .contentShape(Rectangle())
         .onTapGesture { focused = true }
-        .animation(.easeOut(duration: 0.15), value: focused)
+        .animation(MonacoMotion.glide.reduced(reduceMotion), value: focused)
         .accessibilityLabel(placeholder)
     }
 
