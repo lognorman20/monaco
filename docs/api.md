@@ -93,7 +93,7 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/assets/popular` | Popular assets with prices. |
 | `GET /v1/assets/{symbol}` | Asset detail plus `variants[]` when multiple issuers share an `underlyingId`. |
 | `GET /v1/assets/{symbol}/chart` | Price history. |
-| `POST /v1/groups/{id}/quotes` | Check that a buy or sell can route, and at what price. Buy responses add `tokenDecimals`, asset `kind`, and live `premiumBps` when a fresh Jupiter reference exists. |
+| `POST /v1/groups/{id}/quotes` | Check that a buy or sell can route, and at what price. `kind` stays `buy` or `sell`. Buy responses add `tokenDecimals`, `assetKind` (`stock` or `pre_ipo`), and live `premiumBps` when a fresh Jupiter reference exists. |
 | `GET /v1/groups/{id}/proposals` | List proposals. |
 | `POST /v1/groups/{id}/proposals` ● | Open a proposal: buy, sell, or add, pause, resume, revoke an agent. |
 | `GET /v1/proposals/{id}` | Proposal detail, votes and execution state. |

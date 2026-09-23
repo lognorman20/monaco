@@ -33,16 +33,16 @@ func tesseraSpaceXAsset() xstocks.CatalogAsset {
 }
 
 type tesseraHTTPFixtures struct {
-	Assets     *AssetsHandlers
-	Quotes     *QuoteHandlers
-	Proposals  *ProposalHandlers
-	Groups     *GroupHandlers
-	Auth       *AuthHandlers
-	Privy      privy.Client
-	Jupiter    jupiter.Client
-	Price      jupiter.PriceClient
-	Composite  *catalog.Composite
-	ISO        *postgres.TestIsolation
+	Assets    *AssetsHandlers
+	Quotes    *QuoteHandlers
+	Proposals *ProposalHandlers
+	Groups    *GroupHandlers
+	Auth      *AuthHandlers
+	Privy     privy.Client
+	Jupiter   jupiter.Client
+	Price     jupiter.PriceClient
+	Composite *catalog.Composite
+	ISO       *postgres.TestIsolation
 }
 
 func integrationTesseraHTTPFixtures(t *testing.T) tesseraHTTPFixtures {
@@ -230,7 +230,7 @@ func TestPOST_quotes_preIpo_returnsTokenDecimals9(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.TokenDecimals != 9 || payload.Kind != "pre_ipo" {
+	if payload.TokenDecimals != 9 || payload.AssetKind != "pre_ipo" || payload.Kind != "" {
 		t.Fatalf("payload = %+v", payload)
 	}
 }

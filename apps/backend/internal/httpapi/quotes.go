@@ -41,8 +41,10 @@ type quoteResponse struct {
 	OutputAmount     string `json:"outputAmount,omitempty"`
 	OutputUsdcMicros string `json:"outputUsdcMicros,omitempty"`
 	PriceUsdcMicros  string `json:"priceUsdcMicros,omitempty"`
-	TokenDecimals int  `json:"tokenDecimals,omitempty"`
-	PremiumBps    *int `json:"premiumBps,omitempty"`
+	TokenDecimals    int    `json:"tokenDecimals,omitempty"`
+	PremiumBps       *int   `json:"premiumBps,omitempty"`
+	// AssetKind is stock or pre_ipo. Kind stays buy/sell.
+	AssetKind string `json:"assetKind,omitempty"`
 }
 
 // ProposalQuoteInput is the quote gate input shared with proposal create (M4-T13).
@@ -226,7 +228,7 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 		Routable:      result.Quote.Routable,
 		OutputAmount:  strings.TrimSpace(result.Quote.OutAmount),
 		TokenDecimals: n.Decimals,
-		Kind:          string(n.Kind),
+		AssetKind:     string(n.Kind),
 	}
 	if price, ok := quotePriceUsdcMicros(req.USDC, resp.OutputAmount, n.Decimals); ok {
 		resp.PriceUsdcMicros = strconv.FormatInt(price, 10)
