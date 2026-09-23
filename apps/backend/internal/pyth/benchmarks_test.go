@@ -130,6 +130,45 @@ func TestBenchmarks_Series_previousCloseIsThePriorRegularSessionClose(t *testing
 	}
 }
 
+func TestBenchmarks_Series_noPreviousSessionBarMeansNoPreviousClose(t *testing.T) {
+	t.Parallel()
+
+	// The 1D fetch reaches a week back so a long holiday weekend cannot hide the
+	// previous session's closing bar. That reach is also the hazard: here the feed
+	// has a hole over Monday — the payload jumps from the previous Wednesday
+	// straight to Tuesday's bars — and taking "the last bar before the bell" would
+	// hand back Wednesday's close as the previous close. change24h is a ratio
+	// against that number and the hero labels it a day move, so a six-day move
+	// would be drawn as today's. No bar in the previous session means there is no
+	// previous close to give.
+	client := benchmarksServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(fmt.Sprintf(`{
+			"s":"ok",
+			"t":[%d,%d,%d],
+			"c":[180.0,229.4,231.4]
+		}`,
+			etUnix(2026, time.September, 16, 15, 55),
+			etUnix(2026, time.September, 22, 10, 0),
+			etUnix(2026, time.September, 22, 11, 0),
+		)))
+	})
+
+	series, err := client.Series(context.Background(), "AAPLc", ChartRange1D, tradingNoon)
+	if err != nil {
+		t.Fatalf("Series: %v", err)
+	}
+	if len(series.Points) != 2 {
+		t.Fatalf("points = %d, want Tuesday's 2 bars", len(series.Points))
+	}
+	if series.PreviousCloseUsdcMicros != nil {
+		t.Fatalf("previous close = %d, want none: the last session with bars is six days back", *series.PreviousCloseUsdcMicros)
+	}
+	// And the whole point of omitting it: nothing downstream invents a day move.
+	if got := DayChange(series); got != nil {
+		t.Fatalf("DayChange = %q, want nil without a previous close", *got)
+	}
+}
+
 func TestBenchmarks_Series_previousCloseAfterAHalfDayIsThe1300Bell(t *testing.T) {
 	t.Parallel()
 

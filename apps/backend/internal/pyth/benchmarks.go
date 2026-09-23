@@ -244,11 +244,23 @@ func assembleSeries(bars []ohlcBar, window chartRangeWindow) AssetChartSeries {
 	if !window.previousCloseAt.IsZero() {
 		previousCloseCutoff = window.previousCloseAt.Unix()
 	}
+	// The cut-off needs a floor as much as a ceiling. The fetch window deliberately
+	// reaches a week back so a long holiday weekend cannot hide the previous
+	// session's closing bar — but that same reach means a hole in the history walks
+	// the search straight past the previous session and hands back a close from
+	// days ago, with nothing to say it is not yesterday's. It ships as
+	// previousCloseUsdcMicros, DayChange divides by it, and a multi-day move is
+	// rendered as a day move. Where the window names the previous session's first
+	// instant, a bar older than that is not a previous close at all.
+	var previousCloseFloor int64 = math.MinInt64
+	if !window.previousCloseFrom.IsZero() {
+		previousCloseFloor = window.previousCloseFrom.Unix()
+	}
 
 	inWindow := make([]ohlcBar, 0, len(bars))
 	var previousClose int64
 	for _, bar := range bars {
-		if bar.timestamp < previousCloseCutoff {
+		if bar.timestamp >= previousCloseFloor && bar.timestamp < previousCloseCutoff {
 			previousClose = bar.close
 		}
 		if bar.timestamp >= fromUnix && bar.timestamp <= toUnix {
