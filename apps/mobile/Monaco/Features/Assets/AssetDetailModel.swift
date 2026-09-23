@@ -70,6 +70,13 @@ final class AssetDetailModel {
         case failed
     }
 
+    /// A chart read that failed for a reason the transport did not report.
+    enum ChartLoadError: Error, Equatable {
+        /// The response echoed a range other than the one requested, so nothing in it
+        /// can be drawn under the selected chip.
+        case rangeMismatch(requested: AssetChartRange)
+    }
+
     enum ChartState: Equatable {
         case loading
         case series(AssetChartSeries)
@@ -502,7 +509,12 @@ final class AssetDetailModel {
                 // The server answered about a window nobody asked for. Drawing it would put
                 // a year of history under a 1D chip; leave the slot alone and offer a retry.
                 if !quietly, !hasDrawnCurve(range) { charts[range] = .failed }
-                return nil
+                // Reported as a failure, not as a quiet nil. A backend stuck answering the
+                // wrong window fails every read, and returning nil here left `refreshChart`
+                // non-throwing, so the poll never backed off and kept asking every two
+                // minutes for a slot that was already `.failed`. This is a failed read like
+                // any other; only its cause differs.
+                return ChartLoadError.rangeMismatch(requested: range)
             }
             apply(series, to: range, quietly: quietly)
             return nil

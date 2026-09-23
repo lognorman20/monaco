@@ -515,6 +515,33 @@ struct AssetDetailModelTests {
         #expect(model.series == nil)
     }
 
+    /// A backend persistently answering the wrong window fails every read, so the quiet
+    /// poll has to be able to see it. `refreshChart` throwing is what `pollWhileVisible`
+    /// backs off on; while this returned nil the poll kept firing at the full rate into a
+    /// slot it could never fill.
+    @Test func aMismatchedQuietReadIsReportedSoThePollCanBackOff() async throws {
+        let source = StubAssetDetailDataSource()
+        source.echoedRange = .oneYear
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+
+        await model.loadChart(range: .oneDay)
+        #expect(model.charts[.oneDay] == .failed)
+
+        await #expect(throws: AssetDetailModel.ChartLoadError.rangeMismatch(requested: .oneDay)) {
+            try await model.refreshChart()
+        }
+    }
+
+    /// A range the server does echo back still refreshes silently — the throw above is
+    /// about the mismatch, not about every quiet read.
+    @Test func aMatchingQuietReadDoesNotThrow() async throws {
+        let source = StubAssetDetailDataSource()
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+
+        await model.loadChart(range: .oneDay)
+        try await model.refreshChart()
+    }
+
     @Test func aMismatchedRefreshKeepsTheCurveAlreadyDrawn() async throws {
         let source = StubAssetDetailDataSource()
         let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
