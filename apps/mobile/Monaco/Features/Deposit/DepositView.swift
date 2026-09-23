@@ -22,63 +22,52 @@ struct DepositView: View {
     @State private var toast: MonacoToast?
 
     var body: some View {
-        Form {
-            Section {
-                Text("Send USDC on Base to this address")
-                    .monacoSecondaryCaption()
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.section) {
+                addressBand
 
-            Section("Your deposit address") {
-                if isLoading {
-                    HStack(spacing: 12) {
-                        ProgressView()
-                            .tint(MonacoTheme.accent)
-                        Text("Loading address…")
-                            .monacoSecondaryCaption()
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
+                    MonacoSectionHeader("How it works")
+                    VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+                        stepRow(number: 1, text: "Send USDC on Base to this address.")
+                        stepRow(number: 2, text: "Your account balance updates when it arrives.")
+                        stepRow(number: 3, text: "Fund a cabal to move USDC into the pot and credit your share.")
                     }
-                    .accessibilityIdentifier("deposit-address-loading")
-                } else if let depositAddress {
-                    addressBlock(depositAddress)
-                } else {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label(
-                            errorMessage ?? "Deposit address not ready yet.",
-                            systemImage: "exclamationmark.triangle.fill"
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(MonacoTheme.warning)
+                    .padding(MonacoTheme.Space.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .monacoElevation(.card)
+                }
 
-                        Button("Try again") {
-                            Task { await loadDepositAddress() }
+                if !joinedCabals.isEmpty {
+                    VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
+                        MonacoSectionHeader("Fund a cabal")
+                        MonacoGroupedList {
+                            NavigationLink {
+                                FundCabalView(
+                                    auth: auth,
+                                    joinedCabals: joinedCabals,
+                                    preselectedGroupId: preselectedGroupId
+                                )
+                            } label: {
+                                MonacoRow(
+                                    title: "Choose cabal and amount",
+                                    subtitle: "Move USDC from your account into a pot",
+                                    chevron: true,
+                                    isLast: true
+                                ) {
+                                    MonacoRowGlyph(systemName: "arrow.right")
+                                }
+                            }
+                            .buttonStyle(.monacoRow)
+                            .accessibilityIdentifier("deposit-fund-cabal-link")
                         }
-                        .monacoFormSecondaryAction()
-                        .accessibilityIdentifier("deposit-address-retry")
                     }
                 }
             }
-
-            Section("How it works") {
-                stepRow(number: 1, text: "Send USDC on Base to this address")
-                stepRow(number: 2, text: "Your account balance updates when USDC arrives.")
-                stepRow(number: 3, text: "Fund a cabal to move USDC into the pot and credit your share.")
-            }
-
-            if !joinedCabals.isEmpty {
-                Section("Fund a cabal") {
-                    NavigationLink {
-                        FundCabalView(
-                            auth: auth,
-                            joinedCabals: joinedCabals,
-                            preselectedGroupId: preselectedGroupId
-                        )
-                    } label: {
-                        Label("Choose cabal and amount", systemImage: "arrow.right.circle")
-                    }
-                    .accessibilityIdentifier("deposit-fund-cabal-link")
-                }
-            }
+            .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.bottom, MonacoTheme.Space.xl)
         }
-        .monacoFormScreen()
+        .monacoCanvas()
         .navigationTitle("Add money")
         .navigationBarTitleDisplayMode(.inline)
         .monacoToast($toast)
@@ -90,10 +79,49 @@ struct DepositView: View {
         }
     }
 
+    /// **The address is the screen**, so it gets the screen's one ink band: the chain it is on, the
+    /// address itself in the monospaced wallet face, and one full-width Copy. Nothing about a
+    /// 42-character hex string belongs in a grouped table cell.
+    private var addressBand: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
+                Text("Your deposit address")
+                    .displayFont(.eyebrow)
+                    .foregroundStyle(MonacoTheme.Ink.fgSubtle)
+                Text("Send USDC on Base")
+                    .font(MonacoTheme.Typo.callout)
+                    .foregroundStyle(MonacoTheme.Ink.fgMuted)
+            }
+
+            if isLoading {
+                HStack(spacing: MonacoTheme.Space.sm) {
+                    ProgressView()
+                        .tint(MonacoTheme.Ink.fgPrimary)
+                    Text("Loading address\u{2026}")
+                        .font(MonacoTheme.Typo.callout)
+                        .foregroundStyle(MonacoTheme.Ink.fgMuted)
+                }
+                .frame(minHeight: 56, alignment: .leading)
+                .accessibilityIdentifier("deposit-address-loading")
+            } else if let depositAddress {
+                addressBlock(depositAddress)
+            } else {
+                addressFailure
+            }
+        }
+        .monacoInkBand()
+    }
+
     @ViewBuilder
     private func addressBlock(_ address: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
             MonacoWalletAddressText(address: address)
+                .padding(MonacoTheme.Space.sm)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    MonacoTheme.Ink.sunken,
+                    in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous)
+                )
                 .accessibilityIdentifier("deposit-address-value")
                 .onTapGesture {
                     copyAddress(address)
@@ -103,22 +131,44 @@ struct DepositView: View {
                 copyAddress(address)
             } label: {
                 Label("Copy address", systemImage: "doc.on.doc")
+                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.monacoSecondary)
+            .buttonStyle(.monacoPrimary)
             .accessibilityIdentifier("deposit-address-copy-button")
         }
     }
 
-    private func stepRow(number: Int, text: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("\(number).")
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-                .foregroundStyle(MonacoTheme.accent)
-                .frame(width: 20, alignment: .trailing)
-            Text(text)
-                .font(.subheadline)
-                .foregroundStyle(MonacoTheme.primaryText)
+    private var addressFailure: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+            Label(
+                errorMessage ?? "Deposit address not ready yet.",
+                systemImage: "exclamationmark.triangle.fill"
+            )
+            .font(MonacoTheme.Typo.callout)
+            .foregroundStyle(MonacoTheme.warningOnInk)
+
+            Button("Try again") {
+                Task { await loadDepositAddress() }
+            }
+            .buttonStyle(.monacoSecondary)
+            .accessibilityIdentifier("deposit-address-retry")
         }
+    }
+
+    private func stepRow(number: Int, text: String) -> some View {
+        HStack(alignment: .top, spacing: MonacoTheme.Space.sm) {
+            Text("\(number)")
+                .font(.system(size: 13, weight: .bold).monospacedDigit())
+                .foregroundStyle(MonacoTheme.brandOnWash)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(MonacoTheme.brandWash))
+            Text(text)
+                .font(MonacoTheme.Typo.callout)
+                .foregroundStyle(MonacoTheme.fgPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private func copyAddress(_ address: String) {

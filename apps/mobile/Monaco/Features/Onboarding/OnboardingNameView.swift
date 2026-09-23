@@ -78,7 +78,7 @@ struct OnboardingNameView: View {
                     Button("Sign out") {
                         Task { await signOut() }
                     }
-                    .font(MonacoTheme.TypeRole.caption.weight(.semibold))
+                    .font(MonacoTheme.Typo.caption.weight(.semibold))
                     .foregroundStyle(MonacoTheme.muted)
                     .frame(minHeight: 44)
                     .accessibilityIdentifier("onboarding-sign-out")
@@ -100,7 +100,7 @@ struct OnboardingNameView: View {
     private var title: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             Text("What should friends call you?")
-                .font(MonacoTheme.Typo.display)
+                .displayFont(.display)
                 .foregroundStyle(MonacoTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
             Text("Shown on votes, leaderboards and in chat.")

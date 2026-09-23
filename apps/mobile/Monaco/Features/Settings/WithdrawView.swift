@@ -48,7 +48,7 @@ struct WithdrawView: View {
                 switch balanceLoader.phase {
                 case .loading:
                     ProgressView()
-                        .tint(MonacoTheme.accent)
+                        .tint(MonacoTheme.controlTint)
                         .frame(maxWidth: .infinity)
                         .padding(.top, MonacoTheme.Space.xl)
                         .accessibilityIdentifier("withdraw-loading")
@@ -62,29 +62,40 @@ struct WithdrawView: View {
                     .padding(.top, MonacoTheme.Space.xl)
                     .accessibilityIdentifier("withdraw-balance-error")
                 case .loaded:
-                    AmountEntry(
-                        amountText: $amountText,
-                        max: maxDollars,
-                        presets: [.fraction(1, label: "Max")],
-                        helper: balanceHelper,
-                        showsKeyboardDoneButton: true
-                    )
+                    // The figure is the screen, so it gets the screen's one ink band and the 56pt
+                    // `mega` style — the same shape Add money and Propose use, so the three money
+                    // flows read as one flow rather than three forms.
+                    VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+                        Text("Cash out")
+                            .displayFont(.eyebrow)
+                            .foregroundStyle(MonacoTheme.Ink.fgSubtle)
+                            .frame(maxWidth: .infinity, alignment: .center)
 
-                    VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                        AmountEntry(
+                            amountText: $amountText,
+                            max: maxDollars,
+                            presets: [.fraction(1, label: "Max")],
+                            helper: balanceHelper,
+                            showsKeyboardDoneButton: true,
+                            style: .mega
+                        )
+                    }
+                    .monacoInkBand()
+
+                    VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
                         MonacoSectionHeader("Destination")
                         MonacoTextField("USDC address on Base", text: $destinationAddress, keyboard: .asciiCapable)
                             .accessibilityIdentifier("withdraw-address-field")
                         if let addressProblemMessage {
                             Text(addressProblemMessage)
                                 .font(MonacoTheme.Typo.caption)
-                                .foregroundStyle(MonacoTheme.warning)
+                                .foregroundStyle(MonacoTheme.warningOnWash)
                                 .accessibilityIdentifier("withdraw-address-problem")
                         }
                     }
                 }
             }
             .padding(.horizontal, MonacoTheme.Space.gutter)
-            .padding(.top, MonacoTheme.Space.m)
             .padding(.bottom, MonacoTheme.Space.xl)
         }
         // The decimal pad covers the destination field, and a decimal pad has no return key:
@@ -205,34 +216,45 @@ private struct WithdrawConfirmView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Amount")
-                        .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.muted)
-                    MoneyText(decimalString: amountText, style: .large)
-                }
-
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.section) {
+                // The receipt. One ink band carrying the figure, because what is about to leave
+                // the account is the whole question this screen is asking.
                 VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                    Text("Leaving your account")
+                        .displayFont(.eyebrow)
+                        .foregroundStyle(MonacoTheme.Ink.fgSubtle)
+                    MoneyText(decimalString: amountText, style: .hero, color: MonacoTheme.Ink.fgPrimary)
+                }
+                .monacoInkBand()
+
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
                     Text("Destination")
-                        .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.muted)
+                        .displayFont(.eyebrow)
+                        .foregroundStyle(MonacoTheme.fgSubtle)
                     MonacoWalletAddressText(address: destinationAddress)
                 }
 
-                Text("Double-check this address. Transfers can't be undone.")
+                // Amber is the "be careful, this is not reversible" intent, and on a wash it
+                // reads as a notice rather than as a sentence someone forgot to style.
+                Label("Double-check this address. Transfers can't be undone.", systemImage: "exclamationmark.triangle.fill")
                     .font(MonacoTheme.Typo.callout)
-                    .foregroundStyle(MonacoTheme.warning)
+                    .foregroundStyle(MonacoTheme.warningOnWash)
+                    .padding(MonacoTheme.Space.sm)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        MonacoTheme.warningWash,
+                        in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.container, style: .continuous)
+                    )
 
                 if let failure {
                     VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
                         Text(failure.message)
                             .font(MonacoTheme.Typo.body)
-                            .foregroundStyle(MonacoTheme.ink)
+                            .foregroundStyle(MonacoTheme.fgPrimary)
                         if let nextStep = failure.nextStep {
                             Text(nextStep)
                                 .font(MonacoTheme.Typo.callout)
-                                .foregroundStyle(MonacoTheme.muted)
+                                .foregroundStyle(MonacoTheme.fgMuted)
                         }
                     }
                     .accessibilityElement(children: .combine)
@@ -240,7 +262,6 @@ private struct WithdrawConfirmView: View {
                 }
             }
             .padding(.horizontal, MonacoTheme.Space.gutter)
-            .padding(.top, MonacoTheme.Space.m)
             .padding(.bottom, MonacoTheme.Space.xl)
         }
         .monacoCanvas()

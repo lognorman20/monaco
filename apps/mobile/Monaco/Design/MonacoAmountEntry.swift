@@ -11,6 +11,11 @@ enum AmountPreset: Equatable {
 /// Big centred dollar figure over the system decimal pad, preset chips and one helper line.
 /// `amountText` holds a plain decimal string ("50", "12.5"); the view keeps it to digits,
 /// one ".", and two decimals.
+///
+/// It reads `\.monacoWorld`, so the same view is the figure on a paper screen and the figure on an
+/// ink band without a second copy: every colour here comes from the palette rather than from a
+/// paper token. `style` is `.mega` (56pt) on the three screens where the figure *is* the screen —
+/// Add money, Cash out and Propose — and `.hero` everywhere the figure shares the screen.
 struct AmountEntry: View {
     @Binding private var amountText: String
     private let max: Decimal?
@@ -19,10 +24,12 @@ struct AmountEntry: View {
     private let overLimitHelper: String
     private let problem: String?
     private let showsKeyboardDoneButton: Bool
+    private let style: MoneyStyle
 
     @FocusState private var focused: Bool
     @State private var hasRaisedKeyboard = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.monacoPalette) private var palette
 
     /// - Parameter problem: why the amount can't be used, in the member's words. It replaces
     ///   `helper` while it is set, so a screen with a rule of its own — a minimum, a remainder
@@ -39,7 +46,8 @@ struct AmountEntry: View {
         helper: String? = nil,
         overLimitHelper: String = "More than you have",
         problem: String? = nil,
-        showsKeyboardDoneButton: Bool = false
+        showsKeyboardDoneButton: Bool = false,
+        style: MoneyStyle = .hero
     ) {
         _amountText = amountText
         self.max = max
@@ -48,6 +56,7 @@ struct AmountEntry: View {
         self.overLimitHelper = overLimitHelper
         self.problem = problem
         self.showsKeyboardDoneButton = showsKeyboardDoneButton
+        self.style = style
     }
 
     private var value: Decimal? {
@@ -68,7 +77,7 @@ struct AmountEntry: View {
             if let helperLine {
                 Text(helperLine)
                     .font(MonacoTheme.Typo.callout)
-                    .foregroundStyle(hasProblem ? MonacoTheme.loss : MonacoTheme.muted)
+                    .foregroundStyle(hasProblem ? problemColor : palette.fgMuted)
                     .multilineTextAlignment(.center)
                     .contentTransition(.opacity)
                     .animation(reduceMotion ? nil : .snappy, value: helperLine)
@@ -111,6 +120,25 @@ struct AmountEntry: View {
         problem != nil || isOverLimit
     }
 
+    /// A loss on ink needs the hero pair; `loss` itself is tuned for paper.
+    private var problemColor: Color {
+        palette.world == .ink ? MonacoTheme.lossOnHero : MonacoTheme.loss
+    }
+
+    /// The empty figure is a placeholder, not an amount: it has to look unavailable, which is the
+    /// one job `fgDisabled` exists for. On ink that role is `Ink.fgSubtle`.
+    private var figureColor: Color {
+        if amountText.isEmpty {
+            return palette.world == .ink ? MonacoTheme.Ink.fgSubtle : MonacoTheme.disabledLabel
+        }
+        return hasProblem ? problemColor : palette.fgPrimary
+    }
+
+    /// The caret is drawn, not typed, so it has to be told how tall the figure is.
+    private var caretHeight: CGFloat {
+        style == .mega ? 48 : 40
+    }
+
     private var helperLine: String? {
         if let problem { return problem }
         return isOverLimit ? overLimitHelper : helper
@@ -120,13 +148,13 @@ struct AmountEntry: View {
         ZStack {
             HStack(alignment: .center, spacing: 2) {
                 Text(AmountEntryText.display(amountText))
-                    .moneyFont(.hero)
-                    .foregroundStyle(amountText.isEmpty ? MonacoTheme.disabledLabel : (hasProblem ? MonacoTheme.loss : MonacoTheme.ink))
+                    .moneyFont(style)
+                    .foregroundStyle(figureColor)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.4)
+                    .minimumScaleFactor(style.minimumScaleFactor)
                     .contentTransition(reduceMotion ? .identity : .numericText())
                     .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: amountText)
-                AmountCaret(visible: focused)
+                AmountCaret(visible: focused, color: palette.fgPrimary, height: caretHeight)
             }
             .dynamicTypeSize(...DynamicTypeSize.accessibility2)
             .accessibilityHidden(true)
@@ -165,10 +193,10 @@ struct AmountEntry: View {
                         .font(MonacoTheme.Typo.callout.weight(.semibold).monospacedDigit())
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
-                        .foregroundStyle(selected ? MonacoTheme.primaryButtonLabel : MonacoTheme.ink)
+                        .foregroundStyle(selected ? MonacoTheme.onBrand : palette.fgPrimary)
                         .padding(.horizontal, 16)
                         .frame(minWidth: 64, minHeight: 44)
-                        .background(Capsule().fill(selected ? MonacoTheme.primaryButtonFill : MonacoTheme.surfaceSunken))
+                        .background(Capsule().fill(selected ? MonacoTheme.brandFill : palette.quietFill))
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -199,15 +227,18 @@ struct AmountEntry: View {
     }
 }
 
-/// Blinking ink caret after the figure while the field has focus.
+/// Blinking caret after the figure while the field has focus. It takes its colour from the caller
+/// rather than a token: a caret is a control tint, and on ink that is white.
 private struct AmountCaret: View {
     let visible: Bool
+    var color: Color = MonacoTheme.controlTint
+    var height: CGFloat = 40
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         RoundedRectangle(cornerRadius: 1.5)
-            .fill(MonacoTheme.ink)
-            .frame(width: 3, height: 40)
+            .fill(color)
+            .frame(width: 3, height: height)
             .opacityLoop(to: 0, halfPeriod: 0.5, active: visible && !reduceMotion)
             .opacity(visible ? 1 : 0)
     }

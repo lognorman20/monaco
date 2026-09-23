@@ -1,38 +1,38 @@
 import MonacoCore
 import SwiftUI
 
+/// What is in the account, above a flow that is about to spend it.
+///
+/// It is an E1 card — a shadow in light, an edge in dark — rather than a hairline box, and the
+/// label is an eyebrow over the figure, which is the shape every money label in v3 takes.
 struct PlatformBalanceCard: View {
     let balance: PlatformBalanceDTO?
     var isLoading: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
             Text("Account balance")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(MonacoTheme.secondaryText)
+                .displayFont(.eyebrow)
+                .foregroundStyle(MonacoTheme.fgSubtle)
             if let balance {
-                Text(UsdAmountFormatter.format(micros: balance.availableUsdcMicros))
-                    .font(.title2.bold().monospacedDigit())
-                    .foregroundStyle(MonacoTheme.primaryText)
+                MoneyText(micros: balance.availableUsdcMicros, style: .large)
                     .accessibilityIdentifier("platform-balance-value")
                 if balance.pendingAllocationMicros > 0 {
                     Text("\(UsdAmountFormatter.format(micros: balance.pendingAllocationMicros)) funding a cabal")
-                        .font(.caption)
-                        .foregroundStyle(MonacoTheme.secondaryText)
+                        .font(MonacoTheme.Typo.caption)
+                        .foregroundStyle(MonacoTheme.fgMuted)
                 }
             } else if isLoading {
                 ProgressView()
-                    .tint(MonacoTheme.accent)
+                    .tint(MonacoTheme.controlTint)
                     .accessibilityIdentifier("platform-balance-loading")
             } else {
-                Text("$0.00")
-                    .font(.title2.bold().monospacedDigit())
-                    .foregroundStyle(MonacoTheme.primaryText)
+                MoneyText(micros: 0, style: .large)
                     .accessibilityIdentifier("platform-balance-value")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .monacoSurfaceCard()
+        .padding(MonacoTheme.Space.m)
+        .monacoElevation(.card)
     }
 }

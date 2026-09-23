@@ -75,7 +75,7 @@ struct FundCabalView: View {
                 switch balanceLoader.phase {
                 case .loading:
                     ProgressView()
-                        .tint(MonacoTheme.accent)
+                        .tint(MonacoTheme.controlTint)
                         .frame(maxWidth: .infinity)
                         .padding(.top, MonacoTheme.Space.xl)
                         .accessibilityIdentifier("fund-cabal-loading")
@@ -146,7 +146,7 @@ struct FundCabalView: View {
                 }
             }
             .pickerStyle(.menu)
-            .tint(MonacoTheme.ink)
+            .tint(MonacoTheme.controlTint)
             .accessibilityIdentifier("fund-cabal-picker")
         }
     }
