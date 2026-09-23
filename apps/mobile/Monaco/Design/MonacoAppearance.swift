@@ -1,23 +1,33 @@
 import SwiftUI
 import UIKit
 
-/// Root appearance wiring and reusable styles for sibling screen agents.
+/// Root appearance wiring and the handful of screen-level modifiers that survived v3.
+///
+/// The UIKit proxies are the one place display type has to be handed over as a `UIFont`: a nav
+/// bar has no view tree to scale inside, so it takes `MonacoNavType`'s pre-scaled, point-capped
+/// faces rather than `.displayFont(_:)`.
 enum MonacoAppearance {
     static func configureUIKit() {
-        let canvas = UIColor(MonacoTheme.canvas)
-        let surface = UIColor(MonacoTheme.surface)
-        let primaryText = UIColor(MonacoTheme.primaryText)
-        let muted = UIColor(MonacoTheme.muted)
-        let hairline = UIColor(MonacoTheme.hairline)
-        let titleFont = UIFont(name: "AvenirNext-DemiBold", size: 17) ?? .systemFont(ofSize: 17, weight: .semibold)
-        let largeTitleFont = UIFont(name: "AvenirNext-Bold", size: 32) ?? .systemFont(ofSize: 32, weight: .bold)
+        let canvas = UIColor(MonacoTheme.bgBase)
+        let surface = UIColor(MonacoTheme.bgRaised)
+        let primaryText = UIColor(MonacoTheme.fgPrimary)
+        let muted = UIColor(MonacoTheme.fgMuted)
+        let hairline = UIColor(MonacoTheme.line)
+
+        // SF Pro Expanded, capped: an uncapped large title at AX5 pushes the whole screen down
+        // before the content has said anything. Tracking matches `DisplayRole`'s −0.01/−0.02em
+        // and is measured against the *scaled* size, so it does not open into a gap at AX5.
+        let inlineFont = MonacoNavType.inlineTitle
+        let largeFont = MonacoNavType.largeTitle
         let titleAttributes: [NSAttributedString.Key: Any] = [
             .foregroundColor: primaryText,
-            .font: UIFontMetrics(forTextStyle: .headline).scaledFont(for: titleFont, maximumPointSize: 22),
+            .font: inlineFont,
+            .kern: MonacoNavType.inlineTracking(size: inlineFont.pointSize),
         ]
         let largeTitleAttributes: [NSAttributedString.Key: Any] = [
             .foregroundColor: primaryText,
-            .font: UIFontMetrics(forTextStyle: .largeTitle).scaledFont(for: largeTitleFont, maximumPointSize: 44),
+            .font: largeFont,
+            .kern: MonacoNavType.largeTracking(size: largeFont.pointSize),
         ]
 
         // Chevron-only back button: the title is drawn clear and at a near-zero size so it takes no width.
@@ -36,7 +46,7 @@ enum MonacoAppearance {
         standard.backButtonAppearance = backButton
         standard.setBackIndicatorImage(backImage, transitionMaskImage: backImage)
 
-        // At rest (scroll edge): transparent, no hairline.
+        // At rest (scroll edge): transparent, no hairline, so an ink slab runs up under it.
         let scrollEdge = UINavigationBarAppearance()
         scrollEdge.configureWithTransparentBackground()
         scrollEdge.titleTextAttributes = titleAttributes
@@ -49,10 +59,15 @@ enum MonacoAppearance {
         navigationBar.compactAppearance = standard
         navigationBar.scrollEdgeAppearance = scrollEdge
         navigationBar.compactScrollEdgeAppearance = scrollEdge
-        navigationBar.tintColor = primaryText
+        // Bar buttons are tap targets, so they take brand. The title is not, so it stays ink —
+        // set on the title attributes above rather than inherited from the bar tint.
+        navigationBar.tintColor = UIColor(MonacoTheme.brand)
         navigationBar.prefersLargeTitles = true
 
-        // Tab bar: opaque surface, hairline top edge.
+        // Tab bar: opaque surface, hairline top edge, brand on the selected item. Nothing sets a
+        // SwiftUI `.tint` above this any more, so what is configured here is what ships. Before
+        // v3 the two roots overrode it with ink and the app's one accent colour was absent from
+        // its most persistent chrome while the segmented thumb was blue.
         let tabBar = UITabBarAppearance()
         tabBar.configureWithOpaqueBackground()
         tabBar.backgroundColor = surface
@@ -71,7 +86,7 @@ enum MonacoAppearance {
         UITabBar.appearance().tintColor = brand
         UITabBar.appearance().unselectedItemTintColor = muted
 
-        // Legacy Form / List screens until they migrate to MonacoGroupedList.
+        // The two debug harnesses that keep a `Form` (see `monacoFormScreen`).
         UITableView.appearance().backgroundColor = .clear
         UITableView.appearance().separatorColor = hairline
         UITableViewCell.appearance().backgroundColor = surface
@@ -85,7 +100,7 @@ struct MonacoRootAppearanceModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .monacoCanvas()
-            .foregroundStyle(MonacoTheme.primaryText)
+            .foregroundStyle(MonacoTheme.fgPrimary)
     }
 }
 
@@ -100,148 +115,62 @@ extension View {
         modifier(MonacoRootAppearanceModifier())
     }
 
-    /// Card-style container on the app canvas.
+    /// E1 card. Repointed at `.monacoElevation(.card)` so the two screens still calling it get the
+    /// v3 treatment — shadow in light, stroke in dark — before their own chunk lands.
+    @available(*, deprecated, message: "Use .monacoElevation(.card). Last sites: PlatformBalanceCard.swift (Chunk C), CabalsLeaderboardSection.swift (Chunk D).")
     func monacoSurfaceCard() -> some View {
-        self
-            .padding(MonacoTheme.Space.m)
-            .background(
-                MonacoTheme.surface,
-                in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
-                    .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
-            }
+        padding(MonacoTheme.Space.m)
+            .monacoElevation(.card)
     }
 
-    /// The premium "money" card: deep ink in both schemes, with a very subtle top-left
-    /// radial highlight. Everything inside draws in `onHero` / `onHeroMuted`.
-    func monacoHeroCard(padding: CGFloat = 24) -> some View {
-        self
+    /// The deep "money" card: ink in both schemes, with the shared off-centre radial highlight.
+    /// Now built on `InkSurface` and declaring `\.monacoWorld`, so everything inside picks the ink
+    /// pair instead of being told its colour twice.
+    @available(*, deprecated, message: "Use .monacoInkBand() or .monacoInkSlab(). Last sites: HomeNetWorthSection.swift (Chunk C), GroupHeroSection.swift (Chunk D).")
+    func monacoHeroCard(padding: CGFloat = MonacoInkBandMetrics.verticalPadding) -> some View {
+        monacoWorld(.ink)
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(MonacoHeroCardBackground())
+            .background(
+                InkSurface(
+                    shape: AnyShape(
+                        RoundedRectangle(cornerRadius: MonacoTheme.Radius.object, style: .continuous)
+                    )
+                )
+            )
     }
 
-    /// Inset grouped list on the app canvas — hides default scroll chrome.
-    func monacoInsetList() -> some View {
-        listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(Color.clear)
-    }
-
-    /// High-contrast segmented control strip for board tabs.
-    func monacoSegmentedBoardPicker() -> some View {
-        padding(.horizontal, MonacoTheme.Space.m)
-        .padding(.vertical, 12)
-        .background(MonacoTheme.surface)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(MonacoTheme.hairline)
-                .frame(height: 1)
-        }
-    }
-
-    /// Toolbar / nav bar SF Symbol — ink tint, readable weight.
+    /// Toolbar / nav bar SF Symbol. Brand, because a toolbar glyph is a tap target and blue means tap.
     func monacoToolbarIcon() -> some View {
         font(.body.weight(.semibold))
-            .foregroundStyle(MonacoTheme.ink)
+            .foregroundStyle(MonacoTheme.brand)
             .symbolRenderingMode(.hierarchical)
     }
 
-    /// Form screen root — canvas background, visible rows/separators, readable fields.
+    /// Form screen root. **Debug harnesses only.** `DevBuyView` and `GroupNavSampleHarness` are
+    /// the two screens the v3 form sweep exempts (§5.11); every product `Form` becomes a designed
+    /// screen. A new product call site here is a bug, not a shortcut.
     func monacoFormScreen() -> some View {
         scrollContentBackground(.hidden)
             .monacoCanvas()
-            .foregroundStyle(MonacoTheme.primaryText)
-            .tint(MonacoTheme.accent)
-            .listRowBackground(MonacoTheme.surface)
-            .listRowSeparatorTint(MonacoTheme.border)
+            .foregroundStyle(MonacoTheme.fgPrimary)
+            .tint(MonacoTheme.controlTint)
+            .listRowBackground(MonacoTheme.bgRaised)
+            .listRowSeparatorTint(MonacoTheme.line)
     }
 
-    /// Footnote / hint copy inside forms.
+    /// Footnote / hint copy under a field.
     func monacoSecondaryCaption() -> some View {
-        font(MonacoTheme.TypeRole.caption)
-            .foregroundStyle(MonacoTheme.secondaryText)
+        font(MonacoTheme.Typo.caption)
+            .foregroundStyle(MonacoTheme.fgMuted)
     }
 
-    /// Text field inside a Form section — ink text + accent caret.
-    func monacoFormTextField() -> some View {
-        foregroundStyle(MonacoTheme.primaryText)
-            .tint(MonacoTheme.accent)
-    }
-
-    /// Primary action button row inside a Form.
-    func monacoFormPrimaryAction() -> some View {
-        buttonStyle(.monacoPrimary)
-            .frame(maxWidth: .infinity)
-            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-            .listRowBackground(Color.clear)
-    }
-
-    /// Secondary action button row inside a Form.
+    /// Secondary action row inside a `Form`.
+    @available(*, deprecated, message: "Use BottomCTA. Last site: DepositView.swift (Chunk C).")
     func monacoFormSecondaryAction() -> some View {
         buttonStyle(.monacoSecondary)
             .frame(maxWidth: .infinity)
             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             .listRowBackground(Color.clear)
-    }
-
-    /// Destructive action button row inside a Form (e.g. sign out).
-    func monacoFormDestructiveAction() -> some View {
-        buttonStyle(.monacoDestructive)
-            .frame(maxWidth: .infinity)
-            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-            .listRowBackground(Color.clear)
-    }
-}
-
-/// Empty list placeholder with bordered surface card.
-@available(*, deprecated, message: "Use EmptyState (no icon).")
-struct MonacoEmptyStateCard: View {
-    let message: String
-    let systemImage: String
-
-    var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.title2)
-                .foregroundStyle(MonacoTheme.accent)
-                .symbolRenderingMode(.hierarchical)
-            Text(message)
-                .font(MonacoTheme.TypeRole.body)
-                .foregroundStyle(MonacoTheme.secondaryText)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .monacoSurfaceCard()
-        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
-    }
-}
-
-/// Deep ink money card. One flat ink base plus a soft off-centre highlight — no glass, no glow.
-struct MonacoHeroCardBackground: View {
-    var radius: CGFloat = MonacoTheme.Radius.hero
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .fill(MonacoTheme.heroInk)
-            .overlay {
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(
-                        RadialGradient(
-                            colors: [MonacoTheme.heroInkHighlight, .clear],
-                            center: UnitPoint(x: 0.08, y: -0.05),
-                            startRadius: 0,
-                            endRadius: 340
-                        )
-                    )
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
-            }
     }
 }

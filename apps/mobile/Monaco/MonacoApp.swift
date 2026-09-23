@@ -15,9 +15,12 @@ struct MonacoApp: App {
 
     var body: some Scene {
         WindowGroup {
+            // No root `.tint`. It used to be ink, which silently beat the brand-blue tab-bar
+            // appearance configured in `MonacoAppearance` — so the app's one accent colour was
+            // missing from its most persistent chrome. Carets, spinners and pickers now take
+            // `MonacoTheme.controlTint` at their own call sites; everything tappable is brand.
             root
                 .environmentObject(auth)
-                .tint(MonacoTheme.ink)
         }
     }
 
