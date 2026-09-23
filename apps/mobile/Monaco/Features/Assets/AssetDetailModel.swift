@@ -304,6 +304,23 @@ final class AssetDetailModel {
 
     static let unnamedChartPriceCaption = "Chart price"
 
+    /// "As of Fri 4:00 PM" under the hero when the mark behind it is holding rather than
+    /// moving, and nil when it is live.
+    ///
+    /// The hero is the token's Chainlink total-return mark. Outside the cash session that
+    /// feed holds the last close, so `MoneyText` keeps rolling a number that has not moved
+    /// since Friday — and the session chip beside it may still say the token trades on
+    /// Base, which is true of the pools and not of this price. The mark carries its own
+    /// verdict (`stockVsToken.mark.status`), which is not the same fact as `afterHours`:
+    /// that is the exchange calendar's, and a feed can hold while the calendar says open.
+    ///
+    /// Silent during a scrub, where the price shown is the curve's own sample and already
+    /// carries that sample's time in the change row.
+    var heroPriceAsOf: String? {
+        guard !isScrubbing, let mark = detail?.stockVsToken?.mark else { return nil }
+        return StaleMarkCaption.caption(status: mark.status, publishedAt: mark.publishedAt)
+    }
+
 
     /// The figure under the price.
     ///

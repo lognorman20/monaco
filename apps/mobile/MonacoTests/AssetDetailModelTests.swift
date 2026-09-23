@@ -43,6 +43,9 @@ private final class StubAssetDetailDataSource: AssetDetailDataSource {
     var priceUsdcMicros: Int64? = 185_000_000
     var marketSession: MarketSession?
     var market: MarketStatusDTO?
+    /// The stock-vs-token card. This branch does not draw it, but the hero reads the
+    /// mark's own freshness off it.
+    var stockVsToken: StockVsTokenDTO?
     var points: [AssetChartRange: [AssetChartPointDTO]] = [:]
     var previousCloseUsdcMicros: Int64?
     /// The range the server claims each series was built for. Nil echoes the request.
@@ -88,7 +91,8 @@ private final class StubAssetDetailDataSource: AssetDetailDataSource {
             ),
             marketSession: marketSession,
             afterHours: marketSession.map { !$0.isRegularSession } ?? false,
-            market: market
+            market: market,
+            stockVsToken: stockVsToken
         )
     }
 
@@ -1163,6 +1167,49 @@ struct AssetDetailModelTests {
     @Test func anUnrecognisedBasisDecodesToUnknown() throws {
         let decoded = try JSONDecoder().decode(MarketPriceBasis.self, from: Data("\"wrapped_share\"".utf8))
         #expect(decoded == .unknown)
+    }
+
+    /// Over a weekend the hero is a number that has not moved since Friday, rolling its
+    /// digits next to a chip that says the token still trades on Base. Both are true —
+    /// the pools trade, the mark does not — and the hero has to say which it is showing.
+    @Test func aHeldMarkSaysWhenItLastPrinted() async throws {
+        let source = StubAssetDetailDataSource()
+        source.stockVsToken = MarketSampleData.stockVsTokenWeekend
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+
+        await model.loadDetail()
+
+        #expect(model.heroPriceAsOf?.hasPrefix("As of ") == true)
+    }
+
+    /// A live mark carries no qualifier, and neither does a screen whose backend sends no
+    /// card at all — this line is a fact off the payload, never an assumption.
+    @Test func aLiveMarkAndAMissingCardBothLeaveTheHeroUnqualified() async throws {
+        let live = StubAssetDetailDataSource()
+        live.stockVsToken = MarketSampleData.stockVsTokenLive
+        let liveModel = AssetDetailModel(symbol: "AAPLc", dataSource: live)
+        await liveModel.loadDetail()
+        #expect(liveModel.heroPriceAsOf == nil)
+
+        let silent = AssetDetailModel(symbol: "AAPLc", dataSource: StubAssetDetailDataSource())
+        await silent.loadDetail()
+        #expect(silent.heroPriceAsOf == nil)
+    }
+
+    /// While a finger is down the price is the curve's own sample, which carries its own
+    /// time in the change row. The mark's as-of line would be about a different number.
+    @Test func aScrubbedHeroDropsTheMarksAsOfLine() async throws {
+        let source = StubAssetDetailDataSource()
+        source.stockVsToken = MarketSampleData.stockVsTokenWeekend
+        source.points[.oneDay] = StubAssetDetailDataSource.series(from: 100, to: 110)
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+
+        await model.loadDetail()
+        await model.loadChart(range: .oneDay)
+        #expect(model.heroPriceAsOf != nil)
+
+        model.scrubbedIndex = 1
+        #expect(model.heroPriceAsOf == nil)
     }
 
     // MARK: - Walking out of a scrub

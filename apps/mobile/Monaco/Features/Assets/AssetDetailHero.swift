@@ -18,6 +18,9 @@ struct AssetDetailHero: View {
     let isScrubbing: Bool
     /// Raised only by a poll that changed the price — never by the first load.
     let tick: MonacoPriceTick?
+    /// "As of Fri 4:00 PM" when the mark behind the price is holding the last close.
+    /// Nil while it is live, which is most of the time.
+    var priceAsOf: String?
     let session: MarketSessionChipCopy?
 
     var body: some View {
@@ -29,6 +32,15 @@ struct AssetDetailHero: View {
 
             price
                 .accessibilityIdentifier("asset-detail-price")
+
+            // Directly under the number it qualifies, before the change row, so the
+            // rolling digits are never read as a live price without it.
+            if let priceAsOf {
+                Text(priceAsOf)
+                    .font(MonacoTheme.Typo.caption)
+                    .foregroundStyle(MonacoTheme.muted)
+                    .accessibilityIdentifier("asset-detail-price-as-of")
+            }
 
             if let move {
                 changeRow(move)

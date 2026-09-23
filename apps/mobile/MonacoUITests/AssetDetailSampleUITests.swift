@@ -58,10 +58,12 @@ final class AssetDetailSampleUITests: XCTestCase {
     /// Every scenario reaches a drawn screen, with the chart state that scenario
     /// serves for 1D. One screenshot per scenario is attached.
     ///
-    /// What this does not check: the stats grid and the stock-vs-token card are not
-    /// drawn by this branch's screen (they land with stocks-detail-cards), so the
-    /// scenarios that differ only there (noRoute, notEntitled, weekend) draw the same
-    /// screen as `open`, and their screenshots show it. `loading` is covered by the
+    /// What this does not check: the stats grid and the stock-vs-token card are not drawn
+    /// by this branch's screen (they land with stocks-detail-cards). `noRoute` and
+    /// `notEntitled` differ from `open` only there, so they are left out rather than
+    /// paying for a launch to re-assert what `open` already covers; they come back with
+    /// the cards. `weekend` stays, because it does differ here — see
+    /// `testTheWeekendHeroSaysWhenItsMarkLastPrinted`. `loading` is covered by the
     /// skeleton, not here: it never finishes.
     @MainActor
     func testEveryScenarioReachesItsChartState() throws {
@@ -72,8 +74,6 @@ final class AssetDetailSampleUITests: XCTestCase {
             ("weekend", "asset-detail-chart"),
             ("holiday", "asset-detail-chart"),
             ("sparse", "asset-detail-chart"),
-            ("noRoute", "asset-detail-chart"),
-            ("notEntitled", "asset-detail-chart"),
             ("fallbackSeries", "asset-detail-chart"),
             ("chainlinkSeries", "asset-detail-chart"),
             ("emptyChart", "asset-detail-chart-empty"),
@@ -93,6 +93,46 @@ final class AssetDetailSampleUITests: XCTestCase {
             attachScreenshot(app, name: "asset-detail-\(scenario)")
             app.terminate()
         }
+    }
+
+    /// Saturday: the pools trade while the Chainlink total-return mark behind the hero
+    /// holds Friday's last round. The screen has to carry both facts at once — a chip
+    /// that says the token still trades on Base, and an as-of line saying the price above
+    /// it has not moved since Friday — or the rolling digits read as a live price.
+    ///
+    /// This is the one thing the weekend scenario draws that `open` does not, which is
+    /// why it is asserted here rather than as another "the chart exists" row.
+    @MainActor
+    func testTheWeekendHeroSaysWhenItsMarkLastPrinted() throws {
+        let app = launch("weekend")
+        waitForScreen(app, "weekend")
+
+        let asOf = anyElement(app, "asset-detail-price-as-of")
+        XCTAssertTrue(
+            asOf.waitForExistence(timeout: 10),
+            "the weekend hero should say when its mark last printed"
+        )
+        XCTAssertTrue(
+            asOf.label.hasPrefix("As of "),
+            "expected an as-of line, got \(asOf.label)"
+        )
+        attachScreenshot(app, name: "asset-detail-weekend-as-of")
+        app.terminate()
+    }
+
+    /// And the opposite: a live mark carries no qualifier, so the line is a fact about
+    /// this session rather than something the screen always shows.
+    @MainActor
+    func testAnOpenSessionHeroCarriesNoAsOfLine() throws {
+        let app = launch("open")
+        waitForScreen(app, "open")
+
+        XCTAssertTrue(anyElement(app, "asset-detail-price").waitForExistence(timeout: 10))
+        XCTAssertFalse(
+            anyElement(app, "asset-detail-price-as-of").exists,
+            "a live mark should not be qualified"
+        )
+        app.terminate()
     }
 
     /// The regression: six range chips in a fixed HStack were already ~320pt of the

@@ -137,6 +137,7 @@ struct AssetDetailView: View {
             move: model.move,
             isScrubbing: model.isScrubbing,
             tick: model.heroTick,
+            priceAsOf: model.heroPriceAsOf,
             session: model.sessionChip
         )
     }

@@ -146,4 +146,93 @@ final class MarketAssetDTOTests: XCTestCase {
         XCTAssertFalse(AssetLiquidityDTO.isPositiveAtomicAmount(nil))
         XCTAssertFalse(AssetLiquidityDTO.isPositiveAtomicAmount("1e9"))
     }
+
+    // MARK: - The as-of line under a held mark
+
+    /// Fixed locale and zone, so this asserts the shape of the line rather than the
+    /// machine's regional settings.
+    private static let easternUS = TimeZone(identifier: "America/New_York")!
+    private static let enUS = Locale(identifier: "en_US")
+
+    /// ICU puts a narrow no-break space (U+202F) before the AM/PM marker, which is right
+    /// on screen and invisible in a test failure. Compare on plain spaces so a mismatch
+    /// reads as a mismatch.
+    private func plainSpaces(_ text: String?) -> String? {
+        text?
+            .replacingOccurrences(of: "\u{202F}", with: " ")
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
+    }
+
+    /// The weekend sample is the case this exists for: the Chainlink total-return mark
+    /// holding Friday's last round while the screen keeps rolling its digits.
+    func testStaleMarkCaption_namesTheDayAndTimeTheMarkLastPrinted() {
+        let mark = MarketSampleData.stockVsTokenWeekend.mark
+        XCTAssertEqual(mark.status, .stale)
+        let caption = StaleMarkCaption.caption(
+            status: mark.status,
+            publishedAt: mark.publishedAt,
+            locale: Self.enUS,
+            timeZone: Self.easternUS
+        )
+        XCTAssertEqual(plainSpaces(caption), "As of Fri 7:59 PM")
+    }
+
+    /// A live mark needs no qualifier — the price is the price.
+    func testStaleMarkCaption_isSilentForALiveMark() {
+        XCTAssertNil(
+            StaleMarkCaption.caption(
+                status: .live,
+                publishedAt: Date(timeIntervalSince1970: 1_790_380_740),
+                locale: Self.enUS,
+                timeZone: Self.easternUS
+            )
+        )
+    }
+
+    /// A time the source did not send is not guessed at: better no line than a made-up
+    /// one under a real price.
+    func testStaleMarkCaption_needsATimeItCanName() {
+        XCTAssertNil(
+            StaleMarkCaption.caption(
+                status: .stale,
+                publishedAt: nil,
+                locale: Self.enUS,
+                timeZone: Self.easternUS
+            )
+        )
+        XCTAssertNil(
+            StaleMarkCaption.caption(
+                status: .unavailable,
+                publishedAt: Date(timeIntervalSince1970: 1_790_380_740),
+                locale: Self.enUS,
+                timeZone: Self.easternUS
+            )
+        )
+        XCTAssertNil(
+            StaleMarkCaption.caption(
+                status: nil,
+                publishedAt: Date(timeIntervalSince1970: 1_790_380_740),
+                locale: Self.enUS,
+                timeZone: Self.easternUS
+            )
+        )
+    }
+
+    /// Timestamps travel as UTC and are converted at the point of display, so the same
+    /// instant reads as a different local clock time — and the line has to be the
+    /// reader's, not the exchange's.
+    func testStaleMarkCaption_isRenderedInTheReadersZone() {
+        let instant = Date(timeIntervalSince1970: 1_790_380_740)
+        let newYork = StaleMarkCaption.caption(
+            status: .stale, publishedAt: instant, locale: Self.enUS, timeZone: Self.easternUS
+        )
+        let tokyo = StaleMarkCaption.caption(
+            status: .stale,
+            publishedAt: instant,
+            locale: Self.enUS,
+            timeZone: TimeZone(identifier: "Asia/Tokyo")!
+        )
+        XCTAssertEqual(plainSpaces(newYork), "As of Fri 7:59 PM")
+        XCTAssertEqual(plainSpaces(tokyo), "As of Sat 8:59 AM")
+    }
 }

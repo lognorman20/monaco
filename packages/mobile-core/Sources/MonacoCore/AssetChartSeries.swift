@@ -304,6 +304,43 @@ public struct ChartSessionDay: Equatable, Sendable {
 /// The series is UTC; this is the one place it becomes a local wall clock, and the
 /// pattern is a locale template rather than a fixed format so a 24-hour locale
 /// reads "Tue 14:05" instead of an American clock.
+/// When the price in the hero was last printed, for a mark that is holding rather than
+/// moving.
+///
+/// The hero is the B20 token's Chainlink total-return mark. Outside the cash session
+/// that feed holds the last close, so the number on screen can be hours or days old
+/// while the screen still rolls its digits and — next to a chip saying the token trades
+/// on Base — reads as live. `MarketSessionCopy` speaks for the *exchange*; this speaks
+/// for the *mark*, and the two disagree exactly over a weekend, which is when it matters.
+///
+/// Nil for a live mark, and nil for a stale one the source would not stamp: a time we do
+/// not have is not guessed at.
+public enum StaleMarkCaption {
+    /// "As of Fri 4:00 PM", in the reader's own zone. Timestamps travel as UTC and are
+    /// converted here, at the point of display.
+    public static func caption(
+        status: ReferenceQuoteStatus?,
+        publishedAt: Date?,
+        locale: Locale = .autoupdatingCurrent,
+        timeZone: TimeZone = .autoupdatingCurrent
+    ) -> String? {
+        guard status == .stale, let publishedAt else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        let stamp = SharedFormatters.string(
+            from: publishedAt,
+            // `j` is the locale's own hour field: 12-hour with a marker where a clock is
+            // read that way, 24-hour where it is not.
+            pattern: .template("EEEjmm"),
+            locale: locale,
+            calendar: calendar,
+            timeZone: timeZone
+        )
+        return "As of \(stamp)"
+    }
+}
+
 public enum ChartScrubLabel {
     public static func caption(
         for date: Date,
