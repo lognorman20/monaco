@@ -36,7 +36,7 @@ struct SkeletonBlock: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .fill(MonacoTheme.surfaceSunken)
+            .fill(MonacoTheme.fillQuiet)
             .frame(width: width, height: height)
             .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
             .modifier(SkeletonPulse(active: true))

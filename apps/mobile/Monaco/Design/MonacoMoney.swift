@@ -2,12 +2,20 @@ import MonacoCore
 import SwiftUI
 
 /// Size role for every figure that renders `$`, `%` or a share count.
+///
+/// A money figure **never counts up**. It appears at its value; only `.contentTransition`'s
+/// `.numericText(value:)` interpolates, and only over digits it was actually given. A figure
+/// animating from a wrong value to a right one is a lie about money.
 enum MoneyStyle {
+    /// The three screens where the figure *is* the screen: `MonacoAmountEntry`, Deposit,
+    /// Withdraw. Takes the same `accessibility2` cap as `hero`.
+    case mega
     case hero, large, row, caption
 
     /// Design size at the default text size.
     var baseSize: CGFloat {
         switch self {
+        case .mega: return 56
         case .hero: return 44
         case .large: return 28
         case .row: return 17
@@ -18,7 +26,7 @@ enum MoneyStyle {
     /// The text style the figure scales with.
     var textStyle: Font.TextStyle {
         switch self {
-        case .hero: return .largeTitle
+        case .mega, .hero: return .largeTitle
         case .large: return .title
         case .row: return .body
         case .caption: return .footnote
@@ -27,7 +35,7 @@ enum MoneyStyle {
 
     var weight: Font.Weight {
         switch self {
-        case .hero, .large, .row: return .semibold
+        case .mega, .hero, .large, .row: return .semibold
         case .caption: return .medium
         }
     }
@@ -35,10 +43,18 @@ enum MoneyStyle {
     /// Hero figures shrink before they wrap; rows keep their size and truncate last.
     var minimumScaleFactor: CGFloat {
         switch self {
+        case .mega: return 0.4
         case .hero: return 0.5
         case .large: return 0.6
         case .row, .caption: return 0.8
         }
+    }
+
+    /// The two figures that *are* their screen stop growing at `accessibility2`. Past that they
+    /// push the rest of the screen off the bottom before it has said anything, and the figure is
+    /// already the largest thing on it.
+    var capsDynamicType: Bool {
+        self == .hero || self == .mega
     }
 }
 
@@ -52,6 +68,7 @@ struct MoneyFont: ViewModifier {
     // `@ScaledMetric` needs its text style and base size as literals in the property wrapper, so
     // there is one per role rather than one driven by `style`. The sizes come from `MoneyStyle`
     // so the two cannot drift; the text styles are asserted against it in `MoneyStyleScalingTests`.
+    @ScaledMetric(relativeTo: .largeTitle) private var mega = MoneyStyle.mega.baseSize
     @ScaledMetric(relativeTo: .largeTitle) private var hero = MoneyStyle.hero.baseSize
     @ScaledMetric(relativeTo: .title) private var large = MoneyStyle.large.baseSize
     @ScaledMetric(relativeTo: .body) private var row = MoneyStyle.row.baseSize
@@ -59,6 +76,7 @@ struct MoneyFont: ViewModifier {
 
     private var size: CGFloat {
         switch style {
+        case .mega: return mega
         case .hero: return hero
         case .large: return large
         case .row: return row
@@ -229,15 +247,15 @@ private struct MoneyFigure: View {
             .minimumScaleFactor(style.minimumScaleFactor)
             .contentTransition(reduceMotion || value == nil ? .identity : .numericText(value: value ?? 0))
             .animation(reduceMotion ? nil : .snappy, value: text)
-            .modifier(HeroTypeCap(isHero: style == .hero))
+            .modifier(HeroTypeCap(isCapped: style.capsDynamicType))
     }
 }
 
 private struct HeroTypeCap: ViewModifier {
-    let isHero: Bool
+    let isCapped: Bool
 
     func body(content: Content) -> some View {
-        if isHero {
+        if isCapped {
             content.dynamicTypeSize(...DynamicTypeSize.accessibility2)
         } else {
             content
@@ -270,7 +288,7 @@ enum PnLTone {
         switch self {
         case .profit: return MonacoTheme.profitWash
         case .loss: return MonacoTheme.lossWash
-        case .flat: return MonacoTheme.surfaceSunken
+        case .flat: return MonacoTheme.fillQuiet
         }
     }
 

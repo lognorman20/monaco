@@ -1,49 +1,104 @@
 import SwiftUI
 import UIKit
 
-/// Shared visual tokens: cool paper, deep ink, one electric-blue brand accent, and vivid money colour.
+/// Shared visual tokens for two worlds in one binary.
 ///
-/// - `background` / `canvas` — warm paper sheet, flat
-/// - `surface` — cards, grouped lists, sheets, tab bar
-/// - `surfaceSunken` — field fill, segmented track, skeleton base, idle chips
-/// - `primaryText` / `ink` — headings, body, primary button fill
-/// - `secondaryText` / `muted` — captions
-/// - `tertiaryText` — timestamps and other quiet real content
-/// - `disabledLabel` — disabled control labels and field placeholders; below AA on purpose
-/// - `border` / `hairline` — 1pt separators
-/// - `profit` / `loss` (+ `profitWash` / `lossWash`) — signed P&L only; green never means anything else
-/// - `warning` — amber, pending and after-hours states
-/// - `CabalTint` — pastel identity fills, only inside marks and the cabal hero
+/// **Ink is where money is held** — calm, exact, at most one saturated fill on screen. **Paper is
+/// where friends argue about stocks** — warm, faced, up to three. Dark means *this is your money*;
+/// light means *these are your people*. Every surface declares its world with `\.monacoWorld`, and
+/// the world decides the palette, the elevation and how loud the surface may be.
+///
+/// Three rules this table exists to keep:
+///
+/// 1. **Green only ever means profit.** A passed proposal is `inkWash`. An active agent is
+///    `brandWash`. An online dot is `brand`. Never green.
+/// 2. **Blue only ever means tap.** `brand` is the interactive accent and nothing else carries
+///    it — which is why a cabal's tint never reaches a button (`controlTint` is for carets).
+/// 3. **A money figure never counts up.** It appears at its value; only `.numericText`
+///    interpolates digits it was actually given.
+///
+/// - Paper surfaces: `bgBase` · `bgRaised` · `bgSunken` (a well) · `fillQuiet` (a control fill)
+/// - Paper foreground: `fgPrimary` · `fgMuted` · `fgSubtle` · `fgDisabled` (below AA on purpose)
+/// - Edges: `line` (1pt separators and card strokes) · `lineStrong` (E2 in dark, pending vote ring)
+/// - `Ink` — the money world; fixed values, identical in both schemes
+/// - Intents, none of them green: `brand` · `warning` · `danger` · `inkWash`
+/// - Money: `profit` / `loss` and their washes — signed P&L only
+/// - `CabalTint` (in `MonacoCabalTint.swift`) — identity fills, only on identity surfaces
 enum MonacoTheme {
-    // MARK: Surfaces
+    // MARK: Paper surfaces
+
+    /// Screen canvas. Flat — no gradient, no texture.
+    static let bgBase = Color.adaptive(light: 0xF4F6FA, dark: 0x080B12)
+
+    /// Every card and grouped list.
+    static let bgRaised = Color.adaptive(light: 0xFFFFFF, dark: 0x131A28)
+
+    /// A *well recessed into* a surface: chart plot areas, inset rows. Darker than the card it
+    /// sits in, in both schemes.
+    ///
+    /// Not the same job as `fillQuiet`, and this is the fix for a verified defect. One token used
+    /// to serve both, and in dark the "sunken" value (`#1B2334`, luminance 0.01683) was *lighter*
+    /// than the card it sat inside (`#121826`, 0.01212) — a well that read as a bump. A control
+    /// should read lighter than its surface in dark; a well should read darker. `bgSunken` is the
+    /// well, `fillQuiet` is the control, and `DesignTokenOrderTests` pins the whole dark ladder
+    /// so the two can never converge back into one token.
+    static let bgSunken = Color.adaptive(light: 0xEDF1F7, dark: 0x0E1420)
+
+    /// An *inert raised control fill*: segmented track, field fill, skeleton base, `StockMark`
+    /// ticker tile, idle chips.
+    ///
+    /// The dark value is the old `surfaceSunken`, unchanged, so the components that depended on
+    /// it are pixel-identical across the split rather than silently flattened into the canvas.
+    static let fillQuiet = Color.adaptive(light: 0xEDF1F7, dark: 0x1B2334)
+
+    /// 1pt separators and card strokes.
+    static let line = Color.adaptive(light: 0xE2E8F1, dark: 0x232C40)
+
+    /// Raised-elevation stroke in dark, and the pending vote ring. Nowhere else.
+    static let lineStrong = Color.adaptive(light: 0xCBD5E4, dark: 0x33405A)
+
+    // MARK: Paper surfaces — existing names
 
     /// Cool very-light gray sheet in light; true rich dark in dark.
-    static let background = Color.adaptive(light: 0xF5F7FA, dark: 0x0A0D14)
+    static let background = bgBase
 
-    static let canvas = background
+    static let canvas = bgBase
 
     /// Kept for source compatibility. The gradient wash is gone; this is the flat canvas.
-    static let canvasWash = canvas
+    static let canvasWash = bgBase
 
     /// Crisp white cards on the cool canvas; raised ink panels in dark.
-    static let surface = Color.adaptive(light: 0xFFFFFF, dark: 0x121826)
+    static let surface = bgRaised
 
     /// Field fill, segmented track, skeleton base, idle chip fill.
-    static let surfaceSunken = Color.adaptive(light: 0xEDF1F7, dark: 0x1B2334)
+    ///
+    /// Aliases `fillQuiet`, **not** `bgSunken`: every existing call site of this token is a
+    /// control fill, so the split leaves them exactly where they were.
+    static let surfaceSunken = fillQuiet
 
-    static let primaryText = Color.adaptive(light: 0x0B1220, dark: 0xF3F6FB)
+    // MARK: Paper foreground
 
-    static let ink = primaryText
+    static let fgPrimary = Color.adaptive(light: 0x0B1220, dark: 0xF3F6FB)
 
-    static let secondaryText = Color.adaptive(light: 0x5B6880, dark: 0x94A2BC)
+    static let fgMuted = Color.adaptive(light: 0x5B6880, dark: 0x94A2BC)
 
-    static let muted = secondaryText
+    static let fgSubtle = Color.adaptive(light: 0x616E86, dark: 0x8290AA)
+
+    static let fgDisabled = Color.adaptive(light: 0x848EA3, dark: 0x69768D)
+
+    static let primaryText = fgPrimary
+
+    static let ink = fgPrimary
+
+    static let secondaryText = fgMuted
+
+    static let muted = fgMuted
 
     /// Timestamps and other real-but-quiet content. Clears AA (4.5:1) on `canvas`, `surface` and
     /// `surfaceSunken` in both schemes — see `MonacoContrastTests`.
     ///
     /// Not for disabled controls or placeholders: see `disabledLabel`.
-    static let tertiaryText = Color.adaptive(light: 0x616E86, dark: 0x8290AA)
+    static let tertiaryText = fgSubtle
 
     /// Disabled control labels and field placeholders.
     ///
@@ -55,11 +110,11 @@ enum MonacoTheme {
     /// Still legible, though — 2.9:1 to 4.2:1 on the three surfaces, against `tertiaryText`'s
     /// 4.5:1 to 6.0:1. `MonacoContrastTests` holds it inside that band from both sides, so it
     /// cannot drift up into looking live or down into being unreadable.
-    static let disabledLabel = Color.adaptive(light: 0x848EA3, dark: 0x69768D)
+    static let disabledLabel = fgDisabled
 
-    static let border = Color.adaptive(light: 0xE3E8F0, dark: 0x232C40)
+    static let border = line
 
-    static let hairline = border
+    static let hairline = line
 
     // MARK: Brand
 
@@ -80,6 +135,88 @@ enum MonacoTheme {
     /// Brand text and glyphs drawn *on* `brandWash`. Plain `brand` is only 3.69:1 there in dark;
     /// this pair clears AA on every surface the wash sits on.
     static let brandOnWash = Color.adaptive(light: 0x1652F0, dark: 0x7FA8FF)
+
+    // MARK: Ink — the money world, dark in both schemes
+
+    /// Ink is dark in light mode and dark in dark mode. That is the point: dark means *this is
+    /// your money*, light means *these are your people*, and a screenshot has to say so without a
+    /// caption. These are therefore fixed `Color(hex:)` values, the same discipline
+    /// `profitOnHero` and the toast glyphs already follow — a scheme-adaptive token borrowed onto
+    /// ink is how a later retune for paper quietly drops contrast here (#309).
+    enum Ink {
+        /// The ink slab / band fill.
+        static let base = Color(hex: 0x0B1220)
+
+        /// A card inside an ink band.
+        static let raised = Color(hex: 0x151D30)
+
+        /// A well inside ink: chart plot area, segmented track on ink.
+        static let sunken = Color(hex: 0x070C16)
+
+        /// Divider inside ink.
+        static let line = Color.white.opacity(0.10)
+
+        /// Edge of a raised card on ink.
+        static let lineStrong = Color.white.opacity(0.18)
+
+        /// Figures and titles.
+        static let fgPrimary = Color.white
+
+        /// Captions.
+        static let fgMuted = Color.white.opacity(0.62)
+
+        /// Timestamps and eyebrows on ink. 0.48, not 0.45: at 0.45 this measures 4.41:1 on
+        /// `Ink.raised` and fails AA.
+        static let fgSubtle = Color.white.opacity(0.48)
+
+        /// The interactive accent on ink. Brand blue is too dark on `#0B1220` (2.3:1); this pair
+        /// clears 7:1 on every ink surface.
+        static let accent = Color(hex: 0x7FA8FF)
+
+        /// The top-left radial highlight on an ink surface. `UnitPoint(0.08, -0.05)`, radius 340.
+        static let highlight = Color(hex: 0x2A3A5C, alpha: 0.55)
+
+        /// Full-bleed band edge: the 1pt rule at the top and bottom of an ink band.
+        static let edge = Color.white.opacity(0.06)
+    }
+
+    // MARK: The intent ramp — three intents, none of them green
+
+    /// Amber wash under `warningOnWash` text: pending, closing soon, after hours.
+    static let warningWash = Color.adaptive(light: 0x9A5B13, lightAlpha: 0.12, dark: 0xE0A458, darkAlpha: 0.16)
+
+    /// Amber text drawn *on* `warningWash`.
+    static let warningOnWash = Color.adaptive(light: 0x7A4408, dark: 0xE8BE84)
+
+    /// Amber on an ink surface, and its wash.
+    static let warningOnInk = Color(hex: 0xE8BE84)
+
+    static let warningWashOnInk = Color(hex: 0xE0A458, alpha: 0.18)
+
+    /// "This went wrong with your money": a failed transfer, a destructive confirmation.
+    ///
+    /// `danger` bold is `loss`. That overlap is the one deliberate collision between the intent
+    /// ramp and the money ramp — a failed transfer and a losing position are the same news — and
+    /// it is the only one, which is what keeps green meaning profit and nothing else.
+    static let danger = loss
+
+    static let dangerWash = lossWash
+
+    static let dangerOnWash = lossOnWash
+
+    /// The neutral intent. A *passed* proposal is this, never green: green is profit.
+    static let inkWash = Color.adaptive(light: 0x0B1220, lightAlpha: 0.08, dark: 0xFFFFFF, darkAlpha: 0.10)
+
+    /// Brand wash on an ink surface, for `Ink.accent` text and an active-agent chip.
+    static let brandWashOnInk = Color(hex: 0x3B7BFF, alpha: 0.20)
+
+    /// Carets, spinners, pickers, sliders and every other UIKit-backed control tint.
+    ///
+    /// Deliberately **not** `brand`. Blue means tap, and a caret is not a tap target; the two
+    /// root `.tint(MonacoTheme.ink)` overrides that hid brand blue from the tab bar go away with
+    /// Chunk B, and this is what the controls beneath them repoint to instead of inheriting the
+    /// accent by accident.
+    static let controlTint = fgPrimary
 
     // MARK: Dark "money" hero cards (premium even in light mode)
 
@@ -207,92 +344,14 @@ enum MonacoTheme {
         return muted
     }
 
-    /// Saturated identity tints. Picked from the group id, never from the name, so a rename keeps the colour.
-    /// `soft` is the low-alpha wash for tinted areas that still hold ink text. No purple, and
-    /// nothing close to brand blue or profit green.
+    /// One voice: SF Pro. Display type uses the *width* axis (`.expanded`) via
+    /// `.displayFont(_:)`; money and UI type use standard width.
     ///
-    /// White initials on `fill` clear the 3:1 large-text minimum, not the 4.5:1 body minimum — in
-    /// dark the lighter fills sit at 3.5:1. That is the right bar for what draws there (bold tile
-    /// initials at 15pt and up), but it does mean `fill` must not be used behind small white text.
-    enum CabalTint: CaseIterable {
-        case sage, peach, butter, clay, sky
-
-        /// Mark tile, accent stripe, chart key.
-        var fill: Color {
-            switch self {
-            case .sage: return Color.adaptive(light: 0x0D7D74, dark: 0x10938A)
-            case .peach: return Color.adaptive(light: 0xC2570C, dark: 0xD9681A)
-            case .butter: return Color.adaptive(light: 0xA16207, dark: 0xBC7A10)
-            case .clay: return Color.adaptive(light: 0xBE3455, dark: 0xD44467)
-            case .sky: return Color.adaptive(light: 0x17627D, dark: 0x1E7A99)
-            }
-        }
-
-        /// Initials and glyphs drawn on `fill`.
-        var onFill: Color { .white }
-
-        /// Low-alpha wash of `fill` for tinted surfaces that still carry ink text.
-        var soft: Color { fill.opacity(0.12) }
-
-        /// Brighter than `fill` so the tint still reads as a mark or stripe on a deep ink hero card.
-        var onInk: Color {
-            switch self {
-            case .sage: return Color(hex: 0x2CC3B4)
-            case .peach: return Color(hex: 0xFF9248)
-            case .butter: return Color(hex: 0xEBB13C)
-            case .clay: return Color(hex: 0xFF6C8B)
-            case .sky: return Color(hex: 0x46B3DB)
-            }
-        }
-
-        /// Chart line colour for this cabal.
-        var stroke: Color {
-            switch self {
-            case .sage: return Color.adaptive(light: 0x0D7D74, dark: 0x2CC3B4)
-            case .peach: return Color.adaptive(light: 0xC2570C, dark: 0xFF9248)
-            case .butter: return Color.adaptive(light: 0xA16207, dark: 0xEBB13C)
-            case .clay: return Color.adaptive(light: 0xBE3455, dark: 0xFF6C8B)
-            case .sky: return Color.adaptive(light: 0x17627D, dark: 0x46B3DB)
-            }
-        }
-
-        /// The one tint function for a cabal. Every surface (rows, strip cards, hero, chat header, profile)
-        /// passes the cabal's `groupId`, never its name, so a cabal is the same colour everywhere.
-        /// Stable across launches: FNV-1a 64 over the UTF-8 bytes of the trimmed, lowercased id, mod 5
-        /// (lowercased because Swift's `UUID.uuidString` is uppercase while the API sends lowercase).
-        /// Never `String.hashValue`, which is randomised per launch.
-        static func forGroupId(_ groupId: String) -> CabalTint {
-            let all = CabalTint.allCases
-            let key = groupId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            return all[Int(fnv1a64(key) % UInt64(all.count))]
-        }
-
-        /// Background fill for a cabal: `CabalTint.forGroupId(groupId).fill`.
-        static func fill(forGroupId groupId: String) -> Color {
-            forGroupId(groupId).fill
-        }
-
-        /// Low-alpha wash for a cabal: `CabalTint.forGroupId(groupId).soft`.
-        static func soft(forGroupId groupId: String) -> Color {
-            forGroupId(groupId).soft
-        }
-
-        /// Chart line colour for a cabal: `CabalTint.forGroupId(groupId).stroke`.
-        static func stroke(forGroupId groupId: String) -> Color {
-            forGroupId(groupId).stroke
-        }
-
-        static func fnv1a64(_ string: String) -> UInt64 {
-            var hash: UInt64 = 0xCBF2_9CE4_8422_2325
-            for byte in string.utf8 {
-                hash ^= UInt64(byte)
-                hash = hash &* 0x0000_0100_0000_01B3
-            }
-            return hash
-        }
-    }
-
-    /// Two voices: Avenir Next for display and section titles, SF Pro (tabular digits) for everything else.
+    /// Avenir Next is gone. It is system-bundled, it reads as picked-from-a-list, and it was the
+    /// loudest templated signal left in the app. SF Pro's width axis takes most of the display
+    /// gain for zero bundle, zero licence risk, free Dynamic Type, and — unlike a bundled face —
+    /// no silent-fallback failure mode where a bad `Info.plist` ships an app that looks subtly
+    /// wrong and reports nothing.
     enum Typo {
         /// Prefer `.moneyFont(_:)`. These statics pre-scale with `UIFontMetrics`, so they ignore a
         /// `.dynamicTypeSize` cap on the view tree and do not re-render when the text size changes.
@@ -300,9 +359,20 @@ enum MonacoTheme {
         static var moneyLarge: Font { money(size: 28, weight: .semibold, relativeTo: .title1) }
         static var moneyRow: Font { money(size: 17, weight: .semibold, relativeTo: .body) }
         static var moneyCaption: Font { money(size: 13, weight: .medium, relativeTo: .footnote) }
-        static let display = Font.custom("AvenirNext-Bold", size: 30, relativeTo: .largeTitle)
-        static let title = Font.custom("AvenirNext-DemiBold", size: 22, relativeTo: .title2)
-        static let section = Font.custom("AvenirNext-DemiBold", size: 19, relativeTo: .title3)
+        /// Use `.displayFont(.display)`. This static pre-scales with `UIFontMetrics`, so it
+        /// ignores a `.dynamicTypeSize` cap and does not re-render when the text size changes;
+        /// the modifier scales inside the view tree, the way `.moneyFont(_:)` already does.
+        @available(*, deprecated, message: "Use .displayFont(.display)")
+        static var display: Font { DisplayRole.display.preScaledFont }
+
+        /// Use `.displayFont(.title)`.
+        @available(*, deprecated, message: "Use .displayFont(.title)")
+        static var title: Font { DisplayRole.title.preScaledFont }
+
+        /// Use `.displayFont(.section)`.
+        @available(*, deprecated, message: "Use .displayFont(.section)")
+        static var section: Font { DisplayRole.section.preScaledFont }
+
         static let rowTitle = Font.system(.body, weight: .semibold)
         static let body = Font.system(.body)
         static let callout = Font.system(.callout)
@@ -317,12 +387,27 @@ enum MonacoTheme {
         }
     }
 
+    /// Two steps, not eight. The old ladder (20/24/28/28/28/16/14/20) meant nothing on screen
+    /// read as more important than anything else. `container` is everything that holds content;
+    /// `object` is the handful of things that *are* the screen.
+    ///
+    /// Chips and pills are `Capsule()`, never a radius approximation. All shapes `.continuous`.
     enum Radius {
+        /// Cards, grouped lists, strip cards, proposal cards, rows.
+        static let container: CGFloat = 20
+
+        /// Ink slabs and bands, sheets, hero, bottom bars.
+        static let object: CGFloat = 28
+
+        /// Scheduled for deletion: use `container`.
         static let chip: CGFloat = 20
+
+        /// Scheduled for deletion: use `container`.
         static let card: CGFloat = 24
-        static let sheet: CGFloat = 28
-        static let pill: CGFloat = 28
-        static let hero: CGFloat = 28
+
+        static let sheet: CGFloat = object
+        static let pill: CGFloat = object
+        static let hero: CGFloat = object
         /// `CabalMark` / `StockMark` at 44pt; marks scale this proportionally.
         static let tile: CGFloat = 16
         static let field: CGFloat = 14
@@ -336,14 +421,28 @@ enum MonacoTheme {
         static let m: CGFloat = 16
         static let l: CGFloat = 24
         static let xl: CGFloat = 32
-        /// Screen side padding.
+        /// Screen side padding. Every screen root, no exceptions.
         static let gutter: CGFloat = 20
+
+        /// Between two top-level sections.
+        static let section: CGFloat = 28
+
+        /// A section header to its own content.
+        static let headerToContent: CGFloat = 12
+
+        /// Clearance above and below a full-bleed ink band.
+        static let band: CGFloat = 40
     }
 
-    /// Existing call sites. New code uses `Typo`.
+    /// Scheduled for deletion once its five remaining call sites migrate to `.displayFont(_:)`.
+    /// Repointed at SF Pro Expanded here so no surface is still rendering Avenir Next while they do.
     enum TypeRole {
-        static let display = Font.custom("AvenirNext-Bold", size: 28)
-        static let title = Font.custom("AvenirNext-DemiBold", size: 20)
+        @available(*, deprecated, message: "Use .displayFont(.display)")
+        static var display: Font { Font.system(size: 28, weight: .bold).width(.expanded) }
+
+        @available(*, deprecated, message: "Use .displayFont(.title)")
+        static var title: Font { Font.system(size: 20, weight: .bold).width(.expanded) }
+
         static let body = Font.system(.body)
         static let caption = Font.system(.footnote)
     }

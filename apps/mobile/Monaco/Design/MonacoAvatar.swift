@@ -1,12 +1,20 @@
 import MonacoCore
 import SwiftUI
 
-/// Circular profile photo with an initials placeholder. Used on Profile
-/// and board rows.
+/// Circular profile photo with an initials placeholder. Used on Profile, board rows, chat runs,
+/// feed rows and — with a ring — the vote tally.
 struct MonacoAvatar: View {
     let photoURL: String?
     let displayName: String
     var size: CGFloat = 44
+
+    /// The ring drawn around the avatar. `nil` keeps the default 1pt hairline.
+    ///
+    /// `MonacoVoteFace` passes a 2pt `brand` or `loss` ring, because on a screen deciding whether
+    /// real money gets spent the face has to say *how* someone voted, not just that they did.
+    var ring: Color?
+
+    var ringWidth: CGFloat = 1
 
     private var resolvedURL: URL? {
         let trimmed = photoURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -16,6 +24,8 @@ struct MonacoAvatar: View {
 
     @State private var loadedImage: UIImage?
     @State private var didFail = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
@@ -31,7 +41,10 @@ struct MonacoAvatar: View {
                     placeholder.overlay {
                         ProgressView()
                             .controlSize(size >= 64 ? .regular : .mini)
-                            .tint(MonacoTheme.muted)
+                            // A placeholder spinner, not an accent: deliberately quiet, and
+                            // deliberately not `controlTint`, which would make a loading avatar
+                            // louder than a loaded one.
+                            .tint(MonacoTheme.fgMuted)
                     }
                 }
             } else {
@@ -41,7 +54,7 @@ struct MonacoAvatar: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .overlay {
-            Circle().strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+            Circle().strokeBorder(ring ?? MonacoTheme.line, lineWidth: ring == nil ? 1 : ringWidth)
         }
         .accessibilityHidden(true)
         .task(id: resolvedURL) {
@@ -60,7 +73,7 @@ struct MonacoAvatar: View {
         }
         let image = await store.image(for: resolvedURL)
         guard !Task.isCancelled else { return }
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(MonacoMotion.glide.reduced(reduceMotion)) {
             loadedImage = image
             didFail = image == nil
         }
@@ -69,14 +82,14 @@ struct MonacoAvatar: View {
     private var placeholder: some View {
         let initials = AvatarInitials.from(displayName)
         return ZStack {
-            Circle().fill(MonacoTheme.canvasWash)
+            Circle().fill(MonacoTheme.fillQuiet)
             if initials.isEmpty {
                 Image(systemName: "person.fill")
                     .font(.system(size: size * 0.42, weight: .semibold))
                     .foregroundStyle(MonacoTheme.accent)
             } else {
                 Text(initials)
-                    .font(.custom("AvenirNext-DemiBold", size: size * 0.38))
+                    .font(.system(size: size * 0.38, weight: .bold))
                     .foregroundStyle(MonacoTheme.accent)
                     .minimumScaleFactor(0.5)
                     .lineLimit(1)
