@@ -57,7 +57,11 @@ public enum ProposalFeedCopy {
     /// for agent governance proposals.
     public static func title(for proposal: ProposalDTO) -> String {
         if proposal.isTrade {
-            return AssetDisplayNames.name(forSymbol: proposal.symbol) ?? AssetSymbolFormatter.display(proposal.symbol)
+            return AssetCatalogDisplayName.format(
+                catalogName: "",
+                symbol: proposal.symbol,
+                kind: proposal.resolvedAssetKind
+            )
         }
         let name = proposal.agentDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return name.isEmpty ? agentTitle : name
@@ -69,7 +73,13 @@ public enum ProposalFeedCopy {
         let symbol = AssetSymbolFormatter.format(proposal.symbol)
         switch proposal.resolvedKind {
         case "sell":
-            return sellHeadline(symbol: symbol, shares: ProposalShareFormatter.shares(fromAtomics: proposal.tokenAmount ?? "0"))
+            return sellHeadline(
+                symbol: symbol,
+                shares: ProposalShareFormatter.shares(
+                    fromAtomics: proposal.tokenAmount ?? "0",
+                    decimals: proposal.resolvedTokenDecimals
+                )
+            )
         case "add_agent":
             let name = proposal.agentDisplayName ?? proposal.symbol
             let budget = ProposalAmountFormatter.dollars(fromMicros: proposal.allocationUsdcMicros ?? "0")

@@ -68,10 +68,12 @@ struct StockMark: View {
     private let content: Content
     private let size: CGFloat
 
-    init(symbol: String, size: CGFloat = 44) {
-        let ticker = AssetSymbolFormatter.display(symbol)
+    init(symbol: String, displayName: String? = nil, assetKind: AssetKind = .stock, size: CGFloat = 44) {
+        let ticker = AssetSymbolFormatter.display(symbol, kind: assetKind)
         if ticker.uppercased() == "USDC" {
             content = .symbol("dollarsign")
+        } else if assetKind == .preIpo, let displayName, let first = displayName.first {
+            content = .letter(String(first).uppercased())
         } else {
             content = .letter(ticker.first.map { String($0).uppercased() } ?? "")
         }

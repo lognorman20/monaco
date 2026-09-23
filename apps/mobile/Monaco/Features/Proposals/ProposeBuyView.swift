@@ -265,12 +265,17 @@ struct ProposeStockRow: View {
             chevron: true,
             isLast: isLast
         ) {
-            StockMark(symbol: stock.symbol)
+            StockMark(symbol: stock.symbol, displayName: stock.name, assetKind: stock.assetKind)
         } trailing: {
-            if let micros = stock.priceMicros {
-                MoneyText(micros: micros, style: .row)
-                if let change = stock.change24h, !change.isEmpty {
-                    PercentText(percentReturn: change, style: .caption)
+            VStack(alignment: .trailing, spacing: 4) {
+                if stock.assetKind == .preIpo {
+                    MonacoChip(title: PreIpoCopy.chipLabel, isSelected: false)
+                }
+                if let micros = stock.priceMicros {
+                    MoneyText(micros: micros, style: .row)
+                    if let change = stock.change24h, !change.isEmpty {
+                        PercentText(percentReturn: change, style: .caption)
+                    }
                 }
             }
         }

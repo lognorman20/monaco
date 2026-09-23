@@ -259,18 +259,25 @@ enum GroupActivityRules {
             if let proceeds = item.proceedsUsdcMicros, let micros = Int64(proceeds), micros > 0 {
                 return UsdAmountFormatter.format(micros: micros)
             }
-            if let tokenAmount = item.tokenAmount, let atomics = Double(tokenAmount) {
-                return sharesLabel(atomics / 100_000_000.0)
+            if let tokenAmount = item.tokenAmount {
+                return TokenQuantityFormatter.label(
+                    fromAtomics: tokenAmount,
+                    decimals: item.resolvedTokenDecimals,
+                    kind: item.resolvedAssetKind
+                )
             }
             return "—"
         }
         return UsdAmountFormatter.format(micros: item.amountMicros)
     }
 
-    static func sharesLabel(_ shares: Double) -> String {
+    static func sharesLabel(_ shares: Double, kind: AssetKind = .stock) -> String {
         let trimmed = String(format: "%.4f", shares)
             .replacingOccurrences(of: "0+$", with: "", options: .regularExpression)
             .replacingOccurrences(of: "\\.$", with: "", options: .regularExpression)
+        if kind == .preIpo {
+            return trimmed == "1" ? "1 \(PreIpoCopy.tokenLabelSingular)" : "\(trimmed) \(PreIpoCopy.tokenLabelPlural)"
+        }
         return trimmed == "1" ? "1 share" : "\(trimmed) shares"
     }
 

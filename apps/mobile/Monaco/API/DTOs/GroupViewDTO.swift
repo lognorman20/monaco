@@ -9,8 +9,13 @@ struct PotRowDTO: Codable, Equatable, Identifiable {
     let dollarPnl: String
     let afterHours: Bool?
     let tokenAmount: String?
+    let assetKind: AssetKind?
+    let tokenDecimals: Int?
+    let premiumBps: Int?
 
     var id: String { symbol }
+    var resolvedAssetKind: AssetKind { assetKind ?? .stock }
+    var resolvedTokenDecimals: Int { tokenDecimals ?? AssetCatalogDefaults.decimals }
 }
 
 struct MemberSliceDTO: Codable, Equatable {

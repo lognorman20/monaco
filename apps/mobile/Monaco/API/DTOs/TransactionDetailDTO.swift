@@ -1,4 +1,5 @@
 import Foundation
+import MonacoCore
 
 struct TransactionDetailDTO: Codable, Equatable {
     let transactionId: String
@@ -19,4 +20,9 @@ struct TransactionDetailDTO: Codable, Equatable {
     let confirmedAt: String?
     let failureReason: String?
     let proceedsUsdcMicros: Int64?
+    let assetKind: AssetKind?
+    let tokenDecimals: Int?
+
+    var resolvedAssetKind: AssetKind { assetKind ?? .stock }
+    var resolvedTokenDecimals: Int { tokenDecimals ?? AssetCatalogDefaults.decimals }
 }

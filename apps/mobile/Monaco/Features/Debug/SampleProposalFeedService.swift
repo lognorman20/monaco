@@ -263,6 +263,19 @@ final class SampleProposeService: ProposeService {
         return (Array(matches.dropFirst(offset).prefix(limit)), false)
     }
 
+    func assetDetail(symbol: String) async throws -> AssetDetailDTO {
+        let stock = catalog.first { $0.symbol == symbol }
+        return AssetDetailDTO(
+            symbol: symbol,
+            name: stock?.name ?? symbol,
+            solanaMint: "",
+            routable: stock?.isTradable ?? true,
+            priceUsdcMicros: stock?.priceMicros,
+            change24h: stock?.change24h,
+            liquidity: AssetLiquidityDTO(label: "Via Jupiter", routable: true, buyProbeUsdcMicros: 25_000_000)
+        )
+    }
+
     func priceMicros(symbol: String) async throws -> Int64? {
         catalog.first { $0.symbol == symbol }?.priceMicros
     }

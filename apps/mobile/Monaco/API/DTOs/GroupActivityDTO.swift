@@ -1,4 +1,5 @@
 import Foundation
+import MonacoCore
 
 struct GroupActivityItemDTO: Codable, Equatable, Identifiable {
     let id: String
@@ -12,6 +13,11 @@ struct GroupActivityItemDTO: Codable, Equatable, Identifiable {
     let proceedsUsdcMicros: String?
     let initiatedBy: String?
     let agentDisplayName: String?
+    let assetKind: AssetKind?
+    let tokenDecimals: Int?
+
+    var resolvedAssetKind: AssetKind { assetKind ?? .stock }
+    var resolvedTokenDecimals: Int { tokenDecimals ?? AssetCatalogDefaults.decimals }
 }
 
 struct GroupActivityResponse: Codable, Equatable {

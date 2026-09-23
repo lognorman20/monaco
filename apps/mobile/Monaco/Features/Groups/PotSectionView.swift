@@ -59,17 +59,18 @@ struct PotSectionView: View {
     }
 
     private func stockRow(_ row: PotRowDTO, isLast: Bool) -> some View {
+        let displayName = AssetCatalogDisplayName.format(catalogName: "", symbol: row.symbol, kind: row.resolvedAssetKind)
         MonacoRow(
-            title: AssetDisplayNames.name(forSymbol: row.symbol) ?? AssetSymbolFormatter.display(row.symbol),
-            subtitle: "\(sharesLabel(row)) · \(UsdAmountFormatter.format(decimalString: row.markUsd))",
+            title: displayName,
+            subtitle: "\(quantityLabel(row)) · \(UsdAmountFormatter.format(decimalString: row.markUsd))",
             isLast: isLast
         ) {
-            StockMark(symbol: AssetSymbolFormatter.display(row.symbol))
+            StockMark(symbol: row.symbol, displayName: displayName, assetKind: row.resolvedAssetKind)
         } trailing: {
             MoneyText(decimalString: row.valueUsd, style: .row)
             PnLText(dollarPnl: row.dollarPnl, style: .caption)
                 .accessibilityIdentifier("pot-row-pnl-\(row.symbol)")
-            if row.afterHours == true {
+            if row.afterHours == true, row.resolvedAssetKind != .preIpo {
                 Text("After hours")
                     .font(MonacoTheme.Typo.micro)
                     .foregroundStyle(MonacoTheme.warning)
@@ -79,12 +80,16 @@ struct PotSectionView: View {
         .accessibilityIdentifier("pot-row-\(row.symbol)")
     }
 
-    /// Shares from the raw token amount when present; the decimal `units` string otherwise.
-    private func sharesLabel(_ row: PotRowDTO) -> String {
+    private func quantityLabel(_ row: PotRowDTO) -> String {
         if let atomics = row.tokenAmount, !atomics.isEmpty {
-            return ProposalShareFormatter.sharesLabel(fromAtomics: atomics)
+            return ProposalShareFormatter.sharesLabel(
+                fromAtomics: atomics,
+                decimals: row.resolvedTokenDecimals,
+                kind: row.resolvedAssetKind
+            )
         }
-        return "\(row.units) shares"
+        let unit = row.resolvedAssetKind == .preIpo ? PreIpoCopy.tokenLabelPlural : "shares"
+        return "\(row.units) \(unit)"
     }
 
     static func isCash(_ row: PotRowDTO) -> Bool {
