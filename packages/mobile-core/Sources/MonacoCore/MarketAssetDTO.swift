@@ -149,6 +149,49 @@ public struct AssetLiquidityDTO: Codable, Equatable, Sendable {
         self.sellProbeOutAmount = sellProbeOutAmount
         self.spreadBps = spreadBps
     }
+
+    /// True when the sell probe came back with an amount a member would actually
+    /// receive — a *positive* payout, not merely a field that is present.
+    ///
+    /// The backend fills `sellProbeOutAmount` whenever the router answered
+    /// `Routable` with a non-nil amount out, so a route that prices a whole token at
+    /// nothing still ships as the string "0". Its own pricing step then rejects that
+    /// (`microsPerToken` requires `outAmount.Sign() > 0`) and the token leg comes back
+    /// unavailable, so anything that reads a non-empty string as "you can sell this"
+    /// disagrees with the price the same response carries.
+    ///
+    /// Parsed the way the backend writes it: a base-10 integer of atomic units, from a
+    /// `big.Int`, so it is matched digit-wise rather than through a fixed-width integer
+    /// that would overflow to nil on a large amount and read as "no route".
+    public var sellRoutePaysOut: Bool {
+        Self.isPositiveAtomicAmount(sellProbeOutAmount)
+    }
+
+    /// True when the buy probe would hand back a positive number of tokens, on the
+    /// same terms as `sellRoutePaysOut`.
+    public var buyRoutePaysOut: Bool {
+        Self.isPositiveAtomicAmount(buyProbeOutAmount)
+    }
+
+    /// A route a member can get in *and* out of. A buy with no sell is half a market.
+    ///
+    /// `routable` is the buy side's own verdict — the backend only sets it when the buy
+    /// probe returned a route with an amount out — so the sell side is what this adds.
+    public var routesBothWays: Bool {
+        routable && sellRoutePaysOut
+    }
+
+    /// `big.Int.Sign() > 0` over the wire format: optional `+`, then digits, at least
+    /// one of them non-zero. A negative amount, a decimal point, or any other text is
+    /// not something this app should price, so it is false rather than salvaged.
+    static func isPositiveAtomicAmount(_ raw: String?) -> Bool {
+        guard var text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+            return false
+        }
+        if text.hasPrefix("+") { text.removeFirst() }
+        guard !text.isEmpty, text.allSatisfy({ $0.isASCII && $0.isNumber }) else { return false }
+        return text.contains(where: { $0 != "0" })
+    }
 }
 
 /// Which instrument a figure is about.
