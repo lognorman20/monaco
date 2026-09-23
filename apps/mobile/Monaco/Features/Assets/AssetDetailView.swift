@@ -278,7 +278,11 @@ struct AssetDetailView: View {
     private func companyValueCaption(_ detail: AssetDetailDTO) -> String? {
         guard let valuation = detail.referenceValuationUsd else { return nil }
         let value = UsdAmountFormatter.compact(decimalString: String(valuation))
-        guard let updated = detail.referenceUpdatedAt, let age = RelativeTimeFormatter.label(iso: updated), !age.isEmpty else {
+        guard let updated = detail.referenceUpdatedAt else {
+            return "\(PreIpoCopy.companyValueCaption) \(value)"
+        }
+        let age = RelativeTimeFormatter.label(iso: updated)
+        guard !age.isEmpty else {
             return "\(PreIpoCopy.companyValueCaption) \(value)"
         }
         return "\(PreIpoCopy.companyValueCaption) \(value) · updated \(age) ago"

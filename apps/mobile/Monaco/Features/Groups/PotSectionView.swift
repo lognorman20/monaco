@@ -60,7 +60,7 @@ struct PotSectionView: View {
 
     private func stockRow(_ row: PotRowDTO, isLast: Bool) -> some View {
         let displayName = AssetCatalogDisplayName.format(catalogName: "", symbol: row.symbol, kind: row.resolvedAssetKind)
-        MonacoRow(
+        return MonacoRow(
             title: displayName,
             subtitle: "\(quantityLabel(row)) · \(UsdAmountFormatter.format(decimalString: row.markUsd))",
             isLast: isLast

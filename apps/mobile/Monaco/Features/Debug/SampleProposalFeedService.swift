@@ -285,8 +285,12 @@ final class SampleProposeService: ProposeService {
         let price = catalog.first { $0.symbol == symbol }?.priceMicros ?? 100_000_000
         let atomics = Int64((Double(usdcMicros) / Double(price)) * 100_000_000)
         return BuyQuoteDTO(
-            symbol: symbol, kind: "buy", usdcMicros: String(usdcMicros), tokenAmount: nil,
-            routable: true, outputAmount: String(atomics), outputUsdcMicros: nil, priceUsdcMicros: String(price)
+            symbol: symbol,
+            routable: true,
+            kind: "buy",
+            usdcMicros: String(usdcMicros),
+            outputAmount: String(atomics),
+            priceUsdcMicros: String(price)
         )
     }
 
@@ -295,8 +299,12 @@ final class SampleProposeService: ProposeService {
         let mark = Self.groupView.pot.first { $0.symbol == symbol }.flatMap { Double($0.markUsd) } ?? 1
         let usdc = Int64(Double(tokenAmount) / 100_000_000 * mark * 1_000_000)
         return BuyQuoteDTO(
-            symbol: symbol, kind: "sell", usdcMicros: nil, tokenAmount: String(tokenAmount),
-            routable: usdc >= 1_000_000, outputAmount: String(usdc), outputUsdcMicros: String(usdc), priceUsdcMicros: nil
+            symbol: symbol,
+            routable: usdc >= 1_000_000,
+            kind: "sell",
+            tokenAmount: String(tokenAmount),
+            outputAmount: String(usdc),
+            outputUsdcMicros: String(usdc)
         )
     }
 
