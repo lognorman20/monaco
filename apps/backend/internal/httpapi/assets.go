@@ -102,13 +102,20 @@ type marketAssetResponse struct {
 	Change24hBasisSymbol string `json:"change24hBasisSymbol,omitempty"`
 }
 
-// dayChangeFields is change24h with the basis section 4.3 of the port requires on
-// every Pyth-derived figure. Nil in, empty out: no basis without a figure.
-func dayChangeFields(symbol string, change *string) (*string, string, string) {
-	if change == nil {
+// dayMove is change24h with the instrument it is about. Both travel together or
+// neither ships: a ratio beside a per-token price means nothing until the reader
+// knows which of the two moved.
+type dayMove struct {
+	ratio       *string
+	basis       string
+	basisSymbol string
+}
+
+func (d dayMove) fields() (*string, string, string) {
+	if d.ratio == nil || d.basis == "" || d.basisSymbol == "" {
 		return nil, "", ""
 	}
-	return change, pyth.PriceBasisUnderlying, pyth.UnderlyingTicker(symbol)
+	return d.ratio, d.basis, d.basisSymbol
 }
 
 type listAssetsResponse struct {
@@ -417,6 +424,8 @@ func (h *AssetsHandlers) GetAssetChartHandler(w http.ResponseWriter, r *http.Req
 		"range", chartRange,
 		"point_count", len(resp.Points),
 		"source", series.Source,
+		"basis", series.Basis,
+		"empty_reason", resp.EmptyReason,
 	)
 }
 
@@ -468,7 +477,7 @@ func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []b20.Asset) [
 
 	var (
 		prices  map[string]assetPriceSnapshot
-		changes map[string]*string
+		changes map[string]dayMove
 		wg      sync.WaitGroup
 	)
 	wg.Add(2)
@@ -485,7 +494,7 @@ func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []b20.Asset) [
 	out := make([]marketAssetResponse, 0, len(assets))
 	for _, asset := range assets {
 		resp := marketAssetResponseFor(asset, prices)
-		resp.Change24h, resp.Change24hBasis, resp.Change24hBasisSymbol = dayChangeFields(asset.Symbol, changes[asset.Symbol])
+		resp.Change24h, resp.Change24hBasis, resp.Change24hBasisSymbol = changes[asset.Symbol].fields()
 		out = append(out, resp)
 	}
 	return out
@@ -530,12 +539,50 @@ func (h *AssetsHandlers) fetchPrices(ctx context.Context, assets []b20.Asset) ma
 	return out
 }
 
-// dayChanges reads each asset's 1D Pyth series and keeps the ones with an honest
-// day change. An asset whose series is late, empty or not the underlying simply
-// has no change on the wire.
-func (h *AssetsHandlers) dayChanges(ctx context.Context, assets []b20.Asset) map[string]*string {
-	out := make(map[string]*string, len(assets))
-	if h.Charts == nil || len(assets) == 0 {
+// dayChange is one symbol's day move, Pyth first.
+//
+// Pyth is the underlying equity, which is what "AAPL is up 1.2% today" means, so
+// it wins whenever it can answer. When it cannot — and on a crypto-only key it
+// cannot answer for any equity — the token's own Chainlink series gives a real
+// move of the thing the user actually holds, labelled as the token's. What it
+// never does is mix the two: both ends of every ratio come from one series.
+func (h *AssetsHandlers) dayChange(ctx context.Context, symbol string) dayMove {
+	if h.Charts != nil {
+		if change := h.Charts.DayChange(ctx, symbol); change != nil {
+			return dayMove{ratio: change, basis: pyth.PriceBasisUnderlying, basisSymbol: pyth.UnderlyingTicker(symbol)}
+		}
+	}
+	if h.Pyth == nil {
+		return dayMove{}
+	}
+	series, err := h.Pyth.ChartSeries(ctx, symbol, pyth.ChartRange1D)
+	if err != nil {
+		return dayMove{}
+	}
+	return dayMoveFrom(symbol, series)
+}
+
+// dayMoveFrom labels a series' own day move. A series that does not name its
+// instrument cannot ship a change: the basis is not decoration.
+func dayMoveFrom(symbol string, series pyth.AssetChartSeries) dayMove {
+	ratio, basis, basisSymbol := pyth.DayChangeFields(series)
+	if ratio == nil || basis == "" {
+		return dayMove{}
+	}
+	if basisSymbol == "" {
+		basisSymbol = symbol
+		if basis == pyth.PriceBasisUnderlying {
+			basisSymbol = pyth.UnderlyingTicker(symbol)
+		}
+	}
+	return dayMove{ratio: ratio, basis: basis, basisSymbol: basisSymbol}
+}
+
+// dayChanges reads each asset's day move. An asset whose sources are all late or
+// empty simply has no change on the wire.
+func (h *AssetsHandlers) dayChanges(ctx context.Context, assets []b20.Asset) map[string]dayMove {
+	out := make(map[string]dayMove, len(assets))
+	if len(assets) == 0 || (h.Charts == nil && h.Pyth == nil) {
 		return out
 	}
 	var (
@@ -553,8 +600,8 @@ func (h *AssetsHandlers) dayChanges(ctx context.Context, assets []b20.Asset) map
 				return
 			}
 			defer func() { <-sem }()
-			change := h.Charts.DayChange(ctx, symbol)
-			if change == nil {
+			change := h.dayChange(ctx, symbol)
+			if change.ratio == nil {
 				return
 			}
 			mu.Lock()
@@ -625,9 +672,10 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset b20.Asset) 
 		equity    pyth.ReferenceQuote
 		day       pyth.AssetChartSeries
 		year      pyth.AssetChartSeries
+		change    dayMove
 		wg        sync.WaitGroup
 	)
-	wg.Add(5)
+	wg.Add(6)
 	go func() {
 		defer wg.Done()
 		prices = h.fetchPrices(sectionCtx, []b20.Asset{asset})
@@ -648,6 +696,14 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset b20.Asset) 
 		defer wg.Done()
 		year = h.underlyingSeries(sectionCtx, asset.Symbol, pyth.ChartRange1Y)
 	}()
+	go func() {
+		defer wg.Done()
+		// The day move is its own read because the grid's series and the move's
+		// need not come from the same source: the grid is Benchmarks candles of the
+		// equity or nothing, while the move takes whichever source can date a
+		// previous close, and says which one it was.
+		change = h.dayChange(sectionCtx, asset.Symbol)
+	}()
 	wg.Wait()
 
 	var mark *pyth.AssetMark
@@ -655,7 +711,7 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset b20.Asset) 
 		detail.PriceUsdcMicros = &price.PriceUsdcMicros
 		mark = &price.Mark
 	}
-	detail.Change24h, detail.Change24hBasis, detail.Change24hBasisSymbol = dayChangeFields(asset.Symbol, pyth.DayChange(day))
+	detail.Change24h, detail.Change24hBasis, detail.Change24hBasisSymbol = change.fields()
 	detail.Liquidity = liquidity
 	detail.Routable = asset.Routable || strings.TrimSpace(asset.TokenAddress) != "" || liquidity.Routable
 	now := h.now()
