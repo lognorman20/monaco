@@ -24,5 +24,10 @@ typealias AssetChartRange = MonacoCore.AssetChartRange
 typealias MarketStatusDTO = MonacoCore.MarketStatusDTO
 typealias MarketSession = MonacoCore.MarketSession
 
+typealias HeldAssetDTO = MonacoCore.HeldAssetDTO
+typealias HeldAssetCabalDTO = MonacoCore.HeldAssetCabalDTO
+typealias VotableAssetDTO = MonacoCore.VotableAssetDTO
+
 typealias ListMarketAssetsResponse = MonacoCore.ListMarketAssetsResponseDTO
 typealias PopularAssetsResponse = MonacoCore.PopularAssetsResponseDTO
+typealias HeldAssetsResponse = MonacoCore.HeldAssetsResponseDTO

@@ -143,7 +143,8 @@ func TestGET_assets_list_change24hIsTheUnderlyingsDayMove(t *testing.T) {
 	seedApple(t, handlers)
 	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{Symbol: "AMZNc", Name: "Amazon", TokenAddress: "0xb2000000000000000000000000000000000000a1", Routable: true})
 	pyth.RegisterChartSeries(handlers.Charts.(pyth.AssetPriceClient), "AAPLc", pyth.ChartRange1D, underlyingDay())
-	// AMZN's day series came from a token-basis source: not a day move of the stock.
+	// AMZN has no Pyth series to give: its day move comes from the token's own
+	// feed, and ships labelled as the token's rather than not at all.
 	pyth.RegisterChartSeries(handlers.Charts.(pyth.AssetPriceClient), "AMZNc", pyth.ChartRange1D, pyth.AssetChartSeries{
 		Basis:                   pyth.PriceBasisToken,
 		PreviousCloseUsdcMicros: int64Ptr(100_000_000),
@@ -174,8 +175,78 @@ func TestGET_assets_list_change24hIsTheUnderlyingsDayMove(t *testing.T) {
 	if apple.PriceUsdcMicros == nil || *apple.PriceUsdcMicros != 232_050_000 {
 		t.Fatalf("AAPLc price = %v, want the Chainlink mark", apple.PriceUsdcMicros)
 	}
-	if amazon, ok := bySymbol["AMZNc"]; !ok || amazon.Change24h != nil || amazon.Change24hBasis != "" || amazon.Change24hBasisSymbol != "" {
-		t.Fatalf("AMZNc = %+v, want no change24h (and no basis) from a token-basis series", amazon)
+	// A token-basis series used to ship no change at all. Pyth answers nothing for
+	// any equity on a crypto-only key, so that rule left every pill blank; the
+	// token's own rounds are a real move of what the member holds, and the row says
+	// so. The rule that survived is the labelling, not the refusal.
+	amazon, ok := bySymbol["AMZNc"]
+	if !ok || amazon.Change24h == nil {
+		t.Fatalf("AMZNc = %+v, want the token's own day move", amazon)
+	}
+	if amazon.Change24hBasis != pyth.PriceBasisToken || amazon.Change24hBasisSymbol != "AMZNc" {
+		t.Fatalf("AMZNc change basis = %q/%q, want token/AMZNc", amazon.Change24hBasis, amazon.Change24hBasisSymbol)
+	}
+}
+
+func TestGET_assets_popular_rowsCarryTheDaySparklineWithItsBasis(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, walletClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
+	seedApple(t, handlers)
+	pyth.RegisterChartSeries(handlers.Charts.(pyth.AssetPriceClient), "AAPLc", pyth.ChartRange1D, underlyingDay())
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/popular", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handlers.PopularAssetsHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+	}
+	var popular popularAssetsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &popular); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if len(popular.Assets) != 1 {
+		t.Fatalf("assets = %+v, want AAPLc", popular.Assets)
+	}
+	apple := popular.Assets[0]
+	want := []int64{240_000_000, 229_500_000, 231_420_000}
+	if len(apple.Spark) != len(want) {
+		t.Fatalf("spark = %v, want %v", apple.Spark, want)
+	}
+	for i := range want {
+		if apple.Spark[i] != want[i] {
+			t.Fatalf("spark = %v, want %v", apple.Spark, want)
+		}
+	}
+	if apple.SparkBasis != "underlying" || apple.SparkBasisSymbol != "AAPL" {
+		t.Fatalf("spark basis = %q/%q, want underlying/AAPL", apple.SparkBasis, apple.SparkBasisSymbol)
+	}
+	if apple.LogoURL != "" || strings.Contains(rec.Body.String(), `"logoUrl"`) {
+		t.Fatalf("logoUrl shipped (%q) with no logo source configured", apple.LogoURL)
+	}
+}
+
+func TestGET_assets_list_rowWithoutASeriesShipsNoSparkField(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, walletClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
+	seedApple(t, handlers)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets?query=AAPL", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handlers.ListAssetsHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, field := range []string{`"spark"`, `"sparkBasis"`, `"sparkBasisSymbol"`} {
+		if strings.Contains(body, field) {
+			t.Fatalf("body carries %s with no series behind it: %s", field, body)
+		}
 	}
 }
 

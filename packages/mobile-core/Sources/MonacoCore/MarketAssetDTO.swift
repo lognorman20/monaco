@@ -16,6 +16,27 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
     public let change24hBasis: MarketPriceBasis?
     /// The instrument named in full: "AAPL".
     public let change24hBasisSymbol: String?
+    /// The day's closes in USDC micros, oldest first, downsampled to about two dozen
+    /// points for the row's sparkline. The list routes batch it onto the page: a row
+    /// must never fetch its own history, or a screen of twenty rows is twenty
+    /// requests that all arrive after the user has scrolled past.
+    ///
+    /// Empty when the backend could not source a day series. An empty series draws
+    /// no line rather than a flat one, which would read as "this stock did not move"
+    /// instead of "we do not know how it moved".
+    public let sparkUsdcMicros: [Int64]
+    /// Which instrument `sparkUsdcMicros` is about, and its symbol ("AAPL").
+    ///
+    /// On Base the backend reads the line and `change24h` from one Pyth series of the
+    /// underlying, so both say `underlying`. They are still labelled separately,
+    /// because a line is only tinted by a day move measured on the same instrument;
+    /// `SparkTint` makes that call. Nil against a backend that does not send them.
+    public let sparkBasis: MarketPriceBasis?
+    public let sparkBasisSymbol: String?
+    /// Kept on the wire for a catalog that one day publishes a logo. The B20 catalog
+    /// does not, so the backend sends none and the app draws its bundled mark for the
+    /// underlying, or the ticker tile.
+    public let logoUrl: String?
 
     public var id: String { symbol }
 
@@ -31,6 +52,12 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         routable || !tokenAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// True when the drawn series and the reported day change are about different
+    /// instruments, so the change's sign says nothing about the line's shape.
+    public var sparkAndChangeDisagreeOnInstrument: Bool {
+        MarketRowBasis.disagree(spark: sparkBasis, change: change24hBasis)
+    }
+
     public init(
         symbol: String,
         name: String,
@@ -39,7 +66,11 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         priceUsdcMicros: Int64? = nil,
         change24h: String? = nil,
         change24hBasis: MarketPriceBasis? = nil,
-        change24hBasisSymbol: String? = nil
+        change24hBasisSymbol: String? = nil,
+        sparkUsdcMicros: [Int64] = [],
+        sparkBasis: MarketPriceBasis? = nil,
+        sparkBasisSymbol: String? = nil,
+        logoUrl: String? = nil
     ) {
         self.symbol = symbol
         self.name = name
@@ -49,34 +80,140 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         self.change24h = change24h
         self.change24hBasis = change24hBasis
         self.change24hBasisSymbol = change24hBasisSymbol
+        self.sparkUsdcMicros = sparkUsdcMicros
+        self.sparkBasis = sparkBasis
+        self.sparkBasisSymbol = sparkBasisSymbol
+        self.logoUrl = logoUrl
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case symbol, name, tokenAddress, routable, priceUsdcMicros
+        case change24h, change24hBasis, change24hBasisSymbol
+        case sparkUsdcMicros = "spark"
+        case sparkBasis, sparkBasisSymbol
+        case logoUrl
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        symbol = try container.decode(String.self, forKey: .symbol)
+        name = try container.decode(String.self, forKey: .name)
+        tokenAddress = try container.decode(String.self, forKey: .tokenAddress)
+        // Required, deliberately. `spark` and `logoUrl` default because a backend
+        // that cannot source them still serves a usable row; `routable` does not,
+        // because defaulting it to false silently disables Buy on every screen in
+        // the app. A backend that stops sending it should fail loudly here.
+        routable = try container.decode(Bool.self, forKey: .routable)
+        priceUsdcMicros = try container.decodeIfPresent(Int64.self, forKey: .priceUsdcMicros)
+        change24h = try container.decodeIfPresent(String.self, forKey: .change24h)
+        change24hBasis = try container.decodeIfPresent(MarketPriceBasis.self, forKey: .change24hBasis)
+        change24hBasisSymbol = try container.decodeIfPresent(String.self, forKey: .change24hBasisSymbol)
+        // An absent array, a null and an empty one all mean "no series to draw".
+        sparkUsdcMicros = try container.decodeIfPresent([Int64].self, forKey: .sparkUsdcMicros) ?? []
+        sparkBasis = try container.decodeIfPresent(MarketPriceBasis.self, forKey: .sparkBasis)
+        sparkBasisSymbol = try container.decodeIfPresent(String.self, forKey: .sparkBasisSymbol)
+        logoUrl = try container.decodeIfPresent(String.self, forKey: .logoUrl)
     }
 }
 
-/// The underlying equity's day move, labelled as the stock's.
+/// The one rule for turning a wire `logoUrl` into something the app loads: https and
+/// nothing else. The backend already only sends the issuer's metadata host; this keeps
+/// a stale or misbehaving backend from pointing a member's phone at a plain-http or
+/// odd-scheme URL.
+public enum StockLogoURL {
+    public static func parse(_ raw: String?) -> URL? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty,
+              let url = URL(string: raw), url.scheme?.lowercased() == "https", url.host != nil
+        else { return nil }
+        return url
+    }
+}
+
+extension MarketAssetDTO {
+    /// The issuer's logo for this token, or nil for the ticker tile.
+    public var logoURL: URL? { StockLogoURL.parse(logoUrl) }
+}
+
+/// Whether a row's line and its day move are about different instruments. Nil on
+/// either side is "not stated", which is not a disagreement.
+public enum MarketRowBasis {
+    public static func disagree(spark: MarketPriceBasis?, change: MarketPriceBasis?) -> Bool {
+        guard let spark, let change else { return false }
+        return spark != change
+    }
+}
+
+/// A day move, labelled with the instrument it is actually about.
 ///
-/// `change24h` is Pyth's price for the equity against its previous regular-session
-/// close. It sits beside the token's Chainlink price, which is a different unit
-/// (the token carries a multiplier) and trades on different hours, so an unlabelled
-/// percentage there reads as the token's move. This only exists when the backend
-/// said the figure is the underlying's; without that it is not shown at all.
+/// It sits beside the token's Chainlink price, which is a different unit from the
+/// share (the token carries a multiplier) and trades on different hours, so an
+/// unlabelled percentage there reads as the token's move whatever it is. The rule
+/// has always been that a move without a stated instrument is not shown at all.
+///
+/// Two instruments can reach it. `underlying` is Pyth's price for the equity
+/// against its previous regular-session close — the move people mean by "AAPL is
+/// up today". `token` is the B20 token's own Chainlink feed on Base, which is what
+/// the backend falls through to: Pyth Benchmarks' history endpoint 404s and our
+/// key is crypto-only, so for an equity it answers nothing, and refusing a
+/// token-basis move would leave every pill on the tab blank rather than honest.
+/// A token move is a real move of the thing the member holds, priced in the same
+/// unit as the row's own price, so it is shown — saying so.
 public struct StockDayMove: Equatable, Sendable {
     /// Decimal ratio string, "0.012345" for +1.23%.
     public let ratio: String
-    /// The equity's display ticker: "AAPL".
+    /// The display ticker: "AAPL" either way, since `AssetSymbolFormatter.display`
+    /// strips the token's trailing "c". The basis is what tells the two apart, not
+    /// this.
     public let symbol: String
+    /// Whose move it is. Callers that measure dollars need it, because the price a
+    /// dollar figure is taken on has to be in this instrument's unit.
+    public let basis: MarketPriceBasis
 
     public init?(ratio: String?, basis: MarketPriceBasis?, basisSymbol: String?) {
-        guard basis == .underlying,
+        guard let basis, basis == .underlying || basis == .token,
               let ratio, !ratio.isEmpty,
               let basisSymbol, !basisSymbol.isEmpty
         else { return nil }
         self.ratio = ratio
         self.symbol = AssetSymbolFormatter.display(basisSymbol)
+        self.basis = basis
     }
 
     /// "AAPL day move": the share's move over its last session, which on a weekend
     /// is Friday's, so the caption does not say "today".
-    public var caption: String { "\(symbol) day move" }
+    ///
+    /// "AAPL token day move" when it is the token's, because the display ticker is
+    /// the same for both and a caption that did not distinguish them would be a
+    /// label that labels nothing.
+    public var caption: String {
+        basis == .token ? "\(symbol) token day move" : "\(symbol) day move"
+    }
+}
+
+/// The line under the Stocks tab's lists saying what its figures are.
+///
+/// Derived from the rows on screen rather than asserted, because which instrument
+/// a day move is about is now the backend's answer and not a constant: it is the
+/// equity's when Pyth can serve the equity, and the token's own when it cannot.
+/// A fixed sentence would be wrong in whichever case it was not written for, and
+/// this is the only place a sighted reader is told — the per-row caption is
+/// VoiceOver's.
+public enum MarketFiguresFootnote {
+    public static let prices = "Prices are per token on Base."
+
+    public static func text(for moves: [StockDayMove?]) -> String {
+        let bases = Set(moves.compactMap { $0?.basis })
+        if bases == [.underlying] {
+            return prices + " The day move is the stock's own, on its exchange."
+        }
+        if bases == [.token] {
+            return prices + " The day move is the token's own, on Base."
+        }
+        if bases.isEmpty {
+            return prices
+        }
+        return prices + " Each day move is the stock's own where its exchange can be read, and the token's otherwise."
+    }
 }
 
 public struct ListMarketAssetsResponseDTO: Codable, Equatable, Sendable {

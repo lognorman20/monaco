@@ -47,6 +47,13 @@ type AssetsHandlers struct {
 	// stock-vs-token card. Nil reports that line as not configured.
 	Quotes pyth.EquityQuoteClient
 	Dex    dex.Client
+	// Home answers "what do my cabals own and what are they voting on" for
+	// GET /v1/assets/held. Nil makes that one route unavailable and leaves the
+	// catalog routes untouched.
+	Home *app.HomeService
+	// Logos reads each token's issuer logo from its on-chain metadata. Nil ships
+	// rows without logoUrl.
+	Logos b20.LogoSource
 	// Now is the market clock; tests pin it so session assertions do not depend on
 	// the wall clock of whoever runs them.
 	Now func() time.Time
@@ -100,6 +107,23 @@ type marketAssetResponse struct {
 	// ("AAPL"). Both are set exactly when Change24h is.
 	Change24hBasis       string `json:"change24hBasis,omitempty"`
 	Change24hBasisSymbol string `json:"change24hBasisSymbol,omitempty"`
+	// Spark is the day's closes, downsampled to what a row's sparkline draws, from
+	// the same Pyth 1D series change24h is measured on. It is batched onto the page
+	// so the app never asks per row: twenty visible rows would otherwise be twenty
+	// chart requests, all arriving after the user has scrolled past. Omitted when
+	// no series could be sourced in budget; the row then draws no line rather than
+	// a flat one, which would read as "this stock did not move".
+	Spark []int64 `json:"spark,omitempty"`
+	// SparkBasis and SparkBasisSymbol name the instrument Spark is about
+	// ("underlying", "AAPL"). They are set exactly when Spark is. The app tints a
+	// line by change24h only when the two name the same instrument, and by the
+	// line's own first and last close otherwise, so it has to be told.
+	SparkBasis       string `json:"sparkBasis,omitempty"`
+	SparkBasisSymbol string `json:"sparkBasisSymbol,omitempty"`
+	// LogoURL is the company icon the issuer publishes in the token's own ERC-7572
+	// contractURI metadata (https on metadata.coinbase.com only). Omitted when it
+	// cannot be read; the app then draws the ticker tile.
+	LogoURL string `json:"logoUrl,omitempty"`
 }
 
 // dayMove is change24h with the instrument it is about. Both travel together or
@@ -448,95 +472,26 @@ func (h *AssetsHandlers) authorizeUser(ctx context.Context, accessToken string) 
 	return user.ID, nil
 }
 
+// marketRows is the one place a stock row's market figures come from, shared with
+// the held route and the cabal screen so the same instrument is read the same way
+// everywhere.
+func (h *AssetsHandlers) marketRows() *MarketRowSource {
+	return &MarketRowSource{Catalog: h.Catalog, Marks: h.Pyth, Charts: h.Charts, Logos: h.Logos}
+}
+
 func (h *AssetsHandlers) lookupAsset(ctx context.Context, symbol string) (b20.Asset, bool, error) {
-	needle := strings.ToUpper(strings.TrimSpace(symbol))
-	page, err := h.Catalog.Search(ctx, symbol, 25, 0)
-	if err != nil {
-		return b20.Asset{}, false, err
-	}
-	for _, asset := range page.Assets {
-		if strings.EqualFold(strings.TrimSpace(asset.Symbol), needle) {
-			return asset, true, nil
-		}
-	}
-	addr, err := h.Catalog.ResolveTokenAddress(ctx, symbol)
-	if err != nil || strings.TrimSpace(addr) == "" {
-		return b20.Asset{}, false, nil
-	}
-	asset, found, err := h.Catalog.LookupByAddress(ctx, addr)
-	if err != nil {
-		return b20.Asset{}, false, err
-	}
-	return asset, found, nil
+	return h.marketRows().LookupAsset(ctx, symbol)
 }
 
-// enrichAssets attaches the Chainlink mark and the underlying's day change.
+// enrichAssets attaches the Chainlink mark, the underlying's day change and the
+// day's sparkline.
 func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []b20.Asset) []marketAssetResponse {
-	ctx, cancel := context.WithTimeout(ctx, catalogPriceBudget)
-	defer cancel()
-
-	var (
-		prices  map[string]assetPriceSnapshot
-		changes map[string]dayMove
-		wg      sync.WaitGroup
-	)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		prices = h.fetchPrices(ctx, assets)
-	}()
-	go func() {
-		defer wg.Done()
-		changes = h.dayChanges(ctx, assets)
-	}()
-	wg.Wait()
-
-	out := make([]marketAssetResponse, 0, len(assets))
-	for _, asset := range assets {
-		resp := marketAssetResponseFor(asset, prices)
-		resp.Change24h, resp.Change24hBasis, resp.Change24hBasisSymbol = changes[asset.Symbol].fields()
-		out = append(out, resp)
-	}
-	return out
+	return h.marketRows().Enrich(ctx, assets)
 }
 
-// assetPriceSnapshot is one current Chainlink mark, with when it was struck.
-type assetPriceSnapshot struct {
-	PriceUsdcMicros int64
-	Mark            pyth.AssetMark
-}
-
-// catalogPriceBudget bounds the reads a catalog page costs, so a slow RPC or a
-// slow Pyth costs a missing price or change, never a hung list.
-const catalogPriceBudget = 4 * time.Second
-
-// dayChangeConcurrency bounds how many 1D series one catalog page asks Pyth for at
-// once. They are cached for a minute, so a warm page costs none.
-const dayChangeConcurrency = 4
-
-// fetchPrices loads current marks. A nil client or a failed fetch degrades to "no
-// price" rather than erroring the whole catalog response.
+// fetchPrices loads current Chainlink marks, keyed by token address.
 func (h *AssetsHandlers) fetchPrices(ctx context.Context, assets []b20.Asset) map[string]assetPriceSnapshot {
-	if h.Pyth == nil {
-		return nil
-	}
-	symbols := make([]string, 0, len(assets))
-	for _, asset := range assets {
-		symbols = append(symbols, asset.Symbol)
-	}
-	marks, err := h.Pyth.AssetMarks(ctx, symbols)
-	if err != nil {
-		marks = nil
-	}
-	out := make(map[string]assetPriceSnapshot, len(assets))
-	for _, asset := range assets {
-		mark, ok := marks[asset.Symbol]
-		if !ok || mark.PriceUsdcMicros <= 0 {
-			continue
-		}
-		out[asset.TokenAddress] = assetPriceSnapshot{PriceUsdcMicros: mark.PriceUsdcMicros, Mark: mark}
-	}
-	return out
+	return h.marketRows().Prices(ctx, assets)
 }
 
 // dayChange is one symbol's day move, Pyth first.
@@ -564,6 +519,9 @@ func (h *AssetsHandlers) dayChange(ctx context.Context, symbol string) dayMove {
 
 // dayMoveFrom labels a series' own day move. A series that does not name its
 // instrument cannot ship a change: the basis is not decoration.
+//
+// Shared with the list rows, which reach it through MarketRowSource: a row and
+// the detail screen must not disagree about whose move a ratio is.
 func dayMoveFrom(symbol string, series pyth.AssetChartSeries) dayMove {
 	ratio, basis, basisSymbol := pyth.DayChangeFields(series)
 	if ratio == nil || basis == "" {
@@ -576,54 +534,6 @@ func dayMoveFrom(symbol string, series pyth.AssetChartSeries) dayMove {
 		}
 	}
 	return dayMove{ratio: ratio, basis: basis, basisSymbol: basisSymbol}
-}
-
-// dayChanges reads each asset's day move. An asset whose sources are all late or
-// empty simply has no change on the wire.
-func (h *AssetsHandlers) dayChanges(ctx context.Context, assets []b20.Asset) map[string]dayMove {
-	out := make(map[string]dayMove, len(assets))
-	if len(assets) == 0 || (h.Charts == nil && h.Pyth == nil) {
-		return out
-	}
-	var (
-		mu  sync.Mutex
-		wg  sync.WaitGroup
-		sem = make(chan struct{}, dayChangeConcurrency)
-	)
-	for _, asset := range assets {
-		wg.Add(1)
-		go func(symbol string) {
-			defer wg.Done()
-			select {
-			case sem <- struct{}{}:
-			case <-ctx.Done():
-				return
-			}
-			defer func() { <-sem }()
-			change := h.dayChange(ctx, symbol)
-			if change.ratio == nil {
-				return
-			}
-			mu.Lock()
-			out[symbol] = change
-			mu.Unlock()
-		}(asset.Symbol)
-	}
-	wg.Wait()
-	return out
-}
-
-func marketAssetResponseFor(asset b20.Asset, prices map[string]assetPriceSnapshot) marketAssetResponse {
-	resp := marketAssetResponse{
-		Symbol:       asset.Symbol,
-		Name:         asset.Name,
-		TokenAddress: asset.TokenAddress,
-		Routable:     asset.Routable || strings.TrimSpace(asset.TokenAddress) != "",
-	}
-	if price, ok := prices[asset.TokenAddress]; ok && price.PriceUsdcMicros > 0 {
-		resp.PriceUsdcMicros = &price.PriceUsdcMicros
-	}
-	return resp
 }
 
 // marketSectionTimeout bounds the reads the detail screen fans out — the mark, the
@@ -707,7 +617,7 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset b20.Asset) 
 	wg.Wait()
 
 	var mark *pyth.AssetMark
-	if price, ok := prices[asset.TokenAddress]; ok && price.PriceUsdcMicros > 0 {
+	if price, ok := prices[tokenKey(asset.TokenAddress)]; ok && price.PriceUsdcMicros > 0 {
 		detail.PriceUsdcMicros = &price.PriceUsdcMicros
 		mark = &price.Mark
 	}

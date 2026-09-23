@@ -19,6 +19,9 @@ type GroupHandlers struct {
 	Governance *app.GovernanceService
 	Home       *app.HomeService
 	Redeem     *app.RedeemService
+	// Market decorates holdings rows with the same day move and day series the
+	// Stocks tab shows. Nil leaves those fields out; the pot itself is unaffected.
+	Market *MarketRowSource
 }
 
 type joinPolicyRequest struct {
@@ -406,6 +409,21 @@ type groupViewPotRowResponse struct {
 	DollarPnL   string `json:"dollarPnl"`
 	AfterHours  *bool  `json:"afterHours"`
 	TokenAmount string `json:"tokenAmount,omitempty"`
+	// Change24h and Spark are the market's figures for this stock, not the
+	// cabal's: how the underlying moved on its last session, and the shape it moved
+	// in, both from one Pyth 1D series. DollarPnL above is what this cabal has made
+	// since it bought, a different question; a holdings row shows both.
+	//
+	// Absent when the market side could not be read. A holding is still a
+	// holding, and the row renders without them. The basis fields name the
+	// instrument behind each figure, exactly as on the list rows.
+	Change24h            *string `json:"change24h,omitempty"`
+	Change24hBasis       string  `json:"change24hBasis,omitempty"`
+	Change24hBasisSymbol string  `json:"change24hBasisSymbol,omitempty"`
+	Spark                []int64 `json:"spark,omitempty"`
+	SparkBasis           string  `json:"sparkBasis,omitempty"`
+	SparkBasisSymbol     string  `json:"sparkBasisSymbol,omitempty"`
+	LogoURL              string  `json:"logoUrl,omitempty"`
 }
 
 type groupViewMemberSliceResponse struct {
@@ -475,18 +493,7 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	pot := make([]groupViewPotRowResponse, 0, len(result.Pot))
-	for _, row := range result.Pot {
-		pot = append(pot, groupViewPotRowResponse{
-			Symbol:      row.Symbol,
-			Units:       row.Units,
-			MarkUsd:     row.MarkUsd,
-			ValueUsd:    row.ValueUsd,
-			DollarPnL:   row.DollarPnL,
-			AfterHours:  row.AfterHours,
-			TokenAmount: row.TokenAmount,
-		})
-	}
+	pot := h.potRowResponses(ctx, result.Pot)
 	members := make([]groupViewMemberRowResponse, 0, len(result.Members))
 	for _, row := range result.Members {
 		members = append(members, groupViewMemberRowResponse{
