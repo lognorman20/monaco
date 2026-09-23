@@ -231,8 +231,14 @@ struct MonacoVoteFaceRow: View {
         MonacoVoteTallyLayout.usesFaces(voterCount: votes.count, dynamicTypeSize: dynamicTypeSize)
     }
 
+    /// Ballots do **not** overlap, and that is the difference between this and `MonacoFaceStack`.
+    ///
+    /// A stack of overlapping faces says "these people, as a group". A tally says "these ballots,
+    /// counted" — and overlapping them buries each face's ring under its neighbour, which is the
+    /// part that carries how the vote was cast. Rendered at 22pt with a 2pt ring, a −22% overlap
+    /// clipped the initials outright.
     var body: some View {
-        HStack(spacing: usesFaces ? -faceSize * 0.22 : 4) {
+        HStack(spacing: 4) {
             ForEach(votes) { vote in
                 if usesFaces {
                     MonacoVoteFace(vote: vote, size: faceSize)

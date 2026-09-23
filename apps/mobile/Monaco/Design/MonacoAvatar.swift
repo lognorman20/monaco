@@ -79,18 +79,28 @@ struct MonacoAvatar: View {
         }
     }
 
+    /// Initials are sized against the disc *inside* the ring, not the whole frame. A 2pt vote ring
+    /// on a 22pt face takes 4pt of diameter, and initials scaled against the full 22 ran under it.
+    private var innerSize: CGFloat {
+        max(size - (ring == nil ? 0 : ringWidth * 2), 1)
+    }
+
     private var placeholder: some View {
         let initials = AvatarInitials.from(displayName)
         return ZStack {
             Circle().fill(MonacoTheme.fillQuiet)
+            // Initials are `fgMuted`, not the brand accent. Blue only ever means tap, and an
+            // avatar is not a tap target — a blue-lettered face next to a red "voted no" ring was
+            // the clearest case of the accent being used as decoration. Muted is also the right
+            // weight: the face supports the name beside it, it is not the headline.
             if initials.isEmpty {
                 Image(systemName: "person.fill")
-                    .font(.system(size: size * 0.42, weight: .semibold))
-                    .foregroundStyle(MonacoTheme.accent)
+                    .font(.system(size: innerSize * 0.42, weight: .semibold))
+                    .foregroundStyle(MonacoTheme.fgMuted)
             } else {
                 Text(initials)
-                    .font(.system(size: size * 0.38, weight: .bold))
-                    .foregroundStyle(MonacoTheme.accent)
+                    .font(.system(size: innerSize * 0.38, weight: .bold))
+                    .foregroundStyle(MonacoTheme.fgMuted)
                     .minimumScaleFactor(0.5)
                     .lineLimit(1)
             }
