@@ -80,10 +80,15 @@ Adds to the existing detail:
 - `stats`: `openUsdcMicros`, `highUsdcMicros`, `lowUsdcMicros` (the regular cash
   session, 09:30–16:00 ET or 13:00 on a half day), `previousCloseUsdcMicros`,
   `week52HighUsdcMicros`, `week52LowUsdcMicros`, `confUsdcMicros` (Pyth's confidence
-  interval), and `basis`/`basisSymbol`. A hero price above `stats.highUsdcMicros` is
-  two instruments, not an error. The candle cells come only from Benchmarks: when
+  interval, **only while the equity quote is live** — after the bell the feed
+  republishes a frozen print and the grid has no freshness field to say so), and
+  `basis`/`basisSymbol`. A hero price above `stats.highUsdcMicros` is two
+  instruments, not an error. The candle cells come only from Benchmarks: when
   Benchmarks is down they are omitted, never folded from the sparse Hermes sampler.
-  The Kyber spread is the token's, so it is not in this grid.
+  A close-only Benchmarks payload has no open: the other three legs stay unset
+  rather than borrowing the close, so such a series draws as a line, not as candles
+  whose four prices happen to be equal. The Kyber spread is the token's, so it is
+  not in this grid.
 - `change24h`, `change24hBasis`, `change24hBasisSymbol` (also on list and popular
   rows).
 - `stockVsToken`, present only when both Kyber probes routed: `token` (source
@@ -112,9 +117,29 @@ Adds to the existing detail:
   short by the deadline is discarded, and one with failed samples is served but
   not cached.
 - The previous close is the close of the last bar stamped strictly before the
-  previous session's bell (16:00 ET, or 13:00 on a half day): bars are stamped
-  with their open time, so the bar at the bell is post-market.
+  previous session's bell (16:00 ET, or 13:00 on a half day) **and no earlier than
+  that session's pre-market open**: bars are stamped with their open time, so the
+  bar at the bell is post-market. The 1D fetch reaches seven days back so a long
+  holiday weekend cannot hide the closing bar, which is exactly why the lower bound
+  is needed — without it a hole in the history hands back a close from days ago.
+  When no bar falls inside the previous session there is no previous close, and
+  `previousCloseUsdcMicros` and `change24h` are both omitted.
 - Equity quote: 10 s. Kyber probes: 60 s per token, and a probe that errored is not
   cached.
 - The detail's reads run concurrently under a 4 s bound; the list's day changes run
   four at a time inside the list's 4 s budget.
+
+## Known follow-ups
+
+- **Day-change fan-out on a cold cache.** The list asks `Charts.DayChange` once per
+  catalog row, so a 25-row page on a cold 1-minute cache is 25 separate Benchmarks
+  requests. It is bounded (four at a time, inside the list's 4 s budget) and cached,
+  so it is not a correctness problem, but Benchmarks has no batch endpoint and the
+  fan-out grows with the catalog. Coalescing identical in-flight requests
+  (singleflight) around the chart cache is the fix; it was left out of the stocks
+  data change to keep the cache's failure semantics — outages uncached, per-symbol
+  empties cached — in one place.
+- **Solana-era fixtures in the older backend tests.** `AAPLx`/`MSFTx` symbols and
+  base58 mints in EVM address fields still appear across `internal/app` and other
+  packages inherited from the migration. `internal/httpapi/assets_test.go` was
+  brought in line with `assets_market_test.go`; the rest is base-branch debt.

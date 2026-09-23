@@ -17,25 +17,25 @@ import (
 func integrationAssetsApp(t *testing.T) (*AssetsHandlers, *AuthHandlers, wallets.Client, dex.Client, *postgres.TestIsolation) {
 	t.Helper()
 
-	authHandlers, privyClient, db, iso := integrationApp(t)
+	authHandlers, walletClient, db, iso := integrationApp(t)
 	store := postgres.NewStore(db)
-	jupiterClient := dex.NewFakeClient()
+	dexClient := dex.NewFakeClient()
 	catalog := b20.NewFakeCatalog()
 	pythClient := pyth.NewFakeAssetPriceClient()
 	handlers := &AssetsHandlers{
 		Store:   store,
 		Auth:    authHandlers.Verifier,
-		Wallets: privyClient,
+		Wallets: walletClient,
 		Catalog: catalog,
 		Pyth:    pythClient,
 		Charts:  pyth.NewFakeAssetPriceClient().(pyth.MarketDataClient),
 		Quotes:  pyth.NewFakeEquityQuoteClient(),
-		Dex:     jupiterClient,
+		Dex:     dexClient,
 		// Pin the clock to a Tuesday inside the regular session so session
 		// assertions do not depend on when the suite happens to run.
 		Now: func() time.Time { return assetsTestClock },
 	}
-	return handlers, authHandlers, privyClient, jupiterClient, iso
+	return handlers, authHandlers, walletClient, dexClient, iso
 }
 
 // assetsTestClock is 2026-09-22 14:00 UTC — 10:00 ET on an ordinary Tuesday.
@@ -44,9 +44,9 @@ var assetsTestClock = time.Date(2026, time.September, 22, 14, 0, 0, 0, time.UTC)
 // assetsTestClockClosed is the same day at 23:00 UTC — 19:00 ET, after-hours.
 var assetsTestClockClosed = time.Date(2026, time.September, 22, 23, 0, 0, 0, time.UTC)
 
-func seedAssetsToken(t *testing.T, iso *postgres.TestIsolation, authHandlers *AuthHandlers, privyClient wallets.Client) string {
+func seedAssetsToken(t *testing.T, iso *postgres.TestIsolation, authHandlers *AuthHandlers, walletClient wallets.Client) string {
 	t.Helper()
-	_, token := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "assets-user", "Assets User")
+	_, token := seedAuthenticatedUser(t, iso, authHandlers, walletClient, "assets-user", "Assets User")
 	return string(token)
 }
 
@@ -64,16 +64,16 @@ func TestGET_assets_missingAuth_returns401(t *testing.T) {
 func TestGET_assets_listsCatalogWithPrices(t *testing.T) {
 	t.Parallel()
 
-	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
-	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	handlers, authHandlers, walletClient, dexClient, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
 	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
-		Symbol:       "AAPLx",
+		Symbol:       "AAPLc",
 		Name:         "Apple",
 		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:     true,
 	})
-	pyth.RegisterAssetMark(handlers.Pyth, "AAPLx", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
-	dex.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 1_000_000, dex.BuyQuote{
+	pyth.RegisterAssetMark(handlers.Pyth, "AAPLc", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
+	dex.RegisterQuoteBuy(dexClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 1_000_000, dex.BuyQuote{
 		Routable:    true,
 		InputToken:  dex.USDCAddress(),
 		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
@@ -104,10 +104,10 @@ func TestGET_assets_listsCatalogWithPrices(t *testing.T) {
 func TestGET_assets_popular_returnsPinnedAssets(t *testing.T) {
 	t.Parallel()
 
-	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
-	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	handlers, authHandlers, walletClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
 	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
-		Symbol:       "AAPLx",
+		Symbol:       "AAPLc",
 		Name:         "Apple",
 		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:     true,
@@ -128,32 +128,32 @@ func TestGET_assets_popular_returnsPinnedAssets(t *testing.T) {
 	if len(payload.Assets) != 1 {
 		t.Fatalf("assets len = %d, want 1", len(payload.Assets))
 	}
-	if payload.Assets[0].Symbol != "AAPLx" {
-		t.Fatalf("symbol = %q, want AAPLx", payload.Assets[0].Symbol)
+	if payload.Assets[0].Symbol != "AAPLc" {
+		t.Fatalf("symbol = %q, want AAPLc", payload.Assets[0].Symbol)
 	}
 }
 
 func TestGET_assets_popular_batchedPrices_preservesOrder(t *testing.T) {
 	t.Parallel()
 
-	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
-	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	handlers, authHandlers, walletClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
 	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
-		Symbol:       "AAPLx",
+		Symbol:       "AAPLc",
 		Name:         "Apple",
 		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:     true,
 	})
 	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
-		Symbol:       "MSFTx",
+		Symbol:       "MSFTc",
 		Name:         "Microsoft",
-		TokenAddress: "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX",
+		TokenAddress: "0xb200000000000000000000ab99cfa739e253872b",
 		Routable:     true,
 	})
-	// MSFTx's mark is registered before AAPLx's so a lucky map-iteration order
+	// MSFTc's mark is registered before AAPLc's so a lucky map-iteration order
 	// wouldn't mask a real ordering bug in the response assembly.
-	pyth.RegisterAssetMark(handlers.Pyth, "MSFTx", pyth.AssetMark{PriceUsdcMicros: 400_000_000})
-	pyth.RegisterAssetMark(handlers.Pyth, "AAPLx", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
+	pyth.RegisterAssetMark(handlers.Pyth, "MSFTc", pyth.AssetMark{PriceUsdcMicros: 400_000_000})
+	pyth.RegisterAssetMark(handlers.Pyth, "AAPLc", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/assets/popular?limit=3", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -170,30 +170,30 @@ func TestGET_assets_popular_batchedPrices_preservesOrder(t *testing.T) {
 	if len(payload.Assets) != 2 {
 		t.Fatalf("assets len = %d, want 2", len(payload.Assets))
 	}
-	if payload.Assets[0].Symbol != "AAPLx" || payload.Assets[1].Symbol != "MSFTx" {
-		t.Fatalf("order = [%s, %s], want [AAPLx, MSFTx]", payload.Assets[0].Symbol, payload.Assets[1].Symbol)
+	if payload.Assets[0].Symbol != "AAPLc" || payload.Assets[1].Symbol != "MSFTc" {
+		t.Fatalf("order = [%s, %s], want [AAPLc, MSFTc]", payload.Assets[0].Symbol, payload.Assets[1].Symbol)
 	}
 	if payload.Assets[0].PriceUsdcMicros == nil || *payload.Assets[0].PriceUsdcMicros != 185_000_000 {
-		t.Fatalf("AAPLx price = %v, want 185000000", payload.Assets[0].PriceUsdcMicros)
+		t.Fatalf("AAPLc price = %v, want 185000000", payload.Assets[0].PriceUsdcMicros)
 	}
 	if payload.Assets[1].PriceUsdcMicros == nil || *payload.Assets[1].PriceUsdcMicros != 400_000_000 {
-		t.Fatalf("MSFTx price = %v, want 400000000", payload.Assets[1].PriceUsdcMicros)
+		t.Fatalf("MSFTc price = %v, want 400000000", payload.Assets[1].PriceUsdcMicros)
 	}
 }
 
 func TestGET_assets_popular_usesPriceAPI_skipsQuoteBuy(t *testing.T) {
 	t.Parallel()
 
-	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
-	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	handlers, authHandlers, walletClient, dexClient, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
 	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
-		Symbol:       "AAPLx",
+		Symbol:       "AAPLc",
 		Name:         "Apple",
 		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:     true,
 	})
-	pyth.RegisterAssetMark(handlers.Pyth, "AAPLx", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
-	dex.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 1_000_000, dex.BuyQuote{
+	pyth.RegisterAssetMark(handlers.Pyth, "AAPLc", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
+	dex.RegisterQuoteBuy(dexClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 1_000_000, dex.BuyQuote{
 		Routable:    true,
 		InputToken:  dex.USDCAddress(),
 		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
@@ -216,10 +216,10 @@ func TestGET_assets_popular_usesPriceAPI_skipsQuoteBuy(t *testing.T) {
 	if payload.Assets[0].PriceUsdcMicros == nil || *payload.Assets[0].PriceUsdcMicros != 185_000_000 {
 		t.Fatalf("priceUsdcMicros = %v, want 185000000", payload.Assets[0].PriceUsdcMicros)
 	}
-	if got := dex.QuoteBuyCallCount(jupiterClient); got != 0 {
+	if got := dex.QuoteBuyCallCount(dexClient); got != 0 {
 		t.Fatalf("Price.Prices calls = %d, want 1 batched call for the whole popular strip", got)
 	}
-	if got := dex.QuoteBuyCallCount(jupiterClient); got != 0 {
+	if got := dex.QuoteBuyCallCount(dexClient); got != 0 {
 		t.Fatalf("QuoteBuy calls = %d, want 0 on popular enrichment", got)
 	}
 }
@@ -227,10 +227,10 @@ func TestGET_assets_popular_usesPriceAPI_skipsQuoteBuy(t *testing.T) {
 func TestGET_assets_popular_missingPrice_omitsPriceField(t *testing.T) {
 	t.Parallel()
 
-	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
-	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	handlers, authHandlers, walletClient, dexClient, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
 	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
-		Symbol:       "AAPLx",
+		Symbol:       "AAPLc",
 		Name:         "Apple",
 		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:     true,
@@ -254,7 +254,7 @@ func TestGET_assets_popular_missingPrice_omitsPriceField(t *testing.T) {
 	if payload.Assets[0].PriceUsdcMicros != nil {
 		t.Fatalf("priceUsdcMicros = %v, want nil without a registered price", payload.Assets[0].PriceUsdcMicros)
 	}
-	if got := dex.QuoteBuyCallCount(jupiterClient); got != 0 {
+	if got := dex.QuoteBuyCallCount(dexClient); got != 0 {
 		t.Fatalf("QuoteBuy calls = %d, want 0 when price is missing", got)
 	}
 }
@@ -262,31 +262,31 @@ func TestGET_assets_popular_missingPrice_omitsPriceField(t *testing.T) {
 func TestGET_assets_symbol_returnsDetailAndLiquidity(t *testing.T) {
 	t.Parallel()
 
-	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
-	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	handlers, authHandlers, walletClient, dexClient, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
 	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
-		Symbol:       "AAPLx",
+		Symbol:       "AAPLc",
 		Name:         "Apple",
 		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:     true,
 	})
-	pyth.RegisterAssetMark(handlers.Pyth, "AAPLx", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
-	dex.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 1_000_000, dex.BuyQuote{
+	pyth.RegisterAssetMark(handlers.Pyth, "AAPLc", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
+	dex.RegisterQuoteBuy(dexClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 1_000_000, dex.BuyQuote{
 		Routable:    true,
 		InputToken:  dex.USDCAddress(),
 		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		InAmount:    "1000000",
 		OutAmount:   "100000000",
 	})
-	dex.RegisterSellQuote(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", b20.TokenAtomicScale, dex.SellQuote{
+	dex.RegisterSellQuote(dexClient, "0xb200000000000000000000c2e324d24d7eecd1fb", b20.TokenAtomicScale, dex.SellQuote{
 		Routable:   true,
 		InputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		InAmount:   "100000000",
 		OutAmount:  "1800000",
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLx", nil)
-	req.SetPathValue("symbol", "AAPLx")
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLc", nil)
+	req.SetPathValue("symbol", "AAPLc")
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	handlers.GetAssetHandler(rec, req)
@@ -308,23 +308,23 @@ func TestGET_assets_symbol_returnsDetailAndLiquidity(t *testing.T) {
 		t.Fatal("expected routable liquidity snippet")
 	}
 	if !payload.Routable {
-		t.Fatal("top-level routable must match the live Jupiter probe")
+		t.Fatal("top-level routable must match the live Kyber probe")
 	}
 }
 
 func TestGET_assets_symbol_catalogNotRoutable_liveQuoteSetsRoutable(t *testing.T) {
 	t.Parallel()
 
-	handlers, authHandlers, privyClient, jupiterClient, iso := integrationAssetsApp(t)
-	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	handlers, authHandlers, walletClient, dexClient, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
 	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
-		Symbol:       "AAPLx",
+		Symbol:       "AAPLc",
 		Name:         "Apple",
 		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:     false,
 	})
-	pyth.RegisterAssetMark(handlers.Pyth, "AAPLx", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
-	dex.RegisterQuoteBuy(jupiterClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 1_000_000, dex.BuyQuote{
+	pyth.RegisterAssetMark(handlers.Pyth, "AAPLc", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
+	dex.RegisterQuoteBuy(dexClient, "0xb200000000000000000000c2e324d24d7eecd1fb", 1_000_000, dex.BuyQuote{
 		Routable:    true,
 		InputToken:  dex.USDCAddress(),
 		OutputToken: "0xb200000000000000000000c2e324d24d7eecd1fb",
@@ -332,8 +332,8 @@ func TestGET_assets_symbol_catalogNotRoutable_liveQuoteSetsRoutable(t *testing.T
 		OutAmount:   "100000000",
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLx", nil)
-	req.SetPathValue("symbol", "AAPLx")
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLc", nil)
+	req.SetPathValue("symbol", "AAPLc")
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	handlers.GetAssetHandler(rec, req)
@@ -353,18 +353,18 @@ func TestGET_assets_symbol_catalogNotRoutable_liveQuoteSetsRoutable(t *testing.T
 func TestGET_assets_symbol_quoteFail_marksNotRoutable(t *testing.T) {
 	t.Parallel()
 
-	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
-	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	handlers, authHandlers, walletClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
 	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
-		Symbol:       "AAPLx",
+		Symbol:       "AAPLc",
 		Name:         "Apple",
 		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 		Routable:     true,
 	})
-	pyth.RegisterAssetMark(handlers.Pyth, "AAPLx", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
+	pyth.RegisterAssetMark(handlers.Pyth, "AAPLc", pyth.AssetMark{PriceUsdcMicros: 185_000_000})
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLx", nil)
-	req.SetPathValue("symbol", "AAPLx")
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLc", nil)
+	req.SetPathValue("symbol", "AAPLc")
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	handlers.GetAssetHandler(rec, req)
@@ -387,22 +387,22 @@ func TestGET_assets_symbol_quoteFail_marksNotRoutable(t *testing.T) {
 func TestGET_assets_symbol_chart_returnsSeries(t *testing.T) {
 	t.Parallel()
 
-	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
-	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	handlers, authHandlers, walletClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
 	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
-		Symbol:       "AAPLx",
+		Symbol:       "AAPLc",
 		Name:         "Apple",
 		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 	})
-	pyth.RegisterChartSeries(handlers.Pyth, "AAPLx", pyth.ChartRange1D, pyth.AssetChartSeries{
+	pyth.RegisterChartSeries(handlers.Pyth, "AAPLc", pyth.ChartRange1D, pyth.AssetChartSeries{
 		Points: []pyth.ChartPoint{
 			{Timestamp: 1_700_000_000, PriceUsdcMicros: 180_000_000},
 			{Timestamp: 1_700_003_600, PriceUsdcMicros: 185_000_000},
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLx/chart?range=1D", nil)
-	req.SetPathValue("symbol", "AAPLx")
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLc/chart?range=1D", nil)
+	req.SetPathValue("symbol", "AAPLc")
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	handlers.GetAssetChartHandler(rec, req)
@@ -422,16 +422,16 @@ func TestGET_assets_symbol_chart_returnsSeries(t *testing.T) {
 func TestGET_assets_symbol_chart_emptySeries_returnsReason(t *testing.T) {
 	t.Parallel()
 
-	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
-	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	handlers, authHandlers, walletClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
 	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
-		Symbol:       "AAPLx",
+		Symbol:       "AAPLc",
 		Name:         "Apple",
 		TokenAddress: "0xb200000000000000000000c2e324d24d7eecd1fb",
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLx/chart?range=1W", nil)
-	req.SetPathValue("symbol", "AAPLx")
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLc/chart?range=1W", nil)
+	req.SetPathValue("symbol", "AAPLc")
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	handlers.GetAssetChartHandler(rec, req)
@@ -454,8 +454,8 @@ func TestGET_assets_symbol_chart_emptySeries_returnsReason(t *testing.T) {
 func TestGET_assets_symbol_chart_invalidRange_returns400(t *testing.T) {
 	t.Parallel()
 
-	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
-	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	handlers, authHandlers, walletClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
 	b20.RegisterCatalogAsset(handlers.Catalog, b20.Asset{
 		Symbol: "AAPLc",
 		Name:   "Apple",
