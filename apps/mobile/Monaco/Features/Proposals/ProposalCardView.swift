@@ -44,7 +44,14 @@ struct ProposalCardView<Destination: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.cabalTint) private var environmentTint
+    /// The viewer's own cabals, for the resolved tint. Optional because the debug harnesses and
+    /// the previews render this card with no session behind it.
+    @Environment(AppSessionStore.self) private var session: AppSessionStore?
     @State private var pulse = false
+    /// The ballot this member just cast, while it is in flight. The pill they tapped keeps its
+    /// full strength and the other one falls back, so the card says which way they voted before
+    /// the server has answered.
+    @State private var pendingChoice: ProposalVoteChoice?
     /// The tally has crossed the pass line while this card was on screen. The one `celebrate` in
     /// the app (§4 #14) — a second call site means one of them is wrong.
     @State private var passCelebration = false
@@ -75,14 +82,22 @@ struct ProposalCardView<Destination: View>: View {
 
     // MARK: Identity
 
-    /// The proposing cabal's tint: the one the surface set, else the one the proposal's own group
-    /// id hashes to. Nil when the payload carries no group and nobody told us — the card then
-    /// ships without a rail rather than inventing a colour for a cabal it cannot name.
+    /// The proposing cabal's tint: the one the surface declared, else the resolved tint for the
+    /// cabal this proposal belongs to. Nil when the payload carries no group and nobody told us —
+    /// the card then ships without a rail rather than inventing a colour for a cabal it cannot
+    /// name.
+    ///
+    /// The surface is asked first and it wins. A cross-cabal surface resolves the viewer's cabals
+    /// once and declares the colour it resolved; a card that re-hashed the id underneath it would
+    /// paint the same cabal two colours on two screens, which is the one thing a tint may not do.
+    /// Everything else goes through `CabalTintAssignment`, never `forGroupId` directly, so the
+    /// rail here and the mark on the Cabals tab agree. `cabal:` carries the mark and the name; it
+    /// does not carry the colour.
     private var tint: MonacoTheme.CabalTint? {
-        if let cabal { return .forGroupId(cabal.id) }
         if let environmentTint { return environmentTint }
-        guard let groupId = proposal.groupId, !groupId.isEmpty else { return nil }
-        return .forGroupId(groupId)
+        let groupId = cabal?.id ?? proposal.groupId ?? ""
+        guard !groupId.isEmpty else { return nil }
+        return ProposalCabalTint.tint(forGroupId: groupId, in: session)
     }
 
     private var progress: ProposalVoteProgress? {
@@ -95,19 +110,34 @@ struct ProposalCardView<Destination: View>: View {
         RoundedRectangle(cornerRadius: radius, style: .continuous)
     }
 
+    /// The last hour of a vote is a fact about the clock, not about the payload. Without a tick a
+    /// card already on screen keeps its grey "Closes in 4h" footnote through the whole final hour
+    /// and never reaches the countdown, because nothing re-reads a list nobody is scrolling. A
+    /// minute is the resolution the header needs; the countdown capsule runs its own seconds
+    /// inside it. A settled proposal has no deadline left to watch and does not pay for a timeline.
     var body: some View {
+        if proposal.isOpen, proposal.expiresAt != nil {
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                card(now: context.date)
+            }
+        } else {
+            card(now: Date())
+        }
+    }
+
+    private func card(now: Date) -> some View {
         VStack(alignment: .leading, spacing: compact ? MonacoTheme.Space.sm : MonacoTheme.Space.m) {
             if let destination {
                 NavigationLink {
                     destination()
                 } label: {
-                    summary
+                    summary(now: now)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("proposal-card-open-\(proposal.id)")
             } else {
-                summary
+                summary(now: now)
             }
 
             actions
@@ -120,8 +150,15 @@ struct ProposalCardView<Destination: View>: View {
         .overlay {
             if showsChrome {
                 shape
-                    .strokeBorder(edgeTint, lineWidth: 1)
-                    .opacity(edgeOpacity)
+                    .strokeBorder(edgeTint(now: now), lineWidth: 1)
+                    .opacity(edgeOpacity(now: now))
+            }
+        }
+        // The cabal's own colour washes the card once as the vote lands. Never green: the cabal
+        // agreed to spend money, nobody has made any.
+        .overlay {
+            if showsChrome, passCelebration, let tint {
+                shape.fill(tint.soft).allowsHitTesting(false)
             }
         }
         .scaleEffect(passCelebration ? 1.04 : 1)
@@ -130,6 +167,11 @@ struct ProposalCardView<Destination: View>: View {
             withAnimation(MonacoMotion.glide) { pulse = true }
             try? await Task.sleep(for: .seconds(1))
             withAnimation(.easeIn(duration: 0.4)) { pulse = false }
+        }
+        // The ballot has landed, or been refused: the pills go back to sharing the row evenly.
+        .onChange(of: isVoting) { _, voting in
+            guard !voting else { return }
+            pendingChoice = nil
         }
         // The one celebration in the app: this vote is the one that took the proposal over the
         // line. Nothing celebrates a proposal that was already passing when the card appeared, so
@@ -166,34 +208,34 @@ struct ProposalCardView<Destination: View>: View {
 
     /// The card's edge: `warning` while the vote closes within the hour, the pulse colour for a
     /// proposal that just arrived, and otherwise nothing — `monacoElevation` owns the resting edge.
-    private var edgeTint: Color {
-        closesSoon ? MonacoTheme.warning : MonacoTheme.fgPrimary
+    private func edgeTint(now: Date) -> Color {
+        closesSoon(now: now) ? MonacoTheme.warning : MonacoTheme.fgPrimary
     }
 
-    private var edgeOpacity: Double {
+    private func edgeOpacity(now: Date) -> Double {
         if pulse { return 1 }
-        return closesSoon ? 1 : 0
+        return closesSoon(now: now) ? 1 : 0
     }
 
-    private var closesSoon: Bool {
+    private func closesSoon(now: Date) -> Bool {
         guard proposal.isOpen, let expiresAt = proposal.expiresAt else { return false }
-        return ProposalTimeFormatter.closesSoon(expiresAt: expiresAt)
+        return ProposalTimeFormatter.closesSoon(expiresAt: expiresAt, now: now)
     }
 
     // MARK: Summary
 
-    private var summary: some View {
+    private func summary(now: Date) -> some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
             if !compact {
-                proposerLine
+                proposerLine(now: now)
             }
-            header
+            header(now: now)
             if !compact {
                 reason
             }
             tally
             if !compact {
-                footer
+                footer(now: now)
             }
         }
     }
@@ -204,66 +246,133 @@ struct ProposalCardView<Destination: View>: View {
     /// words of their own thesis, in bold, which read like a quotation attribution rather than a
     /// person. `MonacoAvatar` renders initials until `profilePhotoUrl` reaches the proposal
     /// payload; nothing here invents a photo.
+    ///
+    /// At an accessibility text size the row stops being a row. Four single-line items sharing one
+    /// line means the name — the headline of this whole card — truncates to a glyph or two, so the
+    /// face and the name take the first line on their own and the cabal and the age fall to a
+    /// second as one wrapping sentence rather than two labels competing for the same 80pt.
     @ViewBuilder
-    private var proposerLine: some View {
+    private func proposerLine(now: Date) -> some View {
         let name = proposal.proposerName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let age = proposal.createdAt.map { RelativeTimeFormatter.label(iso: $0, now: now) } ?? ""
         if !name.isEmpty || cabal != nil {
-            HStack(spacing: MonacoTheme.Space.s) {
-                if !name.isEmpty {
-                    MonacoAvatar(photoURL: nil, displayName: name, size: 28)
-                    Text(name)
-                        .font(MonacoTheme.Typo.callout.weight(.semibold))
-                        .foregroundStyle(MonacoTheme.fgPrimary)
-                        .lineLimit(1)
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                    if !name.isEmpty {
+                        HStack(alignment: .top, spacing: MonacoTheme.Space.s) {
+                            MonacoAvatar(photoURL: nil, displayName: name, size: 28)
+                            Text(name)
+                                .font(MonacoTheme.Typo.callout.weight(.semibold))
+                                .foregroundStyle(MonacoTheme.fgPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    if let secondary = secondaryProposerLine(age: age) {
+                        HStack(alignment: .top, spacing: MonacoTheme.Space.s) {
+                            if let cabal {
+                                CabalMark(groupId: cabal.id, name: cabal.name, size: 16)
+                            }
+                            Text(secondary)
+                                .font(MonacoTheme.Typo.caption)
+                                .foregroundStyle(MonacoTheme.fgMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                    }
                 }
-                if let cabal {
-                    CabalMark(groupId: cabal.id, name: cabal.name, size: 16)
-                    Text(cabal.name)
-                        .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.fgMuted)
-                        .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+            } else {
+                HStack(spacing: MonacoTheme.Space.s) {
+                    if !name.isEmpty {
+                        MonacoAvatar(photoURL: nil, displayName: name, size: 28)
+                        Text(name)
+                            .font(MonacoTheme.Typo.callout.weight(.semibold))
+                            .foregroundStyle(MonacoTheme.fgPrimary)
+                            .lineLimit(1)
+                    }
+                    if let cabal {
+                        CabalMark(groupId: cabal.id, name: cabal.name, size: 16)
+                        Text(cabal.name)
+                            .font(MonacoTheme.Typo.caption)
+                            .foregroundStyle(MonacoTheme.fgMuted)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: MonacoTheme.Space.s)
+                    if !age.isEmpty {
+                        Text(age)
+                            .font(MonacoTheme.Typo.caption)
+                            .foregroundStyle(MonacoTheme.fgSubtle)
+                            .lineLimit(1)
+                    }
                 }
-                Spacer(minLength: MonacoTheme.Space.s)
-                if let createdAt = proposal.createdAt {
-                    Text(RelativeTimeFormatter.label(iso: createdAt))
-                        .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.fgSubtle)
-                        .lineLimit(1)
-                }
+                .accessibilityElement(children: .combine)
             }
-            .accessibilityElement(children: .combine)
         }
+    }
+
+    /// The cabal and the age as one wrapping sentence, for the accessibility-size layout. Nil when
+    /// the payload names neither, in which case there is no second line to draw.
+    private func secondaryProposerLine(age: String) -> String? {
+        let parts = [cabal?.name, age].compactMap { $0 }.filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// The object: the stock, what would happen to it, and for how much.
-    private var header: some View {
-        HStack(alignment: .center, spacing: MonacoTheme.Space.sm) {
-            mark
-            VStack(alignment: .leading, spacing: 2) {
-                Text(ProposalFeedCopy.title(for: proposal))
-                    .displayFont(.section)
-                    .foregroundStyle(MonacoTheme.fgPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Text(ProposalFeedCopy.subtitle(for: proposal))
-                    .font(MonacoTheme.Typo.caption)
-                    .foregroundStyle(MonacoTheme.fgMuted)
-                    .lineLimit(1)
+    ///
+    /// At an accessibility text size the figure comes out of the row and goes under the title: an
+    /// 18pt expanded title and a 28pt figure cannot share one line without both sitting on their
+    /// `minimumScaleFactor` floors, and what is being voted on is the thing that has to be read.
+    @ViewBuilder
+    private func header(now: Date) -> some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                HStack(alignment: .top, spacing: MonacoTheme.Space.sm) {
+                    mark
+                    titleBlock
+                    Spacer(minLength: 0)
+                }
+                amount
+                // The chip's home at this size. The compact card has no footer to fall back to —
+                // it is the inline card in a chat thread — so a closed proposal has to say
+                // "Bought" here or it does not say it at all.
+                state(now: now)
             }
-            Spacer(minLength: MonacoTheme.Space.s)
-            trailingHeader
+        } else {
+            HStack(alignment: .center, spacing: MonacoTheme.Space.sm) {
+                mark
+                titleBlock
+                Spacer(minLength: MonacoTheme.Space.s)
+                trailingHeader(now: now)
+            }
         }
     }
 
-    /// The amount stacked over the state chip, or — at an accessibility text size, where two
-    /// columns of figures stop fitting side by side — the amount alone, with the chip on its own
-    /// line below the tally. A 56pt figure and a capsule cannot share 120pt of width.
-    private var trailingHeader: some View {
+    /// What is being proposed, over the one-line summary of it. Scaled to fit while it shares a
+    /// row with the figure; allowed to wrap once it has the row to itself.
+    private var titleBlock: some View {
+        let isAccessibilitySize = dynamicTypeSize.isAccessibilitySize
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(ProposalFeedCopy.title(for: proposal))
+                .displayFont(.section)
+                .foregroundStyle(MonacoTheme.fgPrimary)
+                .lineLimit(isAccessibilitySize ? 3 : 1)
+                .minimumScaleFactor(isAccessibilitySize ? 1 : 0.8)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(ProposalFeedCopy.subtitle(for: proposal))
+                .font(MonacoTheme.Typo.caption)
+                .foregroundStyle(MonacoTheme.fgMuted)
+                .lineLimit(isAccessibilitySize ? 3 : 1)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The amount stacked over the state chip, at the trailing edge of the header row.
+    private func trailingHeader(now: Date) -> some View {
         VStack(alignment: .trailing, spacing: 4) {
             amount
-            if !dynamicTypeSize.isAccessibilitySize {
-                state
-            }
+            state(now: now)
         }
     }
 
@@ -278,8 +387,8 @@ struct ProposalCardView<Destination: View>: View {
 
     /// The closing-soon countdown, the closed-state chip, or nothing while a vote is quietly open.
     @ViewBuilder
-    private var state: some View {
-        if proposal.isOpen, closesSoon, let expiresAt = proposal.expiresAt {
+    private func state(now: Date) -> some View {
+        if proposal.isOpen, closesSoon(now: now), let expiresAt = proposal.expiresAt {
             ProposalClosingSoonChip(expiresAt: expiresAt)
         } else if let closed = ProposalFeedCopy.closedLabel(for: proposal) {
             ProposalStatusChip(
@@ -344,15 +453,12 @@ struct ProposalCardView<Destination: View>: View {
         }
     }
 
-    private var footer: some View {
+    private func footer(now: Date) -> some View {
         HStack(spacing: MonacoTheme.Space.m) {
-            if proposal.isOpen, !closesSoon, let expiresAt = proposal.expiresAt,
-               let closes = ProposalTimeFormatter.closesLabel(expiresAt: expiresAt) {
+            if proposal.isOpen, !closesSoon(now: now), let expiresAt = proposal.expiresAt,
+               let closes = ProposalTimeFormatter.closesLabel(expiresAt: expiresAt, now: now) {
                 Label(closes, systemImage: "clock")
                     .foregroundStyle(MonacoTheme.fgMuted)
-            }
-            if dynamicTypeSize.isAccessibilitySize {
-                state
             }
             Spacer(minLength: 0)
             if let count = proposal.commentCount, count > 0 {
@@ -377,28 +483,44 @@ struct ProposalCardView<Destination: View>: View {
         } else if proposal.showsVoteActions {
             HStack(spacing: MonacoTheme.Space.s) {
                 Button {
-                    Haptics.tap()
-                    onVote(.yes)
+                    cast(.yes)
                 } label: {
                     Text(ProposalFeedCopy.voteYes)
                 }
                 .buttonStyle(.monacoPrimary)
+                .opacity(pillOpacity(for: .yes))
                 .accessibilityIdentifier("proposal-card-vote-yes-\(proposal.id)")
 
                 Button {
-                    Haptics.tap()
-                    onVote(.no)
+                    cast(.no)
                 } label: {
                     Text(ProposalFeedCopy.voteNo)
                 }
                 .buttonStyle(.monacoSecondary)
+                .opacity(pillOpacity(for: .no))
                 .accessibilityIdentifier("proposal-card-vote-no-\(proposal.id)")
             }
             .monacoFullWidthButtons()
             .disabled(isVoting)
-            .opacity(isVoting ? 0.6 : 1)
+            .animation(MonacoMotion.snap.reduced(reduceMotion), value: pendingChoice)
+            .animation(MonacoMotion.snap.reduced(reduceMotion), value: isVoting)
             .transition(.opacity)
         }
+    }
+
+    private func cast(_ choice: ProposalVoteChoice) {
+        Haptics.tap()
+        pendingChoice = choice
+        onVote(choice)
+    }
+
+    /// While a ballot is in flight the pill the member tapped holds its full strength and the
+    /// other one falls back, so the card says which way they voted in the moment they voted rather
+    /// than greying out both and saying only "wait".
+    private func pillOpacity(for choice: ProposalVoteChoice) -> Double {
+        guard isVoting else { return 1 }
+        guard let pendingChoice else { return 0.6 }
+        return pendingChoice == choice ? 1 : 0.35
     }
 }
 
