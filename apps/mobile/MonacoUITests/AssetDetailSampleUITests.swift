@@ -58,13 +58,10 @@ final class AssetDetailSampleUITests: XCTestCase {
     /// Every scenario reaches a drawn screen, with the chart state that scenario
     /// serves for 1D. One screenshot per scenario is attached.
     ///
-    /// What this does not check: the stats grid and the stock-vs-token card are not drawn
-    /// by this branch's screen (they land with stocks-detail-cards). `noRoute` and
-    /// `notEntitled` differ from `open` only there, so they are left out rather than
-    /// paying for a launch to re-assert what `open` already covers; they come back with
-    /// the cards. `weekend` stays, because it does differ here — see
-    /// `testTheWeekendHeroSaysWhenItsMarkLastPrinted`. `loading` is covered by the
-    /// skeleton, not here: it never finishes.
+    /// What this does not check: the cards below the chart, which have their own file
+    /// (`AssetDetailCardsUITests`) because they need scrolling rather than a screenshot
+    /// of the top of the screen. `loading` is covered by the skeleton, not here: it
+    /// never finishes.
     @MainActor
     func testEveryScenarioReachesItsChartState() throws {
         let chartIdentifierByScenario: [(String, String)] = [
@@ -74,6 +71,8 @@ final class AssetDetailSampleUITests: XCTestCase {
             ("weekend", "asset-detail-chart"),
             ("holiday", "asset-detail-chart"),
             ("sparse", "asset-detail-chart"),
+            ("noRoute", "asset-detail-chart"),
+            ("notEntitled", "asset-detail-chart"),
             ("fallbackSeries", "asset-detail-chart"),
             ("chainlinkSeries", "asset-detail-chart"),
             ("emptyChart", "asset-detail-chart-empty"),
@@ -182,6 +181,19 @@ final class AssetDetailSampleUITests: XCTestCase {
     /// 335pt a 375pt device leaves inside the gutters, so one Dynamic Type step up
     /// clipped the row and the longest chip ("ALL") could not be tapped at all. The
     /// row scrolls now, so every range stays reachable at any text size.
+    ///
+    /// KNOWN FAILING on the asset-detail-cards port, and left failing on purpose.
+    /// It passes on `feat/stocks-detail-chart` and fails once the trade bar moves
+    /// into a bottom `safeAreaInset`. What I could establish: at
+    /// `AccessibilityL` the 1D chip is present and taps, and the 1W chip is not in
+    /// the accessibility tree at all — swiping the row sideways does not bring it
+    /// in. The run that finally executed my instrumented version of this test
+    /// instead died with the app crashing inside SwiftUI's own
+    /// `EnvironmentValues` getter, with no Monaco frame in the stack, on a machine
+    /// at 99% disk and load 10-50. I could not separate a real accessibility
+    /// regression from that noise, so I am not shipping a guess: the test stays as
+    /// the base wrote it, and stays red, because a red test is the honest signal
+    /// and a skip would hide it.
     @MainActor
     func testEveryChartRangeIsReachableAtAnAccessibilityTextSize() throws {
         let app = launch("open", textSize: "UICTContentSizeCategoryAccessibilityL")
