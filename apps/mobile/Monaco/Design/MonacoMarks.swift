@@ -13,21 +13,48 @@ struct CabalMark: View {
     private let name: String
     private let size: CGFloat
     private let onInk: Bool
+    private let animatesIdentity: Bool
 
     /// `onInk` brightens the tile and drops the initials to deep ink, so the mark still
     /// carries the cabal's identity on a deep ink hero card.
-    init(groupId: String, name: String, size: CGFloat = 44, onInk: Bool = false) {
-        self.init(tint: .forGroupId(groupId), name: name, size: size, onInk: onInk)
+    init(
+        groupId: String,
+        name: String,
+        size: CGFloat = 44,
+        onInk: Bool = false,
+        animatesIdentity: Bool = false
+    ) {
+        self.init(
+            tint: .forGroupId(groupId),
+            name: name,
+            size: size,
+            onInk: onInk,
+            animatesIdentity: animatesIdentity
+        )
     }
 
     /// The resolved-tint entry point. Every surface that already knows which cabal it belongs to
     /// — the hero, the strip card, the chat toolbar — comes through here.
-    init(tint: MonacoTheme.CabalTint, name: String, size: CGFloat = 44, onInk: Bool = false) {
+    ///
+    /// `animatesIdentity` is the live recolour of §4 moment #22, and it is **off by default**.
+    /// §5.11.1 asks for it on exactly one screen — the create form, where a founder watches the
+    /// mark settle as they type — and a mark that crossfades whenever its tint or its initials
+    /// change is wrong everywhere else: in a `LazyVStack` or `LazyHStack` a recycled row is handed
+    /// a different cabal, and the strip, the leaderboard and the chat toolbar would crossfade one
+    /// cabal into another on scroll.
+    init(
+        tint: MonacoTheme.CabalTint,
+        name: String,
+        size: CGFloat = 44,
+        onInk: Bool = false,
+        animatesIdentity: Bool = false
+    ) {
         self.tint = tint
         initials = CabalMark.initials(for: name)
         self.name = name
         self.size = size
         self.onInk = onInk
+        self.animatesIdentity = animatesIdentity
     }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -45,12 +72,13 @@ struct CabalMark: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.5)
                     .padding(size * 0.08)
-                    .contentTransition(.opacity)
+                    .contentTransition(animatesIdentity ? .opacity : .identity)
             }
             // Recolours live while a founder types a cabal's name, so the tint system is a visible
-            // feature at the moment it is first met. Instant swap under Reduce Motion.
-            .animation(MonacoMotion.glide.reduced(reduceMotion), value: tint)
-            .animation(MonacoMotion.glide.reduced(reduceMotion), value: initials)
+            // feature at the moment it is first met. Instant swap under Reduce Motion, and off
+            // entirely anywhere a mark can be recycled onto a different cabal.
+            .animation(animatesIdentity ? MonacoMotion.glide.reduced(reduceMotion) : nil, value: tint)
+            .animation(animatesIdentity ? MonacoMotion.glide.reduced(reduceMotion) : nil, value: initials)
             .accessibilityHidden(true)
     }
 

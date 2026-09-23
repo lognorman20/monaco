@@ -427,6 +427,70 @@ public enum GroupChatCopy {
         return "\(day), \(clock)"
     }
 
+    /// Which rows open a new day, keyed by row id.
+    ///
+    /// `showsTimeSeparator` marks a *gap in the conversation*, not a new day — two messages four
+    /// hours apart on the same afternoon both carry it. That was right when the label included
+    /// the clock time; with a day-only label it printed "Today" twice down one screen. A day
+    /// divider is drawn where the day actually changes, and nowhere else.
+    ///
+    /// The calendar and the locale are injected for the same reason `timeSeparatorLabel` injects
+    /// them: a day boundary is the thing most likely to be wrong across a timezone, and the
+    /// device calendar is not something a test can rely on.
+    public static func dayDividerLabels(
+        for rows: [GroupChatRow],
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        locale: Locale = .current
+    ) -> [String: String] {
+        var labels: [String: String] = [:]
+        var lastDay: Date?
+        for row in rows {
+            guard let date = row.date else { continue }
+            let day = calendar.startOfDay(for: date)
+            if day != lastDay {
+                labels[row.id] = dayDividerLabel(for: date, now: now, calendar: calendar, locale: locale)
+                lastDay = day
+            }
+        }
+        return labels
+    }
+
+    /// The centred label that breaks a thread into days: "Today", "Yesterday", a weekday inside
+    /// the last week, then the date.
+    ///
+    /// `timeSeparatorLabel` returns the day **and** the clock time ("Yesterday 5:52 PM"), which was
+    /// right when the thread showed no times anywhere else. Now that the end of every run carries
+    /// its own stamp, that put the time on screen twice, six inches apart, and the divider stopped
+    /// reading as a day break. This is the day alone; the stamp under the last bubble is the time.
+    ///
+    /// Neither branch carries a year: a chat thread nobody has opened in a year is not a case
+    /// worth a wider label.
+    public static func dayDividerLabel(
+        for date: Date,
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        locale: Locale = .current
+    ) -> String {
+        if calendar.isDate(date, inSameDayAs: now) { return "Today" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+           calendar.isDate(date, inSameDayAs: yesterday) {
+            return "Yesterday"
+        }
+        // Whole days between the two *calendar days*, not between the two instants: 11pm Sunday
+        // and 1am the following Sunday are six days apart on the clock and seven on the calendar,
+        // and it is the calendar answer that decides whether a weekday name is still unambiguous.
+        let days = calendar.dateComponents(
+            [.day],
+            from: calendar.startOfDay(for: date),
+            to: calendar.startOfDay(for: now)
+        ).day ?? 0
+        if days < 7 {
+            return SharedFormatters.string(from: date, pattern: .template("EEEE"), locale: locale, calendar: calendar)
+        }
+        return SharedFormatters.string(from: date, pattern: .template("MMMd"), locale: locale, calendar: calendar)
+    }
+
     /// Shown in place of the thread when the first page never arrived. A Try again button
     /// sits right under it, so this must not send the member looking for a gesture: there is
     /// nothing to pull on an empty screen.

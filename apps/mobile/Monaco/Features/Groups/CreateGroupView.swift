@@ -153,9 +153,12 @@ struct CreateGroupView: View {
 
     /// The preview mark's colour, hashed from what has been typed so far.
     ///
-    /// The real tint is hashed from the cabal's **id**, which the server has not issued yet, so
-    /// this is a stand-in and the copy under it never claims otherwise. The initials are the
-    /// honest half and they are the half that matters: "Semis or bust" becomes SB, not SO.
+    /// It is **not** the colour this cabal will end up with, and nothing on the screen says it is.
+    /// The real tint is hashed from the server-issued id and then run through
+    /// `CabalTintAssignment.resolve` against the founder's other cabals, so it is not knowable
+    /// until the cabal exists — a colour a founder watched settle would change three seconds
+    /// later, in front of them. The initials are the honest half and they are the half that
+    /// matters: "Semis or bust" becomes SB, not SO. The copy under the mark says which is which.
     private var previewTint: MonacoTheme.CabalTint {
         .forGroupId(trimmedName.isEmpty ? "monaco" : trimmedName)
     }
@@ -170,11 +173,13 @@ struct CreateGroupView: View {
                     if let errorMessage {
                         Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                             .font(MonacoTheme.Typo.caption)
-                            .foregroundStyle(MonacoTheme.warningOnWash)
+                            // §5.6 maps a failed thing to the danger ramp; amber is "pending" and
+                            // "closing soon". The cabal was not created, which is a failure.
+                            .foregroundStyle(MonacoTheme.dangerOnWash)
                             .padding(MonacoTheme.Space.sm)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(
-                                MonacoTheme.warningWash,
+                                MonacoTheme.dangerWash,
                                 in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.container, style: .continuous)
                             )
                             .accessibilityIdentifier("create-group-error")
@@ -206,14 +211,20 @@ struct CreateGroupView: View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
             CreateStepHeader(number: 1, title: "Name your cabal")
             HStack(spacing: MonacoTheme.Space.m) {
-                CabalMark(tint: previewTint, name: trimmedName.isEmpty ? "?" : trimmedName, size: 56)
-                    .accessibilityHidden(true)
+                // The one screen in the app that gets the live recolour (§4 #22, §5.11.1).
+                CabalMark(
+                    tint: previewTint,
+                    name: trimmedName.isEmpty ? "?" : trimmedName,
+                    size: 56,
+                    animatesIdentity: true
+                )
+                .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(trimmedName.isEmpty ? "Your cabal" : trimmedName)
                         .displayFont(.section)
                         .foregroundStyle(trimmedName.isEmpty ? MonacoTheme.fgSubtle : MonacoTheme.fgPrimary)
                         .lineLimit(2)
-                    Text("Every cabal gets a colour and a mark of its own")
+                    Text("Your initials now — we'll give it a colour when it's created")
                         .font(MonacoTheme.Typo.caption)
                         .foregroundStyle(MonacoTheme.fgMuted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -361,22 +372,29 @@ struct CreateGroupView: View {
 
 /// A numbered step heading. The numeral is the only thing on this screen that says "there are
 /// three of these and you are on the second", which is what a wheel picker never told anybody.
+///
+/// It is set as an eyebrow above the title, not as a disc. Nothing about a step number is
+/// tappable and §0 rule 2 is that brand blue is the interactive accent and nothing else carries
+/// it — a numbered blue circle is both a broken rule and the exact onboarding furniture §5.3.2
+/// deletes four brand-wash circles for. The eyebrow is §2.2's highest-leverage style and it is
+/// free here.
 private struct CreateStepHeader: View {
     let number: Int
     let title: String
 
     var body: some View {
-        HStack(spacing: MonacoTheme.Space.s) {
-            Text("\(number)")
-                .font(.system(size: 12, weight: .bold).monospacedDigit())
-                .foregroundStyle(MonacoTheme.brandOnWash)
-                .frame(width: 22, height: 22)
-                .background(Circle().fill(MonacoTheme.brandWash))
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Step \(number)")
+                .displayFont(.eyebrow)
+                .foregroundStyle(MonacoTheme.fgMuted)
+                .fixedSize(horizontal: false, vertical: true)
             Text(title)
                 .displayFont(.section)
                 .foregroundStyle(MonacoTheme.fgPrimary)
+                .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Step \(number). \(title)")
     }

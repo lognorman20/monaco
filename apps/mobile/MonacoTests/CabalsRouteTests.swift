@@ -9,7 +9,28 @@ struct CabalsRouteTests {
     @Test func aRowTheViewerIsInOpensTheCabal() {
         let route = CabalsRoute(row: "g1", name: "Weekend investors", isJoined: true, joinMode: .request)
 
-        #expect(route == .cabal(id: "g1", name: "Weekend investors"))
+        #expect(route == .cabal(id: "g1", name: "Weekend investors", from: .plainPush))
+    }
+
+    /// A discovery row has no `.matchedTransitionSource` behind it, so it must not ask for the
+    /// zoom — otherwise it grows out of whichever strip card happens to be rendered for that id.
+    @Test func aDiscoveryRowNeverClaimsAZoomSource() {
+        let route = CabalsRoute(row: "g1", name: "Weekend investors", isJoined: true, joinMode: .open)
+
+        guard case let .cabal(_, _, origin) = route else {
+            Issue.record("expected a cabal route")
+            return
+        }
+        #expect(origin == .plainPush)
+    }
+
+    /// The origin is part of the route's identity: the same cabal reached from the strip and from
+    /// the board are two different pushes, and `navigationDestination(item:)` must see that.
+    @Test func theOriginDistinguishesTwoPushesOfTheSameCabal() {
+        #expect(
+            CabalsRoute.cabal(id: "g1", name: "Weekend investors", from: .stripCard)
+                != .cabal(id: "g1", name: "Weekend investors", from: .plainPush)
+        )
     }
 
     @Test func anApprovalCabalRoutesToTheRequestForm() {

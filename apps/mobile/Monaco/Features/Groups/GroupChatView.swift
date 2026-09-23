@@ -25,8 +25,13 @@ struct GroupChatView: View {
     /// Returns the chat transport for the current session, or nil when signed out.
     let makeService: () -> (any GroupChatService)?
 
-    /// Author id to member, built once per members change rather than per bubble.
-    private var membersById: [String: LeaderboardRowDTO] {
+    /// Author id to member.
+    ///
+    /// Built **once per body pass**, in `thread`, next to `dayLabels` — never read from inside the
+    /// `ForEach` closure. As a computed property read per row it was rebuilt once per bubble,
+    /// O(rows x members) on a body that every composer keystroke invalidates, which is the exact
+    /// per-row work `GroupChatRow` exists to keep off this path.
+    private func membersById(_ members: [LeaderboardRowDTO]) -> [String: LeaderboardRowDTO] {
         Dictionary(members.map { ($0.userId, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
@@ -64,6 +69,7 @@ struct GroupChatView: View {
     @State private var refreshGate = RefreshGate()
     @FocusState private var composerFocused: Bool
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let pageSize = 30
     private let pollInterval: Duration = .seconds(4)
@@ -157,7 +163,7 @@ struct GroupChatView: View {
                 statusMessage {
                     ProgressView("Loading messages…")
                         .tint(MonacoTheme.controlTint)
-                        .foregroundStyle(MonacoTheme.secondaryText)
+                        .foregroundStyle(MonacoTheme.fgMuted)
                 }
                 .accessibilityIdentifier("group-chat-loading")
             }
@@ -165,7 +171,7 @@ struct GroupChatView: View {
             statusMessage {
                 Text(GroupChatCopy.emptyState)
                     .font(.subheadline)
-                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .foregroundStyle(MonacoTheme.fgMuted)
                     .multilineTextAlignment(.center)
             }
             .contentShape(Rectangle())
@@ -177,7 +183,8 @@ struct GroupChatView: View {
     }
 
     private var thread: some View {
-        let dayLabels = GroupChatDayDivider.labels(for: timeline.rows)
+        let dayLabels = GroupChatCopy.dayDividerLabels(for: timeline.rows)
+        let authors = membersById(members)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 3) {
@@ -202,7 +209,7 @@ struct GroupChatView: View {
                         }
                         GroupChatBubble(
                             row: row,
-                            author: membersById[row.message.authorId],
+                            author: authors[row.message.authorId],
                             tint: resolvedTint
                         )
                         .padding(.top, row.startsRun && !row.showsTimeSeparator ? 10 : 0)
@@ -299,7 +306,7 @@ struct GroupChatView: View {
                 }
             }
             .onChange(of: scrollToBottomRequests) { _, _ in
-                withAnimation(.easeOut(duration: 0.2)) {
+                withAnimation(MonacoMotion.glide.reduced(reduceMotion)) {
                     proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
                 }
             }
@@ -368,7 +375,7 @@ struct GroupChatView: View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Label(message, systemImage: "lock.fill")
                 .font(.footnote)
-                .foregroundStyle(MonacoTheme.secondaryText)
+                .foregroundStyle(MonacoTheme.fgMuted)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Button("Try again") { Task { await loadNewest() } }
@@ -581,7 +588,7 @@ private struct GroupChatComposer: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 11)
                     .frame(minHeight: 44)
-                    .background(MonacoTheme.surfaceSunken, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .background(MonacoTheme.fillQuiet, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .accessibilityIdentifier("group-chat-composer")
 
                 Button {
@@ -610,7 +617,7 @@ private struct GroupChatComposer: View {
             if trimmedCount > GroupChatDraft.maxCharacters - 200 {
                 Text("\(trimmedCount)/\(GroupChatDraft.maxCharacters)")
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(trimmedCount > GroupChatDraft.maxCharacters ? MonacoTheme.destructive : MonacoTheme.secondaryText)
+                    .foregroundStyle(trimmedCount > GroupChatDraft.maxCharacters ? MonacoTheme.destructive : MonacoTheme.fgMuted)
                     .accessibilityIdentifier("group-chat-char-count")
             }
         }
@@ -649,49 +656,6 @@ private struct GroupChatComposer: View {
             // picked to throw away silently.
             draft = draft.isEmpty ? submitted : submitted + "\n" + draft
         }
-    }
-}
-
-/// The centred label that breaks a thread into days.
-///
-/// `GroupChatRow.timeSeparatorLabel()` returns the day **and** the clock time ("Yesterday
-/// 5:52 PM"), which was right when the thread showed no times anywhere else. Now that the end of
-/// every run carries its own stamp, that put the time on screen twice, six inches apart, and the
-/// divider stopped reading as a day break. This is the day alone; the stamp under the last
-/// bubble of a run is the time.
-enum GroupChatDayDivider {
-    /// Which rows open a new day, keyed by row id.
-    ///
-    /// `showsTimeSeparator` marks a *gap in the conversation*, not a new day — two messages four
-    /// hours apart on the same afternoon both carry it. That was right when the label included
-    /// the clock time; with a day-only label it printed "Today" twice down one screen. A day
-    /// divider is drawn where the day actually changes, and nowhere else.
-    static func labels(for rows: [GroupChatRow], now: Date = Date()) -> [String: String] {
-        let calendar = Calendar.current
-        var labels: [String: String] = [:]
-        var lastDay: Date?
-        for row in rows {
-            guard let date = row.date else { continue }
-            let day = calendar.startOfDay(for: date)
-            if day != lastDay {
-                labels[row.id] = label(for: date, now: now)
-                lastDay = day
-            }
-        }
-        return labels
-    }
-
-    static func label(for date: Date, now: Date = Date()) -> String {
-        let calendar = Calendar.current
-        if calendar.isDateInToday(date) { return "Today" }
-        if calendar.isDateInYesterday(date) { return "Yesterday" }
-        // Inside the last week, the weekday is what a member actually remembers; past that, the
-        // date. Neither carries a year: a chat thread nobody has opened in a year is not a case
-        // worth a wider label.
-        if let days = calendar.dateComponents([.day], from: date, to: now).day, days < 7 {
-            return date.formatted(.dateTime.weekday(.wide))
-        }
-        return date.formatted(.dateTime.day().month(.abbreviated))
     }
 }
 
@@ -808,7 +772,9 @@ private struct GroupChatBubble: View {
     }
 
     private var accessibilityText: String {
-        let who = message.mine ? "You" : message.authorName
+        // The same resolved name the bubble draws. A member who renamed themselves must not be
+        // one person to a sighted reader and another to VoiceOver on the same bubble.
+        let who = message.mine ? "You" : (author?.displayName ?? message.authorName)
         guard let date = row.date else { return "\(who): \(message.body)" }
         return "\(who), \(date.formatted(date: .omitted, time: .shortened)): \(message.body)"
     }

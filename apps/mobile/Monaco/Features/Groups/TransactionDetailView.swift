@@ -28,7 +28,7 @@ struct TransactionDetailView: View {
                 VStack(spacing: 16) {
                     Text(errorMessage)
                         .font(.body)
-                        .foregroundStyle(MonacoTheme.muted)
+                        .foregroundStyle(MonacoTheme.fgMuted)
                         .multilineTextAlignment(.center)
                     Button("Try again") {
                         Task { await loadDetail() }
@@ -279,13 +279,13 @@ struct TransactionReceiptView: View {
                 VStack(spacing: 12) {
                     Image(systemName: receipt.glyph)
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(MonacoTheme.ink)
+                        .foregroundStyle(MonacoTheme.fgPrimary)
                         .frame(width: 56, height: 56)
-                        .background(Circle().fill(MonacoTheme.surfaceSunken))
+                        .background(Circle().fill(MonacoTheme.fillQuiet))
                         .accessibilityHidden(true)
                     Text(receipt.headline)
                         .font(MonacoTheme.Typo.title)
-                        .foregroundStyle(MonacoTheme.ink)
+                        .foregroundStyle(MonacoTheme.fgPrimary)
                         .multilineTextAlignment(.center)
                     Group {
                         if let micros = receipt.amountMicros {
@@ -293,7 +293,7 @@ struct TransactionReceiptView: View {
                         } else {
                             Text(receipt.fallbackHero ?? "—")
                                 .moneyFont(.hero)
-                                .foregroundStyle(MonacoTheme.ink)
+                                .foregroundStyle(MonacoTheme.fgPrimary)
                         }
                     }
                     .lineLimit(1)
@@ -310,7 +310,7 @@ struct TransactionReceiptView: View {
                 if let failure = receipt.failureMessage {
                     Text(failure)
                         .font(.subheadline)
-                        .foregroundStyle(MonacoTheme.muted)
+                        .foregroundStyle(MonacoTheme.fgMuted)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                 }
@@ -319,12 +319,12 @@ struct TransactionReceiptView: View {
                     ForEach(receipt.rows) { row in
                         HStack {
                             Text(row.label)
-                                .foregroundStyle(MonacoTheme.muted)
+                                .foregroundStyle(MonacoTheme.fgMuted)
                             Spacer(minLength: 12)
                             Text(row.value)
                                 .fontWeight(.semibold)
                                 .monospacedDigit()
-                                .foregroundStyle(MonacoTheme.ink)
+                                .foregroundStyle(MonacoTheme.fgPrimary)
                                 .multilineTextAlignment(.trailing)
                         }
                         .font(MonacoTheme.Typo.body)
@@ -332,7 +332,7 @@ struct TransactionReceiptView: View {
                         .frame(minHeight: 52)
                         .overlay(alignment: .bottom) {
                             if row.id != receipt.rows.last?.id {
-                                Rectangle().fill(MonacoTheme.hairline).frame(height: 1).padding(.leading, MonacoTheme.Space.m)
+                                Rectangle().fill(MonacoTheme.line).frame(height: 1).padding(.leading, MonacoTheme.Space.m)
                             }
                         }
                         .accessibilityElement(children: .combine)
@@ -366,10 +366,10 @@ struct TransactionReceiptView: View {
 
     private var statusColor: Color {
         switch receipt.status {
-        case .confirmed: MonacoTheme.muted
+        case .confirmed: MonacoTheme.fgMuted
         case .pending: MonacoTheme.warning
         case .failed: MonacoTheme.loss
-        case .other: MonacoTheme.muted
+        case .other: MonacoTheme.fgMuted
         }
     }
 }

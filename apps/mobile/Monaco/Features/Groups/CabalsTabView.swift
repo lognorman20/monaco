@@ -126,11 +126,11 @@ struct CabalsTabView: View {
                 onCreated: { created in
                     // Replace the form with the new cabal. Back then lands on the
                     // tab, not on a filled-in form that would create a second one.
-                    self.route = .cabal(id: created.groupId, name: created.name)
+                    self.route = .cabal(id: created.groupId, name: created.name, from: .plainPush)
                 },
                 onJoined: { groupId, groupName in
                     model.markJoined(groupID: groupId)
-                    self.route = .cabal(id: groupId, name: groupName)
+                    self.route = .cabal(id: groupId, name: groupName, from: .plainPush)
                 },
                 zoomNamespace: cabalZoom
             )

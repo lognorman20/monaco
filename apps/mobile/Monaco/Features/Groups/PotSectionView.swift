@@ -50,7 +50,7 @@ struct PotSectionView: View {
                 if stocks.isEmpty {
                     Text("Nothing bought yet. Propose the first buy.")
                         .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.muted)
+                        .foregroundStyle(MonacoTheme.fgMuted)
                         .accessibilityIdentifier("pot-nothing-bought")
                 }
             }

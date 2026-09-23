@@ -144,6 +144,21 @@ struct GroupHeroBand<Content: View>: View {
     let tint: MonacoTheme.CabalTint
     @ViewBuilder let content: Content
 
+    /// The cabal's wash over ink.
+    ///
+    /// `CabalTint.soft` is a *paper* wash — the deep `fill` at 12% — and over `#0B1220` it is not
+    /// there at all, which is why this reaches for the `onInk` pair instead, exactly as
+    /// `brandWashOnInk` is the light blue rather than `brand`. The opacity is held here rather
+    /// than inline so there is one number with one reason: at 10% the worst case in the ramp
+    /// (olive `#B9C93A`) lifts the band far enough that `Ink.fgSubtle` — white@0.48, 4.98:1 on
+    /// bare ink per §1.5 — still measures ~4.7:1 on the washed band, so the 11pt eyebrows hold AA.
+    /// Anything heavier is a fill, and the hero's one saturated fill is the Propose capsule.
+    ///
+    /// This belongs in the token table as `CabalTint.softOnInk` with a contrast row of its own.
+    /// That is a Chunk A edit to `MonacoTheme.swift`, which this chunk may not make; it is filed
+    /// as the follow-up and named here so the value is not a bare literal in the meantime.
+    static let washOpacity: Double = 0.10
+
     private var shape: AnyShape {
         AnyShape(RoundedRectangle(cornerRadius: MonacoTheme.Radius.object, style: .continuous))
     }
@@ -155,14 +170,7 @@ struct GroupHeroBand<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 InkSurface(shape: shape)
-                    .overlay {
-                        // `CabalTint.soft` is a *paper* wash: in light mode it is the deep fill
-                        // at 12%, which over #0B1220 is not there at all. On ink the tint has to
-                        // come from the `onInk` pair, exactly as `brandWashOnInk` is the light
-                        // blue rather than `brand`. 10% is a wash, not a fill, so the hero's one
-                        // saturated fill is still the Propose capsule.
-                        shape.fill(tint.onInk.opacity(0.10))
-                    }
+                    .overlay { shape.fill(tint.onInk.opacity(Self.washOpacity)) }
             }
     }
 }
@@ -173,7 +181,7 @@ struct GroupMemberAvatarStack: View {
     let members: [LeaderboardRowDTO]
     var size: CGFloat = 32
     var visibleLimit = 4
-    var ringColor: Color = MonacoTheme.surface
+    var ringColor: Color = MonacoTheme.bgRaised
 
     private var overlap: CGFloat { (size * 0.19).rounded() }
 
@@ -198,11 +206,16 @@ struct GroupMemberAvatarStack: View {
 
     /// Five solid-white discs on a deep ink band is more white than anything else on the screen,
     /// and the members are not the loudest thing on a cabal's hero — the pot is. On ink the disc
-    /// is a quiet white wash with white initials; on paper it stays the surface it always was.
+    /// is a raised ink card; on paper it stays the surface it always was.
     @Environment(\.monacoWorld) private var world
 
+    /// `Ink.raised`, not `Ink.lineStrong`: §1.5 gives `lineStrong` one job, the *edge* of a raised
+    /// card on ink, and a filled object inside ink is `Ink.raised`. The initials keep ~16.8:1
+    /// either way, so this is a token doing the job it is defined for rather than a legibility
+    /// fix — and against the hero's tint wash the raised fill reads as a disc that belongs to the
+    /// band instead of a white chip sitting on top of it.
     private var discFill: Color {
-        world == .ink ? MonacoTheme.Ink.lineStrong : MonacoTheme.bgRaised
+        world == .ink ? MonacoTheme.Ink.raised : MonacoTheme.bgRaised
     }
 
     private var discLabel: Color {

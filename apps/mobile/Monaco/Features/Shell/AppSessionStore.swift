@@ -371,7 +371,7 @@ final class AppSessionStore {
     }
 
     /// After POST /v1/groups: patch joined cabals locally, then refresh home/dashboard
-    /// in the background. Skips popular assets so create does not stampede Jupiter.
+    /// in the background. Skips popular assets so create does not stampede the price feed.
     func refreshAfterCreate(auth: SessionAuthenticating, created: CreateGroupResponse) {
         insertJoinedCabal(from: created)
         startDeferredWork { [self] in await deferredRefreshAfterCreate(auth: auth) }

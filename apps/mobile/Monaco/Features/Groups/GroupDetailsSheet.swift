@@ -33,7 +33,7 @@ struct GroupDetailsSheet: View {
                     field(title: "Invite code") {
                         Text(groupId)
                             .font(.system(.footnote, design: .monospaced))
-                            .foregroundStyle(MonacoTheme.ink)
+                            .foregroundStyle(MonacoTheme.fgPrimary)
                             .textSelection(.enabled)
                             .accessibilityIdentifier("group-invite-code")
                         copyButton(.invite, value: groupId)
@@ -72,7 +72,7 @@ struct GroupDetailsSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(MonacoTheme.Typo.caption.weight(.semibold))
-                .foregroundStyle(MonacoTheme.muted)
+                .foregroundStyle(MonacoTheme.fgMuted)
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -91,7 +91,7 @@ struct GroupDetailsSheet: View {
             Label(copiedField == field ? "Copied" : "Copy", systemImage: copiedField == field ? "checkmark" : "doc.on.doc")
         }
         .font(.subheadline.weight(.semibold))
-        .foregroundStyle(MonacoTheme.ink)
+        .foregroundStyle(MonacoTheme.fgPrimary)
         .frame(minHeight: 44)
     }
 }

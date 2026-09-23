@@ -233,7 +233,7 @@ struct GroupDetailView: View {
             statusCard {
                 Text(errorMessage)
                     .font(.body)
-                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .foregroundStyle(MonacoTheme.fgMuted)
                     .multilineTextAlignment(.center)
                 Button("Try again") {
                     Task { await refreshGate.runNow { try? await refresh(.initial) } }
@@ -247,7 +247,7 @@ struct GroupDetailView: View {
             statusCard {
                 Text("Couldn't load this cabal. Pull down to try again")
                     .font(.body)
-                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .foregroundStyle(MonacoTheme.fgMuted)
                     .multilineTextAlignment(.center)
                 Button("Try again") {
                     Task { await refreshGate.runNow { try? await refresh(.initial) } }
@@ -666,17 +666,17 @@ struct GroupLeaveProgressCover: View {
 
     var body: some View {
         ZStack {
-            MonacoTheme.canvas.opacity(0.94)
+            MonacoTheme.bgBase.opacity(0.94)
                 .ignoresSafeArea()
             VStack(spacing: 14) {
                 ProgressView()
                     .tint(MonacoTheme.controlTint)
                 Text(isSellingSlice ? "Selling your slice…" : "Leaving the cabal…")
                     .font(MonacoTheme.Typo.rowTitle)
-                    .foregroundStyle(MonacoTheme.ink)
+                    .foregroundStyle(MonacoTheme.fgPrimary)
                 Text("This can take a minute. Keep the app open.")
                     .font(.footnote)
-                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .foregroundStyle(MonacoTheme.fgMuted)
                     .multilineTextAlignment(.center)
             }
             .padding(24)

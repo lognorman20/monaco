@@ -452,3 +452,64 @@ struct CabalsTabModelTests {
         #expect(model.searchState == .results)
     }
 }
+
+/// The terminus name labels on the cabals P&L chart.
+///
+/// Every line ends at the same instant, so the labels sit in one column and two cabals with
+/// similar P&L would print their names on top of each other — and §1.8 is that tint is never the
+/// only identity signal, which on this chart means the name has to stay readable.
+@MainActor
+struct CabalsChartLabelLayoutTests {
+    private let domain: ClosedRange<Double> = -20...80
+    private let plotHeight: CGFloat = 176
+
+    private func offsets(_ terminals: [(id: String, value: Double)]) -> [String: CGFloat] {
+        CabalsPnLChartSection.labelOffsets(
+            terminals: terminals, domain: domain, plotHeight: plotHeight, minimumSeparation: 15
+        )
+    }
+
+    @Test func labelsThatAlreadyClearEachOtherAreNotMoved() {
+        let placed = offsets([("a", 70), ("b", 20), ("c", -10)])
+
+        #expect(placed["a"] == 0)
+        #expect(placed["b"] == 0)
+        #expect(placed["c"] == 0)
+    }
+
+    /// The topmost label never moves, so a name is always nearest the line it belongs to; the one
+    /// below is pushed down to exactly the minimum separation and no further.
+    @Test func aCrowdedPairIsPushedApartDownwards() {
+        let placed = offsets([("high", 40), ("low", 38)])
+        let span = domain.upperBound - domain.lowerBound
+        let pointsApart = CGFloat((40.0 - 38.0) / span) * plotHeight
+
+        #expect(placed["high"] == 0)
+        #expect(abs((placed["low"] ?? 0) - (15 - pointsApart)) < 0.001)
+    }
+
+    /// Three identical termini — three cabals all flat at zero, which is what a new set of
+    /// cabals looks like — stack at one separation each rather than collapsing into one label.
+    @Test func aStackOfIdenticalTerminiSpreadsEvenly() {
+        let placed = offsets([("a", 0), ("b", 0), ("c", 0)])
+        let steps = placed.values.sorted()
+
+        #expect(steps == [0, 15, 30])
+    }
+
+    /// Order is by value, not by arrival: the input is whatever the series array happens to hold.
+    @Test func theWalkIsOrderedByValueNotByInput() {
+        let placed = offsets([("low", 38), ("high", 40)])
+
+        #expect(placed["high"] == 0)
+        #expect((placed["low"] ?? 0) > 0)
+    }
+
+    @Test func aDegenerateDomainPlacesNothingRatherThanDividingByZero() {
+        let placed = CabalsPnLChartSection.labelOffsets(
+            terminals: [("a", 0)], domain: 0...0, plotHeight: plotHeight
+        )
+
+        #expect(placed.isEmpty)
+    }
+}

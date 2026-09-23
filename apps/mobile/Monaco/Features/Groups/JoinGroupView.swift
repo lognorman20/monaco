@@ -183,10 +183,13 @@ struct JoinGroupView: View {
                 ? JoinCabalCopy.codeFooter
                 : JoinCabalCopy.malformedCode)
                 .font(MonacoTheme.Typo.caption)
+                // `warning`, not `warningOnWash`: §1.6's on-wash pair is tuned to be read
+                // *through* the amber wash, and on bare canvas `#7A4408` reads as muddy brown
+                // rather than as the amber this line is meant to be.
                 .foregroundStyle(
                     trimmedId.isEmpty || isCodeWellFormed
                         ? MonacoTheme.fgMuted
-                        : MonacoTheme.warningOnWash
+                        : MonacoTheme.warning
                 )
                 .fixedSize(horizontal: false, vertical: true)
         }

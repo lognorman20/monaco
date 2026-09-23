@@ -34,12 +34,12 @@ struct GroupActivitySection: View {
             } else if let errorMessage, items.isEmpty {
                 Text(errorMessage)
                     .font(MonacoTheme.Typo.caption)
-                    .foregroundStyle(MonacoTheme.muted)
+                    .foregroundStyle(MonacoTheme.fgMuted)
                     .accessibilityIdentifier("group-activity-error")
             } else if items.isEmpty {
                 Text("Nothing yet. Money in, buys, and sells show up here.")
                     .font(MonacoTheme.Typo.caption)
-                    .foregroundStyle(MonacoTheme.muted)
+                    .foregroundStyle(MonacoTheme.fgMuted)
                     .accessibilityIdentifier("group-activity-empty")
             } else {
                 GroupActivityList(
@@ -81,7 +81,7 @@ struct GroupActivityList: View {
                 .padding(.horizontal, MonacoTheme.Space.m)
                 .overlay(alignment: .bottom) {
                     if item.id != items.last?.id {
-                        Rectangle().fill(MonacoTheme.hairline).frame(height: 1).padding(.leading, 60)
+                        Rectangle().fill(MonacoTheme.line).frame(height: 1).padding(.leading, 60)
                     }
                 }
             }
@@ -133,20 +133,20 @@ struct GroupActivityRow: View {
         HStack(spacing: 12) {
             Image(systemName: GroupActivityRules.glyph(for: item.kind))
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(MonacoTheme.ink)
+                .foregroundStyle(MonacoTheme.fgPrimary)
                 .frame(width: 32, height: 32)
-                .background(Circle().fill(MonacoTheme.surfaceSunken))
+                .background(Circle().fill(MonacoTheme.fillQuiet))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(GroupActivityRules.title(for: item))
                     .font(MonacoTheme.Typo.rowTitle)
-                    .foregroundStyle(MonacoTheme.ink)
+                    .foregroundStyle(MonacoTheme.fgPrimary)
                     .lineLimit(1)
                 HStack(spacing: 4) {
                     Text(GroupActivityRules.timeLabel(item.createdAt))
-                        .foregroundStyle(MonacoTheme.muted)
+                        .foregroundStyle(MonacoTheme.fgMuted)
                     if let status = GroupActivityRules.statusLabel(item.status) {
-                        Text("·").foregroundStyle(MonacoTheme.muted)
+                        Text("·").foregroundStyle(MonacoTheme.fgMuted)
                         Text(status.text)
                             .fontWeight(.semibold)
                             .foregroundStyle(status.isFailure ? MonacoTheme.loss : MonacoTheme.warning)
@@ -172,7 +172,7 @@ struct GroupActivityRow: View {
                 } else {
                     Text(GroupActivityRules.amountLabel(item))
                         .font(MonacoTheme.Typo.moneyRow)
-                        .foregroundStyle(MonacoTheme.ink)
+                        .foregroundStyle(MonacoTheme.fgPrimary)
                 }
             }
             .lineLimit(1)

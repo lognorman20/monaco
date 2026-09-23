@@ -357,6 +357,101 @@ final class GroupChatCopyTests: XCTestCase {
     }
 }
 
+/// The day divider. Injected calendar and locale throughout: a day boundary is the single thing
+/// in the thread most likely to be wrong across a timezone, and it lived in the view with
+/// `Calendar.current` and no test at all.
+final class GroupChatDayDividerTests: XCTestCase {
+    private let locale = Locale(identifier: "en_US_POSIX")
+
+    private func calendar(_ zone: String) -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: zone)!
+        return calendar
+    }
+
+    private func label(_ date: Date, now: Date, calendar: Calendar) -> String {
+        GroupChatCopy.dayDividerLabel(for: date, now: now, calendar: calendar, locale: locale)
+    }
+
+    /// The day alone. The clock time belongs under the last bubble of a run, and printing it in
+    /// both places six inches apart is what stopped the divider reading as a day break.
+    func testLabel_namesTheDayAndNeverTheClock() {
+        let utc = calendar("UTC")
+        let now = ISO8601DateFormatter().date(from: "2026-09-18T15:00:00Z")!
+
+        let today = ISO8601DateFormatter().date(from: "2026-09-18T12:40:00Z")!
+        let yesterday = ISO8601DateFormatter().date(from: "2026-09-17T09:02:00Z")!
+        let thisWeek = ISO8601DateFormatter().date(from: "2026-09-14T09:02:00Z")!
+        let older = ISO8601DateFormatter().date(from: "2026-08-30T09:02:00Z")!
+
+        XCTAssertEqual(label(today, now: now, calendar: utc), "Today")
+        XCTAssertEqual(label(yesterday, now: now, calendar: utc), "Yesterday")
+        XCTAssertEqual(label(thisWeek, now: now, calendar: utc), "Monday")
+        XCTAssertEqual(label(older, now: now, calendar: utc), "Aug 30")
+    }
+
+    /// The boundary is a calendar day in the reader's own zone, not 24 hours on the clock. One
+    /// stamp is "today" in UTC and "yesterday" in Los Angeles, and the divider has to say so.
+    func testLabel_takesTheBoundaryFromTheInjectedZone() {
+        let now = ISO8601DateFormatter().date(from: "2026-09-18T18:00:00Z")!
+        let stamp = ISO8601DateFormatter().date(from: "2026-09-18T04:00:00Z")!
+
+        XCTAssertEqual(label(stamp, now: now, calendar: calendar("UTC")), "Today")
+        XCTAssertEqual(label(stamp, now: now, calendar: calendar("America/Los_Angeles")), "Yesterday")
+    }
+
+    /// Seven calendar days back is the same weekday name as today, so it must fall through to the
+    /// date. Measured between calendar days rather than between instants: 11pm and 1am seven days
+    /// later are six days apart on the clock and would print an ambiguous weekday.
+    func testLabel_weekdayStopsAtSevenCalendarDays() {
+        let utc = calendar("UTC")
+        let now = ISO8601DateFormatter().date(from: "2026-09-18T01:00:00Z")!
+        let sixDays = ISO8601DateFormatter().date(from: "2026-09-12T23:00:00Z")!
+        let sevenDays = ISO8601DateFormatter().date(from: "2026-09-11T23:00:00Z")!
+
+        XCTAssertEqual(label(sixDays, now: now, calendar: utc), "Saturday")
+        XCTAssertEqual(label(sevenDays, now: now, calendar: utc), "Sep 11")
+    }
+
+    /// One divider per day, on the first row of that day — not on every row that carries a
+    /// conversation gap. Two messages five hours apart on one afternoon both set
+    /// `showsTimeSeparator`, and must still produce a single "Today".
+    func testLabels_markTheFirstRowOfEachDayOnly() {
+        var timeline = GroupChatTimeline()
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [
+            message("m3", at: "2026-09-18T14:00:00.000000Z"),
+            message("m2", at: "2026-09-18T09:00:00.000000Z"),
+            message("m1", at: "2026-09-17T09:00:00.000000Z"),
+        ]))
+        let now = ISO8601DateFormatter().date(from: "2026-09-18T20:00:00Z")!
+
+        let labels = GroupChatCopy.dayDividerLabels(
+            for: timeline.rows, now: now, calendar: calendar("UTC"), locale: locale
+        )
+
+        XCTAssertEqual(timeline.rows.map(\.showsTimeSeparator), [true, true, true])
+        XCTAssertEqual(labels["m1"], "Yesterday")
+        XCTAssertEqual(labels["m2"], "Today")
+        XCTAssertNil(labels["m3"], "the day did not change, so there is no second divider")
+    }
+
+    func testLabels_skipRowsWhoseStampDidNotParse() {
+        var timeline = GroupChatTimeline()
+        timeline.mergeNewest(GroupMessagesPageDTO(messages: [
+            message("m2", at: "2026-09-18T09:00:00.000000Z"),
+            message("m1", at: "not a date"),
+        ]))
+        let now = ISO8601DateFormatter().date(from: "2026-09-18T20:00:00Z")!
+
+        let labels = GroupChatCopy.dayDividerLabels(
+            for: timeline.rows, now: now, calendar: calendar("UTC"), locale: locale
+        )
+
+        XCTAssertNil(labels["m1"])
+        XCTAssertEqual(labels["m2"], "Today")
+    }
+}
+
 final class GroupChatAPITests: XCTestCase {
     override func tearDown() {
         MockURLProtocol.requestHandler = nil

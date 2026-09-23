@@ -30,11 +30,17 @@ struct CabalsStripSection: View {
     static let cardSize = CGSize(width: 200, height: 176)
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Snapping and scroll transitions are decoration on a horizontal strip and they fight the
     /// vertical stack the row falls back to at an accessibility size — the same gate
     /// `StockMoverStrip` already applies to the movers.
     private var scrollsHorizontally: Bool { !dynamicTypeSize.isAccessibilitySize }
+
+    /// The scroll-in is §4 moment #10, whose Reduce Motion fallback is "modifier omitted" —
+    /// not a shorter one. A card that arrives already at full opacity and full size has nothing
+    /// left to animate, so the modifier comes off entirely rather than being weakened.
+    private var scrollsIn: Bool { !reduceMotion }
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
@@ -82,11 +88,7 @@ struct CabalsStripSection: View {
             LazyHStack(spacing: MonacoTheme.Space.sm) {
                 ForEach(rows) { row in
                     cardButton(row)
-                        .scrollTransition(.interactive, axis: .horizontal) { view, phase in
-                            view
-                                .opacity(phase.isIdentity ? 1 : 0.55)
-                                .scaleEffect(phase.isIdentity ? 1 : 0.94)
-                        }
+                        .cabalStripScrollIn(scrollsIn)
                 }
                 newCabalButton
             }
@@ -111,7 +113,7 @@ struct CabalsStripSection: View {
 
     private func cardButton(_ row: HomeGroupBoardRowDTO) -> some View {
         Button {
-            onSelect(.cabal(id: row.groupId, name: row.name))
+            onSelect(.cabal(id: row.groupId, name: row.name, from: .stripCard))
         } label: {
             CabalStripCard(
                 row: row,
@@ -270,6 +272,22 @@ extension View {
     func zoomDestination(id: String, in namespace: Namespace.ID?) -> some View {
         if let namespace {
             navigationTransition(.zoom(sourceID: id, in: namespace))
+        } else {
+            self
+        }
+    }
+
+    /// The strip card's scroll-in (§4 moment #10). Written as a branch rather than a weakened
+    /// transition because the spec's fallback is the modifier's absence: `.scrollTransition`
+    /// with an identity body still drives a per-frame layout pass on every card in the strip.
+    @ViewBuilder
+    func cabalStripScrollIn(_ enabled: Bool) -> some View {
+        if enabled {
+            scrollTransition(.interactive, axis: .horizontal) { view, phase in
+                view
+                    .opacity(phase.isIdentity ? 1 : 0.55)
+                    .scaleEffect(phase.isIdentity ? 1 : 0.94)
+            }
         } else {
             self
         }

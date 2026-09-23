@@ -13,7 +13,7 @@ struct MemberBoardSection: View {
             if members.isEmpty {
                 Text("No members yet.")
                     .font(MonacoTheme.Typo.caption)
-                    .foregroundStyle(MonacoTheme.muted)
+                    .foregroundStyle(MonacoTheme.fgMuted)
             } else {
                 MonacoGroupedList {
                     ForEach(members) { row in
@@ -29,18 +29,18 @@ struct MemberBoardSection: View {
         HStack(spacing: MonacoTheme.Space.sm) {
             Text("\(row.rank)")
                 .font(MonacoTheme.Typo.moneyRow)
-                .foregroundStyle(MonacoTheme.muted)
+                .foregroundStyle(MonacoTheme.fgMuted)
                 .frame(width: 24, alignment: .leading)
             MonacoAvatar(photoURL: row.profilePhotoUrl, displayName: row.displayName, size: 36)
             HStack(spacing: 4) {
                 Text(row.displayName)
                     .font(MonacoTheme.Typo.rowTitle)
-                    .foregroundStyle(MonacoTheme.ink)
+                    .foregroundStyle(MonacoTheme.fgPrimary)
                     .lineLimit(1)
                 if isViewer(row) {
                     Text("(you)")
                         .font(MonacoTheme.Typo.body)
-                        .foregroundStyle(MonacoTheme.muted)
+                        .foregroundStyle(MonacoTheme.fgMuted)
                         .fixedSize()
                 }
             }
@@ -63,7 +63,7 @@ struct MemberBoardSection: View {
         }
         .overlay(alignment: .bottom) {
             if !isLast, row.rank != 1 {
-                Rectangle().fill(MonacoTheme.hairline).frame(height: 1).padding(.leading, 72)
+                Rectangle().fill(MonacoTheme.line).frame(height: 1).padding(.leading, 72)
             }
         }
         .accessibilityElement(children: .combine)
