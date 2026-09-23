@@ -10,12 +10,13 @@ import (
 
 // QuoteSellParams identifies an xStock → USDC sell quote request.
 type QuoteSellParams struct {
-	GroupID   string
-	UserID    string
-	Symbol    string
-	InputMint string
-	Amount    int64
-	Taker     string
+	GroupID     string
+	UserID      string
+	Symbol      string
+	InputMint   string
+	Amount      int64
+	Taker       string
+	SlippageBps int
 }
 
 // SellToUSDCParams executes a signed treasury sell to USDC.
@@ -46,10 +47,11 @@ func (c *HTTPClient) QuoteSell(ctx context.Context, params QuoteSellParams) (Sel
 	}
 
 	body, err := c.fetchBuyOrder(ctx, buyOrderRequest{
-		InputMint:  params.InputMint,
-		OutputMint: USDCMint,
-		Amount:     params.Amount,
-		Taker:      params.Taker,
+		InputMint:   params.InputMint,
+		OutputMint:  USDCMint,
+		Amount:      params.Amount,
+		Taker:       params.Taker,
+		SlippageBps: params.SlippageBps,
 	}, params.GroupID, params.UserID, params.Symbol)
 	if err != nil {
 		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, err.Error())

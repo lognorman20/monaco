@@ -22,6 +22,8 @@ const (
 	defaultBaseURL     = "https://api.jup.ag/swap/v2"
 	defaultTimeout     = 15 * time.Second
 	defaultSlippageBps = 50
+	// PreIPOSlippageBps is the slippage tolerance for Tessera pre-IPO token swaps.
+	PreIPOSlippageBps = 100
 )
 
 // ErrNoRoute means Jupiter returned no routable path for the requested swap.
@@ -209,10 +211,18 @@ func isRoutableBuyQuote(raw quoteResponse, requireTransaction bool) bool {
 }
 
 type buyOrderRequest struct {
-	InputMint  string
-	OutputMint string
-	Amount     int64
-	Taker      string
+	InputMint   string
+	OutputMint  string
+	Amount      int64
+	Taker       string
+	SlippageBps int
+}
+
+func slippageBpsForOrder(req buyOrderRequest) int {
+	if req.SlippageBps > 0 {
+		return req.SlippageBps
+	}
+	return defaultSlippageBps
 }
 
 func (c *HTTPClient) fetchBuyOrder(ctx context.Context, req buyOrderRequest, groupID, userID, symbol string) ([]byte, error) {
@@ -232,7 +242,7 @@ func (c *HTTPClient) fetchBuyOrder(ctx context.Context, req buyOrderRequest, gro
 	query.Set("outputMint", req.OutputMint)
 	query.Set("amount", strconv.FormatInt(req.Amount, 10))
 	query.Set("swapMode", "ExactIn")
-	query.Set("slippageBps", strconv.Itoa(defaultSlippageBps))
+	query.Set("slippageBps", strconv.Itoa(slippageBpsForOrder(req)))
 	taker := strings.TrimSpace(req.Taker)
 	if taker != "" {
 		query.Set("taker", taker)

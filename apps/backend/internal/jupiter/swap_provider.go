@@ -9,6 +9,18 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/swapprovider"
 )
 
+func swapSlippageBps(req swapprovider.Request) int {
+	if req.Kind == swapprovider.AssetKindPreIPO {
+		return PreIPOSlippageBps
+	}
+	return defaultSlippageBps
+}
+
+// SlippageBpsForRequest exposes order slippage for tests.
+func SlippageBpsForRequest(req swapprovider.Request) int {
+	return swapSlippageBps(req)
+}
+
 // SwapProvider adapts the Jupiter order → sign → execute → poll flow to swapprovider.Provider.
 type SwapProvider struct {
 	client Client
@@ -29,12 +41,13 @@ func (p *SwapProvider) Name() string {
 // SubmitBuy fetches a buy order for the treasury taker, signs it, and submits it to /execute.
 func (p *SwapProvider) SubmitBuy(ctx context.Context, req swapprovider.Request) (swapprovider.Submission, error) {
 	order, err := p.client.OrderBuy(ctx, OrderBuyParams{
-		GroupID:    req.GroupID,
-		UserID:     req.UserID,
-		Symbol:     req.Symbol,
-		OutputMint: req.OutputMint,
-		Amount:     req.Amount,
-		Taker:      req.Wallet.SolanaAddress,
+		GroupID:     req.GroupID,
+		UserID:      req.UserID,
+		Symbol:      req.Symbol,
+		OutputMint:  req.OutputMint,
+		Amount:      req.Amount,
+		Taker:       req.Wallet.SolanaAddress,
+		SlippageBps: swapSlippageBps(req),
 	})
 	if err != nil {
 		return swapprovider.Submission{}, swapprovider.AtStage("order_buy", "", err)
@@ -55,18 +68,25 @@ func (p *SwapProvider) SubmitBuy(ctx context.Context, req swapprovider.Request) 
 	if err != nil {
 		return swapprovider.Submission{}, swapprovider.AtStage("execute_submit", order.RequestID, err)
 	}
-	return swapprovider.Submission{RequestID: order.RequestID, Receipt: signedTx, Request: req}, nil
+	quotedOut, _ := parseFillAmount(order.OutAmount)
+	return swapprovider.Submission{
+		RequestID:          order.RequestID,
+		Receipt:            signedTx,
+		Request:            req,
+		QuotedOutputAmount: quotedOut,
+	}, nil
 }
 
 // SubmitSell quotes an xStock → USDC sell for the treasury taker, signs it, and submits it.
 func (p *SwapProvider) SubmitSell(ctx context.Context, req swapprovider.Request) (swapprovider.Submission, error) {
 	quote, err := p.client.QuoteSell(ctx, QuoteSellParams{
-		GroupID:   req.GroupID,
-		UserID:    req.UserID,
-		Symbol:    req.Symbol,
-		InputMint: req.InputMint,
-		Amount:    req.Amount,
-		Taker:     req.Wallet.SolanaAddress,
+		GroupID:     req.GroupID,
+		UserID:      req.UserID,
+		Symbol:      req.Symbol,
+		InputMint:   req.InputMint,
+		Amount:      req.Amount,
+		Taker:       req.Wallet.SolanaAddress,
+		SlippageBps: swapSlippageBps(req),
 	})
 	if err != nil {
 		if errors.Is(err, ErrNoRoute) || errors.Is(err, ErrBelowMinimumSize) {
@@ -96,7 +116,13 @@ func (p *SwapProvider) SubmitSell(ctx context.Context, req swapprovider.Request)
 	if err != nil {
 		return swapprovider.Submission{}, swapprovider.AtStage("execute_submit", quote.RequestID, err)
 	}
-	return swapprovider.Submission{RequestID: quote.RequestID, Receipt: signedTx, Request: req}, nil
+	quotedIn, _ := parseFillAmount(quote.InAmount)
+	return swapprovider.Submission{
+		RequestID:         quote.RequestID,
+		Receipt:           signedTx,
+		Request:           req,
+		QuotedInputAmount: quotedIn,
+	}, nil
 }
 
 // AwaitFill re-submits /execute until Jupiter confirms the swap or reports a terminal failure.
@@ -121,6 +147,8 @@ func (p *SwapProvider) AwaitFill(ctx context.Context, sub swapprovider.Submissio
 		return fill, fmt.Errorf("jupiter %s not confirmed: status=%s code=%d", side, result.Status, result.Code)
 	}
 	fill.Confirmed = true
+	fill.QuotedOutputAmount = sub.QuotedOutputAmount
+	fill.QuotedInputAmount = sub.QuotedInputAmount
 
 	fill.OutputAmount, err = parseFillAmount(result.OutputAmountResult)
 	if err != nil {

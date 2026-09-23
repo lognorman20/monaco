@@ -37,6 +37,8 @@ type fakePrivyClient struct {
 	rejectProofs    bool
 	rejectSubmitSweep bool
 	rejectSubmitSweepErr error
+	tokenBalanceDeltas map[string]int64
+	tokenBalanceDeltaErr map[string]error
 }
 
 // NewFakeClient returns a deterministic in-memory Privy client for tests.
@@ -49,8 +51,39 @@ func NewFakeClient() Client {
 		memberBalances:   make(map[string]int64),
 		treasuryBalances: make(map[string]int64),
 		validProofs:      make(map[string]struct{}),
-		payouts:          make(map[string]*fakePayout),
+		payouts:              make(map[string]*fakePayout),
+		tokenBalanceDeltas:   make(map[string]int64),
+		tokenBalanceDeltaErr: make(map[string]error),
 	}
+}
+
+func tokenBalanceDeltaKey(signature, owner, mint string) string {
+	return strings.TrimSpace(signature) + "|" + strings.TrimSpace(owner) + "|" + strings.TrimSpace(mint)
+}
+
+// RegisterTokenBalanceDelta configures the fake chain delta for getTransaction reconciliation tests.
+func RegisterTokenBalanceDelta(client Client, signature, owner, mint string, delta int64) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		panic("privy: RegisterTokenBalanceDelta requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	fake.tokenBalanceDeltas[tokenBalanceDeltaKey(signature, owner, mint)] = delta
+	delete(fake.tokenBalanceDeltaErr, tokenBalanceDeltaKey(signature, owner, mint))
+	fake.mu.Unlock()
+}
+
+// RegisterTokenBalanceDeltaError forces TokenBalanceDelta to fail for tests.
+func RegisterTokenBalanceDeltaError(client Client, signature, owner, mint string, err error) {
+	fake, ok := client.(*fakePrivyClient)
+	if !ok {
+		panic("privy: RegisterTokenBalanceDeltaError requires NewFakeClient")
+	}
+	fake.mu.Lock()
+	key := tokenBalanceDeltaKey(signature, owner, mint)
+	fake.tokenBalanceDeltaErr[key] = err
+	delete(fake.tokenBalanceDeltas, key)
+	fake.mu.Unlock()
 }
 
 // RegisterToken maps an access token to an identity for VerifySession tests.
@@ -163,6 +196,20 @@ func (f *fakePrivyClient) TreasuryUSDCBalance(ctx context.Context, treasuryAddre
 	balance := f.treasuryBalances[treasuryAddress]
 	logFake("treasury_usdc_balance", "address", treasuryAddress, "balance", balance)
 	return balance, nil
+}
+
+func (f *fakePrivyClient) TokenBalanceDelta(ctx context.Context, signature, owner, mint string) (int64, error) {
+	_ = ctx
+	key := tokenBalanceDeltaKey(signature, owner, mint)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err, ok := f.tokenBalanceDeltaErr[key]; ok {
+		return 0, err
+	}
+	if delta, ok := f.tokenBalanceDeltas[key]; ok {
+		return delta, nil
+	}
+	return 0, fmt.Errorf("%w: token balance delta not configured", ErrAPI)
 }
 
 func (f *fakePrivyClient) VerifyPayoutProof(ctx context.Context, userID string, proof PayoutProof) error {
