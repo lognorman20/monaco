@@ -99,7 +99,7 @@ struct AssetDetailModelTests {
 
         await model.loadChart(range: .oneWeek)
 
-        #expect(model.chartState == .empty)
+        #expect(model.chartState == .empty(reason: nil))
     }
 
     /// The bug: a slow 1M response overwrote the 1D curve the user had already switched to.
