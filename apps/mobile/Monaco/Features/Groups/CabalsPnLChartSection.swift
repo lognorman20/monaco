@@ -47,8 +47,7 @@ struct CabalsPnLChartSection: View {
     /// How much of the plot's width is reserved to the right of the last point for the name
     /// labels. A terminus sits at the plot's right edge by definition, so without this the label
     /// has nowhere to go and `overflowResolution` would drag it back over its own line.
-    private static let labelWidth: CGFloat = 72
-    private static let labelGutter: CGFloat = 76
+    private static let labelGutter: CGFloat = CabalChartLine.labelWidth + 4
 
     /// Explicit rather than inferred, because `labelOffsets` maps a value to a point inside it.
     /// Zero is always in range: the break-even rule is drawn at zero and a chart that hides it is
@@ -193,39 +192,24 @@ struct CabalsPnLChartSection: View {
 
     private var chart: some View {
         let series = drawable
+        let lines = chartLines()
         let domain = yDomain
-        let offsets = Self.labelOffsets(
-            terminals: series.compactMap { line in
-                line.points.last.map { (id: line.groupID, value: $0.chartValue) }
-            },
-            domain: domain,
-            plotHeight: Self.plotHeight
-        )
         return Chart {
-            RuleMark(y: .value("Break even", 0.0))
-                .foregroundStyle(MonacoTheme.Ink.lineStrong)
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
-            ForEach(series, id: \.id) { line in
+            breakEven
+            ForEach(lines) { line in
                 lineMarks(for: line)
                 // The terminus stays inside the `Chart` builder: lifted into a function of its
-                // own, `PointMark(x:y:)` resolves to the 3D chart's mark, which has no
-                // `annotation`. The label and the line marks are what the type checker needed
-                // taking out of here, and both are below.
-                ForEach(terminals(of: line), id: \.id) { last in
+                // own, `PointMark(x:y:)` resolves to the three-dimensional chart's mark, which
+                // has no `annotation`. Everything that can leave has left — the colour, the
+                // offset and the label are worked out before the builder runs.
+                ForEach(line.terminal) { last in
                     PointMark(
                         x: .value("Time", last.at),
                         y: .value("P&L", last.chartValue)
                     )
-                    .foregroundStyle(color(forGroupID: line.groupID))
+                    .foregroundStyle(line.color)
                     .symbolSize(28)
-                    .annotation(
-                        position: .trailing,
-                        alignment: .leading,
-                        spacing: 4,
-                        overflowResolution: .init(x: .fitToChart, y: .fitToChart)
-                    ) {
-                        terminusLabel(line, offset: offsets[line.groupID] ?? 0)
-                    }
+                    .cabalNameAtTheEnd(of: line)
                 }
             }
         }
@@ -251,44 +235,53 @@ struct CabalsPnLChartSection: View {
         .accessibilityIdentifier("cabals-pnl-chart")
     }
 
-    /// One cabal's line. Split out of the `Chart` builder because the whole thing in one
-    /// expression is past what the type checker will do in reasonable time.
+    /// The break-even rule, in a builder of its own. Everything this chart draws is factored out
+    /// of the `Chart` expression: with it all inline the type checker gives up.
     @ChartContentBuilder
-    private func lineMarks(for line: GroupPnLSeriesDTO) -> some ChartContent {
+    private var breakEven: some ChartContent {
+        RuleMark(y: .value("Break even", 0.0))
+            .foregroundStyle(MonacoTheme.Ink.lineStrong)
+            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+    }
+
+    /// One cabal's line.
+    @ChartContentBuilder
+    private func lineMarks(for line: CabalChartLine) -> some ChartContent {
         ForEach(line.points) { point in
             LineMark(
                 x: .value("Time", point.at),
                 y: .value("P&L", point.chartValue),
-                series: .value("Cabal", line.groupID)
+                series: .value("Cabal", line.id)
             )
-            .foregroundStyle(color(forGroupID: line.groupID))
+            .foregroundStyle(line.color)
             .interpolationMethod(.monotone)
             .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
         }
     }
 
-    /// The last point of a line, as a zero-or-one collection so the `Chart` builder can walk it
-    /// with a `ForEach` instead of an `if let` — which is what keeps the mark below inside the
-    /// two-dimensional chart's world.
-    private func terminals(of line: GroupPnLSeriesDTO) -> [GroupPnLPointDTO] {
-        line.points.last.map { [$0] } ?? []
-    }
-
-    /// The name at the end of one cabal's line.
-    ///
-    /// The hand-built swatch legend is gone: a legend makes colour the only identity carrier and
-    /// then asks the reader to hold seven of them in their head. A terminus sits at the plot's
-    /// right edge by definition, so the label needs both somewhere to go — the gutter reserved on
-    /// the x scale — and an overflow rule, or the chart clips its own only non-colour signal.
-    private func terminusLabel(_ line: GroupPnLSeriesDTO, offset: CGFloat) -> some View {
-        Text(line.name)
-            .font(MonacoTheme.Typo.micro)
-            .foregroundStyle(color(forGroupID: line.groupID))
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .frame(maxWidth: Self.labelWidth, alignment: .leading)
-            .offset(y: offset)
-            .accessibilityHidden(true)
+    /// Every drawable cabal, with its colour, its terminus and its label's offset already worked
+    /// out, so the `Chart` builder does no lookups and no arithmetic of its own.
+    private func chartLines() -> [CabalChartLine] {
+        let series = drawable
+        let offsets = Self.labelOffsets(
+            terminals: series.compactMap { line in
+                line.points.last.map { (id: line.groupID, value: $0.chartValue) }
+            },
+            domain: yDomain,
+            plotHeight: Self.plotHeight
+        )
+        return series.map { line in
+            CabalChartLine(
+                id: line.groupID,
+                name: line.name,
+                color: color(forGroupID: line.groupID),
+                points: line.points,
+                // Zero or one, so the builder can walk it with a `ForEach` rather than an
+                // `if let` — which is what keeps the mark inside the two-dimensional chart.
+                terminal: line.points.last.map { [$0] } ?? [],
+                labelOffset: offsets[line.groupID] ?? 0
+            )
+        }
     }
 
     /// The whole chart in one sentence, because the lines themselves carry nothing to VoiceOver.
@@ -393,6 +386,50 @@ private struct OptionalIdentifier: ViewModifier {
             content.accessibilityIdentifier(identifier)
         } else {
             content
+        }
+    }
+}
+
+
+/// One cabal's line, with everything the chart needs already decided.
+struct CabalChartLine: Identifiable {
+    let id: String
+    let name: String
+    let color: Color
+    let points: [GroupPnLPointDTO]
+    /// The last point, as a zero-or-one collection.
+    let terminal: [GroupPnLPointDTO]
+    /// How far below its own terminus the name sits, so two cabals ending close together do not
+    /// print their names on top of each other.
+    let labelOffset: CGFloat
+
+    /// How wide the name may be. The x scale reserves slightly more than this to the right of
+    /// the last point, so a terminus label has somewhere to go.
+    static let labelWidth: CGFloat = 72
+}
+
+extension ChartContent {
+    /// The cabal's name at the end of its line.
+    ///
+    /// The hand-built swatch legend is gone: a legend makes colour the only identity carrier and
+    /// then asks the reader to hold seven of them in their head. A terminus sits at the plot's
+    /// right edge by definition, so the label needs both somewhere to go — the gutter reserved on
+    /// the x scale — and an overflow rule, or the chart clips its own only non-colour signal.
+    func cabalNameAtTheEnd(of line: CabalChartLine) -> some ChartContent {
+        annotation(
+            position: .trailing,
+            alignment: .leading,
+            spacing: 4,
+            overflowResolution: .init(x: .fitToChart, y: .fitToChart)
+        ) {
+            Text(line.name)
+                .font(MonacoTheme.Typo.micro)
+                .foregroundStyle(line.color)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: CabalChartLine.labelWidth, alignment: .leading)
+                .offset(y: line.labelOffset)
+                .accessibilityHidden(true)
         }
     }
 }
