@@ -59,10 +59,16 @@ struct AssetChartCard: View {
                 .accessibilityIdentifier("asset-detail-chart-loading")
         case .series(let series):
             curve(series)
-        case .empty:
+        case .empty(let reason):
+            // The server's own reason when it gave one, and the generic nudge only
+            // when it did not. For 3M and 1Y on a B20 feed the reason is the whole
+            // answer: the token has been on-chain for weeks, so naming the day its
+            // history starts beats "try another range" under a box that reads like a
+            // bug. The retry stays either way — an empty window is also what a source
+            // that hiccuped looks like, and the member cannot tell the two apart.
             EmptyState(
                 title: "No price history for this window yet",
-                message: "Try another range, or ask again.",
+                message: reason ?? "Try another range, or ask again.",
                 actionTitle: "Try again",
                 action: { reload() }
             )

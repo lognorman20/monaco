@@ -25,8 +25,26 @@ var ChartRanges = []ChartRange{
 	ChartRange1D, ChartRange1W, ChartRange1M, ChartRange3M, ChartRange1Y, ChartRangeAll,
 }
 
-// EmptyReasonNoHistory is the single empty-series reason the app renders.
+// EmptyReasonNoHistory is the reason for a window a source could have covered and
+// had nothing in.
 const EmptyReasonNoHistory = "price history unavailable"
+
+// EmptyReasonBefore names the other case: the window starts before the price
+// existed anywhere we can read it. A B20 feed that went live seven weeks ago has
+// no 1Y chart and never will have one until a year has passed, and stretching the
+// seven weeks across a year axis would be a chart of something else. The reason
+// carries the date so the app can say which day the history starts, rather than
+// repeating "unavailable" at a user who can see the 1M chart working.
+//
+// The date is the feed's own first round, read from the chain, never a constant.
+func EmptyReasonBefore(first time.Time) string {
+	if first.IsZero() {
+		return EmptyReasonNoHistory
+	}
+	// Sentence case: the app renders this under the empty state's title, as its
+	// own line, not inside another sentence.
+	return "Only on-chain since " + first.UTC().Format("2 Jan 2006")
+}
 
 // ParseChartRange validates a chart range query param. An empty value means 1D, so
 // a build that only ever sends 1D, 1W or 1M keeps working unchanged.
@@ -65,6 +83,14 @@ type chartRangeWindow struct {
 	// the previous regular session's closing bar, not whatever after-hours print
 	// happened to be last before 04:00 ET.
 	previousCloseAt time.Time
+	// previousCloseFrom is the other end of that cut-off: the first instant a bar
+	// may carry the previous close. Without it a hole in the history — a symbol
+	// with no bars at all on the previous session — walks the search back through
+	// whatever else the fetch window happens to hold, and a close from days ago
+	// ships as "the previous close". That value is not decorative: change24h is a
+	// ratio against it, labelled as a day move. Outside the window there is no
+	// previous close, and the honest answer is to omit it.
+	previousCloseFrom time.Time
 }
 
 func chartWindow(chartRange ChartRange, now time.Time) chartRangeWindow {
@@ -125,10 +151,13 @@ func dayWindow(now time.Time) chartRangeWindow {
 		// No session inside the calendar's scan horizon. Degrade to a rolling day
 		// rather than to no chart at all.
 		return chartRangeWindow{
-			from:       now.AddDate(0, 0, -1),
-			fetchFrom:  now.AddDate(0, 0, -7),
-			to:         now,
-			resolution: "5",
+			from:      now.AddDate(0, 0, -1),
+			fetchFrom: now.AddDate(0, 0, -7),
+			to:        now,
+			// Still bounded: the baseline for a rolling day is the day before it,
+			// never whatever the seven-day fetch happens to reach.
+			previousCloseFrom: now.AddDate(0, 0, -2),
+			resolution:        "5",
 		}
 	}
 
@@ -147,6 +176,9 @@ func dayWindow(now time.Time) chartRangeWindow {
 		regularClose: session.RegularClose,
 	}
 	if previous, ok := marketcal.PreviousTradingSession(session.Day); ok {
+		// The previous close has to come from the previous session itself, so the
+		// pair of instants brackets exactly that session's extended hours.
+		window.previousCloseFrom = previous.PreMarketOpen
 		window.previousCloseAt = previous.RegularClose
 	}
 	return window

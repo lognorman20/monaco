@@ -48,6 +48,10 @@ private final class StubAssetDetailDataSource: AssetDetailDataSource {
     var stockVsToken: StockVsTokenDTO?
     var points: [AssetChartRange: [AssetChartPointDTO]] = [:]
     var previousCloseUsdcMicros: Int64?
+    /// What the server says about a window it could not fill, per range. On a B20
+    /// token the chart comes off a Chainlink feed that is only weeks old, so 3M and
+    /// 1Y really do come back empty with "Only on-chain since 5 Aug 2026".
+    var emptyReason: [AssetChartRange: String] = [:]
     /// The range the server claims each series was built for. Nil echoes the request.
     var echoedRange: AssetChartRange?
     var source: AssetChartSource?
@@ -110,7 +114,7 @@ private final class StubAssetDetailDataSource: AssetDetailDataSource {
         if let chartError { throw chartError }
         return AssetChartDTO(
             points: answer,
-            emptyReason: nil,
+            emptyReason: emptyReason[range],
             previousCloseUsdcMicros: previousCloseUsdcMicros,
             range: echoedRange ?? range,
             source: source,
@@ -173,7 +177,79 @@ struct AssetDetailModelTests {
 
         await model.loadChart(range: .oneWeek)
 
-        #expect(model.chartState == .empty)
+        #expect(model.chartState == .empty(reason: nil))
+    }
+
+    /// The reason is the whole answer for 3M and 1Y on a B20 token: the Chainlink feed
+    /// the chart is drawn from is weeks old, so those windows have no history and never
+    /// will until it ages. An unexplained blank box reads as a broken app.
+    ///
+    /// It travels on the series rather than beside it, so it goes through the same
+    /// per-range sequence check the curve does — see
+    /// `aLateEmptyReasonCannotCaptionANewerWindow`.
+    @Test func anEmptyWindowSurfacesTheServersReason() async throws {
+        let source = StubAssetDetailDataSource()
+        source.points[.oneYear] = []
+        source.emptyReason[.oneYear] = "Only on-chain since 5 Aug 2026"
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+        model.range = .oneYear
+
+        await model.loadChart(range: .oneYear)
+
+        #expect(model.chartState == .empty(reason: "Only on-chain since 5 Aug 2026"))
+    }
+
+    /// The catch-all only repeats what an empty chart already says, so it is dropped
+    /// before it ever reaches a slot. `AssetChartDTO.emptyMessage` is where that is
+    /// decided; this pins that the model reads it and not the raw field.
+    @Test func theCatchAllReasonIsNotWorthShowing() async throws {
+        let source = StubAssetDetailDataSource()
+        source.points[.threeMonths] = []
+        source.emptyReason[.threeMonths] = AssetChartDTO.genericEmptyReason
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+        model.range = .threeMonths
+
+        await model.loadChart(range: .threeMonths)
+
+        #expect(model.chartState == .empty(reason: nil))
+    }
+
+    /// A range that has data still draws a real curve, reason or no reason: the field
+    /// is about a window the server could not fill, and a filled one must ignore it.
+    @Test func aRangeWithDataStillDrawsItsCurve() async throws {
+        let source = StubAssetDetailDataSource()
+        source.points[.oneDay] = StubAssetDetailDataSource.series(from: 100, to: 110)
+        source.emptyReason[.oneDay] = "Only on-chain since 5 Aug 2026"
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+
+        await model.loadChart(range: .oneDay)
+
+        let series = try #require(model.series)
+        #expect(series.points.count == 2)
+        #expect(series.isDrawable)
+        #expect(model.chartState != .empty(reason: "Only on-chain since 5 Aug 2026"))
+    }
+
+    /// The reason is carried by the series, so the per-range sequence guards it too: a
+    /// slow 1Y read must not caption the 1D window the member has since tapped to.
+    @Test func aLateEmptyReasonCannotCaptionANewerWindow() async throws {
+        let source = StubAssetDetailDataSource()
+        source.points[.oneYear] = []
+        source.emptyReason[.oneYear] = "Only on-chain since 5 Aug 2026"
+        source.delays[.oneYear] = .milliseconds(400)
+        source.points[.oneDay] = StubAssetDetailDataSource.series(from: 100, to: 110)
+        let model = AssetDetailModel(symbol: "AAPLc", dataSource: source)
+
+        model.range = .oneYear
+        let slow = Task { await model.loadChart(range: .oneYear) }
+        try await Task.sleep(for: .milliseconds(50))
+        model.range = .oneDay
+        await model.loadChart(range: .oneDay)
+        _ = await slow.value
+
+        #expect(model.chartState == .series(StubAssetDetailDataSource.expected(.oneDay, from: 100, to: 110)))
+        // The year's own slot still keeps its reason, so tapping back is instant.
+        #expect(model.charts[.oneYear] == .empty(reason: "Only on-chain since 5 Aug 2026"))
     }
 
     /// The bug: a slow 1M response overwrote the 1D curve the user had already switched to.

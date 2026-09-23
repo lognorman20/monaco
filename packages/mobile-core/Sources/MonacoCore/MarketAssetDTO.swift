@@ -91,6 +91,17 @@ public struct ListMarketAssetsResponseDTO: Codable, Equatable, Sendable {
         self.hasMore = hasMore
         self.market = market
     }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        assets = try container.decode([MarketAssetDTO].self, forKey: .assets)
+        hasMore = try container.decodeIfPresent(Bool.self, forKey: .hasMore) ?? false
+        // The chip is decoration on a list of rows that decoded fine. Its two
+        // timestamps throw on anything the shared ISO8601 parser rejects, and the
+        // whole market list failing over a session chip is not a trade anyone would
+        // make.
+        market = (try? container.decodeIfPresent(MarketStatusDTO.self, forKey: .market)) ?? nil
+    }
 }
 
 public struct PopularAssetsResponseDTO: Codable, Equatable, Sendable {
@@ -100,6 +111,13 @@ public struct PopularAssetsResponseDTO: Codable, Equatable, Sendable {
     public init(assets: [MarketAssetDTO], market: MarketStatusDTO? = nil) {
         self.assets = assets
         self.market = market
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        assets = try container.decode([MarketAssetDTO].self, forKey: .assets)
+        // As on the list: an unparseable instant in the chip does not cost the rows.
+        market = (try? container.decodeIfPresent(MarketStatusDTO.self, forKey: .market)) ?? nil
     }
 }
 
@@ -548,7 +566,11 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
         change24hBasis = try container.decodeIfPresent(MarketPriceBasis.self, forKey: .change24hBasis)
         change24hBasisSymbol = try container.decodeIfPresent(String.self, forKey: .change24hBasisSymbol)
         liquidity = try container.decode(AssetLiquidityDTO.self, forKey: .liquidity)
-        market = try container.decodeIfPresent(MarketStatusDTO.self, forKey: .market)
+        // Same rule as the grid and the card below: the session chip is an optional
+        // section, and it carries two timestamps that throw on any spelling the
+        // shared ISO8601 parser rejects. One unparseable instant must not take the
+        // hero price down with it.
+        market = (try? container.decodeIfPresent(MarketStatusDTO.self, forKey: .market)) ?? nil
         marketSession = try container.decodeIfPresent(MarketSession.self, forKey: .marketSession) ?? market?.session
         afterHours = try container.decodeIfPresent(Bool.self, forKey: .afterHours) ?? market?.afterHours ?? false
         // The grid and the card are optional sections. A malformed one is dropped on
@@ -636,9 +658,10 @@ public struct AssetChartDTO: Codable, Equatable, Sendable {
     /// The close of the regular session before this window: the baseline a day
     /// chart draws its dashed line at and measures its change against.
     ///
-    /// Absent when the source does not know one. The Hermes sampler and the
-    /// Chainlink rounds never do — any number they could offer would be a point
-    /// already drawn in `points`. Draw nothing rather than a line through t0.
+    /// Absent when the source does not know one. The Hermes sampler never does.
+    /// The Chainlink rounds do: the baseline is the last round of the previous
+    /// session, which is a round outside the drawn window, not a point already in
+    /// `points`. When it is absent, draw nothing rather than a line through t0.
     public let previousCloseUsdcMicros: Int64?
     /// The range this series was built for. A response that names a range the user
     /// has already tapped away from should be discarded, not drawn.
@@ -673,6 +696,23 @@ public struct AssetChartDTO: Codable, Equatable, Sendable {
     /// Caption for the curve, e.g. "AAPL on its home exchange".
     public var basisCaption: String? {
         MarketPriceBasisCaption.caption(basis: basis, symbol: basisSymbol)
+    }
+
+    /// The catch-all the backend sends for a window a source could have covered
+    /// and had nothing in.
+    public static let genericEmptyReason = "price history unavailable"
+
+    /// The reason worth showing a reader, or nil.
+    ///
+    /// An empty chart already says there is no history, so repeating the
+    /// catch-all under it is noise. A reason that names a date is not: "Only
+    /// on-chain since 5 Aug 2026" answers the question the empty 1Y chip raises,
+    /// which is whether the app is broken.
+    public var emptyMessage: String? {
+        guard let emptyReason, !emptyReason.isEmpty, emptyReason != Self.genericEmptyReason else {
+            return nil
+        }
+        return emptyReason
     }
 
     private enum CodingKeys: String, CodingKey {

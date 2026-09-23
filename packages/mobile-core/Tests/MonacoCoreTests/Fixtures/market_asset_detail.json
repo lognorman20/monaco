@@ -11,7 +11,7 @@
     "label": "Via DEX",
     "routable": true,
     "buyProbeUsdcMicros": 1000000,
-    "buyProbeOutAmount": "430000",
+    "buyProbeOutAmount": "427533",
     "sellProbeInAmount": "100000000",
     "sellProbeOutAmount": "232520000",
     "spreadBps": 59
@@ -33,7 +33,6 @@
     "previousCloseUsdcMicros": 226500000,
     "week52HighUsdcMicros": 262000000,
     "week52LowUsdcMicros": 163000000,
-    "confUsdcMicros": 30000,
     "basis": "underlying",
     "basisSymbol": "AAPL"
   },
@@ -41,9 +40,9 @@
     "token": {
       "source": "dex_kyber",
       "status": "live",
-      "priceUsdcMicros": 233210000,
+      "priceUsdcMicros": 233210036,
       "bidUsdcMicros": 232520000,
-      "askUsdcMicros": 233900000,
+      "askUsdcMicros": 233900073,
       "probedAt": "2026-09-22T20:59:30Z"
     },
     "mark": {

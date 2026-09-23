@@ -270,6 +270,46 @@ final class MarketDataDTOTests: XCTestCase {
         XCTAssertNil(dto.stockVsToken)
     }
 
+    func testAssetDetail_aMalformedSessionChipDoesNotTakeTheHeroDown() throws {
+        // The chip carries two timestamps and they throw on anything the shared
+        // ISO8601 parser rejects. It is the same optional section as the grid and
+        // the card, so it goes the same way: dropped on its own.
+        let dto = try decode(AssetDetailDTO.self, """
+        {
+          "symbol":"AAPLc","name":"Apple","tokenAddress":"0xb200000000000000000000c2e324d24d7eecd1fb","routable":true,
+          "priceUsdcMicros":232050000,
+          "liquidity":{"label":"Via DEX","routable":true,"buyProbeUsdcMicros":1000000},
+          "market":{"session":"open","isOpen":true,"nextTransition":"the bell"}
+        }
+        """)
+        XCTAssertEqual(dto.priceUsdcMicros, 232_050_000)
+        XCTAssertNil(dto.market)
+        XCTAssertNil(dto.marketSession)
+    }
+
+    func testListMarketAssets_aMalformedSessionChipDoesNotTakeTheRowsDown() throws {
+        let dto = try decode(ListMarketAssetsResponseDTO.self, """
+        {
+          "assets":[{"symbol":"AAPLc","name":"Apple","tokenAddress":"0xb200000000000000000000c2e324d24d7eecd1fb","routable":true,"priceUsdcMicros":232050000}],
+          "hasMore":false,
+          "market":{"session":"open","isOpen":true,"asOf":"never"}
+        }
+        """)
+        XCTAssertEqual(dto.assets.count, 1)
+        XCTAssertNil(dto.market)
+    }
+
+    func testPopularAssets_aMalformedSessionChipDoesNotTakeTheRowsDown() throws {
+        let dto = try decode(PopularAssetsResponseDTO.self, """
+        {
+          "assets":[{"symbol":"AAPLc","name":"Apple","tokenAddress":"0xb200000000000000000000c2e324d24d7eecd1fb","routable":true,"priceUsdcMicros":232050000}],
+          "market":{"session":"open","isOpen":true,"asOf":"never"}
+        }
+        """)
+        XCTAssertEqual(dto.assets.count, 1)
+        XCTAssertNil(dto.market)
+    }
+
     func testStockVsToken_unknownReasonStringSurvivesAsRawText() throws {
         let quote = try decode(ReferenceQuoteDTO.self, """
         {"source":"pyth_equity","status":"unavailable","reason":"feed_retired"}
@@ -468,6 +508,49 @@ final class MarketDataDTOTests: XCTestCase {
         XCTAssertEqual(MarketSampleData.detail().marketSession, .open)
     }
 
+    func testSampleData_theChartStaysInsideTheGridItIsShownWith() throws {
+        // The chart and the grid under it describe the same session of the same
+        // instrument, so a curve drawn above its own stated day high is a harness
+        // screenshot of a contradiction. Both samples are checked against the grid
+        // they ship beside.
+        func assertWithin(
+            _ chart: AssetChartDTO,
+            _ stats: AssetStatsDTO,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) throws {
+            let high = try XCTUnwrap(stats.highUsdcMicros, file: file, line: line)
+            let low = try XCTUnwrap(stats.lowUsdcMicros, file: file, line: line)
+            XCTAssertFalse(chart.points.isEmpty, file: file, line: line)
+            for point in chart.points {
+                XCTAssertLessThanOrEqual(point.highUsdcMicros, high, file: file, line: line)
+                XCTAssertLessThanOrEqual(point.priceUsdcMicros, high, file: file, line: line)
+                XCTAssertGreaterThanOrEqual(point.lowUsdcMicros, low, file: file, line: line)
+                XCTAssertGreaterThanOrEqual(point.openUsdcMicros, low, file: file, line: line)
+            }
+            // And the grid's own extremes are reached, or the cells would be
+            // describing a session the curve never had.
+            XCTAssertEqual(chart.points.map(\.highUsdcMicros).max(), high, file: file, line: line)
+            XCTAssertEqual(chart.points.map(\.lowUsdcMicros).min(), low, file: file, line: line)
+        }
+
+        for range in AssetChartRange.allCases {
+            try assertWithin(MarketSampleData.chart(range: range), MarketSampleData.statsComplete)
+        }
+        for range in [AssetChartRange.oneDay, .oneWeek, .oneMonth] {
+            try assertWithin(MarketSampleData.chartRecentListing(range: range), MarketSampleData.statsPartial)
+        }
+        // The baseline the chart draws is the grid's previous close, for both.
+        XCTAssertEqual(
+            MarketSampleData.chart(range: .oneDay).previousCloseUsdcMicros,
+            MarketSampleData.statsComplete.previousCloseUsdcMicros
+        )
+        XCTAssertEqual(
+            MarketSampleData.chartRecentListing(range: .oneDay).previousCloseUsdcMicros,
+            MarketSampleData.statsPartial.previousCloseUsdcMicros
+        )
+    }
+
     func testSampleData_theSparseListingIsOneTheBackendCouldProduce() throws {
         let sparse = MarketSampleData.sparseDetail()
         // The pinned SPCXc contract (apps/backend/internal/b20/pinned.go).
@@ -560,6 +643,34 @@ final class MarketDataDTOTests: XCTestCase {
         XCTAssertEqual(sample.source, .chainlink)
         XCTAssertEqual(sample.basis, .token)
         XCTAssertFalse(sample.points.contains(where: \.hasCandle))
+        // The rounds do know a previous close: the last round of the session before
+        // the window, which is not a point the curve draws.
+        XCTAssertNotNil(sample.previousCloseUsdcMicros)
+    }
+
+    func testAssetChart_emptyMessageOnlySurfacesAReasonWorthReading() throws {
+        // The catch-all repeats what an empty chart already shows.
+        let generic = try decode(AssetChartDTO.self, """
+        {"points":[],"emptyReason":"price history unavailable","range":"1Y"}
+        """)
+        XCTAssertNil(generic.emptyMessage)
+
+        // A reason that names the day the feed starts answers the question an
+        // empty 1Y chip raises: whether the app is broken.
+        let dated = try decode(AssetChartDTO.self, """
+        {"points":[],"emptyReason":"Only on-chain since 5 Aug 2026","range":"1Y","source":"chainlink"}
+        """)
+        XCTAssertEqual(dated.emptyMessage, "Only on-chain since 5 Aug 2026")
+
+        let silent = try decode(AssetChartDTO.self, """
+        {"points":[],"range":"1Y"}
+        """)
+        XCTAssertNil(silent.emptyMessage)
+
+        XCTAssertEqual(
+            MarketSampleData.chartBeforeTheFeedExisted(range: .oneYear).emptyMessage,
+            "Only on-chain since 5 Aug 2026"
+        )
     }
 
     func testSampleData_premiumIsTheKyberMidAgainstTheMark() throws {

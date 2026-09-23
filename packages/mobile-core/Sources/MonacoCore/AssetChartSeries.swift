@@ -27,6 +27,19 @@ public struct AssetChartSeries: Equatable, Sendable {
     public let source: AssetChartSource?
     public let basis: MarketPriceBasis?
     public let basisSymbol: String?
+    /// Why this window has no curve, when the server said something worth reading.
+    ///
+    /// A series with points ignores it. A series without them is the only thing the
+    /// screen has to show, and "Only on-chain since 5 Aug 2026" is the difference
+    /// between an answer and a blank box that reads like a bug: the Chainlink feed a
+    /// B20 token's chart is drawn from is weeks old, so 3M and 1Y have no history to
+    /// serve and never will until the feed is old enough.
+    ///
+    /// It rides here rather than beside the series so that a range's reason travels
+    /// with that range's response, through the same per-range sequence check the
+    /// curve goes through. `AssetChartDTO.emptyMessage` has already dropped the
+    /// catch-all, which only repeats what an empty chart says by itself.
+    public let emptyMessage: String?
 
     public init(
         range: AssetChartRange,
@@ -34,7 +47,8 @@ public struct AssetChartSeries: Equatable, Sendable {
         previousCloseUsdcMicros: Int64? = nil,
         source: AssetChartSource? = nil,
         basis: MarketPriceBasis? = nil,
-        basisSymbol: String? = nil
+        basisSymbol: String? = nil,
+        emptyMessage: String? = nil
     ) {
         self.range = range
         self.points = Self.canonical(points)
@@ -42,6 +56,7 @@ public struct AssetChartSeries: Equatable, Sendable {
         self.source = source
         self.basis = basis
         self.basisSymbol = basisSymbol
+        self.emptyMessage = emptyMessage
     }
 
     /// Builds the series for `requested`, or nil when the response is not about it.
@@ -59,7 +74,8 @@ public struct AssetChartSeries: Equatable, Sendable {
             previousCloseUsdcMicros: dto.previousCloseUsdcMicros,
             source: dto.source,
             basis: dto.basis,
-            basisSymbol: dto.basisSymbol
+            basisSymbol: dto.basisSymbol,
+            emptyMessage: dto.emptyMessage
         )
     }
 

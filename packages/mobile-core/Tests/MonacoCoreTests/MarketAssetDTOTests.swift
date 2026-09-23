@@ -38,8 +38,15 @@ final class MarketAssetDTOTests: XCTestCase {
         let dto = try JSONDecoder().decode(AssetDetailDTO.self, from: Data(contentsOf: fixtureURL))
 
         XCTAssertEqual(dto.liquidity.label, "Via DEX")
-        XCTAssertEqual(dto.liquidity.buyProbeOutAmount, "430000")
+        XCTAssertEqual(dto.liquidity.buyProbeOutAmount, "427533")
         XCTAssertEqual(dto.liquidity.spreadBps, 59)
+        // The fixture is a response the server could actually emit: the backend
+        // derives the card's bid, ask and spread from these same two probes, so
+        // 1_000_000 USDC micros buying 427_533 atomics is the ask on the card.
+        XCTAssertEqual(dto.stockVsToken?.token.askUsdcMicros, 233_900_073)
+        XCTAssertEqual(dto.stockVsToken?.token.bidUsdcMicros, 232_520_000)
+        // Stale equity, so no confidence interval in the grid.
+        XCTAssertNil(dto.stats?.confUsdcMicros)
         XCTAssertTrue(dto.routable)
         XCTAssertEqual(dto.marketSession, .afterHours)
         XCTAssertTrue(dto.afterHours)

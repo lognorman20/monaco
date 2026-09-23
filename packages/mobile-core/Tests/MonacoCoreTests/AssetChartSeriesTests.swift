@@ -248,6 +248,26 @@ final class AssetChartSeriesTests: XCTestCase {
         XCTAssertTrue(chart.drawsBaselineRule)
     }
 
+    /// A window the source is too young to cover has no curve, so its only content is
+    /// the server's reason. The series is what the screen reads, so the reason has to
+    /// survive the trip through it. The catch-all does not: `AssetChartDTO.emptyMessage`
+    /// has already dropped it as a repeat of what an empty chart says by itself.
+    func testAnEmptyWindowsReasonSurvivesIntoTheSeries() throws {
+        let dto = MarketSampleData.chartBeforeTheFeedExisted(range: .oneYear)
+        let chart = try XCTUnwrap(AssetChartSeries(dto, requested: .oneYear))
+
+        XCTAssertFalse(chart.isDrawable)
+        XCTAssertEqual(chart.emptyMessage, "Only on-chain since 5 Aug 2026")
+    }
+
+    func testTheCatchAllReasonNeverReachesTheSeries() throws {
+        let dto = MarketSampleData.chartEmpty(range: .oneYear)
+        let chart = try XCTUnwrap(AssetChartSeries(dto, requested: .oneYear))
+
+        XCTAssertFalse(chart.isDrawable)
+        XCTAssertNil(chart.emptyMessage)
+    }
+
     func testTheSampleFallbackSeriesDrawsNoBaseline() throws {
         let dto = MarketSampleData.chartFromFallback(range: .oneDay)
         let chart = try XCTUnwrap(AssetChartSeries(dto, requested: .oneDay))

@@ -80,7 +80,13 @@ final class AssetDetailModel {
     enum ChartState: Equatable {
         case loading
         case series(AssetChartSeries)
-        case empty
+        /// Empty, with the server's reason when it said something the reader did
+        /// not already know from the empty chart itself.
+        ///
+        /// The reason rides in on the series, so it goes through the same per-range
+        /// sequence check the curve does: a late "only on-chain since 5 Aug 2026"
+        /// can no more caption a newer window than a late curve can draw over one.
+        case empty(reason: String?)
         case failed
     }
 
@@ -567,10 +573,14 @@ final class AssetDetailModel {
     }
 
     private func apply(_ series: AssetChartSeries, to range: AssetChartRange, quietly: Bool) {
-        let fresh: ChartState = series.isDrawable ? .series(series) : .empty
+        // An empty window carries the server's own reason, when it gave one worth
+        // reading: on a B20 token the chart is drawn from a Chainlink feed that is
+        // only weeks old, so 3M and 1Y have nothing to draw and the honest answer is
+        // the day the feed starts, not a blank box.
+        let fresh: ChartState = series.isDrawable ? .series(series) : .empty(reason: series.emptyMessage)
         // A quiet re-read that comes back empty is a source hiccup, not news: keep the
         // curve the member is looking at rather than blanking it.
-        if quietly, fresh == .empty, hasDrawnCurve(range) { return }
+        if quietly, case .empty = fresh, hasDrawnCurve(range) { return }
         QuietUpdate.apply(fresh, over: charts[range] ?? .loading) { charts[range] = $0 }
         clampScrubIfNeeded(for: range)
     }

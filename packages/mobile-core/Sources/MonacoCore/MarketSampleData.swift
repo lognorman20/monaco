@@ -251,6 +251,13 @@ public enum MarketSampleData {
 
     /// A dense intraday series with candles, the way Benchmarks serves it.
     ///
+    /// The series is generated *inside* the session high and low it is shown with,
+    /// because the chart and the stats grid below it describe the same session of
+    /// the same instrument. A free-running ramp drew a curve above its own stated
+    /// day high in every harness screenshot. The shape is normalised so the highest
+    /// candle touches the grid's high exactly and the lowest touches its low: the
+    /// two agree by construction rather than by a comment saying they do.
+    ///
     /// The previous close is deliberately *not* the first point's price. It is the
     /// close of the session before this window, so the dashed baseline sits off the
     /// curve and the day change is non-zero at t0 — which is what makes the baseline
@@ -258,26 +265,45 @@ public enum MarketSampleData {
     public static func chart(
         range: AssetChartRange,
         points: Int = 78,
-        startUsdcMicros: Int64 = 226_500_000,
-        previousCloseUsdcMicros: Int64? = 224_800_000,
+        sessionLowUsdcMicros: Int64 = 228_200_000,
+        sessionHighUsdcMicros: Int64 = 231_800_000,
+        previousCloseUsdcMicros: Int64? = 226_500_000,
         basisSymbol: String = "AAPL"
     ) -> AssetChartDTO {
         let step = range.sampleInterval
         let start = tradingTuesday.timeIntervalSince1970 - Double(points) * step
+        let band = max(sessionHighUsdcMicros - sessionLowUsdcMicros, 0)
+        // The candle wings are a fraction of the session's own range, so a narrow
+        // session does not sprout candles wider than the day they belong to.
+        let upperWing = band / 12
+        let lowerWing = band / 14
+        let openOffset = band / 24
+        let closeFloor = sessionLowUsdcMicros + lowerWing
+        let closeCeiling = max(sessionHighUsdcMicros - upperWing, closeFloor)
+
+        // A deterministic wobble on a slow uptrend: the same shape on every run, so
+        // a screenshot diff means a real change. Normalised to span exactly 0...1,
+        // which is what pins the extremes to the grid's high and low.
+        var shape = (0..<points).map { index -> Double in
+            let progress = points > 1 ? Double(index) / Double(points - 1) : 0
+            let wobble = (sin(Double(index) / 5.0) + 1) / 2
+            return 0.7 * progress + 0.3 * wobble
+        }
+        let lowest = shape.min() ?? 0
+        let span = (shape.max() ?? 1) - lowest
+        shape = span > 0 ? shape.map { ($0 - lowest) / span } : shape.map { _ in 0 }
+
         var samples: [AssetChartPointDTO] = []
         samples.reserveCapacity(points)
         for index in 0..<points {
-            // A deterministic wobble with a slow uptrend: the same shape on every
-            // run, so a screenshot diff means a real change.
-            let wobble = Int64((sin(Double(index) / 5.0) * 900_000).rounded())
-            let price = startUsdcMicros + wobble + Int64(index) * 60_000
+            let price = closeFloor + Int64((Double(closeCeiling - closeFloor) * shape[index]).rounded())
             samples.append(
                 AssetChartPointDTO(
                     timestamp: Int64(start + Double(index) * step),
                     priceUsdcMicros: price,
-                    openUsdcMicros: price - 180_000,
-                    highUsdcMicros: price + 420_000,
-                    lowUsdcMicros: price - 360_000
+                    openUsdcMicros: price - openOffset,
+                    highUsdcMicros: price + upperWing,
+                    lowUsdcMicros: price - lowerWing
                 )
             )
         }
@@ -310,13 +336,32 @@ public enum MarketSampleData {
 
     /// The last fallback: the token's own Chainlink rounds, per token. Only a few
     /// days reach back, so the backend serves it for 1D/1W/1M and nothing longer.
+    /// What a B20 feed's own rounds look like for a range it is too young to
+    /// serve: no points, and the day its history starts instead of the catch-all.
+    public static func chartBeforeTheFeedExisted(range: AssetChartRange) -> AssetChartDTO {
+        AssetChartDTO(
+            points: [],
+            emptyReason: "Only on-chain since 5 Aug 2026",
+            range: range,
+            source: .chainlink,
+            market: sessionOpen
+        )
+    }
+
     public static func chartFromChainlink(range: AssetChartRange) -> AssetChartDTO {
-        let dense = chart(range: range, points: 12, startUsdcMicros: 231_000_000)
+        let dense = chart(
+            range: range,
+            points: 12,
+            sessionLowUsdcMicros: 231_000_000,
+            sessionHighUsdcMicros: 232_400_000
+        )
         return AssetChartDTO(
             points: dense.points.map {
                 AssetChartPointDTO(timestamp: $0.timestamp, priceUsdcMicros: $0.priceUsdcMicros)
             },
-            previousCloseUsdcMicros: nil,
+            // The rounds do carry a baseline: the last round of the previous
+            // session, which is outside the window the curve draws.
+            previousCloseUsdcMicros: 231_400_000,
             range: range,
             source: .chainlink,
             basis: .token,
@@ -338,14 +383,16 @@ public enum MarketSampleData {
 
     /// The recent SPCX listing: Benchmarks candles for the short ranges, nothing
     /// before it listed. The same session candles the partial grid folds, so the
-    /// 1D chart and the grid agree.
+    /// 1D chart and the grid agree — the series is generated inside `statsPartial`'s
+    /// own high and low, which is what makes that true rather than hoped for.
     public static func chartRecentListing(range: AssetChartRange) -> AssetChartDTO {
         switch range {
         case .oneDay, .oneWeek, .oneMonth:
             return chart(
                 range: range,
                 points: 40,
-                startUsdcMicros: 40_900_000,
+                sessionLowUsdcMicros: 40_900_000,
+                sessionHighUsdcMicros: 42_050_000,
                 previousCloseUsdcMicros: 41_000_000,
                 basisSymbol: "SPCX"
             )

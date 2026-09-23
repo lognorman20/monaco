@@ -95,6 +95,49 @@ final class AssetDetailSampleUITests: XCTestCase {
         }
     }
 
+    /// The chart is drawn from the token's own Chainlink feed on Base, which is weeks
+    /// old, so 3M and 1Y have no history to serve — and will not until the feed ages.
+    /// An unexplained blank box there reads as a broken app, so the empty state carries
+    /// the server's own reason, which names the day the feed starts.
+    ///
+    /// Both halves in one launch, because they are one claim: the young windows say why
+    /// they are empty, and the windows the feed does cover still draw a real curve. A
+    /// resolution that kept only the reason, or only the curve, would pass half of this.
+    @MainActor
+    func testAWindowOlderThanTheFeedSaysWhyWhileTheRestStillDraw() throws {
+        let app = launch("chainlinkSeries")
+        waitForScreen(app, "chainlinkSeries")
+
+        XCTAssertTrue(
+            anyElement(app, "asset-detail-chart").waitForExistence(timeout: 20),
+            "1D is inside the feed's history and must draw a curve"
+        )
+
+        anyElement(app, "asset-chart-range-1Y").tap()
+        let empty = anyElement(app, "asset-detail-chart-empty")
+        XCTAssertTrue(empty.waitForExistence(timeout: 20), "1Y never reached its empty state")
+        // The reason, not the generic nudge. The date is the sample feed's first
+        // round; the point of the assertion is that the server's own sentence is what
+        // reaches the screen, rather than being swallowed on the way through.
+        XCTAssertTrue(
+            app.staticTexts["Only on-chain since 5 Aug 2026"].waitForExistence(timeout: 10),
+            "the empty 1Y window did not say why it is empty"
+        )
+        attachScreenshot(app, name: "asset-detail-chainlink-1Y-empty-reason")
+
+        anyElement(app, "asset-chart-range-ALL").tap()
+        XCTAssertTrue(
+            anyElement(app, "asset-detail-chart").waitForExistence(timeout: 20),
+            "ALL is the feed's whole history and must draw a curve"
+        )
+        XCTAssertFalse(
+            app.staticTexts["Only on-chain since 5 Aug 2026"].exists,
+            "a window with data must not carry an empty window's reason"
+        )
+        attachScreenshot(app, name: "asset-detail-chainlink-all-curve")
+        app.terminate()
+    }
+
     /// Saturday: the pools trade while the Chainlink total-return mark behind the hero
     /// holds Friday's last round. The screen has to carry both facts at once — a chip
     /// that says the token still trades on Base, and an as-of line saying the price above

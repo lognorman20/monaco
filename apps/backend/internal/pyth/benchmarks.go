@@ -185,23 +185,30 @@ func decodeBars(payload benchmarksHistoryResponse) ([]ohlcBar, error) {
 		if !ok || payload.Timestamp[i] <= 0 {
 			continue
 		}
+		// Open/high/low stay zero when the shim omits them, rather than borrowing
+		// the close. A feed that only publishes a close has no open: substituting
+		// one puts a close in the grid's "Open" cell, and makes every bar look like
+		// a candle whose four prices happen to be identical, which the app would
+		// dutifully draw. Zero means "not published", and both the grid and the
+		// chart already have a close-only path to fall through to.
 		bar := ohlcBar{timestamp: payload.Timestamp[i], close: closeMicros}
-		bar.open = optionalMicros(payload.Open, i, closeMicros)
-		bar.high = optionalMicros(payload.High, i, closeMicros)
-		bar.low = optionalMicros(payload.Low, i, closeMicros)
+		bar.open = optionalMicros(payload.Open, i)
+		bar.high = optionalMicros(payload.High, i)
+		bar.low = optionalMicros(payload.Low, i)
 		bars = append(bars, bar)
 	}
 	sort.Slice(bars, func(i, j int) bool { return bars[i].timestamp < bars[j].timestamp })
 	return bars, nil
 }
 
-func optionalMicros(values []float64, index int, fallback int64) int64 {
+// optionalMicros reads one OHLC leg, or zero when the shim did not publish it.
+func optionalMicros(values []float64, index int) int64 {
 	if index >= len(values) {
-		return fallback
+		return 0
 	}
 	micros, ok := usdToMicros(values[index])
 	if !ok {
-		return fallback
+		return 0
 	}
 	return micros
 }
@@ -244,11 +251,23 @@ func assembleSeries(bars []ohlcBar, window chartRangeWindow) AssetChartSeries {
 	if !window.previousCloseAt.IsZero() {
 		previousCloseCutoff = window.previousCloseAt.Unix()
 	}
+	// The cut-off needs a floor as much as a ceiling. The fetch window deliberately
+	// reaches a week back so a long holiday weekend cannot hide the previous
+	// session's closing bar — but that same reach means a hole in the history walks
+	// the search straight past the previous session and hands back a close from
+	// days ago, with nothing to say it is not yesterday's. It ships as
+	// previousCloseUsdcMicros, DayChange divides by it, and a multi-day move is
+	// rendered as a day move. Where the window names the previous session's first
+	// instant, a bar older than that is not a previous close at all.
+	var previousCloseFloor int64 = math.MinInt64
+	if !window.previousCloseFrom.IsZero() {
+		previousCloseFloor = window.previousCloseFrom.Unix()
+	}
 
 	inWindow := make([]ohlcBar, 0, len(bars))
 	var previousClose int64
 	for _, bar := range bars {
-		if bar.timestamp < previousCloseCutoff {
+		if bar.timestamp >= previousCloseFloor && bar.timestamp < previousCloseCutoff {
 			previousClose = bar.close
 		}
 		if bar.timestamp >= fromUnix && bar.timestamp <= toUnix {

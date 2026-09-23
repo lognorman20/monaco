@@ -490,6 +490,41 @@ func TestGET_assets_symbol_stats_areTheUnderlyingsRegularSession(t *testing.T) {
 	}
 }
 
+func TestGET_assets_symbol_stats_omitTheConfidenceOfAFrozenPrint(t *testing.T) {
+	t.Parallel()
+
+	handlers, authHandlers, walletClient, dexClient, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, walletClient)
+	seedApple(t, handlers)
+	seedKyberProbes(t, dexClient)
+	// After the bell the equity feed keeps republishing its last print, so the
+	// quote is priced but stale, and its confidence interval belongs to that
+	// frozen print. The grid carries no freshness of its own, so the cell would
+	// read as the confidence of the session the Benchmarks candles beside it
+	// describe — while the same price on the card is explicitly marked stale.
+	stale := liveEquityQuote()
+	stale.Status = pyth.QuoteStatusStale
+	pyth.RegisterEquityQuote(handlers.Quotes, "AAPLc", stale)
+	charts := handlers.Charts.(pyth.AssetPriceClient)
+	pyth.RegisterChartSeries(charts, "AAPLc", pyth.ChartRange1D, underlyingDay())
+
+	detail, _ := getAssetDetail(t, handlers, token)
+	if detail.Stats == nil {
+		t.Fatal("expected a stats grid from the Benchmarks candles")
+	}
+	if detail.Stats.ConfUsdcMicros != nil {
+		t.Fatalf("conf = %d, want it omitted while the equity feed is stale", *detail.Stats.ConfUsdcMicros)
+	}
+	// The candle-derived cells are unaffected: they were never the equity quote's.
+	if detail.Stats.OpenUsdcMicros == nil || *detail.Stats.OpenUsdcMicros != 229_000_000 {
+		t.Fatalf("open = %v, want 229000000", detail.Stats.OpenUsdcMicros)
+	}
+	// And the card still shows the stale price itself, labelled.
+	if detail.StockVsToken == nil || detail.StockVsToken.Equity.Status != "stale" {
+		t.Fatalf("card = %+v, want the equity line marked stale", detail.StockVsToken)
+	}
+}
+
 func TestGET_assets_symbol_stats_neverFoldTheHermesSampler(t *testing.T) {
 	t.Parallel()
 
