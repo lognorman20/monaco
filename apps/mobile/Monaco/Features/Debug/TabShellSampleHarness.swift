@@ -1,4 +1,5 @@
 #if DEBUG
+import MonacoCore
 import SwiftUI
 
 /// Renders the real `MainTabView` with no backend and no sign-in, so the tab chrome can be
@@ -14,7 +15,9 @@ import SwiftUI
 /// badge and the title voice, not about the screens inside.
 ///
 /// Launch with `-MonacoTabShellSample`. Add `-MonacoTabShellSampleName <name>` to see the
-/// monogram glyph a real member would get; leave it off for the no-name fallback.
+/// monogram glyph a real member would get; leave it off for the no-name fallback. The harness
+/// seeds two open votes on the dashboard so the Cabals badge renders — it is amber (`warning`),
+/// not systemRed, because §1.6 keeps the danger ramp for money that went wrong.
 enum TabShellSample {
     static let launchArgument = "-MonacoTabShellSample"
     static let nameArgument = "-MonacoTabShellSampleName"
@@ -46,6 +49,35 @@ private struct TabShellSampleHarness: View {
         MainTabView(auth: auth)
             .environment(session)
             .monacoRootAppearance()
+            .onAppear { session.dashboard = TabShellSample.dashboard }
+    }
+}
+
+private extension TabShellSample {
+    /// The smallest dashboard that makes the badge appear: two votes that have not expired.
+    /// Nothing else on it is read by the shell.
+    static var dashboard: HomeDashboardDTO {
+        let now = Date()
+        let rows = [("Weekend investors", "AAPLc"), ("Semis or bust", "NVDAc")]
+        return HomeDashboardDTO(
+            netWorthUsd: "0",
+            netWorthDollarPnl: "+0.00",
+            netWorthPercentReturn: nil,
+            myGroups: [],
+            pnlSeries1H: [],
+            leaderboard: HomeLeaderboardSectionDTO(range: "24h", people: []),
+            missedProposals: rows.enumerated().map { index, row in
+                HomeMissedProposalRowDTO(
+                    groupID: "8f1c2d3e-000\(index + 1)",
+                    groupName: row.0,
+                    proposalID: "proposal-\(index + 1)",
+                    symbol: row.1,
+                    status: "open",
+                    createdAt: now.addingTimeInterval(-3600),
+                    expiresAt: now.addingTimeInterval(3600 * Double(index + 2))
+                )
+            }
+        )
     }
 }
 #endif

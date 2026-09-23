@@ -1,3 +1,4 @@
+import Combine
 import MonacoCore
 import SwiftUI
 import UIKit
@@ -16,21 +17,36 @@ enum MainTab: Hashable {
 /// to put a SwiftUI mark into.
 struct MainTabView: View {
     @ObservedObject var auth: DynamicAuthService
-    @Environment(AppSessionStore.self) private var session: AppSessionStore?
+    // Non-optional. Both construction sites inject the store — `SessionGateView.swift:58` and
+    // `TabShellSampleHarness.swift:47` — and this was the only optional read of it in the app.
+    // Optional turned a missing-environment bug into a silently empty badge and a fallback glyph
+    // in Release, which is the failure mode you find in a screenshot months later.
+    @Environment(AppSessionStore.self) private var session
     @State private var selectedTab: MainTab = .home
+
+    /// The badge is time-sensitive, so it gets a clock of its own.
+    ///
+    /// A vote closes on the wall clock, not on anything the member does. Reading `Date()` inside
+    /// `body` would only drop an expired vote when something *else* invalidated the view, so the
+    /// badge could sit there counting a vote that closed ten minutes ago. Home already ticks on a
+    /// 60s `TimelineView` for exactly this; this is the tab shell's copy of that clock, and it
+    /// invalidates one view rather than wrapping four tab roots in a timeline.
+    @State private var clock = Date()
+
+    private let minuteTick = Timer.publish(every: 60, tolerance: 10, on: .main, in: .common).autoconnect()
 
     /// Votes still open on the dashboard the app already loads. Nothing new is fetched and nothing
     /// is invented: a row whose `expiresAt` has passed is not counted, and zero shows no badge.
     private var openVoteCount: Int {
-        guard let rows = session?.dashboard?.missedProposals else { return 0 }
-        return HomeMissedVotes.open(rows, now: Date()).count
+        guard let rows = session.dashboard?.missedProposals else { return 0 }
+        return HomeMissedVotes.open(rows, now: clock).count
     }
 
     private var monogramSource: String? {
-        let name = session?.me?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let name = session.me?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !name.isEmpty { return name }
         #if DEBUG
-        // The tab-shell harness has no session; it passes the name it wants the glyph drawn from.
+        // The tab-shell harness's store has no member loaded; it passes the name to draw from.
         return TabShellSample.displayName
         #else
         return nil
@@ -105,6 +121,7 @@ struct MainTabView: View {
         .onChange(of: selectedTab) { _, _ in
             Haptics.selection()
         }
+        .onReceive(minuteTick) { clock = $0 }
     }
 }
 
@@ -114,6 +131,14 @@ struct MainTabView: View {
 /// brand, unselected takes `fgMuted` — so anything with its own colours (a photo, a filled avatar)
 /// would flatten to a silhouette. A knocked-out mark and a ringed monogram are shapes, so they
 /// survive tinting intact and pick up the selected state for free.
+///
+/// **Known tradeoff.** At accessibility text sizes the tab bar swaps to the large content viewer,
+/// where the two SF Symbols redraw as vectors and these two are resampled from a 26pt raster.
+/// `UITabBarItem.largeContentSizeImage` is the fix and SwiftUI's `.tabItem` does not expose it, so
+/// taking it would mean reaching into UIKit for the bar item. The rasters are drawn at the device
+/// scale (78px on a 3x phone), so the viewer's ~52pt draw is a 1.5x upscale of an alpha mask of
+/// circles and one letter — soft at the edges, never illegible. Revisit if the shell ever holds a
+/// `UITabBarController` of its own.
 enum MonacoTabGlyph {
     /// Matches the tab bar's own symbol sizing, so the drawn glyphs sit on the same baseline as
     /// the two SF Symbols beside them.

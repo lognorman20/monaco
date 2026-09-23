@@ -46,12 +46,24 @@ final class TabShellGlyphTests: XCTestCase {
     }
 
     /// The cache is keyed on the initial, so two members whose names start differently must not
-    /// share a glyph.
+    /// share a glyph — and two whose names start the same must.
+    ///
+    /// Asserted on the *key*, not on object identity. `NSCache` may evict at any moment, and on a
+    /// shared build machine under memory pressure it will: `===` on two cache reads is a test that
+    /// fails for a reason that has nothing to do with the code it names.
     func testMonogramCacheIsKeyedOnTheInitial() {
+        XCTAssertEqual(MonacoTabGlyph.initial(from: "Ana"), MonacoTabGlyph.initial(from: "Alex"))
+        XCTAssertNotEqual(MonacoTabGlyph.initial(from: "Ana"), MonacoTabGlyph.initial(from: "dev"))
+    }
+
+    /// Two names with the same initial draw the same glyph, cached or freshly rendered — which is
+    /// what the key is for. Compared on pixels, so an eviction between the two reads changes
+    /// nothing.
+    func testTheSameInitialDrawsTheSameGlyph() {
         let ana = MonacoTabGlyph.monogram(for: "Ana")
-        let anotherA = MonacoTabGlyph.monogram(for: "Alex")
+        let alex = MonacoTabGlyph.monogram(for: "Alex")
         let dev = MonacoTabGlyph.monogram(for: "dev")
-        XCTAssertTrue(ana === anotherA, "Two names with the same initial share one rendered glyph")
-        XCTAssertFalse(ana === dev, "Different initials must not share a glyph")
+        XCTAssertEqual(ana.pngData(), alex.pngData(), "Two names with the same initial draw one glyph")
+        XCTAssertNotEqual(ana.pngData(), dev.pngData(), "Different initials must not draw the same glyph")
     }
 }
