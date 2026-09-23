@@ -174,8 +174,10 @@ struct CommentComposer: View {
                     axis: .vertical
                 )
                 .font(MonacoTheme.Typo.body)
-                .foregroundStyle(MonacoTheme.ink)
-                .tint(MonacoTheme.ink)
+                .foregroundStyle(MonacoTheme.fgPrimary)
+                // The caret is a control and takes `controlTint`, which is ink on purpose: brand
+                // blue means tap, and a blinking blue bar in a text field is not a thing to tap.
+                .tint(MonacoTheme.controlTint)
                 .lineLimit(1...5)
                 .focused($focused)
                 .padding(.horizontal, MonacoTheme.Space.m)

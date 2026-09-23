@@ -32,6 +32,8 @@ struct ProposalDetailView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.cabalTint) private var cabalTint
+    /// The viewer's cabals, for the resolved tint when the surface did not declare one.
+    @Environment(AppSessionStore.self) private var session: AppSessionStore?
 
     init(service: ProposalFeedService, proposalId: String, initialProposal: ProposalDTO? = nil) {
         self.service = service
@@ -48,13 +50,16 @@ struct ProposalDetailView: View {
         proposal.flatMap { votes.choice(for: $0, viewerId: service.viewerId) }
     }
 
-    /// The proposing cabal's colour: the one the surface set, else the one the payload's group id
-    /// hashes to. Nil when neither is known — the screen then ships without a tint rather than
-    /// picking some cabal's colour for it.
+    /// The proposing cabal's colour: the one the surface set, else the resolved one for the
+    /// payload's group. Nil when neither is known — the screen then ships without a tint rather
+    /// than picking some cabal's colour for it.
+    ///
+    /// Resolved, never hashed directly: a cabal that is sage on its feed has to be sage on the
+    /// proposal you opened from that feed.
     private func tint(for proposal: ProposalDTO) -> MonacoTheme.CabalTint? {
         if let cabalTint { return cabalTint }
         guard let groupId = proposal.groupId, !groupId.isEmpty else { return nil }
-        return .forGroupId(groupId)
+        return ProposalCabalTint.tint(forGroupId: groupId, in: session)
     }
 
     var body: some View {
@@ -498,8 +503,11 @@ private struct BallotRow: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// Brand is "tap" and this row is not tappable, so the word "Yes" is plain. The ring on the
+    /// face beside it already says how the ballot was cast, in the same encoding the tally uses,
+    /// and it says it without spending the one colour that means a control.
     private var choiceColor: Color {
         if isWaiting { return MonacoTheme.fgSubtle }
-        return isNo ? MonacoTheme.loss : MonacoTheme.brand
+        return isNo ? MonacoTheme.loss : MonacoTheme.fgPrimary
     }
 }

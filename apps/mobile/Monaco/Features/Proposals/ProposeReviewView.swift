@@ -17,6 +17,9 @@ struct ProposeReviewView: View {
     @State private var isSending = false
     @State private var errorMessage: String?
 
+    /// The viewer's cabals, for the resolved tint.
+    @Environment(AppSessionStore.self) private var session: AppSessionStore?
+
     init(service: ProposeService, groupId: String, review: ProposeBuyReview, onProposed: @escaping (_ proposalId: String) -> Void) {
         self.service = service
         self.groupId = groupId
@@ -24,8 +27,10 @@ struct ProposeReviewView: View {
         self.onProposed = onProposed
     }
 
+    /// Resolved against the viewer's cabals, so the wash behind the reason on this receipt is the
+    /// colour the cabal wears everywhere else.
     private var tint: MonacoTheme.CabalTint {
-        .forGroupId(review.cabalId)
+        ProposalCabalTint.tint(forGroupId: review.cabalId, in: session)
     }
 
     var body: some View {
@@ -44,21 +49,23 @@ struct ProposeReviewView: View {
 
                 voters
 
-                MonacoGroupedList {
-                    if let price = review.priceMicros {
-                        ReceiptRow(label: ProposeFlowCopy.priceRow) {
-                            Text(ProposeFlowCopy.perShare(UsdAmountFormatter.format(micros: price)))
-                                .font(MonacoTheme.Typo.body.monospacedDigit())
+                if hasReceiptRows {
+                    MonacoGroupedList {
+                        if let price = review.priceMicros {
+                            ReceiptRow(label: ProposeFlowCopy.priceRow, isLast: isLastRow(.price)) {
+                                Text(ProposeFlowCopy.perShare(UsdAmountFormatter.format(micros: price)))
+                                    .font(MonacoTheme.Typo.body.monospacedDigit())
+                            }
                         }
-                    }
-                    if let shares = review.sharesLabel {
-                        ReceiptRow(label: ProposeFlowCopy.sharesRow, isLast: review.thesis.isEmpty) {
-                            Text(ProposeFlowCopy.aboutShares(shares))
-                                .font(MonacoTheme.Typo.body.monospacedDigit())
+                        if let shares = review.sharesLabel {
+                            ReceiptRow(label: ProposeFlowCopy.sharesRow, isLast: isLastRow(.shares)) {
+                                Text(ProposeFlowCopy.aboutShares(shares))
+                                    .font(MonacoTheme.Typo.body.monospacedDigit())
+                            }
                         }
-                    }
-                    if !review.thesis.isEmpty {
-                        ReceiptReasonRow(text: review.thesis, tint: tint)
+                        if !review.thesis.isEmpty {
+                            ReceiptReasonRow(text: review.thesis, tint: tint)
+                        }
                     }
                 }
 
@@ -95,6 +102,30 @@ struct ProposeReviewView: View {
             }
         }
         .accessibilityIdentifier("propose-review")
+    }
+
+    /// The receipt rows that have something to say, in the order they are drawn.
+    ///
+    /// A quote without an output amount and a member who wrote no reason leaves one row, and the
+    /// hairline under the last row has to come off whichever row that turns out to be — otherwise
+    /// the card ends on a rule with nothing beneath it. With nothing at all to say there is no
+    /// list: an empty grouped card on a receipt reads as a row that failed to load.
+    private enum ReceiptRowKind {
+        case price, shares, reason
+    }
+
+    private var receiptRows: [ReceiptRowKind] {
+        var rows: [ReceiptRowKind] = []
+        if review.priceMicros != nil { rows.append(.price) }
+        if review.sharesLabel != nil { rows.append(.shares) }
+        if !review.thesis.isEmpty { rows.append(.reason) }
+        return rows
+    }
+
+    private var hasReceiptRows: Bool { !receiptRows.isEmpty }
+
+    private func isLastRow(_ kind: ReceiptRowKind) -> Bool {
+        receiptRows.last == kind
     }
 
     /// Who is about to be asked.

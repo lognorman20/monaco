@@ -147,7 +147,7 @@ struct ProposeBuyView: View {
                 stockList(results, paginates: true)
                 if isLoadingMore {
                     ProgressView()
-                        .tint(MonacoTheme.muted)
+                        .tint(MonacoTheme.controlTint)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, MonacoTheme.Space.s)
                 }
@@ -295,7 +295,7 @@ private struct ProposePotUnavailable: View {
                     .accessibilityIdentifier("propose-pot-error")
             } else {
                 ProgressView()
-                    .tint(MonacoTheme.muted)
+                    .tint(MonacoTheme.controlTint)
                     .accessibilityLabel("Loading")
             }
         }

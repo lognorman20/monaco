@@ -237,9 +237,12 @@ struct ProposeSellAmountView: View {
                         VStack(spacing: MonacoTheme.Space.s) {
                             MonacoTextField(ProposeFlowCopy.sharesRow, text: $amountText, keyboard: .decimalPad)
                                 .accessibilityIdentifier("proposal-sell-amount")
+                            // `lossOnHero` and not `loss`: this line is inside the ink band, and
+                            // the band is built from the on-ink column of the table (7.43:1 here,
+                            // against 6.05:1 for the paper pair) like every other ink surface.
                             Text(isOverHoldings ? ProposeFlowCopy.overHoldings : ProposalShareFormatter.sharesLabel(fromAtomics: holding.tokenAmount ?? "0"))
                                 .font(MonacoTheme.Typo.callout)
-                                .foregroundStyle(isOverHoldings ? MonacoTheme.loss : MonacoTheme.Ink.fgMuted)
+                                .foregroundStyle(isOverHoldings ? MonacoTheme.lossOnHero : MonacoTheme.Ink.fgMuted)
                         }
                     }
                 }
@@ -332,6 +335,9 @@ struct ProposeSellReviewView: View {
     @State private var isSending = false
     @State private var errorMessage: String?
 
+    /// The viewer's cabals, for the resolved tint.
+    @Environment(AppSessionStore.self) private var session: AppSessionStore?
+
     init(service: ProposeService, groupId: String, review: ProposeSellReview, onProposed: @escaping (_ proposalId: String) -> Void) {
         self.service = service
         self.groupId = groupId
@@ -371,7 +377,10 @@ struct ProposeSellReviewView: View {
                         Text(review.sharesLabel).font(MonacoTheme.Typo.body.monospacedDigit())
                     }
                     if !review.thesis.isEmpty {
-                        ReceiptReasonRow(text: review.thesis, tint: .forGroupId(review.cabalId))
+                        ReceiptReasonRow(
+                            text: review.thesis,
+                            tint: ProposalCabalTint.tint(forGroupId: review.cabalId, in: session)
+                        )
                     }
                 }
 
