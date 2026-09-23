@@ -31,7 +31,7 @@ struct MonacoAvatar: View {
         Group {
             if let resolvedURL {
                 // A photo seen before is drawn on the first pass, with no placeholder flash.
-                if let image = loadedImage ?? MonacoAvatarImageStore.shared.cachedImage(for: resolvedURL) {
+                if let image = loadedImage ?? MonacoRemoteImageStore.avatars.cachedImage(for: resolvedURL) {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
@@ -66,7 +66,7 @@ struct MonacoAvatar: View {
         loadedImage = nil
         didFail = false
         guard let resolvedURL else { return }
-        let store = MonacoAvatarImageStore.shared
+        let store = MonacoRemoteImageStore.avatars
         if let cached = store.cachedImage(for: resolvedURL) {
             loadedImage = cached
             return

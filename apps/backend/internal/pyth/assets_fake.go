@@ -4,22 +4,27 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 type fakeAssetPriceClient struct {
 	mu sync.Mutex
 
-	marks   map[string]AssetMark
-	markErr map[string]error
-	charts  map[string]AssetChartSeries
+	marks      map[string]AssetMark
+	markErr    map[string]error
+	charts     map[string]AssetChartSeries
+	chartDelay map[string]time.Duration
+	chartCalls map[string]int
 }
 
 // NewFakeAssetPriceClient returns an in-memory asset price client for tests.
 func NewFakeAssetPriceClient() AssetPriceClient {
 	return &fakeAssetPriceClient{
-		marks:   make(map[string]AssetMark),
-		markErr: make(map[string]error),
-		charts:  make(map[string]AssetChartSeries),
+		marks:      make(map[string]AssetMark),
+		markErr:    make(map[string]error),
+		charts:     make(map[string]AssetChartSeries),
+		chartDelay: make(map[string]time.Duration),
+		chartCalls: make(map[string]int),
 	}
 }
 
@@ -61,6 +66,53 @@ func RegisterChartSeries(client AssetPriceClient, symbol string, chartRange Char
 	fake.mu.Unlock()
 }
 
+// RegisterChartSeriesDelay makes ChartSeries and DaySeries take delay to answer
+// for a symbol and range, so a test can stand a slow vendor up and check that a
+// caller's budget is really its budget. A caller whose context ends first gets
+// its context error (ChartSeries) or no answer (DaySeries).
+func RegisterChartSeriesDelay(client AssetPriceClient, symbol string, chartRange ChartRange, delay time.Duration) {
+	fake, ok := client.(*fakeAssetPriceClient)
+	if !ok {
+		panic("pyth: RegisterChartSeriesDelay requires NewFakeAssetPriceClient")
+	}
+	fake.mu.Lock()
+	fake.chartDelay[chartKey(symbol, chartRange)] = delay
+	fake.mu.Unlock()
+}
+
+// ChartSeriesCallCount reports how many times a symbol's series was asked for,
+// through ChartSeries or DaySeries.
+func ChartSeriesCallCount(client AssetPriceClient, symbol string, chartRange ChartRange) int {
+	fake, ok := client.(*fakeAssetPriceClient)
+	if !ok {
+		panic("pyth: ChartSeriesCallCount requires NewFakeAssetPriceClient")
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	return fake.chartCalls[chartKey(symbol, chartRange)]
+}
+
+// series reads one registered series, counting the call and waiting out any
+// registered delay under ctx.
+func (f *fakeAssetPriceClient) series(ctx context.Context, symbol string, chartRange ChartRange) (AssetChartSeries, bool, error) {
+	key := chartKey(symbol, chartRange)
+	f.mu.Lock()
+	series, ok := f.charts[key]
+	delay := f.chartDelay[key]
+	f.chartCalls[key]++
+	f.mu.Unlock()
+	if delay > 0 {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return AssetChartSeries{}, false, ctx.Err()
+		}
+	}
+	return series, ok, nil
+}
+
 func chartKey(symbol string, chartRange ChartRange) string {
 	return normalizeSymbol(symbol) + ":" + string(chartRange)
 }
@@ -94,11 +146,10 @@ func (f *fakeAssetPriceClient) AssetMarks(ctx context.Context, symbols []string)
 }
 
 func (f *fakeAssetPriceClient) ChartSeries(ctx context.Context, symbol string, chartRange ChartRange) (AssetChartSeries, error) {
-	_ = ctx
-	key := chartKey(symbol, chartRange)
-	f.mu.Lock()
-	series, ok := f.charts[key]
-	f.mu.Unlock()
+	series, ok, err := f.series(ctx, symbol, chartRange)
+	if err != nil {
+		return AssetChartSeries{}, err
+	}
 	if !ok {
 		return AssetChartSeries{EmptyReason: EmptyReasonNoHistory}, nil
 	}
@@ -110,6 +161,17 @@ func (f *fakeAssetPriceClient) ChartSeries(ctx context.Context, symbol string, c
 func (f *fakeAssetPriceClient) DayChange(ctx context.Context, symbol string) *string {
 	series, _ := f.ChartSeries(ctx, symbol, ChartRange1D)
 	return DayChange(series)
+}
+
+// DaySeries serves the registered 1D series. A symbol with nothing registered is
+// Benchmarks failing to answer, so it reports false, the way the real client does
+// on an outage.
+func (f *fakeAssetPriceClient) DaySeries(ctx context.Context, symbol string) (AssetChartSeries, bool) {
+	series, ok, err := f.series(ctx, symbol, ChartRange1D)
+	if err != nil {
+		return AssetChartSeries{}, false
+	}
+	return series, ok
 }
 
 type fakeEquityQuoteClient struct {

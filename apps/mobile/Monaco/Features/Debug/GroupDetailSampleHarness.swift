@@ -139,6 +139,8 @@ struct GroupDetailSampleHarness: View {
                 GroupActivityListView(auth: auth, items: GroupDetailSampleData.activity, retryingTransactionIDs: [], onRetry: { _ in nil })
             case .proposals:
                 ProposalFeedView(service: proposalService, groupId: view.id)
+            case .stock(let symbol):
+                AssetDetailView(auth: auth, symbol: symbol)
             case .addMoney, .chat:
                 Text("Not in the sample harness")
                     .foregroundStyle(MonacoTheme.muted)

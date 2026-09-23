@@ -2,7 +2,8 @@
 import MonacoCore
 import SwiftUI
 
-/// Debug-only Stocks flow on fixed sample data (launch argument `-MonacoStocksTabSample`).
+/// Debug-only Stocks flow on fixed sample data (launch argument `-MonacoStocksTabSample`,
+/// optionally followed by a `StocksTabSampleScenario` name for the browse sections).
 ///
 /// No sign-in and no backend: the Stocks tab, the stock detail, the cabal picker and the amount
 /// step all read from `StocksTabSampleData`, so `StocksTabSampleUITests` and its screenshots are
@@ -28,30 +29,17 @@ enum StocksTabSampleData {
         people: []
     )
 
-    /// Pinned B20 catalogue subset. Addresses are placeholders in the vanity range and are never
-    /// shown on these screens.
-    static let catalog: [MarketAssetDTO] = [
-        asset("AAPLc", "Apple Inc.", 231_400_000, "0.012", suffix: "01"),
-        asset("NVDAc", "NVIDIA Corporation", 178_200_000, "-0.008", suffix: "02"),
-        asset("TSLAc", "Tesla, Inc.", 342_100_000, "0.034", suffix: "03"),
-        asset("MSFTc", "Microsoft Corporation", 438_900_000, "0.004", suffix: "04"),
-        asset("AMZNc", "Amazon.com, Inc.", 219_700_000, "-0.011", suffix: "05"),
-        asset("GOOGLc", "Alphabet Inc.", 201_000_000, "-0.015", suffix: "06"),
-    ]
-
-    private static func asset(_ symbol: String, _ name: String, _ micros: Int64, _ change: String, suffix: String) -> MarketAssetDTO {
-        MarketAssetDTO(
-            symbol: symbol,
-            name: name,
-            tokenAddress: "0xb2000000000000000000000000000000000000" + suffix,
-            routable: true,
-            priceUsdcMicros: micros,
-            change24h: change,
-            // As the backend sends it: the share's day move, labelled as such.
-            change24hBasis: .underlying,
-            change24hBasisSymbol: AssetSymbolFormatter.display(symbol)
-        )
+    /// The state the four browse sections are in: `-MonacoStocksTabSample <scenario>`, or
+    /// `full` when the flag stands alone.
+    static var scenario: StocksTabSampleScenario {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let flag = arguments.firstIndex(of: launchArgument), arguments.indices.contains(flag + 1) else { return .full }
+        return StocksTabSampleScenario(rawValue: arguments[flag + 1]) ?? .full
     }
+
+    /// The pinned B20 rows in the production shape: Chainlink price per token, and the
+    /// underlying's day move and sparkline, both labelled. See `MarketSampleData`.
+    static let catalog: [MarketAssetDTO] = MarketSampleData.popularAssets
 
     static func groupView(_ groupId: String) -> GroupViewDTO? {
         switch groupId {
@@ -108,20 +96,75 @@ enum StocksTabSampleData {
 
     struct SampleError: Error {}
 
-    struct TabSource: StocksTabDataSource {
+    /// Canned answers for the three reads the tab makes. `loading` never returns, which is
+    /// how the skeleton is screenshotted.
+    final class TabSource: StocksTabDataSource {
+        let scenario: StocksTabSampleScenario
+        /// `cabalsStale` answers once and then stops, which is what a refresh failing over
+        /// rows already on screen looks like.
+        private var heldReads = 0
+
+        init(scenario: StocksTabSampleScenario = .full) {
+            self.scenario = scenario
+        }
+
+        private var market: MarketStatusDTO {
+            scenario == .afterHours ? MarketSampleData.sessionAfterHours : MarketSampleData.sessionOpen
+        }
+
+        private var assets: [MarketAssetDTO] {
+            guard scenario == .noSeries else { return catalog }
+            return catalog.map { asset in
+                MarketAssetDTO(
+                    symbol: asset.symbol,
+                    name: asset.name,
+                    tokenAddress: asset.tokenAddress,
+                    routable: asset.routable,
+                    priceUsdcMicros: asset.priceUsdcMicros,
+                    change24h: asset.change24h,
+                    change24hBasis: asset.change24hBasis,
+                    change24hBasisSymbol: asset.change24hBasisSymbol
+                )
+            }
+        }
+
+        private func hangIfLoading() async throws {
+            if scenario == .loading { try await Task.sleep(for: .seconds(3600)) }
+        }
+
         func search(query: String, offset: Int, limit: Int) async throws -> ListMarketAssetsResponse {
             try await Task.sleep(for: .milliseconds(150))
+            try await hangIfLoading()
             let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            let matches = catalog.filter {
+            let matches = assets.filter {
                 $0.name.lowercased().contains(term) || AssetSymbolFormatter.display($0.symbol).lowercased().contains(term)
             }
             let page = Array(matches.dropFirst(offset).prefix(limit))
-            return ListMarketAssetsResponse(assets: page, hasMore: offset + page.count < matches.count)
+            return ListMarketAssetsResponse(assets: page, hasMore: offset + page.count < matches.count, market: market)
         }
 
         func popular(limit: Int) async throws -> PopularAssetsResponse {
             try await Task.sleep(for: .milliseconds(150))
-            return PopularAssetsResponse(assets: Array(catalog.prefix(limit)))
+            try await hangIfLoading()
+            if scenario == .popularFailed { throw SampleError() }
+            return PopularAssetsResponse(assets: Array(assets.prefix(limit)), market: market)
+        }
+
+        func held() async throws -> HeldAssetsResponse {
+            try await Task.sleep(for: .milliseconds(150))
+            try await hangIfLoading()
+            switch scenario {
+            case .cabalsFailed:
+                throw SampleError()
+            case .cabalsStale:
+                heldReads += 1
+                if heldReads > 1 { throw SampleError() }
+                return MarketSampleData.heldAssetsResponse(market: market)
+            case .noCabals, .popularFailed:
+                return HeldAssetsResponse(held: [], upForVote: [], market: market)
+            case .full, .loading, .noSeries, .afterHours:
+                return MarketSampleData.heldAssetsResponse(market: market)
+            }
         }
     }
 
@@ -218,9 +261,31 @@ enum StocksTabSampleData {
         }
     }
 
-    static var sources: StocksFlowSources {
-        StocksFlowSources(tab: TabSource(), detail: DetailSource(), holdings: HoldingsSource(), propose: ProposeSource())
+    static func sources(scenario: StocksTabSampleScenario) -> StocksFlowSources {
+        StocksFlowSources(tab: TabSource(scenario: scenario), detail: DetailSource(), holdings: HoldingsSource(), propose: ProposeSource())
     }
+}
+
+/// Every state the four browse sections can be in, so each one can be screenshotted.
+enum StocksTabSampleScenario: String, CaseIterable {
+    /// All four sections, with the awkward rows in them: a faller, a stock that did not
+    /// move, one with no day move and one with no series.
+    case full
+    /// Signed in, in no cabals, or in cabals that have bought nothing.
+    case noCabals
+    /// The cabal read failed; the catalogue did not. The market stays live.
+    case cabalsFailed
+    /// The cabal sections loaded once and then a refresh failed. The rows stay on screen
+    /// (they are the member's own money) with the caption that says they are not fresh.
+    case cabalsStale
+    /// The catalogue would not load. Nothing else can be shown.
+    case popularFailed
+    /// Nothing has answered yet: the skeleton.
+    case loading
+    /// A catalogue with no day series at all: rows without sparklines.
+    case noSeries
+    /// After the bell: the rows carry the moon.
+    case afterHours
 }
 
 struct StocksTabSampleHarness: View {
@@ -231,12 +296,31 @@ struct StocksTabSampleHarness: View {
         session.isLoading = false
         return session
     }()
-    @State private var sources = StocksTabSampleData.sources
+    private let scenario: StocksTabSampleScenario
+    @State private var sources: StocksFlowSources
+    @State private var model: StocksTabModel
+    @State private var isPrepared = false
+
+    init(auth: DynamicAuthService, scenario: StocksTabSampleScenario = StocksTabSampleData.scenario) {
+        self.auth = auth
+        self.scenario = scenario
+        let sources = StocksTabSampleData.sources(scenario: scenario)
+        _sources = State(initialValue: sources)
+        _model = State(initialValue: StocksTabModel(dataSource: sources.tab ?? StocksTabSampleData.TabSource(scenario: scenario)))
+    }
 
     var body: some View {
         TabView {
             NavigationStack {
-                AssetsTabView(auth: auth, sources: sources)
+                if isPrepared {
+                    AssetsTabView(auth: auth, sources: sources, model: model)
+                } else {
+                    Color.clear
+                }
+            }
+            .task {
+                await prepare()
+                isPrepared = true
             }
             .tabItem {
                 Label("Stocks", systemImage: "chart.line.uptrend.xyaxis")
@@ -245,6 +329,15 @@ struct StocksTabSampleHarness: View {
         }
         .tint(MonacoTheme.ink)
         .environment(session)
+    }
+
+    /// Most scenarios are one canned answer per read. `cabalsStale` is two: the cabal
+    /// sections have to land before a refresh can fail on top of them, and that
+    /// sequence is the state worth screenshotting.
+    private func prepare() async {
+        guard scenario == .cabalsStale else { return }
+        await model.loadSocial()
+        await model.loadSocial()
     }
 }
 #endif

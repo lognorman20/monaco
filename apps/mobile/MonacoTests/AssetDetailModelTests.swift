@@ -177,6 +177,8 @@ struct AssetDetailModelTests {
 
         await model.loadChart(range: .oneWeek)
 
+        // `.empty` gained its reason payload when the chart moved to the Chainlink
+        // feed; the server said nothing here, so there is nothing to caption it with.
         #expect(model.chartState == .empty(reason: nil))
     }
 
