@@ -16,6 +16,30 @@ struct PotRowDTO: Codable, Equatable, Identifiable {
     var id: String { symbol }
     var resolvedAssetKind: AssetKind { assetKind ?? .stock }
     var resolvedTokenDecimals: Int { tokenDecimals ?? AssetCatalogDefaults.decimals }
+
+    init(
+        symbol: String,
+        units: String,
+        markUsd: String,
+        valueUsd: String,
+        dollarPnl: String,
+        afterHours: Bool?,
+        tokenAmount: String? = nil,
+        assetKind: AssetKind? = nil,
+        tokenDecimals: Int? = nil,
+        premiumBps: Int? = nil
+    ) {
+        self.symbol = symbol
+        self.units = units
+        self.markUsd = markUsd
+        self.valueUsd = valueUsd
+        self.dollarPnl = dollarPnl
+        self.afterHours = afterHours
+        self.tokenAmount = tokenAmount
+        self.assetKind = assetKind
+        self.tokenDecimals = tokenDecimals
+        self.premiumBps = premiumBps
+    }
 }
 
 struct MemberSliceDTO: Codable, Equatable {

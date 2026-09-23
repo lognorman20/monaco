@@ -18,6 +18,36 @@ struct GroupActivityItemDTO: Codable, Equatable, Identifiable {
 
     var resolvedAssetKind: AssetKind { assetKind ?? .stock }
     var resolvedTokenDecimals: Int { tokenDecimals ?? AssetCatalogDefaults.decimals }
+
+    init(
+        id: String,
+        kind: String,
+        status: String,
+        symbol: String?,
+        amountMicros: Int64,
+        createdAt: String,
+        txSignature: String?,
+        tokenAmount: String?,
+        proceedsUsdcMicros: String?,
+        initiatedBy: String?,
+        agentDisplayName: String?,
+        assetKind: AssetKind? = nil,
+        tokenDecimals: Int? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.status = status
+        self.symbol = symbol
+        self.amountMicros = amountMicros
+        self.createdAt = createdAt
+        self.txSignature = txSignature
+        self.tokenAmount = tokenAmount
+        self.proceedsUsdcMicros = proceedsUsdcMicros
+        self.initiatedBy = initiatedBy
+        self.agentDisplayName = agentDisplayName
+        self.assetKind = assetKind
+        self.tokenDecimals = tokenDecimals
+    }
 }
 
 struct GroupActivityResponse: Codable, Equatable {

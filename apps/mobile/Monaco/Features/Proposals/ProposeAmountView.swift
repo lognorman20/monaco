@@ -309,7 +309,7 @@ struct ProposeBuyReview: Hashable, Identifiable {
 }
 
 extension BuyQuoteDTO: Hashable {
-    func hash(into hasher: inout Hasher) {
+    public func hash(into hasher: inout Hasher) {
         hasher.combine(symbol)
         hasher.combine(usdcMicros)
         hasher.combine(tokenAmount)
