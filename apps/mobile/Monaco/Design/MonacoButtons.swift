@@ -77,17 +77,22 @@ struct MonacoPrimaryButtonStyle: ButtonStyle {
     }
 }
 
+/// The outlined capsule. Reads `\.monacoWorld`, so a secondary action inside an ink band is an
+/// ink capsule rather than a white one: on paper the palette resolves to exactly the statics this
+/// used to name (`raised` is `secondaryButtonFill`, `fgPrimary` is `secondaryButtonLabel`), so
+/// nothing moves there — it just stops being paper-only.
 struct MonacoSecondaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.monacoPalette) private var palette
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .monacoButtonLabel()
-            .foregroundStyle(isEnabled ? MonacoTheme.secondaryButtonLabel : MonacoTheme.disabledLabel)
-            .background(Capsule().fill(MonacoTheme.secondaryButtonFill))
+            .foregroundStyle(isEnabled ? palette.fgPrimary : MonacoTheme.disabledLabel)
+            .background(Capsule().fill(palette.raised))
             .overlay {
                 Capsule()
-                    .strokeBorder(MonacoTheme.line, lineWidth: 1)
+                    .strokeBorder(palette.line, lineWidth: 1)
             }
             .contentShape(Capsule())
             .modifier(MonacoPressEffect(isPressed: configuration.isPressed))
@@ -195,9 +200,13 @@ struct CircleAction: View {
     @ScaledMetric(relativeTo: .footnote) private var scaledDiscSize: CGFloat = 56
     @ScaledMetric(relativeTo: .footnote) private var scaledGlyphSize: CGFloat = 20
 
-    private var discSize: CGFloat { min(scaledDiscSize, 88) }
+    // The ceilings live in `CircleActionMetrics` and are called, not inlined: `DesignLayoutTests`
+    // tests the enum, so an inlined constant would let the ceiling change under a green suite (or
+    // the suite change without touching the shipped disc). Referencing a deprecated declaration
+    // from inside a deprecated one raises no warning.
+    private var discSize: CGFloat { CircleActionMetrics.discSize(scaled: scaledDiscSize) }
 
-    private var glyphSize: CGFloat { min(scaledGlyphSize, 30) }
+    private var glyphSize: CGFloat { CircleActionMetrics.glyphSize(scaled: scaledGlyphSize) }
 
     init(_ title: String, systemImage: String, action: @escaping () -> Void) {
         self.title = title

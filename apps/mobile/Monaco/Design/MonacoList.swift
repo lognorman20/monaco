@@ -28,21 +28,30 @@ struct MonacoSectionHeader: View {
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: MonacoTheme.Space.s)
             if let trailing {
+                // The title is now `.displayFont(.section)` — SF Pro Expanded, 8-10% wider than
+                // the face it replaced — so at AX5 the header and its action compete for a line
+                // that was already tight. The action keeps `lineLimit(1)` (a wrapped "See all" is
+                // worse than a slightly smaller one) and takes a scale floor and a layout
+                // priority, so the *title* gives way first and the tap target never truncates.
                 if let action {
                     Button(action: action) {
                         Text(trailing)
                             .font(MonacoTheme.Typo.callout.weight(.semibold))
                             .foregroundStyle(palette.accent)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                             .frame(minHeight: 44)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .layoutPriority(1)
                 } else {
                     Text(trailing)
                         .font(MonacoTheme.Typo.callout)
                         .foregroundStyle(palette.fgMuted)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .layoutPriority(1)
                 }
             }
         }
@@ -318,15 +327,22 @@ struct EmptyState: View {
         self.action = action
     }
 
-    /// A cabal surface tints its own disc; everywhere else the disc is brand wash. Both pairs are
-    /// measured in the contrast table — `fgPrimary` on `soft`, `brandOnWash` on `brandWash` — so
-    /// the glyph never falls below AA whichever of the seven tints the cabal drew.
+    /// A cabal surface tints its own disc; everywhere else the disc is the world's brand wash.
+    /// Every pair is measured in the contrast table — `fgPrimary` on `soft`, `brandOnWash` on
+    /// `brandWash`, `Ink.accent` on `brandWashOnInk` at 6.27:1 — so the glyph never falls below
+    /// AA, whichever of the seven tints the cabal drew and whichever world the empty landed in.
+    ///
+    /// The world read matters because `EmptyState` is the one component here with 42 call sites:
+    /// the first empty that lands inside an ink band would otherwise draw a paper wash and a
+    /// near-invisible glyph, and nobody would go looking for the reason.
     private var discFill: Color {
-        cabalTint?.soft ?? MonacoTheme.brandWash
+        if let cabalTint { return cabalTint.soft }
+        return palette.world == .ink ? MonacoTheme.brandWashOnInk : MonacoTheme.brandWash
     }
 
     private var glyphColor: Color {
-        cabalTint == nil ? MonacoTheme.brandOnWash : palette.fgPrimary
+        guard cabalTint == nil else { return palette.fgPrimary }
+        return palette.world == .ink ? MonacoTheme.Ink.accent : MonacoTheme.brandOnWash
     }
 
     var body: some View {
