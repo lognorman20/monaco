@@ -42,29 +42,6 @@ final class AssetDetailSampleUITests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
-    /// Scrolls the page until `element` is hittable, or gives up.
-    ///
-    /// Hittable, not merely present: the trade bar is a material pinned over the
-    /// bottom of the scroll view, so a control the page has not been scrolled to can
-    /// exist and still not be tappable — the tap lands on the bar. `safeAreaInset`
-    /// keeps it reachable; it does not put it on screen.
-    ///
-    /// A plain swipe rather than a synthesized drag in the page's gutter: at the
-    /// accessibility text sizes the gutter drag does not move this page at all.
-    @MainActor
-    @discardableResult
-    private func scrollUntilHittable(_ app: XCUIApplication, _ element: XCUIElement, attempts: Int = 6) -> Bool {
-        for _ in 0..<attempts {
-            if element.exists && element.isHittable { return true }
-            app.swipeUp(velocity: .slow)
-        }
-        for _ in 0..<attempts {
-            if element.exists && element.isHittable { return true }
-            app.swipeDown(velocity: .slow)
-        }
-        return element.exists && element.isHittable
-    }
-
     /// "The screen drew" is asked of the 1D chip rather than of the scroll view the
     /// root identifier sits on: the chip is a real control, it is present in every
     /// chart state — loading, series, empty and failed alike — and a SwiftUI
@@ -161,54 +138,40 @@ final class AssetDetailSampleUITests: XCTestCase {
     /// 335pt a 375pt device leaves inside the gutters, so one Dynamic Type step up
     /// clipped the row and the longest chip ("ALL") could not be tapped at all. The
     /// row scrolls now, so every range stays reachable at any text size.
+    ///
+    /// KNOWN FAILING on the asset-detail-cards port, and left failing on purpose.
+    /// It passes on `feat/stocks-detail-chart` and fails once the trade bar moves
+    /// into a bottom `safeAreaInset`. What I could establish: at
+    /// `AccessibilityL` the 1D chip is present and taps, and the 1W chip is not in
+    /// the accessibility tree at all — swiping the row sideways does not bring it
+    /// in. The run that finally executed my instrumented version of this test
+    /// instead died with the app crashing inside SwiftUI's own
+    /// `EnvironmentValues` getter, with no Monaco frame in the stack, on a machine
+    /// at 99% disk and load 10-50. I could not separate a real accessibility
+    /// regression from that noise, so I am not shipping a guess: the test stays as
+    /// the base wrote it, and stays red, because a red test is the honest signal
+    /// and a skip would hide it.
     @MainActor
     func testEveryChartRangeIsReachableAtAnAccessibilityTextSize() throws {
         let app = launch("open", textSize: "UICTContentSizeCategoryAccessibilityL")
         waitForScreen(app, "accessibility text size")
-
-        // Scroll the row into the open area first. At this text size the hero alone
-        // fills most of the window and the trade bar takes a chunk of what is left,
-        // so the row starts below the fold: reachable, but not on screen, and a chip
-        // that is not on screen is not hittable however far the row is swiped
-        // sideways. This is the vertical scroll a member makes before they can reach
-        // the chips at all.
-        XCTAssertTrue(
-            scrollUntilHittable(app, anyElement(app, "asset-chart-range-1D")),
-            "the range row never came out from behind the trade bar"
-        )
 
         // The chip tapped last is on screen by construction, so the row is swiped
         // from there rather than from the middle of the screen (the chart).
         var lastTapped = anyElement(app, "asset-chart-range-1D")
         for range in ["1D", "1W", "1M", "3M", "1Y", "ALL"] {
             let chip = anyElement(app, "asset-chart-range-\(range)")
-
-            // Swipe for existence, not just for hittability. At this text size each
-            // chip is wide enough that the row only builds the ones near its
-            // viewport, so a chip further along is not in the accessibility tree at
-            // all until the row has been scrolled toward it — asserting existence
-            // before swiping fails on the second chip every time.
+            XCTAssertTrue(chip.waitForExistence(timeout: 5), "\(range) chip is missing")
+            // Hittable is what makes this a real check: a chip clipped out of a fixed
+            // row would never become hittable however far the row is swiped.
             var swipes = 0
-            while !chip.exists && swipes < 6 {
-                lastTapped.swipeLeft()
-                swipes += 1
-            }
-            XCTAssertTrue(chip.exists, "\(range) chip is missing after \(swipes) swipes")
-
-            // Then swipe for hittability. This is what makes it a real check: a chip
-            // clipped out of a fixed row exists and never becomes hittable however
-            // far the row is swiped, which is the regression this test guards.
-            while !chip.isHittable && swipes < 10 {
+            while !chip.isHittable && swipes < 4 {
                 lastTapped.swipeLeft()
                 swipes += 1
             }
             XCTAssertTrue(chip.isHittable, "\(range) chip cannot be reached")
             chip.tap()
             lastTapped = chip
-
-            // Tapping reloads the curve, which can change the card's height and
-            // carry the row back under the trade bar.
-            scrollUntilHittable(app, chip, attempts: 2)
         }
         attachScreenshot(app, name: "asset-detail-ranges-accessibility-text")
     }
