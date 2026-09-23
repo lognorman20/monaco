@@ -32,13 +32,13 @@ struct LoginView: View {
                 if let reason = auth.lastSignOutReason {
                     Text(reason)
                         .font(MonacoTheme.Typo.callout)
-                        .foregroundStyle(MonacoTheme.destructive)
+                        .foregroundStyle(MonacoTheme.lossOnHero)
                         .accessibilityIdentifier("signOutReasonNotice")
                 }
 
                 VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
                     if showsMethodPicker {
-                        MonacoSegmented(availableMethods, selection: $selectedMethod) { $0.rawValue }
+                        InkSegmented(availableMethods, selection: $selectedMethod) { $0.rawValue }
                             .accessibilityLabel("Sign-in method")
                             // Switching method mid-send would leave the in-flight request to
                             // report success against the other form: an email screen showing
@@ -55,8 +55,8 @@ struct LoginView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .authScreenBackground()
-        .tint(MonacoTheme.accent)
-        .foregroundStyle(MonacoTheme.primaryText)
+        .tint(MonacoTheme.Ink.fgPrimary)
+        .foregroundStyle(MonacoTheme.Ink.fgPrimary)
         .onChange(of: selectedMethod) { _, _ in
             auth.resetLoginFlow()
         }

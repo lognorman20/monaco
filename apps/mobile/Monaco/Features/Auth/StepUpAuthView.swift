@@ -8,15 +8,15 @@ struct StepUpAuthView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Confirm it’s you")
-                .font(.title2.bold())
-                .foregroundStyle(MonacoTheme.primaryText)
+                .displayFont(.title)
+                .foregroundStyle(MonacoTheme.Ink.fgPrimary)
             Text("Enter the code we sent so we can keep this session open.")
                 .authSecondaryCaption()
 
             TextField(
                 "",
                 text: $otpCode,
-                prompt: Text("6-digit code").foregroundStyle(MonacoTheme.tertiaryText)
+                prompt: Text("6-digit code").foregroundStyle(MonacoTheme.Ink.fgSubtle)
             )
             .keyboardType(.numberPad)
             .textContentType(.oneTimeCode)
@@ -27,7 +27,7 @@ struct StepUpAuthView: View {
             if let message = auth.securityOTPMessage {
                 Text(message)
                     .font(.footnote)
-                    .foregroundStyle(MonacoTheme.destructive)
+                    .foregroundStyle(MonacoTheme.lossOnHero)
             }
 
             Button("Send code") {

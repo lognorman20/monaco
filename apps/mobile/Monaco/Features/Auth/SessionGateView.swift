@@ -82,7 +82,7 @@ private struct SessionGateSkeleton: View {
                 SkeletonBlock(width: 120, height: 24, radius: 12)
             }
             .padding(.top, 72)
-            SkeletonBlock(height: 64, radius: MonacoTheme.Radius.card)
+            SkeletonBlock(height: 64, radius: MonacoTheme.Radius.container)
             VStack(spacing: MonacoTheme.Space.sm) {
                 ForEach(0..<3, id: \.self) { _ in
                     SkeletonBlock(height: 60, radius: MonacoTheme.Radius.tile)

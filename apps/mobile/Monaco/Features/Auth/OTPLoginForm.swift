@@ -47,7 +47,7 @@ struct OTPLoginForm: View {
             TextField(
                 "",
                 text: $address,
-                prompt: Text(destination.prompt).foregroundStyle(MonacoTheme.tertiaryText)
+                prompt: Text(destination.prompt).foregroundStyle(MonacoTheme.Ink.fgSubtle)
             )
                 .keyboardType(destination.keyboardType)
                 .textContentType(destination.contentType)
@@ -69,7 +69,7 @@ struct OTPLoginForm: View {
             if showsAddressHint {
                 Text(destination.invalidHint(address))
                     .font(.footnote)
-                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .foregroundStyle(MonacoTheme.Ink.fgMuted)
                     .accessibilityIdentifier("\(destination.identifierPrefix)AddressHint")
             }
 
@@ -77,7 +77,7 @@ struct OTPLoginForm: View {
                 TextField(
                     "",
                     text: $otpCode,
-                    prompt: Text("6-digit code").foregroundStyle(MonacoTheme.tertiaryText)
+                    prompt: Text("6-digit code").foregroundStyle(MonacoTheme.Ink.fgSubtle)
                 )
                     .keyboardType(.numberPad)
                     .textContentType(.oneTimeCode)
@@ -121,7 +121,7 @@ struct OTPLoginForm: View {
                     .buttonStyle(.plain)
                     .font(.footnote.weight(.semibold))
                     .frame(minHeight: 44)
-                    .foregroundStyle(MonacoTheme.accent)
+                    .foregroundStyle(MonacoTheme.Ink.accent)
                     .disabled(auth.flow.isBusy)
                     .accessibilityIdentifier("\(destination.identifierPrefix)ResendCodeButton")
 
@@ -134,7 +134,7 @@ struct OTPLoginForm: View {
                     .buttonStyle(.plain)
                     .font(.footnote.weight(.semibold))
                     .frame(minHeight: 44)
-                    .foregroundStyle(MonacoTheme.secondaryText)
+                    .foregroundStyle(MonacoTheme.Ink.fgMuted)
                     .disabled(auth.flow.isBusy)
                     .accessibilityIdentifier("\(destination.identifierPrefix)ChangeAddressButton")
                 }
@@ -223,11 +223,11 @@ struct OTPLoginForm: View {
     private var statusColor: Color {
         switch auth.phase {
         case .failed:
-            return MonacoTheme.destructive
+            return MonacoTheme.lossOnHero
         case .authenticated:
-            return MonacoTheme.success
+            return MonacoTheme.profitOnHero
         default:
-            return MonacoTheme.secondaryText
+            return MonacoTheme.Ink.fgMuted
         }
     }
 }

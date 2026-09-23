@@ -10,27 +10,28 @@ struct AuthGateView: View {
                 if hasLoginMethod {
                     if isAuthenticated {
                         if auth.accessToken != nil {
+                            // Past the gate. **This is where the app opens into daylight**: nothing
+                            // below here is ink-pinned, so Home arrives on paper in light mode.
                             SessionGateView(auth: auth)
                         } else {
-                            restoringView
+                            preAuth { restoringView }
                         }
                     } else if auth.phase == .restoring {
-                        restoringView
+                        preAuth { restoringView }
                     } else if case .restoreFailed(let message) = auth.phase {
-                        restoreFailedView(message: message)
+                        preAuth { restoreFailedView(message: message) }
                     } else {
+                        // `LoginView` pins its own surface; it is the one screen here that is a
+                        // designed object rather than a state.
                         LoginView(auth: auth)
                     }
                 } else {
-                    missingLoginMethodsView
+                    preAuth { missingLoginMethodsView }
                 }
             } else {
-                missingConfigView
+                preAuth { missingConfigView }
             }
         }
-        .authScreenBackground()
-        .tint(MonacoTheme.accent)
-        .foregroundStyle(MonacoTheme.primaryText)
         .task {
             await auth.restoreSessionIfNeeded()
         }
@@ -38,6 +39,18 @@ struct AuthGateView: View {
             guard newPhase == .active else { return }
             Task { await auth.restoreSessionIfNeeded() }
         }
+    }
+
+    /// The ink surface, applied to a pre-auth state rather than to the gate as a whole.
+    ///
+    /// It used to wrap the `Group`, which meant `SessionGateView` — and therefore the entire
+    /// signed-in app — inherited the pre-auth colour scheme. Ink is the *pre*-auth world; the app
+    /// opens into daylight the moment the token is in hand.
+    private func preAuth<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .authScreenBackground()
+            .tint(MonacoTheme.Ink.fgPrimary)
+            .foregroundStyle(MonacoTheme.Ink.fgPrimary)
     }
 
     private var restoringView: some View {
@@ -83,7 +96,7 @@ struct AuthGateView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Sign-in is not configured", systemImage: "key.fill")
                 .font(.headline)
-                .foregroundStyle(MonacoTheme.primaryText)
+                .foregroundStyle(MonacoTheme.Ink.fgPrimary)
 
             Text("Set DYNAMIC_ENVIRONMENT_ID in your Xcode scheme or shell env. Copy values from `.env.example`.")
                 .authSecondaryCaption()
@@ -94,7 +107,7 @@ struct AuthGateView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("No login methods enabled", systemImage: "person.crop.circle.badge.exclamationmark")
                 .font(.headline)
-                .foregroundStyle(MonacoTheme.primaryText)
+                .foregroundStyle(MonacoTheme.Ink.fgPrimary)
 
             Text("Enable AUTH_SMS_LOGIN_ENABLED and/or AUTH_EMAIL_LOGIN_ENABLED.")
                 .authSecondaryCaption()

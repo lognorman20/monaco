@@ -8,15 +8,15 @@ struct DeviceRegistrationView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Confirm this device")
-                .font(.title2.bold())
-                .foregroundStyle(MonacoTheme.primaryText)
+                .displayFont(.title)
+                .foregroundStyle(MonacoTheme.Ink.fgPrimary)
             Text(auth.loginChannel.deviceRegistrationCopy)
                 .authSecondaryCaption()
 
             TextField(
                 "",
                 text: $otpCode,
-                prompt: Text("6-digit code").foregroundStyle(MonacoTheme.tertiaryText)
+                prompt: Text("6-digit code").foregroundStyle(MonacoTheme.Ink.fgSubtle)
             )
             .keyboardType(.numberPad)
             .textContentType(.oneTimeCode)
@@ -27,7 +27,7 @@ struct DeviceRegistrationView: View {
             if let message = auth.securityOTPMessage {
                 Text(message)
                     .font(.footnote)
-                    .foregroundStyle(MonacoTheme.destructive)
+                    .foregroundStyle(MonacoTheme.lossOnHero)
             }
 
             Button("Send code") {
