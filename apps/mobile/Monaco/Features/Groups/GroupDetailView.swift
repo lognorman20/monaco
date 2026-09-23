@@ -111,8 +111,16 @@ struct GroupDetailView: View {
         groupView?.name ?? groupName ?? "Cabal"
     }
 
+    /// This cabal's colour, resolved against the viewer's own set so no two of their cabals can
+    /// be the same. A cabal they are not in falls back to the plain hash, which is what the
+    /// mark would have drawn anyway.
+    private var cabalTint: MonacoTheme.CabalTint {
+        session?.cabalTint(forGroupId: groupId) ?? .forGroupId(groupId)
+    }
+
     var body: some View {
         content
+            .cabalTint(cabalTint)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .monacoCanvas()
             .groupLeaveProgress(isLeaving: isLeaving, isSellingSlice: leavingSellsSlice)
@@ -709,12 +717,22 @@ struct GroupDetailContent: View {
     let onToast: (MonacoToast) -> Void
     var onHeroScrolledAway: (Bool) -> Void = { _ in }
 
+    /// Set at the screen root from the viewer's resolved tints.
+    @Environment(\.cabalTint) private var cabalTint
+
+    private var tint: MonacoTheme.CabalTint {
+        cabalTint ?? .forGroupId(view.id)
+    }
+
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 32) {
-                VStack(spacing: 20) {
-                    GroupHeroSection(view: view)
-                    GroupActionRow(slice: view.you, onRoute: onRoute, onPropose: onPropose)
+            LazyVStack(alignment: .leading, spacing: MonacoTheme.Space.section) {
+                GroupHeroBand(tint: tint) {
+                    VStack(alignment: .leading, spacing: 20) {
+                        GroupHeroSection(view: view)
+                        GroupActionRow(slice: view.you, onRoute: onRoute, onPropose: onPropose)
+                        GroupChatBar { onRoute(.chat) }
+                    }
                 }
 
                 if !joinRequests.isEmpty {
@@ -769,28 +787,134 @@ struct GroupDetailContent: View {
     }
 }
 
-/// Add money · Propose · Cash out · Chat, directly under the hero.
+/// The cabal's actions, in the order the product means them.
+///
+/// This was four identical brand-wash discs — plus, arrow up, arrow down, speech bubble — which
+/// is the most recognisable fintech-template component shipping, and which said that funding the
+/// pot, proposing a buy, cashing out and chatting were all the same size of decision. They are
+/// not. Proposing a buy is what a cabal is *for*, so it gets the full-width brand capsule, and
+/// the two money moves sit under it as quiet chips.
 struct GroupActionRow: View {
     /// The member's slice, read here so Cash out is pushed with the figures that were on screen.
     let slice: MemberSliceDTO
     let onRoute: (GroupDetailRoute) -> Void
     let onPropose: () -> Void
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            action("Add money", systemImage: "plus", id: "group-action-fund") { onRoute(.addMoney) }
-            action("Propose", systemImage: "arrow.up.right", id: "group-action-propose", perform: onPropose)
-            action("Cash out", systemImage: "arrow.down.left", id: "group-action-sell") {
-                onRoute(.cashOut(shareUnits: Int64(slice.shareUnits) ?? 0, equityUsd: slice.equityUsd))
+        VStack(spacing: MonacoTheme.Space.s) {
+            Button("Propose a buy", action: onPropose)
+                .buttonStyle(.monacoPrimary)
+                .monacoFullWidthButtons()
+                .accessibilityIdentifier("group-action-propose")
+
+            // Two columns normally; stacked once the labels can no longer share a line.
+            let chips = [
+                GroupActionChip(
+                    title: "Add money",
+                    systemImage: "plus",
+                    identifier: "group-action-fund",
+                    action: { onRoute(.addMoney) }
+                ),
+                GroupActionChip(
+                    title: "Cash out",
+                    systemImage: "arrow.down.left",
+                    identifier: "group-action-sell",
+                    action: {
+                        onRoute(.cashOut(shareUnits: Int64(slice.shareUnits) ?? 0, equityUsd: slice.equityUsd))
+                    }
+                )
+            ]
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: MonacoTheme.Space.s) { chips[0]; chips[1] }
+            } else {
+                HStack(spacing: MonacoTheme.Space.s) { chips[0]; chips[1] }
             }
-            action("Chat", systemImage: "bubble.left", id: "group-action-chat") { onRoute(.chat) }
         }
     }
+}
 
-    private func action(_ title: String, systemImage: String, id: String, perform: @escaping () -> Void) -> some View {
-        CircleAction(title, systemImage: systemImage, action: perform)
-            .frame(maxWidth: .infinity)
-            .accessibilityIdentifier(id)
+/// A quiet money action: glyph, label, `fillQuiet` capsule. Not tinted, not brand — the one
+/// brand fill on this row is above it.
+private struct GroupActionChip: View {
+    let title: String
+    let systemImage: String
+    let identifier: String
+    let action: () -> Void
+
+    /// The chips sit inside the ink hero, so their fill and their label come from the world
+    /// rather than from the paper statics — a `fillQuiet` capsule on `Ink.base` would be a pale
+    /// grey pill on a near-black band.
+    @Environment(\.monacoPalette) private var palette
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.footnote.weight(.semibold))
+                Text(title)
+                    .font(MonacoTheme.Typo.callout.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundStyle(palette.fgPrimary)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(Capsule().fill(palette.raised))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(identifier)
+    }
+}
+
+/// The cabal's group chat, as a bar rather than one of four identical discs.
+///
+/// "Your group chat, with a portfolio" is the product's tagline, and chat was the fourth icon in
+/// a row of four. This puts the last thing anybody said above the fold.
+///
+/// **There is no unread count and no unread dot.** `GroupMessageDTO` carries the author, the body
+/// and the timestamp, and nothing about what the viewer has read. A wrong count on a money app is
+/// worse than no count, so the bar says who spoke last and leaves it there until an unread field
+/// exists.
+struct GroupChatBar: View {
+    let onOpen: () -> Void
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: MonacoTheme.Space.sm) {
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(MonacoTheme.Ink.accent)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Group chat")
+                        .font(MonacoTheme.Typo.rowTitle)
+                        .foregroundStyle(MonacoTheme.Ink.fgPrimary)
+                        .lineLimit(1)
+                    Text("Talk it over before you propose it")
+                        .font(MonacoTheme.Typo.caption)
+                        .foregroundStyle(MonacoTheme.Ink.fgMuted)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(MonacoTheme.Ink.fgSubtle)
+            }
+            .multilineTextAlignment(.leading)
+            .padding(.horizontal, MonacoTheme.Space.m)
+            .frame(minHeight: 56)
+            .background(
+                MonacoTheme.Ink.raised,
+                in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.container, style: .continuous)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("group-action-chat")
     }
 }
 
@@ -841,27 +965,25 @@ struct GroupJoinRequestsCard: View {
                 }
             }
             .padding(.horizontal, MonacoTheme.Space.m)
-            .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
+            .padding(.vertical, MonacoTheme.Space.s)
+            .monacoElevation(.card)
         }
         .accessibilityIdentifier("group-join-requests")
     }
 }
 
-/// Placeholder shaped like the loaded screen: hero, action row, three rows.
+/// Placeholder shaped like the loaded screen: one tall ink band, then a run of rows.
+///
+/// Shaped like what actually arrives — the band now carries the hero, the propose capsule and
+/// the chat bar, so a skeleton with four discs under it would jump when the cabal lands.
 struct GroupDetailSkeleton: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 32) {
-            SkeletonBlock(height: 300, radius: MonacoTheme.Radius.hero)
-            HStack {
-                ForEach(0..<4, id: \.self) { _ in
-                    SkeletonBlock(width: 56, height: 56, radius: 28)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.section) {
+            SkeletonBlock(height: 420, radius: MonacoTheme.Radius.object)
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.headerToContent) {
                 SkeletonBlock(width: 120, height: 22)
                 ForEach(0..<3, id: \.self) { _ in
-                    SkeletonBlock(height: 60, radius: 14)
+                    SkeletonBlock(height: 60, radius: MonacoTheme.Radius.container)
                 }
             }
         }

@@ -192,6 +192,8 @@ struct CabalStripCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(MonacoTheme.Space.m)
+            // The mark hangs 20pt below the band into this padding; the name clears it.
+            .padding(.top, 10)
         }
         .frame(width: fillsWidth ? nil : size.width, alignment: .topLeading)
         .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .topLeading)

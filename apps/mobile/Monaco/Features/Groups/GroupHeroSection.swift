@@ -2,37 +2,53 @@ import MonacoCore
 import SwiftUI
 
 /// Top of the group screen: identity, the pot, how it's doing, and your slice of it.
-/// A deep ink money card in both schemes; the cabal's tint is the mark and the accent
-/// rule, never a full-bleed wash.
+///
+/// Ink in both schemes, because this is where the cabal's money is held — with one flat wash of
+/// the cabal's own colour over it and a 2pt rule under the name. Back out, open a different
+/// cabal, and the room is a different colour. The tint never reaches a control on this screen:
+/// blue still means tap.
 struct GroupHeroSection: View {
     let view: GroupViewDTO
+
+    /// Set at the root of the cabal screen from the viewer's resolved tints; nil for a cabal
+    /// being previewed outside that set, where the mark hashes the id itself.
+    @Environment(\.cabalTint) private var cabalTint
+
+    private var tint: MonacoTheme.CabalTint {
+        cabalTint ?? .forGroupId(view.id)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .center, spacing: MonacoTheme.Space.sm) {
-                    CabalMark(groupId: view.id, name: view.name, size: 36, onInk: true)
+                    CabalMark(tint: tint, name: view.name, size: 36, onInk: true)
                     Text(view.name)
-                        .font(MonacoTheme.Typo.title)
-                        .foregroundStyle(MonacoTheme.onHero)
+                        .displayFont(.title)
+                        .foregroundStyle(MonacoTheme.Ink.fgPrimary)
                         .lineLimit(2)
                         .minimumScaleFactor(0.75)
                         .accessibilityAddTraits(.isHeader)
                 }
+                // The accent rule. Short and deliberate: it is a signature, not a divider.
+                Capsule()
+                    .fill(tint.onInk)
+                    .frame(width: 44, height: 2)
+                    .accessibilityHidden(true)
                 HStack(spacing: 8) {
-                    GroupMemberAvatarStack(members: view.members, ringColor: MonacoTheme.heroInk)
+                    GroupMemberAvatarStack(members: view.members, ringColor: MonacoTheme.Ink.base)
                     Text(view.members.count == 1 ? "1 member" : "\(view.members.count) members")
                         .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.onHeroMuted)
+                        .foregroundStyle(MonacoTheme.Ink.fgMuted)
                 }
                 .accessibilityElement(children: .combine)
             }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("In the pot")
-                    .font(MonacoTheme.Typo.caption)
-                    .foregroundStyle(MonacoTheme.onHeroMuted)
-                MoneyText(decimalString: view.resolvedPotTotalUsd, style: .hero, color: MonacoTheme.onHero)
+                    .displayFont(.eyebrow)
+                    .foregroundStyle(MonacoTheme.Ink.fgSubtle)
+                MoneyText(decimalString: view.resolvedPotTotalUsd, style: .hero, color: MonacoTheme.Ink.fgPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
                     .dynamicTypeSize(...DynamicTypeSize.accessibility2)
@@ -41,27 +57,27 @@ struct GroupHeroSection: View {
                     PnLBadge(dollarPnl: GroupHeroMath.potDollarPnl(view.pot), percentReturn: nil, onInk: true)
                     Text("all time")
                         .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.onHeroMuted)
+                        .foregroundStyle(MonacoTheme.Ink.fgMuted)
                 }
             }
             .accessibilityElement(children: .combine)
 
             Rectangle()
-                .fill(MonacoTheme.onHeroHairline)
+                .fill(MonacoTheme.Ink.line)
                 .frame(height: 1)
 
             HStack(alignment: .lastTextBaseline, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Your slice")
-                        .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.onHeroMuted)
-                    MoneyText(decimalString: view.you.equityUsd, style: .row, color: MonacoTheme.onHero)
+                        .displayFont(.eyebrow)
+                        .foregroundStyle(MonacoTheme.Ink.fgSubtle)
+                    MoneyText(decimalString: view.you.equityUsd, style: .row, color: MonacoTheme.Ink.fgPrimary)
                 }
                 Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(GroupHeroMath.sliceCaption(view.you))
                         .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.onHeroMuted)
+                        .foregroundStyle(MonacoTheme.Ink.fgMuted)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                     if GroupHeroMath.hasSlice(view.you) {
@@ -72,8 +88,40 @@ struct GroupHeroSection: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("group-hero-slice")
         }
-        .monacoHeroCard()
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityIdentifier("group-hero")
+    }
+}
+
+/// The ink surface the hero, the action row and the chat bar all sit on, washed in the cabal's
+/// own colour.
+///
+/// One object, not three stacked rectangles: identity and the pot, then the thing a cabal is for,
+/// then the room's conversation. Tap a different cabal and the whole thing is a different colour.
+struct GroupHeroBand<Content: View>: View {
+    let tint: MonacoTheme.CabalTint
+    @ViewBuilder let content: Content
+
+    private var shape: AnyShape {
+        AnyShape(RoundedRectangle(cornerRadius: MonacoTheme.Radius.object, style: .continuous))
+    }
+
+    var body: some View {
+        content
+            .monacoWorld(.ink)
+            .padding(MonacoTheme.Space.l)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                InkSurface(shape: shape)
+                    .overlay {
+                        // `CabalTint.soft` is a *paper* wash: in light mode it is the deep fill
+                        // at 12%, which over #0B1220 is not there at all. On ink the tint has to
+                        // come from the `onInk` pair, exactly as `brandWashOnInk` is the light
+                        // blue rather than `brand`. 10% is a wash, not a fill, so the hero's one
+                        // saturated fill is still the Propose capsule.
+                        shape.fill(tint.onInk.opacity(0.10))
+                    }
+            }
     }
 }
 
@@ -98,12 +146,25 @@ struct GroupMemberAvatarStack: View {
                 bubble {
                     Text("+\(overflow)")
                         .font(.system(size: size * 0.36, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(MonacoTheme.heroInk)
+                        .foregroundStyle(discLabel)
                 }
             }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(members.count == 1 ? "1 member" : "\(members.count) members")
+    }
+
+    /// Five solid-white discs on a deep ink band is more white than anything else on the screen,
+    /// and the members are not the loudest thing on a cabal's hero — the pot is. On ink the disc
+    /// is a quiet white wash with white initials; on paper it stays the surface it always was.
+    @Environment(\.monacoWorld) private var world
+
+    private var discFill: Color {
+        world == .ink ? MonacoTheme.Ink.lineStrong : MonacoTheme.bgRaised
+    }
+
+    private var discLabel: Color {
+        world == .ink ? MonacoTheme.Ink.fgPrimary : MonacoTheme.fgPrimary
     }
 
     @ViewBuilder
@@ -113,7 +174,7 @@ struct GroupMemberAvatarStack: View {
             bubble {
                 Text(CabalMark.initials(for: member.displayName))
                     .font(.system(size: size * 0.36, weight: .semibold))
-                    .foregroundStyle(MonacoTheme.heroInk)
+                    .foregroundStyle(discLabel)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
@@ -125,7 +186,9 @@ struct GroupMemberAvatarStack: View {
 
     private func bubble<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         Circle()
-            .fill(Color.white)
+            .fill(discFill)
+            // The ring punches the surface behind the stack out between faces, so overlapping
+            // discs read as separate people rather than one welded shape.
             .overlay(Circle().strokeBorder(ringColor, lineWidth: 2))
             .overlay(content().padding(.horizontal, 5))
             .frame(width: size, height: size)

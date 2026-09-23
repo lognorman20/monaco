@@ -56,8 +56,8 @@ struct MemberBoardSection: View {
         .frame(minHeight: 60)
         .overlay {
             if row.rank == 1 {
-                RoundedRectangle(cornerRadius: MonacoTheme.Radius.card - 4, style: .continuous)
-                    .strokeBorder(MonacoTheme.ink, lineWidth: 1)
+                RoundedRectangle(cornerRadius: MonacoTheme.Radius.container - 4, style: .continuous)
+                    .strokeBorder(MonacoTheme.fgPrimary, lineWidth: 1)
                     .padding(4)
             }
         }
