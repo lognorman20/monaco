@@ -8,7 +8,10 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const MAX_EMAIL = 254;
 const MAX_TWITTER = 15; // X/Twitter's own handle length limit.
 const MAX_SOURCE = 64;
-const DEFAULT_ORIGINS = ["https://trymonaco.xyz", "https://www.trymonaco.xyz"];
+const DEFAULT_ORIGINS = [
+  "https://monacolabs.xyz", "https://www.monacolabs.xyz",
+  "https://trymonaco.xyz", "https://www.trymonaco.xyz",
+];
 
 export function allowedOrigins(env) {
   const raw = (env.ALLOWED_ORIGINS || "").trim();
@@ -59,7 +62,7 @@ export async function handleSignup({ method, headers, body, env, fetch, log = co
 
   const origin = headers.origin;
   if (origin && !allowedOrigins(env).includes(origin)) {
-    return { status: 403, body: { error: "Signups are only accepted from trymonaco.xyz." } };
+    return { status: 403, body: { error: "Signups are only accepted from monacolabs.xyz." } };
   }
 
   if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY || !env.IP_HASH_SALT) {
