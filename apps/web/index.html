@@ -78,6 +78,7 @@
   .join { width: 100%; max-width: 480px; display: grid; gap: 10px; }
   .field { display: flex; padding: 4px; border-radius: 999px; background: #fff; border: 1px solid var(--line-strong); box-shadow: 0 10px 30px -18px rgba(15, 41, 28, 0.35); transition: border-color .15s; }
   .field:focus-within { border-color: var(--green); }
+  .field.invalid, .field.invalid:focus-within { border-color: var(--down); }
   .field input { flex: 1; min-width: 0; font: inherit; font-size: 16px; color: var(--ink); background: transparent; border: 0; padding: 12px 14px; outline: none; }
   .field input::placeholder { color: var(--ink-3); }
   .join .btn.submit { width: 100%; padding-block: 13px; font-size: 16px; }
@@ -101,6 +102,9 @@
   footer { border-top: 1px solid var(--line); padding-block: 28px calc(28px + env(safe-area-inset-bottom, 0px)); color: var(--ink-3); font-size: 14px; }
   footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: center; align-items: center; }
   footer p { margin: 0; }
+  .social { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding-inline: 4px; color: var(--ink-2); text-decoration: none; font-weight: 500; transition: color .15s; }
+  .social:hover { color: var(--ink); }
+  .social:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; border-radius: 6px; }
 
   @media (max-width: 860px) {
     .sec { padding-block: 72px; }
@@ -159,13 +163,22 @@
 <footer>
   <div class="wrap">
     <a class="brand" href="/" aria-label="Monaco home"><img class="m" src="/assets/mark-ink.svg" alt="" width="24" height="24" style="width:24px;height:24px"><img class="w" src="/assets/wordmark-ink.svg" alt="monaco" style="height:16px;width:auto"></a>
+    <a class="social" href="https://x.com/trymonaco" target="_blank" rel="noopener" aria-label="Monaco on Twitter (@trymonaco)"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@trymonaco</a>
   </div>
 </footer>
 
 <script>
 (function () {
   var EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  var TWITTER = /^[A-Za-z0-9_]{1,15}$/;
+  var BAD_TWITTER = "Enter a valid Twitter handle, like @monaco, or leave it blank.";
   var ENDPOINT = "/api/waitlist";
+
+  function twitterHandle(value) {
+    var handle = value.trim().replace(/^@/, "");
+    if (handle === "") return "";
+    return TWITTER.test(handle) ? handle : null;
+  }
 
   var nav = document.getElementById("nav");
   function onScroll() { nav.classList.toggle("scrolled", window.scrollY > 8); }
@@ -183,18 +196,32 @@
     var button = form.querySelector('button[type="submit"]');
     var status = form.querySelector(".status");
     function say(text, kind) { status.textContent = text; status.className = "status" + (kind ? " " + kind : ""); }
+    function mark(el, bad) { el.setAttribute("aria-invalid", bad ? "true" : "false"); el.parentNode.classList.toggle("invalid", bad); }
+    function checkTwitter() {
+      var bad = twitterHandle(twitterInput.value) === null;
+      mark(twitterInput, bad);
+      if (bad) say(BAD_TWITTER, "err");
+      return !bad;
+    }
+
+    twitterInput.addEventListener("blur", checkTwitter);
+    twitterInput.addEventListener("input", function () {
+      if (twitterInput.getAttribute("aria-invalid") === "true" && twitterHandle(twitterInput.value) !== null) { mark(twitterInput, false); say(""); }
+    });
+    input.addEventListener("input", function () { if (input.getAttribute("aria-invalid") === "true") { mark(input, false); say(""); } });
 
     form.addEventListener("submit", function (e) {
       e.preventDefault();
+      if (!checkTwitter()) { twitterInput.focus(); return; }
       var email = input.value.trim();
-      if (!EMAIL.test(email)) { say("Enter a valid email, like you@email.com.", "err"); input.focus(); return; }
+      if (!EMAIL.test(email)) { mark(input, true); say("Enter a valid email, like you@email.com.", "err"); input.focus(); return; }
       button.disabled = true; say("Adding you…");
       var ctrl = new AbortController();
       var timer = setTimeout(function () { ctrl.abort(); }, 10000);
       fetch(ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email, twitter: twitterInput ? twitterInput.value.trim() : "", company: trap.value, source: params().ref }),
+        body: JSON.stringify({ email: email, twitter: twitterHandle(twitterInput.value), company: trap.value, source: params().ref }),
         signal: ctrl.signal
       }).then(function (res) {
         return res.json().catch(function () { return {}; }).then(function (body) { return { ok: res.ok, status: res.status, body: body }; });

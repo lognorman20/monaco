@@ -118,18 +118,17 @@ test("health reports each dependency", async () => {
   assert.equal(unconf.body.dependencies.ipHashSalt, "missing");
 });
 
-test("an optional twitter handle is passed through, trimmed, de-@'d, and capped", async () => {
-  const fetch = fakeFetch();
-  await run({ fetch, body: { email: "you@email.com", twitter: "  @adalovelace  " } });
-  assert.equal(JSON.parse(fetch.calls[0].init.body).p_twitter, "adalovelace");
-
-  const long = fakeFetch();
-  await run({ fetch: long, body: { email: "you@email.com", twitter: "a".repeat(200) } });
-  assert.equal(JSON.parse(long.calls[0].init.body).p_twitter.length, 15);
+test("a valid twitter handle is trimmed, loses one leading @, and keeps its case", async () => {
+  for (const [input, sent] of [["  @AdaLovelace  ", "AdaLovelace"], ["ada_1815", "ada_1815"], ["@" + "a".repeat(15), "a".repeat(15)]]) {
+    const fetch = fakeFetch();
+    const r = await run({ fetch, body: { email: "you@email.com", twitter: input } });
+    assert.equal(r.status, 200, input);
+    assert.equal(JSON.parse(fetch.calls[0].init.body).p_twitter, sent);
+  }
 });
 
 test("no twitter handle is absent, not an empty string, and never blocks the signup", async () => {
-  for (const twitter of [undefined, "", "   ", "@", 42, null, {}]) {
+  for (const twitter of [undefined, "", "   ", "@", " @ ", null]) {
     const fetch = fakeFetch();
     const r = await run({ fetch, body: { email: "you@email.com", twitter } });
     assert.equal(r.status, 200, `twitter ${JSON.stringify(twitter)} should still sign up`);
@@ -137,12 +136,22 @@ test("no twitter handle is absent, not an empty string, and never blocks the sig
   }
 });
 
-test("a twitter handle cannot smuggle control characters into an email we later send", async () => {
-  const fetch = fakeFetch();
-  await run({ fetch, body: { email: "you@email.com", twitter: "ada\r\nBcc: someone@else.com" } });
-  const sent = JSON.parse(fetch.calls[0].init.body).p_twitter;
-  assert.equal(sent, "adaBcc: someone");
-  assert.ok(!/[\r\n]/.test(sent));
+test("an invalid twitter handle is rejected without touching the database", async () => {
+  const bad = ["a".repeat(16), "ada lovelace", "ada-lovelace", "ada.l", "@@ada", "https://x.com/ada",
+    "ada\r\nBcc: someone@else.com", "adá", 42, {}];
+  for (const twitter of bad) {
+    const fetch = fakeFetch();
+    const r = await run({ fetch, body: { email: "you@email.com", twitter } });
+    assert.equal(r.status, 400, `twitter ${JSON.stringify(twitter)}`);
+    assert.match(r.body.error, /Twitter handle/);
+    assert.equal(fetch.calls.length, 0);
+  }
+});
+
+test("the database rejecting a handle is a 400, not a server error", async () => {
+  const r = await run({ fetch: fakeFetch({ result: "invalid_twitter" }), body: { email: "you@email.com", twitter: "ada" } });
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /Twitter handle/);
 });
 
 test("the signup log records that a twitter handle was given, never the handle", async () => {

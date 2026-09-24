@@ -6,8 +6,10 @@ import { createHash } from "node:crypto";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const MAX_EMAIL = 254;
-const MAX_TWITTER = 15; // X/Twitter's own handle length limit.
+// X/Twitter's own handle rules. Keep in sync with index.html and join_waitlist().
+const TWITTER = /^[A-Za-z0-9_]{1,15}$/;
 const MAX_SOURCE = 64;
+const BAD_TWITTER = "Enter a valid Twitter handle, like @monaco, or leave it blank.";
 const DEFAULT_ORIGINS = [
   "https://monacolabs.xyz", "https://www.monacolabs.xyz",
   "https://trymonaco.xyz", "https://www.trymonaco.xyz",
@@ -23,6 +25,16 @@ export function normalizeEmail(value) {
   const email = value.trim().toLowerCase();
   if (email.length === 0 || email.length > MAX_EMAIL || !EMAIL.test(email)) return null;
   return email;
+}
+
+// Optional field: absent or blank is null, a valid handle comes back without its @,
+// anything else is undefined so the caller can reject it.
+export function normalizeTwitter(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") return undefined;
+  const handle = value.trim().replace(/^@/, "");
+  if (handle === "") return null;
+  return TWITTER.test(handle) ? handle : undefined;
 }
 
 export function clientIp(headers) {
@@ -85,12 +97,10 @@ export async function handleSignup({ method, headers, body, env, fetch, log = co
   const email = normalizeEmail(payload.email);
   if (!email) return { status: 400, body: { error: "Enter a valid email, like you@email.com." } };
 
-  // Optional. Leading @ stripped since we add it back for display. Control characters are
-  // stripped so a handle cannot smuggle newlines into an email we later send; the database
-  // enforces the same rule for callers that skip this page.
-  const twitter = typeof payload.twitter === "string"
-    ? payload.twitter.replace(/[\u0000-\u001F\u007F]/g, "").trim().replace(/^@+/, "").slice(0, MAX_TWITTER)
-    : "";
+  // Optional, but if given it must be a real handle. The database enforces the same rule
+  // for callers that skip this page.
+  const twitter = normalizeTwitter(payload.twitter);
+  if (twitter === undefined) return { status: 400, body: { error: BAD_TWITTER } };
   const source = typeof payload.source === "string" ? payload.source.trim().slice(0, MAX_SOURCE) : "";
   const ua = typeof headers["user-agent"] === "string" ? headers["user-agent"].slice(0, 256) : null;
   const ipHash = hashIp(clientIp(headers), env.IP_HASH_SALT);
@@ -99,7 +109,7 @@ export async function handleSignup({ method, headers, body, env, fetch, log = co
   try {
     result = await rpc({
       fetch, env, name: "join_waitlist",
-      args: { p_email: email, p_twitter: twitter || null, p_source: source || null, p_ip_hash: ipHash, p_user_agent: ua },
+      args: { p_email: email, p_twitter: twitter, p_source: source || null, p_ip_hash: ipHash, p_user_agent: ua },
     });
   } catch (err) {
     log.error(JSON.stringify({ event: "waitlist_store_failed", message: String(err && err.message || err) }));
@@ -115,6 +125,7 @@ export async function handleSignup({ method, headers, body, env, fetch, log = co
     return { status: 503, body: { error: "Lots of people are signing up right now. Try again in a minute." } };
   }
   if (result === "invalid_email") return { status: 400, body: { error: "Enter a valid email, like you@email.com." } };
+  if (result === "invalid_twitter") return { status: 400, body: { error: BAD_TWITTER } };
   if (result !== "ok") {
     // invalid_request or anything unexpected: our request or the database is wrong, not the visitor.
     log.error(JSON.stringify({ event: "waitlist_rejected_by_db", result }));
