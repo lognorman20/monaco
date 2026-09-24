@@ -1,0 +1,11 @@
+# Cloudflare Pages equivalent of vercel.json's "headers". Keep the two in sync while
+# both hosts are live. Every matching rule is applied, so /assets/* gets the security
+# headers below as well as its own Cache-Control.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+/assets/*
+  Cache-Control: public, max-age=86400
