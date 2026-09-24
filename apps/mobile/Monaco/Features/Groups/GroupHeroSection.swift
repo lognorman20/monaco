@@ -6,12 +6,35 @@ import SwiftUI
 /// rule, never a full-bleed wash.
 struct GroupHeroSection: View {
     let view: GroupViewDTO
+    /// Set, replace and remove the cabal picture. Nil on surfaces that only show
+    /// the hero (the sample harness's read-only states), which then get a plain mark.
+    var pictureEditor: CabalPictureEditor?
+    var onPictureResult: (MonacoToast) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .center, spacing: MonacoTheme.Space.sm) {
-                    CabalMark(groupId: view.id, name: view.name, size: 36, onInk: true)
+                    if let pictureEditor {
+                        CabalPicturePicker(
+                            groupId: view.id,
+                            name: view.name,
+                            canEdit: view.viewerIsCreator,
+                            size: 36,
+                            onInk: true,
+                            onResult: onPictureResult,
+                            editor: pictureEditor
+                        )
+                    } else {
+                        CabalMark(
+                            groupId: view.id,
+                            name: view.name,
+                            size: 36,
+                            onInk: true,
+                            pictureUrl: view.pictureUrl,
+                            accessibilityLabel: view.pictureUrl == nil ? nil : "\(view.name) picture"
+                        )
+                    }
                     Text(view.name)
                         .font(MonacoTheme.Typo.title)
                         .foregroundStyle(MonacoTheme.onHero)

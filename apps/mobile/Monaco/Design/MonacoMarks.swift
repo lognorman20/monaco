@@ -1,37 +1,114 @@
 import MonacoCore
 import SwiftUI
 
-/// A cabal's identity: saturated tile (tint from the group id) with 1–2 initials in white.
+/// A cabal's identity: its picture when it has one, otherwise a saturated tile
+/// (tint from the group id) with 1–2 initials in white.
+///
+/// The tinted initials are not a spinner, they are the answer for a cabal with
+/// no picture — so they are also what a loading picture shows. The tile is a
+/// fixed `size × size` either way, so an arriving picture never moves anything.
 struct CabalMark: View {
     private let tint: MonacoTheme.CabalTint
     private let initials: String
     private let name: String
     private let size: CGFloat
     private let onInk: Bool
+    private let pictureURL: URL?
+    private let accessibilityLabel: String?
+
+    @State private var loadedPicture: UIImage?
+    @State private var pictureFailed = false
 
     /// `onInk` brightens the tile and drops the initials to deep ink, so the mark still
     /// carries the cabal's identity on a deep ink hero card.
-    init(groupId: String, name: String, size: CGFloat = 44, onInk: Bool = false) {
+    ///
+    /// `pictureUrl` is the cabal's picture; blank or unparseable falls back to the
+    /// initials. `accessibilityLabel` makes the mark its own VoiceOver element —
+    /// pass it where the mark stands alone, and leave it off in a row whose own
+    /// label already reads the cabal's name.
+    init(
+        groupId: String,
+        name: String,
+        size: CGFloat = 44,
+        onInk: Bool = false,
+        pictureUrl: String? = nil,
+        accessibilityLabel: String? = nil
+    ) {
         tint = .forGroupId(groupId)
         initials = CabalMark.initials(for: name)
         self.name = name
         self.size = size
         self.onInk = onInk
+        self.pictureURL = CabalMark.resolvedURL(pictureUrl)
+        self.accessibilityLabel = accessibilityLabel
+    }
+
+    /// Trims and rejects blanks, so an empty string never becomes a URL the
+    /// image store retries forever.
+    static func resolvedURL(_ raw: String?) -> URL? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        return URL(string: trimmed)
     }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: MarkGeometry.radius(for: size), style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: MarkGeometry.radius(for: size), style: .continuous)
+        return shape
             .fill(onInk ? tint.onInk : tint.fill)
             .frame(width: size, height: size)
             .overlay {
-                Text(initials)
-                    .font(.custom("AvenirNext-DemiBold", fixedSize: size * (initials.count > 1 ? 0.36 : 0.42)))
-                    .foregroundStyle(onInk ? MonacoTheme.heroInk : tint.onFill)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-                    .padding(size * 0.08)
+                // A picture already in the cache draws on the first pass, so a mark
+                // scrolling back into a lazy stack never flashes its initials.
+                if let picture = loadedPicture ?? cachedPicture {
+                    Image(uiImage: picture)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: size, height: size)
+                        .clipShape(shape)
+                        .transition(.opacity)
+                } else {
+                    initialsLabel
+                }
             }
-            .accessibilityHidden(true)
+            .clipShape(shape)
+            .modifier(CabalMarkAccessibility(label: accessibilityLabel))
+            .task(id: pictureURL) { await loadPicture() }
+    }
+
+    private var initialsLabel: some View {
+        Text(initials)
+            .font(.custom("AvenirNext-DemiBold", fixedSize: size * (initials.count > 1 ? 0.36 : 0.42)))
+            .foregroundStyle(onInk ? MonacoTheme.heroInk : tint.onFill)
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
+            .padding(size * 0.08)
+    }
+
+    private var cachedPicture: UIImage? {
+        pictureURL.flatMap { MonacoAvatarImageStore.shared.cachedImage(for: $0) }
+    }
+
+    /// Shares `MonacoAvatarImageStore` with member avatars: it is keyed by URL
+    /// and knows nothing about what it is holding, and cabal pictures get a
+    /// fresh object key per upload exactly as profile photos do.
+    private func loadPicture() async {
+        loadedPicture = nil
+        pictureFailed = false
+        guard let pictureURL else { return }
+
+        let store = MonacoAvatarImageStore.shared
+        if let cached = store.cachedImage(for: pictureURL) {
+            loadedPicture = cached
+            return
+        }
+        let fetched = await store.image(for: pictureURL)
+        guard !Task.isCancelled else { return }
+        if let fetched {
+            withAnimation(.easeOut(duration: 0.2)) { loadedPicture = fetched }
+        } else {
+            pictureFailed = true
+        }
     }
 
     /// Connectors and articles never become initials ("Semis or bust" → "SB", not "SO").
@@ -55,6 +132,24 @@ struct CabalMark: View {
             return String(first).uppercased()
         }
         return (String(first) + String(last)).uppercased()
+    }
+}
+
+/// A mark with no label of its own stays hidden from VoiceOver, because the row
+/// around it already reads the cabal's name. One that was given a label becomes
+/// an image element carrying it.
+private struct CabalMarkAccessibility: ViewModifier {
+    let label: String?
+
+    func body(content: Content) -> some View {
+        if let label {
+            content
+                .accessibilityElement(children: .ignore)
+                .accessibilityAddTraits(.isImage)
+                .accessibilityLabel(label)
+        } else {
+            content.accessibilityHidden(true)
+        }
     }
 }
 

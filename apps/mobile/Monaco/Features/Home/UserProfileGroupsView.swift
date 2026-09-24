@@ -108,7 +108,7 @@ struct UserProfileGroupsView: View {
                             subtitle: CabalPositionRowFigures.potSubtitle(potValueUsd: row.potValueUsd),
                             chevron: true,
                             isLast: row.groupId == groups.last?.groupId,
-                            leading: { CabalMark(groupId: row.groupId, name: row.name) },
+                            leading: { CabalMark(groupId: row.groupId, name: row.name, pictureUrl: row.pictureUrl) },
                             trailing: {
                                 PercentText(percentReturn: row.percentReturn, style: .row)
                                 PnLText(dollarPnl: row.dollarPnl, style: .caption)

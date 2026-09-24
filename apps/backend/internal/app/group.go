@@ -37,6 +37,8 @@ type CreateGroupResult struct {
 type GetGroupResult struct {
 	Name            string
 	TreasuryAddress string
+	// PictureURL is blank when the cabal has no picture.
+	PictureURL string
 }
 
 // CreateGroup inserts a group row and provisions its treasury wallet.
@@ -170,5 +172,6 @@ func (g *GroupService) GetGroup(ctx context.Context, accessToken string, groupID
 	return GetGroupResult{
 		Name:            group.Name,
 		TreasuryAddress: treasury.SolanaAddress,
+		PictureURL:      nullStringValue(group.PictureURL),
 	}, nil
 }

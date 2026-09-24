@@ -75,6 +75,8 @@ type GroupDiscoveryRow struct {
 	DollarPnL     string
 	IsJoined      bool
 	JoinMode      domain.JoinMode
+	// PictureURL is blank when the cabal has no picture.
+	PictureURL string
 }
 
 // GroupLeaderboardRow is a ranked row on the platform-wide group board.
@@ -161,6 +163,7 @@ func (s *GroupsTabService) Leaderboard(ctx context.Context, accessToken string, 
 				DollarPnL:     formatSignedDollarPnL(int64(ranked.DollarPnL)),
 				IsJoined:      joined[ranked.GroupID],
 				JoinMode:      dir.JoinMode,
+				PictureURL:    nullStringValue(dir.PictureURL),
 			},
 		})
 	}
@@ -242,6 +245,7 @@ func discoveryRow(dir postgres.GroupDirectoryRow, v groupValuation, isJoined boo
 		DollarPnL:     formatSignedDollarPnL(v.DollarPnLMicros()),
 		IsJoined:      isJoined,
 		JoinMode:      dir.JoinMode,
+		PictureURL:    nullStringValue(dir.PictureURL),
 	}
 }
 

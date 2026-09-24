@@ -12,6 +12,8 @@ struct HomeGroupBoardRowDTO: Codable, Equatable, Identifiable {
     let percentReturn: String?
     let dollarPnl: String
     let isJoined: Bool
+    /// The cabal's picture; nil falls back to the tinted initials.
+    var pictureUrl: String? = nil
 
     var id: String { groupId }
 }

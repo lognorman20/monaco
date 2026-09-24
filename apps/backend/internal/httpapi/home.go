@@ -23,6 +23,7 @@ type homeGroupBoardRowResponse struct {
 	PercentReturn *string `json:"percentReturn"`
 	DollarPnL     string  `json:"dollarPnl"`
 	IsJoined      bool    `json:"isJoined"`
+	PictureURL    *string `json:"pictureUrl"`
 }
 
 type homePeopleBoardRowResponse struct {
@@ -72,6 +73,7 @@ func (h *HomeHandlers) HomeHandler(w http.ResponseWriter, r *http.Request) {
 			PercentReturn: row.PercentReturn,
 			DollarPnL:     row.DollarPnL,
 			IsJoined:      row.IsJoined,
+			PictureURL:    optionalString(row.PictureURL),
 		})
 	}
 	people := make([]homePeopleBoardRowResponse, 0, len(result.People))
@@ -134,6 +136,7 @@ func (h *HomeHandlers) UserSharedGroupsHandler(w http.ResponseWriter, r *http.Re
 			PercentReturn: row.PercentReturn,
 			DollarPnL:     row.DollarPnL,
 			IsJoined:      row.IsJoined,
+			PictureURL:    optionalString(row.PictureURL),
 		})
 	}
 
@@ -150,6 +153,7 @@ type homeMyGroupRowResponse struct {
 	SlicePercent  string  `json:"slicePercent"`
 	DollarPnL     string  `json:"dollarPnl"`
 	PercentReturn *string `json:"percentReturn"`
+	PictureURL    *string `json:"pictureUrl"`
 }
 
 // Timestamps on the home DTOs are strings formatted as UTC RFC 3339, like every other
@@ -311,6 +315,7 @@ func mapHomeDashboardResponse(result app.HomeDashboardResult) homeDashboardRespo
 			SlicePercent:  row.SlicePercent,
 			DollarPnL:     row.DollarPnL,
 			PercentReturn: row.PercentReturn,
+			PictureURL:    optionalString(row.PictureURL),
 		})
 	}
 	people := make([]homePeopleBoardRowResponse, 0, len(result.Leaderboard.People))

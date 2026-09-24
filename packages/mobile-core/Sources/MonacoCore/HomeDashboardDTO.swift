@@ -35,6 +35,9 @@ public struct HomeMyGroupRowDTO: Codable, Equatable, Sendable, Identifiable {
     public let slicePercent: String
     public let dollarPnl: String
     public let percentReturn: String?
+    /// The cabal's picture. Nil when it has none, and the mark falls back
+    /// to its tinted initials.
+    public let pictureUrl: String?
 
     public var id: String { groupID }
 
@@ -44,7 +47,8 @@ public struct HomeMyGroupRowDTO: Codable, Equatable, Sendable, Identifiable {
         equityUsd: String,
         slicePercent: String,
         dollarPnl: String,
-        percentReturn: String?
+        percentReturn: String?,
+        pictureUrl: String? = nil
     ) {
         self.groupID = groupID
         self.name = name
@@ -52,6 +56,7 @@ public struct HomeMyGroupRowDTO: Codable, Equatable, Sendable, Identifiable {
         self.slicePercent = slicePercent
         self.dollarPnl = dollarPnl
         self.percentReturn = percentReturn
+        self.pictureUrl = pictureUrl
     }
 
     enum CodingKeys: String, CodingKey {
@@ -61,6 +66,7 @@ public struct HomeMyGroupRowDTO: Codable, Equatable, Sendable, Identifiable {
         case slicePercent
         case dollarPnl
         case percentReturn
+        case pictureUrl
     }
 }
 

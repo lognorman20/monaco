@@ -178,6 +178,46 @@ public final class MonacoAPIClient: @unchecked Sendable {
         return try JSONDecoder().decode(MeDTO.self, from: response.data)
     }
 
+    /// `POST /v1/groups/{id}/picture` — multipart field `picture`; jpeg, png or
+    /// webp up to 2MB. Only the cabal's creator may call it: a member who is not
+    /// gets 403, anyone else 404.
+    public func uploadCabalPicture(groupID: String, imageData: Data, mimeType: String) async throws -> CabalPictureDTO {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        let route = "v1/groups/\(groupID)/picture"
+        var request = URLRequest(url: baseURL.appending(path: route))
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        try await applyAuthorizationHeader(to: &request)
+        request.httpBody = ImageUploadMultipart.body(
+            fieldName: "picture",
+            fileBaseName: "cabal",
+            imageData: imageData,
+            mimeType: mimeType,
+            boundary: boundary
+        )
+
+        let response = try await session.send(
+            request,
+            route: "/v1/groups/{id}/picture",
+            timeout: MonacoRequestTimeout.upload
+        )
+        try Self.requireOK(response)
+        return try JSONDecoder().decode(CabalPictureDTO.self, from: response.data)
+    }
+
+    /// `DELETE /v1/groups/{id}/picture` — clears the picture, so the cabal falls
+    /// back to its tinted initials. Same permission rule as the upload.
+    public func removeCabalPicture(groupID: String) async throws -> CabalPictureDTO {
+        let route = "v1/groups/\(groupID)/picture"
+        var request = URLRequest(url: baseURL.appending(path: route))
+        request.httpMethod = "DELETE"
+        try await applyAuthorizationHeader(to: &request)
+
+        let response = try await session.send(request, route: "/v1/groups/{id}/picture")
+        try Self.requireOK(response)
+        return try JSONDecoder().decode(CabalPictureDTO.self, from: response.data)
+    }
+
     /// How much of a failed response a route keeps.
     enum ErrorMapping {
         /// Just the status. What most routes still do, because their callers pattern-match
