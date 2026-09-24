@@ -53,7 +53,10 @@ func ComputePotNAV(in NavInput) (PotNAV, error) {
 			if err != nil {
 				return PotNAV{}, err
 			}
-			total += value
+			total, err = addUSDCMicros(total, value)
+			if err != nil {
+				return PotNAV{}, fmt.Errorf("pot nav: %w", err)
+			}
 		}
 	}
 
