@@ -70,8 +70,8 @@ enum MonacoTheme {
     /// primary CTA reads as a live button, and the hero-sized `$0.00` placeholder on the amount
     /// screen reads as an amount the member already entered.
     ///
-    /// Still legible, though — 2.6:1 to 3.6:1 on the three surfaces, against `tertiaryText`'s
-    /// 4.7:1 to 6.5:1. `MonacoContrastTests` holds it inside that band from both sides, so it
+    /// Still legible, though — 2.6:1 to 4.3:1 on the three surfaces, against `tertiaryText`'s
+    /// 4.7:1 to 7.0:1. `MonacoContrastTests` holds it inside that band from both sides, so it
     /// cannot drift up into looking live or down into being unreadable.
     static let disabledLabel = Color.adaptive(light: 0x8A968E, dark: 0x6E7D75)
 

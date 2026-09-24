@@ -206,9 +206,13 @@ struct CircleAction: View {
             VStack(spacing: MonacoTheme.Space.s) {
                 Image(systemName: systemImage)
                     .font(.system(size: glyphSize, weight: .semibold))
-                    .foregroundStyle(isEnabled ? MonacoTheme.brandOnWash : MonacoTheme.disabledLabel)
+                    // Filled, not washed. The brand is monochrome now, so a low-alpha brand tint
+                    // over cream has no colour left in it — the disc came out a flat sage-grey and
+                    // the row read as four disabled controls. A solid disc carries the affordance
+                    // the way the saturated blue glyph used to.
+                    .foregroundStyle(isEnabled ? MonacoTheme.onBrand : MonacoTheme.disabledLabel)
                     .frame(width: discSize, height: discSize)
-                    .background(Circle().fill(isEnabled ? MonacoTheme.brandWash : MonacoTheme.surfaceSunken))
+                    .background(Circle().fill(isEnabled ? MonacoTheme.brandFill : MonacoTheme.surfaceSunken))
                 Text(title)
                     .font(.system(.footnote, weight: .medium))
                     .foregroundStyle(isEnabled ? MonacoTheme.ink : MonacoTheme.disabledLabel)
