@@ -3,6 +3,7 @@ package pricechain
 import (
 	"context"
 	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -127,13 +128,14 @@ func testHolding() pyth.CostBasis {
 
 func preIpoHolding() pyth.CostBasis {
 	return pyth.CostBasis{
-		Symbol:   preIpoSymbol,
-		Mint:     preIpoMint,
-		Units:    1_000_000_000,
-		Price:    500_000_000,
-		Amount:   1_000_000_000,
-		Decimals: 9,
-		Kind:     xstocks.AssetKindPreIPO,
+		Symbol:       preIpoSymbol,
+		Mint:         preIpoMint,
+		Units:        1_000_000_000,
+		Price:        500_000_000,
+		Amount:       1_000_000_000,
+		Decimals:     9,
+		Kind:         xstocks.AssetKindPreIPO,
+		UiMultiplier: big.NewRat(1, 1),
 	}
 }
 

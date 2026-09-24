@@ -43,8 +43,9 @@ type getTransactionResponse struct {
 	CreatedAt        string `json:"createdAt"`
 	ConfirmedAt      string `json:"confirmedAt,omitempty"`
 	FailureReason    string `json:"failureReason,omitempty"`
-	TokenDecimals    int    `json:"tokenDecimals,omitempty"`
-	AssetKind        string `json:"assetKind,omitempty"`
+	TokenDecimals        int    `json:"tokenDecimals,omitempty"`
+	AssetKind            string `json:"assetKind,omitempty"`
+	UiAmountMultiplier   string `json:"uiAmountMultiplier,omitempty"`
 }
 
 type treasuryTokenBalance struct {
@@ -201,6 +202,11 @@ func (h *TransactionHandlers) transactionRowToResponse(ctx context.Context, row 
 		resp.TokenDecimals = row.TokenDecimals
 	}
 	resp.AssetKind = h.assetKindForTransaction(ctx, row)
+	mint := strings.TrimSpace(row.OutputMint)
+	if row.Action == postgres.TransactionActionSell {
+		mint = strings.TrimSpace(row.InputMint)
+	}
+	resp.UiAmountMultiplier = uiAmountMultiplierForMint(ctx, h.Catalog, mint)
 	return resp
 }
 

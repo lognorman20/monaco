@@ -386,10 +386,11 @@ type groupViewPotRowResponse struct {
 	ValueUsd      string `json:"valueUsd"`
 	DollarPnL     string `json:"dollarPnl"`
 	AfterHours    *bool  `json:"afterHours"`
-	TokenAmount   string `json:"tokenAmount,omitempty"`
-	TokenDecimals int    `json:"tokenDecimals,omitempty"`
-	AssetKind     string `json:"assetKind,omitempty"`
-	PremiumBps    *int   `json:"premiumBps,omitempty"`
+	TokenAmount          string `json:"tokenAmount,omitempty"`
+	TokenDecimals        int    `json:"tokenDecimals,omitempty"`
+	AssetKind            string `json:"assetKind,omitempty"`
+	PremiumBps           *int   `json:"premiumBps,omitempty"`
+	UiAmountMultiplier   string `json:"uiAmountMultiplier,omitempty"`
 }
 
 type groupViewMemberSliceResponse struct {
@@ -526,8 +527,9 @@ type groupActivityItemResponse struct {
 	TxSignature        string `json:"txSignature,omitempty"`
 	InitiatedBy        string `json:"initiatedBy,omitempty"`
 	AgentDisplayName   string `json:"agentDisplayName,omitempty"`
-	TokenDecimals      int    `json:"tokenDecimals,omitempty"`
-	AssetKind          string `json:"assetKind,omitempty"`
+	TokenDecimals        int    `json:"tokenDecimals,omitempty"`
+	AssetKind            string `json:"assetKind,omitempty"`
+	UiAmountMultiplier   string `json:"uiAmountMultiplier,omitempty"`
 }
 
 type groupActivityResponse struct {
@@ -588,6 +590,7 @@ func (h *GroupHandlers) ListGroupActivityHandler(w http.ResponseWriter, r *http.
 			resp.AssetKind = assetKindForSymbol(ctx, h.Catalog, item.Symbol)
 			if asset, ok := lookupCatalogAssetBySymbol(ctx, h.Catalog, item.Symbol); ok {
 				resp.TokenDecimals = asset.Decimals
+				resp.UiAmountMultiplier = uiAmountMultiplierForAsset(asset)
 			}
 		}
 		respItems = append(respItems, resp)

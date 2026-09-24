@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -392,10 +393,20 @@ func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset xstocks.Cat
 		snippet.Routable = false
 	}
 
+	sellProbeAmount := jupiter.AtomicScale(n.Decimals)
+	if mult := n.UiAmountMultiplier; mult != nil {
+		if raw, err := pyth.RawAtomicsForOneScaledUnit(n.Decimals, mult); err == nil {
+			sellProbeAmount = raw
+		}
+	} else if n.Kind == xstocks.AssetKindPreIPO {
+		if raw, err := pyth.RawAtomicsForOneScaledUnit(n.Decimals, big.NewRat(1, 1)); err == nil {
+			sellProbeAmount = raw
+		}
+	}
 	sellQuote, err := h.Jupiter.QuoteSell(ctx, jupiter.QuoteSellParams{
 		Symbol:    n.Symbol,
 		InputMint: n.SolanaMint,
-		Amount:    jupiter.AtomicScale(n.Decimals),
+		Amount:    sellProbeAmount,
 	})
 	if err == nil && sellQuote.Routable {
 		snippet.SellProbeInAmount = sellQuote.InAmount

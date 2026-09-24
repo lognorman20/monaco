@@ -1,6 +1,7 @@
 package pyth
 
 import (
+	"math/big"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
@@ -20,8 +21,9 @@ type CostBasis struct {
 	Units    int64
 	Price    int64
 	Amount   int64
-	Decimals int
-	Kind     xstocks.AssetKind
+	Decimals     int
+	Kind         xstocks.AssetKind
+	UiMultiplier *big.Rat
 }
 
 // MarkSource names the price source a mark came from, so a valuation is auditable.
@@ -52,8 +54,9 @@ type MarkedHolding struct {
 	CostBasis  int64
 	AfterHours bool
 	Source     MarkSource
-	Decimals   int
-	Kind       xstocks.AssetKind
+	Decimals     int
+	Kind         xstocks.AssetKind
+	UiMultiplier *big.Rat
 }
 
 // NavInput is the marked-pot valuation input for domain NAV callers (M4-T5).

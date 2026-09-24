@@ -171,12 +171,13 @@ func (c *Chain) MarkedPot(ctx context.Context, treasury pyth.TreasuryRef, holdin
 
 func (c *Chain) markHolding(ctx context.Context, treasury pyth.TreasuryRef, holding pyth.CostBasis) (pyth.MarkedHolding, error) {
 	out := pyth.MarkedHolding{
-		Symbol:    holding.Symbol,
-		Mint:      holding.Mint,
-		Units:     holding.Units,
-		CostBasis: holding.Price,
-		Decimals:  holding.Decimals,
-		Kind:      holding.Kind,
+		Symbol:       holding.Symbol,
+		Mint:         holding.Mint,
+		Units:        holding.Units,
+		CostBasis:    holding.Price,
+		Decimals:     holding.Decimals,
+		Kind:         holding.Kind,
+		UiMultiplier: holding.UiMultiplier,
 	}
 
 	mark := c.marketMark(ctx, holding.Symbol, holding.Mint, holding.Kind)
@@ -197,7 +198,7 @@ func (c *Chain) markHolding(ctx context.Context, treasury pyth.TreasuryRef, hold
 		return out, nil
 	}
 
-	costMark, err := pyth.CostBasisMarkPerUnitMicros(holding.Price, holding.Amount, holding.Decimals)
+	costMark, err := pyth.CostBasisMarkPerUnitMicros(holding.Price, holding.Amount, holding.Decimals, holding.UiMultiplier, holding.Kind)
 	if err != nil {
 		return pyth.MarkedHolding{}, fmt.Errorf("no live price for %s and %w", holding.Symbol, err)
 	}
@@ -379,7 +380,7 @@ func (c *Chain) checkJupiterPrice(key string, price jupiter.TokenPrice) error {
 // checkAgainstCostBasis is the only sanity reference on a cold start, when no market
 // mark has been accepted yet.
 func (c *Chain) checkAgainstCostBasis(priceMicros int64, holding pyth.CostBasis) error {
-	costMark, err := pyth.CostBasisMarkPerUnitMicros(holding.Price, holding.Amount, holding.Decimals)
+	costMark, err := pyth.CostBasisMarkPerUnitMicros(holding.Price, holding.Amount, holding.Decimals, holding.UiMultiplier, holding.Kind)
 	if err != nil {
 		// No usable cost basis to compare against (e.g. a catalog probe); nothing to check.
 		return nil

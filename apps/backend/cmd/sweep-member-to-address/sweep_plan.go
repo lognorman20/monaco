@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
@@ -50,12 +51,18 @@ func resolveSweepSell(ctx context.Context, lookup xstocks.MintCatalog, prices ju
 
 	decimals := jupiter.XStockDecimals
 	kind := xstocks.AssetKindStock
+	var uiMult *big.Rat
 	switch {
 	case found:
 		decimals = asset.Decimals
 		kind = asset.Kind
+		uiMult = asset.UiAmountMultiplier
 	case priceOK && mark.Decimals > 0:
 		decimals = mark.Decimals
+	}
+
+	if uiMult == nil {
+		uiMult = big.NewRat(1, 1)
 	}
 
 	slippage := 0
@@ -63,35 +70,34 @@ func resolveSweepSell(ctx context.Context, lookup xstocks.MintCatalog, prices ju
 		slippage = jupiter.PreIPOSlippageBps
 	}
 
-	value := tokenValueUSDCMicros(amount, mark.PriceUsdcMicros, decimals)
+	value, err := tokenValueUSDCMicros(amount, mark.PriceUsdcMicros, decimals, uiMult, kind)
+	if err != nil {
+		return sweepSellPlan{}, err
+	}
+	whole, err := formatScaledWholeTokens(amount, decimals, uiMult, kind)
+	if err != nil {
+		return sweepSellPlan{}, err
+	}
 	return sweepSellPlan{
 		Decimals:        decimals,
 		Kind:            kind,
 		SlippageBps:     slippage,
 		SkipDust:        priceOK && value < sweepDustMinUSDCMicros,
-		WholeTokens:     formatWholeTokens(amount, decimals),
+		WholeTokens:     whole,
 		ValueUSDCMicros: value,
 	}, nil
 }
 
-func tokenValueUSDCMicros(amount, priceMicros int64, decimals int) int64 {
-	if amount <= 0 || priceMicros <= 0 {
-		return 0
+func tokenValueUSDCMicros(amount, priceMicros int64, decimals int, uiMultiplier *big.Rat, kind xstocks.AssetKind) (int64, error) {
+	return pyth.HoldingValueUSDCMicros(amount, priceMicros, decimals, uiMultiplier, kind)
+}
+
+func formatScaledWholeTokens(amount int64, decimals int, uiMultiplier *big.Rat, kind xstocks.AssetKind) (string, error) {
+	units, err := pyth.TokenAtomicsToScaledDecimalUnits(amount, decimals, uiMultiplier, kind)
+	if err != nil {
+		return "", err
 	}
-	scale := jupiter.AtomicScale(decimals)
-	if scale <= 0 {
-		return 0
-	}
-	var value, amt, price, divisor big.Int
-	amt.SetInt64(amount)
-	price.SetInt64(priceMicros)
-	divisor.SetInt64(scale)
-	value.Mul(&amt, &price)
-	value.Quo(&value, &divisor)
-	if !value.IsInt64() {
-		return 0
-	}
-	return value.Int64()
+	return string(units), nil
 }
 
 func formatWholeTokens(amount int64, decimals int) string {

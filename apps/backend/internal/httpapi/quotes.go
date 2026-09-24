@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -230,7 +231,7 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 		TokenDecimals: n.Decimals,
 		AssetKind:     string(n.Kind),
 	}
-	if price, ok := quotePriceUsdcMicros(req.USDC, resp.OutputAmount, n.Decimals); ok {
+	if price, ok := quotePriceUsdcMicros(req.USDC, resp.OutputAmount, n.Decimals, n.UiAmountMultiplier, n.Kind); ok {
 		resp.PriceUsdcMicros = strconv.FormatInt(price, 10)
 	}
 	if h.Price != nil {
@@ -254,7 +255,7 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
-func quotePriceUsdcMicros(usdcMicros int64, outputAmount string, decimals int) (int64, bool) {
+func quotePriceUsdcMicros(usdcMicros int64, outputAmount string, decimals int, uiMultiplier *big.Rat, kind xstocks.AssetKind) (int64, bool) {
 	outputAmount = strings.TrimSpace(outputAmount)
 	if usdcMicros <= 0 || outputAmount == "" {
 		return 0, false
@@ -266,8 +267,27 @@ func quotePriceUsdcMicros(usdcMicros int64, outputAmount string, decimals int) (
 	if decimals == 0 {
 		decimals = jupiter.XStockDecimals
 	}
-	// USDC micros (6 dp) per whole token; Jupiter outAmount uses token atomics at decimals.
-	return (usdcMicros * jupiter.AtomicScale(decimals)) / outAtomics, true
+	mult := uiMultiplier
+	if mult == nil {
+		mult = big.NewRat(1, 1)
+	}
+	if mult.Sign() <= 0 {
+		return 0, false
+	}
+	scale := jupiter.AtomicScale(decimals)
+	num := new(big.Int).SetInt64(usdcMicros)
+	num.Mul(num, big.NewInt(scale))
+	num.Mul(num, mult.Denom())
+	den := new(big.Int).SetInt64(outAtomics)
+	den.Mul(den, mult.Num())
+	if den.Sign() <= 0 {
+		return 0, false
+	}
+	price := new(big.Int).Quo(num, den)
+	if !price.IsInt64() || price.Int64() <= 0 {
+		return 0, false
+	}
+	return price.Int64(), true
 }
 
 func (h *QuoteHandlers) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {
