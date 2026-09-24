@@ -40,6 +40,10 @@ struct LoginView: View {
                     if showsMethodPicker {
                         MonacoSegmented(availableMethods, selection: $selectedMethod) { $0.rawValue }
                             .accessibilityLabel("Sign-in method")
+                            // Switching method mid-send would leave the in-flight request to
+                            // report success against the other form: an email screen showing
+                            // a code step whose code was texted to a phone number.
+                            .disabled(auth.flow.isBusy)
                     }
 
                     loginContent

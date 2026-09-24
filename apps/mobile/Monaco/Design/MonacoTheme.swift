@@ -8,7 +8,8 @@ import UIKit
 /// - `surfaceSunken` — field fill, segmented track, skeleton base, idle chips
 /// - `primaryText` / `ink` — headings, body, primary button fill
 /// - `secondaryText` / `muted` — captions
-/// - `tertiaryText` — timestamps, placeholders
+/// - `tertiaryText` — timestamps and other quiet real content
+/// - `disabledLabel` — disabled control labels and field placeholders; below AA on purpose
 /// - `border` / `hairline` — 1pt separators
 /// - `profit` / `loss` (+ `profitWash` / `lossWash`) — signed P&L only; green never means anything else
 /// - `warning` — amber, pending and after-hours states
@@ -38,8 +39,23 @@ enum MonacoTheme {
 
     static let muted = secondaryText
 
-    /// Timestamps and placeholders.
-    static let tertiaryText = Color.adaptive(light: 0x8C99AE, dark: 0x64718A)
+    /// Timestamps and other real-but-quiet content. Clears AA (4.5:1) on `canvas`, `surface` and
+    /// `surfaceSunken` in both schemes — see `MonacoContrastTests`.
+    ///
+    /// Not for disabled controls or placeholders: see `disabledLabel`.
+    static let tertiaryText = Color.adaptive(light: 0x616E86, dark: 0x8290AA)
+
+    /// Disabled control labels and field placeholders.
+    ///
+    /// Deliberately below AA and deliberately not `tertiaryText`. WCAG 1.4.3 exempts disabled
+    /// controls, and unavailable has to *look* unavailable: at `tertiaryText`'s 4.5:1 a disabled
+    /// primary CTA reads as a live button, and the hero-sized `$0.00` placeholder on the amount
+    /// screen reads as an amount the member already entered.
+    ///
+    /// Still legible, though — 2.9:1 to 4.2:1 on the three surfaces, against `tertiaryText`'s
+    /// 4.5:1 to 6.0:1. `MonacoContrastTests` holds it inside that band from both sides, so it
+    /// cannot drift up into looking live or down into being unreadable.
+    static let disabledLabel = Color.adaptive(light: 0x848EA3, dark: 0x69768D)
 
     static let border = Color.adaptive(light: 0xE3E8F0, dark: 0x232C40)
 
@@ -61,6 +77,10 @@ enum MonacoTheme {
     /// Tinted chip / selected-row wash under brand text.
     static let brandWash = Color.adaptive(light: 0x1652F0, lightAlpha: 0.10, dark: 0x3B7BFF, darkAlpha: 0.18)
 
+    /// Brand text and glyphs drawn *on* `brandWash`. Plain `brand` is only 3.69:1 there in dark;
+    /// this pair clears AA on every surface the wash sits on.
+    static let brandOnWash = Color.adaptive(light: 0x1652F0, dark: 0x7FA8FF)
+
     // MARK: Dark "money" hero cards (premium even in light mode)
 
     /// Deep ink card base for the Home net-worth hero and the cabal hero.
@@ -80,10 +100,11 @@ enum MonacoTheme {
 
     // MARK: Money
 
-    /// Signed P&L text. Deep enough to clear AA on white (4.59:1) and vivid in dark (8.96:1).
-    static let profit = Color.adaptive(light: 0x00874D, dark: 0x1FD286)
+    /// Signed P&L text on a plain surface. Clears AA on `canvas`, `surface` and `surfaceSunken`,
+    /// not only on bare white. On a wash, use `profitOnWash` / `lossOnWash`.
+    static let profit = Color.adaptive(light: 0x007A45, dark: 0x1FD286)
 
-    static let loss = Color.adaptive(light: 0xDC2F33, dark: 0xFF5A5F)
+    static let loss = Color.adaptive(light: 0xD1272B, dark: 0xFF5A5F)
 
     /// Saturated P&L for chart strokes/fills and figures sitting on a dark hero card,
     /// where the background carries the contrast (6.8:1 on `heroInk`).
@@ -97,10 +118,47 @@ enum MonacoTheme {
     /// `PnLBadge` background on losses.
     static let lossWash = Color.adaptive(light: 0xDC2F33, lightAlpha: 0.12, dark: 0xFF5A5F, darkAlpha: 0.20)
 
+    /// P&L text drawn *on* its own wash. `profit` / `loss` are derived for paper, and the wash
+    /// lifts the background under them, so the badge needs its own deeper pair (AA on every surface).
+    static let profitOnWash = Color.adaptive(light: 0x006B3D, dark: 0x1FD286)
+
+    static let lossOnWash = Color.adaptive(light: 0xB3261E, dark: 0xFF7A7E)
+
     /// `PnLBadge` on a dark hero card: the wash must read on ink, not on paper.
     static let profitWashOnHero = Color.adaptive(light: 0x1FD286, lightAlpha: 0.20, dark: 0x1FD286, darkAlpha: 0.20)
 
     static let lossWashOnHero = Color.adaptive(light: 0xFF5A5F, lightAlpha: 0.22, dark: 0xFF5A5F, darkAlpha: 0.22)
+
+    /// P&L figures on a deep ink hero card. The hero is dark in both schemes, so these are fixed
+    /// colours. `lossVivid` is tuned for chart strokes on paper and only reaches 3.3:1 on the
+    /// hero loss wash, which is why the hero has its own pair.
+    static let profitOnHero = Color(hex: 0x1FD286)
+
+    static let lossOnHero = Color(hex: 0xFF7A7E)
+
+    // MARK: Toast
+
+    /// Toast capsule. Ink in light, a raised ink panel in dark — never the brand fill, or the toast
+    /// reads as a second primary button stacked above the real one.
+    static let toastFill = Color.adaptive(light: 0x0B1220, dark: 0x1B2334)
+
+    /// Hairline on the toast. Carries the capsule's edge in dark, where the drop shadow is invisible.
+    static let toastStroke = Color.adaptive(light: 0x0B1220, lightAlpha: 0, dark: 0xFFFFFF, darkAlpha: 0.10)
+
+    static let toastLabel = Color.white
+
+    /// State glyphs on `toastFill`. The toast panel is dark in both schemes, so — like the hero
+    /// pair above — these are fixed colours rather than aliases of the scheme-adaptive
+    /// `profitVivid` / `lossVivid`, which are documented for chart strokes on paper. Pointing a
+    /// toast token at a token tuned for a different background is how `primaryButtonFill = brandFill`
+    /// turned the toast into a blue capsule (#309): a later retune for paper would quietly drop
+    /// the glyph's contrast here.
+    ///
+    /// 9.5:1 light, 8.0:1 dark.
+    static let toastSuccessGlyph = Color(hex: 0x1FD286)
+
+    /// 7.4:1 light, 6.2:1 dark.
+    static let toastErrorGlyph = Color(hex: 0xFF7A7E)
 
     // MARK: Roles
 
@@ -150,8 +208,12 @@ enum MonacoTheme {
     }
 
     /// Saturated identity tints. Picked from the group id, never from the name, so a rename keeps the colour.
-    /// Every `fill` carries white initials at AA; `soft` is the low-alpha wash for tinted areas that
-    /// still hold ink text. No purple, and nothing close to brand blue or profit green.
+    /// `soft` is the low-alpha wash for tinted areas that still hold ink text. No purple, and
+    /// nothing close to brand blue or profit green.
+    ///
+    /// White initials on `fill` clear the 3:1 large-text minimum, not the 4.5:1 body minimum — in
+    /// dark the lighter fills sit at 3.5:1. That is the right bar for what draws there (bold tile
+    /// initials at 15pt and up), but it does mean `fill` must not be used behind small white text.
     enum CabalTint: CaseIterable {
         case sage, peach, butter, clay, sky
 
@@ -232,6 +294,8 @@ enum MonacoTheme {
 
     /// Two voices: Avenir Next for display and section titles, SF Pro (tabular digits) for everything else.
     enum Typo {
+        /// Prefer `.moneyFont(_:)`. These statics pre-scale with `UIFontMetrics`, so they ignore a
+        /// `.dynamicTypeSize` cap on the view tree and do not re-render when the text size changes.
         static var moneyHero: Font { money(size: 44, weight: .semibold, relativeTo: .largeTitle) }
         static var moneyLarge: Font { money(size: 28, weight: .semibold, relativeTo: .title1) }
         static var moneyRow: Font { money(size: 17, weight: .semibold, relativeTo: .body) }
@@ -245,7 +309,8 @@ enum MonacoTheme {
         static let caption = Font.system(.footnote)
         static let micro = Font.system(.caption2, weight: .semibold)
 
-        /// SF Pro at a fixed design size that still follows Dynamic Type.
+        /// SF Pro pre-scaled against the process-wide content size category.
+        /// Prefer `.moneyFont(_:)`, which scales inside the view tree.
         static func money(size: CGFloat, weight: Font.Weight, relativeTo style: UIFont.TextStyle) -> Font {
             let scaled = UIFontMetrics(forTextStyle: style).scaledValue(for: size)
             return Font.system(size: scaled, weight: weight).monospacedDigit()

@@ -3,9 +3,8 @@ import SwiftUI
 
 /// Search results replace the tab content while a query is typed.
 struct CabalsSearchResultsSection: View {
-    @ObservedObject var auth: PrivyAuthService
     let model: CabalsTabModel
-    var onChanged: () async -> Void
+    var onSelect: (CabalsRoute) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
@@ -41,14 +40,8 @@ struct CabalsSearchResultsSection: View {
         LazyVStack(spacing: MonacoTheme.Space.s) {
             MonacoGroupedList {
                 ForEach(Array(model.results.enumerated()), id: \.element.id) { index, row in
-                    NavigationLink {
-                        CabalDiscoveryDestinationView(
-                            auth: auth,
-                            groupId: row.groupID,
-                            name: row.name,
-                            destination: GroupDiscoveryDestination(isJoined: row.isJoined, joinMode: row.joinMode),
-                            onChanged: onChanged
-                        )
+                    Button {
+                        onSelect(CabalsRoute(row: row.groupID, name: row.name, isJoined: row.isJoined, joinMode: row.joinMode))
                     } label: {
                         CabalDiscoveryRowContent(
                             rank: nil,
@@ -66,13 +59,19 @@ struct CabalsSearchResultsSection: View {
             }
 
             if model.nextCursor != nil {
+                if model.loadMoreFailed {
+                    Text("Couldn't load more cabals.")
+                        .monacoSecondaryCaption()
+                        .accessibilityIdentifier("cabals-search-more-error")
+                }
+
                 Button {
-                    Task { await model.loadMoreResults() }
+                    model.loadMore()
                 } label: {
                     if model.isLoadingMore {
                         ProgressView().tint(MonacoTheme.accent)
                     } else {
-                        Text("Show more cabals")
+                        Text(model.loadMoreFailed ? "Try again" : "Show more cabals")
                     }
                 }
                 .buttonStyle(.monacoSecondary)

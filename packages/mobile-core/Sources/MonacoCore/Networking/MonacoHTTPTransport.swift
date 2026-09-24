@@ -48,16 +48,19 @@ public struct MonacoHTTPResponse: Sendable {
 /// that survives the retry is a real rejection and is returned to the caller as is.
 ///
 /// Every request is sent with a fresh `X-Request-Id` and reported once to `APITelemetry`.
+/// Every request also gets an explicit deadline (see `MonacoRequestTimeout`) rather than
+/// the shared session's one-size-fits-all 60s.
 public struct MonacoHTTPTransport: Sendable {
     private let session: URLSession
     private let refresher: AccessTokenRefresher?
     private let telemetry: APITelemetry?
 
     /// - Parameters:
+    ///   - session: defaults to Monaco's own session, which declares its timeouts.
     ///   - refresher: defaults to whatever is registered in `AccessTokenRefreshRegistry.shared`.
     ///   - telemetry: defaults to whatever is registered in `APITelemetryRegistry.shared`.
     public init(
-        session: URLSession = .shared,
+        session: URLSession = .monaco,
         refresher: AccessTokenRefresher? = nil,
         telemetry: APITelemetry? = nil
     ) {
@@ -70,17 +73,26 @@ public struct MonacoHTTPTransport: Sendable {
         try await data(for: URLRequest(url: url))
     }
 
-    public func data(for request: URLRequest) async throws -> (Data, URLResponse) {
-        let result = try await send(request)
+    public func data(for request: URLRequest, timeout: TimeInterval? = nil) async throws -> (Data, URLResponse) {
+        let result = try await send(request, timeout: timeout)
         return (result.data, result.response)
     }
 
-    /// - Parameter route: route template for telemetry, e.g. `/v1/groups/{id}/fund`.
-    ///   When `nil` the request path is redacted into one (see `APIRouteTemplate`).
-    public func send(_ request: URLRequest, route: String? = nil) async throws -> MonacoHTTPResponse {
+    /// - Parameters:
+    ///   - route: route template for telemetry, e.g. `/v1/groups/{id}/fund`.
+    ///     When `nil` the request path is redacted into one (see `APIRouteTemplate`).
+    ///   - timeout: deadline for this request. Defaults to the budget for its kind
+    ///     (`MonacoRequestTimeout`): the money budget when it carries an idempotency key,
+    ///     the short one otherwise.
+    public func send(
+        _ request: URLRequest,
+        route: String? = nil,
+        timeout: TimeInterval? = nil
+    ) async throws -> MonacoHTTPResponse {
         let requestID = UUID().uuidString.lowercased()
         var request = request
         request.setValue(requestID, forHTTPHeaderField: monacoRequestIDHeader)
+        request.timeoutInterval = MonacoRequestTimeout.seconds(for: request, override: timeout)
 
         let clock = ContinuousClock()
         let started = clock.now
@@ -124,8 +136,13 @@ public struct MonacoHTTPTransport: Sendable {
             return (data, response)
         }
 
-        let freshToken = try await refresh(rejectedToken)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let freshToken: String?
+        do {
+            freshToken = try await refresh(rejectedToken)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        } catch {
+            throw Self.tokenRefreshFailure(error)
+        }
         guard let freshToken, !freshToken.isEmpty, freshToken != rejectedToken else {
             return (data, response)
         }
@@ -133,6 +150,18 @@ public struct MonacoHTTPTransport: Sendable {
         var retry = request
         retry.setValue("Bearer \(freshToken)", forHTTPHeaderField: "Authorization")
         return try await session.data(for: retry)
+    }
+
+    /// A refresh that failed says something the request's own failure cannot: the request
+    /// was never sent. It stays a `URLError` so the session screens keep reading it as a
+    /// connection problem, and carries `monacoTokenRefreshFailedErrorKey` so the money
+    /// flows can say "nothing was sent" instead of "we couldn't confirm that went through".
+    private static func tokenRefreshFailure(_ error: Error) -> Error {
+        let code = (error as? URLError)?.code ?? URLError.Code.userAuthenticationRequired
+        var userInfo = (error as? URLError)?.userInfo ?? [:]
+        userInfo[monacoTokenRefreshFailedErrorKey] = true
+        userInfo[NSUnderlyingErrorKey] = error as NSError
+        return URLError(code, userInfo: userInfo)
     }
 
     /// Connection failures stay `URLError`s so callers keep matching on `code`; the request

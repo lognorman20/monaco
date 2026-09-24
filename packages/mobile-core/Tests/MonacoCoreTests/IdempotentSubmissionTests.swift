@@ -199,6 +199,56 @@ final class IdempotentSubmissionTests: XCTestCase {
         XCTAssertNotEqual(recorder.idempotencyKeys[0], recorder.idempotencyKeys[1])
     }
 
+    /// A leave the server refuses is a final answer, so the next attempt must reach the handler
+    /// rather than replay the stored 409. The member is told to fix something first ("cash out
+    /// your slice", "vote on the open proposals") and then taps Leave again with a byte-identical
+    /// body: if that retried under the same key, the backend would replay the refusal for the
+    /// full 24 h key TTL and the member could never leave.
+    func testBlockedLeaveGetsNewKeyOnTheNextAttempt() async throws {
+        let recorder = RequestRecorder()
+        MockURLProtocol.requestHandler = { request in
+            recorder.record(request)
+            if recorder.requests.count == 1 {
+                // What the handler returns for a blocked leave: a 409 carrying a reason and no
+                // `Idempotency-Status`, which marks it as the request's own answer.
+                return (Self.response(for: request, status: 409), Data(#"{"error":"cash out your slice first","reason":"share_units_remaining"}"#.utf8))
+            }
+            return (Self.response(for: request, status: 204), Data())
+        }
+        let client = makeClient()
+        let submission = IdempotentSubmission()
+
+        try? await client.leaveGroup(groupId: "g1", withdrawStake: false, submission: submission)
+        try await client.leaveGroup(groupId: "g1", withdrawStake: false, submission: submission)
+
+        XCTAssertEqual(recorder.idempotencyKeys.count, 2)
+        XCTAssertNotEqual(
+            recorder.idempotencyKeys[0], recorder.idempotencyKeys[1],
+            "a refused leave is answered; the retry must be a new submission, not a replay"
+        )
+    }
+
+    /// The other half: a 409 that only means "your first attempt is still running" is not an
+    /// answer, so the retry has to stay under the same key or it would start a second leave.
+    func testLeaveStillRunningRetriesUnderTheSameKey() async throws {
+        let recorder = RequestRecorder()
+        MockURLProtocol.requestHandler = { request in
+            recorder.record(request)
+            if recorder.requests.count == 1 {
+                let headers = [IdempotentSubmission.statusHeader: IdempotentSubmission.inProgressStatus]
+                return (Self.response(for: request, status: 409, headers: headers), Data())
+            }
+            return (Self.response(for: request, status: 204), Data())
+        }
+        let client = makeClient()
+        let submission = IdempotentSubmission()
+
+        try? await client.leaveGroup(groupId: "g1", withdrawStake: true, submission: submission)
+        try await client.leaveGroup(groupId: "g1", withdrawStake: true, submission: submission)
+
+        XCTAssertEqual(recorder.idempotencyKeys[0], recorder.idempotencyKeys[1])
+    }
+
     func testChangedAmountAfterLostResponseGetsNewKey() async throws {
         let recorder = RequestRecorder()
         MockURLProtocol.requestHandler = { request in
@@ -247,6 +297,50 @@ final class IdempotentSubmissionTests: XCTestCase {
         submission.record(response: Self.response(for: first, status: 200), forKey: "key-1")
 
         XCTAssertEqual(submission.key(for: second), "key-2")
+    }
+
+    /// `hasPendingKey` is what the money screens are asked to gate an edit on, so its two
+    /// edges matter: it is false until a key is actually minted, and it stays true across
+    /// every non-final answer.
+    func testHasPendingKey_followsTheKeyFromMintToFinalAnswer() throws {
+        let submission = IdempotentSubmission { "key-1" }
+        var request = URLRequest(url: URL(string: "https://api.test/v1/groups/g1/fund")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data(#"{"amount":1}"#.utf8)
+
+        // The key is minted inside the send, so a screen reading this between the tap and
+        // the request being built sees false. That gap is why the doc pins it to the actor
+        // that owns the submission.
+        XCTAssertFalse(submission.hasPendingKey)
+
+        let key = submission.key(for: request)
+        XCTAssertTrue(submission.hasPendingKey)
+
+        // A 5xx is not the request's result, so the key stays pending.
+        submission.record(response: response(status: 502, for: request), forKey: key)
+        XCTAssertTrue(submission.hasPendingKey)
+
+        // An in-progress 409 is not final either.
+        submission.record(
+            response: response(
+                status: 409,
+                for: request,
+                headers: [IdempotentSubmission.statusHeader: IdempotentSubmission.inProgressStatus]
+            ),
+            forKey: key
+        )
+        XCTAssertTrue(submission.hasPendingKey)
+
+        submission.record(response: response(status: 200, for: request), forKey: key)
+        XCTAssertFalse(submission.hasPendingKey)
+    }
+
+    private func response(
+        status: Int,
+        for request: URLRequest,
+        headers: [String: String]? = nil
+    ) -> HTTPURLResponse {
+        HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!
     }
 
     func testMoneyBodyEncodingIsByteStableAcrossRetries() throws {

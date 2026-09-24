@@ -58,7 +58,7 @@ struct CabalMark: View {
     }
 }
 
-/// A stock's tile: sunken fill with a hairline and the ticker's first letter. "USDC" (cash) shows a dollar sign.
+/// A stock's tile: sunken fill with a hairline and the ticker. "USDC" (cash) shows a dollar sign.
 struct StockMark: View {
     private enum Content {
         case letter(String)
@@ -73,9 +73,34 @@ struct StockMark: View {
         if ticker.uppercased() == "USDC" {
             content = .symbol("dollarsign")
         } else {
-            content = .letter(ticker.first.map { String($0).uppercased() } ?? "")
+            content = .letter(StockMark.tileText(forTicker: ticker))
         }
         self.size = size
+    }
+
+    /// The whole ticker, up to four characters. One letter is not an identity: nine tickers in
+    /// the catalog start with "A", so Apple, Amazon and Broadcom were three identical grey tiles.
+    ///
+    /// A class separator is dropped rather than left hanging: "BRK.B" cut at four characters is
+    /// "BRK." reading as an abbreviation of itself.
+    static func tileText(forTicker ticker: String) -> String {
+        let trimmed = ticker.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        var tile = String(trimmed.prefix(4))
+        while let last = tile.last, last == "." || last == "-" {
+            tile.removeLast()
+        }
+        return tile
+    }
+
+    /// Fraction of the tile the text is set at. Longer tickers are set smaller so the tile keeps
+    /// its weight; `minimumScaleFactor` takes the rest.
+    static func textScale(for text: String) -> CGFloat {
+        switch text.count {
+        case 0, 1: return 0.42
+        case 2: return 0.34
+        case 3: return 0.28
+        default: return 0.23
+        }
     }
 
     /// For non-stock rows, e.g. `"cpu"` for a trading bot.
@@ -96,8 +121,11 @@ struct StockMark: View {
                 switch content {
                 case .letter(let letter):
                     Text(letter)
-                        .font(.system(size: size * 0.42, weight: .semibold))
+                        .font(.system(size: size * StockMark.textScale(for: letter), weight: .semibold))
                         .foregroundStyle(MonacoTheme.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .padding(.horizontal, size * 0.08)
                 case .symbol(let name):
                     Image(systemName: name)
                         .font(.system(size: size * 0.40, weight: .semibold))

@@ -42,7 +42,7 @@ final class MonacoAPIClient {
     /// refreshed and the request retried once instead of signing the user out.
     private let session: MonacoHTTPTransport
 
-    init(baseURL: URL = Config.apiBaseURL, session: URLSession = .shared) {
+    init(baseURL: URL = Config.apiBaseURL, session: URLSession = .monaco) {
         self.baseURL = baseURL
         self.session = MonacoHTTPTransport(session: session)
     }
@@ -66,7 +66,9 @@ final class MonacoAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(SessionRequest(accessToken: accessToken))
 
-        let (data, response) = try await session.data(for: request)
+        // Cold-start gate: a Privy verify plus wallet provisioning on first sign-in, so it
+        // names its own budget rather than inheriting the short read default.
+        let (data, response) = try await session.data(for: request, timeout: MonacoRequestTimeout.signIn)
         guard let http = response as? HTTPURLResponse else {
             throw MonacoAPIError.invalidResponse
         }
@@ -701,17 +703,9 @@ final class MonacoAPIClient {
             throw MonacoAPIError.invalidResponse
         }
         guard http.statusCode == 200 else {
-            throw proposalCreateError(status: http.statusCode, data: data)
+            throw apiFailure(status: http.statusCode, data: data)
         }
         return try JSONDecoder().decode(CreateProposalResponse.self, from: data)
-    }
-
-    private func proposalCreateError(status: Int, data: Data) -> MonacoAPIError {
-        if let body = try? JSONDecoder().decode(APIErrorBody.self, from: data),
-           !body.error.isEmpty {
-            return .apiError(status: status, message: body.error)
-        }
-        return .httpStatus(status)
     }
 
     func getGroupActivity(accessToken: String, groupId: String) async throws -> GroupActivityResponse {
@@ -801,7 +795,8 @@ final class MonacoAPIClient {
         try applyAuthorizationHeader(accessToken: accessToken, to: &request)
         request.httpBody = try JSONEncoder().encode(DevBuyRequest(symbol: symbol, usdc: usdc))
 
-        let (data, response) = try await session.data(for: request)
+        // Buys the stock inside the request, so it gets the money budget, not the read one.
+        let (data, response) = try await session.data(for: request, timeout: MonacoRequestTimeout.moneyWrite)
         guard let http = response as? HTTPURLResponse else {
             throw MonacoAPIError.invalidResponse
         }

@@ -1,39 +1,23 @@
 import MonacoCore
 import SwiftUI
 
-/// Market browse: pinned search, one scrolling grid. Search replaces Popular.
+/// Market browse: pinned search, one scrolling list. Search replaces Popular.
 struct AssetsTabView: View {
     @ObservedObject var auth: PrivyAuthService
     @Environment(AppSessionStore.self) private var session
+    @Environment(\.scenePhase) private var scenePhase
+    // A tab body's `.task` fires once on first appearance, so coming back to Stocks from another
+    // tab does not re-run it. The shell publishes which tab is showing for exactly this.
+    @Environment(\.selectedMainTab) private var selectedMainTab
+    @Environment(\.hostMainTab) private var hostMainTab
 
-    private let apiClient = MonacoAPIClient()
-    private let pageSize = 25
-    private let searchDebounceNanos: UInt64 = 300_000_000
-
+    @State private var model: StocksTabModel
     @State private var searchQuery = ""
-    @State private var assets: [MarketAssetDTO] = []
-    @State private var hasMore = false
-    @State private var listOffset = 0
-    @State private var isLoadingList = false
-    @State private var isLoadingMore = false
-    @State private var listFailed = false
-    @State private var searchTask: Task<Void, Never>?
     @State private var selectedSymbol: String?
 
-    private var popular: [MarketAssetDTO] {
-        session.popularAssets
-    }
-
-    private var trimmedQuery: String {
-        searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var isSearching: Bool {
-        !trimmedQuery.isEmpty
-    }
-
-    private var gridAssets: [MarketAssetDTO] {
-        isSearching ? assets : popular
+    init(auth: PrivyAuthService, dataSource: StocksTabDataSource? = nil) {
+        self.auth = auth
+        _model = State(initialValue: StocksTabModel(dataSource: dataSource ?? LiveStocksTabDataSource(auth: auth)))
     }
 
     var body: some View {
@@ -43,9 +27,12 @@ struct AssetsTabView: View {
                 text: $searchQuery,
                 isEnabled: true
             )
+            .textInputAutocapitalization(.words)
+            .autocorrectionDisabled()
+            .submitLabel(.search)
             .accessibilityIdentifier("assets-search-field")
 
-            if !isSearching {
+            if !model.isSearching {
                 MonacoSectionHeader("Popular")
             }
 
@@ -66,86 +53,159 @@ struct AssetsTabView: View {
                 AssetDetailView(auth: auth, symbol: selectedSymbol)
             }
         }
-        .onChange(of: searchQuery) { _, _ in
-            scheduleListSearch()
+        .onChange(of: searchQuery) { _, newValue in
+            model.updateQuery(newValue)
         }
         .task {
-            if session.popularAssets.isEmpty {
-                await session.refreshPopular(auth: auth)
-            }
+            model.seedPopular(session.popularAssets)
+            await refreshPopular()
         }
-        .onDisappear {
-            searchTask?.cancel()
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await refreshPopular() }
+        }
+        .onChange(of: selectedMainTab) { _, tab in
+            guard let hostMainTab, tab == hostMainTab else { return }
+            Task { await refreshPopular() }
         }
         .monacoFrameStats("Stocks")
     }
 
     @ViewBuilder
     private var listRegion: some View {
-        if isSearching, isLoadingList, assets.isEmpty, !listFailed {
-            centeredStatus {
-                ProgressView()
-                    .tint(MonacoTheme.ink)
-                Text("Loading stocks…")
-                    .font(MonacoTheme.Typo.caption)
-                    .foregroundStyle(MonacoTheme.muted)
-            }
-            .accessibilityIdentifier("assets-search-loading")
-        } else if isSearching, listFailed, assets.isEmpty {
+        if model.isSearching {
+            searchRegion
+        } else {
+            popularRegion
+        }
+    }
+
+    @ViewBuilder
+    private var searchRegion: some View {
+        switch model.searchState {
+        case .idle, .loading:
+            ScrollView { skeletonRows }
+                .scrollDisabled(true)
+                .accessibilityIdentifier("assets-search-loading")
+        case .failed:
             centeredStatus {
                 EmptyState(
                     title: "Could not load stocks",
                     actionTitle: "Retry",
-                    action: { Task { await loadList(reset: true) } }
+                    action: { Task { await model.retrySearch() } }
                 )
             }
-        } else if isSearching, !isLoadingList, assets.isEmpty {
+        case .empty:
             centeredStatus {
                 EmptyState(title: "No matches for that search")
             }
-        } else if !isSearching, popular.isEmpty {
+        case .results:
             ScrollView {
-                EmptyState(title: "Popular names show up here once prices load")
-                    .accessibilityIdentifier("assets-grid-popular")
-            }
-            .refreshable {
-                await session.refreshPopular(auth: auth)
-            }
-        } else {
-            ScrollView {
-                MonacoGroupedList {
-                    ForEach(Array(gridAssets.enumerated()), id: \.element.id) { index, asset in
-                        Button {
-                            selectedSymbol = asset.symbol
-                        } label: {
-                            assetRow(asset, isLast: index == gridAssets.count - 1)
-                        }
-                        .buttonStyle(.monacoRow)
-                        .accessibilityIdentifier(
-                            isSearching ? "assets-row-\(asset.symbol)" : "assets-popular-\(asset.symbol)"
-                        )
-                    }
+                if model.refreshFailed {
+                    Text("Couldn't refresh — these prices may be out of date.")
+                        .font(MonacoTheme.Typo.caption)
+                        .foregroundStyle(MonacoTheme.warning)
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, MonacoTheme.Space.s)
+                        .accessibilityIdentifier("assets-refresh-failed")
                 }
-
-                if isSearching, hasMore {
-                    Button(isLoadingMore ? "Loading…" : "Load more") {
-                        Task { await loadList(reset: false) }
+                assetList(model.results)
+                if model.loadMoreFailed {
+                    Text("Could not load more stocks.")
+                        .font(MonacoTheme.Typo.caption)
+                        .foregroundStyle(MonacoTheme.muted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, MonacoTheme.Space.s)
+                }
+                if model.hasMore {
+                    Button(model.isLoadingMore ? "Loading…" : "Load more") {
+                        Task { await model.loadMore() }
                     }
                     .buttonStyle(.monacoSecondary)
-                    .disabled(isLoadingMore)
+                    .disabled(model.isLoadingMore)
                     .padding(.top, MonacoTheme.Space.s)
                     .accessibilityIdentifier("assets-load-more")
                 }
             }
-            .refreshable {
-                if isSearching {
-                    await loadList(reset: true)
-                } else {
-                    await session.refreshPopular(auth: auth)
-                }
-            }
-            .accessibilityIdentifier(isSearching ? "assets-grid-search" : "assets-grid-popular")
+            .refreshable { await model.refreshSearch() }
+            .accessibilityIdentifier("assets-grid-search")
         }
+    }
+
+    @ViewBuilder
+    private var popularRegion: some View {
+        switch model.popularState {
+        case .loading where model.popular.isEmpty:
+            ScrollView { skeletonRows }
+                .scrollDisabled(true)
+                .accessibilityIdentifier("assets-popular-loading")
+        case .failed where model.popular.isEmpty:
+            centeredStatus {
+                EmptyState(
+                    title: "Could not load popular stocks",
+                    actionTitle: "Retry",
+                    action: { Task { await forceRefreshPopular() } }
+                )
+                .accessibilityIdentifier("assets-popular-failed")
+            }
+        default:
+            ScrollView {
+                assetList(model.popular)
+            }
+            .refreshable { await forceRefreshPopular() }
+            .accessibilityIdentifier("assets-grid-popular")
+        }
+    }
+
+    private func assetList(_ assets: [MarketAssetDTO]) -> some View {
+        MonacoGroupedList {
+            ForEach(Array(assets.enumerated()), id: \.element.id) { index, asset in
+                Button {
+                    selectedSymbol = asset.symbol
+                } label: {
+                    assetRow(asset, isLast: index == assets.count - 1)
+                }
+                .buttonStyle(.monacoRow)
+                .accessibilityIdentifier(
+                    model.isSearching ? "assets-row-\(asset.symbol)" : "assets-popular-\(asset.symbol)"
+                )
+            }
+        }
+    }
+
+    private var skeletonRows: some View {
+        MonacoGroupedList {
+            ForEach(0..<6, id: \.self) { _ in
+                HStack(spacing: MonacoTheme.Space.sm) {
+                    SkeletonBlock(width: 40, height: 40, radius: MonacoTheme.Radius.tile)
+                    VStack(alignment: .leading, spacing: 6) {
+                        SkeletonBlock(width: 120, height: 14)
+                        SkeletonBlock(width: 56, height: 12)
+                    }
+                    Spacer()
+                    SkeletonBlock(width: 64, height: 14)
+                }
+                .padding(.horizontal, MonacoTheme.Space.m)
+                .frame(minHeight: 60)
+            }
+        }
+        .accessibilityLabel("Loading stocks")
+    }
+
+    /// Keeps the shared session strip in step with the tab so other screens read fresh prices too.
+    private func refreshPopular() async {
+        await model.refreshPopularIfStale()
+        syncPopularToSession()
+    }
+
+    private func forceRefreshPopular() async {
+        await model.loadPopular()
+        syncPopularToSession()
+    }
+
+    private func syncPopularToSession() {
+        guard !model.popular.isEmpty else { return }
+        session.popularAssets = model.popular
     }
 
     private func centeredStatus<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -160,7 +220,7 @@ struct AssetsTabView: View {
     private func assetRow(_ asset: MarketAssetDTO, isLast: Bool) -> some View {
         let ticker = AssetSymbolFormatter.display(asset.symbol)
         return MonacoRow(
-            title: AssetDisplayNames.name(forSymbol: asset.symbol) ?? ticker,
+            title: ProposeStock.displayName(symbol: asset.symbol, catalogName: asset.name),
             subtitle: ticker,
             isLast: isLast,
             leading: { StockMark(symbol: asset.symbol, size: 40) },
@@ -175,73 +235,5 @@ struct AssetsTabView: View {
                 }
             }
         )
-    }
-
-
-    private func scheduleListSearch() {
-        searchTask?.cancel()
-        let query = trimmedQuery
-        if query.isEmpty {
-            assets = []
-            hasMore = false
-            listOffset = 0
-            isLoadingList = false
-            listFailed = false
-            return
-        }
-        isLoadingList = true
-        assets = []
-        listFailed = false
-        searchTask = Task {
-            do {
-                try await Task.sleep(nanoseconds: searchDebounceNanos)
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            await loadList(reset: true)
-        }
-    }
-
-    private func loadList(reset: Bool) async {
-        guard let token = auth.accessToken else { return }
-        let query = trimmedQuery
-        guard !query.isEmpty else { return }
-
-        if reset {
-            isLoadingList = true
-            listFailed = false
-            listOffset = 0
-            hasMore = false
-        } else {
-            isLoadingMore = true
-        }
-        defer {
-            isLoadingList = false
-            isLoadingMore = false
-        }
-
-        let offset = reset ? 0 : listOffset
-        do {
-            let response = try await apiClient.listMarketAssets(
-                accessToken: token,
-                query: query,
-                limit: pageSize,
-                offset: offset
-            )
-            if reset {
-                assets = response.assets
-            } else {
-                assets.append(contentsOf: response.assets)
-            }
-            listOffset = assets.count
-            hasMore = response.hasMore
-        } catch {
-            if error.isRequestCancellation { return }
-            if reset {
-                listFailed = true
-                assets = []
-            }
-        }
     }
 }

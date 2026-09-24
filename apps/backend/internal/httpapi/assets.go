@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
@@ -308,20 +309,22 @@ func marketAssetResponseFor(asset xstocks.CatalogAsset, prices map[string]jupite
 }
 
 func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset xstocks.CatalogAsset) assetDetailResponse {
+	// The mark is needed for the spread, so price first and probe once. Probing before the
+	// price as well would double every Jupiter quote this screen costs.
+	prices := h.fetchPrices(ctx, []xstocks.CatalogAsset{asset})
+	var markMicros *int64
 	detail := assetDetailResponse{
 		Symbol:     asset.Symbol,
 		Name:       asset.Name,
 		SolanaMint: asset.SolanaMint,
 		Routable:   asset.Routable,
-		Liquidity:  h.liquiditySnippet(ctx, asset, nil),
 	}
-	prices := h.fetchPrices(ctx, []xstocks.CatalogAsset{asset})
 	if price, ok := prices[asset.SolanaMint]; ok && price.PriceUsdcMicros > 0 {
 		detail.PriceUsdcMicros = &price.PriceUsdcMicros
 		detail.Change24h = price.Change24h
-		detail.Liquidity = h.liquiditySnippet(ctx, asset, &price.PriceUsdcMicros)
+		markMicros = &price.PriceUsdcMicros
 	}
-	// Live Jupiter probe wins over a stale catalog rank (429s cache as not routable).
+	detail.Liquidity = h.liquiditySnippet(ctx, asset, markMicros)
 	detail.Routable = detail.Liquidity.Routable
 	return detail
 }
@@ -336,27 +339,46 @@ func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset xstocks.Cat
 		return snippet
 	}
 
-	buyQuote, err := h.Jupiter.QuoteBuy(ctx, jupiter.QuoteBuyParams{
-		Symbol:     asset.Symbol,
-		OutputMint: asset.SolanaMint,
-		USDCAmount: app.CatalogRoutabilityProbeMicros,
-	})
-	if err == nil && buyQuote.Routable {
-		snippet.Routable = true
+	// Both probes are independent reads; the buy one alone decides routability.
+	var (
+		buyQuote  jupiter.BuyQuote
+		buyErr    error
+		sellQuote jupiter.SellQuote
+		sellErr   error
+		wg        sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		buyQuote, buyErr = h.Jupiter.QuoteBuy(ctx, jupiter.QuoteBuyParams{
+			Symbol:     asset.Symbol,
+			OutputMint: asset.SolanaMint,
+			USDCAmount: app.CatalogRoutabilityProbeMicros,
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		sellQuote, sellErr = h.Jupiter.QuoteSell(ctx, jupiter.QuoteSellParams{
+			Symbol:    asset.Symbol,
+			InputMint: asset.SolanaMint,
+			Amount:    jupiter.XStockAtomicScale,
+		})
+	}()
+	wg.Wait()
+
+	// A probe that never got an answer is not an answer. Rate limits, timeouts and upstream
+	// 5xx all surface as errors here, and telling a member a stock "can't be bought" on one
+	// of those is a lie about their money — the catalog's own probe stands instead.
+	if buyErr == nil {
+		snippet.Routable = buyQuote.Routable
+	}
+	if buyErr == nil && buyQuote.Routable {
 		snippet.BuyProbeOutAmount = buyQuote.OutAmount
 		if markMicros != nil {
 			snippet.SpreadBps = pyth.MidSpreadBps(*markMicros, buyQuote.OutAmount, app.CatalogRoutabilityProbeMicros, jupiter.XStockDecimals)
 		}
-	} else {
-		snippet.Routable = false
 	}
-
-	sellQuote, err := h.Jupiter.QuoteSell(ctx, jupiter.QuoteSellParams{
-		Symbol:    asset.Symbol,
-		InputMint: asset.SolanaMint,
-		Amount:    jupiter.XStockAtomicScale,
-	})
-	if err == nil && sellQuote.Routable {
+	if sellErr == nil && sellQuote.Routable {
 		snippet.SellProbeInAmount = sellQuote.InAmount
 		snippet.SellProbeOutAmount = sellQuote.OutAmount
 	}

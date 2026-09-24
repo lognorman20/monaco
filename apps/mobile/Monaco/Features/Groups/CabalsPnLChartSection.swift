@@ -2,6 +2,19 @@ import Charts
 import MonacoCore
 import SwiftUI
 
+extension GroupPnLRange {
+    /// The range as it is spoken inside a sentence. `label` is the chip code
+    /// ("1D"), which is right on a chip and reads as jargon in copy.
+    var spokenWindow: String {
+        switch self {
+        case .oneDay: "the last day"
+        case .oneWeek: "the last week"
+        case .oneMonth: "the last month"
+        case .threeMonths: "the last three months"
+        }
+    }
+}
+
 /// One P&L line per cabal the viewer belongs to.
 struct CabalsPnLChartSection: View {
     let model: CabalsTabModel
@@ -18,24 +31,14 @@ struct CabalsPnLChartSection: View {
         GroupPnLChartModel.drawable(model.series)
     }
 
-    /// A scrub-worthy line needs at least 3 points; the chart only earns its
-    /// place once two or more cabals clear that bar. Below it, the chart is
-    /// hidden entirely rather than showing an empty card.
+    /// A scrub-worthy line needs at least 3 points; a comparison needs two
+    /// cabals that clear that bar.
     private var hasEnoughData: Bool {
-        drawable.filter { $0.points.count >= 3 }.count >= 2
-    }
-
-    /// While loading or recovering from an error we still want feedback, but
-    /// a genuinely sparse chart (or no cabals at all) renders nothing.
-    private var shouldRender: Bool {
-        guard hasCabals else { return false }
-        if model.isChartLoading, model.series.isEmpty { return true }
-        if model.chartFailed, model.series.isEmpty { return true }
-        return hasEnoughData
+        CabalsTabModel.isChartable(model.series)
     }
 
     var body: some View {
-        if shouldRender {
+        if model.showsChartSection(hasCabals: hasCabals) {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
                 Text("Your cabals' P&L")
                     .font(MonacoTheme.Typo.section)
@@ -69,14 +72,20 @@ struct CabalsPnLChartSection: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.isChartLoading, model.series.isEmpty {
+        if model.isChartLoading {
             ProgressView()
                 .tint(MonacoTheme.ink)
                 .accessibilityIdentifier("cabals-pnl-loading")
         } else if model.chartFailed, model.series.isEmpty {
             emptyMessage("Couldn't load the chart. Pull down to try again.", id: "cabals-pnl-error")
+        } else if !hasEnoughData {
+            emptyMessage("Not enough history in \(model.range.spokenWindow) yet. Try a longer stretch.", id: "cabals-pnl-sparse")
         } else {
             chart
+                // A range switch keeps the old lines on screen; dim them so the
+                // highlighted chip and the drawing agree about what is showing.
+                .opacity(model.isChartReloading ? 0.4 : 1)
+                .animation(.easeInOut(duration: 0.15), value: model.isChartReloading)
         }
     }
 

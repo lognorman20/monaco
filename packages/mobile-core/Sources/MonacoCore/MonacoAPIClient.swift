@@ -20,6 +20,20 @@ public enum MonacoAPIError: Error, Equatable {
     /// 429. `retryAfterSeconds` comes from the `Retry-After` header when present.
     case rateLimited(retryAfterSeconds: Int?, requestID: String? = nil)
 
+    /// The status the server answered with, for callers that only care about the code.
+    /// Prefer this over matching `.httpStatus`: the same status can arrive as `.rejected`
+    /// or `.rateLimited` when the response carried more than a code.
+    public var statusCode: Int? {
+        switch self {
+        case .httpStatus(let status, _), .rejected(let status, _, _):
+            return status
+        case .rateLimited:
+            return 429
+        case .invalidResponse, .leaveBlocked:
+            return nil
+        }
+    }
+
     public var requestID: String? {
         switch self {
         case .httpStatus(_, let requestID),
@@ -64,7 +78,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
     ///   registered in `APITelemetryRegistry.shared`.
     public convenience init(
         baseURL: URL = MonacoConfig.apiBaseURL,
-        session: URLSession = .shared,
+        session: URLSession = .monaco,
         accessTokenProvider: AccessTokenProvider? = nil,
         telemetry: APITelemetry? = nil
     ) {
@@ -159,45 +173,67 @@ public final class MonacoAPIClient: @unchecked Sendable {
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = ProfilePhotoMultipart.body(imageData: imageData, mimeType: mimeType, boundary: boundary)
 
-        let response = try await session.send(request, route: "/v1/me/profile-photo")
+        let response = try await session.send(request, route: "/v1/me/profile-photo", timeout: MonacoRequestTimeout.upload)
         try Self.requireOK(response)
         return try JSONDecoder().decode(MeDTO.self, from: response.data)
     }
 
-    /// Maps non-200 responses to `MonacoAPIError`, keeping server copy for 4xx.
-    static func requireOK(_ response: MonacoHTTPResponse) throws {
+    /// How much of a failed response a route keeps.
+    enum ErrorMapping {
+        /// Just the status. What most routes still do, because their callers pattern-match
+        /// `.httpStatus(404)` and would silently stop matching on a richer case.
+        case statusOnly
+        /// Everything the response carried: the `Retry-After` on a 429, and a 4xx body
+        /// written for members. Routes opt in once their callers read `statusCode`.
+        case full
+    }
+
+    /// The one place a response becomes an error. Returns nil when the status is accepted.
+    static func error(
+        for response: MonacoHTTPResponse,
+        accepting: Set<Int>,
+        mapping: ErrorMapping
+    ) -> MonacoAPIError? {
         guard let http = response.response as? HTTPURLResponse else {
-            throw MonacoAPIError.invalidResponse
+            return .invalidResponse
         }
-        guard http.statusCode != 200 else { return }
+        guard !accepting.contains(http.statusCode) else { return nil }
         let requestID = response.requestID
+        guard mapping == .full else {
+            return .httpStatus(http.statusCode, requestID: requestID)
+        }
         if http.statusCode == 429 {
             let retryAfter = http.value(forHTTPHeaderField: "Retry-After").flatMap { Int($0) }
-            throw MonacoAPIError.rateLimited(retryAfterSeconds: retryAfter, requestID: requestID)
+            return .rateLimited(retryAfterSeconds: retryAfter, requestID: requestID)
         }
         if (400..<500).contains(http.statusCode), http.statusCode != 401,
            let body = try? JSONDecoder().decode(APIErrorBody.self, from: response.data),
            !body.error.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw MonacoAPIError.rejected(status: http.statusCode, message: body.error, requestID: requestID)
+            return .rejected(status: http.statusCode, message: body.error, requestID: requestID)
         }
-        throw MonacoAPIError.httpStatus(http.statusCode, requestID: requestID)
+        return .httpStatus(http.statusCode, requestID: requestID)
+    }
+
+    /// Maps non-200 responses to `MonacoAPIError`, keeping server copy for 4xx.
+    static func requireOK(_ response: MonacoHTTPResponse) throws {
+        if let error = error(for: response, accepting: [200], mapping: .full) { throw error }
     }
 
     /// Sends `request` under its route template and returns the response when the status
-    /// is in `accepting`. Any other status throws `.httpStatus` carrying the request id.
+    /// is in `accepting`. Any other status throws, carrying as much of the answer as
+    /// `mapping` allows plus the request id.
     /// Money POSTs pass their `submission` so the idempotency key rides along.
     private func send(
         _ request: URLRequest,
         route: String,
         accepting: Set<Int> = [200],
-        submission: IdempotentSubmission? = nil
+        submission: IdempotentSubmission? = nil,
+        mapping: ErrorMapping = .statusOnly,
+        timeout: TimeInterval? = nil
     ) async throws -> MonacoHTTPResponse {
-        let response = try await session.send(request, route: route, submission: submission)
-        guard let status = response.statusCode else {
-            throw MonacoAPIError.invalidResponse
-        }
-        guard accepting.contains(status) else {
-            throw MonacoAPIError.httpStatus(status, requestID: response.requestID)
+        let response = try await session.send(request, route: route, timeout: timeout, submission: submission)
+        if let error = Self.error(for: response, accepting: accepting, mapping: mapping) {
+            throw error
         }
         return response
     }
@@ -605,7 +641,12 @@ public final class MonacoAPIClient: @unchecked Sendable {
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = try JSONEncoder().encode(DevBuyRequestDTO(symbol: symbol, usdc: usdc))
 
-        let response = try await send(request, route: "/v1/dev/groups/{id}/buy")
+        // Buys the stock inside the request, so it gets the money budget, not the read one.
+        let response = try await send(
+            request,
+            route: "/v1/dev/groups/{id}/buy",
+            timeout: MonacoRequestTimeout.moneyWrite
+        )
         return try JSONDecoder().decode(DevBuyResponseDTO.self, from: response.data)
     }
 
@@ -693,7 +734,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
         request.httpMethod = "GET"
         try await applyAuthorizationHeader(to: &request)
 
-        let response = try await send(request, route: "/v1/groups/{id}/messages")
+        let response = try await send(request, route: "/v1/groups/{id}/messages", mapping: .full)
         return try JSONDecoder().decode(GroupMessagesPageDTO.self, from: response.data)
     }
 
@@ -706,7 +747,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
         try await applyAuthorizationHeader(to: &request)
         request.httpBody = try JSONEncoder().encode(GroupMessageRequestDTO(body: body))
 
-        let response = try await send(request, route: "/v1/groups/{id}/messages", accepting: [201])
+        let response = try await send(request, route: "/v1/groups/{id}/messages", accepting: [201], mapping: .full)
         return try JSONDecoder().decode(GroupMessageDTO.self, from: response.data)
     }
 

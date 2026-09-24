@@ -3,9 +3,8 @@ import SwiftUI
 
 /// Every funded cabal on Monaco, ranked by percent return.
 struct CabalsLeaderboardSection: View {
-    @ObservedObject var auth: PrivyAuthService
     let model: CabalsTabModel
-    var onChanged: () async -> Void
+    var onSelect: (CabalsRoute) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
@@ -42,14 +41,8 @@ struct CabalsLeaderboardSection: View {
             } else {
                 MonacoGroupedList {
                     ForEach(Array(model.leaderboard.enumerated()), id: \.element.id) { index, row in
-                        NavigationLink {
-                            CabalDiscoveryDestinationView(
-                                auth: auth,
-                                groupId: row.groupID,
-                                name: row.name,
-                                destination: GroupDiscoveryDestination(isJoined: row.isJoined, joinMode: row.joinMode),
-                                onChanged: onChanged
-                            )
+                        Button {
+                            onSelect(CabalsRoute(row: row.groupID, name: row.name, isJoined: row.isJoined, joinMode: row.joinMode))
                         } label: {
                             CabalDiscoveryRowContent(
                                 rank: row.rank,
@@ -112,7 +105,9 @@ struct CabalDiscoveryRowContent: View {
     }
 }
 
-/// A cabal's mark with its platform rank badged at the corner.
+/// A cabal's mark with its platform rank badged at the corner. The mark itself
+/// is decoration, but the rank is the whole point of this board, so VoiceOver
+/// reads it as the first thing in the row.
 private struct RankedCabalMark: View {
     let rank: Int
     let groupId: String
@@ -121,34 +116,14 @@ private struct RankedCabalMark: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             CabalMark(groupId: groupId, name: name, size: 40)
+                .accessibilityHidden(true)
             Text("\(rank)")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(MonacoTheme.primaryButtonLabel)
                 .frame(minWidth: 16, minHeight: 16)
                 .background(Circle().fill(MonacoTheme.ink))
                 .offset(x: 4, y: 4)
-        }
-        .accessibilityHidden(true)
-    }
-}
-
-/// Where a discovery row leads: the cabal itself for members, otherwise the
-/// join flow for that cabal's join policy.
-struct CabalDiscoveryDestinationView: View {
-    @ObservedObject var auth: PrivyAuthService
-    let groupId: String
-    let name: String
-    let destination: GroupDiscoveryDestination
-    var onChanged: () async -> Void
-
-    var body: some View {
-        switch destination {
-        case .detail:
-            GroupDetailView(auth: auth, groupId: groupId, groupName: name, onLeft: onChanged)
-        case .join:
-            JoinGroupView(auth: auth, groupId: groupId, groupName: name, joinMode: .open)
-        case .requestToJoin:
-            JoinGroupView(auth: auth, groupId: groupId, groupName: name, joinMode: .request)
+                .accessibilityLabel("Rank \(rank)")
         }
     }
 }

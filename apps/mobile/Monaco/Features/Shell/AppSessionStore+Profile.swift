@@ -34,7 +34,7 @@ extension AppSessionStore {
         guard normalized != current.displayName else {
             return .unchanged
         }
-        guard let client = profileClient(auth: auth) else {
+        guard let (client, token) = profileClient(auth: auth) else {
             return .failed("Sign in again to edit your profile.")
         }
 
@@ -43,40 +43,63 @@ extension AppSessionStore {
             me = pending
         }
         do {
-            me = try await client.updateProfile(displayName: normalized)
+            let saved = try await client.updateProfile(displayName: normalized)
+            noteProfileWrite()
+            me = saved
         } catch {
             // Only ever rolls back our own optimistic write, never a fresher one.
             if me == pending {
                 me = current
             }
-            return await failure(for: error, auth: auth, fallback: "Could not save your name. Try again.")
+            return await failure(
+                for: error,
+                auth: auth,
+                rejectedToken: token,
+                fallback: "Could not save your name. Try again."
+            )
         }
-        await refresh(auth: auth)
+        // The name is saved: say so now, and let the boards catch up in the background.
+        refreshBoardsAfterProfileWrite(auth: auth)
         return .saved
     }
 
     /// Uploads an already-prepared photo (see `ProfilePhotoUploadPreparer`).
     func uploadProfilePhoto(_ imageData: Data, mimeType: String, auth: PrivyAuthService) async -> ProfileSaveOutcome {
-        guard let client = profileClient(auth: auth) else {
+        guard let (client, token) = profileClient(auth: auth) else {
             return .failed("Sign in again to change your photo.")
         }
         do {
-            me = try await client.uploadProfilePhoto(imageData: imageData, mimeType: mimeType)
+            let saved = try await client.uploadProfilePhoto(imageData: imageData, mimeType: mimeType)
+            noteProfileWrite()
+            me = saved
         } catch {
-            return await failure(for: error, auth: auth, fallback: "Could not upload your photo. Try again.")
+            return await failure(
+                for: error,
+                auth: auth,
+                rejectedToken: token,
+                fallback: "Could not upload your photo. Try again."
+            )
         }
-        await refresh(auth: auth)
+        refreshBoardsAfterProfileWrite(auth: auth)
         return .saved
     }
 
-    private func profileClient(auth: PrivyAuthService) -> MonacoCore.MonacoAPIClient? {
+    /// The client for this write plus the token it runs under, so a 401 can be reported
+    /// against the token that was actually rejected.
+    private func profileClient(auth: PrivyAuthService) -> (MonacoCore.MonacoAPIClient, String)? {
         guard let token = auth.accessToken, !token.isEmpty else { return nil }
-        return MonacoCore.MonacoAPIClient(baseURL: Config.apiBaseURL, accessTokenProvider: { token })
+        let client = MonacoCore.MonacoAPIClient(baseURL: Config.apiBaseURL, accessTokenProvider: { token })
+        return (client, token)
     }
 
-    private func failure(for error: Error, auth: PrivyAuthService, fallback: String) async -> ProfileSaveOutcome {
+    private func failure(
+        for error: Error,
+        auth: PrivyAuthService,
+        rejectedToken: String,
+        fallback: String
+    ) async -> ProfileSaveOutcome {
         if case MonacoCore.MonacoAPIError.httpStatus(401, _) = error {
-            await auth.signOutAfterRejectedSession()
+            await auth.signOutAfterRejectedSession(rejectedToken: rejectedToken)
             return .failed(LoginFailureCopy.sessionExpired)
         }
         return .failed(Self.profileErrorMessage(for: error, fallback: fallback))
