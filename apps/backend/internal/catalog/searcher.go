@@ -363,11 +363,7 @@ func resolverExactMatch(query string, asset xstocks.CatalogAsset) bool {
 	}
 	needle := strings.ToLower(strings.TrimSpace(query))
 	name := strings.ToLower(strings.TrimSpace(asset.Name))
-	if needle != "" && needle == name {
-		return true
-	}
-	stripped := supplementalStrippedName(asset)
-	if needle != "" && needle == stripped && query == strings.ToLower(query) {
+	if needle != "" && needle == name && !isKnownPreIPOUnderlying(needle) {
 		return true
 	}
 	if asset.Source == xstocks.AssetSourcePreStocks || asset.Issuer == "prestocks" {

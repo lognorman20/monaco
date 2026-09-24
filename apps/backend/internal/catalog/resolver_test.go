@@ -3,11 +3,13 @@ package catalog
 import (
 	"context"
 	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/solana/mintinfo"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
@@ -63,6 +65,38 @@ func TestCompositeResolver_SPACEX_and_tSpaceX_distinctMints(t *testing.T) {
 	}
 	if mDefault != tSpaceXMint {
 		t.Fatalf("default spacex mint = %q, want tSpaceX best price", mDefault)
+	}
+
+	full, err := resolver.ResolveSolanaMint(ctx, "SpaceX PreStocks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full != spacexPreStocksMint {
+		t.Fatalf("SpaceX PreStocks mint = %q, want prestocks", full)
+	}
+}
+
+func TestCompositeResolver_spacex_usesBestPriceWhenPreStocksListedFirst(t *testing.T) {
+	ctx := context.Background()
+	prices := &fakePriceClient{prices: map[string]jupiter.TokenPrice{
+		tSpaceXMint:         priceEntry(562.19, 500_000, freshStock(746.61, 1.958e12)),
+		spacexPreStocksMint: priceEntry(116.74, 100_000, freshStock(149.32, 1.958e12)),
+	}}
+	xs := xstocks.NewFakeCatalogSearcher()
+	c := NewCompositeWithSources(xs, []TaggedSource{
+		{Source: NewFakeSource(prestocksSpaceX()), SourceID: xstocks.AssetSourcePreStocks},
+		{Source: NewFakeSource(tesseraSpaceX()), SourceID: xstocks.AssetSourceTessera},
+	}, xstocks.NewFakeRoutabilityProber(true), mintinfo.NewFakeReader(map[string]mintinfo.Info{
+		tSpaceXMint:         {Decimals: 9, TransferFeeBps: 20, UiMultiplier: big.NewRat(1, 1)},
+		spacexPreStocksMint: {Decimals: 9, TransferFeeBps: 100, UiMultiplier: big.NewRat(5, 1)},
+	}), prices)
+	resolver := NewResolverWithCatalog(xstocks.NewFakeResolver(), c)
+	got, err := resolver.ResolveSolanaMint(ctx, "spacex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != tSpaceXMint {
+		t.Fatalf("spacex mint = %q, want tSpaceX even when PreStocks is listed first", got)
 	}
 }
 
