@@ -224,7 +224,7 @@ struct StockListRow: View {
     /// The mark on a market row. Smaller than `MonacoRow`'s 44pt because a market
     /// row carries a sparkline column as well, and the separator inset is derived
     /// from this rather than assumed.
-    static let markSize: CGFloat = 40
+    static let markSize: CGFloat = 46
 
     private var mark: some View {
         StockMark(symbol: asset.symbol, size: StockListRow.markSize, logoURL: asset.logoURL)

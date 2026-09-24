@@ -216,23 +216,95 @@ struct StockMark: View {
 
     @State private var logo: UIImage?
 
-    private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: MarkGeometry.radius(for: size), style: .continuous)
+    /// A coin, not a tile. These are tokenised stocks, and a disc reads as one at a glance.
+    private var shape: Circle { Circle() }
+
+    /// The coin's face. Gold, because these are tokens — a grey disc read as a disabled
+    /// control, and the warm face also separates a stock from a cabal's tinted tile at a
+    /// glance. Lit from the top left, so the face has a direction and does not read as a flat
+    /// swatch. Dark mode drops the luminance rather than the hue so it still reads as metal.
+    private static var coinFace: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color.adaptive(light: 0xFCF5E4, dark: 0x4A4030),
+                Color.adaptive(light: 0xEBD9A8, dark: 0x2E2719),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    /// The rim. Metal is not one colour: a real rim catches the light at two points and falls
+    /// into shadow at the two between them, which is what makes a disc read as struck rather
+    /// than drawn. An angular sweep around the circle is the cheapest honest way to say that —
+    /// highlight at the top left, shadow at the top right and bottom left, a second, weaker
+    /// highlight at the bottom right where the light bounces back.
+    private static var coinRim: AngularGradient {
+        AngularGradient(
+            stops: [
+                .init(color: Color.adaptive(light: 0xFFF6DC, dark: 0x8A7648), location: 0.00),
+                .init(color: Color.adaptive(light: 0xB08E3E, dark: 0x4A3F26), location: 0.20),
+                .init(color: Color.adaptive(light: 0xE8CE86, dark: 0x6F5F3A), location: 0.42),
+                .init(color: Color.adaptive(light: 0xA8873A, dark: 0x453A22), location: 0.62),
+                .init(color: Color.adaptive(light: 0xF3E4B4, dark: 0x7D6B42), location: 0.82),
+                .init(color: Color.adaptive(light: 0xFFF6DC, dark: 0x8A7648), location: 1.00),
+            ],
+            center: .center,
+            angle: .degrees(-135)
+        )
+    }
+
+    /// Thinner than a hairline separator on purpose: at 0.33pt the rim is a single device pixel
+    /// on a 3x screen, so it describes the coin's edge without drawing a ring around the logo.
+    private static let rimWidth: CGFloat = 0.33
+
+    /// The issuer's artwork frames every company logo with four grey arrows that reach about
+    /// 16% in from each edge, so drawn whole they show as triangles poking out around the mark.
+    /// Showing the middle of the image crops the frame away.
+    ///
+    /// 0.70 is measured, not guessed: the arrows on the tightest logo (Alphabet) end at 16%,
+    /// and Amazon's swoosh starts being clipped below about 0.70. It applies to the remote
+    /// artwork only — a logo from anywhere else is drawn as it comes.
+    private static let issuerArtworkVisibleFraction: CGFloat = 0.70
+
+    /// How much of the disc the mark itself occupies. Most issuer logos are solid squares —
+    /// Apple's black tile, Tesla's red one — not marks on transparency, so they are clipped to
+    /// the coin and this cannot usefully exceed the largest square a circle holds (0.707).
+    /// 0.72 fills the face to its edge and lets the rim, not a ring of fill, be the border.
+    private static let markInset: CGFloat = 0.72
+
+    /// Centre-crops the issuer's arrow frame away. Done once when the image loads, not on every
+    /// frame. An image too small to crop is returned untouched rather than upscaled.
+    static func croppedToMark(_ image: UIImage) -> UIImage {
+        let side = min(image.size.width, image.size.height) * issuerArtworkVisibleFraction
+        guard side > 1, let cgImage = image.cgImage else { return image }
+        let scale = image.scale
+        let rect = CGRect(
+            x: ((image.size.width - side) / 2) * scale,
+            y: ((image.size.height - side) / 2) * scale,
+            width: side * scale,
+            height: side * scale
+        )
+        guard let cropped = cgImage.cropping(to: rect) else { return image }
+        return UIImage(cgImage: cropped, scale: scale, orientation: image.imageOrientation)
     }
 
     var body: some View {
         shape
-            .fill(MonacoTheme.surfaceSunken)
+            .fill(StockMark.coinFace)
             .frame(width: size, height: size)
             .overlay {
-                shape.strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+                shape.strokeBorder(StockMark.coinRim, lineWidth: StockMark.rimWidth)
             }
             .overlay {
                 if let logo = logo ?? logoURL.flatMap({ MonacoRemoteImageStore.stockLogos.cachedImage(for: $0) }) {
-                    Image(uiImage: logo)
+                    // Fitted, not filled. Filling a disc with a square mark (Microsoft's four
+                    // tiles) slices its corners off; fitting keeps every logo whole and lets the
+                    // coin's face be the frame around it.
+                    Image(uiImage: StockMark.croppedToMark(logo))
                         .resizable()
-                        .scaledToFill()
-                        .frame(width: size, height: size)
+                        .scaledToFit()
+                        .frame(width: size * StockMark.markInset, height: size * StockMark.markInset)
                         .clipShape(shape)
                 } else {
                     tileGlyph
