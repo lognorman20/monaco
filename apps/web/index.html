@@ -90,22 +90,6 @@
   .joined { display: none; align-items: center; justify-content: center; gap: 10px; padding: 14px 18px; border-radius: 999px; background: var(--green-soft); border: 1px solid var(--mint); color: var(--ink); font-weight: 500; }
   .join.done .joined { display: flex; }
 
-  /* Video. Placeholder frame until VIDEO_URL is set in the script below. */
-  .video { padding-block: 8px 96px; }
-  .video figure { margin: 0; display: grid; gap: 12px; }
-  .frame { position: relative; aspect-ratio: 16 / 9; width: 100%; border-radius: 20px; overflow: hidden; background: #0F291C; border: 1px solid var(--line); box-shadow: 0 40px 90px -40px rgba(15, 41, 28, 0.45); }
-  .frame > video, .frame > iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
-  .placeholder { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 18px; text-align: center; background: radial-gradient(60% 70% at 50% 45%, #1C4330, #0F291C 70%); }
-  .placeholder img { width: clamp(72px, 12vw, 120px); opacity: .95; }
-  .placeholder p { margin: 0; color: rgba(242, 235, 225, 0.6); font-size: 15px; }
-  .play { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; cursor: pointer; display: grid; place-items: center; background: #0F291C center / cover no-repeat; }
-  .play::before { content: ""; position: absolute; inset: 0; background: rgba(15, 41, 28, 0.32); }
-  .play .disc { position: relative; width: 76px; height: 76px; border-radius: 50%; background: rgba(248, 245, 238, 0.95); color: var(--ink); display: grid; place-items: center; box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6); transition: transform .15s ease; }
-  .play .disc svg { margin-left: 3px; }
-  .play:hover .disc { transform: scale(1.06); }
-  .play:focus-visible { outline: 2px solid var(--green); outline-offset: -4px; }
-  .video figcaption { margin: 0; color: var(--ink-3); font-size: 14px; text-align: center; }
-
   /* Sections */
   section { scroll-margin-top: 80px; }
   .sec { padding-block: 96px; border-top: 1px solid var(--line); }
@@ -175,19 +159,6 @@
     </div>
   </section>
 
-  <section class="video" aria-label="Product video">
-    <div class="wrap">
-      <figure>
-        <div class="frame" id="frame">
-          <div class="placeholder">
-            <img src="/assets/mark.svg" alt="">
-            <p>Demo video coming soon.</p>
-          </div>
-        </div>
-        <figcaption id="video-caption" hidden>How a Monaco fund works, from first deposit to first vote.</figcaption>
-      </figure>
-    </div>
-  </section>
 </main>
 
 <footer>
@@ -204,22 +175,6 @@
   var BAD_TWITTER = "Enter a valid Twitter handle, like @monaco, or leave it blank.";
   var ENDPOINT = "/api/waitlist";
 
-  // ───────────────────────────── Demo video ─────────────────────────────
-  // THE ONE EDIT: put the video URL here and the player replaces the
-  // "coming soon" placeholder. Leave it "" and the placeholder stays.
-  //
-  //   Cloudflare R2 file  "https://media.trymonaco.xyz/demo.mp4"
-  //                       Preferred. R2 has no egress fees, so plays are free.
-  //   Unlisted embed      "https://www.youtube.com/embed/VIDEO_ID"
-  //                       or "https://player.vimeo.com/video/VIDEO_ID"
-  //
-  // Never commit the video itself, and never serve it from Pages. A file URL
-  // gets preload="none", so the bytes are fetched only when someone presses
-  // play; an embed URL sits behind a poster and a real button, so the third
-  // party is not contacted on page load either.
-  var VIDEO_URL = "";
-  var VIDEO_POSTER = "/assets/video-poster.png";
-  // ──────────────────────────────────────────────────────────────────────
 
   function twitterHandle(value) {
     var handle = value.trim().replace(/^@/, "");
@@ -286,46 +241,6 @@
     });
   });
 
-  (function () {
-    var frame = document.getElementById("frame");
-    if (!frame || !VIDEO_URL) return;
-    var el;
-    if (/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(VIDEO_URL)) {
-      el = document.createElement("video");
-      el.src = VIDEO_URL;
-      el.poster = VIDEO_POSTER;
-      el.controls = true;
-      el.preload = "none";  // nothing downloads until the visitor presses play
-      el.playsInline = true;
-      el.setAttribute("aria-describedby", "video-caption");
-      // Captions: drop a WebVTT file at /assets/demo.vtt and uncomment.
-      // var cc = document.createElement("track");
-      // cc.kind = "captions"; cc.src = "/assets/demo.vtt";
-      // cc.srclang = "en"; cc.label = "English"; cc.default = true;
-      // el.appendChild(cc);
-    } else {
-      // Poster plus a real button. The iframe is built on click, so an unlisted
-      // YouTube or Vimeo embed costs nothing and sees nobody who doesn't watch.
-      el = document.createElement("button");
-      el.type = "button";
-      el.className = "play";
-      el.style.backgroundImage = "url(" + VIDEO_POSTER + ")";
-      el.setAttribute("aria-label", "Play the Monaco demo video");
-      el.innerHTML = '<span class="disc" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg></span>';
-      el.addEventListener("click", function () {
-        var iframe = document.createElement("iframe");
-        // autoplay is fine here: it follows the visitor's own click.
-        iframe.src = VIDEO_URL + (VIDEO_URL.indexOf("?") < 0 ? "?" : "&") + "autoplay=1";
-        iframe.title = "Monaco demo video";
-        iframe.allow = "autoplay; fullscreen; picture-in-picture";
-        iframe.setAttribute("allowfullscreen", "");
-        frame.replaceChildren(iframe);
-      });
-    }
-    frame.replaceChildren(el);
-    var caption = document.getElementById("video-caption");
-    if (caption) caption.hidden = false;
-  })();
 })();
 </script>
 </body>

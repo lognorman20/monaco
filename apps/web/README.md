@@ -76,30 +76,26 @@ Notes:
   `test/`. That is the price of having no build step; the same files are already
   public on GitHub.
 
-## Demo video
+## Demo video (not on the page yet)
 
-The video is never committed and never served from Pages. Host it on **R2**, where
-egress is free, or as an **unlisted YouTube/Vimeo embed**.
+There is deliberately no video section on the page — it goes back when there is a video
+to put in it. What matters is that it stays cheap when it does.
 
-To wire it up, set `VIDEO_URL` in the script at the bottom of `index.html` — that one
-line is the whole edit. Empty means the "coming soon" placeholder stays.
+**Never commit the video, and never serve it from Pages.** Host it on **Cloudflare R2**,
+where egress is free, or as an **unlisted YouTube/Vimeo embed**. A 20MB file served from
+a metered host is roughly 100GB after five thousand plays, which is where a free tier
+stops being free.
 
-| `VIDEO_URL` | What renders |
-|---|---|
-| `""` | The placeholder |
-| `https://media.trymonaco.xyz/demo.mp4` | `<video controls preload="none" poster>` |
-| `https://www.youtube.com/embed/<id>` | The poster behind a play button; the iframe is built on click |
+To add it back:
 
-`preload="none"` is the point: browsers otherwise fetch the first chunk of a video on
-every page load, watched or not, which is how free bandwidth turns into a bill. The
-embed path is the same idea for a third party — nothing is requested until someone
-presses play. Nothing autoplays on load, and the caption under the frame appears with
-the video.
+1. A `<section class="video">` with a 16/9 frame, after the hero and before `</main>`.
+2. For a file: `<video controls preload="none" poster="/assets/video-poster.png">`.
+   `preload="none"` is the whole point — browsers otherwise fetch the first chunk of a
+   video on every page load, watched or not.
+3. For an embed: show the poster behind a real `<button>` and build the `<iframe>` on
+   click, so the third party is not contacted by visitors who never press play.
 
-For R2: create a bucket, upload `demo.mp4`, connect a custom domain such as
-`media.trymonaco.xyz` (public bucket access, no signed URLs needed for a launch video),
-and use that URL. For captions, drop a WebVTT file at `assets/demo.vtt` and uncomment
-the four `cc` lines in the player below `VIDEO_URL`.
+`assets/video-poster.png` is already in the repo for this.
 
 ## Data
 
