@@ -69,6 +69,20 @@ jobs:
           go vet ./...
           go test -race ./...
 
+  web:
+    name: Web (landing page)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+
   swift:
     name: Swift (mobile-core)
     runs-on: macos-15
@@ -82,3 +96,91 @@ jobs:
       - name: Test mobile-core
         working-directory: packages/mobile-core
         run: swift test
+
+  # Decides which of the path-filtered jobs below need to run. A Go-only change skips the
+  # iOS app build; the go and swift jobs above are not filtered.
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      ios: ${{ steps.filter.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            ios:
+              - 'apps/mobile/**'
+              - 'packages/mobile-core/**'
+              - 'scripts/ensure-ios-privy-config.sh'
+              - 'scripts/resolve-ios-sim.sh'
+              - 'scripts/ci/select-xcode.sh'
+              - 'scripts/qa/screens.sh'
+              - 'scripts/qa/sample-screens.txt'
+              - '.github/workflows/ci.yml'
+
+  ios:
+    name: iOS app (build, MonacoTests)
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      DERIVED_DATA: ${{ github.workspace }}/../DerivedData
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: scripts/ci/select-xcode.sh
+
+      # Only the resolved Swift packages are cached. Build products are not: a fresh checkout
+      # gives every source a new mtime, so a restored DerivedData is rebuilt from scratch anyway.
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.DERIVED_DATA }}/SourcePackages
+          key: spm-ios-${{ runner.os }}-${{ hashFiles('apps/mobile/Monaco.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: spm-ios-${{ runner.os }}-
+
+      # Compile-only Privy config: no .env.local, no secret. Unit tests need no environment.
+      - name: Placeholder app config
+        run: scripts/ensure-ios-privy-config.sh placeholder
+
+      - name: Sample-screen manifest covers every harness
+        run: scripts/qa/screens.sh --check
+
+      # Booting here lets the simulator start while the app compiles.
+      - name: Pick and boot a simulator
+        run: |
+          sim="$(scripts/resolve-ios-sim.sh)"
+          xcrun simctl list devices available | grep -F "$sim"
+          xcrun simctl boot "$sim"
+          echo "SIM=$sim" >> "$GITHUB_ENV"
+
+      - name: Build app and tests
+        run: |
+          xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIM" -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO -quiet build-for-testing
+
+      - name: Run MonacoTests
+        run: |
+          xcodebuild -project apps/mobile/Monaco.xcodeproj -scheme Monaco -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIM" -derivedDataPath "$DERIVED_DATA" \
+            -resultBundlePath "$RUNNER_TEMP/MonacoTests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO -only-testing:MonacoTests test-without-building
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MonacoTests-xcresult
+          path: ${{ runner.temp }}/MonacoTests.xcresult
+          if-no-files-found: ignore
+          retention-days: 7

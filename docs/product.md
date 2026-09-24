@@ -1,21 +1,77 @@
-# Monaco product
+# Monaco Product Brief
 
-This is the canonical product and architecture brief. It is not legal advice.
+Monaco is a social investing app that lets users start a hedge fund with their friends. Users form groups (cabals) that share one treasury and invest in tokenized stocks on Solana.
 
-**Monaco** is an iOS app where friends form a group, pool USDC, and buy tokenized US stocks on Solana.
+A cabal is one treasury, not a feed of separate accounts. Members contribute USDC, get a proportional stake, propose what the treasury should buy, and vote. Approved trades execute for the group. Each member's slice moves with the pot.
+
+The loop is: join, contribute, decide, watch the book, decide again.
 
 How to clone, run, and operate the repo: [README](../README.md). Milestone backlog: [docs/index.md](index.md).
 
-Prize target is the general Stocklana pool. Judges ask whether this could be a real app people use. The build does **not** use Meteora DBC or Clawpump. Execution is Jupiter Swap API v2 on **Solana mainnet** with small real USDC.
+## Cabals
 
-## Goals
+A user creates a cabal and invites people in. Each cabal has one shared portfolio. The creator sets who can join, who votes, the pass threshold, and how long a proposal lives. Detail: [Groups and invites](#groups-and-invites).
 
-- **Social investing, not crypto.** Copy is "invite friends", "add money", "buy Apple". No wallets, gas, seed phrases, or "mint" in user-facing copy.
-- **Leaderboard and P&L first.** Two boards, both percent return. Inside a group: who in this pot is winning. Across the app: which groups and which people are winning. Buys and cash-out serve those screens.
-- **Real on-chain execution.** Tokenized stocks land in the group treasury via Jupiter. A fiat-only mock does not meet the bar.
-- **Fair equity.** Members hold share units (claim tickets on the pot), not dollar IOUs. A redeem pays that member's slice of what the pot is worth now, in USDC, not a refund of what they put in.
-- **Cash out is a primary flow.** Partial redeem to USDC at a payout address the user proved they own. Full exit is the same path with the amount at max.
-- **Shippable Friday scope.** Native SwiftUI, Go API, Supabase Postgres, Privy auth and wallets, Jupiter swaps. No custom Solana program.
+One person can belong to many cabals: a friends pot, a coworkers pot, a pot built around one thesis. Home ranks cabals and people across the app. That history is the social graph. It is tied to money in, votes, and returns.
+
+## Shared ownership
+
+You own a fraction of the pot, not a dollar IOU. The first dollars in buy shares at $1. Later dollars buy shares at the current price, so a new member does not take earlier gains. Pot up, your slice up. Pot down, your slice down. Add capital any time, or redeem shares for USDC equal to that fraction now.
+
+Formula and worked numbers: [NAV and share units](#nav-and-share-units).
+
+## Performance
+
+Two boards, both percent return. Inside a cabal: who in this pot is ahead. Across the app: which cabals and which people are ahead. The boards are why people come back and argue about the next trade. Buys and cash-out exist so those numbers are real.
+
+## Agents
+
+A cabal can vote to hand a slice of the treasury to an agent. Example: 10% of the pot, one strategy. That slice sits in the portfolio next to positions members picked and USDC left idle.
+
+Members see capital in each agent, how that slice has done, and vote to raise it, cut it, pause it, or remove it. A cabal can start with every trade as a member vote, delegate after a strategy has a record, and pull the allocation if it does not work. The agent trades only inside the budget the vote set. The cabal remains the decision layer.
+
+## Solana, Privy, and Bankr
+
+Users see cabal, stake, and performance. Under that, three systems split the work: **Solana** settles, **Privy** holds the keys, **Bankr** runs the strategy. Solana is the chain because fees are a fraction of a cent, which keeps small group buys worth making.
+
+### Solana
+
+Settlement is Solana mainnet. There is no custom program.
+
+- Cash is USDC, mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. USDC on another chain is a different token. The deposit poller ignores it.
+- Positions are xStocks tokenized US stocks. Mints come from the xStocks public API, which is metadata only and does not execute trades. Detail: [Votes and buys](#votes-and-buys).
+- A passed member vote or a valid agent intent swaps on Jupiter, from the cabal treasury. The token lands in that treasury.
+- Fees are SOL, paid by the app relayer. Member wallets and treasuries need no SOL on the happy path. Funding: [README relayer](../README.md#relayer-fee-payer).
+
+Postgres holds share units, votes, NAV snapshots, and the agent budget. Solana holds the assets.
+
+### Privy
+
+Privy is sign-in and custody.
+
+- Sign-in is email or SMS OTP. No password in the product path.
+- Each member gets one Privy wallet. That address is the deposit inbox. Inbound USDC stays there as account balance until the member funds a cabal. `POST /v1/groups/{id}/fund` sweeps that amount into the treasury and credits share units at the current share price. Inbound USDC alone does not credit shares.
+- Each cabal gets one app-owned Privy server wallet. That wallet is the treasury. Member buys, agent fills, and redeems all sign from it.
+- The Go API signs sweeps, swaps, and payouts. Members do not approve each transaction. Wallet roles: [Wallets](#wallets).
+
+### Bankr
+
+Bankr is the strategy runtime. Monaco does not run the strategy process.
+
+A strategy ships as a [Bankr skill](https://skills.bankr.bot/): a package any agent host can load. The same skill can run on a laptop, a server, Cursor, Claude, the Bankr CLI, or another host. It needs the cabal agent key and a path to the Monaco API. It does not need to live next to the backend or inside the iOS app.
+
+Split of work:
+
+1. **Cabal votes the agent in.** Name plus a USDC allocation. Later votes pause, resume, or revoke. On pass, the proposer gets the agent key. Key rules and error codes: [agent trading](agent-trading.md).
+2. **The skill runs wherever it was installed.** It reads the cabal catalog (`GET /v1/groups/{id}/assets`) and posts buy or sell intents with `X-Monaco-Agent-Key`. No member JWT.
+3. **Monaco enforces the vote.** A bad or revoked key, a paused agent, an intent over the allocation, and too many wrong keys are each refused.
+4. **The fill uses the member-vote path.** The Go API swaps on Jupiter and Privy signs the cabal treasury. The position lands in the shared pot and on the cabal activity feed. It does not land in a Bankr wallet. A skill that spent from its own wallet would split the pot and break share accounting.
+
+Bankr tools (prices, research, other skills in the catalog) can inform the decision. They do not sign the treasury. The only order Monaco fills is an intent inside the voted budget.
+
+`agents/momentum-bot` is the reference shape: read prices, apply one rule, POST an intent, stop on 401. Fork that loop or encode it as a Bankr skill. The API does not care which host sent the request.
+
+Operator steps: [connect an agent](how-to/connect-an-agent.md). HTTP contract: [agent trading](agent-trading.md).
 
 ## How it works
 
@@ -56,20 +112,16 @@ The xStocks public API is mint metadata only. It is not an execution rail. Poll 
 
 ## Architecture
 
-No custom on-chain vault. Privy server wallets hold assets. Supabase Postgres holds member share units, votes, NAV snapshots, and P&L inputs (net USDC in). A Go API talks to Privy and Jupiter.
-
-Solana transaction fees are paid by an **app relayer**. Treasuries may hold no SOL. Users never see gas. Relayer env and funding: [README](../README.md#relayer-fee-payer).
-
-The backend can sign the treasury. That custodial fact is accepted for the hackathon. Demo the buy. Do not spend UX on a trust explainer.
+Who does what is in [Solana, Privy, and Bankr](#solana-privy-and-bankr). The API signs the treasury. The product UI does not explain custody.
 
 ```
-SwiftUI (iOS 18+)
-  → Privy Swift (auth, member wallets)
-  → Go API (groups, invites, votes, share ledger, sweeps, swaps, P&L)
-  → Supabase Postgres DB
-  → Privy Solana server wallet per group (treasury)
-  → App fee payer (SOL fees)
-  → Jupiter Swap API v2 (USDC → xStocks)
+SwiftUI + Privy OTP
+Bankr skill (any host, agent key)
+        → Go API
+            → Postgres (shares, votes, NAV, agent budget)
+            → Privy treasury on Solana
+                → Jupiter (USDC → xStocks)
+                → relayer pays SOL
 ```
 
 ### Retrying money requests
@@ -212,6 +264,7 @@ They receive USDC equal to their redeemed fraction of the pot at that moment, no
 | API              | Go                                                                                                           |
 | Ledger           | [Supabase](https://supabase.com/) Postgres. Share units, votes, NAV snapshots, idempotent tx log.            |
 | Execution        | [Jupiter Swap API v2](https://dev.jup.ag/docs/swap) on mainnet                                               |
+| Agent strategies | [Bankr skills](https://skills.bankr.bot/). Any host. Intents only. Fills stay in the Privy treasury.          |
 | Fees             | App relayer (SOL)                                                                                            |
 | Asset metadata   | [xStocks public API](https://api.xstocks.fi/api/v2/public/assets) (mints only)                               |
 | Marks            | [Pyth Hermes](https://docs.pyth.network/price-feeds/core/api-instances-and-providers/hermes), then Jupiter Price API; cost basis for display only |
@@ -232,7 +285,6 @@ Judges should spend most of the live pass on P&L. Show the in-group member board
 
 - Custom on-chain vault or share-token program
 - On-chain voting
-- Meteora DBC, DAMM, and Clawpump prize tracks
 - Privy production webhooks (Enterprise)
 - Android, web client, copy-trading network
 - Primary issuer mint or redeem APIs (Backed client, institutional gates). Secondary Jupiter path only.

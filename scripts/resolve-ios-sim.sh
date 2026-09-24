@@ -37,12 +37,20 @@ slim_ready() {
 pick_available_udid() {
   if command -v python3 >/dev/null 2>&1; then
     simctl list devices available -j | python3 -c '
-import json, sys
+import json, re, sys
 data = json.load(sys.stdin)
 booted = None
 any_iphone = None
 any_ios = None
-for runtime, devices in data.get("devices", {}).items():
+
+def runtime_version(runtime):
+    # com.apple.CoreSimulator.SimRuntime.iOS-26-0 -> (26, 0)
+    return tuple(int(n) for n in re.findall(r"\d+", runtime.rsplit("iOS", 1)[-1]))
+
+# Newest runtime first: an old runtime may sit below the app deployment target
+# (a fresh CI runner lists several), and the newest one matches the newest Xcode.
+runtimes = sorted(data.get("devices", {}).items(), key=lambda item: runtime_version(item[0]), reverse=True)
+for runtime, devices in runtimes:
     if "iOS" not in runtime and "SimRuntime.iOS" not in runtime:
         continue
     for dev in devices:
