@@ -219,6 +219,16 @@ struct StockMark: View {
     /// A coin, not a tile. These are tokenised stocks, and a disc reads as one at a glance.
     private var shape: Circle { Circle() }
 
+    /// The coin's face. Gold, because these are tokens — a grey disc read as a disabled
+    /// control, and the warm face also separates a stock from a cabal's tinted tile at a
+    /// glance. Dark mode drops the luminance rather than the hue so it still reads as metal.
+    private static let coinFace = Color.adaptive(light: 0xF7EBCE, dark: 0x3A3223)
+
+    /// The rim: the same gold a shade down. A hairline, not a border — at 0.5pt it describes
+    /// the coin's edge without drawing a ring around the logo.
+    private static let coinRim = Color.adaptive(light: 0xD8BC77, dark: 0x6B5A35)
+    private static let rimWidth: CGFloat = 0.5
+
     /// The issuer's artwork frames every company logo with four grey arrows that reach about
     /// 16% in from each edge, so drawn whole they show as triangles poking out around the mark.
     /// Showing the middle of the image crops the frame away.
@@ -228,8 +238,10 @@ struct StockMark: View {
     /// artwork only — a logo from anywhere else is drawn as it comes.
     private static let issuerArtworkVisibleFraction: CGFloat = 0.70
 
-    /// How much of the disc the mark itself occupies. The rest is breathing room, so a square
-    /// logo sits inside the circle rather than being cut by it.
+    /// How much of the disc the mark itself occupies. Most issuer logos are solid squares —
+    /// Apple's black tile, Tesla's red one — not marks on transparency, so they are clipped to
+    /// the coin and this cannot usefully exceed the largest square a circle holds (0.707).
+    /// 0.72 fills the face to its edge and lets the rim, not a ring of fill, be the border.
     private static let markInset: CGFloat = 0.72
 
     /// Centre-crops the issuer's arrow frame away. Done once when the image loads, not on every
@@ -250,16 +262,16 @@ struct StockMark: View {
 
     var body: some View {
         shape
-            .fill(MonacoTheme.surfaceSunken)
+            .fill(StockMark.coinFace)
             .frame(width: size, height: size)
             .overlay {
-                shape.strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+                shape.strokeBorder(StockMark.coinRim, lineWidth: StockMark.rimWidth)
             }
             .overlay {
                 if let logo = logo ?? logoURL.flatMap({ MonacoRemoteImageStore.stockLogos.cachedImage(for: $0) }) {
                     // Fitted, not filled. Filling a disc with a square mark (Microsoft's four
                     // tiles) slices its corners off; fitting keeps every logo whole and lets the
-                    // disc be the frame around it.
+                    // coin's face be the frame around it.
                     Image(uiImage: StockMark.croppedToMark(logo))
                         .resizable()
                         .scaledToFit()
