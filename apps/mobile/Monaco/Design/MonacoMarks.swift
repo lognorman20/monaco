@@ -221,13 +221,42 @@ struct StockMark: View {
 
     /// The coin's face. Gold, because these are tokens — a grey disc read as a disabled
     /// control, and the warm face also separates a stock from a cabal's tinted tile at a
-    /// glance. Dark mode drops the luminance rather than the hue so it still reads as metal.
-    private static let coinFace = Color.adaptive(light: 0xF7EBCE, dark: 0x3A3223)
+    /// glance. Lit from the top left, so the face has a direction and does not read as a flat
+    /// swatch. Dark mode drops the luminance rather than the hue so it still reads as metal.
+    private static var coinFace: LinearGradient {
+        LinearGradient(
+            colors: [
+                Color.adaptive(light: 0xFCF5E4, dark: 0x4A4030),
+                Color.adaptive(light: 0xEBD9A8, dark: 0x2E2719),
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
 
-    /// The rim: the same gold a shade down. A hairline, not a border — at 0.5pt it describes
-    /// the coin's edge without drawing a ring around the logo.
-    private static let coinRim = Color.adaptive(light: 0xD8BC77, dark: 0x6B5A35)
-    private static let rimWidth: CGFloat = 0.5
+    /// The rim. Metal is not one colour: a real rim catches the light at two points and falls
+    /// into shadow at the two between them, which is what makes a disc read as struck rather
+    /// than drawn. An angular sweep around the circle is the cheapest honest way to say that —
+    /// highlight at the top left, shadow at the top right and bottom left, a second, weaker
+    /// highlight at the bottom right where the light bounces back.
+    private static var coinRim: AngularGradient {
+        AngularGradient(
+            stops: [
+                .init(color: Color.adaptive(light: 0xFFF6DC, dark: 0x8A7648), location: 0.00),
+                .init(color: Color.adaptive(light: 0xB08E3E, dark: 0x4A3F26), location: 0.20),
+                .init(color: Color.adaptive(light: 0xE8CE86, dark: 0x6F5F3A), location: 0.42),
+                .init(color: Color.adaptive(light: 0xA8873A, dark: 0x453A22), location: 0.62),
+                .init(color: Color.adaptive(light: 0xF3E4B4, dark: 0x7D6B42), location: 0.82),
+                .init(color: Color.adaptive(light: 0xFFF6DC, dark: 0x8A7648), location: 1.00),
+            ],
+            center: .center,
+            angle: .degrees(-135)
+        )
+    }
+
+    /// Thinner than a hairline separator on purpose: at 0.33pt the rim is a single device pixel
+    /// on a 3x screen, so it describes the coin's edge without drawing a ring around the logo.
+    private static let rimWidth: CGFloat = 0.33
 
     /// The issuer's artwork frames every company logo with four grey arrows that reach about
     /// 16% in from each edge, so drawn whole they show as triangles poking out around the mark.
