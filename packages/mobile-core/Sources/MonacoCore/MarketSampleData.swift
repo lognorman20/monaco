@@ -255,6 +255,189 @@ public enum MarketSampleData {
         )
     }
 
+    // MARK: - List rows
+
+    /// A day of closes for a row's sparkline, shaped like the backend's downsample
+    /// of the 1D series. Deterministic, so a screenshot diff means a real change:
+    /// `drift` is the whole-day move and `wobble` how noisy the path to it is.
+    public static func spark(
+        startUsdcMicros: Int64 = 226_500_000,
+        driftUsdcMicros: Int64 = 5_500_000,
+        wobbleUsdcMicros: Int64 = 900_000,
+        points: Int = 24
+    ) -> [Int64] {
+        guard points > 1 else { return [] }
+        return (0..<points).map { index in
+            let progress = Double(index) / Double(points - 1)
+            let wobble = sin(Double(index) / 2.6) * Double(wobbleUsdcMicros)
+            return startUsdcMicros + Int64((Double(driftUsdcMicros) * progress + wobble).rounded())
+        }
+    }
+
+    /// The catalogue's logo URL for a ticker, in the shape the xStocks metadata host
+    /// publishes: `https://xstocks-metadata.backed.fi/logos/tokens/AAPLx.png`.
+    ///
+    /// Sample rows carry no logo by default, so a screen rendered from this data is
+    /// deterministic and needs no network — which is what the UI tests rely on. A
+    /// demo or a screenshot that wants the real marks opts in with
+    /// `-MonacoSampleLogos`, and `sampleLogosRequested` reports that.
+    public static func logoURL(forSymbol symbol: String) -> String {
+        "https://xstocks-metadata.backed.fi/logos/tokens/\(symbol).png"
+    }
+
+    /// Whether this process was launched asking sample rows to carry real logos.
+    public static var sampleLogosRequested: Bool {
+        ProcessInfo.processInfo.arguments.contains("-MonacoSampleLogos")
+    }
+
+    /// `logoUrl` as given, or the catalogue URL when the process asked for real logos.
+    public static func resolvedLogoURL(explicit: String?, symbol: String) -> String? {
+        if let explicit { return explicit }
+        return sampleLogosRequested ? logoURL(forSymbol: symbol) : nil
+    }
+
+    public static func listAsset(
+        symbol: String,
+        name: String,
+        priceUsdcMicros: Int64,
+        change24h: String?,
+        spark: [Int64]? = nil,
+        logoUrl: String? = nil
+    ) -> MarketAssetDTO {
+        let series = spark ?? Self.spark(
+            startUsdcMicros: priceUsdcMicros,
+            driftUsdcMicros: Int64(Double(priceUsdcMicros) * 0.018),
+            wobbleUsdcMicros: Int64(Double(priceUsdcMicros) * 0.004)
+        )
+        return MarketAssetDTO(
+            symbol: symbol,
+            name: name,
+            solanaMint: "Xs" + String(symbol.uppercased().prefix(4)) + "1111111111111111111111111111",
+            routable: true,
+            priceUsdcMicros: priceUsdcMicros,
+            change24h: change24h,
+            sparkUsdcMicros: series,
+            // The production shape: Pyth serves the underlying equity, Jupiter
+            // prices the token. Sample rows carry the same labels so the harness
+            // renders what the app really gets rather than a simplified version.
+            sparkBasis: series.isEmpty ? nil : .underlying,
+            sparkBasisSymbol: series.isEmpty ? nil : String(symbol.dropLast()),
+            changeBasis: change24h == nil ? nil : .token,
+            changeBasisSymbol: change24h == nil ? nil : symbol,
+            logoUrl: Self.resolvedLogoURL(explicit: logoUrl, symbol: symbol)
+        )
+    }
+
+    /// A popular list with the awkward rows in it on purpose: a faller, a stock
+    /// that did not move, one with no day change at all, and one with no series —
+    /// the row has to stay readable in every one of those.
+    public static let popularAssets: [MarketAssetDTO] = [
+        listAsset(symbol: "AAPLx", name: "Apple", priceUsdcMicros: 232_050_000, change24h: "0.012400"),
+        listAsset(symbol: "NVDAx", name: "NVIDIA", priceUsdcMicros: 178_200_000, change24h: "0.038600"),
+        // The divergence, on purpose: the token is down on the day while the drawn
+        // window — Tesla on NASDAQ — rose. The line is tinted from the line, the
+        // pill from the token, and the row has to survive the two disagreeing.
+        listAsset(
+            symbol: "TSLAx",
+            name: "Tesla",
+            priceUsdcMicros: 412_700_000,
+            change24h: "-0.024100",
+            spark: spark(startUsdcMicros: 404_100_000, driftUsdcMicros: 9_200_000, wobbleUsdcMicros: 1_600_000)
+        ),
+        listAsset(symbol: "MSFTx", name: "Microsoft", priceUsdcMicros: 501_300_000, change24h: "0.000000"),
+        listAsset(symbol: "AMZNx", name: "Amazon", priceUsdcMicros: 189_400_000, change24h: "-0.008300"),
+        // No day change: the pill shows "—" and the row still lays out.
+        listAsset(symbol: "BRK.Bx", name: "Berkshire Hathaway", priceUsdcMicros: 468_900_000, change24h: nil),
+        // No series: the row draws no sparkline rather than a flat line.
+        listAsset(symbol: "NEWx", name: "Newly listed", priceUsdcMicros: 41_250_000, change24h: "0.004500", spark: []),
+    ]
+
+    // MARK: - In your cabals / up for vote
+
+    public static let heldAssets: [HeldAssetDTO] = [
+        HeldAssetDTO(
+            asset: popularAssets[0],
+            cabals: [
+                HeldAssetCabalDTO(
+                    groupId: "grp_weekend",
+                    name: "Weekend investors",
+                    units: "4.20",
+                    valueUsd: "974.61",
+                    dollarPnl: "112.40",
+                    mySliceUsd: "243.65"
+                ),
+                HeldAssetCabalDTO(
+                    groupId: "grp_semis",
+                    name: "Semis or bust",
+                    units: "1.10",
+                    valueUsd: "255.26",
+                    dollarPnl: "-18.90",
+                    mySliceUsd: "51.05"
+                ),
+            ],
+            totalValueUsd: "1229.87",
+            totalDollarPnl: "93.50",
+            mySliceUsd: "294.70"
+        ),
+        HeldAssetDTO(
+            asset: popularAssets[2],
+            cabals: [
+                HeldAssetCabalDTO(
+                    groupId: "grp_weekend",
+                    name: "Weekend investors",
+                    units: "0.75",
+                    valueUsd: "309.53",
+                    dollarPnl: "-42.10",
+                    mySliceUsd: "77.38"
+                ),
+            ],
+            totalValueUsd: "309.53",
+            totalDollarPnl: "-42.10",
+            mySliceUsd: "77.38"
+        ),
+        // A position so small the slice rounds to nothing: the line drops the slice
+        // rather than reading "your slice $0.00".
+        HeldAssetDTO(
+            asset: popularAssets[4],
+            cabals: [
+                HeldAssetCabalDTO(
+                    groupId: "grp_semis",
+                    name: "Semis or bust",
+                    units: "0.01",
+                    valueUsd: "1.89",
+                    dollarPnl: "0.04",
+                    mySliceUsd: "0.00"
+                ),
+            ],
+            totalValueUsd: "1.89",
+            totalDollarPnl: "0.04",
+            mySliceUsd: "0.00"
+        ),
+    ]
+
+    public static let votableAssets: [VotableAssetDTO] = [
+        VotableAssetDTO(
+            asset: popularAssets[1],
+            openProposals: 1,
+            cabalNames: ["Semis or bust"],
+            soonestExpiresAt: tradingTuesday.addingTimeInterval(4 * 3600)
+        ),
+        VotableAssetDTO(
+            asset: popularAssets[3],
+            openProposals: 3,
+            cabalNames: ["Weekend investors", "Semis or bust", "Rent"],
+            soonestExpiresAt: tradingTuesday.addingTimeInterval(35 * 60)
+        ),
+    ]
+
+    public static func heldAssetsResponse(
+        held: [HeldAssetDTO] = heldAssets,
+        upForVote: [VotableAssetDTO] = votableAssets,
+        market: MarketStatusDTO = sessionOpen
+    ) -> HeldAssetsResponseDTO {
+        HeldAssetsResponseDTO(held: held, upForVote: upForVote, market: market)
+    }
+
     // MARK: - Detail
 
     public static let liquidity = AssetLiquidityDTO(

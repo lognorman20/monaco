@@ -163,6 +163,8 @@ struct GroupDetailSampleHarness: View {
                 GroupActivityListView(auth: auth, items: GroupDetailSampleData.activity, retryingTransactionIDs: [], onRetry: { _ in })
             case .proposals:
                 ProposalFeedView(service: proposalService, groupId: view.id)
+            case .stock(let symbol):
+                AssetDetailView(auth: auth, symbol: symbol)
             case .addMoney, .chat:
                 Text("Not in the sample harness")
                     .foregroundStyle(MonacoTheme.muted)
@@ -277,10 +279,20 @@ enum GroupDetailSampleData {
     /// scenarios say the viewer created the cabal, so the others must not offer
     /// the controls at all.
     static func pictureView(for scenario: GroupDetailSampleScenario) -> GroupViewDTO {
-        var view = self.view
-        view.pictureUrl = initialPictureURL(for: scenario)
-        view.isCreator = scenario != .pictureNotCreator
-        return view
+        let view = self.view
+        return GroupViewDTO(
+            id: view.id,
+            name: view.name,
+            treasuryAddress: view.treasuryAddress,
+            potTotalUsd: view.potTotalUsd,
+            pot: view.pot,
+            you: view.you,
+            members: view.members,
+            proposals: view.proposals,
+            agent: view.agent,
+            pictureUrl: initialPictureURL(for: scenario),
+            isCreator: scenario != .pictureNotCreator
+        )
     }
 
     /// A generated square written to tmp, so the cabal mark shows a picture with

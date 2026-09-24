@@ -3,7 +3,7 @@ import XCTest
 @testable import Monaco
 
 @MainActor
-final class MonacoAvatarImageStoreTests: XCTestCase {
+final class MonacoRemoteImageStoreTests: XCTestCase {
     override func setUp() {
         super.setUp()
         AvatarStubProtocol.reset()
@@ -11,20 +11,20 @@ final class MonacoAvatarImageStoreTests: XCTestCase {
 
     func testDownsample_capsTheLongestEdge() throws {
         let data = try XCTUnwrap(Self.jpeg(width: 1600, height: 1200))
-        let image = try XCTUnwrap(MonacoAvatarImageStore.downsampledImage(from: data))
-        XCTAssertEqual(max(image.size.width, image.size.height), CGFloat(MonacoAvatarImageStore.maxPixelSize))
+        let image = try XCTUnwrap(MonacoRemoteImageStore.downsampledImage(from: data, maxPixelSize: MonacoRemoteImageStore.avatarMaxPixelSize))
+        XCTAssertEqual(max(image.size.width, image.size.height), CGFloat(MonacoRemoteImageStore.avatarMaxPixelSize))
         XCTAssertEqual(image.size.width / image.size.height, 1600.0 / 1200.0, accuracy: 0.01)
     }
 
     func testDownsample_malformedDataIsNil() {
-        XCTAssertNil(MonacoAvatarImageStore.downsampledImage(from: Data("<html>not an image</html>".utf8)))
-        XCTAssertNil(MonacoAvatarImageStore.downsampledImage(from: Data()))
+        XCTAssertNil(MonacoRemoteImageStore.downsampledImage(from: Data("<html>not an image</html>".utf8), maxPixelSize: 320))
+        XCTAssertNil(MonacoRemoteImageStore.downsampledImage(from: Data(), maxPixelSize: 320))
     }
 
     func testSecondRequest_isServedFromMemoryWithoutTheNetwork() async throws {
         let url = URL(string: "https://avatars.test/maya.jpg")!
         AvatarStubProtocol.respond(to: url, status: 200, body: try XCTUnwrap(Self.jpeg(width: 640, height: 640)))
-        let store = MonacoAvatarImageStore(session: AvatarStubProtocol.session())
+        let store = MonacoRemoteImageStore(session: AvatarStubProtocol.session())
 
         XCTAssertNil(store.cachedImage(for: url))
         let first = await store.image(for: url)
@@ -39,7 +39,7 @@ final class MonacoAvatarImageStoreTests: XCTestCase {
     func testConcurrentRequests_shareOneDownload() async throws {
         let url = URL(string: "https://avatars.test/jordan.jpg")!
         AvatarStubProtocol.respond(to: url, status: 200, body: try XCTUnwrap(Self.jpeg(width: 640, height: 640)))
-        let store = MonacoAvatarImageStore(session: AvatarStubProtocol.session())
+        let store = MonacoRemoteImageStore(session: AvatarStubProtocol.session())
 
         async let first = store.image(for: url)
         async let second = store.image(for: url)
@@ -52,7 +52,7 @@ final class MonacoAvatarImageStoreTests: XCTestCase {
     func testNon200_isNilAndNotCached() async {
         let url = URL(string: "https://avatars.test/missing.jpg")!
         AvatarStubProtocol.respond(to: url, status: 404, body: Data("not found".utf8))
-        let store = MonacoAvatarImageStore(session: AvatarStubProtocol.session())
+        let store = MonacoRemoteImageStore(session: AvatarStubProtocol.session())
 
         let image = await store.image(for: url)
         XCTAssertNil(image)
@@ -62,7 +62,7 @@ final class MonacoAvatarImageStoreTests: XCTestCase {
     func testNetworkFailure_isNil() async {
         let url = URL(string: "https://avatars.test/offline.jpg")!
         AvatarStubProtocol.fail(url, with: URLError(.notConnectedToInternet))
-        let store = MonacoAvatarImageStore(session: AvatarStubProtocol.session())
+        let store = MonacoRemoteImageStore(session: AvatarStubProtocol.session())
 
         let image = await store.image(for: url)
         XCTAssertNil(image)
@@ -71,7 +71,7 @@ final class MonacoAvatarImageStoreTests: XCTestCase {
     func testMalformedBody_isNil() async {
         let url = URL(string: "https://avatars.test/html.jpg")!
         AvatarStubProtocol.respond(to: url, status: 200, body: Data("<html></html>".utf8))
-        let store = MonacoAvatarImageStore(session: AvatarStubProtocol.session())
+        let store = MonacoRemoteImageStore(session: AvatarStubProtocol.session())
 
         let image = await store.image(for: url)
         XCTAssertNil(image)

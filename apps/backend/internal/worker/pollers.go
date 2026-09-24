@@ -5,4 +5,5 @@ const (
 	PollerSweep           = "deposit_sweep"
 	PollerProposalExecute = "proposal_execute"
 	PollerRedeemRecovery  = "redeem_recovery"
+	PollerSparkWarm       = "spark_warm"
 )

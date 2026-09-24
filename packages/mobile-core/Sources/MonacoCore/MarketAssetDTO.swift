@@ -7,8 +7,48 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
     public let routable: Bool
     public let priceUsdcMicros: Int64?
     public let change24h: String?
+    /// The day's closes in USDC micros, downsampled to about two dozen points, for
+    /// the row's sparkline. The list routes batch this from their own chart cache:
+    /// a row must never fetch its own history, or a screen of twenty rows is twenty
+    /// requests that all arrive after the user has scrolled past.
+    ///
+    /// Empty when the backend could not source a day series. An empty series draws
+    /// no sparkline rather than a flat line, which would read as "this stock did not
+    /// move" instead of "we do not know how it moved".
+    public let sparkUsdcMicros: [Int64]
+    /// Which instrument `sparkUsdcMicros` is about, and which instrument
+    /// `change24h` is about.
+    ///
+    /// They are not always the same one, and that is the point. `change24h` is the
+    /// xStock token's 24h move on Solana; the series comes from Pyth, which serves
+    /// the underlying equity on its home exchange. AAPLx and Apple genuinely
+    /// diverge. A row that draws one and tints it by the other is asserting they
+    /// are the same instrument, so when these disagree the row tints the drawn line
+    /// from the drawn series instead.
+    ///
+    /// Nil against a backend that does not send them, which reads as "not stated"
+    /// and leaves the old behaviour — tint by the reported change — in place.
+    public let sparkBasis: MarketPriceBasis?
+    public let sparkBasisSymbol: String?
+    public let changeBasis: MarketPriceBasis?
+    public let changeBasisSymbol: String?
+    /// The company's logo. Nil — or a URL that fails to load — falls back to the
+    /// ticker tile, so a row never waits on an image to be readable.
+    public let logoUrl: String?
 
     public var id: String { symbol }
+
+    public var logoURL: URL? {
+        guard let logoUrl, !logoUrl.isEmpty else { return nil }
+        return URL(string: logoUrl)
+    }
+
+    /// True when the drawn series and the reported day change are about different
+    /// instruments, so the change's sign says nothing about the line's shape.
+    public var sparkAndChangeDisagreeOnInstrument: Bool {
+        guard let sparkBasis, let changeBasis else { return false }
+        return sparkBasis != changeBasis
+    }
 
     public init(
         symbol: String,
@@ -16,7 +56,13 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         solanaMint: String,
         routable: Bool,
         priceUsdcMicros: Int64? = nil,
-        change24h: String? = nil
+        change24h: String? = nil,
+        sparkUsdcMicros: [Int64] = [],
+        sparkBasis: MarketPriceBasis? = nil,
+        sparkBasisSymbol: String? = nil,
+        changeBasis: MarketPriceBasis? = nil,
+        changeBasisSymbol: String? = nil,
+        logoUrl: String? = nil
     ) {
         self.symbol = symbol
         self.name = name
@@ -24,6 +70,40 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         self.routable = routable
         self.priceUsdcMicros = priceUsdcMicros
         self.change24h = change24h
+        self.sparkUsdcMicros = sparkUsdcMicros
+        self.sparkBasis = sparkBasis
+        self.sparkBasisSymbol = sparkBasisSymbol
+        self.changeBasis = changeBasis
+        self.changeBasisSymbol = changeBasisSymbol
+        self.logoUrl = logoUrl
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case symbol, name, solanaMint, routable, priceUsdcMicros, change24h
+        case sparkUsdcMicros = "spark"
+        case sparkBasis, sparkBasisSymbol, changeBasis, changeBasisSymbol
+        case logoUrl
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        symbol = try container.decode(String.self, forKey: .symbol)
+        name = try container.decode(String.self, forKey: .name)
+        solanaMint = try container.decode(String.self, forKey: .solanaMint)
+        // Required, deliberately. `spark` and `logoUrl` default because a backend
+        // that cannot source them still serves a usable row; `routable` does not,
+        // because defaulting it to false silently disables Buy on every screen in
+        // the app. A backend that stops sending it should fail loudly here.
+        routable = try container.decode(Bool.self, forKey: .routable)
+        priceUsdcMicros = try container.decodeIfPresent(Int64.self, forKey: .priceUsdcMicros)
+        change24h = try container.decodeIfPresent(String.self, forKey: .change24h)
+        // An absent array, a null and an empty one all mean "no series to draw".
+        sparkUsdcMicros = try container.decodeIfPresent([Int64].self, forKey: .sparkUsdcMicros) ?? []
+        sparkBasis = try container.decodeIfPresent(MarketPriceBasis.self, forKey: .sparkBasis)
+        sparkBasisSymbol = try container.decodeIfPresent(String.self, forKey: .sparkBasisSymbol)
+        changeBasis = try container.decodeIfPresent(MarketPriceBasis.self, forKey: .changeBasis)
+        changeBasisSymbol = try container.decodeIfPresent(String.self, forKey: .changeBasisSymbol)
+        logoUrl = try container.decodeIfPresent(String.self, forKey: .logoUrl)
     }
 }
 

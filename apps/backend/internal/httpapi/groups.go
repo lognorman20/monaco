@@ -18,6 +18,9 @@ type GroupHandlers struct {
 	Governance *app.GovernanceService
 	Home       *app.HomeService
 	Redeem     *app.RedeemService
+	// Market decorates holdings rows with the same day change and day series the
+	// Stocks tab shows. Nil leaves those fields out; the pot itself is unaffected.
+	Market *MarketRowSource
 }
 
 type joinPolicyRequest struct {
@@ -286,8 +289,12 @@ func (h *GroupHandlers) ListJoinRequestsHandler(w http.ResponseWriter, r *http.R
 	logJSONOK(ctx, log, "ok", "group_id", groupID, "count", len(respItems))
 }
 
-func (h *GroupHandlers) ApproveJoinRequestHandler(w http.ResponseWriter, r *http.Request) { h.decideJoinRequest(w, r, true) }
-func (h *GroupHandlers) DenyJoinRequestHandler(w http.ResponseWriter, r *http.Request)   { h.decideJoinRequest(w, r, false) }
+func (h *GroupHandlers) ApproveJoinRequestHandler(w http.ResponseWriter, r *http.Request) {
+	h.decideJoinRequest(w, r, true)
+}
+func (h *GroupHandlers) DenyJoinRequestHandler(w http.ResponseWriter, r *http.Request) {
+	h.decideJoinRequest(w, r, false)
+}
 
 func (h *GroupHandlers) decideJoinRequest(w http.ResponseWriter, r *http.Request, approve bool) {
 	ctx := r.Context()
@@ -385,6 +392,24 @@ type groupViewPotRowResponse struct {
 	DollarPnL   string `json:"dollarPnl"`
 	AfterHours  *bool  `json:"afterHours"`
 	TokenAmount string `json:"tokenAmount,omitempty"`
+	// Change24h and Spark are the market's figures for this stock, not the
+	// cabal's: how the stock moved today, and the shape it moved in. DollarPnL
+	// above is what this cabal has made since it bought, which is a different
+	// question, and a holdings row shows both.
+	//
+	// Absent when the market side could not be read. A holding is still a
+	// holding, and the row renders without them.
+	Change24h *string `json:"change24h,omitempty"`
+	Spark     []int64 `json:"spark,omitempty"`
+	// SparkBasis, SparkBasisSymbol and ChangeBasis name the instrument behind each
+	// of those two figures. Spark comes from Pyth, which serves the underlying
+	// equity; Change24h comes from Jupiter, which prices the xStock token. They
+	// diverge, and a row that drew one and tinted it by the other was asserting
+	// they were the same thing.
+	SparkBasis       string `json:"sparkBasis,omitempty"`
+	SparkBasisSymbol string `json:"sparkBasisSymbol,omitempty"`
+	ChangeBasis      string `json:"changeBasis,omitempty"`
+	LogoURL          string `json:"logoUrl,omitempty"`
 }
 
 type groupViewMemberSliceResponse struct {
@@ -457,18 +482,7 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	pot := make([]groupViewPotRowResponse, 0, len(result.Pot))
-	for _, row := range result.Pot {
-		pot = append(pot, groupViewPotRowResponse{
-			Symbol:      row.Symbol,
-			Units:       row.Units,
-			MarkUsd:     row.MarkUsd,
-			ValueUsd:    row.ValueUsd,
-			DollarPnL:   row.DollarPnL,
-			AfterHours:  row.AfterHours,
-			TokenAmount: row.TokenAmount,
-		})
-	}
+	pot := h.potRowResponses(ctx, result.Pot)
 	members := make([]groupViewMemberRowResponse, 0, len(result.Members))
 	for _, row := range result.Members {
 		members = append(members, groupViewMemberRowResponse{
@@ -580,7 +594,7 @@ func (h *GroupHandlers) ListGroupActivityHandler(w http.ResponseWriter, r *http.
 			AmountMicros:     item.AmountMicros,
 			CreatedAt:        item.CreatedAt.UTC().Format(time.RFC3339),
 			TxSignature:      item.TxSignature,
-			InitiatedBy:        item.InitiatedBy,
+			InitiatedBy:      item.InitiatedBy,
 			AgentDisplayName: item.AgentDisplayName,
 		}
 		if item.TokenAmount > 0 {

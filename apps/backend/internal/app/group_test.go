@@ -10,7 +10,7 @@ import (
 )
 
 type failingEnsureTreasuryClient struct {
-	inner           privy.Client
+	inner             privy.Client
 	ensureTreasuryErr error
 }
 

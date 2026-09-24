@@ -156,9 +156,10 @@ final class MonacoUITests: XCTestCase {
         ).element(boundBy: 0)
         XCTAssertTrue(popularChip.waitForExistence(timeout: 30), "popular strip with prices")
 
-        let search = app.textFields["assets-search-field"].exists
-            ? app.textFields["assets-search-field"]
-            : app.textFields["monaco-search-field"]
+        // The design system names the field; the Stocks tab does not re-name it.
+        // One identifier, stated once — the fallback branch this used to carry was
+        // the only thing keeping a dead identifier looking alive.
+        let search = app.textFields["monaco-search-field"]
         XCTAssertTrue(search.waitForExistence(timeout: 8), "search field")
         search.tap()
         search.typeText("AAPL")
@@ -216,9 +217,7 @@ final class MonacoUITests: XCTestCase {
             app.navigationBars.buttons.element(boundBy: 0).tap()
         }
         tabButton(app, "Assets").tap()
-        let searchField = app.textFields["assets-search-field"].exists
-            ? app.textFields["assets-search-field"]
-            : app.textFields["monaco-search-field"]
+        let searchField = app.textFields["monaco-search-field"]
         if searchField.waitForExistence(timeout: 5), let value = searchField.value as? String, !value.isEmpty {
             searchField.tap()
             searchField.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: value.count))

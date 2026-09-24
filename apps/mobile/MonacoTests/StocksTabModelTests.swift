@@ -7,6 +7,7 @@ import Testing
 private typealias MarketAssetDTO = Monaco.MarketAssetDTO
 private typealias ListMarketAssetsResponse = Monaco.ListMarketAssetsResponse
 private typealias PopularAssetsResponse = Monaco.PopularAssetsResponse
+private typealias HeldAssetsResponse = Monaco.HeldAssetsResponse
 
 @MainActor
 private final class StubStocksDataSource: StocksTabDataSource {
@@ -20,6 +21,12 @@ private final class StubStocksDataSource: StocksTabDataSource {
     var offsetErrors: [Int: Error] = [:]
     var errors: [String: Error] = [:]
     var popularError: Error?
+    var heldCalls = 0
+    var heldError: Error?
+    var heldResponse = HeldAssetsResponse(held: [], upForVote: [])
+    /// Rows served by `popular`, so a test can shape the mover strip.
+    var popularAssets: [MarketAssetDTO] = [StubStocksDataSource.asset(symbol: "AAPLx")]
+    var popularMarket: MarketStatusDTO?
 
     func search(query: String, offset: Int, limit: Int) async throws -> ListMarketAssetsResponse {
         searches.append((query, offset))
@@ -39,17 +46,28 @@ private final class StubStocksDataSource: StocksTabDataSource {
     func popular(limit: Int) async throws -> PopularAssetsResponse {
         popularCalls += 1
         if let popularError { throw popularError }
-        return PopularAssetsResponse(assets: [Self.asset(symbol: "AAPLx")])
+        return PopularAssetsResponse(assets: popularAssets, market: popularMarket)
     }
 
-    static func asset(symbol: String) -> MarketAssetDTO {
+    func held() async throws -> HeldAssetsResponse {
+        heldCalls += 1
+        if let heldError { throw heldError }
+        return heldResponse
+    }
+
+    static func asset(
+        symbol: String,
+        change24h: String? = "0.012",
+        spark: [Int64] = [180_000_000, 182_000_000, 185_000_000]
+    ) -> MarketAssetDTO {
         MarketAssetDTO(
             symbol: symbol,
             name: "\(symbol) xStock",
             solanaMint: "Mint\(symbol)",
             routable: true,
             priceUsdcMicros: 185_000_000,
-            change24h: "0.012"
+            change24h: change24h,
+            sparkUsdcMicros: spark
         )
     }
 }
@@ -326,5 +344,170 @@ struct StocksTabModelTests {
         source.errors["aap"] = nil
         await model.refreshSearch()
         #expect(!model.refreshFailed)
+    }
+
+    // MARK: Sections
+
+    @Test func rowsCarryTheirSparklineSoNoViewHasToBuildIt() async throws {
+        let source = StubStocksDataSource()
+        let model = StocksTabModel(dataSource: source)
+
+        await model.loadPopular()
+
+        #expect(model.popularRows.map(\.id) == ["AAPLx"])
+        #expect(model.popularRows.first?.spark != nil)
+    }
+
+    @Test func aSymbolWithNoDaySeriesStillMakesARow() async throws {
+        let source = StubStocksDataSource()
+        source.popularAssets = [StubStocksDataSource.asset(symbol: "NEWx", spark: [])]
+        let model = StocksTabModel(dataSource: source)
+
+        await model.loadPopular()
+
+        #expect(model.popularRows.count == 1)
+        #expect(model.popularRows.first?.spark == nil, "no series means no line, not a flat one")
+    }
+
+    @Test func topMoversAreThePopularRowsResortedByTheDaysMove() async throws {
+        let source = StubStocksDataSource()
+        source.popularAssets = [
+            StubStocksDataSource.asset(symbol: "SMALLx", change24h: "0.004"),
+            StubStocksDataSource.asset(symbol: "DROPx", change24h: "-0.081"),
+            StubStocksDataSource.asset(symbol: "MIDx", change24h: "0.030"),
+            StubStocksDataSource.asset(symbol: "QUIETx", change24h: nil),
+        ]
+        let model = StocksTabModel(dataSource: source)
+
+        await model.loadPopular()
+
+        #expect(model.moverRows.map(\.id) == ["DROPx", "MIDx", "SMALLx"])
+        #expect(!model.moverRows.contains { $0.id == "QUIETx" }, "unknown is not a move")
+    }
+
+    @Test func theSessionOnTheEnvelopeReachesTheRows() async throws {
+        let source = StubStocksDataSource()
+        source.popularMarket = MarketSampleData.sessionAfterHours
+        let model = StocksTabModel(dataSource: source)
+
+        await model.loadPopular()
+
+        #expect(model.afterHours)
+    }
+
+    @Test func yourCabalsAndOpenVotesArriveTogether() async throws {
+        let source = StubStocksDataSource()
+        source.heldResponse = MarketSampleData.heldAssetsResponse()
+        let model = StocksTabModel(dataSource: source)
+
+        await model.loadSocial()
+
+        #expect(model.socialState == .loaded)
+        #expect(model.heldRows.count == MarketSampleData.heldAssets.count)
+        #expect(model.voteRows.count == MarketSampleData.votableAssets.count)
+        #expect(model.heldRows.first?.subtitle == "2 cabals · your slice $294.70")
+        #expect(model.voteRows.first?.subtitle == "1 open vote · Semis or bust")
+    }
+
+    @Test func cabalsThatOwnNothingIsAnAnswerNotAFailure() async throws {
+        let source = StubStocksDataSource()
+        let model = StocksTabModel(dataSource: source)
+
+        await model.loadSocial()
+
+        #expect(model.socialState == .loaded)
+        #expect(model.heldRows.isEmpty)
+    }
+
+    @Test func aFailedCabalReadIsItsOwnFailureAndLeavesTheCatalogueAlone() async throws {
+        let source = StubStocksDataSource()
+        source.heldError = Monaco.MonacoAPIError.httpStatus(500)
+        let model = StocksTabModel(dataSource: source)
+
+        await model.refreshEverything()
+
+        #expect(model.socialState == .failed)
+        #expect(model.popularState == .loaded, "the market is still live")
+        #expect(!model.popularRows.isEmpty)
+    }
+
+    @Test func cabalRowsAlreadyOnScreenSurviveAFailedRefresh() async throws {
+        let source = StubStocksDataSource()
+        source.heldResponse = MarketSampleData.heldAssetsResponse()
+        let model = StocksTabModel(dataSource: source)
+        await model.loadSocial()
+
+        source.heldError = Monaco.MonacoAPIError.httpStatus(500)
+        await model.loadSocial()
+
+        #expect(model.socialState == .loaded, "a stale holding beats an empty section")
+        #expect(!model.heldRows.isEmpty)
+    }
+
+    /// The rows staying is right; the rows staying *silently* is not. The figure on
+    /// them is "your slice $294.70", and nothing else on screen said it was old.
+    @Test func aFailedCabalRefreshMarksTheRowsStale() async throws {
+        let source = StubStocksDataSource()
+        source.heldResponse = MarketSampleData.heldAssetsResponse()
+        let model = StocksTabModel(dataSource: source)
+        await model.loadSocial()
+        #expect(!model.socialRefreshFailed)
+
+        source.heldError = Monaco.MonacoAPIError.httpStatus(500)
+        await model.loadSocial()
+
+        #expect(model.socialRefreshFailed, "a member must be told the money on screen is not fresh")
+        #expect(!model.heldRows.isEmpty)
+    }
+
+    @Test func aSuccessfulRefreshClearsTheStaleMark() async throws {
+        let source = StubStocksDataSource()
+        source.heldResponse = MarketSampleData.heldAssetsResponse()
+        let model = StocksTabModel(dataSource: source)
+        await model.loadSocial()
+        source.heldError = Monaco.MonacoAPIError.httpStatus(500)
+        await model.loadSocial()
+        #expect(model.socialRefreshFailed)
+
+        source.heldError = nil
+        await model.loadSocial()
+
+        #expect(!model.socialRefreshFailed)
+        #expect(model.socialState == .loaded)
+    }
+
+    /// An empty section that failed is `.failed`, which has its own retry. It is not
+    /// also stale — there is nothing on screen to be stale.
+    @Test func aFirstCabalReadThatFailsIsNotStaleItIsFailed() async throws {
+        let source = StubStocksDataSource()
+        source.heldError = Monaco.MonacoAPIError.httpStatus(500)
+        let model = StocksTabModel(dataSource: source)
+
+        await model.loadSocial()
+
+        #expect(model.socialState == .failed)
+        #expect(!model.socialRefreshFailed)
+    }
+
+    @Test func anExpiredSessionFromTheCabalReadIsReported() async throws {
+        let source = StubStocksDataSource()
+        source.heldError = Monaco.MonacoAPIError.httpStatus(401)
+        let model = StocksTabModel(dataSource: source)
+
+        await model.loadSocial()
+
+        #expect(model.sessionExpired)
+        #expect(model.socialState == .loading, "a dead session is not an empty cabal list")
+    }
+
+    @Test func aRefreshWithinTheStaleWindowDoesNotReAskForTheCabals() async throws {
+        let now = Date()
+        let source = StubStocksDataSource()
+        let model = StocksTabModel(dataSource: source, clock: { now })
+
+        await model.refreshSocialIfStale()
+        await model.refreshSocialIfStale()
+
+        #expect(source.heldCalls == 1)
     }
 }

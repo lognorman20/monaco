@@ -22,6 +22,9 @@ type CatalogAsset struct {
 	Name       string
 	SolanaMint string
 	Routable   bool
+	// LogoURL is the company logo the catalogue publishes for this xStock. Empty
+	// when the catalogue has none, in which case a row draws its ticker tile.
+	LogoURL string
 }
 
 // CatalogSearchPage is one page of catalog search results.
@@ -30,9 +33,11 @@ type CatalogSearchPage struct {
 	HasMore bool
 }
 
-// CatalogSearcher searches the xStocks catalog and resolves Solana mints.
+// CatalogSearcher searches the xStocks catalog and resolves Solana mints and
+// tickers.
 type CatalogSearcher interface {
 	MintCatalog
+	SymbolCatalog
 	Search(ctx context.Context, query string, limit, offset int) (CatalogSearchPage, error)
 }
 
@@ -40,7 +45,7 @@ type CatalogSearcher interface {
 type HTTPCatalogSearcher struct {
 	baseURL     string
 	httpClient  *http.Client
-	mintIndex   mintIndex
+	catalog     catalogIndex
 	routability RoutabilityProber
 }
 
@@ -51,7 +56,6 @@ func NewHTTPCatalogSearcher() *HTTPCatalogSearcher {
 		httpClient: telemetry.InstrumentClient(telemetry.UpstreamXStocks, &http.Client{
 			Timeout: defaultTimeout,
 		}),
-		mintIndex: mintIndex{byMint: make(map[string]CatalogAsset)},
 	}
 }
 
@@ -68,7 +72,6 @@ func NewHTTPCatalogSearcherWithClient(baseURL string, httpClient *http.Client) *
 	return &HTTPCatalogSearcher{
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		httpClient: telemetry.InstrumentClient(telemetry.UpstreamXStocks, httpClient),
-		mintIndex:  mintIndex{byMint: make(map[string]CatalogAsset)},
 	}
 }
 
@@ -84,13 +87,41 @@ type catalogPageInfo struct {
 	HasNextPage bool `json:"hasNextPage"`
 }
 
-// catalogAssetNode mirrors xStocks public API asset rows. As of 2026-03 the API exposes
-// symbol, name, and chain deployments (Solana mint) only — no volume, holder count, or
-// popularity fields; pinned symbols and Jupiter routability probes supply ranking signals.
+// catalogAssetNode mirrors xStocks public API asset rows. The API exposes symbol,
+// name, a logo URL, and chain deployments (Solana mint) — no volume, holder count,
+// or popularity fields; pinned symbols and Jupiter routability probes supply ranking
+// signals.
 type catalogAssetNode struct {
-	Symbol      string       `json:"symbol"`
-	Name        string       `json:"name"`
+	Symbol string `json:"symbol"`
+	Name   string `json:"name"`
+	// Logo is the catalogue's own artwork for the token, e.g.
+	// https://xstocks-metadata.backed.fi/logos/tokens/AAPLx.png. It is the only
+	// logo source we have, and it is already on every payload this package fetches.
+	Logo        string       `json:"logo"`
 	Deployments []deployment `json:"deployments"`
+}
+
+// catalogAssetFromNode is the one place a catalogue payload becomes a CatalogAsset,
+// so a field added here reaches every path that resolves an asset — search by
+// ticker, the paginated filter, and the index — rather than two of the three.
+func catalogAssetFromNode(node catalogAssetNode, mint string) CatalogAsset {
+	return CatalogAsset{
+		Symbol:     strings.TrimSpace(node.Symbol),
+		Name:       strings.TrimSpace(node.Name),
+		SolanaMint: mint,
+		LogoURL:    normalizeLogoURL(node.Logo),
+	}
+}
+
+// normalizeLogoURL keeps only a logo the app can actually load. A relative path or
+// a plain-HTTP URL would be a broken image on an ATS-enforcing client, and an empty
+// string is what the row already knows how to fall back from.
+func normalizeLogoURL(raw string) string {
+	logo := strings.TrimSpace(raw)
+	if !strings.HasPrefix(strings.ToLower(logo), "https://") {
+		return ""
+	}
+	return logo
 }
 
 // Search returns one page of catalog assets whose symbol or name matches query.
@@ -141,47 +172,33 @@ func (s *HTTPCatalogSearcher) searchBySymbol(ctx context.Context, query string) 
 		if err != nil {
 			continue
 		}
-		return &CatalogAsset{
-			Symbol:     strings.TrimSpace(node.Symbol),
-			Name:       strings.TrimSpace(node.Name),
-			SolanaMint: mint,
-		}, nil
+		asset := catalogAssetFromNode(*node, mint)
+		return &asset, nil
 	}
 	return nil, nil
 }
 
+// searchPaginatedList filters the catalogue index rather than re-walking every
+// catalogue page.
+//
+// It used to crawl the whole catalogue per call, which made every query — and
+// every pinned symbol the popular list resolves, and every symbol a cabal holds —
+// its own full crawl of a third-party API. The catalogue is one small list that
+// changes when a new xStock is listed, so it is crawled once and searched in
+// memory.
 func (s *HTTPCatalogSearcher) searchPaginatedList(ctx context.Context, query string, limit, offset int) (CatalogSearchPage, error) {
 	needle := strings.ToLower(strings.TrimSpace(query))
+	entries, err := s.index(ctx)
+	if err != nil {
+		return CatalogSearchPage{}, err
+	}
+
 	matches := make([]CatalogAsset, 0)
-	hasNextPage := true
-
-	for page := 0; hasNextPage; page++ {
-		body, err := s.fetchCatalogListPage(ctx, page)
-		if err != nil {
-			return CatalogSearchPage{}, err
+	for _, asset := range entries.all {
+		if !catalogAssetMatches(asset, needle) {
+			continue
 		}
-
-		var list catalogListResponse
-		if err := json.Unmarshal(body, &list); err != nil {
-			return CatalogSearchPage{}, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
-		}
-
-		for _, node := range list.Nodes {
-			if !catalogNodeMatches(node, needle) {
-				continue
-			}
-			mint, err := solanaMintFromDeployments(node.Deployments)
-			if err != nil {
-				continue
-			}
-			matches = append(matches, CatalogAsset{
-				Symbol:     strings.TrimSpace(node.Symbol),
-				Name:       strings.TrimSpace(node.Name),
-				SolanaMint: mint,
-			})
-		}
-
-		hasNextPage = list.Page.HasNextPage
+		matches = append(matches, asset)
 	}
 
 	rankCatalogAssets(ctx, s.routability, matches)
@@ -296,35 +313,15 @@ func xStockSymbolCandidates(query string) []string {
 	return []string{upper + "x", q + "x"}
 }
 
-// catalogAssetsFromListResponse parses one catalog list page JSON and filters by query.
-func catalogAssetsFromListResponse(body []byte, query string) ([]CatalogAsset, error) {
-	var list catalogListResponse
-	if err := json.Unmarshal(body, &list); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
-	}
-
-	needle := strings.ToLower(strings.TrimSpace(query))
-	assets := make([]CatalogAsset, 0)
-	for _, node := range list.Nodes {
-		if !catalogNodeMatches(node, needle) {
-			continue
-		}
-		mint, err := solanaMintFromDeployments(node.Deployments)
-		if err != nil {
-			continue
-		}
-		assets = append(assets, CatalogAsset{
-			Symbol:     strings.TrimSpace(node.Symbol),
-			Name:       strings.TrimSpace(node.Name),
-			SolanaMint: mint,
-		})
-	}
-	return assets, nil
-}
-
 func catalogNodeMatches(node catalogAssetNode, needle string) bool {
 	symbol := strings.ToLower(strings.TrimSpace(node.Symbol))
 	name := strings.ToLower(strings.TrimSpace(node.Name))
+	return strings.Contains(symbol, needle) || strings.Contains(name, needle)
+}
+
+func catalogAssetMatches(asset CatalogAsset, needle string) bool {
+	symbol := strings.ToLower(strings.TrimSpace(asset.Symbol))
+	name := strings.ToLower(strings.TrimSpace(asset.Name))
 	return strings.Contains(symbol, needle) || strings.Contains(name, needle)
 }
 

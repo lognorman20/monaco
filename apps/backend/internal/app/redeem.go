@@ -124,7 +124,6 @@ func (r *RedeemService) WithdrawToBalance(ctx context.Context, req WithdrawToBal
 		return RedeemJobView{}, err
 	}
 
-
 	identity, err := r.privy.VerifySession(ctx, privy.AccessToken(req.AccessToken))
 	if err != nil {
 		if errors.Is(err, privy.ErrInvalidToken) {
@@ -255,7 +254,6 @@ func (r *RedeemService) redeem(ctx context.Context, req RedeemRequest) (RedeemJo
 	if err := rejectFakerGroup(ctx, r.store, req.GroupID); err != nil {
 		return RedeemJobView{}, err
 	}
-
 
 	identity, err := r.privy.VerifySession(ctx, privy.AccessToken(req.AccessToken))
 	if err != nil {
