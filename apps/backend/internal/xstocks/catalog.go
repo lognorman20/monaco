@@ -30,8 +30,9 @@ const (
 type AssetSource string
 
 const (
-	AssetSourceXStocks AssetSource = "xstocks"
-	AssetSourceTessera AssetSource = "tessera"
+	AssetSourceXStocks  AssetSource = "xstocks"
+	AssetSourceTessera  AssetSource = "tessera"
+	AssetSourcePreStocks AssetSource = "prestocks"
 )
 
 // CatalogAsset is a backend-resolved catalog row for mobile search.
