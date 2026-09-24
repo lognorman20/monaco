@@ -87,13 +87,6 @@
   .joined { display: none; align-items: center; justify-content: center; gap: 10px; padding: 14px 18px; border-radius: 999px; background: var(--green-soft); border: 1px solid var(--mint); color: var(--ink); font-weight: 500; }
   .join.done .joined { display: flex; }
 
-  /* Video */
-  .video { padding-block: 8px 96px; }
-  .frame { position: relative; aspect-ratio: 16 / 9; width: 100%; border-radius: 20px; overflow: hidden; background: #0F291C; border: 1px solid var(--line); box-shadow: 0 40px 90px -40px rgba(15, 41, 28, 0.45); }
-  .placeholder { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 18px; text-align: center; background: radial-gradient(60% 70% at 50% 45%, #1C4330, #0F291C 70%); }
-  .placeholder img { width: clamp(72px, 12vw, 120px); opacity: .95; }
-  .placeholder p { margin: 0; color: rgba(242, 235, 225, 0.6); font-size: 15px; }
-
   /* Sections */
   section { scroll-margin-top: 80px; }
   .sec { padding-block: 96px; border-top: 1px solid var(--line); }
@@ -159,19 +152,6 @@
       </form>
     </div>
   </section>
-
-  <section class="video" aria-label="Product video">
-    <div class="wrap">
-      <div class="frame" id="frame">
-        <div class="placeholder">
-          <img src="/assets/mark.svg" alt="">
-          <p>Demo video coming soon.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-
 </main>
 
 <footer>
