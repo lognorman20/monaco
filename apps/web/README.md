@@ -32,6 +32,6 @@ cd apps/web && npx vercel dev
 | `SUPABASE_URL` | `https://<ref>.supabase.co` for the Monaco project |
 | `SUPABASE_ANON_KEY` | The project's anon (publishable) key. Never the service role key |
 | `IP_HASH_SALT` | Any long random string. IPs are stored only as salted hashes |
-| `ALLOWED_ORIGINS` | Optional. Defaults to the two trymonaco.xyz origins. Set to the preview URL on Preview |
+| `ALLOWED_ORIGINS` | Optional. Defaults to monacolabs.xyz and trymonaco.xyz (with and without `www`). Set to the preview URL on Preview |
 
 Signups are in the `waitlist` table. Export with the Supabase table editor or `select email, source, created_at from waitlist order by created_at`.

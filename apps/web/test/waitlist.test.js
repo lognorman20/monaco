@@ -65,6 +65,9 @@ test("only POST is allowed", async () => {
 
 test("rejects foreign origins, allows no origin and configured origins", async () => {
   assert.equal((await run({ headers: { ...headers, origin: "https://evil.example" } })).status, 403);
+  for (const allowed of ["https://monacolabs.xyz", "https://www.monacolabs.xyz", "https://trymonaco.xyz"]) {
+    assert.equal((await run({ headers: { ...headers, origin: allowed } })).status, 200, allowed);
+  }
   const { origin, ...noOrigin } = headers;
   assert.equal((await run({ headers: noOrigin })).status, 200);
   const local = { ...env, ALLOWED_ORIGINS: "http://localhost:3000" };
