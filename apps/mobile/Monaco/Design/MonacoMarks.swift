@@ -216,8 +216,36 @@ struct StockMark: View {
 
     @State private var logo: UIImage?
 
-    private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: MarkGeometry.radius(for: size), style: .continuous)
+    /// A coin, not a tile. These are tokenised stocks, and a disc reads as one at a glance.
+    private var shape: Circle { Circle() }
+
+    /// The issuer's artwork frames every company logo with four grey arrows that reach about
+    /// 16% in from each edge, so drawn whole they show as triangles poking out around the mark.
+    /// Showing the middle of the image crops the frame away.
+    ///
+    /// 0.70 is measured, not guessed: the arrows on the tightest logo (Alphabet) end at 16%,
+    /// and Amazon's swoosh starts being clipped below about 0.70. It applies to the remote
+    /// artwork only — a logo from anywhere else is drawn as it comes.
+    private static let issuerArtworkVisibleFraction: CGFloat = 0.70
+
+    /// How much of the disc the mark itself occupies. The rest is breathing room, so a square
+    /// logo sits inside the circle rather than being cut by it.
+    private static let markInset: CGFloat = 0.72
+
+    /// Centre-crops the issuer's arrow frame away. Done once when the image loads, not on every
+    /// frame. An image too small to crop is returned untouched rather than upscaled.
+    static func croppedToMark(_ image: UIImage) -> UIImage {
+        let side = min(image.size.width, image.size.height) * issuerArtworkVisibleFraction
+        guard side > 1, let cgImage = image.cgImage else { return image }
+        let scale = image.scale
+        let rect = CGRect(
+            x: ((image.size.width - side) / 2) * scale,
+            y: ((image.size.height - side) / 2) * scale,
+            width: side * scale,
+            height: side * scale
+        )
+        guard let cropped = cgImage.cropping(to: rect) else { return image }
+        return UIImage(cgImage: cropped, scale: scale, orientation: image.imageOrientation)
     }
 
     var body: some View {
@@ -229,10 +257,13 @@ struct StockMark: View {
             }
             .overlay {
                 if let logo = logo ?? logoURL.flatMap({ MonacoRemoteImageStore.stockLogos.cachedImage(for: $0) }) {
-                    Image(uiImage: logo)
+                    // Fitted, not filled. Filling a disc with a square mark (Microsoft's four
+                    // tiles) slices its corners off; fitting keeps every logo whole and lets the
+                    // disc be the frame around it.
+                    Image(uiImage: StockMark.croppedToMark(logo))
                         .resizable()
-                        .scaledToFill()
-                        .frame(width: size, height: size)
+                        .scaledToFit()
+                        .frame(width: size * StockMark.markInset, height: size * StockMark.markInset)
                         .clipShape(shape)
                 } else {
                     tileGlyph
