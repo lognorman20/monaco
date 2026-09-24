@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
@@ -201,6 +202,78 @@ func TestCompositeSearchVariants_returnsAllMints(t *testing.T) {
 	}
 	if !mints[tSpaceXMint] || !mints[spacexXMint] {
 		t.Fatalf("missing expected mints: %v", mints)
+	}
+}
+
+func TestCompositeSearch_spacexQuery_oneRow_variantCount2(t *testing.T) {
+	ctx := context.Background()
+	c := spacexCompositeWithPrices(t, &fakePriceClient{prices: map[string]jupiter.TokenPrice{
+		tSpaceXMint:         priceEntry(562.19, 500_000, freshStock(746.61, 1.958e12)),
+		spacexPreStocksMint: priceEntry(116.74, 100_000, freshStock(149.32, 1.958e12)),
+	}})
+	page, err := c.Search(ctx, "spacex", 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spacexRows int
+	for _, a := range page.Assets {
+		if underlyingKey(a) == "spacex" {
+			spacexRows++
+		}
+	}
+	if spacexRows != 1 {
+		t.Fatalf("spacex rows = %d, want 1 collapsed row", spacexRows)
+	}
+	variants, err := c.SearchVariants(ctx, "spacex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(variants) != 2 {
+		t.Fatalf("variants = %d, want 2", len(variants))
+	}
+}
+
+func TestCompositeSearch_tesseraDisabled_noTesseraRows(t *testing.T) {
+	ctx := context.Background()
+	xs := xstocks.NewFakeCatalogSearcher()
+	prestocks := NewFakeSource(prestocksSpaceX())
+	c := NewCompositeWithSources(xs, []TaggedSource{
+		{Source: prestocks, SourceID: xstocks.AssetSourcePreStocks},
+	}, nil, nil, nil)
+	page, err := c.Search(ctx, "spacex", 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, asset := range page.Assets {
+		if asset.Source == xstocks.AssetSourceTessera {
+			t.Fatalf("unexpected tessera row: %+v", asset)
+		}
+	}
+}
+
+func TestCompositeSearch_emptyQuery_fullXStockPage_keepsPreStocks(t *testing.T) {
+	ctx := context.Background()
+	xs := xstocks.NewFakeCatalogSearcher()
+	xstocks.RegisterCatalogAsset(xs, xStockAAPL())
+	prestocks := NewFakeSource(prestocksSpaceX())
+	c := NewCompositeWithSources(xs, []TaggedSource{
+		{Source: prestocks, SourceID: xstocks.AssetSourcePreStocks},
+	}, nil, nil, nil)
+	page, err := c.Search(ctx, "", 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Assets) < 2 {
+		t.Fatalf("prestocks row dropped from full xStocks page: %d assets", len(page.Assets))
+	}
+	var sawPreStocks bool
+	for _, asset := range page.Assets {
+		if asset.Source == xstocks.AssetSourcePreStocks {
+			sawPreStocks = true
+		}
+	}
+	if !sawPreStocks {
+		t.Fatalf("assets = %+v, want prestocks row", page.Assets)
 	}
 }
 

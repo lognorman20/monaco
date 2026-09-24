@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
@@ -30,6 +31,38 @@ func TestCompositeResolver_tSpaceX_and_T_SpaceX_resolveSameMint(t *testing.T) {
 	}
 	if m1 != tSpaceXMint || m2 != tSpaceXMint {
 		t.Fatalf("mints = %q %q, want %q", m1, m2, tSpaceXMint)
+	}
+}
+
+func TestCompositeResolver_SPACEX_and_tSpaceX_distinctMints(t *testing.T) {
+	ctx := context.Background()
+	prices := &fakePriceClient{prices: map[string]jupiter.TokenPrice{
+		tSpaceXMint:         priceEntry(562.19, 500_000, freshStock(746.61, 1.958e12)),
+		spacexPreStocksMint: priceEntry(116.74, 100_000, freshStock(149.32, 1.958e12)),
+	}}
+	c := spacexCompositeWithPrices(t, prices)
+	resolver := NewResolverWithCatalog(xstocks.NewFakeResolver(), c)
+
+	mPre, err := resolver.ResolveSolanaMint(ctx, "SPACEX")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mTess, err := resolver.ResolveSolanaMint(ctx, "tSpaceX")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mPre == mTess {
+		t.Fatalf("mints equal %q", mPre)
+	}
+	if mPre != spacexPreStocksMint || mTess != tSpaceXMint {
+		t.Fatalf("mPre=%q mTess=%q", mPre, mTess)
+	}
+	mDefault, err := resolver.ResolveSolanaMint(ctx, "spacex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mDefault != tSpaceXMint {
+		t.Fatalf("default spacex mint = %q, want tSpaceX best price", mDefault)
 	}
 }
 

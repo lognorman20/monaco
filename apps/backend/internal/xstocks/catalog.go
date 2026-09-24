@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -50,6 +51,10 @@ type CatalogAsset struct {
 	LogoURL        string
 	UnderlyingID   string
 	Issuer         string
+	IssuerName     string
+
+	UiAmountMultiplier *big.Rat // nil = unresolved
+	Paused             bool
 
 	ReferenceMarkUsdcMicros *int64
 	ReferenceValuationUsd   *int64

@@ -2,30 +2,42 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"math/big"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/solana/mintinfo"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
-const (
-	defaultVariantCacheTTL = 30 * time.Minute
-	searchMergeLimit       = 100_000
-)
+const searchMergeLimit = 100_000
 
-// Composite merges xStocks catalog search with supplemental sources (e.g. Tessera).
+// TaggedSource pairs a supplemental catalog source with its asset-source id.
+type TaggedSource struct {
+	Source   Source
+	SourceID xstocks.AssetSource
+}
+
+// Composite merges xStocks catalog search with supplemental sources (e.g. Tessera, PreStocks).
 type Composite struct {
-	xstocks xstocks.CatalogSearcher
-	tessera Source
-	prober  xstocks.RoutabilityProber
+	xstocks  xstocks.CatalogSearcher
+	sources  []TaggedSource
+	prober   xstocks.RoutabilityProber
+	mintinfo mintinfo.Reader
+	prices   jupiter.PriceClient
 
 	defaultVariantMu sync.Mutex
 	defaultVariant   map[string]defaultVariantEntry
 
-	tesseraListErrOnce sync.Once
+	comparisonMu    sync.Mutex
+	comparisonCache map[string]comparisonCacheEntry
+
+	listErrOnce sync.Once
 }
 
 type defaultVariantEntry struct {
@@ -35,11 +47,30 @@ type defaultVariantEntry struct {
 
 // NewComposite returns a catalog searcher over xStocks and an optional Tessera source.
 func NewComposite(xstocksSearcher xstocks.CatalogSearcher, tessera Source, prober xstocks.RoutabilityProber) *Composite {
+	var sources []TaggedSource
+	if tessera != nil {
+		sources = []TaggedSource{{Source: tessera, SourceID: xstocks.AssetSourceTessera}}
+	}
+	return NewCompositeWithSources(xstocksSearcher, sources, prober, nil, nil)
+}
+
+// NewCompositeWithSources merges xStocks with tagged supplemental sources, mint enrichment, and best-price ranking.
+func NewCompositeWithSources(
+	xstocksSearcher xstocks.CatalogSearcher,
+	sources []TaggedSource,
+	prober xstocks.RoutabilityProber,
+	mints mintinfo.Reader,
+	prices jupiter.PriceClient,
+) *Composite {
+	tagCopy := append([]TaggedSource(nil), sources...)
 	return &Composite{
-		xstocks:        xstocksSearcher,
-		tessera:        tessera,
-		prober:         prober,
-		defaultVariant: make(map[string]defaultVariantEntry),
+		xstocks:         xstocksSearcher,
+		sources:         tagCopy,
+		prober:          prober,
+		mintinfo:        mints,
+		prices:          prices,
+		defaultVariant:  make(map[string]defaultVariantEntry),
+		comparisonCache: make(map[string]comparisonCacheEntry),
 	}
 }
 
@@ -62,13 +93,10 @@ func (c *Composite) SearchKind(ctx context.Context, query string, kind xstocks.A
 	var hasMore bool
 
 	if query == "" {
-		// xStocks is already paged. Pre-IPO rows are appended on the first page
-		// and are not trimmed back to limit, so a full xStocks page cannot hide them.
-		// Later pages are xStocks only. A pre_ipo filter pages the Tessera list itself.
 		if kind == xstocks.AssetKindPreIPO {
-			tesseraRows := c.tesseraRows(ctx)
-			probeAndRankTessera(ctx, c.prober, tesseraRows)
-			merged = c.collapseByUnderlying(ctx, tesseraRows)
+			supplemental := c.supplementalRows(ctx)
+			probeSupplemental(ctx, c.prober, supplemental)
+			merged = c.collapseByUnderlying(ctx, supplemental)
 			hasMore = len(merged) > offset+limit
 			return pageSlice(merged, offset, limit, hasMore), nil
 		}
@@ -78,9 +106,9 @@ func (c *Composite) SearchKind(ctx context.Context, query string, kind xstocks.A
 		}
 		merged = append(merged, xsPage.Assets...)
 		if offset == 0 && kind == "" {
-			tesseraRows := c.tesseraRows(ctx)
-			probeAndRankTessera(ctx, c.prober, tesseraRows)
-			merged = append(merged, tesseraRows...)
+			supplemental := c.supplementalRows(ctx)
+			probeSupplemental(ctx, c.prober, supplemental)
+			merged = append(merged, supplemental...)
 		}
 		if kind != "" {
 			filtered := make([]xstocks.CatalogAsset, 0, len(merged))
@@ -93,15 +121,15 @@ func (c *Composite) SearchKind(ctx context.Context, query string, kind xstocks.A
 		}
 		merged = c.collapseByUnderlying(ctx, merged)
 		return xstocks.CatalogSearchPage{Assets: merged, HasMore: xsPage.HasMore}, nil
-	} else {
-		xsPage, err := c.xstocks.Search(ctx, query, searchMergeLimit, 0)
-		if err != nil {
-			return xstocks.CatalogSearchPage{}, err
-		}
-		tesseraMatches := c.matchTessera(ctx, query)
-		merged = mergeRankedSearch(ctx, query, xsPage.Assets, tesseraMatches, c.prober)
-		hasMore = len(merged) > offset+limit
 	}
+
+	xsPage, err := c.xstocks.Search(ctx, query, searchMergeLimit, 0)
+	if err != nil {
+		return xstocks.CatalogSearchPage{}, err
+	}
+	supplementalMatches := c.matchSupplemental(ctx, query)
+	merged = mergeRankedSearch(ctx, query, xsPage.Assets, supplementalMatches, c.prober)
+	hasMore = len(merged) > offset+limit
 
 	if kind != "" {
 		filtered := make([]xstocks.CatalogAsset, 0, len(merged))
@@ -115,10 +143,8 @@ func (c *Composite) SearchKind(ctx context.Context, query string, kind xstocks.A
 	}
 
 	merged = c.collapseByUnderlying(ctx, merged)
+	hasMore = len(merged) > offset+limit
 
-	if query != "" {
-		hasMore = len(merged) > offset+limit
-	}
 	if offset >= len(merged) {
 		return xstocks.CatalogSearchPage{Assets: nil, HasMore: hasMore}, nil
 	}
@@ -157,12 +183,21 @@ func (c *Composite) SearchVariants(ctx context.Context, underlyingID string) ([]
 	var out []xstocks.CatalogAsset
 	for _, asset := range xsPage.Assets {
 		if underlyingKey(asset) == underlyingID {
-			out = append(out, asset.Normalize())
+			out = append(out, c.enrichAsset(ctx, asset.Normalize()))
 		}
 	}
-	for _, asset := range c.tesseraRows(ctx) {
+	for _, asset := range c.supplementalRows(ctx) {
 		if underlyingKey(asset) == underlyingID {
-			out = append(out, asset.Normalize())
+			enriched := c.enrichAsset(ctx, asset)
+			if c.prober != nil {
+				enriched.Routable = c.prober.IsRoutable(ctx, enriched)
+			} else {
+				enriched.Routable = true
+			}
+			if enriched.Paused {
+				enriched.Routable = false
+			}
+			out = append(out, enriched)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -171,60 +206,117 @@ func (c *Composite) SearchVariants(ctx context.Context, underlyingID string) ([]
 	return out, nil
 }
 
-// LookupByMint returns the exact mint row from xStocks or Tessera.
+// LookupByMint returns the exact mint row from xStocks or supplemental sources.
 func (c *Composite) LookupByMint(ctx context.Context, mint string) (xstocks.CatalogAsset, bool, error) {
 	if c.xstocks != nil {
 		asset, ok, err := c.xstocks.LookupByMint(ctx, mint)
 		if err != nil || ok {
-			return asset.Normalize(), ok, err
+			return c.enrichAsset(ctx, asset.Normalize()), ok, err
 		}
 	}
-	for _, asset := range c.tesseraRows(ctx) {
+	for _, asset := range c.supplementalRows(ctx) {
 		if strings.TrimSpace(asset.SolanaMint) == strings.TrimSpace(mint) {
-			return asset.Normalize(), true, nil
+			return c.enrichAsset(ctx, asset), true, nil
 		}
 	}
 	return xstocks.CatalogAsset{}, false, nil
 }
 
-func (c *Composite) tesseraRows(ctx context.Context) []xstocks.CatalogAsset {
-	if c.tessera == nil {
+func (c *Composite) supplementalRows(ctx context.Context) []xstocks.CatalogAsset {
+	if len(c.sources) == 0 {
 		return nil
 	}
-	rows, err := c.tessera.List(ctx)
-	if err != nil {
-		c.tesseraListErrOnce.Do(func() {
-			slog.Warn("catalog: tessera list failed; continuing with xstocks only", "err", err)
-		})
-		return nil
-	}
-	out := make([]xstocks.CatalogAsset, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, row.Normalize())
+	var out []xstocks.CatalogAsset
+	for _, tagged := range c.sources {
+		if tagged.Source == nil {
+			continue
+		}
+		rows, err := tagged.Source.List(ctx)
+		if err != nil {
+			c.listErrOnce.Do(func() {
+				slog.Warn("catalog: supplemental list failed; continuing with xstocks only", "err", err)
+			})
+			continue
+		}
+		for _, row := range rows {
+			asset := row.Normalize()
+			if asset.Source == "" && tagged.SourceID != "" {
+				asset.Source = tagged.SourceID
+			}
+			out = append(out, c.enrichAsset(ctx, asset))
+		}
 	}
 	return out
 }
 
-func (c *Composite) matchTessera(ctx context.Context, query string) []xstocks.CatalogAsset {
+func (c *Composite) enrichAsset(ctx context.Context, asset xstocks.CatalogAsset) xstocks.CatalogAsset {
+	asset = asset.Normalize()
+	fillIssuerName(&asset)
+	if asset.Kind != xstocks.AssetKindPreIPO || c.mintinfo == nil {
+		return asset
+	}
+	info, err := c.mintinfo.Info(ctx, asset.SolanaMint)
+	if err != nil {
+		if errors.Is(err, mintinfo.ErrUnknownMint) {
+			return asset
+		}
+		return asset
+	}
+	asset.Decimals = info.Decimals
+	asset.TransferFeeBps = info.TransferFeeBps
+	if info.UiMultiplier != nil {
+		asset.UiAmountMultiplier = new(big.Rat).Set(info.UiMultiplier)
+	}
+	asset.Paused = info.Paused
+	if asset.Paused {
+		asset.Routable = false
+	}
+	return asset
+}
+
+func fillIssuerName(asset *xstocks.CatalogAsset) {
+	if asset.IssuerName != "" {
+		return
+	}
+	switch asset.Source {
+	case xstocks.AssetSourcePreStocks:
+		asset.IssuerName = "PreStocks"
+	case xstocks.AssetSourceTessera:
+		asset.IssuerName = "Tessera"
+	case xstocks.AssetSourceXStocks:
+		asset.IssuerName = "xStocks"
+	default:
+		switch asset.Issuer {
+		case "prestocks":
+			asset.IssuerName = "PreStocks"
+		case "tessera":
+			asset.IssuerName = "Tessera"
+		case "xstocks":
+			asset.IssuerName = "xStocks"
+		}
+	}
+}
+
+func (c *Composite) matchSupplemental(ctx context.Context, query string) []xstocks.CatalogAsset {
 	needle := strings.ToLower(strings.TrimSpace(query))
 	if needle == "" {
-		return c.tesseraRows(ctx)
+		return c.supplementalRows(ctx)
 	}
 	matches := make([]xstocks.CatalogAsset, 0)
-	for _, asset := range c.tesseraRows(ctx) {
-		if tesseraRowMatches(asset, needle) {
+	for _, asset := range c.supplementalRows(ctx) {
+		if supplementalRowMatches(asset, needle) {
 			matches = append(matches, asset)
 		}
 	}
 	return matches
 }
 
-func tesseraRowMatches(asset xstocks.CatalogAsset, needle string) bool {
+func supplementalRowMatches(asset xstocks.CatalogAsset, needle string) bool {
 	symbol := strings.ToLower(strings.TrimSpace(asset.Symbol))
 	name := strings.ToLower(strings.TrimSpace(asset.Name))
 	sector := strings.ToLower(strings.TrimSpace(asset.Sector))
 	underlying := underlyingKey(asset)
-	stripped := tesseraStrippedName(asset.Name)
+	stripped := supplementalStrippedName(asset)
 	return strings.Contains(symbol, needle) ||
 		strings.Contains(name, needle) ||
 		strings.Contains(stripped, needle) ||
@@ -232,44 +324,94 @@ func tesseraRowMatches(asset xstocks.CatalogAsset, needle string) bool {
 		strings.Contains(underlying, needle)
 }
 
-func tesseraStrippedName(name string) string {
-	n := strings.TrimSpace(name)
-	if len(n) >= 2 && strings.EqualFold(n[:2], "T-") {
-		return strings.ToLower(n[2:])
+func supplementalStrippedName(asset xstocks.CatalogAsset) string {
+	n := strings.TrimSpace(asset.Name)
+	if asset.Source == xstocks.AssetSourceTessera || asset.Issuer == "tessera" {
+		if len(n) >= 2 && strings.EqualFold(n[:2], "T-") {
+			return strings.ToLower(n[2:])
+		}
 	}
 	return strings.ToLower(n)
 }
 
-func tesseraExactMatch(query string, asset xstocks.CatalogAsset) bool {
+func supplementalExactMatch(query string, asset xstocks.CatalogAsset) bool {
 	needle := strings.ToLower(strings.TrimSpace(query))
 	if needle == "" {
 		return false
 	}
-	symbol := strings.ToLower(strings.TrimSpace(asset.Symbol))
-	if needle == symbol {
+	if supplementalSymbolExact(query, asset) {
 		return true
 	}
-	return needle == tesseraStrippedName(asset.Name)
+	name := strings.ToLower(strings.TrimSpace(asset.Name))
+	if needle == name {
+		return true
+	}
+	if needle == supplementalStrippedName(asset) {
+		return true
+	}
+	if asset.Source == xstocks.AssetSourcePreStocks || asset.Issuer == "prestocks" {
+		if needle == strings.ToLower(strings.TrimSpace(asset.Name+" PreStocks")) {
+			return true
+		}
+	}
+	return false
 }
 
-func mergeRankedSearch(ctx context.Context, query string, xs []xstocks.CatalogAsset, tessera []xstocks.CatalogAsset, prober xstocks.RoutabilityProber) []xstocks.CatalogAsset {
+func resolverExactMatch(query string, asset xstocks.CatalogAsset) bool {
+	if supplementalSymbolExact(query, asset) {
+		return true
+	}
+	needle := strings.ToLower(strings.TrimSpace(query))
+	name := strings.ToLower(strings.TrimSpace(asset.Name))
+	if needle != "" && needle == name {
+		return true
+	}
+	stripped := supplementalStrippedName(asset)
+	if needle != "" && needle == stripped && query == strings.ToLower(query) {
+		return true
+	}
+	if asset.Source == xstocks.AssetSourcePreStocks || asset.Issuer == "prestocks" {
+		full := strings.ToLower(strings.TrimSpace(asset.Name + " PreStocks"))
+		if needle == full {
+			return true
+		}
+	}
+	return false
+}
+
+func supplementalSymbolExact(query string, asset xstocks.CatalogAsset) bool {
+	sym := strings.TrimSpace(asset.Symbol)
+	q := strings.TrimSpace(query)
+	if q == sym {
+		return true
+	}
+	if strings.EqualFold(q, sym) {
+		if sym == strings.ToUpper(sym) && q != sym {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+func mergeRankedSearch(ctx context.Context, query string, xs []xstocks.CatalogAsset, supplemental []xstocks.CatalogAsset, prober xstocks.RoutabilityProber) []xstocks.CatalogAsset {
 	xs = append([]xstocks.CatalogAsset(nil), xs...)
 	for i := range xs {
 		xs[i] = xs[i].Normalize()
 	}
-	tessera = append([]xstocks.CatalogAsset(nil), tessera...)
-	probeAndRankTessera(ctx, prober, tessera)
+	supplemental = append([]xstocks.CatalogAsset(nil), supplemental...)
+	probeSupplemental(ctx, prober, supplemental)
 
-	exactTessera := false
-	for _, asset := range tessera {
-		if tesseraExactMatch(query, asset) {
-			exactTessera = true
+	exactSupplemental := false
+	for _, asset := range supplemental {
+		if supplementalExactMatch(query, asset) {
+			exactSupplemental = true
 			break
 		}
 	}
 
 	byMint := make(map[string]xstocks.CatalogAsset)
-	order := make([]string, 0, len(xs)+len(tessera))
+	order := make([]string, 0, len(xs)+len(supplemental))
 	add := func(asset xstocks.CatalogAsset) {
 		mint := strings.TrimSpace(asset.SolanaMint)
 		if mint == "" {
@@ -282,9 +424,9 @@ func mergeRankedSearch(ctx context.Context, query string, xs []xstocks.CatalogAs
 		order = append(order, mint)
 	}
 
-	if exactTessera {
-		sortTesseraMatches(tessera)
-		for _, asset := range tessera {
+	if exactSupplemental {
+		sortSupplementalMatches(supplemental)
+		for _, asset := range supplemental {
 			add(asset)
 		}
 		rankXStockMatches(ctx, prober, xs)
@@ -294,7 +436,7 @@ func mergeRankedSearch(ctx context.Context, query string, xs []xstocks.CatalogAs
 		return mintOrderAssets(order, byMint)
 	}
 
-	combined := append(append([]xstocks.CatalogAsset{}, xs...), tessera...)
+	combined := append(append([]xstocks.CatalogAsset{}, xs...), supplemental...)
 	sortMergedDefault(combined)
 	for _, asset := range combined {
 		add(asset)
@@ -321,8 +463,12 @@ func rankXStockMatches(ctx context.Context, prober xstocks.RoutabilityProber, ma
 	sortXStockMergeMatches(matches)
 }
 
-func probeAndRankTessera(ctx context.Context, prober xstocks.RoutabilityProber, matches []xstocks.CatalogAsset) {
+func probeSupplemental(ctx context.Context, prober xstocks.RoutabilityProber, matches []xstocks.CatalogAsset) {
 	for i := range matches {
+		if matches[i].Paused {
+			matches[i].Routable = false
+			continue
+		}
 		if prober == nil {
 			matches[i].Routable = true
 			continue
@@ -348,7 +494,7 @@ func sortXStockMergeMatches(matches []xstocks.CatalogAsset) {
 	})
 }
 
-func sortTesseraMatches(matches []xstocks.CatalogAsset) {
+func sortSupplementalMatches(matches []xstocks.CatalogAsset) {
 	sort.SliceStable(matches, func(i, j int) bool {
 		if matches[i].Routable != matches[j].Routable {
 			return matches[i].Routable
@@ -383,7 +529,9 @@ func mergeDefaultTier(asset xstocks.CatalogAsset) int {
 			}
 		}
 	}
-	if asset.Source == xstocks.AssetSourceTessera || asset.Kind == xstocks.AssetKindPreIPO {
+	if asset.Source == xstocks.AssetSourceTessera ||
+		asset.Source == xstocks.AssetSourcePreStocks ||
+		asset.Kind == xstocks.AssetKindPreIPO {
 		if asset.Routable {
 			return 1
 		}
@@ -431,6 +579,13 @@ func (c *Composite) collapseByUnderlying(ctx context.Context, assets []xstocks.C
 }
 
 func (c *Composite) pickDefaultVariant(ctx context.Context, underlyingID string, variants []xstocks.CatalogAsset) xstocks.CatalogAsset {
+	if len(variants) == 0 {
+		return xstocks.CatalogAsset{}
+	}
+	if len(variants) == 1 {
+		return variants[0]
+	}
+	probeSupplemental(ctx, c.prober, variants)
 	if cached, ok := c.cachedDefaultVariant(underlyingID); ok {
 		for _, v := range variants {
 			if v.SolanaMint == cached {
@@ -438,9 +593,8 @@ func (c *Composite) pickDefaultVariant(ctx context.Context, underlyingID string,
 			}
 		}
 	}
-	chosen := selectDefaultVariant(variants)
+	chosen := c.pickDefaultVariantByCompare(ctx, underlyingID, variants)
 	c.storeDefaultVariant(underlyingID, chosen.SolanaMint)
-	_ = ctx
 	return chosen
 }
 
@@ -459,7 +613,7 @@ func (c *Composite) storeDefaultVariant(underlyingID, mint string) {
 	defer c.defaultVariantMu.Unlock()
 	c.defaultVariant[underlyingID] = defaultVariantEntry{
 		mint:      mint,
-		expiresAt: time.Now().Add(defaultVariantCacheTTL),
+		expiresAt: time.Now().Add(bestPriceCacheTTL),
 	}
 }
 
@@ -473,6 +627,9 @@ func selectDefaultVariant(variants []xstocks.CatalogAsset) xstocks.CatalogAsset 
 	sorted := append([]xstocks.CatalogAsset(nil), variants...)
 	sort.Slice(sorted, func(i, j int) bool {
 		a, b := sorted[i], sorted[j]
+		if a.Paused != b.Paused {
+			return !a.Paused
+		}
 		if a.Routable != b.Routable {
 			return a.Routable
 		}
@@ -491,11 +648,31 @@ func issuerRank(asset xstocks.CatalogAsset) int {
 		if asset.Source == xstocks.AssetSourceTessera || asset.Issuer == "tessera" {
 			return 0
 		}
-		return 1
+		if asset.Source == xstocks.AssetSourcePreStocks || asset.Issuer == "prestocks" {
+			return 1
+		}
+		return 2
 	default:
 		if asset.Source == xstocks.AssetSourceXStocks || asset.Issuer == "xstocks" {
 			return 0
 		}
 		return 1
 	}
+}
+
+// DefaultMintForUnderlying resolves the best default variant mint for a company slug.
+func (c *Composite) DefaultMintForUnderlying(ctx context.Context, underlyingID string) (string, bool) {
+	underlyingID = strings.ToLower(strings.TrimSpace(underlyingID))
+	variants, err := c.SearchVariants(ctx, underlyingID)
+	if err != nil || len(variants) == 0 {
+		return "", false
+	}
+	if len(variants) == 1 {
+		return variants[0].SolanaMint, true
+	}
+	chosen := c.pickDefaultVariant(ctx, underlyingID, variants)
+	if chosen.SolanaMint == "" {
+		return "", false
+	}
+	return chosen.SolanaMint, true
 }
