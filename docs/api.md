@@ -15,7 +15,9 @@ A valid token with no Monaco user yet gets `404 user not found`: call `POST /v1/
 A blocked `POST /v1/groups/{id}/leave` is `409` with the same shape plus a machine-readable `reason`
 (for example `share_units_remaining`, `creator_must_transfer`).
 
-**Money.** USDC is integer micros (1 USDC = 1,000,000). Timestamps are UTC RFC 3339.
+**Money.** USDC is integer micros (1 USDC = 1,000,000). Timestamps are UTC RFC 3339. `priceUsdcMicros` is the price of one whole token, whatever that token's decimals are.
+
+**Catalog kind.** Asset rows carry `kind` (`stock` or `pre_ipo`), `source`, `issuer`, `underlyingId`, `tokenDecimals`, `sector`, `logoUrl`, `alwaysOpen`, reference fields (`referenceMarkUsdcMicros`, `referenceValuationUsd`, `referenceUpdatedAt`), `premiumBps`, `holders`, and `variantCount`. Filter with `?kind=stock` or `?kind=pre_ipo`; any other value is `400`. Quote JSON keeps `kind` as `buy` or `sell`. Buy quotes add `assetKind` and `tokenDecimals`. Detail adds `variants[]` when several issuers share an underlying. Pre-IPO chart responses are empty until a sampler has history.
 
 **Rate limits.** Per process, non-GET only. Over budget is `429` with `Retry-After`.
 "Per user" is the verified Privy user, so refreshing a token does not reset it (agent

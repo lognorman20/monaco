@@ -90,6 +90,11 @@ Or `curl -sfS https://dotenvx.sh | sh`. See [install docs](https://dotenvx.com/d
 3. Inspect: `just show-env` prints decrypted `.env.local` as `export KEY='value'` lines via dotenvx (`.env.production` omitted). Needs `.env.local`, dotenvx, and `.env.keys` or Keychain.
 4. Set values: `dotenvx set KEY value -f .env.local` (encrypts by default; `--plain` for non-secrets).
 
+| Env | Default | Meaning |
+| --- | --- | --- |
+| `TESSERA_API_BASE_URL` | `https://rest-api.tessera.pe` | Public Tessera catalog used for pre-IPO tokens. |
+| `TESSERA_ENABLED` | `true` | Include those tokens in search, detail, and sweeps. `false` hides them from the catalog; existing holdings still value from Jupiter. |
+
 Justfile `dotenv-load` only reads plain `.env` — not dotenvx ciphertext. Recipes that need secrets re-exec once under `dotenvx run -f .env.local` (via `scripts/with-dotenv-local.sh`). Mobile Privy uses `scripts/ensure-ios-privy-config.sh` (xcconfig) + `SIMCTL_CHILD_*` at sim launch.
 
 Private keys: `DOTENV_PRIVATE_KEY` for `.env` / `.env.local`; `DOTENV_PRIVATE_KEY_PRODUCTION` for `.env.production`. On macOS, new keys often land in Keychain, not `.env.keys`. Export with `dotenvx native pull` or `dotenvx keypair -f .env.local`.

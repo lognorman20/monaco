@@ -14,14 +14,15 @@ import (
 )
 
 type sweepRunner struct {
-	flags        sweepFlags
-	cfg          *config.Config
-	privy        *privy.HTTPClient
-	jupiter      jupiter.Client
-	signer       app.TreasurySigner
-	relayerPub   string
-	relayerKey   string
-	mintCatalog  xstocks.MintCatalog
+	flags       sweepFlags
+	cfg         *config.Config
+	privy       *privy.HTTPClient
+	jupiter     jupiter.Client
+	signer      app.TreasurySigner
+	relayerPub  string
+	relayerKey  string
+	mintCatalog xstocks.MintCatalog
+	prices      jupiter.PriceClient
 }
 
 type swapOutcome struct {
@@ -234,26 +235,36 @@ func (runner sweepRunner) walletID(ctx context.Context, src sweepSource) (string
 }
 
 func (runner sweepRunner) swapTokenToUSDC(ctx context.Context, src sweepSource, walletID string, token privy.SPLTokenBalance) (swapOutcome, error) {
+	plan, err := resolveSweepSell(ctx, runner.mintCatalog, runner.prices, token.Mint, token.Amount)
+	if err != nil {
+		return swapOutcome{}, err
+	}
+	if plan.SkipDust {
+		fmt.Printf("skip dust %s from=%s mint=%s amount=%d whole=%s value_usdc_micros=%d\n",
+			src.kind, src.address, token.Mint, token.Amount, plan.WholeTokens, plan.ValueUSDCMicros)
+		return swapOutcome{skipped: true}, nil
+	}
 	quote, err := runner.jupiter.QuoteSell(ctx, jupiter.QuoteSellParams{
-		GroupID:   "ops-sweep",
-		UserID:    "ops-sweep",
-		Symbol:    token.Mint,
-		InputMint: token.Mint,
-		Amount:    token.Amount,
-		Taker:     src.address,
+		GroupID:     "ops-sweep",
+		UserID:      "ops-sweep",
+		Symbol:      token.Mint,
+		InputMint:   token.Mint,
+		Amount:      token.Amount,
+		Taker:       src.address,
+		SlippageBps: plan.SlippageBps,
 	})
 	if err != nil {
 		if runner.flags.dryRun {
-			fmt.Printf("dry-run %s from=%s dest=%s mint=%s amount=%d jupiter_swap=true routable=false quote_err=%v no_tx_sent\n",
-				src.kind, src.address, runner.flags.destination, token.Mint, token.Amount, err)
+			fmt.Printf("dry-run %s from=%s dest=%s mint=%s amount=%d whole=%s slippage_bps=%d jupiter_swap=true routable=false quote_err=%v no_tx_sent\n",
+				src.kind, src.address, runner.flags.destination, token.Mint, token.Amount, plan.WholeTokens, plan.SlippageBps, err)
 			return swapOutcome{skipped: true, quoteErr: err}, nil
 		}
 		return swapOutcome{}, err
 	}
 	if !quote.Routable {
 		if runner.flags.dryRun {
-			fmt.Printf("dry-run %s from=%s dest=%s mint=%s amount=%d jupiter_swap=true routable=false no_tx_sent\n",
-				src.kind, src.address, runner.flags.destination, token.Mint, token.Amount)
+			fmt.Printf("dry-run %s from=%s dest=%s mint=%s amount=%d whole=%s slippage_bps=%d jupiter_swap=true routable=false no_tx_sent\n",
+				src.kind, src.address, runner.flags.destination, token.Mint, token.Amount, plan.WholeTokens, plan.SlippageBps)
 			return swapOutcome{skipped: true, routable: false}, nil
 		}
 		return swapOutcome{}, fmt.Errorf("no route")
@@ -262,16 +273,16 @@ func (runner sweepRunner) swapTokenToUSDC(ctx context.Context, src sweepSource, 
 	outUSDC, err := parseUSDCAmount(quote.OutAmount)
 	if err != nil {
 		if runner.flags.dryRun {
-			fmt.Printf("dry-run %s from=%s dest=%s mint=%s amount=%d jupiter_swap=true routable=true out_usdc=invalid no_tx_sent\n",
-				src.kind, src.address, runner.flags.destination, token.Mint, token.Amount)
+			fmt.Printf("dry-run %s from=%s dest=%s mint=%s amount=%d whole=%s slippage_bps=%d jupiter_swap=true routable=true out_usdc=invalid no_tx_sent\n",
+				src.kind, src.address, runner.flags.destination, token.Mint, token.Amount, plan.WholeTokens, plan.SlippageBps)
 			return swapOutcome{skipped: true, routable: true, quoteErr: err}, nil
 		}
 		return swapOutcome{}, fmt.Errorf("parse out amount: %w", err)
 	}
 
 	if runner.flags.dryRun {
-		fmt.Printf("dry-run %s from=%s dest=%s mint=%s amount=%d jupiter_swap=true routable=true out_usdc=%s no_tx_sent\n",
-			src.kind, src.address, runner.flags.destination, token.Mint, token.Amount, quote.OutAmount)
+		fmt.Printf("dry-run %s from=%s dest=%s mint=%s amount=%d whole=%s slippage_bps=%d jupiter_swap=true routable=true out_usdc=%s no_tx_sent\n",
+			src.kind, src.address, runner.flags.destination, token.Mint, token.Amount, plan.WholeTokens, plan.SlippageBps, quote.OutAmount)
 		return swapOutcome{executed: true, routable: true, outUSDC: outUSDC}, nil
 	}
 

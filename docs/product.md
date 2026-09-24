@@ -22,7 +22,7 @@ Prize target is the general Stocklana pool. Judges ask whether this could be a r
 1. Sign in with SMS or email OTP via Privy.
 2. Create a group or join one of many. One user belongs to many groups. App home ranks groups and people across the whole app.
 3. Deposit USDC into the member wallet. It appears as **account balance** (chain USDC in the Privy member wallet). The user picks a cabal and amount to fund; the backend sweeps that exact amount into the group treasury and credits share units at the current share price.
-4. Propose a buy from the xStocks catalog. The group's voter set must pass it under the creator's threshold and expiry. Then the backend swaps treasury USDC for the token on Jupiter.
+4. Propose a buy from the catalog (tokenized US stocks via xStocks, and pre-IPO tokens via Tessera). The group's voter set must pass it under the creator's threshold and expiry. Then the backend swaps treasury USDC for the token on Jupiter.
 5. Live on the group screen: pot composition, your slice, dollar P&L, percent return, and the in-group member leaderboard.
 6. Redeem some or all share units whenever you want. The backend sells that slice to USDC and pays a verified payout address.
 
@@ -41,7 +41,7 @@ At create, the **group creator** sets:
 
 On-chain governance is out of scope. Votes live in Postgres. The Go API is the source of truth.
 
-1. A buy proposal names an xStock from the **full public catalog** (search, not a fixed two-ticker list).
+1. A buy proposal names an asset from the catalog (tokenized US stocks via xStocks, and pre-IPO tokens via Tessera). Search the full public catalog, not a fixed ticker list.
 2. If Jupiter cannot quote a route, the UI refuses the proposal. Do not offer names the Meta-Aggregator cannot fill.
 3. Members in the voter set vote yes or no before expiry.
 4. On pass, the backend builds a Jupiter v2 order (`inputMint` = USDC, `outputMint` = xStock mint), signs with the treasury via Privy, and `POST`s `/execute`. Confirm `status: Success`, `code: 0`.
@@ -51,6 +51,19 @@ Constants:
 
 - USDC mint: `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`
 - xStock mints: `GET https://api.xstocks.fi/api/v2/public/assets/{symbol}` then `deployments` where `network == Solana` then `address`. Examples: `AAPLx` is `XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp`. `TSLAx` is `XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB`.
+- Pre-IPO mints: `tSpaceX` `TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v`, `tKalshi` `TKLSidmLVt3cqGaaodG8tyRzoANfQwoh67AccjmubeZ`, `tOpenAI` `oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ`.
+
+## Pre-IPO tokens
+
+Tessera tokens sit in the same catalog, propose, buy, hold, and sell path as tokenized stocks.
+
+| Fact | Rule |
+| --- | --- |
+| Unit | 9 decimals. Quantities are tokens, not shares. |
+| Mark | The Jupiter DEX price is the pot mark. A private-market reference is shown beside it when that reference is fresh. |
+| Hours | These tokens trade around the clock. They never show an after-hours label. |
+| Copy | Display names drop the `T-` prefix (SpaceX). The on-chain symbol stays `tSpaceX`. A small fee applies when buying and selling. Terms open at tessera.pe. |
+| Charts | No price history until samples exist. The detail screen says the chart is empty. |
 
 The xStocks public API is mint metadata only. It is not an execution rail. Poll `/execute` for confirmation. Do not use a Jupiter WebSocket. Do not use Privy production webhooks (Enterprise-only).
 

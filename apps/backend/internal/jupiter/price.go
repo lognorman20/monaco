@@ -44,6 +44,7 @@ type TokenPrice struct {
 	PriceUsdcMicros int64
 	Change24h       *string
 	LiquidityUsd    float64
+	Decimals        int
 	StockData       *StockData
 }
 
@@ -117,6 +118,7 @@ type jupiterPriceEntry struct {
 	UsdPrice       float64                `json:"usdPrice"`
 	PriceChange24h float64                `json:"priceChange24h"`
 	Liquidity      float64                `json:"liquidity"`
+	Decimals       int                    `json:"decimals"`
 	StockData      *jupiterStockDataEntry `json:"stockData"`
 }
 
@@ -179,6 +181,7 @@ func (e jupiterPriceEntry) toTokenPrice() TokenPrice {
 		PriceUsdcMicros: micros,
 		Change24h:       &change,
 		LiquidityUsd:    e.Liquidity,
+		Decimals:        e.Decimals,
 	}
 	if e.StockData != nil && e.StockData.Price > 0 && e.StockData.UpdatedAt > 0 {
 		out.StockData = &StockData{
