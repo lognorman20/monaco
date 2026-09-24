@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const MAX_EMAIL = 254;
-const MAX_NAME = 80;
+const MAX_TWITTER = 15; // X/Twitter's own handle length limit.
 const MAX_SOURCE = 64;
 const DEFAULT_ORIGINS = ["https://trymonaco.xyz", "https://www.trymonaco.xyz"];
 
@@ -82,10 +82,11 @@ export async function handleSignup({ method, headers, body, env, fetch, log = co
   const email = normalizeEmail(payload.email);
   if (!email) return { status: 400, body: { error: "Enter a valid email, like you@email.com." } };
 
-  // Optional. Control characters are stripped so a name cannot smuggle newlines into an
-  // email we later send; the database enforces the same rule for callers that skip this page.
-  const name = typeof payload.name === "string"
-    ? payload.name.replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, MAX_NAME)
+  // Optional. Leading @ stripped since we add it back for display. Control characters are
+  // stripped so a handle cannot smuggle newlines into an email we later send; the database
+  // enforces the same rule for callers that skip this page.
+  const twitter = typeof payload.twitter === "string"
+    ? payload.twitter.replace(/[\u0000-\u001F\u007F]/g, "").trim().replace(/^@+/, "").slice(0, MAX_TWITTER)
     : "";
   const source = typeof payload.source === "string" ? payload.source.trim().slice(0, MAX_SOURCE) : "";
   const ua = typeof headers["user-agent"] === "string" ? headers["user-agent"].slice(0, 256) : null;
@@ -95,7 +96,7 @@ export async function handleSignup({ method, headers, body, env, fetch, log = co
   try {
     result = await rpc({
       fetch, env, name: "join_waitlist",
-      args: { p_email: email, p_name: name || null, p_source: source || null, p_ip_hash: ipHash, p_user_agent: ua },
+      args: { p_email: email, p_twitter: twitter || null, p_source: source || null, p_ip_hash: ipHash, p_user_agent: ua },
     });
   } catch (err) {
     log.error(JSON.stringify({ event: "waitlist_store_failed", message: String(err && err.message || err) }));
@@ -117,7 +118,7 @@ export async function handleSignup({ method, headers, body, env, fetch, log = co
     return { status: 500, body: { error: "The waitlist is having trouble right now. Try again in a minute." } };
   }
 
-  log.info(JSON.stringify({ event: "waitlist_signup", source: source || null, named: Boolean(name) }));
+  log.info(JSON.stringify({ event: "waitlist_signup", source: source || null, hasTwitter: Boolean(twitter) }));
   // Same response for new and existing emails, so the endpoint doesn't reveal who signed up.
   return { status: 200, body: { ok: true } };
 }

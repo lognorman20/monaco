@@ -115,37 +115,37 @@ test("health reports each dependency", async () => {
   assert.equal(unconf.body.dependencies.ipHashSalt, "missing");
 });
 
-test("an optional name is passed through, trimmed and capped", async () => {
+test("an optional twitter handle is passed through, trimmed, de-@'d, and capped", async () => {
   const fetch = fakeFetch();
-  await run({ fetch, body: { email: "you@email.com", name: "  Ada Lovelace  " } });
-  assert.equal(JSON.parse(fetch.calls[0].init.body).p_name, "Ada Lovelace");
+  await run({ fetch, body: { email: "you@email.com", twitter: "  @adalovelace  " } });
+  assert.equal(JSON.parse(fetch.calls[0].init.body).p_twitter, "adalovelace");
 
   const long = fakeFetch();
-  await run({ fetch: long, body: { email: "you@email.com", name: "a".repeat(200) } });
-  assert.equal(JSON.parse(long.calls[0].init.body).p_name.length, 80);
+  await run({ fetch: long, body: { email: "you@email.com", twitter: "a".repeat(200) } });
+  assert.equal(JSON.parse(long.calls[0].init.body).p_twitter.length, 15);
 });
 
-test("no name is absent, not an empty string, and never blocks the signup", async () => {
-  for (const name of [undefined, "", "   ", 42, null, {}]) {
+test("no twitter handle is absent, not an empty string, and never blocks the signup", async () => {
+  for (const twitter of [undefined, "", "   ", "@", 42, null, {}]) {
     const fetch = fakeFetch();
-    const r = await run({ fetch, body: { email: "you@email.com", name } });
-    assert.equal(r.status, 200, `name ${JSON.stringify(name)} should still sign up`);
-    assert.equal(JSON.parse(fetch.calls[0].init.body).p_name, null);
+    const r = await run({ fetch, body: { email: "you@email.com", twitter } });
+    assert.equal(r.status, 200, `twitter ${JSON.stringify(twitter)} should still sign up`);
+    assert.equal(JSON.parse(fetch.calls[0].init.body).p_twitter, null);
   }
 });
 
-test("a name cannot smuggle control characters into an email we later send", async () => {
+test("a twitter handle cannot smuggle control characters into an email we later send", async () => {
   const fetch = fakeFetch();
-  await run({ fetch, body: { email: "you@email.com", name: "Ada\r\nBcc: someone@else.com" } });
-  const sent = JSON.parse(fetch.calls[0].init.body).p_name;
-  assert.equal(sent, "AdaBcc: someone@else.com");
+  await run({ fetch, body: { email: "you@email.com", twitter: "ada\r\nBcc: someone@else.com" } });
+  const sent = JSON.parse(fetch.calls[0].init.body).p_twitter;
+  assert.equal(sent, "adaBcc: someone");
   assert.ok(!/[\r\n]/.test(sent));
 });
 
-test("the signup log records that a name was given, never the name", async () => {
+test("the signup log records that a twitter handle was given, never the handle", async () => {
   const lines = [];
-  await run({ body: { email: "you@email.com", name: "Ada Lovelace" }, log: { ...quiet, info: (l) => lines.push(l) } });
+  await run({ body: { email: "you@email.com", twitter: "adalovelace" }, log: { ...quiet, info: (l) => lines.push(l) } });
   const line = lines.find((l) => l.includes("waitlist_signup"));
-  assert.ok(line.includes('"named":true'));
-  assert.ok(!line.includes("Ada"));
+  assert.ok(line.includes('"hasTwitter":true'));
+  assert.ok(!line.includes("adalovelace"));
 });
