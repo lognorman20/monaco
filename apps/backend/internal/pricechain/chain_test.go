@@ -89,6 +89,24 @@ func (f *fakeCharts) ChartSeries(context.Context, string, pyth.ChartRange) (pyth
 	return pyth.AssetChartSeries{Points: []pyth.ChartPoint{{Timestamp: 1, PriceUsdcMicros: 2}}}, nil
 }
 
+// keylessCharts is a chart client backed by a source that needs no Hermes key —
+// Pyth Benchmarks in production. HasKeylessHistory is a live answer there, not a
+// constant: HermesClient reports false once the series breaker trips, because with
+// Benchmarks out the only remaining history path is the Hermes sampler, which does
+// need the entitlement.
+type keylessCharts struct {
+	fakeCharts
+	sourceUp atomic.Bool
+}
+
+func newKeylessCharts() *keylessCharts {
+	charts := &keylessCharts{}
+	charts.sourceUp.Store(true)
+	return charts
+}
+
+func (k *keylessCharts) HasKeylessHistory() bool { return k.sourceUp.Load() }
+
 func entitlementError(t *testing.T) error {
 	t.Helper()
 	// Produce the real Hermes error type through the real client rather than forging one.
@@ -472,6 +490,63 @@ func TestChain_holdingsFallBackIndependently(t *testing.T) {
 	}
 	if input.Holdings[1].Source != pyth.MarkSourceCostBasis || input.Holdings[1].MarkUsdc != 300_000_000 {
 		t.Fatalf("TSLAx got %s @ %d, want cost_basis @ 300000000", input.Holdings[1].Source, input.Holdings[1].MarkUsdc)
+	}
+}
+
+func TestChain_chartSeries_keylessHistoryIsServedEvenWhenHermesDeniesTheFeed(t *testing.T) {
+	// A crypto-only Pyth key is refused the equity feed, which is why the sampler
+	// is gated. Benchmarks needs no key at all, so gating it on that denial would
+	// throw away charts we can draw — and would do it exactly on the keys the team
+	// actually has.
+	clock := newFakeClock()
+	source := &fakePythSource{err: entitlementError(t)}
+	charts := newKeylessCharts()
+	chain := New(source, nil, charts, testConfig(clock))
+
+	series, err := chain.ChartSeries(context.Background(), testSymbol, pyth.ChartRange1Y)
+	if err != nil {
+		t.Fatalf("ChartSeries: %v", err)
+	}
+	if len(series.Points) == 0 {
+		t.Fatalf("expected a series from the keyless source, got %+v", series)
+	}
+	if got := charts.calls.Load(); got != 1 {
+		t.Fatalf("chart client called %d times, want 1", got)
+	}
+	if got := source.callCount(); got != 0 {
+		t.Fatalf("entitlement probed %d times for a keyless source, want 0", got)
+	}
+}
+
+func TestChain_chartSeries_entitlementGateReturnsWhenTheKeylessSourceGoesDown(t *testing.T) {
+	// The gate exists for the Hermes sampler: 25-31 requests at a feed that will
+	// refuse all of them. Skipping it is only safe while a keyless source is
+	// actually serving. Once the series breaker trips on a Benchmarks outage, the
+	// sampler is all that is left, and the gate has to come back — otherwise the
+	// outage turns into a fan-out of refusals on every chart load.
+	clock := newFakeClock()
+	source := &fakePythSource{err: entitlementError(t)}
+	charts := newKeylessCharts()
+	chain := New(source, nil, charts, testConfig(clock))
+
+	if _, err := chain.ChartSeries(context.Background(), testSymbol, pyth.ChartRange1Y); err != nil {
+		t.Fatalf("ChartSeries: %v", err)
+	}
+	if got := charts.calls.Load(); got != 1 {
+		t.Fatalf("chart client called %d times while keyless, want 1", got)
+	}
+
+	charts.sourceUp.Store(false)
+	clock.Advance(2 * time.Minute) // past ChartTTL, so this is a fresh resolution
+	series, err := chain.ChartSeries(context.Background(), testSymbol, pyth.ChartRange1M)
+	if err != nil {
+		t.Fatalf("ChartSeries after the source went down: %v", err)
+	}
+	if len(series.Points) != 0 || series.EmptyReason != pyth.EmptyReasonNoHistory {
+		t.Fatalf("series = %+v, want the unavailable answer once the gate is back", series)
+	}
+	if got := charts.calls.Load(); got != 1 {
+		t.Fatalf("chart client called %d times, want the denied feed to stop at the gate", got)
 	}
 }
 

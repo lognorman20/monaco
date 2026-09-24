@@ -26,6 +26,7 @@ const (
 	envSolanaRPCURL                 = "SOLANA_RPC_URL"
 	envPythAPIKey                   = "PYTH_API_KEY"
 	envPythHermesBaseURL            = "PYTH_HERMES_BASE_URL"
+	envPythBenchmarksBaseURL        = "PYTH_BENCHMARKS_BASE_URL"
 	envJupiterAPIKey                = "JUPITER_API_KEY"
 	envSupabaseURL                  = "SUPABASE_URL"
 	envSupabaseServiceRoleKey       = "SUPABASE_SERVICE_ROLE_KEY"
@@ -62,6 +63,9 @@ const maxFlashSlippage = 0.05
 //     Equity feeds (e.g. AAPLx) require feed grants on the key in Pyth Terminal; crypto-only
 //     keys authenticate but return 403 "Not entitled" for equity price updates.
 //   - PYTH_HERMES_BASE_URL: Optional Hermes base URL override (default https://pyth.dourolabs.app/hermes).
+//   - PYTH_BENCHMARKS_BASE_URL: Optional Pyth Benchmarks base URL override (default
+//     https://benchmarks.pyth.network). Benchmarks serves a whole chart range as OHLC in one
+//     call; it needs no key, and when it is unreachable charts fall back to sampling Hermes.
 //   - JUPITER_API_KEY: Jupiter Price API key (x-api-key header) for catalog/popular display
 //     prices. Optional — the Price API also serves unauthenticated requests at a lower rate
 //     limit — but set it in production to avoid 429s.
@@ -85,6 +89,7 @@ type Config struct {
 	SolanaRPCURL                 string
 	PythAPIKey                   string
 	PythHermesBaseURL            string
+	PythBenchmarksBaseURL        string
 	JupiterAPIKey                string
 	SupabaseURL                  string
 	SupabaseServiceRoleKey       string
@@ -110,6 +115,7 @@ func Load() (*Config, error) {
 		SolanaRPCURL:                 strings.TrimSpace(os.Getenv(envSolanaRPCURL)),
 		PythAPIKey:                   strings.TrimSpace(os.Getenv(envPythAPIKey)),
 		PythHermesBaseURL:            strings.TrimRight(strings.TrimSpace(os.Getenv(envPythHermesBaseURL)), "/"),
+		PythBenchmarksBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv(envPythBenchmarksBaseURL)), "/"),
 		JupiterAPIKey:                strings.TrimSpace(os.Getenv(envJupiterAPIKey)),
 		SupabaseURL:                  strings.TrimSpace(os.Getenv(envSupabaseURL)),
 		SupabaseServiceRoleKey:       strings.TrimSpace(os.Getenv(envSupabaseServiceRoleKey)),

@@ -13,7 +13,11 @@ func TestParseChartRange(t *testing.T) {
 		{raw: "1D", want: ChartRange1D, ok: true},
 		{raw: "1w", want: ChartRange1W, ok: true},
 		{raw: "1M", want: ChartRange1M, ok: true},
-		{raw: "1Y", ok: false},
+		{raw: "3M", want: ChartRange3M, ok: true},
+		{raw: "1y", want: ChartRange1Y, ok: true},
+		{raw: " all ", want: ChartRangeAll, ok: true},
+		{raw: "5Y", ok: false},
+		{raw: "1H", ok: false},
 	}
 	for _, tc := range cases {
 		got, err := ParseChartRange(tc.raw)

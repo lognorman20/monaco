@@ -15,6 +15,7 @@ final class MarketAssetDTOTests: XCTestCase {
         XCTAssertEqual(dto.assets[0].symbol, "AAPLx")
         XCTAssertEqual(dto.assets[0].priceUsdcMicros, 185_000_000)
         XCTAssertTrue(dto.hasMore)
+        XCTAssertEqual(dto.market?.session, .open)
     }
 
     func testAssetDetail_decodesLiquiditySnippet() throws {
@@ -27,6 +28,11 @@ final class MarketAssetDTOTests: XCTestCase {
         XCTAssertEqual(dto.liquidity.buyProbeOutAmount, "100000000")
         XCTAssertEqual(dto.liquidity.spreadBps, 12)
         XCTAssertTrue(dto.routable)
+        XCTAssertEqual(dto.marketSession, .afterHours)
+        XCTAssertTrue(dto.afterHours)
+        XCTAssertEqual(dto.stats?.previousCloseUsdcMicros, 180_100_000)
+        XCTAssertEqual(dto.stockVsToken?.equity.status, .stale)
+        XCTAssertEqual(dto.stockVsToken?.premiumBps, 16)
     }
 
     func testAssetChart_decodesPoints() throws {
@@ -38,6 +44,10 @@ final class MarketAssetDTOTests: XCTestCase {
         XCTAssertEqual(dto.points.count, 2)
         XCTAssertNil(dto.emptyReason)
         XCTAssertEqual(dto.points[1].priceUsdcMicros, 185_000_000)
+        XCTAssertEqual(dto.previousCloseUsdcMicros, 179_000_000)
+        XCTAssertEqual(dto.range, .oneDay)
+        XCTAssertEqual(dto.source, .benchmarks)
+        XCTAssertTrue(dto.points.allSatisfy(\.hasCandle))
     }
 
     func testAssetChart_decodesEmptySeriesWithReason() throws {

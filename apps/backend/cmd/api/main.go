@@ -142,12 +142,24 @@ func boot(ctx context.Context) (*bootResult, error) {
 		return nil, err
 	}
 	privyClient := privy.NewHTTPClient(cfg)
+	// Chart history comes from Pyth Benchmarks in one call per range, and Benchmarks
+	// is a public endpoint that takes no key. Building this inside a
+	// `PythAPIKey != ""` branch made keyless history depend on exactly the Hermes
+	// entitlement it exists not to need: with the key unset there were no charts at
+	// all, while .env.example promised operators that charts keep working on a
+	// crypto-only key. The client is built unconditionally; the Hermes per-sample
+	// path stays behind a breaker as the fallback, and it is the fallback that needs
+	// the key.
+	chartClient := pyth.NewHermesClientWithBaseURL(cfg.PythHermesBaseURL, cfg.PythAPIKey).
+		WithSeriesSource(pyth.NewBenchmarksClientWithHTTP(cfg.PythBenchmarksBaseURL, nil))
+	// Latest marks and the stock-vs-token feeds do need a key; without one they are
+	// left unwired rather than wired to something that would 401 on every call.
 	var hermes *pyth.HermesClient
 	if cfg.PythAPIKey != "" {
-		hermes = pyth.NewHermesClientWithBaseURL(cfg.PythHermesBaseURL, cfg.PythAPIKey)
+		hermes = chartClient
 		slog.Info("pyth client ready")
 	} else {
-		slog.Info("pyth client skipped", "reason", "PYTH_API_KEY unset")
+		slog.Info("pyth marks skipped", "reason", "PYTH_API_KEY unset; Benchmarks chart history stays active")
 	}
 	jupiterPriceClient := jupiter.NewHTTPPriceClient(cfg.JupiterAPIKey)
 	if cfg.JupiterAPIKey != "" {
@@ -156,12 +168,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 		slog.Info("jupiter price client ready", "reason", "JUPITER_API_KEY unset, using unauthenticated rate limit")
 	}
 	// Pot valuation and charts price through one chain: Pyth, then Jupiter, then cost basis.
+	// The mark source is nil without a key; the chart client is passed either way.
 	var pythSource pricechain.PythSource
-	var pythCharts pyth.AssetPriceClient
 	if hermes != nil {
-		pythSource, pythCharts = hermes, hermes
+		pythSource = hermes
 	}
-	priceChain := pricechain.New(pythSource, jupiterPriceClient, pythCharts, pricechain.DefaultConfig())
+	priceChain := pricechain.New(pythSource, jupiterPriceClient, chartClient, pricechain.DefaultConfig())
 	var pythClient pyth.Client = priceChain
 	catalogSearcher := xstocks.NewHTTPCatalogSearcher()
 	jupiterClient := jupiter.NewHTTPClientWithPayer(relayer.PublicKey())
@@ -242,6 +254,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Pyth:    priceChain,
 		Jupiter: jupiterClient,
 		Price:   jupiterPriceClient,
+	}
+	if hermes != nil {
+		// The stock-vs-token card reads the raw feeds, not the valuation chain: its
+		// whole point is to show where the two prices disagree.
+		assetsHandlers.Quotes = hermes
 	}
 	quoteHandlers := &httpapi.QuoteHandlers{
 		Store:      store,

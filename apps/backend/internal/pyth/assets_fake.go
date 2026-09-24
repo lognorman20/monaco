@@ -88,7 +88,67 @@ func (f *fakeAssetPriceClient) ChartSeries(ctx context.Context, symbol string, c
 	series, ok := f.charts[key]
 	f.mu.Unlock()
 	if !ok {
-		return AssetChartSeries{EmptyReason: "price history unavailable"}, nil
+		return AssetChartSeries{EmptyReason: EmptyReasonNoHistory}, nil
 	}
 	return series, nil
+}
+
+type fakeReferenceQuoteClient struct {
+	mu     sync.Mutex
+	quotes map[string]ReferenceQuotes
+	errs   map[string]error
+}
+
+// NewFakeReferenceQuoteClient returns an in-memory stock-vs-token client for tests.
+func NewFakeReferenceQuoteClient() ReferenceQuoteClient {
+	return &fakeReferenceQuoteClient{
+		quotes: make(map[string]ReferenceQuotes),
+		errs:   make(map[string]error),
+	}
+}
+
+// RegisterReferenceQuotes configures the pair returned for a symbol.
+func RegisterReferenceQuotes(client ReferenceQuoteClient, symbol string, quotes ReferenceQuotes) {
+	fake, ok := client.(*fakeReferenceQuoteClient)
+	if !ok {
+		panic("pyth: RegisterReferenceQuotes requires NewFakeReferenceQuoteClient")
+	}
+	key := normalizeSymbol(symbol)
+	fake.mu.Lock()
+	fake.quotes[key] = quotes
+	delete(fake.errs, key)
+	fake.mu.Unlock()
+}
+
+// RegisterReferenceQuotesError forces the fetch to fail for a symbol.
+func RegisterReferenceQuotesError(client ReferenceQuoteClient, symbol string, err error) {
+	fake, ok := client.(*fakeReferenceQuoteClient)
+	if !ok {
+		panic("pyth: RegisterReferenceQuotesError requires NewFakeReferenceQuoteClient")
+	}
+	key := normalizeSymbol(symbol)
+	fake.mu.Lock()
+	fake.errs[key] = err
+	delete(fake.quotes, key)
+	fake.mu.Unlock()
+}
+
+func (f *fakeReferenceQuoteClient) ReferenceQuotes(ctx context.Context, symbol string) (ReferenceQuotes, error) {
+	_ = ctx
+	key := normalizeSymbol(symbol)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err, ok := f.errs[key]; ok {
+		return ReferenceQuotes{}, err
+	}
+	quotes, ok := f.quotes[key]
+	if !ok {
+		// An unconfigured symbol stands for one with no Pyth feeds at all.
+		return ReferenceQuotes{
+			Symbol: symbol,
+			Equity: unavailableQuote(QuoteSourcePythEquity, QuoteReasonNoFeed),
+			Token:  unavailableQuote(QuoteSourcePythCrypto, QuoteReasonNoFeed),
+		}, nil
+	}
+	return quotes, nil
 }

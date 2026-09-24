@@ -2,11 +2,30 @@
   "points": [
     {
       "timestamp": 1700000000,
-      "priceUsdcMicros": 180000000
+      "priceUsdcMicros": 180000000,
+      "openUsdcMicros": 179400000,
+      "highUsdcMicros": 180600000,
+      "lowUsdcMicros": 179100000
     },
     {
       "timestamp": 1700003600,
-      "priceUsdcMicros": 185000000
+      "priceUsdcMicros": 185000000,
+      "openUsdcMicros": 180100000,
+      "highUsdcMicros": 185400000,
+      "lowUsdcMicros": 179900000
     }
-  ]
+  ],
+  "previousCloseUsdcMicros": 179000000,
+  "range": "1D",
+  "source": "benchmarks",
+  "basis": "underlying",
+  "basisSymbol": "AAPL",
+  "market": {
+    "session": "open",
+    "isOpen": true,
+    "afterHours": false,
+    "nextSession": "after_hours",
+    "nextTransition": "2026-09-22T20:00:00Z",
+    "asOf": "2026-09-22T14:00:00Z"
+  }
 }
