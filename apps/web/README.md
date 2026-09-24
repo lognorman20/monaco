@@ -8,7 +8,7 @@ Waitlist landing page. Static HTML plus two Vercel serverless functions. No buil
 | `api/waitlist.js` | `POST` signup to the Supabase `waitlist` table |
 | `api/health.js` | `GET` status of Supabase and config |
 | `lib/waitlist.js` | Signup logic, tested in `test/` |
-| `assets/demo.mp4` | Drop the launch video here. The page shows a placeholder until it exists |
+| `assets/demo.mp4` | Not wired into the page yet. Drop the launch video here and add the section back when it's ready |
 
 ## Run and test
 
