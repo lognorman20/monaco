@@ -116,11 +116,14 @@ func (h *HomeService) ListGroupActivity(ctx context.Context, accessToken, groupI
 }
 
 func (h *HomeService) activityItemFromTransaction(ctx context.Context, tx postgres.TransactionActivityRow) GroupActivityItem {
+	// A sell with no recorded proceeds leaves AmountMicros at zero; the row
+	// shows its share count (TokenAmount) instead of a dollar figure.
+	usdcMicros, usdcKnown := postgres.SwapUsdcMicros(tx.Action, tx.Status, tx.Amount, tx.CostBasisAmount)
 	item := GroupActivityItem{
 		ID:           tx.ID,
 		Kind:         tx.Action,
 		Status:       tx.Status,
-		AmountMicros: tx.Amount,
+		AmountMicros: usdcMicros,
 		CreatedAt:    tx.CreatedAt,
 		InitiatedBy:  tx.InitiatedBy,
 	}
@@ -133,9 +136,8 @@ func (h *HomeService) activityItemFromTransaction(ctx context.Context, tx postgr
 	case postgres.TransactionActionSell:
 		item.Symbol = h.symbolForMint(ctx, tx.InputToken)
 		item.TokenAmount = tx.Amount
-		if tx.Status == postgres.TransactionStatusConfirmed && tx.CostBasisAmount.Valid {
-			item.ProceedsUsdcMicros = tx.CostBasisAmount.Int64
-			item.AmountMicros = tx.CostBasisAmount.Int64
+		if usdcKnown {
+			item.ProceedsUsdcMicros = usdcMicros
 		}
 	}
 	if tx.TxHash.Valid {

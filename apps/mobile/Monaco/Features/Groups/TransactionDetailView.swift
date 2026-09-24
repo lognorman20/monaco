@@ -182,8 +182,8 @@ struct TransactionReceipt: Equatable {
             case .failed: "Couldn't sell \(name)"
             default: "Selling \(name)"
             }
-            let proceeds = transaction.proceedsUsdcMicros ?? transaction.costBasisAmount
-            let shares = Double(transaction.amountMicros) / Self.atomicsPerShare
+            let proceeds = transaction.proceedsUsdcMicros
+            let shares = Double(transaction.tokenAmount ?? 0) / Self.atomicsPerShare
             if let proceeds, proceeds > 0 {
                 amountMicros = proceeds
                 fallbackHero = nil
