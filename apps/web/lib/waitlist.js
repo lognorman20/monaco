@@ -38,6 +38,12 @@ export function normalizeTwitter(value) {
 }
 
 export function clientIp(headers) {
+  // Cloudflare sets CF-Connecting-IP itself and strips any client-supplied copy, so it is
+  // the one header a visitor cannot forge. It wins over the forwarded chain, which is what
+  // Vercel and plain reverse proxies give us. Getting this wrong silently merges every
+  // visitor into one bucket and disables the per-IP rate limit.
+  const cf = headers["cf-connecting-ip"];
+  if (typeof cf === "string" && cf.trim()) return cf.trim();
   const fwd = headers["x-forwarded-for"];
   const first = (Array.isArray(fwd) ? fwd[0] : fwd || "").split(",")[0].trim();
   return first || headers["x-real-ip"] || "unknown";
