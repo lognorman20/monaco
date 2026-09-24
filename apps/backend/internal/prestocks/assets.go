@@ -13,17 +13,16 @@ const (
 )
 
 type apiRow struct {
-	Name            string  `json:"name"`
-	Symbol          string  `json:"symbol"`
-	Description     string  `json:"description"`
-	Image           string  `json:"image"`
-	ExternalURL     string  `json:"external_url"`
-	ContractAddress string  `json:"contract_address"`
-	MarkPrice       float64 `json:"markPrice"`
-	MarkValuation   int64   `json:"markValuation"`
-	TokenPrice      float64 `json:"tokenPrice"`
-	ImpliedValuation int64  `json:"impliedValuation"`
-	Supply          string  `json:"supply"`
+	Name             string  `json:"name"`
+	Symbol           string  `json:"symbol"`
+	Description      string  `json:"description"`
+	Image            string  `json:"image"`
+	ExternalURL      string  `json:"external_url"`
+	ContractAddress  string  `json:"contract_address"`
+	MarkPrice        float64 `json:"markPrice"`
+	MarkValuation    int64   `json:"markValuation"`
+	TokenPrice       float64 `json:"tokenPrice"`
+	ImpliedValuation int64   `json:"impliedValuation"`
 }
 
 // StaticFallback returns the eight known PreStocks mints when the API is unavailable.

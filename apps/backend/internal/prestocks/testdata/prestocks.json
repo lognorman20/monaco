@@ -10,7 +10,7 @@
     "markValuation": 12500000000,
     "tokenPrice": 12.4,
     "impliedValuation": 12400000000,
-    "supply": "1000000"
+    "supply": 11805.817
   },
   {
     "name": "Anthropic PreStocks",
@@ -23,7 +23,7 @@
     "markValuation": 45000000000,
     "tokenPrice": 44.8,
     "impliedValuation": 44800000000,
-    "supply": "1000000"
+    "supply": 11805.817
   },
   {
     "name": "Figure AI PreStocks",
@@ -36,7 +36,7 @@
     "markValuation": 8000000000,
     "tokenPrice": 7.9,
     "impliedValuation": 7900000000,
-    "supply": "1000000"
+    "supply": 11805.817
   },
   {
     "name": "Kalshi PreStocks",
@@ -49,7 +49,7 @@
     "markValuation": 2000000000,
     "tokenPrice": 19.8,
     "impliedValuation": 1980000000,
-    "supply": "1000000"
+    "supply": 11805.817
   },
   {
     "name": "Neuralink PreStocks",
@@ -62,7 +62,7 @@
     "markValuation": 30000000000,
     "tokenPrice": 29.5,
     "impliedValuation": 29500000000,
-    "supply": "1000000"
+    "supply": 11805.817
   },
   {
     "name": "OpenAI PreStocks",
@@ -75,7 +75,7 @@
     "markValuation": 150000000000,
     "tokenPrice": 148.0,
     "impliedValuation": 148000000000,
-    "supply": "1000000"
+    "supply": 11805.817
   },
   {
     "name": "Polymarket PreStocks",
@@ -88,7 +88,7 @@
     "markValuation": 5000000000,
     "tokenPrice": 4.9,
     "impliedValuation": 4900000000,
-    "supply": "1000000"
+    "supply": 11805.817
   },
   {
     "name": "SpaceX PreStocks",
@@ -101,6 +101,6 @@
     "markValuation": 350000000000,
     "tokenPrice": 116.74,
     "impliedValuation": 348000000000,
-    "supply": "1000000"
+    "supply": 11805.817
   }
 ]
