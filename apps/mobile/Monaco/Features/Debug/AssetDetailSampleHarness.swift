@@ -51,6 +51,26 @@ enum AssetDetailSampleScenario: String, CaseIterable {
     /// curve must not wipe itself left to right each time, and the selected chip
     /// must not sprout a spinner for a refresh nobody asked for.
     case tickingChart
+    /// The social cards at their fullest: three cabals holding it, two open votes,
+    /// a history behind them. This is the screenshot for #341 and #344.
+    case cabals
+    /// One cabal, one vote — the common case, and the one the cards have to look
+    /// best in.
+    case oneCabal
+    /// Nobody holds it and nobody is voting: the position card must not draw at
+    /// all, the activity card must not draw at all, and the trade bar must offer
+    /// no sell.
+    case noCabals
+    /// A pass where one cabal could not be priced. The card shows what it has and
+    /// says what it could not check.
+    case cabalsPartial
+    /// The social read fails outright. The card must say so and offer a retry, and
+    /// the trade bar must not let a missing Sell button claim the member holds
+    /// nothing — they may well hold this in three cabals.
+    case cabalsFailed
+    /// Nothing can be bought: the trade bar carries the reason next to the button
+    /// it disables.
+    case notRoutable
 
     static let launchArgument = "-MonacoAssetDetailSample"
 
@@ -79,6 +99,7 @@ struct AssetDetailSampleHarness: View {
                 auth: auth,
                 symbol: scenario == .sparse ? "NEWx" : "AAPLx",
                 dataSource: AssetDetailSampleDataSource(scenario: scenario),
+                socialDataSource: AssetDetailSampleSocialSource(scenario: scenario),
                 // The scripted price walk is the point of `ticking`; at the shipping
                 // cadence a screenshot would wait ten seconds for the first move.
                 pricePollInterval: scenario == .ticking ? .seconds(2) : AssetDetailPolling.price,
@@ -110,8 +131,11 @@ private final class AssetDetailSampleDataSource: AssetDetailDataSource {
         if scenario == .loading { try await Task.sleep(for: .seconds(3600)) }
         detailCalls += 1
         switch scenario {
-        case .open, .fallbackSeries, .emptyChart, .chartFailed, .loading, .slowRange, .staleRange, .tickingChart:
+        case .open, .fallbackSeries, .emptyChart, .chartFailed, .loading, .slowRange, .staleRange, .tickingChart,
+             .cabals, .oneCabal, .noCabals, .cabalsPartial, .cabalsFailed:
             return MarketSampleData.detail()
+        case .notRoutable:
+            return unroutableDetail()
         case .ticking:
             return tickingDetail()
         case .afterHours:
@@ -163,6 +187,31 @@ private final class AssetDetailSampleDataSource: AssetDetailDataSource {
         }
     }
 
+    /// Everything is there except a route. The trade bar is the only thing that
+    /// changes, which is the point of the scenario.
+    private func unroutableDetail() -> AssetDetailDTO {
+        let base = MarketSampleData.detail()
+        return AssetDetailDTO(
+            symbol: base.symbol,
+            name: base.name,
+            solanaMint: base.solanaMint,
+            routable: false,
+            priceUsdcMicros: base.priceUsdcMicros,
+            change24h: base.change24h,
+            liquidity: AssetLiquidityDTO(
+                label: "No route",
+                routable: false,
+                buyProbeUsdcMicros: 1_000_000,
+                spreadBps: nil
+            ),
+            marketSession: base.marketSession,
+            afterHours: base.afterHours,
+            market: base.market,
+            stats: base.stats,
+            stockVsToken: base.stockVsToken
+        )
+    }
+
     /// A price that walks: up, up, down, up… deterministic, so the flash and the
     /// digit roll can be screenshotted and compared between runs.
     private func tickingDetail() -> AssetDetailDTO {
@@ -186,5 +235,33 @@ private final class AssetDetailSampleDataSource: AssetDetailDataSource {
     }
 }
 
+/// The social half of the screen, canned. `AssetSocialSampleData` in MonacoCore is
+/// the data; this picks which shape of it a scenario shows.
+@MainActor
+private struct AssetDetailSampleSocialSource: AssetSocialDataSource {
+    let scenario: AssetDetailSampleScenario
+
+    func social(symbol: String) async throws -> AssetSocialDTO {
+        switch scenario {
+        case .cabals:
+            return AssetSocialSampleData.social(symbol: symbol)
+        case .cabalsPartial:
+            return AssetSocialSampleData.partial(symbol: symbol)
+        case .noCabals, .sparse, .notRoutable:
+            return AssetSocialSampleData.empty(symbol: symbol)
+        case .cabalsFailed:
+            throw SampleSocialFailure()
+        case .loading:
+            // Never answers, so the screen can be screenshotted with the cards still
+            // unbuilt and the trade bar still holding back its sell.
+            try await Task.sleep(for: .seconds(3600))
+            return AssetSocialSampleData.empty(symbol: symbol)
+        default:
+            return AssetSocialSampleData.modest(symbol: symbol)
+        }
+    }
+}
+
 private struct SampleChartFailure: Error {}
+private struct SampleSocialFailure: Error {}
 #endif

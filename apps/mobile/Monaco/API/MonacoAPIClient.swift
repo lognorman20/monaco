@@ -661,6 +661,27 @@ final class MonacoAPIClient {
         return try JSONDecoder().decode(AssetChartDTO.self, from: data)
     }
 
+    /// What the caller's own cabals are doing with one stock: holdings, open votes
+    /// and activity. Scoped server-side to the caller's memberships.
+    func getAssetSocial(
+        accessToken: String,
+        symbol: String
+    ) async throws -> AssetSocialDTO {
+        let url = baseURL.appending(path: "v1/assets/\(symbol)/social")
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        try applyAuthorizationHeader(accessToken: accessToken, to: &request)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw MonacoAPIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw MonacoAPIError.httpStatus(http.statusCode)
+        }
+        return try JSONDecoder().decode(AssetSocialDTO.self, from: data)
+    }
+
     func postQuote(
         accessToken: String,
         groupId: String,

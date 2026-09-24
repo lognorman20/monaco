@@ -22,6 +22,11 @@ typealias AssetChartPointDTO = MonacoCore.AssetChartPointDTO
 typealias AssetChartDTO = MonacoCore.AssetChartDTO
 typealias AssetChartRange = MonacoCore.AssetChartRange
 typealias MarketStatusDTO = MonacoCore.MarketStatusDTO
+typealias AssetSocialDTO = MonacoCore.AssetSocialDTO
+typealias AssetHoldingDTO = MonacoCore.AssetHoldingDTO
+typealias AssetProposalDTO = MonacoCore.AssetProposalDTO
+typealias AssetVoterDTO = MonacoCore.AssetVoterDTO
+typealias AssetActivityDTO = MonacoCore.AssetActivityDTO
 typealias MarketSession = MonacoCore.MarketSession
 
 typealias HeldAssetDTO = MonacoCore.HeldAssetDTO

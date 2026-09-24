@@ -194,7 +194,9 @@ public struct AssetStatsDTO: Codable, Equatable, Sendable {
     public let previousCloseUsdcMicros: Int64?
     public let week52HighUsdcMicros: Int64?
     public let week52LowUsdcMicros: Int64?
-    /// Round-trip trading cost in basis points, from the Jupiter probes.
+    /// The signed, one-way gap in basis points between the token's routed buy
+    /// price and the Pyth mark, from a single buy probe: positive is a premium a
+    /// buyer pays over the mark, negative a discount. Not a fee, not a round trip.
     public let spreadBps: Int?
     /// Pyth's own confidence interval around the latest mark, in USDC micros.
     public let confUsdcMicros: Int64?

@@ -63,6 +63,7 @@ final class AssetDetailSampleUITests: XCTestCase {
             "open", "afterHours", "preMarket", "holiday", "sparse",
             "jupiterFallback", "notEntitled", "fallbackSeries", "emptyChart", "chartFailed",
             "ticking", "tickingChart", "slowRange", "staleRange",
+            "cabals", "oneCabal", "noCabals", "cabalsPartial", "cabalsFailed", "notRoutable",
         ]
         for scenario in scenarios {
             let app = launch(scenario)
