@@ -145,6 +145,10 @@
       <p class="sub rise">Pool money with your friends, vote on what to buy, and everyone owns a slice of the pot.</p>
       <form class="join rise" data-waitlist novalidate>
         <div class="field">
+          <label for="name-hero" class="hp">Name (optional)</label>
+          <input id="name-hero" name="name" type="text" autocomplete="name" placeholder="Name (optional)" maxlength="80">
+        </div>
+        <div class="field">
           <label for="email-hero" class="hp">Email</label>
           <input id="email-hero" name="email" type="email" inputmode="email" autocomplete="email" placeholder="you@email.com" required>
           <button class="btn" type="submit">Join the waitlist</button>
@@ -192,6 +196,7 @@
 
   document.querySelectorAll("form[data-waitlist]").forEach(function (form) {
     var input = form.querySelector('input[name="email"]');
+    var nameInput = form.querySelector('input[name="name"]');
     var trap = form.querySelector('input[name="company"]');
     var button = form.querySelector('button[type="submit"]');
     var status = form.querySelector(".status");
@@ -207,7 +212,7 @@
       fetch(ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email, company: trap.value, source: params().ref }),
+        body: JSON.stringify({ email: email, name: nameInput ? nameInput.value.trim() : "", company: trap.value, source: params().ref }),
         signal: ctrl.signal
       }).then(function (res) {
         return res.json().catch(function () { return {}; }).then(function (body) { return { ok: res.ok, status: res.status, body: body }; });
