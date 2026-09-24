@@ -55,3 +55,52 @@ profile-error                 -MonacoProfileSample error
 chat-thread                   -MonacoChatSampleQA
 chat-empty                    -MonacoChatSampleQA -MonacoChatSampleEmpty
 chat-offline                  -MonacoChatSampleQA -MonacoChatSampleOffline
+
+cabals-tab-unavailable        -MonacoCabalsTabSample -MonacoCabalsTabSampleScenario cabalsUnavailable
+cabals-tab-loading            -MonacoCabalsTabSample -MonacoCabalsTabSampleScenario cabalsLoading
+
+propose-from-stock            -MonacoProposalFeedSample -MonacoProposeSampleStock
+
+chat-busy                     -MonacoChatSampleQA -MonacoChatSampleBusy
+chat-closed-blip              -MonacoChatSampleQA -MonacoChatSampleClosedBlip
+chat-closed-first-load        -MonacoChatSampleQA -MonacoChatSampleClosedFirstLoad
+
+profile-save-failure          -MonacoProfileSample saveFailure
+profile-save-success          -MonacoProfileSample saveSuccess
+
+cabal-sell-and-leave          -MonacoGroupDetailSample sellAndLeave
+cabal-picture                 -MonacoGroupDetailSample picture
+cabal-no-picture              -MonacoGroupDetailSample noPicture
+cabal-picture-not-creator     -MonacoGroupDetailSample pictureNotCreator
+cabal-picture-upload-failure  -MonacoGroupDetailSample pictureUploadFailure
+
+stocks-tab-full               -MonacoStocksTabSample full
+stocks-tab-no-cabals          -MonacoStocksTabSample noCabals
+stocks-tab-cabals-failed      -MonacoStocksTabSample cabalsFailed
+stocks-tab-cabals-stale       -MonacoStocksTabSample cabalsStale
+stocks-tab-popular-failed     -MonacoStocksTabSample popularFailed
+stocks-tab-loading            -MonacoStocksTabSample loading
+stocks-tab-no-series          -MonacoStocksTabSample noSeries
+stocks-tab-after-hours        -MonacoStocksTabSample afterHours
+
+asset-open                    -MonacoAssetDetailSample open
+asset-after-hours             -MonacoAssetDetailSample afterHours
+asset-pre-market              -MonacoAssetDetailSample preMarket
+asset-holiday                 -MonacoAssetDetailSample holiday
+asset-sparse                  -MonacoAssetDetailSample sparse
+asset-jupiter-fallback        -MonacoAssetDetailSample jupiterFallback
+asset-not-entitled            -MonacoAssetDetailSample notEntitled
+asset-fallback-series         -MonacoAssetDetailSample fallbackSeries
+asset-empty-chart             -MonacoAssetDetailSample emptyChart
+asset-chart-failed            -MonacoAssetDetailSample chartFailed
+asset-loading                 -MonacoAssetDetailSample loading
+asset-ticking                 -MonacoAssetDetailSample ticking
+asset-slow-range              -MonacoAssetDetailSample slowRange
+asset-stale-range             -MonacoAssetDetailSample staleRange
+asset-ticking-chart           -MonacoAssetDetailSample tickingChart
+asset-cabals                  -MonacoAssetDetailSample cabals
+asset-one-cabal               -MonacoAssetDetailSample oneCabal
+asset-no-cabals               -MonacoAssetDetailSample noCabals
+asset-cabals-partial          -MonacoAssetDetailSample cabalsPartial
+asset-cabals-failed           -MonacoAssetDetailSample cabalsFailed
+asset-not-routable            -MonacoAssetDetailSample notRoutable
