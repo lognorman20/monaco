@@ -132,7 +132,7 @@ def duration(path: Path) -> float:
     return float(out)
 
 
-VERSION = 3
+VERSION = 4
 
 
 def spec_of(beat: object) -> dict:
@@ -222,19 +222,19 @@ FACE_PAD = 90  # the canvas is wider than the disc, so a name like Jordan is not
 def face_png(animal: str, name: str, size: int) -> Path:
     """One pixel animal on a paper disc with a hairline, the name under it. The canvas is
     (size + FACE_PAD) wide with the disc centred."""
-    p = WORK / f"face-{animal}-{size}.png"
+    p = WORK / f"face-{animal}-{size}-{'named' if name else 'bare'}.png"
     if not p.exists():
         src = AVATARS / f"avatar-{animal}.imageset" / f"avatar-{animal}.png"
         disc = size
         w = size + FACE_PAD
         cx = w // 2
-        magick("-size", f"{w}x{disc + 66}", "xc:none",
+        magick("-size", f"{w}x{disc + (66 if name else 0)}", "xc:none",
                "(", str(src), "-filter", "point", "-resize", f"{disc}x{disc}",
                "(", "-size", f"{disc}x{disc}", "xc:none", "-fill", "white", "-draw", f"circle {disc // 2},{disc // 2} {disc // 2},1", ")",
                "-compose", "DstIn", "-composite", ")", "-gravity", "north", "-compose", "Over", "-composite",
                "-fill", "none", "-stroke", "#D9D3C7", "-strokewidth", "3", "-draw", f"circle {cx},{disc // 2} {cx},2",
                "-stroke", "none", "-fill", INK, "-font", DEMI, "-pointsize", str(max(30, size // 5)), "-gravity", "south",
-               "-annotate", "+0+0", name, str(p))
+               *(["-annotate", "+0+0", name] if name else []), str(p))
     return p
 
 
@@ -300,14 +300,14 @@ def cast_layer(fmt: str, secs: float, at: float, start_idx: int) -> tuple[list[s
     total = 3 * (size + FACE_PAD) + 2 * gap
     if fmt == "vertical":
         pw, ph, px, py = GEOMETRY[fmt]["phone"]
-        x0, y = (W - total) // 2, py + ph - size - 46
+        x0, y = (W - total) // 2, py + ph - size + 30
     else:
         x0, y = 150, H // 2 + 96
     inputs: list[str] = []
     filt = ""
     idx = start_idx
-    for k, (n, a) in enumerate(CAST):
-        inputs += ["-loop", "1", "-t", f"{secs:.3f}", "-i", str(face_png(a, n, size))]
+    for k, (_, a) in enumerate(CAST):
+        inputs += ["-loop", "1", "-t", f"{secs:.3f}", "-i", str(face_png(a, "", size))]
         filt += f"{{bg}}[{idx}:v]overlay=x={x0 + k * (size + FACE_PAD + gap)}:y='{bounce(y, at + 0.12 * k)}':eval=frame{{out}};"
         idx += 1
     return inputs, filt, idx
