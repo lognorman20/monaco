@@ -298,7 +298,7 @@ struct ProposeBuyReview: Hashable, Identifiable {
     }
 
     var shares: Decimal? {
-        quote.outputAmount.flatMap { ProposeMath.shares(fromAtomics: $0, decimals: quote.resolvedDecimals) }
+        quote.outputAmount.flatMap { ProposeMath.shares(fromAtomics: $0, decimals: quote.resolvedDecimals, multiplier: quote.resolvedUiMultiplier) }
     }
 
     var sharesLabel: String? {

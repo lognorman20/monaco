@@ -155,7 +155,7 @@ final class LiveProposeService: ProposeService {
     }
 
     func buyQuote(groupId: String, symbol: String, usdcMicros: Int64) async throws -> BuyQuoteDTO {
-        try await client.postQuote(accessToken: try token(), groupId: groupId, symbol: symbol, kind: "buy", usdc: usdcMicros)
+        try await client.postQuote(accessToken: try token(), groupId: groupId, symbol: symbol, kind: "buy", usdc: usdcMicros, selectBestVariant: true)
     }
 
     func sellQuote(groupId: String, symbol: String, tokenAmount: Int64) async throws -> BuyQuoteDTO {
@@ -264,25 +264,26 @@ enum ProposeMath {
         return micros
     }
 
-    static func shares(fromAtomics raw: String, decimals: Int = ProposalShareFormatter.defaultDecimals) -> Decimal? {
-        TokenQuantityFormatter.quantity(fromAtomics: raw, decimals: decimals)
+    static func shares(fromAtomics raw: String, decimals: Int = ProposalShareFormatter.defaultDecimals, multiplier: Decimal = 1) -> Decimal? {
+        guard let qty = TokenQuantityFormatter.quantity(fromAtomics: raw, decimals: decimals), multiplier > 0 else { return nil }
+        return qty * multiplier
     }
 
     /// Token atomics for a dollar amount of a holding at its mark, rounded down so a sell never
     /// asks for more than the cabal holds.
-    static func atomics(forUsd usd: Decimal, markUsd: Decimal, ceiling: Int64, decimals: Int = ProposalShareFormatter.defaultDecimals) -> Int64? {
-        guard markUsd > 0, usd > 0 else { return nil }
+    static func atomics(forUsd usd: Decimal, markUsd: Decimal, ceiling: Int64, decimals: Int = ProposalShareFormatter.defaultDecimals, multiplier: Decimal = 1) -> Int64? {
+        guard markUsd > 0, usd > 0, multiplier > 0 else { return nil }
         let scale = shareScale(decimals: decimals)
-        let raw = rounded(usd / markUsd * scale, mode: .down) ?? 0
+        let raw = rounded(usd / markUsd * scale / multiplier, mode: .down) ?? 0
         let clamped = min(raw, ceiling)
         return clamped > 0 ? clamped : nil
     }
 
-    static func atomics(fromShares text: String, decimals: Int = ProposalShareFormatter.defaultDecimals) -> Int64? {
+    static func atomics(fromShares text: String, decimals: Int = ProposalShareFormatter.defaultDecimals, multiplier: Decimal = 1) -> Int64? {
         let trimmed = text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")
-        guard let value = Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX")), value > 0 else { return nil }
+        guard let value = Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX")), value > 0, multiplier > 0 else { return nil }
         let scale = shareScale(decimals: decimals)
-        let atomics = rounded(value * scale, mode: .down) ?? 0
+        let atomics = rounded(value / multiplier * scale, mode: .down) ?? 0
         return atomics > 0 ? atomics : nil
     }
 

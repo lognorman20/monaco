@@ -109,9 +109,9 @@ func (c *HTTPPriceClient) Prices(ctx context.Context, mints []string) (map[strin
 }
 
 type jupiterStockDataEntry struct {
-	Price     float64 `json:"price"`
-	Mcap      float64 `json:"mcap"`
-	UpdatedAt int64   `json:"updatedAt"`
+	Price     float64      `json:"price"`
+	Mcap      float64      `json:"mcap"`
+	UpdatedAt jsonUnixTime `json:"updatedAt"`
 }
 
 type jupiterPriceEntry struct {
@@ -183,11 +183,11 @@ func (e jupiterPriceEntry) toTokenPrice() TokenPrice {
 		LiquidityUsd:    e.Liquidity,
 		Decimals:        e.Decimals,
 	}
-	if e.StockData != nil && e.StockData.Price > 0 && e.StockData.UpdatedAt > 0 {
+	if e.StockData != nil && e.StockData.Price > 0 && e.StockData.UpdatedAt.Unix() > 0 {
 		out.StockData = &StockData{
 			Price:     e.StockData.Price,
 			Mcap:      e.StockData.Mcap,
-			UpdatedAt: time.Unix(e.StockData.UpdatedAt, 0).UTC(),
+			UpdatedAt: time.Unix(e.StockData.UpdatedAt.Unix(), 0).UTC(),
 		}
 	}
 	return out

@@ -28,6 +28,7 @@ type ProposalHandlers struct {
 type createProposalRequest struct {
 	Kind                 string `json:"kind"`
 	Symbol               string `json:"symbol"`
+	SelectBestVariant    bool   `json:"selectBestVariant"`
 	USDC                 int64  `json:"usdc"`
 	TokenAmount          int64  `json:"tokenAmount"`
 	AgentDisplayName     string `json:"agentDisplayName"`
@@ -119,6 +120,7 @@ func (h *ProposalHandlers) CreateProposalHandler(w http.ResponseWriter, r *http.
 		AgentDisplayName:     strings.TrimSpace(req.AgentDisplayName),
 		AllocationUsdcMicros: req.AllocationUsdcMicros,
 		Thesis:               strings.TrimSpace(req.Thesis),
+		SelectBestVariant:    req.SelectBestVariant && kind == "buy",
 	})
 	if err != nil {
 		writeProposalCreateError(ctx, log, w, err, "group_id", groupID, "user_id", userID, "symbol", req.Symbol)

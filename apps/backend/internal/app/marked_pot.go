@@ -37,7 +37,7 @@ func computeGroupPotView(
 		return groupPotView{}, err
 	}
 
-	rows, err := potRowsFromPythInput(valuation.Marked)
+	rows, err := potRowsFromPythInput(ctx, symbols, valuation.Marked)
 	if err != nil {
 		return groupPotView{}, err
 	}
@@ -237,7 +237,7 @@ func domainNavInputFromPyth(input pyth.NavInput, totalShares domain.ShareUnits) 
 	}, nil
 }
 
-func potRowsFromPythInput(input pyth.NavInput) ([]GroupViewPotRow, error) {
+func potRowsFromPythInput(ctx context.Context, symbols *SymbolResolver, input pyth.NavInput) ([]GroupViewPotRow, error) {
 	rows := []GroupViewPotRow{{
 		Symbol:    "USDC",
 		Units:     formatMicrosAsUsdDecimal(input.TreasuryUsdc),
@@ -263,7 +263,7 @@ func potRowsFromPythInput(input pyth.NavInput) ([]GroupViewPotRow, error) {
 		if holding.AfterHours {
 			afterHours = boolPtr(true)
 		}
-		rows = append(rows, GroupViewPotRow{
+		row := GroupViewPotRow{
 			Symbol:             holding.Symbol,
 			Units:              string(units),
 			MarkUsd:            formatMicrosAsUsdDecimal(holding.MarkUsdc),
@@ -272,7 +272,13 @@ func potRowsFromPythInput(input pyth.NavInput) ([]GroupViewPotRow, error) {
 			AfterHours:         afterHours,
 			TokenAmount:        strconv.FormatInt(holding.Units, 10),
 			UiAmountMultiplier: pyth.UiMultiplierDecimalString(holding.UiMultiplier),
-		})
+		}
+		if holding.Kind == xstocks.AssetKindPreIPO && symbols != nil {
+			fields := symbols.IssuerFieldsForMint(ctx, holding.Mint)
+			row.Issuer = fields.Issuer
+			row.IssuerName = fields.IssuerName
+		}
+		rows = append(rows, row)
 	}
 	return rows, nil
 }

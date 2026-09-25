@@ -10,6 +10,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/solana/mintinfo"
 	"github.com/monaco/monaco/apps/backend/internal/solana/txsign"
 	"github.com/monaco/monaco/apps/backend/internal/swapprovider"
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
@@ -30,7 +31,7 @@ type DevExecuteBuyRequest struct {
 // DevExecuteBuyResult is the persisted confirmed buy transaction.
 type DevExecuteBuyResult struct {
 	Transaction postgres.TransactionRow
-	Created       bool
+	Created     bool
 }
 
 // SellToUSDCRequest sells treasury xStock back to USDC.
@@ -48,7 +49,7 @@ type SellToUSDCRequest struct {
 // SellToUSDCResult is the persisted confirmed sell transaction.
 type SellToUSDCResult struct {
 	Transaction postgres.TransactionRow
-	Created       bool
+	Created     bool
 	// ProceedsUSDC is the USDC the fill raised, in micros.
 	ProceedsUSDC int64
 }
@@ -76,6 +77,7 @@ type SwapService struct {
 	pollConfig jupiter.PollConfig
 	symbols    *SymbolResolver
 	pyth       pyth.Client
+	mintinfo   mintinfo.Reader
 }
 
 // NewSwapService wires swap dependencies.
@@ -112,6 +114,11 @@ func (s *SwapService) SetSwapProvider(provider swapprovider.Provider) {
 // SetPriceClient wires the price chain used to mark holdings in post-swap NAV snapshots.
 func (s *SwapService) SetPriceClient(client pyth.Client) {
 	s.pyth = client
+}
+
+// SetMintInfo wires live mint extension reads for pre-IPO fee and pause checks at execute time.
+func (s *SwapService) SetMintInfo(reader mintinfo.Reader) {
+	s.mintinfo = reader
 }
 
 // SwapProviderName reports which venue executes treasury swaps.
@@ -184,6 +191,15 @@ func (s *SwapService) executeBuy(ctx context.Context, req DevExecuteBuyRequest) 
 	outputMint := asset.SolanaMint
 	tokenDecimals := asset.Normalize().Decimals
 
+	if err := preIPOSwapGuard(ctx, s.mintinfo, asset); err != nil {
+		if errors.Is(err, ErrIssuerPaused) {
+			_ = s.recordIssuerPausedBuyFailure(ctx, req, outputMint)
+		}
+		logSwapBranchError("swap buy rejected", err, "group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol, "stage", "issuer_paused")
+		return DevExecuteBuyResult{}, err
+	}
+	transferFeeBps := transferFeeBpsAtExecute(ctx, s.mintinfo, asset)
+
 	swapReq := swapprovider.Request{
 		GroupID:        req.GroupID,
 		UserID:         req.UserID,
@@ -194,7 +210,7 @@ func (s *SwapService) executeBuy(ctx context.Context, req DevExecuteBuyRequest) 
 		InputDecimals:  usdcDecimals,
 		OutputDecimals: tokenDecimals,
 		Kind:           swapAssetKind(asset.Kind),
-		TransferFeeBps: asset.TransferFeeBps,
+		TransferFeeBps: transferFeeBps,
 		Amount:         req.USDCAmount,
 		Wallet:         swapprovider.Wallet{PrivyWalletID: treasury.PrivyWalletID, SolanaAddress: treasury.SolanaAddress},
 	}
@@ -243,7 +259,7 @@ func (s *SwapService) executeBuy(ctx context.Context, req DevExecuteBuyRequest) 
 
 	costBasisAmount, quotedOut, receivedOut := s.reconcileBuyFill(ctx, req.GroupID, treasury.SolanaAddress, outputMint, fill)
 	costBasisPrice := fill.InputAmount
-	s.logBuyFillReconciliation(ctx, req, asset, quotedOut, receivedOut, fill, sub.RequestID)
+	s.logBuyFillReconciliation(ctx, req, asset, transferFeeBps, quotedOut, receivedOut, fill, sub.RequestID)
 
 	row, created, err := s.store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          req.GroupID,
@@ -302,6 +318,12 @@ func (s *SwapService) executeSell(ctx context.Context, req SellToUSDCRequest) (S
 	sellAsset := s.assetForInputMint(ctx, req.GroupID, req.InputMint)
 	tokenDecimals := sellAsset.Decimals
 
+	if err := preIPOSwapGuard(ctx, s.mintinfo, sellAsset); err != nil {
+		logSwapBranchError("swap sell rejected", err, "group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol, "stage", "issuer_paused")
+		return SellToUSDCResult{}, err
+	}
+	sellTransferFeeBps := transferFeeBpsAtExecute(ctx, s.mintinfo, sellAsset)
+
 	swapReq := swapprovider.Request{
 		GroupID:        req.GroupID,
 		UserID:         req.UserID,
@@ -312,7 +334,7 @@ func (s *SwapService) executeSell(ctx context.Context, req SellToUSDCRequest) (S
 		InputDecimals:  tokenDecimals,
 		OutputDecimals: usdcDecimals,
 		Kind:           swapAssetKind(sellAsset.Kind),
-		TransferFeeBps: sellAsset.TransferFeeBps,
+		TransferFeeBps: sellTransferFeeBps,
 		Amount:         req.Amount,
 		Wallet:         swapprovider.Wallet{PrivyWalletID: treasury.PrivyWalletID, SolanaAddress: treasury.SolanaAddress},
 	}
@@ -499,7 +521,7 @@ func (s *SwapService) reconcileBuyFill(ctx context.Context, groupID, treasuryAdd
 	return receivedOut, quotedOut, receivedOut
 }
 
-func (s *SwapService) logBuyFillReconciliation(ctx context.Context, req DevExecuteBuyRequest, asset xstocks.CatalogAsset, quotedOut, receivedOut int64, fill swapprovider.Fill, requestID string) {
+func (s *SwapService) logBuyFillReconciliation(ctx context.Context, req DevExecuteBuyRequest, asset xstocks.CatalogAsset, transferFeeBps int, quotedOut, receivedOut int64, fill swapprovider.Fill, requestID string) {
 	if quotedOut <= 0 {
 		return
 	}
@@ -518,7 +540,7 @@ func (s *SwapService) logBuyFillReconciliation(ctx context.Context, req DevExecu
 	if asset.Kind == xstocks.AssetKindPreIPO {
 		slippageBps = jupiter.PreIPOSlippageBps
 	}
-	if feeBpsObserved > int64(asset.TransferFeeBps+slippageBps) {
+	if feeBpsObserved > int64(transferFeeBps+slippageBps) {
 		telemetry.Alert(ctx, telemetry.AlertEvent{
 			Kind:     "swap_fill_fee_high",
 			Key:      "swap_fill_fee_high:" + requestID,

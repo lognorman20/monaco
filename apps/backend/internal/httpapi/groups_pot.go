@@ -17,6 +17,8 @@ func (h *GroupHandlers) enrichPotRow(ctx context.Context, row app.GroupViewPotRo
 		AfterHours:  row.AfterHours,
 		TokenAmount:        row.TokenAmount,
 		UiAmountMultiplier: row.UiAmountMultiplier,
+		Issuer:             row.Issuer,
+		IssuerName:         row.IssuerName,
 	}
 	if row.Symbol == "USDC" {
 		return out

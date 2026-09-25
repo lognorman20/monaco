@@ -93,7 +93,9 @@ Or `curl -sfS https://dotenvx.sh | sh`. See [install docs](https://dotenvx.com/d
 | Env | Default | Meaning |
 | --- | --- | --- |
 | `TESSERA_API_BASE_URL` | `https://rest-api.tessera.pe` | Public Tessera catalog used for pre-IPO tokens. |
-| `TESSERA_ENABLED` | `true` | Include those tokens in search, detail, and sweeps. `false` hides them from the catalog; existing holdings still value from Jupiter. |
+| `TESSERA_ENABLED` | `true` | Include Tessera tokens in search, detail, and sweeps. `false` hides them from the catalog; existing holdings still value from Jupiter. |
+| `PRESTOCKS_API_BASE_URL` | `https://prestocks.com` | Public PreStocks catalog used for pre-IPO tokens. |
+| `PRESTOCKS_ENABLED` | `true` | Include PreStocks tokens in search, detail, and sweeps. `false` hides them from the catalog; existing holdings still value from Jupiter. |
 
 Justfile `dotenv-load` only reads plain `.env` — not dotenvx ciphertext. Recipes that need secrets re-exec once under `dotenvx run -f .env.local` (via `scripts/with-dotenv-local.sh`). Mobile Privy uses `scripts/ensure-ios-privy-config.sh` (xcconfig) + `SIMCTL_CHILD_*` at sim launch.
 

@@ -100,6 +100,7 @@ type CreateProposalInput struct {
 	Kind                 domain.ProposalKind
 	UsdcMicros           int64
 	TokenAmount          int64
+	SelectBestVariant    bool
 	AgentDisplayName     string
 	AllocationUsdcMicros int64
 	Thesis               string
@@ -692,11 +693,12 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 			logGovernanceBranchWarn("governance create proposal rejected", "exceeds treasury total", "group_id", in.GroupID, "proposer_id", in.ProposerID, "usdc_micros", in.UsdcMicros, "treasury_total_micros", treasuryTotal)
 			return Proposal{}, ErrExceedsTreasuryUSDC
 		}
-		_, err = g.buy.StartBuy(ctx, StartBuyRequest{
-			GroupID:    in.GroupID,
-			UserID:     in.ProposerID,
-			Symbol:     in.Symbol,
-			USDCAmount: in.UsdcMicros,
+		buyResult, err := g.buy.StartBuy(ctx, StartBuyRequest{
+			GroupID:           in.GroupID,
+			UserID:            in.ProposerID,
+			Symbol:            in.Symbol,
+			USDCAmount:        in.UsdcMicros,
+			SelectBestVariant: in.SelectBestVariant,
 		})
 		if err != nil {
 			if errors.Is(err, ErrQuoteNotRoutable) {
@@ -706,6 +708,11 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 			logGovernanceBranchError("governance create proposal start buy failed", err, "group_id", in.GroupID, "proposer_id", in.ProposerID)
 			return Proposal{}, err
 		}
+		persistSymbol := in.Symbol
+		if in.SelectBestVariant && strings.TrimSpace(buyResult.Symbol) != "" {
+			persistSymbol = buyResult.Symbol
+		}
+		in.Symbol = persistSymbol
 	case domain.ProposalKindSell:
 		if in.TokenAmount <= 0 || in.UsdcMicros != 0 {
 			return Proposal{}, fmt.Errorf("token amount must be positive")

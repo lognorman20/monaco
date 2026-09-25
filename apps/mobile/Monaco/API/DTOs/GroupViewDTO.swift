@@ -12,10 +12,18 @@ struct PotRowDTO: Codable, Equatable, Identifiable {
     let assetKind: AssetKind?
     let tokenDecimals: Int?
     let premiumBps: Int?
+    let uiAmountMultiplier: String?
+    let issuerName: String?
 
     var id: String { symbol }
     var resolvedAssetKind: AssetKind { assetKind ?? .stock }
     var resolvedTokenDecimals: Int { tokenDecimals ?? AssetCatalogDefaults.decimals }
+    var resolvedUiMultiplier: Decimal {
+        guard let uiAmountMultiplier, let value = Decimal(string: uiAmountMultiplier, locale: Locale(identifier: "en_US_POSIX")), value > 0 else {
+            return 1
+        }
+        return value
+    }
 
     init(
         symbol: String,
@@ -27,7 +35,9 @@ struct PotRowDTO: Codable, Equatable, Identifiable {
         tokenAmount: String? = nil,
         assetKind: AssetKind? = nil,
         tokenDecimals: Int? = nil,
-        premiumBps: Int? = nil
+        premiumBps: Int? = nil,
+        uiAmountMultiplier: String? = nil,
+        issuerName: String? = nil
     ) {
         self.symbol = symbol
         self.units = units
@@ -39,6 +49,8 @@ struct PotRowDTO: Codable, Equatable, Identifiable {
         self.assetKind = assetKind
         self.tokenDecimals = tokenDecimals
         self.premiumBps = premiumBps
+        self.uiAmountMultiplier = uiAmountMultiplier
+        self.issuerName = issuerName
     }
 }
 

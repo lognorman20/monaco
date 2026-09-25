@@ -178,8 +178,8 @@ struct AssetDetailView: View {
                         activeSymbol = variant.symbol
                     } label: {
                         MonacoRow(
-                            title: variant.issuer.capitalized,
-                            subtitle: variantLiquidity(variant),
+                            title: variantTitle(variant),
+                            subtitle: variantSubtitle(variant),
                             chevron: variant.symbol != activeSymbol,
                             isLast: index == variants.count - 1
                         ) {
@@ -286,6 +286,21 @@ struct AssetDetailView: View {
             return "\(PreIpoCopy.companyValueCaption) \(value)"
         }
         return "\(PreIpoCopy.companyValueCaption) \(value) · updated \(age) ago"
+    }
+
+    private func variantTitle(_ variant: AssetVariantDTO) -> String {
+        if variant.paused == true { return "\(variant.resolvedIssuerName) · paused" }
+        if variant.bestPrice == true { return "\(variant.resolvedIssuerName) · Best price" }
+        return variant.resolvedIssuerName
+    }
+
+    private func variantSubtitle(_ variant: AssetVariantDTO) -> String {
+        var parts = [variantLiquidity(variant)]
+        if let fee = variant.transferFeeBps, fee > 0 {
+            let pct = Double(fee) / 100
+            parts.append(String(format: "Fee %.1f%%", pct))
+        }
+        return parts.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     private func variantLiquidity(_ variant: AssetVariantDTO) -> String {

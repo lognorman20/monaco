@@ -121,12 +121,20 @@ public struct AssetLiquidityDTO: Codable, Equatable, Sendable {
 public struct AssetVariantDTO: Codable, Equatable, Sendable, Identifiable {
     public let symbol: String
     public let issuer: String
+    public let issuerName: String?
     public let solanaMint: String
     public let priceUsdcMicros: Int64?
     public let liquidityUsd: String?
     public let routable: Bool
+    public let transferFeeBps: Int?
+    public let bestPrice: Bool?
+    public let paused: Bool?
 
     public var id: String { symbol }
+    public var resolvedIssuerName: String {
+        if let issuerName, !issuerName.isEmpty { return issuerName }
+        return issuer.capitalized
+    }
 
     public init(
         symbol: String,
@@ -134,9 +142,17 @@ public struct AssetVariantDTO: Codable, Equatable, Sendable, Identifiable {
         solanaMint: String,
         priceUsdcMicros: Int64? = nil,
         liquidityUsd: String? = nil,
-        routable: Bool
+        routable: Bool,
+        issuerName: String? = nil,
+        transferFeeBps: Int? = nil,
+        bestPrice: Bool? = nil,
+        paused: Bool? = nil
     ) {
         self.symbol = symbol
+        self.issuerName = issuerName
+        self.transferFeeBps = transferFeeBps
+        self.bestPrice = bestPrice
+        self.paused = paused
         self.issuer = issuer
         self.solanaMint = solanaMint
         self.priceUsdcMicros = priceUsdcMicros

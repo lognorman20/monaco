@@ -24,7 +24,7 @@ const (
 
 // Comparison summarizes how the default pre-IPO variant was chosen for one company.
 type Comparison struct {
-	Basis        string // "price_v3" | "unavailable" | "single"
+	Basis        string // "price_v3" | "live_quote" | "unavailable" | "single"
 	ChosenSymbol string
 	Candidates   []ComparisonCandidate
 }
@@ -36,8 +36,9 @@ type ComparisonCandidate struct {
 	IssuerName   string
 	SolanaMint   string
 	CostRatioBps int64
+	ExposureUsdcMicros int64 // live_quote basis
 	DeltaBps     int64
-	Reason       string // "" | "issuer_paused" | "reference_unavailable"
+	Reason       string // "" | "issuer_paused" | "no_route" | "reference_unavailable"
 }
 
 type comparisonCacheEntry struct {

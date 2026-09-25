@@ -3,9 +3,11 @@ package httpapi
 import (
 	"context"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/catalog"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
@@ -14,29 +16,37 @@ const referenceFreshness = 48 * time.Hour
 
 // Shared catalog JSON fields for list and detail asset responses.
 type assetCatalogJSONFields struct {
-	Kind                     string  `json:"kind"`
-	Source                   string  `json:"source"`
-	Issuer                   string  `json:"issuer"`
-	UnderlyingID             string  `json:"underlyingId"`
-	TokenDecimals            int     `json:"tokenDecimals"`
-	Sector                   string  `json:"sector,omitempty"`
-	LogoURL                  string  `json:"logoUrl,omitempty"`
-	AlwaysOpen               bool    `json:"alwaysOpen"`
-	ReferenceMarkUsdcMicros  *int64  `json:"referenceMarkUsdcMicros,omitempty"`
-	ReferenceValuationUsd    *int64  `json:"referenceValuationUsd,omitempty"`
-	ReferenceUpdatedAt       *string `json:"referenceUpdatedAt,omitempty"`
-	PremiumBps               *int    `json:"premiumBps,omitempty"`
-	Holders                  *int    `json:"holders,omitempty"`
-	VariantCount             int     `json:"variantCount,omitempty"`
+	Kind                    string  `json:"kind"`
+	Source                  string  `json:"source"`
+	Issuer                  string  `json:"issuer"`
+	IssuerName              string  `json:"issuerName,omitempty"`
+	UnderlyingID            string  `json:"underlyingId"`
+	UiAmountMultiplier      string  `json:"uiAmountMultiplier,omitempty"`
+	Paused                  bool    `json:"paused,omitempty"`
+	TokenDecimals           int     `json:"tokenDecimals"`
+	Sector                  string  `json:"sector,omitempty"`
+	LogoURL                 string  `json:"logoUrl,omitempty"`
+	AlwaysOpen              bool    `json:"alwaysOpen"`
+	ReferenceMarkUsdcMicros *int64  `json:"referenceMarkUsdcMicros,omitempty"`
+	ReferenceValuationUsd   *int64  `json:"referenceValuationUsd,omitempty"`
+	ReferenceUpdatedAt      *string `json:"referenceUpdatedAt,omitempty"`
+	PremiumBps              *int    `json:"premiumBps,omitempty"`
+	Holders                 *int    `json:"holders,omitempty"`
+	VariantCount            int     `json:"variantCount,omitempty"`
 }
 
 type assetVariantResponse struct {
-	Symbol          string  `json:"symbol"`
-	Issuer          string  `json:"issuer"`
-	SolanaMint      string  `json:"solanaMint"`
-	PriceUsdcMicros *int64  `json:"priceUsdcMicros,omitempty"`
-	LiquidityUsd    float64 `json:"liquidityUsd,omitempty"`
-	Routable        bool    `json:"routable"`
+	Symbol          string `json:"symbol"`
+	Issuer          string `json:"issuer"`
+	IssuerName      string `json:"issuerName,omitempty"`
+	SolanaMint      string `json:"solanaMint"`
+	PriceUsdcMicros *int64 `json:"priceUsdcMicros,omitempty"`
+	LiquidityUsd    string `json:"liquidityUsd,omitempty"`
+	Routable        bool   `json:"routable"`
+	TransferFeeBps  int    `json:"transferFeeBps,omitempty"`
+	CostRatioBps    int64  `json:"costRatioBps,omitempty"`
+	BestPrice       bool   `json:"bestPrice,omitempty"`
+	Paused          bool   `json:"paused,omitempty"`
 }
 
 type catalogKindSearcher interface {
@@ -125,16 +135,19 @@ func variantCountFor(ctx context.Context, catalog xstocks.CatalogSearcher, asset
 func catalogJSONFields(asset xstocks.CatalogAsset, price *jupiter.TokenPrice, variantCount int) assetCatalogJSONFields {
 	n := asset.Normalize()
 	out := assetCatalogJSONFields{
-		Kind:          string(n.Kind),
-		Source:        string(n.Source),
-		Issuer:        n.Issuer,
-		UnderlyingID:  n.UnderlyingID,
-		TokenDecimals: n.Decimals,
-		Sector:        strings.TrimSpace(n.Sector),
-		LogoURL:       strings.TrimSpace(n.LogoURL),
-		AlwaysOpen:    n.Kind == xstocks.AssetKindPreIPO,
-		Holders:       n.Holders,
-		VariantCount:  variantCount,
+		Kind:               string(n.Kind),
+		Source:             string(n.Source),
+		Issuer:             n.Issuer,
+		IssuerName:         n.IssuerName,
+		UnderlyingID:       n.UnderlyingID,
+		UiAmountMultiplier: uiAmountMultiplierForAsset(n),
+		Paused:             n.Paused,
+		TokenDecimals:      n.Decimals,
+		Sector:             strings.TrimSpace(n.Sector),
+		LogoURL:            strings.TrimSpace(n.LogoURL),
+		AlwaysOpen:         n.Kind == xstocks.AssetKindPreIPO,
+		Holders:            n.Holders,
+		VariantCount:       variantCount,
 	}
 	if price != nil {
 		applyJupiterReference(&out, *price)
@@ -235,17 +248,44 @@ func variantResponses(ctx context.Context, catalog xstocks.CatalogSearcher, pric
 	for _, v := range variants {
 		n := v.Normalize()
 		row := assetVariantResponse{
-			Symbol:     n.Symbol,
-			Issuer:     n.Issuer,
-			SolanaMint: n.SolanaMint,
-			Routable:   n.Routable,
+			Symbol:         n.Symbol,
+			Issuer:         n.Issuer,
+			IssuerName:     n.IssuerName,
+			SolanaMint:     n.SolanaMint,
+			Routable:       n.Routable,
+			TransferFeeBps: n.TransferFeeBps,
+			Paused:         n.Paused,
 		}
 		if p, ok := prices[n.SolanaMint]; ok && p.PriceUsdcMicros > 0 {
 			micros := p.PriceUsdcMicros
 			row.PriceUsdcMicros = &micros
-			row.LiquidityUsd = p.LiquidityUsd
+			if p.LiquidityUsd > 0 {
+				row.LiquidityUsd = strconv.FormatFloat(p.LiquidityUsd, 'f', -1, 64)
+			}
 		}
 		out = append(out, row)
 	}
+	markBestPriceVariant(ctx, catalog, underlying, out)
 	return out
+}
+
+func markBestPriceVariant(ctx context.Context, searcher xstocks.CatalogSearcher, underlying string, rows []assetVariantResponse) {
+	cmp, ok := searcher.(interface {
+		Compare(ctx context.Context, underlyingID string) (catalog.Comparison, error)
+	})
+	if !ok || len(rows) < 2 {
+		return
+	}
+	comparison, err := cmp.Compare(ctx, underlying)
+	if err != nil || comparison.Basis != "price_v3" || comparison.ChosenSymbol == "" {
+		return
+	}
+	ratios := map[string]int64{}
+	for _, candidate := range comparison.Candidates {
+		ratios[candidate.Symbol] = candidate.CostRatioBps
+	}
+	for i := range rows {
+		rows[i].CostRatioBps = ratios[rows[i].Symbol]
+		rows[i].BestPrice = rows[i].Symbol == comparison.ChosenSymbol
+	}
 }

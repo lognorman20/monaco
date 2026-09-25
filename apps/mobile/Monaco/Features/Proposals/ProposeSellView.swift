@@ -163,10 +163,11 @@ struct ProposeSellAmountView: View {
                 forUsd: entered,
                 markUsd: markUsd,
                 ceiling: ceilingAtomics,
-                decimals: holding.resolvedTokenDecimals
+                decimals: holding.resolvedTokenDecimals,
+                multiplier: holding.resolvedUiMultiplier
             )
         }
-        guard let atomics = ProposeMath.atomics(fromShares: amountText, decimals: holding.resolvedTokenDecimals),
+        guard let atomics = ProposeMath.atomics(fromShares: amountText, decimals: holding.resolvedTokenDecimals, multiplier: holding.resolvedUiMultiplier),
               atomics <= ceilingAtomics else { return nil }
         return atomics
     }
@@ -178,7 +179,7 @@ struct ProposeSellAmountView: View {
     private var isOverHoldings: Bool {
         guard let entered = enteredValue else { return false }
         if entersDollars, let valueUsd { return entered > valueUsd }
-        return (ProposeMath.atomics(fromShares: amountText, decimals: holding.resolvedTokenDecimals) ?? 0) > ceilingAtomics
+        return (ProposeMath.atomics(fromShares: amountText, decimals: holding.resolvedTokenDecimals, multiplier: holding.resolvedUiMultiplier) ?? 0) > ceilingAtomics
     }
 
     var body: some View {

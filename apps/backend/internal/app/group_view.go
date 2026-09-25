@@ -20,6 +20,8 @@ type GroupViewPotRow struct {
 	AfterHours          *bool
 	TokenAmount         string
 	UiAmountMultiplier  string
+	Issuer              string
+	IssuerName          string
 }
 
 // GroupViewMemberSlice is the authenticated viewer's slice in a group.

@@ -200,3 +200,33 @@ func TestJupiterQuoteBuy_httpError_propagatesAsRefusal(t *testing.T) {
 		t.Fatalf("OutputMint = %q, want %q", quote.OutputMint, outputMint)
 	}
 }
+
+func TestParseBuyQuoteResponse_stringPriceImpactPct(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{
+  "inputMint": "` + USDCMint + `",
+  "outputMint": "TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v",
+  "inAmount": "1000000",
+  "outAmount": "17711094",
+  "transaction": null,
+  "routePlan": [{"percent": 100}],
+  "requestId": "req-string-impact",
+  "priceImpactPct": "0.32290054666190826"
+}`)
+
+	quote, err := ParseBuyQuoteResponse(body, false)
+	if err != nil {
+		t.Fatalf("ParseBuyQuoteResponse() error = %v", err)
+	}
+	if !quote.Routable {
+		t.Fatal("expected routable quote")
+	}
+	impact, ok := PriceImpactPctFromOrderJSON(body)
+	if !ok {
+		t.Fatal("expected price impact")
+	}
+	if impact < 0.32 || impact > 0.33 {
+		t.Fatalf("priceImpactPct = %v", impact)
+	}
+}

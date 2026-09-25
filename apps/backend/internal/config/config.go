@@ -35,9 +35,14 @@ const (
 	envPrivyVerificationKey         = "PRIVY_VERIFICATION_KEY"
 	envTesseraAPIBaseURL            = "TESSERA_API_BASE_URL"
 	envTesseraEnabled               = "TESSERA_ENABLED"
+	envPreStocksAPIBaseURL          = "PRESTOCKS_API_BASE_URL"
+	envPreStocksEnabled             = "PRESTOCKS_ENABLED"
 )
 
-const defaultTesseraAPIBaseURL = "https://rest-api.tessera.pe"
+const (
+	defaultTesseraAPIBaseURL   = "https://rest-api.tessera.pe"
+	defaultPreStocksAPIBaseURL = "https://prestocks.com"
+)
 
 // maxFlashSlippage caps FLASH_MAX_SLIPPAGE so a typo cannot open a treasury swap to a bad fill.
 const maxFlashSlippage = 0.05
@@ -71,6 +76,8 @@ const maxFlashSlippage = 0.05
 //     limit — but set it in production to avoid 429s.
 //   - TESSERA_API_BASE_URL: Tessera public catalog API base (default https://rest-api.tessera.pe).
 //   - TESSERA_ENABLED: include Tessera pre-IPO tokens in the composite catalog (default true).
+//   - PRESTOCKS_API_BASE_URL: PreStocks public catalog base (default https://prestocks.com).
+//   - PRESTOCKS_ENABLED: include PreStocks pre-IPO tokens (default true). Set false for a Tessera-only catalog.
 //   - SWAP_PROVIDER: venue for treasury buys and sells: "jupiter" (default) or "flash"
 //     (Definitive Flash), including cash-out sells. Display quotes and routability probes stay on Jupiter.
 //   - FLASH_API_KEY: Definitive Flash integrator key (x-definitive-api-key header). Required
@@ -94,6 +101,8 @@ type Config struct {
 	JupiterAPIKey                string
 	TesseraAPIBaseURL            string
 	TesseraEnabled               bool
+	PreStocksAPIBaseURL          string
+	PreStocksEnabled             bool
 	SupabaseURL                  string
 	SupabaseServiceRoleKey       string
 	SolanaCluster                string
@@ -121,6 +130,8 @@ func Load() (*Config, error) {
 		JupiterAPIKey:                strings.TrimSpace(os.Getenv(envJupiterAPIKey)),
 		TesseraAPIBaseURL:            tesseraAPIBaseURLFromEnv(),
 		TesseraEnabled:               tesseraEnabledFromEnv(),
+		PreStocksAPIBaseURL:          preStocksAPIBaseURLFromEnv(),
+		PreStocksEnabled:             enabledFromEnv(envPreStocksEnabled),
 		SupabaseURL:                  strings.TrimSpace(os.Getenv(envSupabaseURL)),
 		SupabaseServiceRoleKey:       strings.TrimSpace(os.Getenv(envSupabaseServiceRoleKey)),
 		SolanaCluster:                SolanaCluster,
@@ -207,7 +218,19 @@ func tesseraAPIBaseURLFromEnv() string {
 }
 
 func tesseraEnabledFromEnv() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(envTesseraEnabled))) {
+	return enabledFromEnv(envTesseraEnabled)
+}
+
+func preStocksAPIBaseURLFromEnv() string {
+	raw := strings.TrimRight(strings.TrimSpace(os.Getenv(envPreStocksAPIBaseURL)), "/")
+	if raw == "" {
+		return defaultPreStocksAPIBaseURL
+	}
+	return raw
+}
+
+func enabledFromEnv(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
 	case "0", "false", "no", "off":
 		return false
 	default:

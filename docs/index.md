@@ -172,3 +172,4 @@ Never `simctl erase` for QA. Agent-driven QA must export `SIMSLIM_UDID` and pass
 - [M4. Domain logic](milestones/m4-domain.md)
 - [M5. Mobile product UI](milestones/m5-mobile.md)
 - [Tessera. Pre-IPO tokens](milestones/tessera-pre-ipo.md)
+- [PreStocks. Pre-IPO tokens](milestones/prestocks-pre-ipo.md)

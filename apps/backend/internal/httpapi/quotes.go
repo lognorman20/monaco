@@ -27,10 +27,31 @@ type QuoteHandlers struct {
 }
 
 type quoteRequest struct {
-	Kind        string `json:"kind"`
-	Symbol      string `json:"symbol"`
-	USDC        int64  `json:"usdc"`
-	TokenAmount int64  `json:"tokenAmount"`
+	Kind              string `json:"kind"`
+	Symbol            string `json:"symbol"`
+	USDC              int64  `json:"usdc"`
+	TokenAmount       int64  `json:"tokenAmount"`
+	SelectBestVariant bool   `json:"selectBestVariant"`
+}
+
+type quoteProviderResponse struct {
+	Issuer     string `json:"issuer"`
+	IssuerName string `json:"issuerName"`
+}
+
+type quoteComparisonCandidateResponse struct {
+	Symbol             string `json:"symbol"`
+	Issuer             string `json:"issuer,omitempty"`
+	IssuerName         string `json:"issuerName,omitempty"`
+	ExposureUsdcMicros string `json:"exposureUsdcMicros,omitempty"`
+	CostRatioBps       int64  `json:"costRatioBps,omitempty"`
+	DeltaBps           int64  `json:"deltaBps,omitempty"`
+	Reason             string `json:"reason,omitempty"`
+}
+
+type quoteComparisonResponse struct {
+	Basis      string                             `json:"basis"`
+	Candidates []quoteComparisonCandidateResponse `json:"candidates,omitempty"`
 }
 
 type quoteResponse struct {
@@ -39,13 +60,17 @@ type quoteResponse struct {
 	USDCMicros       string `json:"usdcMicros,omitempty"`
 	TokenAmount      string `json:"tokenAmount,omitempty"`
 	Routable         bool   `json:"routable"`
+	Reason           string `json:"reason,omitempty"`
 	OutputAmount     string `json:"outputAmount,omitempty"`
 	OutputUsdcMicros string `json:"outputUsdcMicros,omitempty"`
 	PriceUsdcMicros  string `json:"priceUsdcMicros,omitempty"`
 	TokenDecimals    int    `json:"tokenDecimals,omitempty"`
 	PremiumBps       *int   `json:"premiumBps,omitempty"`
 	// AssetKind is stock or pre_ipo. Kind stays buy/sell.
-	AssetKind string `json:"assetKind,omitempty"`
+	AssetKind          string                   `json:"assetKind,omitempty"`
+	UiAmountMultiplier string                   `json:"uiAmountMultiplier,omitempty"`
+	Provider           *quoteProviderResponse   `json:"provider,omitempty"`
+	PriceComparison    *quoteComparisonResponse `json:"priceComparison,omitempty"`
 }
 
 // ProposalQuoteInput is the quote gate input shared with proposal create (M4-T13).
@@ -191,14 +216,26 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := h.Buy.StartBuy(ctx, app.StartBuyRequest{
-		GroupID:    groupID,
-		UserID:     userID,
-		Symbol:     req.Symbol,
-		USDCAmount: req.USDC,
+		GroupID:           groupID,
+		UserID:            userID,
+		Symbol:            req.Symbol,
+		USDCAmount:        req.USDC,
+		SelectBestVariant: req.SelectBestVariant,
 	})
 	if err != nil {
 		if errors.Is(err, xstocks.ErrNotFound) {
 			logJSONError(ctx, log, "symbol_not_found", w, http.StatusNotFound, "symbol not found", "group_id", groupID, "symbol", req.Symbol, "user_id", userID)
+			return
+		}
+		if errors.Is(err, app.ErrIssuerPaused) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(quoteResponse{
+				Symbol:     req.Symbol,
+				USDCMicros: strconv.FormatInt(req.USDC, 10),
+				Routable:   false,
+				Reason:     "issuer_paused",
+			})
 			return
 		}
 		if errors.Is(err, app.ErrQuoteNotRoutable) {
@@ -223,13 +260,21 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	n := asset.Normalize()
+	quoteSymbol := req.Symbol
+	if strings.TrimSpace(result.Symbol) != "" {
+		quoteSymbol = result.Symbol
+		if picked, err := h.Buy.ResolveAsset(ctx, quoteSymbol); err == nil {
+			n = picked.Normalize()
+		}
+	}
 	resp := quoteResponse{
-		Symbol:        req.Symbol,
-		USDCMicros:    strconv.FormatInt(req.USDC, 10),
-		Routable:      result.Quote.Routable,
-		OutputAmount:  strings.TrimSpace(result.Quote.OutAmount),
-		TokenDecimals: n.Decimals,
-		AssetKind:     string(n.Kind),
+		Symbol:             quoteSymbol,
+		USDCMicros:         strconv.FormatInt(req.USDC, 10),
+		Routable:           result.Quote.Routable,
+		OutputAmount:       strings.TrimSpace(result.Quote.OutAmount),
+		TokenDecimals:      n.Decimals,
+		AssetKind:          string(n.Kind),
+		UiAmountMultiplier: uiAmountMultiplierForAsset(n),
 	}
 	if price, ok := quotePriceUsdcMicros(req.USDC, resp.OutputAmount, n.Decimals, n.UiAmountMultiplier, n.Kind); ok {
 		resp.PriceUsdcMicros = strconv.FormatInt(price, 10)
@@ -241,6 +286,15 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 				resp.PremiumBps = fields.PremiumBps
 			}
 		}
+	}
+	if result.Provider != nil {
+		resp.Provider = &quoteProviderResponse{
+			Issuer:     result.Provider.Issuer,
+			IssuerName: result.Provider.IssuerName,
+		}
+	}
+	if result.PriceComparison != nil {
+		resp.PriceComparison = quoteComparisonToJSON(*result.PriceComparison)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

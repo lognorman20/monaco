@@ -276,6 +276,33 @@ func TestConfig_tesseraDefaults(t *testing.T) {
 	}
 }
 
+func TestConfig_prestocksDefaults(t *testing.T) {
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.PreStocksEnabled || cfg.PreStocksAPIBaseURL != defaultPreStocksAPIBaseURL {
+		t.Fatalf("prestocks = enabled %v url %q", cfg.PreStocksEnabled, cfg.PreStocksAPIBaseURL)
+	}
+}
+
+func TestConfig_prestocksDisabled(t *testing.T) {
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+	t.Setenv("PRESTOCKS_ENABLED", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.PreStocksEnabled {
+		t.Fatal("PreStocksEnabled = true, want false")
+	}
+}
+
 func TestConfig_tesseraDisabled(t *testing.T) {
 	clearConfigEnv(t)
 	setValidConfigEnv(t)

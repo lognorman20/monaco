@@ -107,17 +107,36 @@ func NewHTTPClientWithBaseURL(baseURL string, httpClient *http.Client) *HTTPClie
 }
 
 type quoteResponse struct {
-	InputMint    string          `json:"inputMint"`
-	OutputMint   string          `json:"outputMint"`
-	InAmount     string          `json:"inAmount"`
-	OutAmount    string          `json:"outAmount"`
-	Transaction  string          `json:"transaction"`
-	RoutePlan    json.RawMessage `json:"routePlan"`
-	RequestID    string          `json:"requestId"`
-	Router       string          `json:"router"`
-	ErrorCode    float64         `json:"errorCode"`
-	ErrorMessage string          `json:"errorMessage"`
-	Error        string          `json:"error"`
+	InputMint      string          `json:"inputMint"`
+	OutputMint     string          `json:"outputMint"`
+	InAmount       string          `json:"inAmount"`
+	OutAmount      string          `json:"outAmount"`
+	Transaction    string          `json:"transaction"`
+	RoutePlan      json.RawMessage `json:"routePlan"`
+	RequestID      string          `json:"requestId"`
+	Router         string          `json:"router"`
+	PriceImpactPct jsonFloat       `json:"priceImpactPct"`
+	ErrorCode      float64         `json:"errorCode"`
+	ErrorMessage   string          `json:"errorMessage"`
+	Error          string          `json:"error"`
+}
+
+// PriceImpactPctFromOrderJSON reads Jupiter v2 order priceImpactPct when present.
+func PriceImpactPctFromOrderJSON(body []byte) (float64, bool) {
+	var raw quoteResponse
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return 0, false
+	}
+	return raw.PriceImpactPct.Float64(), true
+}
+
+// ProbeBuyOrderJSON requests a price-only buy order for dev tooling (no taker).
+func (c *HTTPClient) ProbeBuyOrderJSON(ctx context.Context, outputMint string, usdcAmount int64, slippageBps int) ([]byte, error) {
+	return c.fetchBuyOrder(ctx, buyOrderRequest{
+		OutputMint:  outputMint,
+		Amount:      usdcAmount,
+		SlippageBps: slippageBps,
+	}, "", "", "")
 }
 
 // QuoteBuy requests a USDC inputMint quote for an xStock outputMint.

@@ -653,7 +653,8 @@ final class MonacoAPIClient {
         symbol: String,
         kind: String = "buy",
         usdc: Int64? = nil,
-        tokenAmount: Int64? = nil
+        tokenAmount: Int64? = nil,
+        selectBestVariant: Bool = false
     ) async throws -> BuyQuoteDTO {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/quotes")
         var request = URLRequest(url: url)
@@ -661,7 +662,7 @@ final class MonacoAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try applyAuthorizationHeader(accessToken: accessToken, to: &request)
         request.httpBody = try JSONEncoder().encode(
-            QuoteRequest(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount)
+            QuoteRequest(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount, selectBestVariant: selectBestVariant)
         )
 
         let (data, response) = try await session.data(for: request)
@@ -880,9 +881,10 @@ private struct QuoteRequest: Encodable {
     let kind: String?
     let usdc: Int64?
     let tokenAmount: Int64?
+    let selectBestVariant: Bool
 
     enum CodingKeys: String, CodingKey {
-        case symbol, kind, usdc, tokenAmount
+        case symbol, kind, usdc, tokenAmount, selectBestVariant
     }
 
     func encode(to encoder: Encoder) throws {
@@ -891,6 +893,7 @@ private struct QuoteRequest: Encodable {
         if let kind { try container.encode(kind, forKey: .kind) }
         if let usdc { try container.encode(usdc, forKey: .usdc) }
         if let tokenAmount { try container.encode(tokenAmount, forKey: .tokenAmount) }
+        if selectBestVariant { try container.encode(true, forKey: .selectBestVariant) }
     }
 }
 

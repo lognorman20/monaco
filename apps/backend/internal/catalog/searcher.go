@@ -15,7 +15,21 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
-const searchMergeLimit = 100_000
+// fetchLimit is how many xStocks rows a search may collect before it stops.
+// Listing used to request the entire catalog, then quote every row.
+func fetchLimit(limit, offset int) int {
+	if limit < 1 {
+		limit = 25
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	n := limit + offset
+	if n < limit {
+		return limit
+	}
+	return n
+}
 
 // TaggedSource pairs a supplemental catalog source with its asset-source id.
 type TaggedSource struct {
@@ -123,7 +137,7 @@ func (c *Composite) SearchKind(ctx context.Context, query string, kind xstocks.A
 		return xstocks.CatalogSearchPage{Assets: merged, HasMore: xsPage.HasMore}, nil
 	}
 
-	xsPage, err := c.xstocks.Search(ctx, query, searchMergeLimit, 0)
+	xsPage, err := c.xstocks.Search(ctx, query, fetchLimit(limit, offset), 0)
 	if err != nil {
 		return xstocks.CatalogSearchPage{}, err
 	}
@@ -176,7 +190,7 @@ func (c *Composite) SearchVariants(ctx context.Context, underlyingID string) ([]
 		return nil, nil
 	}
 
-	xsPage, err := c.xstocks.Search(ctx, underlyingID, searchMergeLimit, 0)
+	xsPage, err := c.xstocks.Search(ctx, underlyingID, fetchLimit(25, 0), 0)
 	if err != nil {
 		return nil, err
 	}
@@ -189,14 +203,7 @@ func (c *Composite) SearchVariants(ctx context.Context, underlyingID string) ([]
 	for _, asset := range c.supplementalRows(ctx) {
 		if underlyingKey(asset) == underlyingID {
 			enriched := c.enrichAsset(ctx, asset)
-			if c.prober != nil {
-				enriched.Routable = c.prober.IsRoutable(ctx, enriched)
-			} else {
-				enriched.Routable = true
-			}
-			if enriched.Paused {
-				enriched.Routable = false
-			}
+			enriched.Routable = !enriched.Paused
 			out = append(out, enriched)
 		}
 	}
@@ -459,17 +466,12 @@ func rankXStockMatches(ctx context.Context, prober xstocks.RoutabilityProber, ma
 	sortXStockMergeMatches(matches)
 }
 
-func probeSupplemental(ctx context.Context, prober xstocks.RoutabilityProber, matches []xstocks.CatalogAsset) {
+// probeSupplemental marks paused pre-IPO rows as not tradable. List and search
+// do not ask Jupiter for an order quote per symbol; that burst hits rate limits
+// and the phone gives up before the list returns. A buy still quotes the one mint.
+func probeSupplemental(_ context.Context, _ xstocks.RoutabilityProber, matches []xstocks.CatalogAsset) {
 	for i := range matches {
-		if matches[i].Paused {
-			matches[i].Routable = false
-			continue
-		}
-		if prober == nil {
-			matches[i].Routable = true
-			continue
-		}
-		matches[i].Routable = prober.IsRoutable(ctx, matches[i])
+		matches[i].Routable = !matches[i].Paused
 	}
 }
 

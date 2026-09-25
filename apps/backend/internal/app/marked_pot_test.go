@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"testing"
 
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
@@ -63,7 +64,7 @@ func TestPotRowsFromPythInput_perAssetDollarPnL(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			rows, err := potRowsFromPythInput(tc.input)
+			rows, err := potRowsFromPythInput(context.Background(), nil, tc.input)
 			if err != nil {
 				t.Fatalf("potRowsFromPythInput: %v", err)
 			}
@@ -115,7 +116,7 @@ func TestMarkedPot_nineDecimalHolding_valuesOnceNotTenTimes(t *testing.T) {
 		}},
 	}
 
-	rows, err := potRowsFromPythInput(input)
+	rows, err := potRowsFromPythInput(context.Background(), nil, input)
 	if err != nil {
 		t.Fatalf("potRowsFromPythInput: %v", err)
 	}
@@ -144,7 +145,7 @@ func TestPotRowsFromPythInput_largeHoldingValueDoesNotWrap(t *testing.T) {
 	}
 
 	// Act
-	rows, err := potRowsFromPythInput(input)
+	rows, err := potRowsFromPythInput(context.Background(), nil, input)
 
 	// Assert
 	if err != nil {

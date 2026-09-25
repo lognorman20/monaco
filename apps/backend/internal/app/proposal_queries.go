@@ -14,11 +14,13 @@ import (
 
 // ProposalListItem is one row in GET /v1/groups/{id}/proposals.
 type ProposalListItem struct {
-	ID          string
-	Symbol      string
-	Kind        domain.ProposalKind
-	UsdcMicros  int64
-	TokenAmount int64
+	ID            string
+	Symbol        string
+	Issuer        string
+	IssuerName    string
+	Kind          domain.ProposalKind
+	UsdcMicros    int64
+	TokenAmount   int64
 	TokenDecimals int
 	PremiumBps    *int
 	// AgentDisplayName and AllocationUsdcMicros are set on agent governance proposals.
@@ -66,6 +68,8 @@ type ProposalDetailResult struct {
 	ID                   string
 	GroupID              string
 	Symbol               string
+	Issuer               string
+	IssuerName           string
 	Kind                 domain.ProposalKind
 	UsdcMicros           int64
 	TokenAmount          int64
@@ -162,9 +166,12 @@ func (g *GovernanceService) ListGroupProposals(ctx context.Context, accessToken,
 		if readOnlyRows[row.ID] {
 			rowEligibility = readOnlyEligibility
 		}
+		issuer := g.issuerFieldsForProposalSymbol(ctx, row.Symbol)
 		items = append(items, ProposalListItem{
 			ID:                   row.ID,
 			Symbol:               row.Symbol,
+			Issuer:               issuer.Issuer,
+			IssuerName:           issuer.IssuerName,
 			Kind:                 row.Kind,
 			UsdcMicros:           row.UsdcMicros,
 			TokenAmount:          row.TokenAmount,
@@ -355,10 +362,13 @@ func (g *GovernanceService) GetProposalDetail(ctx context.Context, accessToken, 
 		}
 	}
 
+	detailIssuer := g.issuerFieldsForProposalSymbol(ctx, row.Symbol)
 	return ProposalDetailResult{
 		ID:                   row.ID,
 		GroupID:              row.GroupID,
 		Symbol:               row.Symbol,
+		Issuer:               detailIssuer.Issuer,
+		IssuerName:           detailIssuer.IssuerName,
 		Kind:                 row.Kind,
 		UsdcMicros:           row.UsdcMicros,
 		TokenAmount:          row.TokenAmount,
@@ -435,6 +445,11 @@ func buildProposalExecutionDetail(status ProposalStatus, tx postgres.Transaction
 	case postgres.TransactionStatusFailed:
 		detail.State = "failed"
 		detail.FailureReason = "swap failed"
+		if tx.ExecuteRequestID.Valid {
+			if reason := swapFailureReason(tx.ExecuteRequestID.String); reason != "" {
+				detail.FailureReason = reason
+			}
+		}
 	default:
 		detail.State = "pending"
 	}

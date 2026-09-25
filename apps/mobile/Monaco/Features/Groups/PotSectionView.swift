@@ -62,7 +62,7 @@ struct PotSectionView: View {
         let displayName = AssetCatalogDisplayName.format(catalogName: "", symbol: row.symbol, kind: row.resolvedAssetKind)
         return MonacoRow(
             title: displayName,
-            subtitle: "\(quantityLabel(row)) · \(UsdAmountFormatter.format(decimalString: row.markUsd))",
+            subtitle: potSubtitle(row),
             isLast: isLast
         ) {
             StockMark(symbol: row.symbol, displayName: displayName, assetKind: row.resolvedAssetKind)
@@ -80,13 +80,19 @@ struct PotSectionView: View {
         .accessibilityIdentifier("pot-row-\(row.symbol)")
     }
 
+    private func potSubtitle(_ row: PotRowDTO) -> String {
+        var text = "\(quantityLabel(row)) · \(UsdAmountFormatter.format(decimalString: row.markUsd))"
+        if row.resolvedAssetKind == .preIpo, let name = row.issuerName, !name.isEmpty {
+            text += " · via \(name)"
+        }
+        return text
+    }
+
     private func quantityLabel(_ row: PotRowDTO) -> String {
-        if let atomics = row.tokenAmount, !atomics.isEmpty {
-            return ProposalShareFormatter.sharesLabel(
-                fromAtomics: atomics,
-                decimals: row.resolvedTokenDecimals,
-                kind: row.resolvedAssetKind
-            )
+        if let atomics = row.tokenAmount, !atomics.isEmpty,
+           let qty = ProposeMath.shares(fromAtomics: atomics, decimals: row.resolvedTokenDecimals, multiplier: row.resolvedUiMultiplier) {
+            let unit = row.resolvedAssetKind == .preIpo ? PreIpoCopy.tokenLabelPlural : "shares"
+            return "\(qty) \(unit)"
         }
         let unit = row.resolvedAssetKind == .preIpo ? PreIpoCopy.tokenLabelPlural : "shares"
         return "\(row.units) \(unit)"

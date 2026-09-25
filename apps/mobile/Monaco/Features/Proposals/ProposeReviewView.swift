@@ -31,6 +31,12 @@ struct ProposeReviewView: View {
                 )
 
                 MonacoGroupedList {
+                    if let issuer = review.quote.provider?.issuerName, !issuer.isEmpty {
+                        ReceiptRow(label: "Provider") {
+                            Text("Best price via \(issuer)")
+                                .font(MonacoTheme.Typo.body)
+                        }
+                    }
                     if let price = review.priceMicros {
                         ReceiptRow(label: ProposeFlowCopy.priceRow) {
                             Text(
@@ -106,7 +112,7 @@ struct ProposeReviewView: View {
         do {
             let id = try await service.propose(
                 groupId: groupId,
-                draft: .buy(symbol: review.stock.symbol, usdcMicros: review.usdcMicros, thesis: review.thesis),
+                draft: .buy(symbol: review.quote.symbol.isEmpty ? review.stock.symbol : review.quote.symbol, usdcMicros: review.usdcMicros, thesis: review.thesis),
                 submission: proposeSubmission
             )
             onProposed(id)
