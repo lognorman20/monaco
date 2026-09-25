@@ -28,6 +28,7 @@ const (
 	envPythHermesBaseURL            = "PYTH_HERMES_BASE_URL"
 	envPythBenchmarksBaseURL        = "PYTH_BENCHMARKS_BASE_URL"
 	envChartSource                  = "CHART_SOURCE"
+	envDemoMode                     = "DEMO_MODE"
 	envJupiterAPIKey                = "JUPITER_API_KEY"
 	envSupabaseURL                  = "SUPABASE_URL"
 	envSupabaseServiceRoleKey       = "SUPABASE_SERVICE_ROLE_KEY"
@@ -113,7 +114,10 @@ type Config struct {
 	// ChartSource picks where a stock's curve comes from: "yahoo" (the underlying
 	// equity, free, the default while history is not worth paying for) or "jupiter"
 	// (the xStock's own on-chain candles).
-	ChartSource            string
+	ChartSource string
+	// DemoMode is fake money: real sign-in and wallets, balances and fills on an
+	// in-memory ledger, nothing on Solana. For walkthroughs and first runs only.
+	DemoMode               bool
 	JupiterAPIKey          string
 	TesseraAPIBaseURL      string
 	TesseraEnabled         bool
@@ -147,6 +151,7 @@ func Load() (*Config, error) {
 		PythHermesBaseURL:            strings.TrimRight(strings.TrimSpace(os.Getenv(envPythHermesBaseURL)), "/"),
 		PythBenchmarksBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv(envPythBenchmarksBaseURL)), "/"),
 		ChartSource:                  chartSource(os.Getenv(envChartSource)),
+		DemoMode:                     isTruthy(os.Getenv(envDemoMode)),
 		JupiterAPIKey:                strings.TrimSpace(os.Getenv(envJupiterAPIKey)),
 		TesseraAPIBaseURL:            tesseraAPIBaseURLFromEnv(),
 		TesseraEnabled:               tesseraEnabledFromEnv(),
@@ -287,4 +292,12 @@ func chartSource(raw string) string {
 		return "jupiter"
 	}
 	return "yahoo"
+}
+
+func isTruthy(raw string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
