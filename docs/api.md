@@ -16,7 +16,9 @@ A valid token with no Monaco user yet gets `404 user not found`: call `POST /v1/
 A blocked `POST /v1/groups/{id}/leave` is `409` with the same shape plus a machine-readable `reason`
 (for example `share_units_remaining`, `creator_must_transfer`).
 
-**Money.** USDC is integer micros (1 USDC = 1,000,000). Timestamps are UTC RFC 3339.
+**Money.** USDC is integer micros (1 USDC = 1,000,000). Timestamps are UTC RFC 3339. `priceUsdcMicros` is the price of one whole token, whatever that token's decimals are.
+
+**Catalog kind.** Asset rows carry `kind` (`stock` or `pre_ipo`), `source`, `issuer`, `underlyingId`, `tokenDecimals`, `sector`, `logoUrl`, `alwaysOpen`, reference fields (`referenceMarkUsdcMicros`, `referenceValuationUsd`, `referenceUpdatedAt`), `premiumBps`, `holders`, and `variantCount`. Filter with `?kind=stock` or `?kind=pre_ipo`; any other value is `400`. Quote JSON keeps `kind` as `buy` or `sell`. Buy quotes add `assetKind` and `tokenDecimals`. Detail adds `variants[]` when several issuers share an underlying. Pre-IPO chart responses are empty until a sampler has history.
 
 **Rate limits.** Per process, non-GET only. Over budget is `429` with `Retry-After`.
 "Per user" is the verified Privy user, so refreshing a token does not reset it (agent
@@ -89,12 +91,12 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/groups/{id}/treasury/tokens` | Treasury USDC plus token holdings. |
 | `GET /v1/groups/{id}/cost-basis/{symbol}` | Fill-derived cost basis for one symbol. |
 | `POST /v1/groups/{id}/withdraw-to-balance` ● | Cash out a slice of the cabal to the account balance. |
-| `GET /v1/groups/{id}/assets` | Tradable catalog for a cabal. Bearer or agent key. |
-| `GET /v1/assets` | Catalog search with prices. |
+| `GET /v1/groups/{id}/assets` | Tradable catalog for a cabal. Bearer or agent key. Optional `kind=stock\|pre_ipo`. Rows include `kind`, `source`, `issuer`, `tokenDecimals`, `uiAmountMultiplier`, reference fields, `premiumBps`, `variantCount`. |
+| `GET /v1/assets` | Catalog search with prices. Optional `kind=stock\|pre_ipo`. Same catalog fields as group assets. |
 | `GET /v1/assets/popular` | Popular assets with prices. |
-| `GET /v1/assets/{symbol}` | Asset detail. |
+| `GET /v1/assets/{symbol}` | Asset detail plus `variants[]` when multiple issuers share an `underlyingId`. A variant row names the issuer, fee, and whether it is the best price. |
 | `GET /v1/assets/{symbol}/chart` | Price history. |
-| `POST /v1/groups/{id}/quotes` | Check that a buy or sell can route, and at what price. |
+| `POST /v1/groups/{id}/quotes` | Check that a buy or sell can route, and at what price. `kind` stays `buy` or `sell`. A buy may send `selectBestVariant: true`; the response symbol is the issuer that was chosen. Buy responses add `tokenDecimals`, `assetKind` (`stock` or `pre_ipo`), `issuer`, and live `premiumBps` when a fresh Jupiter reference exists. |
 | `GET /v1/groups/{id}/proposals` | List proposals. |
 | `POST /v1/groups/{id}/proposals` ● | Open a proposal: buy, sell, or add, pause, resume, revoke an agent. |
 | `GET /v1/proposals/{id}` | Proposal detail, votes and execution state. |

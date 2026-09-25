@@ -3,6 +3,7 @@ package xstocks
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -112,6 +113,47 @@ func TestHTTPCatalogSearcher_searchWalksPagesBeyondFirst(t *testing.T) {
 	}
 	if !slices.Contains(pagesRequested, 1) {
 		t.Fatalf("pages requested = %v, want page 1 fetched beyond first page", pagesRequested)
+	}
+}
+
+func TestHTTPCatalogSearcher_stopsOncePageIsFull(t *testing.T) {
+	t.Parallel()
+
+	var pagesRequested []int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page, err := strconv.Atoi(r.URL.Query().Get("page"))
+		if err != nil {
+			t.Errorf("invalid page query: %q", r.URL.Query().Get("page"))
+			http.Error(w, "bad page", http.StatusBadRequest)
+			return
+		}
+		pagesRequested = append(pagesRequested, page)
+		symbol := fmt.Sprintf("STK%dx", page)
+		body := marshalCatalogListPage(t, []catalogAssetNode{
+			{
+				Symbol: symbol,
+				Name:   "Stock",
+				Deployments: []deployment{
+					{Address: "Mint" + symbol, Network: solanaNetwork},
+				},
+			},
+		}, page, true)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	searcher := NewHTTPCatalogSearcherWithClient(server.URL, server.Client())
+	page, err := searcher.Search(context.Background(), "Stock", 1, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(page.Assets) != 1 || !page.HasMore {
+		t.Fatalf("page = %+v, want one asset and hasMore", page)
+	}
+	if len(pagesRequested) != 1 || pagesRequested[0] != 0 {
+		t.Fatalf("pages requested = %v, want only page 0", pagesRequested)
 	}
 }
 

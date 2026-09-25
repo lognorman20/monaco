@@ -15,18 +15,22 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/catalog"
 	"github.com/monaco/monaco/apps/backend/internal/config"
 	"github.com/monaco/monaco/apps/backend/internal/faker"
 	"github.com/monaco/monaco/apps/backend/internal/flash"
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
+	"github.com/monaco/monaco/apps/backend/internal/prestocks"
 	"github.com/monaco/monaco/apps/backend/internal/pricechain"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/solana/balance"
+	"github.com/monaco/monaco/apps/backend/internal/solana/mintinfo"
 	"github.com/monaco/monaco/apps/backend/internal/storage"
 	"github.com/monaco/monaco/apps/backend/internal/swapprovider"
+	"github.com/monaco/monaco/apps/backend/internal/tessera"
 	"github.com/monaco/monaco/apps/backend/internal/worker"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
@@ -168,12 +172,25 @@ func boot(ctx context.Context) (*bootResult, error) {
 	var pythClient pyth.Client = priceChain
 	catalogSearcher := xstocks.NewHTTPCatalogSearcher()
 	jupiterClient := jupiter.NewHTTPClientWithPayer(relayer.PublicKey())
-	catalogRoutability := xstocks.NewCachedRoutabilityProber(
-		app.NewJupiterCatalogRoutabilityProber(jupiterClient),
-		xstocks.NewRoutabilityCache(xstocks.DefaultRoutabilityCacheTTL),
-	)
-	catalogSearcher.SetRoutabilityProber(catalogRoutability)
-	symbols := app.NewSymbolResolver(catalogSearcher)
+	mintReader := mintinfo.NewHTTPReader(cfg.SolanaRPCEndpoint())
+	var catalogSources []catalog.TaggedSource
+	if cfg.TesseraEnabled {
+		catalogSources = append(catalogSources, catalog.TaggedSource{
+			Source:   tessera.NewHTTPCatalogWithClient(cfg.TesseraAPIBaseURL, nil),
+			SourceID: xstocks.AssetSourceTessera,
+		})
+	}
+	if cfg.PreStocksEnabled {
+		catalogSources = append(catalogSources, catalog.TaggedSource{
+			Source:   prestocks.NewHTTPCatalogWithClient(cfg.PreStocksAPIBaseURL, nil),
+			SourceID: xstocks.AssetSourcePreStocks,
+		})
+	}
+	// Nil routability prober: lists must not Jupiter-quote every symbol.
+	catalogComposite := catalog.NewCompositeWithSources(catalogSearcher, catalogSources, nil, mintReader, jupiterPriceClient)
+	slog.Info("catalog sources ready", "xstocks", true, "tessera", cfg.TesseraEnabled, "prestocks", cfg.PreStocksEnabled)
+	symbols := app.NewSymbolResolver(catalogComposite)
+	symbols.SetMintInfo(mintReader)
 	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
 	platformWithdrawals := app.NewPlatformWithdrawService(store, privyClient, deposits, solanaRPC, relayer.PrivateKey())
 	sessions := app.NewSessionService(store, privyClient).
@@ -197,10 +214,15 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}
 	platformWithdrawHandlers := &httpapi.PlatformWithdrawHandlers{Withdrawals: platformWithdrawals}
 	xstocksResolver := xstocks.NewHTTPResolver()
-	buy := app.NewBuyService(jupiterClient, xstocksResolver)
+	mintResolver := catalog.NewResolverWithCatalog(xstocksResolver, catalogComposite)
+	buy := app.NewBuyService(jupiterClient, mintResolver)
+	buy.SetMintCatalog(catalogComposite)
+	buy.SetBuyVariantPicker(catalogComposite)
+	buy.SetMintInfo(mintReader)
 	signer := app.NewPrivyTreasurySigner(privyClient)
 	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, relayer.PrivateKey(), symbols)
 	swap.SetPriceClient(pythClient)
+	swap.SetMintInfo(mintReader)
 	if cfg.SwapProvider == swapprovider.NameFlash {
 		swap.SetSwapProvider(flash.NewSwapProvider(
 			flash.NewHTTPClient(cfg.FlashAPIKey),
@@ -224,21 +246,22 @@ func boot(ctx context.Context) (*bootResult, error) {
 	transactionHandlers := &httpapi.TransactionHandlers{
 		Store:   store,
 		Privy:   privyClient,
-		XStocks: xstocksResolver,
+		XStocks: mintResolver,
 		Swap:    swap,
 		Symbols: symbols,
+		Catalog: catalogComposite,
 	}
 	agentKeyGuard := httpapi.NewAgentKeyGuard(trustProxyHeaders())
 	catalogHandlers := &httpapi.CatalogHandlers{
 		Store:    store,
 		Privy:    privyClient,
-		Catalog:  catalogSearcher,
+		Catalog:  catalogComposite,
 		KeyGuard: agentKeyGuard,
 	}
 	assetsHandlers := &httpapi.AssetsHandlers{
 		Store:   store,
 		Privy:   privyClient,
-		Catalog: catalogSearcher,
+		Catalog: catalogComposite,
 		Pyth:    priceChain,
 		Jupiter: jupiterClient,
 		Price:   jupiterPriceClient,

@@ -1,0 +1,27 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "context": { "slot": 1 },
+    "value": {
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "data": {
+        "parsed": {
+          "info": {
+            "decimals": 9,
+            "extensions": [
+              {
+                "extension": "scaledUiAmountConfig",
+                "state": {
+                  "multiplier": "0",
+                  "newMultiplier": "0",
+                  "newMultiplierEffectiveTimestamp": 0
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "id": 1
+}

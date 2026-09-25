@@ -12,6 +12,7 @@ struct AssetsTabView: View {
 
     @State private var searchQuery = ""
     @State private var assets: [MarketAssetDTO] = []
+    @State private var preIpoAssets: [MarketAssetDTO] = []
     @State private var hasMore = false
     @State private var listOffset = 0
     @State private var isLoadingList = false
@@ -73,6 +74,7 @@ struct AssetsTabView: View {
             if session.popularAssets.isEmpty {
                 await session.refreshPopular(auth: auth)
             }
+            await loadPreIpoSection()
         }
         .onDisappear {
             searchTask?.cancel()
@@ -103,27 +105,31 @@ struct AssetsTabView: View {
             centeredStatus {
                 EmptyState(title: "No matches for that search")
             }
-        } else if !isSearching, popular.isEmpty {
+        } else if !isSearching, popular.isEmpty, preIpoAssets.isEmpty {
             ScrollView {
                 EmptyState(title: "Popular names show up here once prices load")
                     .accessibilityIdentifier("assets-grid-popular")
             }
             .refreshable {
                 await session.refreshPopular(auth: auth)
+                await loadPreIpoSection()
             }
         } else {
             ScrollView {
-                MonacoGroupedList {
-                    ForEach(Array(gridAssets.enumerated()), id: \.element.id) { index, asset in
-                        Button {
-                            selectedSymbol = asset.symbol
-                        } label: {
-                            assetRow(asset, isLast: index == gridAssets.count - 1)
+                if !isSearching {
+                    popularSection
+                    preIpoSection
+                } else {
+                    MonacoGroupedList {
+                        ForEach(Array(gridAssets.enumerated()), id: \.element.id) { index, asset in
+                            Button {
+                                selectedSymbol = asset.symbol
+                            } label: {
+                                assetRow(asset, isLast: index == gridAssets.count - 1)
+                            }
+                            .buttonStyle(.monacoRow)
+                            .accessibilityIdentifier("assets-row-\(asset.symbol)")
                         }
-                        .buttonStyle(.monacoRow)
-                        .accessibilityIdentifier(
-                            isSearching ? "assets-row-\(asset.symbol)" : "assets-popular-\(asset.symbol)"
-                        )
                     }
                 }
 
@@ -142,9 +148,46 @@ struct AssetsTabView: View {
                     await loadList(reset: true)
                 } else {
                     await session.refreshPopular(auth: auth)
+                    await loadPreIpoSection()
                 }
             }
             .accessibilityIdentifier(isSearching ? "assets-grid-search" : "assets-grid-popular")
+        }
+    }
+
+    @ViewBuilder
+    private var popularSection: some View {
+        if !popular.isEmpty {
+            MonacoGroupedList {
+                ForEach(Array(popular.enumerated()), id: \.element.id) { index, asset in
+                    Button {
+                        selectedSymbol = asset.symbol
+                    } label: {
+                        assetRow(asset, isLast: index == popular.count - 1 && preIpoAssets.isEmpty)
+                    }
+                    .buttonStyle(.monacoRow)
+                    .accessibilityIdentifier("assets-popular-\(asset.symbol)")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var preIpoSection: some View {
+        if !preIpoAssets.isEmpty {
+            MonacoSectionHeader(PreIpoCopy.sectionTitle)
+                .padding(.top, MonacoTheme.Space.s)
+            MonacoGroupedList {
+                ForEach(Array(preIpoAssets.enumerated()), id: \.element.id) { index, asset in
+                    Button {
+                        selectedSymbol = asset.symbol
+                    } label: {
+                        assetRow(asset, isLast: index == preIpoAssets.count - 1)
+                    }
+                    .buttonStyle(.monacoRow)
+                    .accessibilityIdentifier("assets-preipo-\(asset.symbol)")
+                }
+            }
         }
     }
 
@@ -158,25 +201,31 @@ struct AssetsTabView: View {
     }
 
     private func assetRow(_ asset: MarketAssetDTO, isLast: Bool) -> some View {
-        let ticker = AssetSymbolFormatter.display(asset.symbol)
+        let ticker = asset.displayTicker
         return MonacoRow(
-            title: AssetDisplayNames.name(forSymbol: asset.symbol) ?? ticker,
+            title: asset.displayName,
             subtitle: ticker,
             isLast: isLast,
-            leading: { StockMark(symbol: asset.symbol, size: 40) },
+            leading: {
+                StockMark(symbol: asset.symbol, displayName: asset.displayName, assetKind: asset.resolvedKind, size: 40)
+            },
             trailing: {
-                if let micros = asset.priceUsdcMicros {
-                    MoneyText(micros: micros, style: .row)
-                } else {
-                    Text("—").font(MonacoTheme.Typo.moneyRow).foregroundStyle(MonacoTheme.muted)
-                }
-                if let change = asset.change24h, !change.isEmpty {
-                    PercentText(percentReturn: change, style: .caption)
+                VStack(alignment: .trailing, spacing: 4) {
+                    if asset.resolvedKind == .preIpo {
+                        MonacoChip(title: PreIpoCopy.chipLabel, isSelected: false)
+                    }
+                    if let micros = asset.priceUsdcMicros {
+                        MoneyText(micros: micros, style: .row)
+                    } else {
+                        Text("—").font(MonacoTheme.Typo.moneyRow).foregroundStyle(MonacoTheme.muted)
+                    }
+                    if let change = asset.change24h, !change.isEmpty {
+                        PercentText(percentReturn: change, style: .caption)
+                    }
                 }
             }
         )
     }
-
 
     private func scheduleListSearch() {
         searchTask?.cancel()
@@ -242,6 +291,21 @@ struct AssetsTabView: View {
                 listFailed = true
                 assets = []
             }
+        }
+    }
+
+    private func loadPreIpoSection() async {
+        guard let token = auth.accessToken else { return }
+        do {
+            let response = try await apiClient.listMarketAssets(
+                accessToken: token,
+                limit: 10,
+                offset: 0,
+                catalogKind: .preIpo
+            )
+            preIpoAssets = response.assets
+        } catch {
+            if error.isRequestCancellation { return }
         }
     }
 }

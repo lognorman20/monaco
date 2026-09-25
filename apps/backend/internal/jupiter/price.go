@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
@@ -24,10 +25,27 @@ const (
 // pyth.AssetMark contract so it drops into the same response shape.
 // LiquidityUsd is the pooled liquidity behind the mark; valuation callers use it to
 // refuse a price that a thin pool could be pushed around to produce.
+// StockData is Jupiter Price v3 private-market reference metadata for a mint.
+type StockData struct {
+	Price     float64
+	Mcap      float64
+	UpdatedAt time.Time
+}
+
+// Fresh reports whether the reference was updated within maxAge.
+func (s StockData) Fresh(maxAge time.Duration) bool {
+	if s.Price <= 0 || s.UpdatedAt.IsZero() {
+		return false
+	}
+	return time.Since(s.UpdatedAt) <= maxAge
+}
+
 type TokenPrice struct {
 	PriceUsdcMicros int64
 	Change24h       *string
 	LiquidityUsd    float64
+	Decimals        int
+	StockData       *StockData
 }
 
 // PriceClient batches current USD marks by Solana mint via Jupiter's Price API.
@@ -90,10 +108,18 @@ func (c *HTTPPriceClient) Prices(ctx context.Context, mints []string) (map[strin
 	return out, nil
 }
 
+type jupiterStockDataEntry struct {
+	Price     float64      `json:"price"`
+	Mcap      float64      `json:"mcap"`
+	UpdatedAt jsonUnixTime `json:"updatedAt"`
+}
+
 type jupiterPriceEntry struct {
-	UsdPrice       float64 `json:"usdPrice"`
-	PriceChange24h float64 `json:"priceChange24h"`
-	Liquidity      float64 `json:"liquidity"`
+	UsdPrice       float64                `json:"usdPrice"`
+	PriceChange24h float64                `json:"priceChange24h"`
+	Liquidity      float64                `json:"liquidity"`
+	Decimals       int                    `json:"decimals"`
+	StockData      *jupiterStockDataEntry `json:"stockData"`
 }
 
 func (c *HTTPPriceClient) fetchBatch(ctx context.Context, mints []string) (map[string]TokenPrice, error) {
@@ -151,9 +177,18 @@ func (e jupiterPriceEntry) toTokenPrice() TokenPrice {
 	// here is a decimal ratio, matching pyth.AssetMark.Change24h.
 	ratio := e.PriceChange24h / 100
 	change := fmt.Sprintf("%.6f", ratio)
-	return TokenPrice{
+	out := TokenPrice{
 		PriceUsdcMicros: micros,
 		Change24h:       &change,
 		LiquidityUsd:    e.Liquidity,
+		Decimals:        e.Decimals,
 	}
+	if e.StockData != nil && e.StockData.Price > 0 && e.StockData.UpdatedAt.Unix() > 0 {
+		out.StockData = &StockData{
+			Price:     e.StockData.Price,
+			Mcap:      e.StockData.Mcap,
+			UpdatedAt: time.Unix(e.StockData.UpdatedAt.Unix(), 0).UTC(),
+		}
+	}
+	return out
 }

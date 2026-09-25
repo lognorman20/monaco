@@ -33,7 +33,16 @@ const (
 	envFlashAPIKey                  = "FLASH_API_KEY"
 	envFlashMaxSlippage             = "FLASH_MAX_SLIPPAGE"
 	envPrivyVerificationKey         = "PRIVY_VERIFICATION_KEY"
+	envTesseraAPIBaseURL            = "TESSERA_API_BASE_URL"
+	envTesseraEnabled               = "TESSERA_ENABLED"
+	envPreStocksAPIBaseURL          = "PRESTOCKS_API_BASE_URL"
+	envPreStocksEnabled             = "PRESTOCKS_ENABLED"
 	envPublicAPIBaseURL             = "PUBLIC_API_BASE_URL"
+)
+
+const (
+	defaultTesseraAPIBaseURL   = "https://rest-api.tessera.pe"
+	defaultPreStocksAPIBaseURL = "https://prestocks.com"
 )
 
 // DefaultPublicAPIBaseURL is the API's own address when PUBLIC_API_BASE_URL is unset.
@@ -69,6 +78,10 @@ const maxFlashSlippage = 0.05
 //   - JUPITER_API_KEY: Jupiter Price API key (x-api-key header) for catalog/popular display
 //     prices. Optional — the Price API also serves unauthenticated requests at a lower rate
 //     limit — but set it in production to avoid 429s.
+//   - TESSERA_API_BASE_URL: Tessera public catalog API base (default https://rest-api.tessera.pe).
+//   - TESSERA_ENABLED: include Tessera pre-IPO tokens in the composite catalog (default true).
+//   - PRESTOCKS_API_BASE_URL: PreStocks public catalog base (default https://prestocks.com).
+//   - PRESTOCKS_ENABLED: include PreStocks pre-IPO tokens (default true). Set false for a Tessera-only catalog.
 //   - SWAP_PROVIDER: venue for treasury buys and sells: "jupiter" (default) or "flash"
 //     (Definitive Flash), including cash-out sells. Display quotes and routability probes stay on Jupiter.
 //   - FLASH_API_KEY: Definitive Flash integrator key (x-definitive-api-key header). Required
@@ -92,6 +105,10 @@ type Config struct {
 	PythAPIKey                   string
 	PythHermesBaseURL            string
 	JupiterAPIKey                string
+	TesseraAPIBaseURL            string
+	TesseraEnabled               bool
+	PreStocksAPIBaseURL          string
+	PreStocksEnabled             bool
 	SupabaseURL                  string
 	SupabaseServiceRoleKey       string
 	SolanaCluster                string
@@ -119,6 +136,10 @@ func Load() (*Config, error) {
 		PythAPIKey:                   strings.TrimSpace(os.Getenv(envPythAPIKey)),
 		PythHermesBaseURL:            strings.TrimRight(strings.TrimSpace(os.Getenv(envPythHermesBaseURL)), "/"),
 		JupiterAPIKey:                strings.TrimSpace(os.Getenv(envJupiterAPIKey)),
+		TesseraAPIBaseURL:            tesseraAPIBaseURLFromEnv(),
+		TesseraEnabled:               tesseraEnabledFromEnv(),
+		PreStocksAPIBaseURL:          preStocksAPIBaseURLFromEnv(),
+		PreStocksEnabled:             enabledFromEnv(envPreStocksEnabled),
 		SupabaseURL:                  strings.TrimSpace(os.Getenv(envSupabaseURL)),
 		SupabaseServiceRoleKey:       strings.TrimSpace(os.Getenv(envSupabaseServiceRoleKey)),
 		SolanaCluster:                SolanaCluster,
@@ -205,6 +226,35 @@ func SolanaRPCEndpoint(cluster, rpcURL string) string {
 		cluster = SolanaCluster
 	}
 	return fmt.Sprintf("https://api.%s.solana.com", cluster)
+}
+
+func tesseraAPIBaseURLFromEnv() string {
+	raw := strings.TrimRight(strings.TrimSpace(os.Getenv(envTesseraAPIBaseURL)), "/")
+	if raw == "" {
+		return defaultTesseraAPIBaseURL
+	}
+	return raw
+}
+
+func tesseraEnabledFromEnv() bool {
+	return enabledFromEnv(envTesseraEnabled)
+}
+
+func preStocksAPIBaseURLFromEnv() string {
+	raw := strings.TrimRight(strings.TrimSpace(os.Getenv(envPreStocksAPIBaseURL)), "/")
+	if raw == "" {
+		return defaultPreStocksAPIBaseURL
+	}
+	return raw
+}
+
+func enabledFromEnv(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 func validateSolanaRPCURL(raw string) error {

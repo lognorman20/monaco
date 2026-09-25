@@ -13,6 +13,8 @@ struct GroupPickerForProposalView: View {
     @ObservedObject var auth: PrivyAuthService
     @Environment(AppSessionStore.self) private var session
     let symbol: String
+    let assetKind: AssetKind
+    let tokenDecimals: Int
     let kind: ProposalPickKind
 
     private var cabals: [HomeGroupBoardRowDTO] {
@@ -62,7 +64,13 @@ struct GroupPickerForProposalView: View {
     private func destination(for cabal: HomeGroupBoardRowDTO) -> some View {
         switch kind {
         case .buy:
-            ProposeBuyView(auth: auth, groupId: cabal.groupId, initialSymbol: symbol)
+            ProposeBuyView(
+                auth: auth,
+                groupId: cabal.groupId,
+                initialSymbol: symbol,
+                initialKind: assetKind,
+                initialDecimals: tokenDecimals
+            )
         case .sell:
             ProposeSellFromAssetView(auth: auth, groupId: cabal.groupId, symbol: symbol)
         }

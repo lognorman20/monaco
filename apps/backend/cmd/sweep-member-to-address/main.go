@@ -10,10 +10,12 @@ import (
 	"os"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/catalog"
 	"github.com/monaco/monaco/apps/backend/internal/config"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/tessera"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -72,6 +74,11 @@ func main() {
 	}
 
 	jupiterClient := jupiter.NewHTTPClientWithPayer(relayer.PublicKey())
+	xstockCatalog := xstocks.NewHTTPCatalogSearcher()
+	var tesseraSource catalog.Source
+	if cfg.TesseraEnabled {
+		tesseraSource = tessera.NewHTTPCatalogWithClient(cfg.TesseraAPIBaseURL, nil)
+	}
 	runner := sweepRunner{
 		flags:       flags,
 		cfg:         cfg,
@@ -80,7 +87,8 @@ func main() {
 		signer:      app.NewPrivyTreasurySigner(client),
 		relayerPub:  relayer.PublicKey(),
 		relayerKey:  cfg.RelayerPrivateKey,
-		mintCatalog: xstocks.NewHTTPCatalogSearcher(),
+		mintCatalog: catalog.NewComposite(xstockCatalog, tesseraSource, nil),
+		prices:      jupiter.NewHTTPPriceClient(cfg.JupiterAPIKey),
 	}
 
 	swept, skipped, failed, recap := runSweep(ctx, runner, sources)

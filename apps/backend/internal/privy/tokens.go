@@ -213,3 +213,87 @@ func parseSPLTokenBalances(body []byte) ([]SPLTokenBalance, error) {
 	}
 	return balances, nil
 }
+
+type getTransactionResponse struct {
+	Result struct {
+		Meta struct {
+			PreTokenBalances  []jsonTokenBalance `json:"preTokenBalances"`
+			PostTokenBalances []jsonTokenBalance `json:"postTokenBalances"`
+		} `json:"meta"`
+	} `json:"result"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+type jsonTokenBalance struct {
+	Owner       string `json:"owner"`
+	Mint        string `json:"mint"`
+	UITokenAmount struct {
+		Amount string `json:"amount"`
+	} `json:"uiTokenAmount"`
+}
+
+// TokenBalanceDelta reads post minus pre token balance for owner and mint from a confirmed tx.
+func (c *HTTPClient) TokenBalanceDelta(ctx context.Context, signature, owner, mint string) (int64, error) {
+	signature = strings.TrimSpace(signature)
+	owner = strings.TrimSpace(owner)
+	mint = strings.TrimSpace(mint)
+	if signature == "" || owner == "" || mint == "" {
+		return 0, fmt.Errorf("%w: signature, owner, and mint are required", ErrAPI)
+	}
+
+	respBody, status, err := c.postSolanaRPCWithRetry(ctx, "getTransaction", []any{
+		signature,
+		map[string]any{
+			"encoding":                       "jsonParsed",
+			"commitment":                     "confirmed",
+			"maxSupportedTransactionVersion": 0,
+		},
+	})
+	if err != nil {
+		logSolanaRPC("getTransaction", status, respBody, err)
+		return 0, err
+	}
+
+	delta, err := parseTokenBalanceDelta(respBody, owner, mint)
+	if err != nil {
+		logSolanaRPC("getTransaction", status, respBody, err)
+		return 0, err
+	}
+	logSolanaRPC("getTransaction", status, nil, nil)
+	return delta, nil
+}
+
+func parseTokenBalanceDelta(body []byte, owner, mint string) (int64, error) {
+	var rpcResp getTransactionResponse
+	if err := json.Unmarshal(body, &rpcResp); err != nil {
+		return 0, fmt.Errorf("%w: solana rpc json: %v", ErrAPI, err)
+	}
+	if rpcResp.Error != nil {
+		return 0, fmt.Errorf("%w: solana rpc error: %s", ErrAPI, rpcResp.Error.Message)
+	}
+
+	pre := sumTokenBalanceForOwnerMint(rpcResp.Result.Meta.PreTokenBalances, owner, mint)
+	post := sumTokenBalanceForOwnerMint(rpcResp.Result.Meta.PostTokenBalances, owner, mint)
+	return post - pre, nil
+}
+
+func sumTokenBalanceForOwnerMint(entries []jsonTokenBalance, owner, mint string) int64 {
+	var total int64
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.Owner) != owner || strings.TrimSpace(entry.Mint) != mint {
+			continue
+		}
+		raw := strings.TrimSpace(entry.UITokenAmount.Amount)
+		if raw == "" {
+			continue
+		}
+		amount, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			continue
+		}
+		total += amount
+	}
+	return total
+}

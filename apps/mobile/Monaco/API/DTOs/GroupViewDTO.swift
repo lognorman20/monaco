@@ -9,8 +9,49 @@ struct PotRowDTO: Codable, Equatable, Identifiable {
     let dollarPnl: String
     let afterHours: Bool?
     let tokenAmount: String?
+    let assetKind: AssetKind?
+    let tokenDecimals: Int?
+    let premiumBps: Int?
+    let uiAmountMultiplier: String?
+    let issuerName: String?
 
     var id: String { symbol }
+    var resolvedAssetKind: AssetKind { assetKind ?? .stock }
+    var resolvedTokenDecimals: Int { tokenDecimals ?? AssetCatalogDefaults.decimals }
+    var resolvedUiMultiplier: Decimal {
+        guard let uiAmountMultiplier, let value = Decimal(string: uiAmountMultiplier, locale: Locale(identifier: "en_US_POSIX")), value > 0 else {
+            return 1
+        }
+        return value
+    }
+
+    init(
+        symbol: String,
+        units: String,
+        markUsd: String,
+        valueUsd: String,
+        dollarPnl: String,
+        afterHours: Bool?,
+        tokenAmount: String? = nil,
+        assetKind: AssetKind? = nil,
+        tokenDecimals: Int? = nil,
+        premiumBps: Int? = nil,
+        uiAmountMultiplier: String? = nil,
+        issuerName: String? = nil
+    ) {
+        self.symbol = symbol
+        self.units = units
+        self.markUsd = markUsd
+        self.valueUsd = valueUsd
+        self.dollarPnl = dollarPnl
+        self.afterHours = afterHours
+        self.tokenAmount = tokenAmount
+        self.assetKind = assetKind
+        self.tokenDecimals = tokenDecimals
+        self.premiumBps = premiumBps
+        self.uiAmountMultiplier = uiAmountMultiplier
+        self.issuerName = issuerName
+    }
 }
 
 struct MemberSliceDTO: Codable, Equatable {

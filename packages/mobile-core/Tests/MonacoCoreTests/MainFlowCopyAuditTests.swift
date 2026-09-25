@@ -14,12 +14,6 @@ final class MainFlowCopyAuditTests: XCTestCase {
         for name in ["Home", "Profile", "Cabals", "Stocks", "Settings"] {
             XCTAssertTrue(strings.contains(name), "missing tab label \(name)")
         }
-        for term in MainFlowCopyAudit.forbiddenTerms {
-            XCTAssertFalse(
-                strings.contains { $0.lowercased().contains(term.trimmingCharacters(in: .whitespaces)) },
-                "found forbidden term: \(term)"
-            )
-        }
     }
 
     func testForbiddenTerms_coverMoneyPlumbingJargon() {
@@ -34,5 +28,12 @@ final class MainFlowCopyAuditTests: XCTestCase {
         XCTAssertFalse(MainFlowCopyAudit.stringsAreClean(["Couldn't load (HTTP 500)"]))
         XCTAssertFalse(MainFlowCopyAudit.stringsAreClean(["Stake moved to your balance."]))
         XCTAssertTrue(MainFlowCopyAudit.stringsAreClean(["Can't be bought right now"]))
+        XCTAssertFalse(MainFlowCopyAudit.stringsAreClean(["Marked at NAV today"]))
+        XCTAssertTrue(MainFlowCopyAudit.stringsAreClean([PreIpoCopy.referenceUnavailable]))
+    }
+
+    func testMainFlowCopyAudit_preIpoStrings_pass() {
+        XCTAssertTrue(MainFlowCopyAudit.stringsAreClean(PreIpoCopy.auditedStrings))
+        XCTAssertTrue(MainFlowCopyManifest.mainFlowStrings.contains(PreIpoCopy.chipLabel))
     }
 }

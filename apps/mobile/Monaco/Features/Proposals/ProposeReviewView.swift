@@ -31,14 +31,25 @@ struct ProposeReviewView: View {
                 )
 
                 MonacoGroupedList {
+                    if let issuer = review.quote.provider?.issuerName, !issuer.isEmpty {
+                        ReceiptRow(label: "Provider") {
+                            Text("Best price via \(issuer)")
+                                .font(MonacoTheme.Typo.body)
+                        }
+                    }
                     if let price = review.priceMicros {
                         ReceiptRow(label: ProposeFlowCopy.priceRow) {
-                            Text(ProposeFlowCopy.perShare(UsdAmountFormatter.format(micros: price)))
+                            Text(
+                                review.stock.assetKind == .preIpo
+                                    ? "\(UsdAmountFormatter.format(micros: price)) a \(PreIpoCopy.tokenLabelSingular)"
+                                    : ProposeFlowCopy.perShare(UsdAmountFormatter.format(micros: price))
+                            )
                                 .font(MonacoTheme.Typo.body.monospacedDigit())
                         }
                     }
                     if let shares = review.sharesLabel {
-                        ReceiptRow(label: ProposeFlowCopy.sharesRow) {
+                        let rowLabel = review.stock.assetKind == .preIpo ? PreIpoCopy.tokensRowLabel : ProposeFlowCopy.sharesRow
+                        ReceiptRow(label: rowLabel) {
                             Text(ProposeFlowCopy.aboutShares(shares))
                                 .font(MonacoTheme.Typo.body.monospacedDigit())
                         }
@@ -101,7 +112,7 @@ struct ProposeReviewView: View {
         do {
             let id = try await service.propose(
                 groupId: groupId,
-                draft: .buy(symbol: review.stock.symbol, usdcMicros: review.usdcMicros, thesis: review.thesis),
+                draft: .buy(symbol: review.quote.symbol.isEmpty ? review.stock.symbol : review.quote.symbol, usdcMicros: review.usdcMicros, thesis: review.thesis),
                 submission: proposeSubmission
             )
             onProposed(id)

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHTTPPriceClient_Prices_sendsIDsAndAPIKey(t *testing.T) {
@@ -65,6 +66,68 @@ func TestHTTPPriceClient_Prices_noAPIKey_omitsHeader(t *testing.T) {
 	}
 	if sawHeader {
 		t.Fatal("expected no x-api-key header when apiKey is empty")
+	}
+}
+
+func TestHTTPPriceClient_Prices_parsesStockData(t *testing.T) {
+	t.Parallel()
+
+	updated := time.Now().UTC().Unix()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"mint1": {
+				"usdPrice": 562,
+				"stockData": {"price": 774, "mcap": 2030000000000, "updatedAt": ` + fmt.Sprintf("%d", updated) + `}
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewHTTPPriceClientWithBaseURL(server.URL, server.Client(), "")
+	prices, err := client.Prices(context.Background(), []string{"mint1"})
+	if err != nil {
+		t.Fatalf("Prices: %v", err)
+	}
+	price, ok := prices["mint1"]
+	if !ok || price.StockData == nil {
+		t.Fatal("expected stockData on price")
+	}
+	if price.StockData.Price != 774 || price.PriceUsdcMicros != 562_000_000 {
+		t.Fatalf("price = %+v", price)
+	}
+	if price.StockData.UpdatedAt.Unix() != updated {
+		t.Fatalf("UpdatedAt = %s, want unix %d", price.StockData.UpdatedAt, updated)
+	}
+}
+
+func TestHTTPPriceClient_Prices_parsesISOUpdatedAt(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"mint1": {
+				"usdPrice": 562.18,
+				"stockData": {"price": 746.61, "mcap": 1957785838858, "updatedAt": "2026-09-25T03:15:24.297Z"}
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewHTTPPriceClientWithBaseURL(server.URL, server.Client(), "")
+	prices, err := client.Prices(context.Background(), []string{"mint1"})
+	if err != nil {
+		t.Fatalf("Prices: %v", err)
+	}
+	price, ok := prices["mint1"]
+	if !ok || price.StockData == nil {
+		t.Fatal("expected stockData on price")
+	}
+	want := time.Date(2026, 9, 25, 3, 15, 24, 0, time.UTC)
+	if !price.StockData.UpdatedAt.Equal(want) {
+		t.Fatalf("UpdatedAt = %s, want %s", price.StockData.UpdatedAt, want)
+	}
+	if !price.StockData.Fresh(48*time.Hour) && time.Since(want) > 48*time.Hour {
+		t.Fatal("expected a parsed timestamp")
 	}
 }
 

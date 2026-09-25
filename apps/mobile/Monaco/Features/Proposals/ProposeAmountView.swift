@@ -18,6 +18,7 @@ struct ProposeAmountView: View {
     @State private var isQuoting = false
     @State private var quoteError: String?
     @State private var review: ProposeBuyReview?
+    @State private var referencePremiumBps: Int?
     @FocusState private var reasonFocused: Bool
 
     init(service: ProposeService, groupId: String, stock: ProposeStock, pot: ProposePot?, onProposed: @escaping (_ proposalId: String) -> Void) {
@@ -97,6 +98,7 @@ struct ProposeAmountView: View {
                     overLimitHelper: ProposeFlowCopy.overPot
                 )
                 .onChange(of: amountText) { _, _ in quoteError = nil }
+                premiumNudge
                 reasonField
                 if let quoteError {
                     Text(quoteError)
@@ -119,9 +121,21 @@ struct ProposeAmountView: View {
         return potLoadFailed ? ProposeFlowCopy.potLoadFailed : nil
     }
 
+    @ViewBuilder
+    private var premiumNudge: some View {
+        if let bps = referencePremiumBps, PreIpoCopy.showsPremiumNudge(premiumBps: bps, assetKind: stock.assetKind) {
+            Text(PreIpoCopy.tradingPremiumNudge(bps: bps))
+                .font(MonacoTheme.Typo.callout)
+                .foregroundStyle(MonacoTheme.muted)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("proposal-premium-nudge")
+        }
+    }
+
     private var header: some View {
         HStack(spacing: MonacoTheme.Space.sm) {
-            StockMark(symbol: stock.symbol, size: 56)
+            StockMark(symbol: stock.symbol, displayName: stock.name, assetKind: stock.assetKind, size: 56)
             VStack(alignment: .leading, spacing: 2) {
                 Text(stock.name)
                     .font(MonacoTheme.Typo.title)
@@ -182,7 +196,12 @@ struct ProposeAmountView: View {
 
     private func loadPrice() async {
         guard priceMicros == nil else { return }
-        priceMicros = try? await service.priceMicros(symbol: stock.symbol)
+        if let detail = try? await service.assetDetail(symbol: stock.symbol) {
+            priceMicros = detail.priceUsdcMicros
+            referencePremiumBps = detail.premiumBps
+        } else {
+            priceMicros = try? await service.priceMicros(symbol: stock.symbol)
+        }
     }
 
     private func fetchQuote() async {
@@ -197,6 +216,9 @@ struct ProposeAmountView: View {
                 quoteError = ProposeFlowCopy.cantBuyStock(stock.name)
                 Haptics.warning()
                 return
+            }
+            if let bps = quote.premiumBps {
+                referencePremiumBps = bps
             }
             review = ProposeBuyReview(
                 stock: stock,
@@ -276,16 +298,18 @@ struct ProposeBuyReview: Hashable, Identifiable {
     }
 
     var shares: Decimal? {
-        quote.outputAmount.flatMap(ProposeMath.shares(fromAtomics:))
+        quote.outputAmount.flatMap { ProposeMath.shares(fromAtomics: $0, decimals: quote.resolvedDecimals, multiplier: quote.resolvedUiMultiplier) }
     }
 
     var sharesLabel: String? {
-        quote.outputAmount.map(ProposalShareFormatter.sharesLabel(fromAtomics:))
+        quote.outputAmount.map {
+            ProposalShareFormatter.sharesLabel(fromAtomics: $0, decimals: quote.resolvedDecimals, kind: quote.resolvedAssetKind)
+        }
     }
 }
 
 extension BuyQuoteDTO: Hashable {
-    func hash(into hasher: inout Hasher) {
+    public func hash(into hasher: inout Hasher) {
         hasher.combine(symbol)
         hasher.combine(usdcMicros)
         hasher.combine(tokenAmount)

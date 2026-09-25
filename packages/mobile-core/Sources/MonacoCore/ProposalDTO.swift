@@ -25,6 +25,12 @@ public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
     public let voteSummary: ProposalVoteSummaryDTO?
     public let execution: ProposalExecutionDTO?
     public let commentCount: Int?
+    public let assetKind: AssetKind?
+    public let tokenDecimals: Int?
+    public let premiumBps: Int?
+
+    public var resolvedAssetKind: AssetKind { assetKind ?? .stock }
+    public var resolvedTokenDecimals: Int { tokenDecimals ?? AssetCatalogDefaults.decimals }
 
     public init(
         id: String,
@@ -46,7 +52,10 @@ public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
         votes: [ProposalVoteDTO]? = nil,
         voteSummary: ProposalVoteSummaryDTO? = nil,
         execution: ProposalExecutionDTO? = nil,
-        commentCount: Int? = nil
+        commentCount: Int? = nil,
+        assetKind: AssetKind? = nil,
+        tokenDecimals: Int? = nil,
+        premiumBps: Int? = nil
     ) {
         self.id = id
         self.symbol = symbol
@@ -68,6 +77,9 @@ public struct ProposalDTO: Codable, Equatable, Sendable, Identifiable {
         self.voteSummary = voteSummary
         self.execution = execution
         self.commentCount = commentCount
+        self.assetKind = assetKind
+        self.tokenDecimals = tokenDecimals
+        self.premiumBps = premiumBps
     }
 
     public var resolvedKind: String {

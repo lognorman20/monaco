@@ -110,7 +110,7 @@ func logOrderHTTPFailure(groupID, userID, symbol string, req buyOrderRequest, pa
 	if payer != "" && payer != req.Taker {
 		args = append(args, "payer", payer)
 	}
-	args = append(args, "swap_mode", "ExactIn", "slippage_bps", defaultSlippageBps)
+	args = append(args, "swap_mode", "ExactIn", "slippage_bps", slippageBpsForOrder(req))
 	if httpStatus > 0 {
 		args = append(args, "status", httpStatus)
 	}

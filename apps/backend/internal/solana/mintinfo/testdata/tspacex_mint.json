@@ -1,0 +1,26 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "context": { "slot": 1 },
+    "value": {
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "data": {
+        "parsed": {
+          "info": {
+            "decimals": 9,
+            "extensions": [
+              {
+                "extension": "transferFeeConfig",
+                "state": {
+                  "olderTransferFee": { "epoch": 0, "transferFeeBasisPoints": 20 },
+                  "newerTransferFee": { "epoch": 0, "transferFeeBasisPoints": 20 }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "id": 1
+}

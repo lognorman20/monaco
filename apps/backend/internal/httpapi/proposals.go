@@ -13,6 +13,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -21,11 +22,13 @@ type ProposalHandlers struct {
 	Store      *postgres.Store
 	Privy      privy.Client
 	Governance *app.GovernanceService
+	Catalog    xstocks.CatalogSearcher
 }
 
 type createProposalRequest struct {
 	Kind                 string `json:"kind"`
 	Symbol               string `json:"symbol"`
+	SelectBestVariant    bool   `json:"selectBestVariant"`
 	USDC                 int64  `json:"usdc"`
 	TokenAmount          int64  `json:"tokenAmount"`
 	AgentDisplayName     string `json:"agentDisplayName"`
@@ -117,6 +120,7 @@ func (h *ProposalHandlers) CreateProposalHandler(w http.ResponseWriter, r *http.
 		AgentDisplayName:     strings.TrimSpace(req.AgentDisplayName),
 		AllocationUsdcMicros: req.AllocationUsdcMicros,
 		Thesis:               strings.TrimSpace(req.Thesis),
+		SelectBestVariant:    req.SelectBestVariant && kind == "buy",
 	})
 	if err != nil {
 		writeProposalCreateError(ctx, log, w, err, "group_id", groupID, "user_id", userID, "symbol", req.Symbol)
@@ -194,6 +198,9 @@ type proposalListItemResponse struct {
 	CanVote              bool                        `json:"canVote"`
 	VoteSummary          proposalVoteSummaryResponse `json:"voteSummary"`
 	CommentCount         int                         `json:"commentCount"`
+	TokenDecimals        int                         `json:"tokenDecimals,omitempty"`
+	AssetKind            string                      `json:"assetKind,omitempty"`
+	PremiumBps           *int                        `json:"premiumBps,omitempty"`
 }
 
 type listGroupProposalsResponse struct {
@@ -244,6 +251,9 @@ type proposalDetailResponse struct {
 	VoteSummary          proposalVoteSummaryResponse `json:"voteSummary"`
 	Execution            proposalExecutionResponse   `json:"execution"`
 	CommentCount         int                         `json:"commentCount"`
+	TokenDecimals        int                         `json:"tokenDecimals,omitempty"`
+	AssetKind            string                      `json:"assetKind,omitempty"`
+	PremiumBps           *int                        `json:"premiumBps,omitempty"`
 }
 
 // ListGroupProposalsHandler handles GET /v1/groups/{id}/proposals.
@@ -317,6 +327,13 @@ func (h *ProposalHandlers) ListGroupProposalsHandler(w http.ResponseWriter, r *h
 		}
 		if item.Status == app.ProposalOpen {
 			row.ExpiresAt = item.ExpiresAt.UTC().Format(time.RFC3339)
+		}
+		if item.TokenDecimals > 0 {
+			row.TokenDecimals = item.TokenDecimals
+		}
+		row.PremiumBps = item.PremiumBps
+		if item.Symbol != "" {
+			row.AssetKind = assetKindForSymbol(ctx, h.Catalog, item.Symbol)
 		}
 		proposals = append(proposals, row)
 	}
@@ -429,6 +446,13 @@ func (h *ProposalHandlers) GetProposalDetailHandler(w http.ResponseWriter, r *ht
 	}
 	if detail.MintedAgentKey != "" {
 		detailResp.MintedAgentKey = detail.MintedAgentKey
+	}
+	if detail.TokenDecimals > 0 {
+		detailResp.TokenDecimals = detail.TokenDecimals
+	}
+	detailResp.PremiumBps = detail.PremiumBps
+	if detail.Symbol != "" {
+		detailResp.AssetKind = assetKindForSymbol(ctx, h.Catalog, detail.Symbol)
 	}
 	_ = json.NewEncoder(w).Encode(detailResp)
 	logJSONOK(ctx, log, "ok", "proposal_id", proposalID, "status", detail.Status)

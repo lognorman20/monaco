@@ -4,14 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/solana/mintinfo"
 	"github.com/monaco/monaco/apps/backend/internal/solana/txsign"
 	"github.com/monaco/monaco/apps/backend/internal/swapprovider"
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
 // DevExecuteBuyRequest is input for the M3 dev-only buy execute path.
@@ -28,7 +31,7 @@ type DevExecuteBuyRequest struct {
 // DevExecuteBuyResult is the persisted confirmed buy transaction.
 type DevExecuteBuyResult struct {
 	Transaction postgres.TransactionRow
-	Created       bool
+	Created     bool
 }
 
 // SellToUSDCRequest sells treasury xStock back to USDC.
@@ -46,7 +49,7 @@ type SellToUSDCRequest struct {
 // SellToUSDCResult is the persisted confirmed sell transaction.
 type SellToUSDCResult struct {
 	Transaction postgres.TransactionRow
-	Created       bool
+	Created     bool
 	// ProceedsUSDC is the USDC the fill raised, in micros.
 	ProceedsUSDC int64
 }
@@ -74,6 +77,7 @@ type SwapService struct {
 	pollConfig jupiter.PollConfig
 	symbols    *SymbolResolver
 	pyth       pyth.Client
+	mintinfo   mintinfo.Reader
 }
 
 // NewSwapService wires swap dependencies.
@@ -110,6 +114,11 @@ func (s *SwapService) SetSwapProvider(provider swapprovider.Provider) {
 // SetPriceClient wires the price chain used to mark holdings in post-swap NAV snapshots.
 func (s *SwapService) SetPriceClient(client pyth.Client) {
 	s.pyth = client
+}
+
+// SetMintInfo wires live mint extension reads for pre-IPO fee and pause checks at execute time.
+func (s *SwapService) SetMintInfo(reader mintinfo.Reader) {
+	s.mintinfo = reader
 }
 
 // SwapProviderName reports which venue executes treasury swaps.
@@ -174,11 +183,22 @@ func (s *SwapService) executeBuy(ctx context.Context, req DevExecuteBuyRequest) 
 		return DevExecuteBuyResult{}, err
 	}
 
-	outputMint, err := s.buy.ResolveOutputMint(ctx, req.Symbol)
+	asset, err := s.buy.ResolveAsset(ctx, req.Symbol)
 	if err != nil {
 		logSwapBranchError("swap buy resolve mint failed", err, "group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol, "stage", "resolve_mint")
 		return DevExecuteBuyResult{}, err
 	}
+	outputMint := asset.SolanaMint
+	tokenDecimals := asset.Normalize().Decimals
+
+	if err := preIPOSwapGuard(ctx, s.mintinfo, asset); err != nil {
+		if errors.Is(err, ErrIssuerPaused) {
+			_ = s.recordIssuerPausedBuyFailure(ctx, req, outputMint)
+		}
+		logSwapBranchError("swap buy rejected", err, "group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol, "stage", "issuer_paused")
+		return DevExecuteBuyResult{}, err
+	}
+	transferFeeBps := transferFeeBpsAtExecute(ctx, s.mintinfo, asset)
 
 	swapReq := swapprovider.Request{
 		GroupID:        req.GroupID,
@@ -188,7 +208,9 @@ func (s *SwapService) executeBuy(ctx context.Context, req DevExecuteBuyRequest) 
 		InputMint:      jupiter.USDCMint,
 		OutputMint:     outputMint,
 		InputDecimals:  usdcDecimals,
-		OutputDecimals: jupiter.XStockDecimals,
+		OutputDecimals: tokenDecimals,
+		Kind:           swapAssetKind(asset.Kind),
+		TransferFeeBps: transferFeeBps,
 		Amount:         req.USDCAmount,
 		Wallet:         swapprovider.Wallet{PrivyWalletID: treasury.PrivyWalletID, SolanaAddress: treasury.SolanaAddress},
 	}
@@ -216,6 +238,7 @@ func (s *SwapService) executeBuy(ctx context.Context, req DevExecuteBuyRequest) 
 		OutputMint:       outputMint,
 		Amount:           req.USDCAmount,
 		ExecuteRequestID: sub.RequestID,
+		TokenDecimals:    tokenDecimals,
 	}); err != nil {
 		return DevExecuteBuyResult{}, err
 	}
@@ -234,8 +257,9 @@ func (s *SwapService) executeBuy(ctx context.Context, req DevExecuteBuyRequest) 
 	}
 	logSwapPollTransition(req.GroupID, req.UserID, req.Symbol, fill.Signature, jupiter.ExecuteStatusPending, fill.Status, fill.Code)
 
-	costBasisAmount := fill.OutputAmount
+	costBasisAmount, quotedOut, receivedOut := s.reconcileBuyFill(ctx, req.GroupID, treasury.SolanaAddress, outputMint, fill)
 	costBasisPrice := fill.InputAmount
+	s.logBuyFillReconciliation(ctx, req, asset, transferFeeBps, quotedOut, receivedOut, fill, sub.RequestID)
 
 	row, created, err := s.store.ConfirmBuyTransaction(ctx, postgres.ConfirmBuyTransactionParams{
 		GroupID:          req.GroupID,
@@ -246,6 +270,7 @@ func (s *SwapService) executeBuy(ctx context.Context, req DevExecuteBuyRequest) 
 		ExecuteRequestID: sub.RequestID,
 		CostBasisPrice:   costBasisPrice,
 		CostBasisAmount:  costBasisAmount,
+		TokenDecimals:    tokenDecimals,
 	})
 	if err != nil {
 		return DevExecuteBuyResult{}, err
@@ -290,6 +315,15 @@ func (s *SwapService) executeSell(ctx context.Context, req SellToUSDCRequest) (S
 		return SellToUSDCResult{}, err
 	}
 
+	sellAsset := s.assetForInputMint(ctx, req.GroupID, req.InputMint)
+	tokenDecimals := sellAsset.Decimals
+
+	if err := preIPOSwapGuard(ctx, s.mintinfo, sellAsset); err != nil {
+		logSwapBranchError("swap sell rejected", err, "group_id", req.GroupID, "user_id", req.UserID, "symbol", req.Symbol, "stage", "issuer_paused")
+		return SellToUSDCResult{}, err
+	}
+	sellTransferFeeBps := transferFeeBpsAtExecute(ctx, s.mintinfo, sellAsset)
+
 	swapReq := swapprovider.Request{
 		GroupID:        req.GroupID,
 		UserID:         req.UserID,
@@ -297,8 +331,10 @@ func (s *SwapService) executeSell(ctx context.Context, req SellToUSDCRequest) (S
 		Side:           swapprovider.SideSell,
 		InputMint:      req.InputMint,
 		OutputMint:     jupiter.USDCMint,
-		InputDecimals:  jupiter.XStockDecimals,
+		InputDecimals:  tokenDecimals,
 		OutputDecimals: usdcDecimals,
+		Kind:           swapAssetKind(sellAsset.Kind),
+		TransferFeeBps: sellTransferFeeBps,
 		Amount:         req.Amount,
 		Wallet:         swapprovider.Wallet{PrivyWalletID: treasury.PrivyWalletID, SolanaAddress: treasury.SolanaAddress},
 	}
@@ -326,6 +362,7 @@ func (s *SwapService) executeSell(ctx context.Context, req SellToUSDCRequest) (S
 		OutputMint:       jupiter.USDCMint,
 		Amount:           req.Amount,
 		ExecuteRequestID: sub.RequestID,
+		TokenDecimals:    tokenDecimals,
 	}); err != nil {
 		return SellToUSDCResult{}, err
 	}
@@ -344,6 +381,7 @@ func (s *SwapService) executeSell(ctx context.Context, req SellToUSDCRequest) (S
 	logSwapPollTransition(req.GroupID, req.UserID, req.Symbol, fill.Signature, jupiter.ExecuteStatusPending, fill.Status, fill.Code)
 
 	proceeds := fill.OutputAmount
+	logSwapSellFill(req.GroupID, req.UserID, req.Symbol, req.Amount, fill.QuotedInputAmount, fill.InputAmount)
 
 	row, created, err := s.store.ConfirmSellTransaction(ctx, postgres.ConfirmSellTransactionParams{
 		GroupID:          req.GroupID,
@@ -353,6 +391,7 @@ func (s *SwapService) executeSell(ctx context.Context, req SellToUSDCRequest) (S
 		TxSignature:      fill.Signature,
 		ExecuteRequestID: sub.RequestID,
 		ProceedsUSDC:     proceeds,
+		TokenDecimals:    tokenDecimals,
 	})
 	if err != nil {
 		return SellToUSDCResult{}, err
@@ -433,6 +472,88 @@ func (s *SwapService) signSwapTransaction(ctx context.Context, walletID, unsigne
 		}
 	}
 	return s.signer.SignTreasuryTransaction(ctx, walletID, tx)
+}
+
+func swapAssetKind(kind xstocks.AssetKind) swapprovider.AssetKind {
+	if kind == xstocks.AssetKindPreIPO {
+		return swapprovider.AssetKindPreIPO
+	}
+	return swapprovider.AssetKindStock
+}
+
+func (s *SwapService) assetForInputMint(ctx context.Context, groupID, mint string) xstocks.CatalogAsset {
+	if s.buy != nil {
+		if asset, ok := s.buy.LookupAssetByMint(ctx, mint); ok {
+			return asset
+		}
+	}
+	if s.store != nil {
+		if decimals, ok, err := s.store.MaxTokenDecimalsForGroupMint(ctx, groupID, mint); err == nil && ok {
+			return xstocks.CatalogAsset{SolanaMint: mint, Decimals: decimals}.Normalize()
+		}
+	}
+	return xstocks.CatalogAsset{SolanaMint: mint}.Normalize()
+}
+
+func (s *SwapService) reconcileBuyFill(ctx context.Context, groupID, treasuryAddress, outputMint string, fill swapprovider.Fill) (costBasisAmount, quotedOut, receivedOut int64) {
+	quotedOut = fill.QuotedOutputAmount
+	if quotedOut <= 0 {
+		quotedOut = fill.OutputAmount
+	}
+	receivedOut = fill.OutputAmount
+
+	if s.privy == nil || fill.Signature == "" {
+		return receivedOut, quotedOut, receivedOut
+	}
+	delta, err := s.privy.TokenBalanceDelta(ctx, fill.Signature, treasuryAddress, outputMint)
+	if err == nil && delta > 0 {
+		receivedOut = delta
+		return delta, quotedOut, receivedOut
+	}
+	if err != nil {
+		slog.Warn("fill reconciliation unavailable",
+			"group_id", groupID,
+			"tx_signature", fill.Signature,
+			"output_mint", outputMint,
+			"err", err,
+		)
+	}
+	return receivedOut, quotedOut, receivedOut
+}
+
+func (s *SwapService) logBuyFillReconciliation(ctx context.Context, req DevExecuteBuyRequest, asset xstocks.CatalogAsset, transferFeeBps int, quotedOut, receivedOut int64, fill swapprovider.Fill, requestID string) {
+	if quotedOut <= 0 {
+		return
+	}
+	feeBpsObserved := (quotedOut - receivedOut) * 10_000 / quotedOut
+	slog.Info("swap buy fill reconciliation",
+		"group_id", req.GroupID,
+		"user_id", req.UserID,
+		"symbol", req.Symbol,
+		"request_id", requestID,
+		"quoted_out", quotedOut,
+		"received_out", receivedOut,
+		"fee_bps_observed", feeBpsObserved,
+	)
+
+	slippageBps := 50
+	if asset.Kind == xstocks.AssetKindPreIPO {
+		slippageBps = jupiter.PreIPOSlippageBps
+	}
+	if feeBpsObserved > int64(transferFeeBps+slippageBps) {
+		telemetry.Alert(ctx, telemetry.AlertEvent{
+			Kind:     "swap_fill_fee_high",
+			Key:      "swap_fill_fee_high:" + requestID,
+			Severity: telemetry.SeverityWarning,
+			Title:    "Treasury buy fill wider than expected",
+			Detail:   "Observed output fee exceeded transfer fee plus slippage tolerance.",
+			Fields: map[string]string{
+				"group_id":         req.GroupID,
+				"symbol":           req.Symbol,
+				"fee_bps_observed": fmt.Sprintf("%d", feeBpsObserved),
+			},
+		})
+	}
 }
 
 func (s *SwapService) markSwapFailed(ctx context.Context, groupID, action, inputMint, outputMint string, amount int64, executeRequestID string) error {

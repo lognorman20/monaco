@@ -124,13 +124,16 @@ func (c *HermesClient) markHolding(ctx context.Context, holding CostBasis) (Mark
 		return MarkedHolding{}, err
 	}
 	return MarkedHolding{
-		Symbol:     holding.Symbol,
-		Mint:       holding.Mint,
-		Units:      holding.Units,
-		MarkUsdc:   mark.PriceUsdcMicros,
-		CostBasis:  holding.Price,
-		AfterHours: mark.AfterHours,
-		Source:     MarkSourcePyth,
+		Symbol:       holding.Symbol,
+		Mint:         holding.Mint,
+		Units:        holding.Units,
+		MarkUsdc:     mark.PriceUsdcMicros,
+		CostBasis:    holding.Price,
+		AfterHours:   mark.AfterHours,
+		Source:       MarkSourcePyth,
+		Decimals:     holding.Decimals,
+		Kind:         holding.Kind,
+		UiMultiplier: holding.UiMultiplier,
 	}, nil
 }
 

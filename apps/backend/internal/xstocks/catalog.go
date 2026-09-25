@@ -6,22 +6,103 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
-// CatalogAsset is a backend-resolved xStock catalog row for mobile search.
+// AssetKind classifies catalog rows (listed stock vs pre-IPO token).
+type AssetKind string
+
+const (
+	AssetKindStock  AssetKind = "stock"
+	AssetKindPreIPO AssetKind = "pre_ipo"
+)
+
+// AssetSource identifies which catalog API populated a row.
+type AssetSource string
+
+const (
+	AssetSourceXStocks   AssetSource = "xstocks"
+	AssetSourceTessera   AssetSource = "tessera"
+	AssetSourcePreStocks AssetSource = "prestocks"
+)
+
+// CatalogAsset is a backend-resolved catalog row for mobile search.
 type CatalogAsset struct {
 	Symbol     string
 	Name       string
 	SolanaMint string
 	Routable   bool
+
+	Kind           AssetKind
+	Source         AssetSource
+	Decimals       int
+	TransferFeeBps int
+	Sector         string
+	LogoURL        string
+	UnderlyingID   string
+	Issuer         string
+	IssuerName     string
+
+	UiAmountMultiplier *big.Rat // nil = unresolved
+	Paused             bool
+
+	ReferenceMarkUsdcMicros *int64
+	ReferenceValuationUsd   *int64
+	ReferenceUpdatedAt      *time.Time
+	ReferenceSource         string
+	Holders                 *int
+
+	LiquidityUsd int64
+}
+
+// Normalize applies stock/xStocks defaults for unset kind, source, and decimals.
+func (a CatalogAsset) Normalize() CatalogAsset {
+	if a.Kind == "" {
+		a.Kind = AssetKindStock
+	}
+	if a.Decimals == 0 {
+		a.Decimals = jupiter.XStockDecimals
+	}
+	if a.Source == "" {
+		a.Source = AssetSourceXStocks
+	}
+	return a
+}
+
+// AtomicScale returns 10^Decimals for this asset.
+func (a CatalogAsset) AtomicScale() int64 {
+	return jupiter.AtomicScale(a.Normalize().Decimals)
+}
+
+// CatalogAssetFromXStockNode builds a normalized xStocks catalog row.
+func CatalogAssetFromXStockNode(symbol, name, solanaMint string) CatalogAsset {
+	symbol = strings.TrimSpace(symbol)
+	return CatalogAsset{
+		Symbol:       symbol,
+		Name:         strings.TrimSpace(name),
+		SolanaMint:   strings.TrimSpace(solanaMint),
+		Kind:         AssetKindStock,
+		Source:       AssetSourceXStocks,
+		Decimals:     jupiter.XStockDecimals,
+		Issuer:       string(AssetSourceXStocks),
+		UnderlyingID: UnderlyingIDFromXStockSymbol(symbol),
+	}.Normalize()
+}
+
+// UnderlyingIDFromXStockSymbol derives the company slug from an xStock ticker.
+func UnderlyingIDFromXStockSymbol(symbol string) string {
+	s := strings.ToLower(strings.TrimSpace(symbol))
+	return strings.TrimSuffix(s, "x")
 }
 
 // CatalogSearchPage is one page of catalog search results.
@@ -42,6 +123,10 @@ type HTTPCatalogSearcher struct {
 	httpClient  *http.Client
 	mintIndex   mintIndex
 	routability RoutabilityProber
+
+	catalogMu    sync.Mutex
+	catalogRows  []CatalogAsset
+	catalogUntil time.Time
 }
 
 // NewHTTPCatalogSearcher returns a catalog searcher backed by the production API.
@@ -141,63 +226,152 @@ func (s *HTTPCatalogSearcher) searchBySymbol(ctx context.Context, query string) 
 		if err != nil {
 			continue
 		}
-		return &CatalogAsset{
-			Symbol:     strings.TrimSpace(node.Symbol),
-			Name:       strings.TrimSpace(node.Name),
-			SolanaMint: mint,
-		}, nil
+		asset := CatalogAssetFromXStockNode(node.Symbol, node.Name, mint)
+		return &asset, nil
 	}
 	return nil, nil
 }
 
+const catalogPageBatch = 6
+
 func (s *HTTPCatalogSearcher) searchPaginatedList(ctx context.Context, query string, limit, offset int) (CatalogSearchPage, error) {
 	needle := strings.ToLower(strings.TrimSpace(query))
-	matches := make([]CatalogAsset, 0)
-	hasNextPage := true
-
-	for page := 0; hasNextPage; page++ {
-		body, err := s.fetchCatalogListPage(ctx, page)
-		if err != nil {
-			return CatalogSearchPage{}, err
-		}
-
-		var list catalogListResponse
-		if err := json.Unmarshal(body, &list); err != nil {
-			return CatalogSearchPage{}, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
-		}
-
-		for _, node := range list.Nodes {
-			if !catalogNodeMatches(node, needle) {
-				continue
-			}
-			mint, err := solanaMintFromDeployments(node.Deployments)
-			if err != nil {
-				continue
-			}
-			matches = append(matches, CatalogAsset{
-				Symbol:     strings.TrimSpace(node.Symbol),
-				Name:       strings.TrimSpace(node.Name),
-				SolanaMint: mint,
-			})
-		}
-
-		hasNextPage = list.Page.HasNextPage
+	if rows, ok := s.cachedCatalog(); ok {
+		return pageFilteredAssets(ctx, s.routability, rows, needle, limit, offset), nil
 	}
 
-	rankCatalogAssets(ctx, s.routability, matches)
+	first, hasNext, err := s.fetchCatalogPage(ctx, 0)
+	if err != nil {
+		return CatalogSearchPage{}, err
+	}
+	if needle != "" && hasNext && len(filterCatalogAssets(first, needle)) >= offset+limit {
+		page := pageFilteredAssets(ctx, s.routability, first, needle, limit, offset)
+		page.HasMore = true
+		return page, nil
+	}
+	if !hasNext {
+		s.storeCatalog(first)
+		return pageFilteredAssets(ctx, s.routability, first, needle, limit, offset), nil
+	}
 
+	rest, err := s.fetchRemainingCatalog(ctx, 1)
+	if err != nil {
+		return CatalogSearchPage{}, err
+	}
+	rows := append(first, rest...)
+	s.storeCatalog(rows)
+	return pageFilteredAssets(ctx, s.routability, rows, needle, limit, offset), nil
+}
+
+func (s *HTTPCatalogSearcher) cachedCatalog() ([]CatalogAsset, bool) {
+	s.catalogMu.Lock()
+	defer s.catalogMu.Unlock()
+	if len(s.catalogRows) == 0 || time.Now().After(s.catalogUntil) {
+		return nil, false
+	}
+	return append([]CatalogAsset(nil), s.catalogRows...), true
+}
+
+func (s *HTTPCatalogSearcher) storeCatalog(rows []CatalogAsset) {
+	s.catalogMu.Lock()
+	defer s.catalogMu.Unlock()
+	s.catalogRows = append([]CatalogAsset(nil), rows...)
+	s.catalogUntil = time.Now().Add(5 * time.Minute)
+}
+
+func (s *HTTPCatalogSearcher) fetchRemainingCatalog(ctx context.Context, start int) ([]CatalogAsset, error) {
+	var all []CatalogAsset
+	for page := start; page < start+48; page += catalogPageBatch {
+		batch := catalogPageBatch
+		type pageResult struct {
+			assets  []CatalogAsset
+			hasNext bool
+			missing bool
+			err     error
+		}
+		results := make([]pageResult, batch)
+		var wg sync.WaitGroup
+		for i := 0; i < batch; i++ {
+			wg.Add(1)
+			go func(i, page int) {
+				defer wg.Done()
+				assets, hasNext, err := s.fetchCatalogPage(ctx, page)
+				if errors.Is(err, ErrNotFound) {
+					results[i].missing = true
+					return
+				}
+				results[i] = pageResult{assets: assets, hasNext: hasNext, err: err}
+			}(i, page+i)
+		}
+		wg.Wait()
+
+		stop := false
+		for i := 0; i < batch; i++ {
+			if results[i].err != nil {
+				return nil, results[i].err
+			}
+			if results[i].missing {
+				stop = true
+				break
+			}
+			all = append(all, results[i].assets...)
+			if !results[i].hasNext {
+				stop = true
+				break
+			}
+		}
+		if stop {
+			break
+		}
+	}
+	return all, nil
+}
+
+func (s *HTTPCatalogSearcher) fetchCatalogPage(ctx context.Context, page int) ([]CatalogAsset, bool, error) {
+	body, err := s.fetchCatalogListPage(ctx, page)
+	if err != nil {
+		return nil, false, err
+	}
+	var list catalogListResponse
+	if err := json.Unmarshal(body, &list); err != nil {
+		return nil, false, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
+	}
+	assets := make([]CatalogAsset, 0, len(list.Nodes))
+	for _, node := range list.Nodes {
+		mint, err := solanaMintFromDeployments(node.Deployments)
+		if err != nil {
+			continue
+		}
+		assets = append(assets, CatalogAssetFromXStockNode(node.Symbol, node.Name, mint))
+	}
+	return assets, list.Page.HasNextPage, nil
+}
+
+func filterCatalogAssets(assets []CatalogAsset, needle string) []CatalogAsset {
+	if needle == "" {
+		return append([]CatalogAsset(nil), assets...)
+	}
+	matches := make([]CatalogAsset, 0)
+	for _, asset := range assets {
+		if catalogNodeMatches(catalogAssetNode{Symbol: asset.Symbol, Name: asset.Name}, needle) {
+			matches = append(matches, asset)
+		}
+	}
+	return matches
+}
+
+func pageFilteredAssets(ctx context.Context, prober RoutabilityProber, assets []CatalogAsset, needle string, limit, offset int) CatalogSearchPage {
+	matches := filterCatalogAssets(assets, needle)
+	rankCatalogAssets(ctx, prober, matches)
 	hasMore := len(matches) > offset+limit
 	if offset >= len(matches) {
-		return CatalogSearchPage{Assets: nil, HasMore: hasMore}, nil
+		return CatalogSearchPage{Assets: nil, HasMore: hasMore}
 	}
 	end := offset + limit
 	if end > len(matches) {
 		end = len(matches)
 	}
-	return CatalogSearchPage{
-		Assets:  matches[offset:end],
-		HasMore: hasMore,
-	}, nil
+	return CatalogSearchPage{Assets: matches[offset:end], HasMore: hasMore}
 }
 
 func (s *HTTPCatalogSearcher) fetchCatalogListPage(ctx context.Context, page int) ([]byte, error) {
@@ -313,11 +487,7 @@ func catalogAssetsFromListResponse(body []byte, query string) ([]CatalogAsset, e
 		if err != nil {
 			continue
 		}
-		assets = append(assets, CatalogAsset{
-			Symbol:     strings.TrimSpace(node.Symbol),
-			Name:       strings.TrimSpace(node.Name),
-			SolanaMint: mint,
-		})
+		assets = append(assets, CatalogAssetFromXStockNode(node.Symbol, node.Name, mint))
 	}
 	return assets, nil
 }
