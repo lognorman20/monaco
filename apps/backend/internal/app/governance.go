@@ -24,6 +24,8 @@ type GovernanceService struct {
 	home    *HomeService
 	redeem  *RedeemService
 	now     func() time.Time
+
+	agentDeployments *AgentDeploymentService
 }
 
 func NewGovernanceService(store *postgres.Store, verifier auth.Verifier, walletClient wallets.Client) *GovernanceService {
@@ -97,7 +99,12 @@ type CreateProposalInput struct {
 	TokenAmount          int64
 	AgentDisplayName     string
 	AllocationUsdcMicros int64
-	Thesis               string
+	// AgentWalletAddress is the outside agent's Solana wallet for deploy_agent and recall_agent.
+	AgentWalletAddress string
+	// OperatorKey is an optional ClawPump cpk_ key on deploy_agent; it lets Monaco command
+	// the agent to send USDC back on recall.
+	OperatorKey string
+	Thesis      string
 }
 
 // MaxProposalThesisLength is the maximum accepted length of a proposal thesis.
@@ -623,12 +630,13 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		kind = domain.ProposalKindBuy
 	}
 	logGovernanceCreateProposalStart(in.GroupID, in.ProposerID, in.Symbol, in.UsdcMicros)
+	in.AgentWalletAddress = strings.TrimSpace(in.AgentWalletAddress)
 
 	if in.GroupID == "" || in.ProposerID == "" {
 		logGovernanceBranchWarn("governance create proposal rejected", "missing ids")
 		return Proposal{}, fmt.Errorf("group_id and proposer_id are required")
 	}
-	if in.Symbol == "" && !domain.IsAgentGovernanceKind(kind) {
+	if in.Symbol == "" && !domain.IsAgentGovernanceKind(kind) && !domain.IsAgentDeploymentKind(kind) {
 		logGovernanceBranchWarn("governance create proposal rejected", "symbol required", "group_id", in.GroupID)
 		return Proposal{}, fmt.Errorf("symbol is required")
 	}
@@ -669,6 +677,7 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		return Proposal{}, ErrNotEligibleProposer
 	}
 
+	var operatorKeyEnc string
 	switch kind {
 	case domain.ProposalKindBuy:
 		if in.UsdcMicros <= 0 || in.TokenAmount != 0 {
@@ -725,6 +734,12 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		}); err != nil {
 			return Proposal{}, err
 		}
+	case domain.ProposalKindDeployAgent, domain.ProposalKindRecallAgent:
+		operatorKeyEnc, err = g.validateAgentDeploymentProposal(ctx, in, kind)
+		if err != nil {
+			logGovernanceBranchWarn("governance create proposal rejected", err.Error(), "group_id", in.GroupID, "proposer_id", in.ProposerID, "kind", kind)
+			return Proposal{}, err
+		}
 	default:
 		return Proposal{}, fmt.Errorf("invalid proposal kind")
 	}
@@ -752,11 +767,17 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 		TokenAmount:          in.TokenAmount,
 		AgentDisplayName:     in.AgentDisplayName,
 		AllocationUsdcMicros: in.AllocationUsdcMicros,
+		AgentWalletAddress:   in.AgentWalletAddress,
 		Thesis:               thesis,
 		ExpiresAt:            expiresAt,
 	})
 	if err != nil {
 		return Proposal{}, err
+	}
+	if operatorKeyEnc != "" {
+		if err := g.store.InsertAgentDeployOperatorKeyTx(ctx, tx, row.ID, operatorKeyEnc); err != nil {
+			return Proposal{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		logGovernanceBranchError("governance create proposal commit failed", err, "group_id", in.GroupID, "proposer_id", in.ProposerID)
@@ -770,7 +791,16 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 
 func (g *GovernanceService) proposalTreasuryTotalMicros(ctx context.Context, groupID string) (int64, error) {
 	if g.home != nil {
-		return g.home.GroupTreasuryTotalMicros(ctx, groupID)
+		total, err := g.home.GroupTreasuryTotalMicros(ctx, groupID)
+		if err != nil {
+			return 0, err
+		}
+		// USDC out with an agent wallet is in the pot but cannot fund a buy.
+		deployed, err := g.store.SumOutstandingAgentDeploymentsByGroup(ctx, groupID)
+		if err != nil {
+			return 0, err
+		}
+		return total - deployed, nil
 	}
 	return g.groupTreasuryUSDC(ctx, groupID)
 }
@@ -1002,6 +1032,9 @@ func (g *GovernanceService) finalizeOpenProposalTx(ctx context.Context, tx *sql.
 	if ok {
 		proposal.Status = ProposalExpired
 		slog.Info("governance proposal expired", "proposal_id", proposalID)
+		if err := g.discardAgentDeployOperatorKeyTx(ctx, tx, proposal); err != nil {
+			return Proposal{}, err
+		}
 	}
 	return proposal, nil
 }
@@ -1052,6 +1085,16 @@ func (g *GovernanceService) tallyAndPersistTx(ctx context.Context, tx *sql.Tx, p
 		proposal.Status = nextStatus
 		if nextStatus == ProposalPassed && domain.IsAgentGovernanceKind(proposal.Kind) {
 			if err := g.handleAgentProposalPassTx(ctx, tx, proposal, row); err != nil {
+				return Proposal{}, err
+			}
+		}
+		if nextStatus == ProposalPassed && domain.IsAgentDeploymentKind(proposal.Kind) {
+			if err := g.handleAgentDeploymentPassTx(ctx, tx, proposal, row); err != nil {
+				return Proposal{}, err
+			}
+		}
+		if nextStatus != ProposalPassed {
+			if err := g.discardAgentDeployOperatorKeyTx(ctx, tx, proposal); err != nil {
 				return Proposal{}, err
 			}
 		}

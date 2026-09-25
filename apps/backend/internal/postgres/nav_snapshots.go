@@ -25,6 +25,7 @@ const (
 	NavSnapshotReasonDeposit            NavSnapshotReason = "deposit"
 	NavSnapshotReasonTransactionConfirm NavSnapshotReason = "transaction_confirm"
 	NavSnapshotReasonWithdrawalPayout   NavSnapshotReason = "withdrawal_payout"
+	NavSnapshotReasonAgentDeployment    NavSnapshotReason = "agent_deployment"
 )
 
 // NavSnapshotRow is a row in nav_snapshots.
@@ -89,7 +90,7 @@ func (s *Store) InsertNavSnapshotTx(ctx context.Context, tx *sql.Tx, groupID str
 		return NavSnapshotRow{}, fmt.Errorf("nav snapshot values must be non-negative")
 	}
 	switch reason {
-	case NavSnapshotReasonDeposit, NavSnapshotReasonTransactionConfirm, NavSnapshotReasonWithdrawalPayout:
+	case NavSnapshotReasonDeposit, NavSnapshotReasonTransactionConfirm, NavSnapshotReasonWithdrawalPayout, NavSnapshotReasonAgentDeployment:
 	default:
 		return NavSnapshotRow{}, fmt.Errorf("invalid nav snapshot reason %q", reason)
 	}
@@ -208,7 +209,20 @@ func (s *Store) WriteNavSnapshotOnWithdrawalPayoutTx(ctx context.Context, tx *sq
 	return err
 }
 
-// ComputeNavSnapshotValues derives pot NAV from treasury USDC, outstanding shares, and confirmed fills.
+// WriteNavSnapshotOnAgentDeploymentTx records pot NAV after USDC left for, or came back from,
+// an agent wallet. Outstanding deployed USDC is read inside tx, so the snapshot sees the
+// deployment change it records.
+func (s *Store) WriteNavSnapshotOnAgentDeploymentTx(ctx context.Context, tx *sql.Tx, groupID string, treasuryUSDC int64) error {
+	vals, err := s.computeNavSnapshotValues(ctx, tx, groupID, treasuryUSDC)
+	if err != nil {
+		return err
+	}
+	_, err = s.InsertNavSnapshotTx(ctx, tx, groupID, NavSnapshotReasonAgentDeployment, vals)
+	return err
+}
+
+// ComputeNavSnapshotValues derives pot NAV from treasury USDC, USDC deployed to agent wallets,
+// outstanding shares, and confirmed fills.
 func (s *Store) ComputeNavSnapshotValues(ctx context.Context, groupID string, treasuryUSDC int64) (NavSnapshotValues, error) {
 	return s.computeNavSnapshotValues(ctx, s.db, groupID, treasuryUSDC)
 }
@@ -266,17 +280,15 @@ func (s *Store) computeNavSnapshotValuesWithShareBase(ctx context.Context, q nav
 		return NavSnapshotValues{}, err
 	}
 
+	// USDC sent to an agent wallet still belongs to the pot until it comes back.
+	deployedUSDC, err := sumOutstandingAgentDeploymentsQuery(ctx, q, groupID)
+	if err != nil {
+		return NavSnapshotValues{}, err
+	}
+
 	if len(holdings) == 0 {
-		potNav := treasuryUSDC
-		// Uncredited treasury USDC must not inflate NAV until shares are minted (1:1 M2).
-		if totalSharesMicro > 0 && potNav > totalSharesMicro {
-			potNav = totalSharesMicro
-		}
-		if potNav == 0 && totalSharesMicro > 0 {
-			potNav = totalSharesMicro
-		}
 		return NavSnapshotValues{
-			PotNavMicros:      potNav,
+			PotNavMicros:      USDCOnlyPotNavMicros(treasuryUSDC, deployedUSDC, totalSharesMicro),
 			NavPerShareMicros: domain.BootstrapSharePriceMicros,
 			TotalShares:       totalSharesMicro,
 		}, nil
@@ -312,7 +324,7 @@ func (s *Store) computeNavSnapshotValuesWithShareBase(ctx context.Context, q nav
 
 	nav, err := domain.ComputePotNAV(domain.NavInput{
 		Mode:         domain.NavMarked,
-		TreasuryUsdc: domain.USDCMicros(treasuryUSDC),
+		TreasuryUsdc: domain.USDCMicros(treasuryUSDC + deployedUSDC),
 		TotalShares:  totalShares,
 		Holdings:     markedHoldings,
 	})
@@ -321,6 +333,21 @@ func (s *Store) computeNavSnapshotValuesWithShareBase(ctx context.Context, q nav
 	}
 
 	return NavSnapshotValuesFromPotNAV(nav, totalSharesMicro), nil
+}
+
+// USDCOnlyPotNavMicros is pot NAV for a pot with no token holdings. Treasury USDC is clamped to
+// minted shares (uncredited cash must not inflate NAV), falls back to shares when the treasury
+// reads empty with nothing deployed, and USDC deployed to agent wallets is added after the clamp
+// so a funded cabal that deploys its cash does not show that cash as missing.
+func USDCOnlyPotNavMicros(treasuryUSDC, deployedUSDC, totalSharesMicro int64) int64 {
+	cash := treasuryUSDC
+	if totalSharesMicro > 0 && cash > totalSharesMicro {
+		cash = totalSharesMicro
+	}
+	if cash == 0 && deployedUSDC == 0 && totalSharesMicro > 0 {
+		cash = totalSharesMicro
+	}
+	return cash + deployedUSDC
 }
 
 func sumShareUnitsByGroupQuery(ctx context.Context, q navSnapshotQuerier, groupID string) (int64, error) {

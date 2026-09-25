@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/monaco/monaco/packages/domain"
@@ -21,6 +22,7 @@ type ProposalRow struct {
 	TokenAmount          int64
 	AgentDisplayName     string
 	AllocationUsdcMicros int64
+	AgentWalletAddress   string
 	Thesis               string
 	Status               domain.ProposalStatus
 	ExpiresAt            time.Time
@@ -37,18 +39,19 @@ type InsertProposalParams struct {
 	TokenAmount          int64
 	AgentDisplayName     string
 	AllocationUsdcMicros int64
+	AgentWalletAddress   string
 	Thesis               string
 	ExpiresAt            time.Time
 }
 
 const proposalSelectColumns = `id, group_id, proposer_id, symbol, kind, usdc_micros, token_amount,
-  agent_display_name, allocation_usdc_micros, thesis, status, expires_at, created_at`
+  agent_display_name, allocation_usdc_micros, agent_wallet_address, thesis, status, expires_at, created_at`
 
 func scanProposalRow(scanner interface{ Scan(dest ...any) error }) (ProposalRow, error) {
 	var row ProposalRow
 	var kindRaw, statusRaw string
 	var usdc, token, allocation sql.NullInt64
-	var agentName, thesis sql.NullString
+	var agentName, agentWallet, thesis sql.NullString
 	if err := scanner.Scan(
 		&row.ID,
 		&row.GroupID,
@@ -59,6 +62,7 @@ func scanProposalRow(scanner interface{ Scan(dest ...any) error }) (ProposalRow,
 		&token,
 		&agentName,
 		&allocation,
+		&agentWallet,
 		&thesis,
 		&statusRaw,
 		&row.ExpiresAt,
@@ -87,6 +91,9 @@ func scanProposalRow(scanner interface{ Scan(dest ...any) error }) (ProposalRow,
 	}
 	if allocation.Valid {
 		row.AllocationUsdcMicros = allocation.Int64
+	}
+	if agentWallet.Valid {
+		row.AgentWalletAddress = agentWallet.String
 	}
 	if thesis.Valid {
 		row.Thesis = thesis.String
@@ -153,6 +160,23 @@ func (s *Store) InsertProposalTx(ctx context.Context, tx *sql.Tx, params InsertP
 		if params.Symbol == "" {
 			params.Symbol = "Agent"
 		}
+	case domain.ProposalKindDeployAgent, domain.ProposalKindRecallAgent:
+		params.AgentWalletAddress = strings.TrimSpace(params.AgentWalletAddress)
+		if params.AgentWalletAddress == "" {
+			return ProposalRow{}, fmt.Errorf("agent wallet address is required")
+		}
+		if params.TokenAmount != 0 || params.AllocationUsdcMicros != 0 {
+			return ProposalRow{}, fmt.Errorf("%s proposal takes no token amount or allocation", kind)
+		}
+		if kind == domain.ProposalKindDeployAgent && params.UsdcMicros <= 0 {
+			return ProposalRow{}, fmt.Errorf("deploy agent proposal requires positive usdc_micros")
+		}
+		if kind == domain.ProposalKindRecallAgent && params.UsdcMicros != 0 {
+			return ProposalRow{}, fmt.Errorf("recall agent proposal takes no usdc_micros")
+		}
+		if params.Symbol == "" {
+			params.Symbol = params.AgentWalletAddress
+		}
 	default:
 		return ProposalRow{}, fmt.Errorf("invalid proposal kind")
 	}
@@ -160,7 +184,7 @@ func (s *Store) InsertProposalTx(ctx context.Context, tx *sql.Tx, params InsertP
 	var usdc any
 	var token any
 	switch kind {
-	case domain.ProposalKindBuy:
+	case domain.ProposalKindBuy, domain.ProposalKindDeployAgent:
 		usdc = params.UsdcMicros
 	case domain.ProposalKindSell:
 		token = params.TokenAmount
@@ -174,6 +198,10 @@ func (s *Store) InsertProposalTx(ctx context.Context, tx *sql.Tx, params InsertP
 	if params.AllocationUsdcMicros > 0 {
 		allocation = params.AllocationUsdcMicros
 	}
+	var agentWallet any
+	if params.AgentWalletAddress != "" {
+		agentWallet = params.AgentWalletAddress
+	}
 	var thesis any
 	if params.Thesis != "" {
 		thesis = params.Thesis
@@ -181,8 +209,8 @@ func (s *Store) InsertProposalTx(ctx context.Context, tx *sql.Tx, params InsertP
 	insertSQL := `
 INSERT INTO proposals (
   group_id, proposer_id, symbol, kind, usdc_micros, token_amount,
-  agent_display_name, allocation_usdc_micros, thesis, status, expires_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'open', $10)
+  agent_display_name, allocation_usdc_micros, agent_wallet_address, thesis, status, expires_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'open', $11)
 RETURNING ` + proposalSelectColumns
 
 	row, err := scanProposalRow(tx.QueryRowContext(ctx, insertSQL,
@@ -194,6 +222,7 @@ RETURNING ` + proposalSelectColumns
 		token,
 		agentName,
 		allocation,
+		agentWallet,
 		thesis,
 		params.ExpiresAt,
 	))

@@ -19,6 +19,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/b20"
 	"github.com/monaco/monaco/apps/backend/internal/chainlink"
+	"github.com/monaco/monaco/apps/backend/internal/clawpump"
 	"github.com/monaco/monaco/apps/backend/internal/config"
 	"github.com/monaco/monaco/apps/backend/internal/dex"
 	"github.com/monaco/monaco/apps/backend/internal/evm"
@@ -27,6 +28,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/signer"
+	soltreasury "github.com/monaco/monaco/apps/backend/internal/solana/treasury"
 	"github.com/monaco/monaco/apps/backend/internal/storage"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/apps/backend/internal/worker"
@@ -34,12 +36,13 @@ import (
 
 // bootResult holds API wiring produced at startup.
 type bootResult struct {
-	Server            *http.Server
-	Config            *config.Config
-	Relayer           *config.Relayer
-	DB                *sql.DB
-	stopPoller        context.CancelFunc
-	stopExecutePoller context.CancelFunc
+	Server               *http.Server
+	Config               *config.Config
+	Relayer              *config.Relayer
+	DB                   *sql.DB
+	stopPoller           context.CancelFunc
+	stopExecutePoller    context.CancelFunc
+	stopDeploymentPoller context.CancelFunc
 }
 
 var apiRoutes = []string{
@@ -186,6 +189,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 	governance.SetBuyService(buy)
 	governance.SetHomeService(home)
 	governance.SetSwapService(swap)
+	agentDeployments := newAgentDeploymentService(store, home, sharesKey)
+	governance.SetAgentDeploymentService(agentDeployments)
 	transactionHandlers := &httpapi.TransactionHandlers{
 		Store:   store,
 		Auth:    authVerifier,
@@ -319,16 +324,23 @@ func boot(ctx context.Context) (*bootResult, error) {
 	go worker.RunProposalExecutePoller(executeCtx, executePoller, worker.DefaultProposalExecuteInterval)
 	slog.Info("proposal execute poller started")
 
+	deploymentCtx, stopDeploymentPoller := context.WithCancel(context.Background())
+	if agentDeployments != nil {
+		deploymentPoller := worker.NewAgentDeploymentPoller(store, agentDeployments, nil)
+		go worker.RunAgentDeploymentPoller(deploymentCtx, deploymentPoller, worker.DefaultAgentDeploymentInterval)
+	}
+
 	return &bootResult{
 		Server: &http.Server{
 			Addr:    addr,
 			Handler: mux,
 		},
-		Config:            cfg,
-		Relayer:           relayer,
-		DB:                db,
-		stopPoller:        stopPoller,
-		stopExecutePoller: stopExecutePoller,
+		Config:               cfg,
+		Relayer:              relayer,
+		DB:                   db,
+		stopPoller:           stopPoller,
+		stopExecutePoller:    stopExecutePoller,
+		stopDeploymentPoller: stopDeploymentPoller,
 	}, nil
 }
 
@@ -373,6 +385,7 @@ func main() {
 	slog.Info("sweep poller stopped")
 	result.stopExecutePoller()
 	slog.Info("proposal execute poller stopped")
+	result.stopDeploymentPoller()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
@@ -421,6 +434,27 @@ func warmCatalogMarks(catalog b20.Catalog, prices pyth.AssetPriceClient) {
 			slog.Warn("catalog mark warm missed", "symbol", symbol)
 		}
 	}
+}
+
+// newAgentDeploymentService wires deploy_agent / recall_agent on the Solana treasury. It
+// returns nil (votes rejected, no poller) when the Privy + Solana settings are absent.
+func newAgentDeploymentService(store *postgres.Store, home *app.HomeService, operatorKeyKey []byte) *app.AgentDeploymentService {
+	cfg := config.LoadSolanaTreasury()
+	if !cfg.Enabled() {
+		slog.Info("agent deployments skipped", "reason", "PRIVY_APP_ID, PRIVY_APP_SECRET, PRIVY_AUTHORIZATION_PRIVATE_KEY or SOLANA_RELAYER_PRIVATE_KEY unset")
+		return nil
+	}
+	solana := soltreasury.NewHTTPClient(soltreasury.Config{
+		PrivyAppID:                   cfg.PrivyAppID,
+		PrivyAppSecret:               cfg.PrivyAppSecret,
+		PrivyAuthorizationPrivateKey: cfg.PrivyAuthorizationPrivateKey,
+		PrivyAuthorizationKeyID:      cfg.PrivyAuthorizationKeyID,
+		RelayerPrivateKey:            cfg.RelayerPrivateKey,
+		RPCURL:                       cfg.RPCURL,
+	})
+	home.SetSolanaTreasury(solana)
+	slog.Info("agent deployments ready", "chain", "solana", "usdc_mint", soltreasury.USDCMint)
+	return app.NewAgentDeploymentService(store, solana, clawpump.NewHTTPClient(cfg.ClawpumpMCPURL, nil), operatorKeyKey, home.PotTreasuryUSDCMicros)
 }
 
 func parseSharesKey(raw string) ([]byte, error) {

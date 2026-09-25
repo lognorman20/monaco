@@ -7,6 +7,7 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
+	"github.com/monaco/monaco/packages/domain"
 )
 
 // DefaultProposalExecuteInterval is how often passed proposals are executed.
@@ -80,6 +81,11 @@ func (p *ProposalExecutePoller) tick(ctx context.Context) {
 	now := p.clock.Now()
 	for _, row := range rows {
 		if p.shouldSkipExecute(row.ID, now) {
+			continue
+		}
+		// Deploy and recall votes move USDC to and from an agent wallet; the agent deployment
+		// poller runs them. ExecuteOnPass only knows buys and sells and would fail them forever.
+		if domain.IsAgentDeploymentKind(row.Kind) {
 			continue
 		}
 		proposal := app.Proposal{

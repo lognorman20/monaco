@@ -32,6 +32,8 @@ type createProposalRequest struct {
 	TokenAmount          int64  `json:"tokenAmount"`
 	AgentDisplayName     string `json:"agentDisplayName"`
 	AllocationUsdcMicros int64  `json:"allocationUsdcMicros"`
+	AgentWalletAddress   string `json:"agentWalletAddress"`
+	OperatorKey          string `json:"operatorKey"`
 	Thesis               string `json:"thesis"`
 }
 
@@ -70,7 +72,7 @@ func (h *ProposalHandlers) CreateProposalHandler(w http.ResponseWriter, r *http.
 		kind = "buy"
 	}
 	switch kind {
-	case "buy", "sell", "add_agent", "pause_agent", "resume_agent", "revoke_agent":
+	case "buy", "sell", "add_agent", "pause_agent", "resume_agent", "revoke_agent", "deploy_agent", "recall_agent":
 	default:
 		logJSONError(ctx, log, "invalid_kind", w, http.StatusBadRequest, "invalid proposal kind", "group_id", groupID)
 		return
@@ -99,6 +101,20 @@ func (h *ProposalHandlers) CreateProposalHandler(w http.ResponseWriter, r *http.
 			return
 		}
 	}
+	if kind == "deploy_agent" || kind == "recall_agent" {
+		if strings.TrimSpace(req.AgentWalletAddress) == "" {
+			logJSONError(ctx, log, "missing_agent_wallet", w, http.StatusBadRequest, "agentWalletAddress is required", "group_id", groupID)
+			return
+		}
+	}
+	if kind == "deploy_agent" && req.USDC <= 0 {
+		logJSONError(ctx, log, "invalid_usdc", w, http.StatusBadRequest, "usdc must be positive", "group_id", groupID)
+		return
+	}
+	if kind == "recall_agent" && req.USDC != 0 {
+		logJSONError(ctx, log, "invalid_usdc", w, http.StatusBadRequest, "recall takes no usdc amount", "group_id", groupID)
+		return
+	}
 	if len(strings.TrimSpace(req.Thesis)) > app.MaxProposalThesisLength {
 		logJSONError(ctx, log, "thesis_too_long", w, http.StatusBadRequest, "thesis exceeds maximum length", "group_id", groupID)
 		return
@@ -119,6 +135,8 @@ func (h *ProposalHandlers) CreateProposalHandler(w http.ResponseWriter, r *http.
 		TokenAmount:          req.TokenAmount,
 		AgentDisplayName:     strings.TrimSpace(req.AgentDisplayName),
 		AllocationUsdcMicros: req.AllocationUsdcMicros,
+		AgentWalletAddress:   strings.TrimSpace(req.AgentWalletAddress),
+		OperatorKey:          strings.TrimSpace(req.OperatorKey),
 		Thesis:               strings.TrimSpace(req.Thesis),
 	})
 	if err != nil {
@@ -189,6 +207,7 @@ type proposalListItemResponse struct {
 	TokenAmount          string                      `json:"tokenAmount,omitempty"`
 	AgentDisplayName     string                      `json:"agentDisplayName,omitempty"`
 	AllocationUsdcMicros string                      `json:"allocationUsdcMicros,omitempty"`
+	AgentWalletAddress   string                      `json:"agentWalletAddress,omitempty"`
 	Thesis               string                      `json:"thesis,omitempty"`
 	Status               string                      `json:"status"`
 	ProposerID           string                      `json:"proposerId"`
@@ -236,6 +255,7 @@ type proposalDetailResponse struct {
 	TokenAmount          string                      `json:"tokenAmount,omitempty"`
 	AgentDisplayName     string                      `json:"agentDisplayName,omitempty"`
 	AllocationUsdcMicros string                      `json:"allocationUsdcMicros,omitempty"`
+	AgentWalletAddress   string                      `json:"agentWalletAddress,omitempty"`
 	MintedAgentKey       string                      `json:"mintedAgentKey,omitempty"`
 	Thesis               string                      `json:"thesis,omitempty"`
 	Status               string                      `json:"status"`
@@ -316,6 +336,7 @@ func (h *ProposalHandlers) ListGroupProposalsHandler(w http.ResponseWriter, r *h
 			row.TokenAmount = strconv.FormatInt(item.TokenAmount, 10)
 		}
 		row.AgentDisplayName = item.AgentDisplayName
+		row.AgentWalletAddress = item.AgentWalletAddress
 		if item.AllocationUsdcMicros > 0 {
 			row.AllocationUsdcMicros = strconv.FormatInt(item.AllocationUsdcMicros, 10)
 		}
@@ -431,6 +452,7 @@ func (h *ProposalHandlers) GetProposalDetailHandler(w http.ResponseWriter, r *ht
 	if detail.AllocationUsdcMicros > 0 {
 		detailResp.AllocationUsdcMicros = strconv.FormatInt(detail.AllocationUsdcMicros, 10)
 	}
+	detailResp.AgentWalletAddress = detail.AgentWalletAddress
 	if detail.MintedAgentKey != "" {
 		detailResp.MintedAgentKey = detail.MintedAgentKey
 	}
@@ -494,6 +516,20 @@ func writeProposalCreateError(ctx context.Context, log *requestLog, w http.Respo
 		logJSONError(ctx, log, "agent_already_exists", w, http.StatusConflict, "group already has an active agent", attrs...)
 	case errors.Is(err, app.ErrAgentInvalidState):
 		logJSONError(ctx, log, "agent_invalid_state", w, http.StatusBadRequest, "agent is not in the required state", attrs...)
+	case errors.Is(err, app.ErrAgentDeploymentsUnavailable):
+		logJSONError(ctx, log, "agent_deployments_unavailable", w, http.StatusServiceUnavailable, "solana treasury is not configured", attrs...)
+	case errors.Is(err, app.ErrAgentWalletRequired):
+		logJSONError(ctx, log, "missing_agent_wallet", w, http.StatusBadRequest, "agentWalletAddress is required", attrs...)
+	case errors.Is(err, app.ErrInvalidAgentWallet):
+		logJSONError(ctx, log, "invalid_agent_wallet", w, http.StatusBadRequest, "agentWalletAddress must be a solana wallet address", attrs...)
+	case errors.Is(err, app.ErrInvalidOperatorKey):
+		logJSONError(ctx, log, "invalid_operator_key", w, http.StatusBadRequest, "operatorKey must be a clawpump cpk_ key", attrs...)
+	case errors.Is(err, app.ErrAgentDeploymentExists):
+		logJSONError(ctx, log, "agent_deployment_exists", w, http.StatusConflict, "this agent wallet already has usdc deployed", attrs...)
+	case errors.Is(err, app.ErrAgentDeploymentProposalOpen):
+		logJSONError(ctx, log, "agent_deployment_proposal_open", w, http.StatusConflict, "an open proposal already covers this agent wallet", attrs...)
+	case errors.Is(err, app.ErrAgentDeploymentNotFound):
+		logJSONError(ctx, log, "agent_deployment_not_found", w, http.StatusConflict, "no deployed usdc for this agent wallet", attrs...)
 	default:
 		all := append(attrs, "err", err.Error())
 		logJSONError(ctx, log, "create_proposal_failed", w, http.StatusInternalServerError, "internal server error", all...)
@@ -515,6 +551,10 @@ func writeProposalVoteError(ctx context.Context, log *requestLog, w http.Respons
 		logJSONError(ctx, log, "not_eligible_voter", w, http.StatusForbidden, "not eligible to vote", attrs...)
 	case errors.Is(err, app.ErrProposalNotOpen):
 		logJSONError(ctx, log, "proposal_not_open", w, http.StatusConflict, "proposal not open", attrs...)
+	case errors.Is(err, app.ErrAgentDeploymentExists):
+		logJSONError(ctx, log, "agent_deployment_exists", w, http.StatusConflict, "this agent wallet already has usdc deployed", attrs...)
+	case errors.Is(err, app.ErrAgentDeploymentNotFound):
+		logJSONError(ctx, log, "agent_deployment_not_found", w, http.StatusConflict, "no deployed usdc for this agent wallet", attrs...)
 	default:
 		all := append(attrs, "err", err.Error())
 		logJSONError(ctx, log, "cast_vote_failed", w, http.StatusInternalServerError, "internal server error", all...)

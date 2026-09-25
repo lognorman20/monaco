@@ -39,7 +39,7 @@ func TestParseVoteThreshold_validValues(t *testing.T) {
 }
 
 func TestParseProposalKind_validValues(t *testing.T) {
-	for _, raw := range []string{"buy", "sell", "add_agent", "pause_agent", "resume_agent", "revoke_agent"} {
+	for _, raw := range []string{"buy", "sell", "add_agent", "pause_agent", "resume_agent", "revoke_agent", "deploy_agent", "recall_agent"} {
 		got, err := ParseProposalKind(raw)
 		if err != nil || string(got) != raw {
 			t.Fatalf("ParseProposalKind(%q) = %q, %v", raw, got, err)
@@ -48,8 +48,24 @@ func TestParseProposalKind_validValues(t *testing.T) {
 }
 
 func TestParseProposalKind_rejectsUnknown(t *testing.T) {
-	if _, err := ParseProposalKind("redeem"); err == nil {
-		t.Fatal("expected invalid proposal kind")
+	for _, raw := range []string{"redeem", "deploy", "recall", "fund_agent", ""} {
+		if _, err := ParseProposalKind(raw); err == nil {
+			t.Fatalf("ParseProposalKind(%q): expected invalid proposal kind", raw)
+		}
+	}
+}
+
+func TestAgentDeploymentKinds_areNotAgentLifecycleKinds(t *testing.T) {
+	for _, kind := range []ProposalKind{ProposalKindDeployAgent, ProposalKindRecallAgent} {
+		if IsAgentGovernanceKind(kind) {
+			t.Fatalf("%s must not be a group_agents lifecycle kind", kind)
+		}
+		if !IsAgentDeploymentKind(kind) {
+			t.Fatalf("%s must be an agent deployment kind", kind)
+		}
+	}
+	if IsAgentDeploymentKind(ProposalKindAddAgent) || IsAgentDeploymentKind(ProposalKindBuy) {
+		t.Fatal("only deploy_agent and recall_agent are deployment kinds")
 	}
 }
 

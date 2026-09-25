@@ -22,15 +22,17 @@ type ProposalListItem struct {
 	// AgentDisplayName and AllocationUsdcMicros are set on agent governance proposals.
 	AgentDisplayName     string
 	AllocationUsdcMicros int64
-	Thesis               string
-	Status               ProposalStatus
-	ProposerID           string
-	ProposerName         string
-	CreatedAt            time.Time
-	ExpiresAt            time.Time
-	CanVote              bool
-	VoteSummary          ProposalVoteSummary
-	CommentCount         int
+	// AgentWalletAddress is the outside agent's Solana wallet on deploy and recall proposals.
+	AgentWalletAddress string
+	Thesis             string
+	Status             ProposalStatus
+	ProposerID         string
+	ProposerName       string
+	CreatedAt          time.Time
+	ExpiresAt          time.Time
+	CanVote            bool
+	VoteSummary        ProposalVoteSummary
+	CommentCount       int
 }
 
 // ProposalVoteDetail is one ballot on a proposal detail view.
@@ -69,6 +71,7 @@ type ProposalDetailResult struct {
 	TokenAmount          int64
 	AgentDisplayName     string
 	AllocationUsdcMicros int64
+	AgentWalletAddress   string
 	MintedAgentKey       string
 	Thesis               string
 	Status               ProposalStatus
@@ -166,6 +169,7 @@ func (g *GovernanceService) ListGroupProposals(ctx context.Context, accessToken,
 			TokenAmount:          row.TokenAmount,
 			AgentDisplayName:     row.AgentDisplayName,
 			AllocationUsdcMicros: row.AllocationUsdcMicros,
+			AgentWalletAddress:   row.AgentWalletAddress,
 			Thesis:               row.Thesis,
 			Status:               row.Status,
 			ProposerID:           row.ProposerID,
@@ -358,6 +362,7 @@ func (g *GovernanceService) GetProposalDetail(ctx context.Context, accessToken, 
 		TokenAmount:          row.TokenAmount,
 		AgentDisplayName:     row.AgentDisplayName,
 		AllocationUsdcMicros: row.AllocationUsdcMicros,
+		AgentWalletAddress:   row.AgentWalletAddress,
 		MintedAgentKey:       mintedKey,
 		Thesis:               row.Thesis,
 		Status:               row.Status,
