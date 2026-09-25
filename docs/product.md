@@ -30,9 +30,9 @@ A cabal can vote to hand a slice of the treasury to an agent. Example: 10% of th
 
 Members see capital in each agent, how that slice has done, and vote to raise it, cut it, pause it, or remove it. A cabal can start with every trade as a member vote, delegate after a strategy has a record, and pull the allocation if it does not work. The agent trades only inside the budget the vote set. The cabal remains the decision layer.
 
-## Solana, Privy, and Bankr
+## Solana, Privy, and ClawPump
 
-Users see cabal, stake, and performance. Under that, three systems split the work: **Solana** settles, **Privy** holds the keys, **Bankr** runs the strategy. Solana is the chain because fees are a fraction of a cent, which keeps small group buys worth making.
+Users see cabal, stake, and performance. Under that, three systems split the work: **Solana** settles, **Privy** holds the keys, **ClawPump** runs the strategy. Solana is the chain because fees are a fraction of a cent, which keeps small group buys worth making.
 
 ### Solana
 
@@ -54,22 +54,22 @@ Privy is sign-in and custody.
 - Each cabal gets one app-owned Privy server wallet. That wallet is the treasury. Member buys, agent fills, and redeems all sign from it.
 - The Go API signs sweeps, swaps, and payouts. Members do not approve each transaction. Wallet roles: [Wallets](#wallets).
 
-### Bankr
+### ClawPump
 
-Bankr is the strategy runtime. Monaco does not run the strategy process.
+ClawPump is the strategy runtime. Monaco does not run the strategy process, and never stores a ClawPump key.
 
-A strategy ships as a [Bankr skill](https://skills.bankr.bot/): a package any agent host can load. The same skill can run on a laptop, a server, Cursor, Claude, the Bankr CLI, or another host. It needs the cabal agent key and a path to the Monaco API. It does not need to live next to the backend or inside the iOS app.
+A strategy is a ClawPump agent with a custom skill: the connect instructions a member copies from **Group → Agent → Copy connect instructions**, plus an automation that runs the skill on a schedule (for example, hourly). The agent runs on ClawPump's servers, so the Monaco API it calls must be reachable from the internet. The same connect text works as the system prompt of any other LLM agent.
 
 Split of work:
 
 1. **Cabal votes the agent in.** Name plus a USDC allocation. Later votes pause, resume, or revoke. On pass, the proposer gets the agent key. Key rules and error codes: [agent trading](agent-trading.md).
-2. **The skill runs wherever it was installed.** It reads the cabal catalog (`GET /v1/groups/{id}/assets`) and posts buy or sell intents with `X-Monaco-Agent-Key`. No member JWT.
+2. **The agent runs on ClawPump.** It reads the cabal catalog (`GET /v1/groups/{id}/assets`) and posts buy or sell intents with `X-Monaco-Agent-Key`. No member JWT.
 3. **Monaco enforces the vote.** A bad or revoked key, a paused agent, an intent over the allocation, and too many wrong keys are each refused.
-4. **The fill uses the member-vote path.** The Go API swaps on Jupiter and Privy signs the cabal treasury. The position lands in the shared pot and on the cabal activity feed. It does not land in a Bankr wallet. A skill that spent from its own wallet would split the pot and break share accounting.
+4. **The fill uses the member-vote path.** The Go API swaps on Jupiter and Privy signs the cabal treasury. The position lands in the shared pot and on the cabal activity feed. It does not land in a ClawPump wallet. Turn off ClawPump's own trading skill: an agent that spent from its own wallet would split the pot and break share accounting.
 
-Bankr tools (prices, research, other skills in the catalog) can inform the decision. They do not sign the treasury. The only order Monaco fills is an intent inside the voted budget.
+ClawPump tools can inform the decision. They do not sign the treasury. The only order Monaco fills is an intent inside the voted budget.
 
-`agents/momentum-bot` is the reference shape: read prices, apply one rule, POST an intent, stop on 401. Fork that loop or encode it as a Bankr skill. The API does not care which host sent the request.
+`agents/momentum-bot` is the reference shape: read prices, apply one rule, POST an intent, stop on 401. Fork that loop or run it as a ClawPump agent. The API does not care which host sent the request.
 
 Operator steps: [connect an agent](how-to/connect-an-agent.md). HTTP contract: [agent trading](agent-trading.md).
 
@@ -128,11 +128,11 @@ The xStocks public API is mint metadata only. It is not an execution rail. Poll 
 
 ## Architecture
 
-Who does what is in [Solana, Privy, and Bankr](#solana-privy-and-bankr). The API signs the treasury. The product UI does not explain custody.
+Who does what is in [Solana, Privy, and ClawPump](#solana-privy-and-clawpump). The API signs the treasury. The product UI does not explain custody.
 
 ```
 SwiftUI + Privy OTP
-Bankr skill (any host, agent key)
+ClawPump agent (agent key)
         → Go API
             → Postgres (shares, votes, NAV, agent budget)
             → Privy treasury on Solana
@@ -280,7 +280,7 @@ They receive USDC equal to their redeemed fraction of the pot at that moment, no
 | API              | Go                                                                                                           |
 | Ledger           | [Supabase](https://supabase.com/) Postgres. Share units, votes, NAV snapshots, idempotent tx log.            |
 | Execution        | [Jupiter Swap API v2](https://dev.jup.ag/docs/swap) on mainnet                                               |
-| Agent strategies | [Bankr skills](https://skills.bankr.bot/). Any host. Intents only. Fills stay in the Privy treasury.          |
+| Agent strategies | ClawPump agents. Intents only. Fills stay in the Privy treasury.                                            |
 | Fees             | App relayer (SOL)                                                                                            |
 | Asset metadata   | [xStocks public API](https://api.xstocks.fi/api/v2/public/assets) (mints only)                               |
 | Marks            | [Pyth Hermes](https://docs.pyth.network/price-feeds/core/api-instances-and-providers/hermes), then Jupiter Price API; cost basis for display only |
