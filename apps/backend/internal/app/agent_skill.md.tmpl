@@ -1,0 +1,92 @@
+# Monaco agent trading
+
+You trade tokenized US stocks (xStocks on Solana, symbols like `AAPLx`) for one Monaco cabal. You never hold money: you send trade intents, and Monaco checks them against your budget and executes them from the cabal treasury.
+
+Base URL: `{{.BaseURL}}`
+Auth: send `X-Monaco-Agent-Key: <your key>` on every request. The key alone identifies you and your cabal.
+
+## Loop
+
+1. `GET /v1/agent`: your budget, cash, holdings and status.
+2. `GET /v1/agent/assets`: tradable stocks with a current price (`markUsd`).
+3. Decide. Then `POST /v1/agent/intents`.
+4. On a timeout, resend the same body. To check an intent, `GET /v1/agent/intents/{intentId}`.
+
+## Endpoints
+
+### GET /v1/agent
+
+```
+curl -s {{.BaseURL}}/v1/agent -H "X-Monaco-Agent-Key: $KEY"
+```
+
+Returns `cabalName`, `agentName`, `status` (`active` or `paused`), `budget.availableUsd`, `cashAvailableUsd` (what you can spend right now), `holdings` (only positions you bought, with `shares`, `markUsd`, `valueUsd`), `limits`.
+
+### GET /v1/agent/assets?query=&limit=&offset=
+
+```
+curl -s "{{.BaseURL}}/v1/agent/assets?query=apple&limit=25" -H "X-Monaco-Agent-Key: $KEY"
+```
+
+Returns `assets: [{symbol, name, solanaMint, routable, markUsd, markUsdcMicros}]` and `hasMore`. Only routable stocks are listed. `markUsd` is null when no price is available; do not trade a stock you cannot price. Use the `symbol` exactly as listed (for example `AAPLx`, not `AAPL`).
+
+### POST /v1/agent/intents
+
+Buy with dollars:
+
+```
+curl -s -X POST {{.BaseURL}}/v1/agent/intents -H "X-Monaco-Agent-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"side":"buy","symbol":"AAPLx","usd":"10.50","idempotencyKey":"3f1c...","reason":"breakout above 20d high"}'
+```
+
+Sell shares:
+
+```
+curl -s -X POST {{.BaseURL}}/v1/agent/intents -H "X-Monaco-Agent-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"side":"sell","symbol":"AAPLx","shares":"0.25","idempotencyKey":"9a07...","reason":"take profit"}'
+```
+
+Amounts, exactly one per intent:
+- buy: `usd` (decimal string, at most 6 decimals, like `"10.50"`) or `usdcMicros` (integer, 1 USD = 1000000).
+- sell: `shares` (decimal string, at most 8 decimals, like `"0.25"`) or `tokenAmount` (integer, 1 share = 100000000).
+- Sending both forms, neither, or the other side's field is a 422.
+
+`reason` is optional, at most {{.ReasonMaxChars}} characters. Say why you traded; the cabal reads it.
+
+Response: `{"intentId","status","transactionId"}`. `status` is `executed` when the trade filled.
+
+### GET /v1/agent/intents/{intentId}
+
+```
+curl -s {{.BaseURL}}/v1/agent/intents/$INTENT_ID -H "X-Monaco-Agent-Key: $KEY"
+```
+
+Returns the intent's `status`, `rejectReason`, `reason`, `txSignature`, `filledTokenAmount` and `filledUsdcMicros`. Only your own intents; any other id is a 404.
+
+## Rules
+
+- You may only sell shares you bought. Positions the cabal bought by vote are not yours to sell.
+- Budget: available = allocation - your buys - your in-flight buys + proceeds of your sells. Selling at a profit gives you more to spend. The treasury's cash is still a hard ceiling.
+- Limits: {{.IntentsPerHour}} intents per hour, and a looser limit on reads. Over a limit you get 429 with `Retry-After` (seconds). Wait that long.
+- A paused agent can still read, but every intent is refused until the cabal votes to resume it.
+
+## Idempotency and retries
+
+- Send a unique `idempotencyKey` (at most {{.IdempotencyKeyMax}} characters, a UUID works) with every intent.
+- On a timeout or network error, resend the identical body with the same key. You get the first intent's answer back and never trade twice.
+- Never reuse a key for a different trade: that is refused.
+- A new trade needs a new key.
+
+## Errors
+
+Error bodies are `{"error","requestId","intentId?","status?","rejectReason?"}`. Branch on the HTTP status, then on `status` and `rejectReason`.
+
+| HTTP | Meaning | What to do |
+|---|---|---|
+| 401 | Missing, wrong or revoked key | Stop. Ask your operator for a new key. |
+| 403 | `rejectReason: agent is paused` | Stop trading; reads still work. |
+| 404 | Unknown intent id, or not yours | Check the id. |
+| 409 | Same `idempotencyKey` is still executing | Wait a few seconds, then resend the same body. |
+| 422 | `status: rejected`; `rejectReason` says why, for example `trade exceeds agent allocation`, `insufficient treasury usdc`, `sell exceeds agent position`, `unknown symbol`, a bad amount form | Do not resend unchanged. Fix the intent or skip it. |
+| 429 | Rate limited | Wait `Retry-After` seconds. |
+| 5xx | `status: failed` means the swap failed and nothing traded | You may retry later with a new `idempotencyKey`. Without `status`, resend the same body. |

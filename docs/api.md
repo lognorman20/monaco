@@ -7,7 +7,8 @@ detail. A test (`cmd/api/routes_doc_test.go`) fails if a route is missing from t
 ## Conventions
 
 **Auth.** `Authorization: Bearer <Privy access token>` on every `/v1` route. Agents instead send
-`X-Monaco-Agent-Key` on `POST /v1/groups/{id}/agents/intents` and `GET /v1/groups/{id}/assets`.
+`X-Monaco-Agent-Key` on the `/v1/agent` routes (the key names the cabal), `POST /v1/groups/{id}/agents/intents`
+and `GET /v1/groups/{id}/assets`. `GET /v1/agent/skill.md` is public.
 A valid token with no Monaco user yet gets `404 user not found`: call `POST /v1/auth/session` first.
 
 **Errors.** `{ "error": "message", "requestId": "…" }`. Send your own `X-Request-Id` (1–64 of
@@ -105,4 +106,9 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/transactions/{id}` | One swap. `404 transaction not found` for an unknown id and for a club you cannot read alike. |
 | `POST /v1/transactions/{id}/retry` ● | Retry a failed swap. Members only; a non-member gets the same `404` as an unknown id. |
 | `POST /v1/groups/{id}/agents/intents` | An agent submits a trade. Agent key only. See [agent trading](agent-trading.md). |
+| `GET /v1/agent` | The agent's cabal, budget, cash and holdings. Agent key only. |
+| `GET /v1/agent/assets` | Tradable stocks with marks. Agent key only. |
+| `POST /v1/agent/intents` | An agent submits a trade; the key names the cabal. Agent key only. |
+| `GET /v1/agent/intents/{intentId}` | One of the agent's intents with its fill. Agent key only. |
+| `GET /v1/agent/skill.md` | Public markdown instructions for agents. |
 | `POST /v1/dev/faker` | Seed demo data. Only with `FAKER_ENABLED`, from loopback, on a local database. |

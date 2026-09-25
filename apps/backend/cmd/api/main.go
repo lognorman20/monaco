@@ -95,6 +95,11 @@ var apiRoutes = []string{
 	"GET /v1/proposals/{id}",
 	"POST /v1/proposals/{id}/votes",
 	"POST /v1/groups/{id}/agents/intents",
+	"GET /v1/agent",
+	"GET /v1/agent/assets",
+	"POST /v1/agent/intents",
+	"GET /v1/agent/intents/{intentId}",
+	"GET /v1/agent/skill.md",
 	"GET /v1/proposals/{id}/comments",
 	"POST /v1/proposals/{id}/comments",
 }
@@ -249,8 +254,19 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Privy:      privyClient,
 		Governance: governance,
 	}
-	agentIntents := app.NewAgentIntentService(store, swap, symbols)
-	agentHandlers := &httpapi.AgentHandlers{Intents: agentIntents, KeyGuard: agentKeyGuard}
+	agentDocs, err := app.NewAgentDocs(cfg.PublicAPIBaseURL)
+	if err != nil {
+		return nil, err
+	}
+	groupHandlers.AgentDocs = agentDocs
+	agentIntents := app.NewAgentIntentService(store, swap, symbols).WithMarketData(catalogSearcher, priceChain)
+	agentHandlers := &httpapi.AgentHandlers{
+		Store:    store,
+		Intents:  agentIntents,
+		KeyGuard: agentKeyGuard,
+		Limits:   httpapi.NewAgentRateLimits(time.Now),
+		Docs:     agentDocs,
+	}
 
 	addr := "127.0.0.1:8080"
 	if v := os.Getenv("API_ADDR"); v != "" {
@@ -326,6 +342,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/proposals/{id}", proposalHandlers.GetProposalDetailHandler)
 	mux.HandleFunc("POST /v1/proposals/{id}/votes", proposalHandlers.CastVoteHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/agents/intents", agentHandlers.SubmitAgentIntentHandler)
+	mux.HandleFunc("GET /v1/agent", agentHandlers.AgentAccountHandler)
+	mux.HandleFunc("GET /v1/agent/assets", agentHandlers.AgentAssetsHandler)
+	mux.HandleFunc("POST /v1/agent/intents", agentHandlers.SubmitKeyAgentIntentHandler)
+	mux.HandleFunc("GET /v1/agent/intents/{intentId}", agentHandlers.GetAgentIntentHandler)
+	mux.HandleFunc("GET /v1/agent/skill.md", agentHandlers.AgentSkillHandler)
 	mux.HandleFunc("GET /v1/proposals/{id}/comments", proposalHandlers.ListProposalCommentsHandler)
 	mux.HandleFunc("POST /v1/proposals/{id}/comments", proposalHandlers.CreateProposalCommentHandler)
 	routes := registerDevFakerRoute(mux, fakerHandlers, apiRoutes)
