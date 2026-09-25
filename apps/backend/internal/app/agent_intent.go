@@ -316,14 +316,14 @@ func (s *AgentIntentService) executeIntent(ctx context.Context, accepted postgre
 			TransactionID: result.Transaction.ID,
 		}, nil
 	case domain.AgentIntentSell:
-		inputMint, err := s.swap.buy.ResolveOutputMint(ctx, in.Symbol)
-		if err != nil {
-			return SubmitAgentIntentResult{IntentID: accepted.ID}, err
+		// The mint the sell was reserved under, so the swap can never sell a different one.
+		if !accepted.Mint.Valid {
+			return SubmitAgentIntentResult{IntentID: accepted.ID}, fmt.Errorf("accepted sell has no mint")
 		}
 		result, err := s.swap.SellToUSDC(ctx, SellToUSDCRequest{
 			GroupID:       in.GroupID,
 			Symbol:        in.Symbol,
-			InputMint:     inputMint,
+			InputMint:     accepted.Mint.String,
 			Amount:        in.TokenAmount,
 			AgentIntentID: accepted.ID,
 			InitiatedBy:   "agent",
