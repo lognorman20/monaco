@@ -10,11 +10,13 @@ import UIKit
 ///
 /// It is not exhaustive, and should not be read as a claim that it is. It covers the text, glyph
 /// and mark pairs the design system defines roles for; a screen that invents a new combination out
-/// of existing tokens is not caught until its pair is added here. One known gap on purpose:
-/// `brand` as *text* is only 4.09:1 on `surfaceSunken` in dark. Nothing draws it there today —
-/// `brand` is a fill and a tint, and `brandOnWash` is the token for brand-coloured text — so
-/// asserting it would fail on a combination the app does not use. If a call site ever does draw
-/// brand text on a sunken surface, this is where it will need a token of its own.
+/// of existing tokens is not caught until its pair is added here.
+///
+/// The old "known gap on purpose" note is gone with the blue brand. It said `brand` as *text* was
+/// 4.09:1 on `surfaceSunken` in dark and that nothing drew it there. Both halves were wrong by the
+/// time the forest palette landed: `MonacoSectionHeader`, `AssetAboutCard`, `AssetActivityCard` and
+/// the balance retry button all draw `brand` as a label, sometimes inside a sunken card. The pair
+/// is in the table now, and the forest `brand` clears AA on all three surfaces in both schemes.
 enum WCAGContrast {
     struct RGBA {
         var red: Double
@@ -64,6 +66,52 @@ enum WCAGContrast {
     }
 }
 
+/// OKLCh over resolved tokens, for the questions WCAG contrast cannot answer.
+///
+/// Contrast is a ratio against a *background*; it says nothing about whether two foregrounds look
+/// like each other. `brand` and `profit` share a hue — the brand is a forest and profit is a green
+/// — so the only honest way to assert they cannot be confused is perceptual lightness and chroma,
+/// which is what OKLCh gives and HSB does not.
+enum OKLCh {
+    struct Value {
+        /// Perceptual lightness, 0…1.
+        var lightness: Double
+        /// Chroma — how far from grey. ~0.04 is a tint, ~0.15 is a saturated colour.
+        var chroma: Double
+        /// Hue angle in degrees.
+        var hue: Double
+    }
+
+    static func value(_ color: Color, _ scheme: UIUserInterfaceStyle) -> Value {
+        let rgba = WCAGContrast.resolve(color, scheme)
+        func linear(_ v: Double) -> Double {
+            v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        let r = linear(rgba.red), g = linear(rgba.green), b = linear(rgba.blue)
+        let l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b
+        let m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b
+        let s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
+        let l_ = cbrt(l), m_ = cbrt(m), s_ = cbrt(s)
+        let lightness = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_
+        let a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_
+        let bb = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
+        return Value(
+            lightness: lightness,
+            chroma: (a * a + bb * bb).squareRoot(),
+            hue: (atan2(bb, a) * 180 / .pi).truncatingRemainder(dividingBy: 360)
+        )
+    }
+
+    /// Euclidean distance in OKLab. Roughly 0.02 is a just-noticeable difference.
+    static func distance(_ first: Color, _ second: Color, _ scheme: UIUserInterfaceStyle) -> Double {
+        let a = value(first, scheme), b = value(second, scheme)
+        let aa = a.chroma * cos(a.hue * .pi / 180), ab = a.chroma * sin(a.hue * .pi / 180)
+        let ba = b.chroma * cos(b.hue * .pi / 180), bb = b.chroma * sin(b.hue * .pi / 180)
+        return ((a.lightness - b.lightness) * (a.lightness - b.lightness)
+            + (aa - ba) * (aa - ba) + (ab - bb) * (ab - bb)).squareRoot()
+    }
+}
+
 private struct Pair {
     let label: String
     let foreground: Color
@@ -105,8 +153,22 @@ struct MonacoContrastTests {
             pairs.append(Pair("loss", MonacoTheme.loss, on: [surface]))
             // CircleAction glyph and selected chips.
             pairs.append(Pair("brandOnWash", MonacoTheme.brandOnWash, on: [surface, MonacoTheme.brandWash]))
+            // `brand` as a label: "See all", "Show more", "Try again", the selected tab item.
+            pairs.append(Pair("brand", MonacoTheme.brand, on: [surface]))
         }
         pairs.append(Pair("onBrand", MonacoTheme.onBrand, on: [MonacoTheme.brandFill]))
+        // The same pair through the role aliases, so repointing a role is caught even if the
+        // token it aliased stayed put.
+        pairs.append(Pair(
+            "primaryButtonLabel",
+            MonacoTheme.primaryButtonLabel,
+            on: [MonacoTheme.primaryButtonFill]
+        ))
+        pairs.append(Pair(
+            "secondaryButtonLabel",
+            MonacoTheme.secondaryButtonLabel,
+            on: [MonacoTheme.secondaryButtonFill]
+        ))
         pairs.append(Pair("onHero", MonacoTheme.onHero, on: [MonacoTheme.heroInk]))
         pairs.append(Pair("onHeroMuted", MonacoTheme.onHeroMuted, on: [MonacoTheme.heroInk]))
         pairs.append(Pair("profitOnHero", MonacoTheme.profitOnHero, on: [MonacoTheme.heroInk]))
@@ -187,6 +249,70 @@ struct MonacoContrastTests {
                     "\(pair.label) in \(scheme == .light ? "light" : "dark") is \(ratio), below \(pair.minimum)"
                 )
             }
+        }
+    }
+
+    /// The rule the whole palette is built around: **green means "this went up"**.
+    ///
+    /// The brand is a forest and `profit` is a green, so they share a hue — 4° to 8° apart, which
+    /// is nothing. Hue cannot separate them and this test does not pretend it can. What separates
+    /// them is that the brand reads as *ink* and profit reads as *colour*: profit is markedly
+    /// lighter and at least twice the chroma, in both schemes.
+    ///
+    /// Measured today, with the floors this asserts in brackets:
+    ///
+    /// | scheme | pair             | ΔL* (≥0.09) | chroma ratio (≥1.9) | ΔE OKLab (≥0.13) |
+    /// |--------|------------------|-------------|---------------------|------------------|
+    /// | light  | brand vs profit  | 0.136       | 2.16                | 0.152            |
+    /// | light  | fill  vs profit  | 0.253       | 3.06                | 0.267            |
+    /// | dark   | brand vs profit  | 0.111       | 2.91                | 0.157            |
+    /// | dark   | fill  vs profit  | 0.170       | 7.72                | 0.224            |
+    ///
+    /// For scale: a just-noticeable difference in OKLab is about 0.02, so the closest of these is
+    /// seven JNDs apart. The old electric-blue brand managed 0.307 / 0.337 by going to a different
+    /// hue entirely; a same-hue palette cannot match that, and these floors are where a retune
+    /// would start making a primary button look like a gain.
+    @Test func brandAndProfitCannotBeConfused() {
+        for scheme in [UIUserInterfaceStyle.light, .dark] {
+            let name = scheme == .light ? "light" : "dark"
+            let profit = OKLCh.value(MonacoTheme.profit, scheme)
+            let text = OKLCh.value(MonacoTheme.primaryText, scheme)
+            for (label, token) in [("brand", MonacoTheme.brand), ("brandFill", MonacoTheme.brandFill)] {
+                let brand = OKLCh.value(token, scheme)
+                let deltaLightness = abs(profit.lightness - brand.lightness)
+                // Which side the brand sits on flips with the scheme — it is ink on cream in light
+                // and cream on ink in dark, because it follows the surfaces. What does not flip is
+                // that it stays on the *text's* side of profit. Asserting "brand is darker than
+                // profit" would only have been true in light mode.
+                #expect(
+                    abs(brand.lightness - text.lightness) < abs(profit.lightness - text.lightness),
+                    "\(label) in \(name) is further from primaryText than profit is: it reads as money"
+                )
+                #expect(
+                    deltaLightness >= 0.09,
+                    "\(label) vs profit in \(name): ΔL* is \(deltaLightness), under 0.09"
+                )
+                #expect(
+                    profit.chroma / brand.chroma >= 1.9,
+                    "\(label) vs profit in \(name): profit is only \(profit.chroma / brand.chroma)× its chroma"
+                )
+                let delta = OKLCh.distance(token, MonacoTheme.profit, scheme)
+                #expect(delta >= 0.13, "\(label) vs profit in \(name): ΔE OKLab is \(delta), under 0.13")
+            }
+            // And the two money colours from each other. Here hue *is* the separator — and it has
+            // to stay one, because red/green is the pair a member reads fastest and the pair a
+            // deuteranopic member reads slowest.
+            let hueGap = abs(
+                OKLCh.value(MonacoTheme.profit, scheme).hue - OKLCh.value(MonacoTheme.loss, scheme).hue
+            )
+            #expect(min(hueGap, 360 - hueGap) >= 90, "profit and loss in \(name) are \(hueGap)° apart")
+            let moneyDelta = OKLCh.distance(MonacoTheme.profit, MonacoTheme.loss, scheme)
+            #expect(moneyDelta >= 0.2, "profit vs loss in \(name): ΔE OKLab is \(moneyDelta)")
+            // A gain badge must not look like a selected chip either. `brandWash` and `profitWash`
+            // land within a few points of each other over cream (`#DCDDD5` against `#D5E1D5`), so
+            // the text on them is what carries the difference and it is the text that is pinned.
+            let onWash = OKLCh.distance(MonacoTheme.brandOnWash, MonacoTheme.profitOnWash, scheme)
+            #expect(onWash >= 0.13, "brandOnWash vs profitOnWash in \(name): ΔE OKLab is \(onWash)")
         }
     }
 
