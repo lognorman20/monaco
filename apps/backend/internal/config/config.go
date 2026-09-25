@@ -41,7 +41,16 @@ const (
 	envPreStocksAPIBaseURL          = "PRESTOCKS_API_BASE_URL"
 	envPreStocksEnabled             = "PRESTOCKS_ENABLED"
 	envPublicAPIBaseURL             = "PUBLIC_API_BASE_URL"
+	// lane: notifications
+	envAPNSKeyID      = "APNS_KEY_ID"
+	envAPNSTeamID     = "APNS_TEAM_ID"
+	envAPNSPrivateKey = "APNS_PRIVATE_KEY"
+	envAPNSBundleID   = "APNS_BUNDLE_ID"
+	envAPNSEnv        = "APNS_ENV"
 )
+
+// DefaultAPNSBundleID is the app's bundle id, the apns-topic when APNS_BUNDLE_ID is unset.
+const DefaultAPNSBundleID = "com.monaco.app"
 
 const (
 	defaultTesseraAPIBaseURL   = "https://rest-api.tessera.pe"
@@ -100,6 +109,9 @@ const maxFlashSlippage = 0.05
 //   - PUBLIC_API_BASE_URL: the URL agents reach this API at, written into the agent connect
 //     text and skill.md (default http://127.0.0.1:8080). Not a secret.
 //   - DB_MAX_OPEN_CONNS, DB_MAX_IDLE_CONNS, DB_CONN_MAX_LIFETIME, DB_CONN_MAX_IDLE_TIME: see DBPool.
+//   - APNS_KEY_ID, APNS_TEAM_ID, APNS_PRIVATE_KEY (the .p8 PEM, literal \n allowed),
+//     APNS_BUNDLE_ID (default com.monaco.app), APNS_ENV (sandbox | production): Apple push.
+//     Unset, notifications still land in the inbox and pushes are logged, not sent.
 type Config struct {
 	DatabaseURL                  string
 	PrivyAppID                   string
@@ -134,6 +146,49 @@ type Config struct {
 	// PrivyVerificationKey is the parsed PRIVY_VERIFICATION_KEY.
 	PrivyVerificationKey *ecdsa.PublicKey
 	DBPool               DBPool
+	// lane: notifications
+	APNS APNSConfig
+}
+
+// APNSConfig is the Apple push provider identity. Enabled only when the key, key id and team
+// id are all set.
+type APNSConfig struct {
+	KeyID      string
+	TeamID     string
+	PrivateKey string
+	BundleID   string
+	Env        string
+}
+
+// Enabled reports whether push can be sent.
+func (c APNSConfig) Enabled() bool {
+	return c.KeyID != "" && c.TeamID != "" && c.PrivateKey != ""
+}
+
+// Partial reports that some but not all of the credentials are set, which is a misconfiguration
+// worth saying out loud at boot.
+func (c APNSConfig) Partial() bool {
+	set := 0
+	for _, v := range []string{c.KeyID, c.TeamID, c.PrivateKey} {
+		if v != "" {
+			set++
+		}
+	}
+	return set > 0 && set < 3
+}
+
+func loadAPNSConfig() APNSConfig {
+	bundle := strings.TrimSpace(os.Getenv(envAPNSBundleID))
+	if bundle == "" {
+		bundle = DefaultAPNSBundleID
+	}
+	return APNSConfig{
+		KeyID:      strings.TrimSpace(os.Getenv(envAPNSKeyID)),
+		TeamID:     strings.TrimSpace(os.Getenv(envAPNSTeamID)),
+		PrivateKey: strings.TrimSpace(os.Getenv(envAPNSPrivateKey)),
+		BundleID:   bundle,
+		Env:        strings.TrimSpace(os.Getenv(envAPNSEnv)),
+	}
 }
 
 // Load reads required settings from the process environment.
@@ -163,6 +218,8 @@ func Load() (*Config, error) {
 		FlashAPIKey:                  strings.TrimSpace(os.Getenv(envFlashAPIKey)),
 		FlashMaxSlippage:             strings.TrimSpace(os.Getenv(envFlashMaxSlippage)),
 		PublicAPIBaseURL:             PublicAPIBaseURL(os.Getenv(envPublicAPIBaseURL)),
+		// lane: notifications
+		APNS: loadAPNSConfig(),
 	}
 
 	if cfg.DatabaseURL == "" {

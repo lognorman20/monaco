@@ -24,6 +24,8 @@ type GovernanceService struct {
 	redeem *RedeemService
 	price  jupiter.PriceClient
 	now    func() time.Time
+	// lane: notifications
+	notifier *Notifier
 }
 
 func NewGovernanceService(store *postgres.Store, privyClient privy.Client) *GovernanceService {
@@ -234,6 +236,8 @@ func (g *GovernanceService) JoinGroup(ctx context.Context, accessToken, groupID 
 		if err := g.insertMember(ctx, groupID, user.ID); err != nil {
 			return "", err
 		}
+		// lane: notifications
+		g.notifier.MemberJoined(ctx, groupID, user.ID)
 		return JoinOutcomeJoined, nil
 	case JoinModeRequest:
 		if _, pending, err := g.store.GetPendingJoinRequest(ctx, groupID, user.ID); err != nil {
@@ -247,6 +251,8 @@ func (g *GovernanceService) JoinGroup(ctx context.Context, accessToken, groupID 
 			}
 			return "", err
 		}
+		// lane: notifications
+		g.notifier.JoinRequested(ctx, groupID, user.ID)
 		return JoinOutcomePending, nil
 	default:
 		return "", fmt.Errorf("invalid join mode")
@@ -343,6 +349,10 @@ func (g *GovernanceService) decideJoinRequest(ctx context.Context, accessToken, 
 		return fmt.Errorf("commit join request decision: %w", err)
 	}
 	committed = true
+	// lane: notifications
+	if status == domain.JoinRequestApproved {
+		g.notifier.JoinApproved(ctx, groupID, row.UserID)
+	}
 	return nil
 }
 
@@ -794,6 +804,8 @@ func (g *GovernanceService) CreateProposal(ctx context.Context, in CreateProposa
 	committed = true
 
 	logGovernanceCreateProposalSuccess(row.ID, in.GroupID, in.ProposerID)
+	// lane: notifications
+	g.notifier.ProposalCreated(ctx, row, voterIDs)
 	return proposalFromRow(row), nil
 }
 
@@ -935,6 +947,8 @@ func (g *GovernanceService) CastVote(ctx context.Context, in CastVoteInput) (Pro
 	committed = true
 	if updated.Status != prevStatus {
 		logGovernanceProposalStatusTransition(in.ProposalID, prevStatus, updated.Status)
+		// lane: notifications
+		g.notifier.ProposalClosed(ctx, in.ProposalID)
 	}
 	slog.Info("governance cast vote success", "proposal_id", in.ProposalID, "voter_id", in.VoterID, "status", updated.Status)
 	return updated, nil
@@ -965,6 +979,8 @@ func (g *GovernanceService) FinalizeExpiredProposal(ctx context.Context, proposa
 	committed = true
 	if proposal.Status == ProposalExpired {
 		logGovernanceProposalStatusTransition(proposalID, ProposalOpen, ProposalExpired)
+		// lane: notifications
+		g.notifier.ProposalClosed(ctx, proposalID)
 	}
 	return proposal, nil
 }

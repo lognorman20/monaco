@@ -59,7 +59,8 @@ callers: per agent key). A bearer token that fails verification is limited per I
 | `money` | fund, withdraw-to-balance, withdrawals, retry, agent intents | burst 5, +1 per 10s | burst 20, +1 per 3s |
 | `write` | every other non-GET route | burst 20, +1 per 2s | burst 60, +1 per 1s |
 
-Chat, comments, display name and profile photo have their own tighter per-user limits.
+Chat, comments, display name and profile photo have their own tighter per-user limits, and a
+proposal can be nudged once an hour whoever sends it.
 Set `TRUST_PROXY_HEADERS=true` only behind a proxy that overwrites `X-Forwarded-For`.
 
 **Idempotency.** Routes marked ● accept an `Idempotency-Key` header (8–128 of
@@ -94,6 +95,10 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/me/balance` | Account balance: member-wallet USDC minus in-flight funds and withdrawals. |
 | `POST /v1/me/withdrawals` ● | Send USDC from the account balance to an external Solana address. |
 | `GET /v1/me/withdrawals/{id}` | One withdrawal. |
+| `GET /v1/me/notifications` | The inbox, newest first, with `unreadCount`. `cursor` from the last page's `nextCursor`; `limit` 1–100 (default 30). See [Notifications](#notifications). |
+| `POST /v1/me/notifications/read` | Mark read: `{ "ids": [...] }` (up to 200 of the caller's own) or `{ "all": true }`. Answers `{ "unreadCount": n }`. |
+| `PUT /v1/me/devices` | Register this install for Apple push: `{ "token", "platform": "ios", "appEnv": "debug\|production" }`. Upsert; a token signed in as someone else moves to the caller. `204`. |
+| `DELETE /v1/me/devices/{token}` | Forget the caller's install. Unknown or someone else's token is a no-op. `204`. |
 | `GET /v1/home` | Group and people boards. |
 | `GET /v1/home/dashboard` | Net worth, the caller's cabals, a 1H series, leaderboard and missed proposals in one call. |
 | `GET /v1/home/pnl-series` | The caller's equity series. `range` = `1H`, `1D`, `1W`, `1M`. At most one point per second, so `ts` is unique at second precision. |
@@ -134,6 +139,7 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `POST /v1/groups/{id}/proposals` ● | Open a proposal: buy, sell, or add, pause, resume, revoke an agent. |
 | `GET /v1/proposals/{id}` | Proposal detail, votes and execution state. |
 | `POST /v1/proposals/{id}/votes` | Cast a vote. |
+| `POST /v1/proposals/{id}/nudge` | Remind the voters who have not voted. The proposer or a member who voted; once per proposal per hour (`429` + `Retry-After` inside the hour, `403` for a member who has not voted, `409` once the vote closed). Answers `{ "reminded": n, "waitingOn": m }`. |
 | `GET /v1/proposals/{id}/comments` | Comment thread, oldest first. |
 | `POST /v1/proposals/{id}/comments` | Add a comment or reply. |
 | `GET /v1/groups/{id}/messages` | A page of cabal chat. |
@@ -173,3 +179,40 @@ series.
 `spark` is always served from cache. A list route never fetches price history: a miss
 is a row without a sparkline now and a background warm for the next request, so no
 page of rows can ever wait on a vendor.
+
+## Notifications
+
+Every event below writes one inbox row per recipient and, when `APNS_*` is set, pushes it to
+each device the recipient registered. A recipient who set
+`users.preferences.notifications.<category>` to `false` gets neither; a missing key is on.
+Seeded ghost members never get rows. The push carries `aps.alert` (the row's title and body),
+`aps.badge` (the unread count), `aps.sound`, `aps.thread-id` (the cabal) and the routing keys
+`groupId`, `proposalId`, `notificationId` and `kind`.
+
+| Kind | Category | When | Who |
+| --- | --- | --- | --- |
+| `proposal_created` | proposals | A proposal opens | Every voter but the proposer |
+| `proposal_expiring` | proposals | An hour before close, in cabals whose vote window is 2h or more | Voters who have not voted, once per proposal |
+| `proposal_nudge` | proposals | `POST /v1/proposals/{id}/nudge` | Voters who have not voted, the sender aside |
+| `join_request` | proposals | Someone asks to join a by-request cabal | The creator |
+| `proposal_passed` | results | A bot vote (add, pause, resume, remove) passes | Every member |
+| `proposal_failed` | results | A vote is voted down | Every member |
+| `proposal_expired` | results | A vote runs out of time (the poller closes it within a minute) | Every member |
+| `trade_bought`, `trade_sold` | results | A voted buy or sell fills | Every member |
+| `bot_trade` | results | The cabal's bot fills an intent | Every member |
+| `member_joined` | results | Someone joins | The creator |
+| `join_approved` | results | The creator lets a requester in | The requester |
+| `chat_message` | chat | A chat message | Every member but the author, at most one per cabal per 10 minutes |
+| `funds_arrived` | money | USDC from outside reaches the account balance | That member |
+| `fund_credited` | money | A fund-to-cabal sweep is credited | That member |
+| `cash_out_settled` | money | A cash out settles | That member |
+
+`funds_arrived` compares the member wallet with a running total of money that reached it from
+outside Monaco: chain balance plus confirmed sweeps and withdrawals, minus cash-outs paid to it.
+The first reading only sets the mark, and the mark never falls, so an in-flight sweep or
+withdrawal never reads as an arrival. It is checked on every `GET /v1/me/balance` and, for
+members with a push device, every two minutes in the background.
+
+A row: `id`, `kind`, `category`, `title`, `body`, `groupId`, `groupName`, `groupPictureUrl`,
+`proposalId`, `transactionId`, `symbol` (the stock of a buy or sell), `readAt` and `createdAt`.
+Absent references are `null`.

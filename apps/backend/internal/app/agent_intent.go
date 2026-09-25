@@ -44,6 +44,8 @@ type AgentIntentService struct {
 	// catalog and marks serve the agent's read routes; see WithMarketData.
 	catalog xstocks.CatalogSearcher
 	marks   pyth.AssetPriceClient
+	// lane: notifications
+	notifier *Notifier
 }
 
 // NewAgentIntentService wires agent intent execution.
@@ -137,6 +139,8 @@ func (s *AgentIntentService) submitAgentIntent(ctx context.Context, in SubmitAge
 		}, execErr
 	}
 	s.recordIntentStatus(accepted.ID, "executed", "", execResult.TransactionID)
+	// lane: notifications
+	s.notifier.BotTrade(ctx, in.GroupID, agentRow.AgentDisplayName, in.Symbol, in.Side, execResult.TransactionID)
 	return execResult, nil
 }
 

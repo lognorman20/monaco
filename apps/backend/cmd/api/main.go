@@ -48,6 +48,8 @@ type bootResult struct {
 	stopExecutePoller context.CancelFunc
 	stopRedeemPoller  context.CancelFunc
 	stopSparkWarmer   context.CancelFunc
+	// lane: notifications
+	stopNotificationPoller context.CancelFunc
 	// workers tracks the poller goroutines so shutdown can wait for an in-flight tick.
 	workers *sync.WaitGroup
 }
@@ -114,6 +116,12 @@ var apiRoutes = []string{
 	"GET /v1/agent/skill.md",
 	"GET /v1/proposals/{id}/comments",
 	"POST /v1/proposals/{id}/comments",
+	// lane: notifications
+	"GET /v1/me/notifications",
+	"POST /v1/me/notifications/read",
+	"PUT /v1/me/devices",
+	"DELETE /v1/me/devices/{token}",
+	"POST /v1/proposals/{id}/nudge",
 }
 
 // boot loads config, registers the relayer fee payer, applies migrations, and builds the HTTP server.
@@ -392,6 +400,16 @@ func boot(ctx context.Context) (*bootResult, error) {
 
 	groupChat := app.NewGroupChatService(store, privyClient)
 	groupMessageHandlers := &httpapi.GroupMessageHandlers{Chat: groupChat}
+
+	// lane: notifications
+	notifier := app.NewNotifier(store, pushSender(cfg.APNS, store))
+	governance.SetNotifier(notifier)
+	deposits.SetNotifier(notifier)
+	redeem.SetNotifier(notifier)
+	groupChat.SetNotifier(notifier)
+	executeOnPass.SetNotifier(notifier)
+	agentIntents.SetNotifier(notifier)
+	notificationHandlers := &httpapi.NotificationHandlers{Inbox: app.NewNotificationService(store, privyClient), Governance: governance}
 	fakerHandlers := &httpapi.DevFakerHandlers{
 		Enabled:     config.FakerEnabled(),
 		DatabaseURL: cfg.DatabaseURL,
@@ -470,6 +488,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/agent/skill.md", agentHandlers.AgentSkillHandler)
 	mux.HandleFunc("GET /v1/proposals/{id}/comments", proposalHandlers.ListProposalCommentsHandler)
 	mux.HandleFunc("POST /v1/proposals/{id}/comments", proposalHandlers.CreateProposalCommentHandler)
+	// lane: notifications
+	mux.HandleFunc("GET /v1/me/notifications", notificationHandlers.ListNotificationsHandler)
+	mux.HandleFunc("POST /v1/me/notifications/read", notificationHandlers.MarkNotificationsReadHandler)
+	mux.HandleFunc("PUT /v1/me/devices", notificationHandlers.RegisterDeviceHandler)
+	mux.HandleFunc("DELETE /v1/me/devices/{token}", notificationHandlers.UnregisterDeviceHandler)
+	mux.HandleFunc("POST /v1/proposals/{id}/nudge", notificationHandlers.NudgeProposalHandler)
 	routes := registerDevFakerRoute(mux, fakerHandlers, apiRoutes)
 	logRoutesReady(routes)
 
@@ -498,6 +522,15 @@ func boot(ctx context.Context) (*bootResult, error) {
 		worker.RunRedeemRecoveryPoller(redeemCtx, redeemPoller, worker.DefaultRedeemRecoveryInterval)
 	}()
 
+	// lane: notifications
+	notificationPoller := worker.NewNotificationPoller(store, governance, notifier, privyClient, nil)
+	notifyCtx, stopNotificationPoller := context.WithCancel(context.Background())
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		worker.RunNotificationPoller(notifyCtx, notificationPoller, worker.DefaultNotificationInterval)
+	}()
+
 	// Keeps the popular symbols' day series hot, so the Stocks list serves every
 	// row's sparkline from the chart cache instead of waiting on Hermes.
 	sparkCtx, stopSparkWarmer := context.WithCancel(context.Background())
@@ -519,7 +552,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 		stopExecutePoller: stopExecutePoller,
 		stopRedeemPoller:  stopRedeemPoller,
 		stopSparkWarmer:   stopSparkWarmer,
-		workers:           workers,
+		// lane: notifications
+		stopNotificationPoller: stopNotificationPoller,
+		workers:                workers,
 	}, nil
 }
 
@@ -588,6 +623,8 @@ func main() {
 	result.stopExecutePoller()
 	result.stopRedeemPoller()
 	result.stopSparkWarmer()
+	// lane: notifications
+	result.stopNotificationPoller()
 	if waitWorkers(result.workers, workerStopTimeout) {
 		slog.Info("pollers stopped")
 	} else {
