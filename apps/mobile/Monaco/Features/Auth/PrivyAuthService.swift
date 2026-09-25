@@ -6,16 +6,18 @@ import PrivySDK
 
 /// Wraps Privy SDK init, session restore, SMS/email OTP login and access-token refresh.
 @MainActor
-final class PrivyAuthService: ObservableObject {
+class PrivyAuthService: ObservableObject {
     typealias Phase = LoginFlow.Phase
 
     /// Where the login form is and what just happened to it. See `LoginFlow`.
-    @Published private(set) var flow: LoginFlow
+    /// Settable so the Debug sample sign-in (a subclass) can put the form on any step; nothing in
+    /// the app assigns it from outside.
+    @Published var flow: LoginFlow
     @Published private(set) var accessToken: String?
     /// Set when the user lands back on login without asking to (the backend rejected
     /// their token, or the saved session is gone), so LoginView can explain why.
     /// Cleared on the next sign-in attempt.
-    @Published private(set) var lastSignOutReason: String?
+    @Published var lastSignOutReason: String?
 
     private var sessionStore = MonacoSessionStore()
     private let tokenRefresh = SingleFlight<String?>()

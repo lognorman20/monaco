@@ -4,7 +4,14 @@ import UIKit
 
 /// What a one-time-code form asks for before it can send a code. `.sms` and `.email` are defined
 /// next to their views.
+/// Which of the service's two one-time-code paths a destination goes through.
+enum OTPChannel {
+    case sms
+    case email
+}
+
 struct OTPDestination {
+    let channel: OTPChannel
     /// Under the empty field: what the button will do.
     let caption: String
     let prompt: String
@@ -96,13 +103,11 @@ enum OTPPrimaryAction {
 /// screen, takes the code in the market's mono with wide tracking, and keeps "Send a new code" and
 /// "Change number" as text under the button. Whatever needs saying goes in the caption line under
 /// the field.
-struct OTPLoginForm<Auth: OTPSignIn>: View {
-    @ObservedObject var auth: Auth
+struct OTPLoginForm: View {
+    @ObservedObject var auth: PrivyAuthService
     let destination: OTPDestination
     /// The login screen's scroll view, so the button can be kept above the keyboard.
     let scroll: ScrollViewProxy
-    let send: (String) async -> Void
-    let verify: (_ code: String, _ sentTo: String) async -> Void
 
     @State private var address = ""
     @State private var otpCode: String
@@ -118,19 +123,32 @@ struct OTPLoginForm<Auth: OTPSignIn>: View {
     }
 
     init(
-        auth: Auth,
+        auth: PrivyAuthService,
         destination: OTPDestination,
         scroll: ScrollViewProxy,
-        initialCode: String = "",
-        send: @escaping (String) async -> Void,
-        verify: @escaping (_ code: String, _ sentTo: String) async -> Void
+        initialCode: String = ""
     ) {
         self.auth = auth
         self.destination = destination
         self.scroll = scroll
-        self.send = send
-        self.verify = verify
         _otpCode = State(initialValue: initialCode)
+    }
+
+    // The form calls the service itself rather than through closures the two login views
+    // handed it: the stored `(String) async -> Void` went through reabstraction thunks that
+    // crashed with a bus error in `swift_retain` on the first send.
+    private func send(_ address: String) async {
+        switch destination.channel {
+        case .sms: await auth.sendSMSCode(to: address)
+        case .email: await auth.sendEmailCode(to: address)
+        }
+    }
+
+    private func verify(_ code: String, sentTo address: String) async {
+        switch destination.channel {
+        case .sms: await auth.loginWithSMSCode(code, sentTo: address)
+        case .email: await auth.loginWithEmailCode(code, sentTo: address)
+        }
     }
 
     var body: some View {
@@ -343,7 +361,7 @@ struct OTPLoginForm<Auth: OTPSignIn>: View {
 
     private func submitCode(_ code: String) async {
         guard code.count == OTPCode.length, !auth.flow.isBusy, let sentTo = sentDestination else { return }
-        await verify(code, sentTo)
+        await verify(code, sentTo: sentTo)
     }
 
     // MARK: Derived state

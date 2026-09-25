@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Email one-time-code sign-in via Privy: kept for internal testers.
-struct EmailLoginView<Auth: OTPSignIn>: View {
-    @ObservedObject var auth: Auth
+struct EmailLoginView: View {
+    @ObservedObject var auth: PrivyAuthService
     let scroll: ScrollViewProxy
     /// Debug harness only: the code the form opens with.
     var initialCode = ""
@@ -12,17 +12,14 @@ struct EmailLoginView<Auth: OTPSignIn>: View {
             auth: auth,
             destination: .email,
             scroll: scroll,
-            initialCode: initialCode,
-            send: { await auth.sendEmailCode(to: $0) },
-            verify: { code, email in
-                await auth.loginWithEmailCode(code, sentTo: email)
-            }
+            initialCode: initialCode
         )
     }
 }
 
 extension OTPDestination {
     static let email = OTPDestination(
+        channel: .email,
         caption: "We'll email you a one-time code. Check spam if it doesn't arrive.",
         prompt: "Email address",
         keyboardType: .emailAddress,

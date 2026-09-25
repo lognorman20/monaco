@@ -7,7 +7,7 @@ import SwiftUI
 /// can screenshot every step of it without Privy or a backend. Launch with
 /// `-MonacoWelcomeSample <scenario>`; the bare flag means `code`.
 ///
-/// The sign-in scenarios drive the real `LoginView` through `SampleSignIn`, a canned `OTPSignIn`:
+/// The sign-in scenarios drive the real `LoginView` through `SampleSignIn`, the service with the network taken out:
 /// sending a code succeeds after a beat and every code is turned down, so the screen stays put to
 /// be looked at. The gate scenarios draw the gate's own restoring, loading and failure views.
 enum WelcomeSampleScenario: String, CaseIterable {
@@ -84,13 +84,12 @@ struct WelcomeSampleHarness: View {
     }
 }
 
-/// A canned `OTPSignIn`. Sending a code always goes through after a beat; checking one always
-/// fails as a wrong code, so a sample never leaves the login screen.
-final class SampleSignIn: OTPSignIn {
-    @Published private(set) var flow: LoginFlow
-    @Published private(set) var lastSignOutReason: String?
-
+/// A canned sign-in: the real service with the network taken out. Sending a code always goes
+/// through after a beat; checking one always fails as a wrong code, so a sample never leaves
+/// the login screen.
+final class SampleSignIn: PrivyAuthService {
     init(scenario: WelcomeSampleScenario) {
+        super.init(settings: Config.privy)
         switch scenario {
         case .signedOut:
             flow = LoginFlow()
@@ -109,27 +108,23 @@ final class SampleSignIn: OTPSignIn {
         }
     }
 
-    func sendSMSCode(to phoneNumberE164: String) async {
-        await sendCode(to: phoneNumberE164)
+    override func sendSMSCode(to phoneNumberE164: String) async {
+        await pretendToSend(to: phoneNumberE164)
     }
 
-    func loginWithSMSCode(_ code: String, sentTo phoneNumberE164: String) async {
+    override func loginWithSMSCode(_ code: String, sentTo phoneNumberE164: String) async {
         await turnDownCode()
     }
 
-    func sendEmailCode(to email: String) async {
-        await sendCode(to: email)
+    override func sendEmailCode(to email: String) async {
+        await pretendToSend(to: email)
     }
 
-    func loginWithEmailCode(_ code: String, sentTo email: String) async {
+    override func loginWithEmailCode(_ code: String, sentTo email: String) async {
         await turnDownCode()
     }
 
-    func resetLoginFlow() {
-        flow.returnToAddressEntry()
-    }
-
-    private func sendCode(to destination: String) async {
+    private func pretendToSend(to destination: String) async {
         guard flow.beginSend() else { return }
         lastSignOutReason = nil
         try? await Task.sleep(for: .milliseconds(600))

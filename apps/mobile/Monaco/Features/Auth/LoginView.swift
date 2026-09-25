@@ -1,22 +1,10 @@
 import SwiftUI
 
-/// What the sign-in screens need from the auth service: the flow they draw and the requests they
-/// start. `PrivyAuthService` is the app's. The sample harness hands them a canned one, which is how
-/// every step of the form can be screenshotted without Privy.
-@MainActor
-protocol OTPSignIn: ObservableObject {
-    var flow: LoginFlow { get }
-    /// Why the member is back on login without having asked to be, when they are.
-    var lastSignOutReason: String? { get }
-    func sendSMSCode(to phoneNumberE164: String) async
-    func loginWithSMSCode(_ code: String, sentTo phoneNumberE164: String) async
-    func sendEmailCode(to email: String) async
-    func loginWithEmailCode(_ code: String, sentTo email: String) async
-    /// "Change number", or switching method: back to the address field.
-    func resetLoginFlow()
-}
-
-extension PrivyAuthService: OTPSignIn {}
+// The login views take `PrivyAuthService` itself. They used to be generic over a protocol so
+// the Debug harness could hand them a canned sign-in; the async witness call through that
+// generic crashed with a bus error in `swift_retain` on the first "Send code" (a clean build
+// did not help). The harness now subclasses the service instead, which is plain class
+// dispatch and works.
 
 /// The two ways in. Which of them are on comes from the build (`Config.privy`).
 enum LoginMethod: String, CaseIterable, Identifiable {
@@ -38,8 +26,8 @@ enum LoginMethod: String, CaseIterable, Identifiable {
 /// Sign-in, as one composition from the top of the screen down: the brand, then the method, the
 /// field and the button. The form keeps its button above the keyboard while a field is in use,
 /// so the phone pad (which has no return key) never hides the only way forward.
-struct LoginView<Auth: OTPSignIn>: View {
-    @ObservedObject var auth: Auth
+struct LoginView: View {
+    @ObservedObject var auth: PrivyAuthService
 
     private let methods: [LoginMethod]
     /// Debug harness only: the code the form opens with, to shoot a typed code.
@@ -48,7 +36,7 @@ struct LoginView<Auth: OTPSignIn>: View {
     @State private var selectedMethod: LoginMethod
 
     init(
-        auth: Auth,
+        auth: PrivyAuthService,
         methods: [LoginMethod] = LoginMethod.configured,
         initialMethod: LoginMethod? = nil,
         initialCode: String = ""

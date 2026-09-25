@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// SMS one-time-code sign-in via Privy: the main way in.
-struct SMSLoginView<Auth: OTPSignIn>: View {
-    @ObservedObject var auth: Auth
+struct SMSLoginView: View {
+    @ObservedObject var auth: PrivyAuthService
     let scroll: ScrollViewProxy
     /// Debug harness only: the code the form opens with.
     var initialCode = ""
@@ -12,17 +12,14 @@ struct SMSLoginView<Auth: OTPSignIn>: View {
             auth: auth,
             destination: .sms,
             scroll: scroll,
-            initialCode: initialCode,
-            send: { await auth.sendSMSCode(to: $0) },
-            verify: { code, phoneNumber in
-                await auth.loginWithSMSCode(code, sentTo: phoneNumber)
-            }
+            initialCode: initialCode
         )
     }
 }
 
 extension OTPDestination {
     static let sms = OTPDestination(
+        channel: .sms,
         caption: "We'll text you a code to sign in.",
         prompt: "Phone number",
         keyboardType: .phonePad,
