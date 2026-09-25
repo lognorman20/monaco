@@ -93,9 +93,10 @@ An agent is a program holding an API key for one cabal. It posts intents; Monaco
 them through the same swap path a passed vote uses.
 
 ```
-GET  /v1/groups/{id}/assets            list tradable symbols
-POST /v1/groups/{id}/agents/intents    {"side":"buy","symbol":"GOOGLx","usdcMicros":1000000}
-                                       {"side":"sell","symbol":"GOOGLx","tokenAmount":50000000}
+GET  /v1/agent            cabal, budget, cash, holdings
+GET  /v1/agent/assets     tradable symbols with marks
+POST /v1/agent/intents    {"side":"buy","symbol":"GOOGLx","usd":"1.00","idempotencyKey":"…","reason":"…"}
+                          {"side":"sell","symbol":"GOOGLx","shares":"0.5","idempotencyKey":"…"}
 Header: X-Monaco-Agent-Key
 ```
 
@@ -108,7 +109,7 @@ one readable momentum rule, dry run by default. How to run it:
 | Control | How it works | Code |
 | --- | --- | --- |
 | The cabal votes the agent in | `add_agent` is a proposal kind with the same tally as a trade. No vote, no key. | `packages/domain/votes.go`, `internal/app/agent_service.go` |
-| Budget cap, enforced server-side | Each intent is checked against `allocation − in-flight, pending and confirmed buys`, and against the treasury's USDC, under a per-agent row lock that reserves the amount before the swap is sent, so concurrent intents cannot overshoot. Over budget is a `422`, never a partial fill. The bot's own caps are a second, inner limit. | `domain.ValidateIntent` in `packages/domain/agent.go` |
+| Budget cap, enforced server-side | Each intent is checked against `allocation − in-flight, pending and confirmed buys + confirmed sell proceeds`, and against the treasury's USDC, under a per-agent row lock that reserves the amount before the swap is sent, so concurrent intents cannot overshoot. Over budget is a `422`, never a partial fill. The bot's own caps are a second, inner limit. | `domain.ValidateIntent` in `packages/domain/agent.go` |
 | Sells are bounded | An agent can only sell what its own buys returned, net of its own sells, and never more than the cabal holds. Positions bought by vote are out of its reach. | same, `AgentSellableTokenAmountTx` in `internal/postgres/agent_limits.go` |
 | Safe retries | An optional `idempotencyKey` per intent: a resend gets the first outcome, never a second trade. | `reserveIntent` in `internal/app/agent_intent.go` |
 | Pause, resume, revoke by vote | Paused: key stays valid, intents get `403`. Revoked: key gets `401`. | `internal/app/agent_intent.go` |

@@ -294,6 +294,9 @@ public enum ProposeFlowCopy {
     public static let agentKeyMissing = "No key on file. If this bot was added before keys were saved, remove it and add a new bot."
     public static let copyKey = "Copy key"
     public static let keyCopied = "Key copied"
+    public static let copyConnectInstructions = "Copy connect instructions"
+    public static let connectCopied = "Connect instructions copied"
+    public static let clawPumpSteps = "In ClawPump, paste these into your agent as a custom skill. Then add an automation that runs it every hour."
     public static func lifecycleTitle(kind: String) -> String {
         switch kind {
         case "pause_agent": "Pause the trading bot?"
@@ -321,6 +324,7 @@ public enum ProposeFlowCopy {
         sellTitle, holdingsTitle, sellTooSmall, sellNoLongerAvailable,
         sellSummary(amount: "$139", name: "Apple", shares: "0.6 shares"), sellHelper("$278.47"), overHoldings,
         addBotTitle, botNamePlaceholder, botBudgetHelper, botExplainer, botKeyExplainer, agentKeyExplainer, agentDetailTitle, agentKeySection, agentKeyMissing, copyKey, keyCopied,
+        copyConnectInstructions, connectCopied, clawPumpSteps,
         lifecycleTitle(kind: "pause_agent"), lifecycleTitle(kind: "resume_agent"), lifecycleTitle(kind: "revoke_agent"),
         lifecycleMessage(kind: "pause_agent", botName: "Scout"), lifecycleMessage(kind: "resume_agent", botName: "Scout"),
         lifecycleMessage(kind: "revoke_agent", botName: "Scout"),

@@ -169,6 +169,14 @@ final class ProposalFeedFormatterTests: XCTestCase {
         }
     }
 
+    func testProposeFlowCopy_auditsConnectInstructionStrings() {
+        let audited = ProposeFlowCopy.auditedStrings
+        XCTAssertTrue(audited.contains(ProposeFlowCopy.copyConnectInstructions))
+        XCTAssertTrue(audited.contains(ProposeFlowCopy.connectCopied))
+        XCTAssertTrue(audited.contains(ProposeFlowCopy.clawPumpSteps))
+        XCTAssertNotEqual(ProposeFlowCopy.connectCopied, ProposeFlowCopy.keyCopied)
+    }
+
     func testVoteCopy_plainYesNo() {
         XCTAssertEqual(ProposalFeedCopy.voteYes, "Yes")
         XCTAssertEqual(ProposalFeedCopy.voteNo, "No")

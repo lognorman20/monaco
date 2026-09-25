@@ -97,6 +97,8 @@ Or `curl -sfS https://dotenvx.sh | sh`. See [install docs](https://dotenvx.com/d
 | `PRESTOCKS_API_BASE_URL` | `https://prestocks.com` | Public PreStocks catalog used for pre-IPO tokens. |
 | `PRESTOCKS_ENABLED` | `true` | Include PreStocks tokens in search, detail, and sweeps. `false` hides them from the catalog; existing holdings still value from Jupiter. |
 
+`PUBLIC_API_BASE_URL` is the API URL agents are told to call. It is not a secret and defaults to `http://127.0.0.1:8080`. Set it to the public https URL in a deployed env.
+
 Justfile `dotenv-load` only reads plain `.env` — not dotenvx ciphertext. Recipes that need secrets re-exec once under `dotenvx run -f .env.local` (via `scripts/with-dotenv-local.sh`). Mobile Privy uses `scripts/ensure-ios-privy-config.sh` (xcconfig) + `SIMCTL_CHILD_*` at sim launch.
 
 Private keys: `DOTENV_PRIVATE_KEY` for `.env` / `.env.local`; `DOTENV_PRIVATE_KEY_PRODUCTION` for `.env.production`. On macOS, new keys often land in Keychain, not `.env.keys`. Export with `dotenvx native pull` or `dotenvx keypair -f .env.local`.
@@ -442,12 +444,13 @@ API_ADDR=0.0.0.0:8080 MIGRATIONS_DIR=/path/to/supabase/migrations ./bin/monaco-a
 - The relayer address must hold more than 0.001 SOL or the API exits at boot. See [Relayer](#relayer-fee-payer).
 - The API listens on `API_ADDR` (default `127.0.0.1:8080`). `GET /health` probes Postgres and the access-token verifier (critical, `503` when down), Solana RPC, the relayer's SOL balance, poller liveness, Privy and the price API, and reports `ok`, `degraded` or `down`.
 - Metrics are at `GET /metrics` (Prometheus; bearer `METRICS_TOKEN`, or loopback only when unset). Set `SENTRY_DSN` and `ALERT_WEBHOOK_URL` so panics and money alerts reach a person. What is recorded and what to alert on: [`docs/ops-observability.md`](docs/ops-observability.md).
+- Set `PUBLIC_API_BASE_URL` to the API's public https URL. It is not a secret. Monaco puts it in the agent connect instructions and in `GET /v1/agent/skill.md`. Unset, it defaults to `http://127.0.0.1:8080`, which only an agent on the same machine can reach.
 - Routes, rate limits, idempotency keys, body and timeout limits: [`docs/api.md`](docs/api.md).
 - The deposit sweep, execute-on-pass and redeem recovery pollers run inside the API process. A panic in a tick is recovered, alerted and counted; the loop keeps running. The deposit sweep poller is safe to run in several instances: it leases each deposit (`FOR UPDATE SKIP LOCKED`) and records the sweep signature before broadcasting, so a crash or a second instance never sweeps a deposit twice. The other two pollers have not been tested with more than one instance.
 
 **iOS.** Archive and upload steps are in [`apps/mobile/TestFlight.md`](apps/mobile/TestFlight.md).
 
-**Trading agent.** `agents/momentum-bot` runs anywhere Go runs; see [`docs/how-to/connect-an-agent.md`](docs/how-to/connect-an-agent.md).
+**Trading agent.** An agent needs only its key and `PUBLIC_API_BASE_URL`. `agents/momentum-bot` runs anywhere Go runs, and a ClawPump agent connects by pasting the connect instructions. See [`docs/how-to/connect-an-agent.md`](docs/how-to/connect-an-agent.md) and [`docs/agent-trading.md`](docs/agent-trading.md).
 
 ## Layout
 

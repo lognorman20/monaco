@@ -377,3 +377,18 @@ func TestLoad_swapProvider_unknownOrBadSlippage_returnsError(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicAPIBaseURL_defaultsAndTrimsTrailingSlash(t *testing.T) {
+	cases := map[string]string{
+		"":                            DefaultPublicAPIBaseURL,
+		"   ":                         DefaultPublicAPIBaseURL,
+		"https://api.monaco.test/":    "https://api.monaco.test",
+		" https://api.monaco.test// ": "https://api.monaco.test",
+		"http://10.0.0.2:8080":        "http://10.0.0.2:8080",
+	}
+	for raw, want := range cases {
+		if got := PublicAPIBaseURL(raw); got != want {
+			t.Errorf("PublicAPIBaseURL(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}

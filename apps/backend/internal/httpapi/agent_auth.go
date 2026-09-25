@@ -116,6 +116,30 @@ func resolveAgentForGroup(ctx context.Context, store *postgres.Store, groupID, a
 	return agent, nil
 }
 
+// keyOnlyGuardScope stands in for the group on /v1/agent routes, where the key is the only
+// credential. A short legacy key there is a guess against every cabal's agent at once, so all
+// key-only failures share one group allowance: a flood of bad keys can make legacy-key agents
+// wait on these routes (the group routes still work for them), but cannot spread guesses over
+// many addresses. Current-format keys never check it.
+const keyOnlyGuardScope = "key-only"
+
+// resolveAgentByKey authenticates X-Monaco-Agent-Key on a route that takes no group id: the
+// key alone names the agent and its cabal. A revoked agent's key no longer authenticates; a
+// paused agent's still does, so it can read while it waits.
+func resolveAgentByKey(ctx context.Context, store *postgres.Store, agentKey string) (postgres.GroupAgentRow, error) {
+	if agentKey == "" {
+		return postgres.GroupAgentRow{}, app.ErrInvalidAgentAPIKey
+	}
+	agent, found, err := store.GetGroupAgentByAPIKeyHash(ctx, app.HashAgentAPIKey(agentKey))
+	if err != nil {
+		return postgres.GroupAgentRow{}, err
+	}
+	if !found || !agent.APIKeyHash.Valid || agent.Status == domain.AgentStatusRevoked {
+		return postgres.GroupAgentRow{}, app.ErrInvalidAgentAPIKey
+	}
+	return agent, nil
+}
+
 func writeAgentAuthError(ctx context.Context, log *requestLog, w http.ResponseWriter, err error, groupID string) {
 	switch {
 	case errors.Is(err, app.ErrInvalidAgentAPIKey):

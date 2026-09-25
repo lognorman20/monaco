@@ -32,10 +32,12 @@ type Config struct {
 
 type intentSubmitter interface {
 	SubmitIntent(ctx context.Context, intent Intent) (IntentResult, error)
+	Intent(ctx context.Context, intentID string) (IntentRecord, error)
 }
 
+// priceSource returns USD per share keyed by symbol.
 type priceSource interface {
-	Prices(ctx context.Context, mints []string) (map[string]float64, error)
+	Prices(ctx context.Context, symbols []string) (map[string]float64, error)
 }
 
 // Bot watches a fixed set of assets and places at most one trade per tick.
@@ -54,6 +56,7 @@ type Bot struct {
 	cooldown  map[string]time.Time // no new trade in a symbol until this time
 	blocked   time.Time            // no trades at all until this time (paused / throttled)
 	failures  int                  // consecutive price fetch failures
+	retryIn   time.Duration        // the server's Retry-After for the next price read, if throttled
 }
 
 // NewBot wires a bot over already-discovered assets.
@@ -89,7 +92,10 @@ func (b *Bot) Run(ctx context.Context) error {
 			return nil
 		}
 		wait := b.cfg.Interval
-		if b.failures > 0 {
+		switch {
+		case b.retryIn > 0:
+			wait, b.retryIn = b.retryIn, 0
+		case b.failures > 0:
 			wait = backoff(b.failures)
 		}
 		if err := b.sleep(ctx, wait); err != nil {
@@ -108,17 +114,25 @@ type reading struct {
 // Tick samples prices, logs one line per symbol, and acts on the best signal.
 // decided is true when at least one symbol had a full lookback behind it.
 func (b *Bot) Tick(ctx context.Context) (decided bool, err error) {
-	mints := make([]string, len(b.assets))
+	symbols := make([]string, len(b.assets))
 	for i, asset := range b.assets {
-		mints[i] = asset.SolanaMint
+		symbols[i] = asset.Symbol
 	}
-	prices, err := b.prices.Prices(ctx, mints)
-	if err != nil {
-		if ctx.Err() != nil {
-			return false, nil
-		}
+	prices, err := b.prices.Prices(ctx, symbols)
+	var throttled *ThrottledError
+	switch {
+	case err == nil:
+	case ctx.Err() != nil:
+		return false, nil
+	case errors.Is(err, ErrBadKey):
+		return false, fmt.Errorf("%w: the key is wrong or revoked; stopping so the server does not throttle this address", err)
+	case errors.As(err, &throttled):
+		b.retryIn = throttled.RetryAfter
+		b.out.warn(b.now(), "prices throttled by Monaco, asking again in %s", short(b.retryIn))
+		return false, nil
+	default:
 		b.failures++
-		b.out.warn(b.now(), "price feed unavailable (%v), retrying in %s", err, backoff(b.failures))
+		b.out.warn(b.now(), "prices unavailable (%v), retrying in %s", err, backoff(b.failures))
 		return false, nil
 	}
 	b.failures = 0
@@ -126,9 +140,9 @@ func (b *Bot) Tick(ctx context.Context) (decided bool, err error) {
 	now := b.now()
 	var signals []reading
 	for _, asset := range b.assets {
-		price, ok := prices[asset.SolanaMint]
+		price, ok := prices[asset.Symbol]
 		if !ok {
-			b.out.symbol(now, asset.Symbol, 0, "no price from Jupiter, skipping")
+			b.out.symbol(now, asset.Symbol, 0, "no mark from Monaco, skipping")
 			continue
 		}
 		window := b.windows[asset.Symbol]
@@ -192,9 +206,11 @@ func (b *Bot) trade(ctx context.Context, s reading) error {
 	var what string
 	if s.action == Buy {
 		intent.Side, intent.UsdcMicros = "buy", b.budget.NextBuy()
+		intent.Reason = fmt.Sprintf("momentum %+.2f%% over %s, buy rule +%.2f%%", s.momentum, short(b.cfg.Lookback), b.cfg.Rule.BuyPct)
 		what = fmt.Sprintf("buy %s of %s", usd(intent.UsdcMicros), symbol)
 	} else {
 		intent.Side, intent.TokenAmount = "sell", b.positions[symbol]
+		intent.Reason = fmt.Sprintf("momentum %+.2f%% over %s, sell rule -%.2f%%", s.momentum, short(b.cfg.Lookback), b.cfg.Rule.SellPct)
 		what = fmt.Sprintf("sell %s %s", shares(intent.TokenAmount), symbol)
 	}
 	// One trade per symbol per lookback, whatever happens next: the same signal
@@ -203,7 +219,7 @@ func (b *Bot) trade(ctx context.Context, s reading) error {
 
 	if !b.cfg.Live {
 		b.out.action(b.now(), "→ would %s  (dry run, nothing sent)", what)
-		b.settle(s, intent)
+		b.settle(s, intent, 0)
 		return nil
 	}
 
@@ -220,10 +236,10 @@ func (b *Bot) trade(ctx context.Context, s reading) error {
 	var throttled *ThrottledError
 	switch {
 	case err == nil:
-		b.settle(s, intent)
+		b.settle(s, intent, 0)
 		b.out.ok(now, "✓ filled  tx %s  intent %s  (%s of %s spent)", result.TransactionID, result.IntentID, usd(b.budget.Spent()), usd(b.budget.Max()))
 	case errors.Is(err, ErrBadKey):
-		return fmt.Errorf("%w: the key is wrong, revoked, or for another cabal; stopping so the server does not throttle this address", err)
+		return fmt.Errorf("%w: the key is wrong or revoked; stopping so the server does not throttle this address", err)
 	case errors.Is(err, ErrPaused):
 		b.blocked = now.Add(pausedWait)
 		b.out.warn(now, "✗ the cabal has paused this agent; still watching, will ask again in %s", short(pausedWait))
@@ -244,9 +260,10 @@ func (b *Bot) trade(ctx context.Context, s reading) error {
 	case errors.As(err, &throttled):
 		b.blocked = now.Add(throttled.RetryAfter)
 		b.out.warn(now, "✗ throttled by Monaco, standing down for %s", short(throttled.RetryAfter))
+	case b.resolve(ctx, s, intent, intentIDOf(result, err)):
 	default:
-		// Still no clear answer after the resends, or Monaco says the swap failed: the trade may
-		// have gone through all the same. Assume it did, so the cap errs on the safe side.
+		// Still no clear answer after the resends and the status read: the trade may have
+		// gone through all the same. Assume it did, so the cap errs on the safe side.
 		b.out.warn(now, "✗ no clear answer from Monaco (%v). Giving up on this one; check the cabal's activity feed.", err)
 		if s.action == Buy {
 			b.budget.Record(intent.UsdcMicros)
@@ -273,6 +290,43 @@ func (b *Bot) submit(ctx context.Context, intent Intent) (IntentResult, error) {
 	}
 }
 
+// resolve reads the intent's final status when a submit ended without a clear answer but
+// Monaco named the intent. It reports whether the read settled the outcome.
+func (b *Bot) resolve(ctx context.Context, s reading, intent Intent, intentID string) bool {
+	if intentID == "" {
+		return false
+	}
+	record, err := b.monaco.Intent(ctx, intentID)
+	now := b.now()
+	switch {
+	case err != nil:
+		b.out.warn(now, "  could not read intent %s (%v)", intentID, err)
+		return false
+	case record.Status == "executed":
+		var filled int64
+		if record.FilledTokenAmount != nil {
+			filled = *record.FilledTokenAmount
+		}
+		b.settle(s, intent, filled)
+		b.out.ok(now, "✓ filled  tx %s  intent %s, confirmed by status read  (%s of %s spent)", record.TransactionID, intentID, usd(b.budget.Spent()), usd(b.budget.Max()))
+		return true
+	case record.Status == "rejected" || record.Status == "failed":
+		b.out.warn(now, "✗ intent %s %s: %s; nothing traded", intentID, record.Status, record.RejectReason)
+		return true
+	default:
+		return false
+	}
+}
+
+// intentIDOf is the intent Monaco named in an answer that did not settle it.
+func intentIDOf(result IntentResult, err error) string {
+	var status *StatusError
+	if errors.As(err, &status) {
+		return status.IntentID
+	}
+	return result.IntentID
+}
+
 // unclearOutcome reports whether err leaves open whether the trade happened. Every answer
 // the bot has a reaction for is clear; so is a 2xx that says the intent did not execute.
 func unclearOutcome(err error) bool {
@@ -285,11 +339,15 @@ func unclearOutcome(err error) bool {
 	return !errors.As(err, &rejected) && !errors.As(err, &throttled) && !errors.As(err, &unsettled)
 }
 
-// settle updates the bot's books after a fill (or a simulated one in dry run).
-func (b *Bot) settle(s reading, intent Intent) {
+// settle updates the bot's books after a fill (or a simulated one in dry run). filled is
+// the token amount Monaco reported for a buy; zero means estimate it from the price.
+func (b *Bot) settle(s reading, intent Intent, filled int64) {
 	if s.action == Buy {
 		b.budget.Record(intent.UsdcMicros)
-		b.positions[s.asset.Symbol] += estimateFill(intent.UsdcMicros, s.price)
+		if filled <= 0 {
+			filled = estimateFill(intent.UsdcMicros, s.price)
+		}
+		b.positions[s.asset.Symbol] += filled
 		return
 	}
 	b.positions[s.asset.Symbol] = 0

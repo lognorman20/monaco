@@ -79,6 +79,7 @@ struct GroupAgentDTO: Codable, Equatable {
     let agentDisplayName: String
     let allocationUsdcMicros: String
     let apiKey: String?
+    var connectText: String? = nil
 }
 
 struct GroupViewDTO: Codable, Equatable {

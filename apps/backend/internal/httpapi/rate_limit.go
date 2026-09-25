@@ -154,6 +154,7 @@ var moneyPathSuffixes = []string{
 	"/withdrawals",
 	"/retry",
 	"/agents/intents",
+	"/agent/intents",
 }
 
 func isMoneyPath(path string) bool {

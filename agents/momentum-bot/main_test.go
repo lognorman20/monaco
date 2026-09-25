@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -13,7 +14,7 @@ func env(values map[string]string) func(string) string {
 	return func(name string) string { return values[name] }
 }
 
-var fullEnv = map[string]string{"MONACO_API": "http://127.0.0.1:1", "MONACO_GROUP_ID": "group-1", "MONACO_AGENT_KEY": testKey}
+var fullEnv = map[string]string{"MONACO_API": "http://127.0.0.1:1", "MONACO_AGENT_KEY": testKey}
 
 func TestParseOptions_defaultsToDryRun(t *testing.T) {
 	opts, err := parseOptions(nil, env(fullEnv))
@@ -34,8 +35,8 @@ func TestParseOptions_rejections(t *testing.T) {
 		env  map[string]string
 		want string
 	}{
-		"missing key":            {nil, map[string]string{"MONACO_API": "x", "MONACO_GROUP_ID": "g"}, "MONACO_AGENT_KEY is not set"},
-		"missing api":            {nil, map[string]string{"MONACO_GROUP_ID": "g", "MONACO_AGENT_KEY": "k"}, "MONACO_API is not set"},
+		"missing key":            {nil, map[string]string{"MONACO_API": "x"}, "MONACO_AGENT_KEY is not set"},
+		"missing api":            {nil, map[string]string{"MONACO_AGENT_KEY": "k"}, "MONACO_API is not set"},
 		"key is never a flag":    {[]string{"--key", testKey}, fullEnv, "flag provided but not defined"},
 		"live and dry-run":       {[]string{"--live", "--dry-run"}, fullEnv, "mutually exclusive"},
 		"cap below trade size":   {[]string{"--trade-usd", "2", "--max-spend-usd", "1"}, fullEnv, "--max-spend-usd"},
@@ -51,30 +52,31 @@ func TestParseOptions_rejections(t *testing.T) {
 	}
 }
 
-// fakeStack serves both the Monaco catalog/intent routes and a Jupiter price feed
-// whose GOOGLx price climbs 1% per request.
+// fakeStack serves Monaco's key-only agent routes. Every catalog read marks GOOGLx 1%
+// higher than the last. Any request outside /v1/agent fails the test.
 func fakeStack(t *testing.T) (envFn func(string) string, posts *atomic.Int32) {
 	t.Helper()
 	posts = &atomic.Int32{}
-	var priceCalls atomic.Int32
+	var catalogReads atomic.Int32
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/groups/group-1/assets", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"assets":[{"symbol":"GOOGLx","solanaMint":"mintG","routable":true},{"symbol":"DEADx","solanaMint":"mintD","routable":false}]}`))
+	mux.HandleFunc("GET /v1/agent", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"cabalName":"Tech Bros","agentName":"Momentum","status":"active","budget":{"allocationUsd":"100.00","availableUsd":"42.10"}}`))
 	})
-	mux.HandleFunc("POST /v1/groups/group-1/agents/intents", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/agent/assets", func(w http.ResponseWriter, r *http.Request) {
+		mark := 100_000_000 + int(catalogReads.Add(1)-1)*1_000_000
+		_, _ = w.Write([]byte(`{"assets":[{"symbol":"GOOGLx","solanaMint":"mintG","routable":true,"markUsdcMicros":` + strconv.Itoa(mark) + `},{"symbol":"DEADx","solanaMint":"mintD","routable":false}],"hasMore":false}`))
+	})
+	mux.HandleFunc("POST /v1/agent/intents", func(w http.ResponseWriter, r *http.Request) {
 		posts.Add(1)
 		_, _ = w.Write([]byte(`{"intentId":"i","status":"executed","transactionId":"tx"}`))
 	})
-	mux.HandleFunc("GET /price/v3", func(w http.ResponseWriter, r *http.Request) {
-		n := priceCalls.Add(1)
-		_, _ = w.Write([]byte(`{"mintG":{"usdPrice":` + []string{"100", "101", "102", "103", "104"}[min(int(n)-1, 4)] + `}}`))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return env(map[string]string{
-		"MONACO_API": srv.URL, "MONACO_GROUP_ID": "group-1", "MONACO_AGENT_KEY": testKey,
-		"JUPITER_PRICE_URL": srv.URL + "/price/v3",
-	}), posts
+	return env(map[string]string{"MONACO_API": srv.URL, "MONACO_AGENT_KEY": testKey}), posts
 }
 
 var fastOnce = []string{"--once", "--interval", "1s", "--lookback", "2s"}
@@ -89,7 +91,7 @@ func TestRun_dryRunOnceEndToEnd(t *testing.T) {
 		t.Fatalf("dry run posted %d intents", posts.Load())
 	}
 	log := out.String()
-	for _, want := range []string{"DRY RUN", "watching  GOOGLx\n", "key       set (hidden)", "→ would buy $1.00 of GOOGLx"} {
+	for _, want := range []string{"DRY RUN", "cabal     Tech Bros, as agent Momentum (active)", "budget    $42.10 of $100.00 available", "watching  GOOGLx\n", "key       set (hidden)", "→ would buy $1.00 of GOOGLx"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("output missing %q:\n%s", want, log)
 		}
@@ -128,6 +130,15 @@ func TestRun_unknownSymbolFailsBeforeTrading(t *testing.T) {
 	envFn, _ := fakeStack(t)
 	err := run(append([]string{"--symbols", "NOPEx"}, fastOnce...), envFn, strings.NewReader(""), &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "NOPEx is not in the cabal's catalog") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRun_missingAgentRoutesFailFast(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(srv.Close)
+	err := run(fastOnce, env(map[string]string{"MONACO_API": srv.URL, "MONACO_AGENT_KEY": testKey}), strings.NewReader(""), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "check MONACO_API") {
 		t.Fatalf("got %v", err)
 	}
 }

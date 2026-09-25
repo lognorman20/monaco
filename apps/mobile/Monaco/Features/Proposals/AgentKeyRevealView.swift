@@ -5,8 +5,10 @@ import SwiftUI
 /// on the agent detail screen (any cabal member, until the bot is removed).
 struct AgentKeyRevealView: View {
     let apiKey: String
+    var connectText: String? = nil
     var explainer: String = ProposeFlowCopy.botKeyExplainer
-    var onCopied: () -> Void = {}
+    /// Receives the toast message for whichever copy button was tapped.
+    var onCopied: (String) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
@@ -22,13 +24,29 @@ struct AgentKeyRevealView: View {
                 .padding(MonacoTheme.Space.m)
                 .background(MonacoTheme.surfaceSunken, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous))
                 .accessibilityIdentifier("agent-key-reveal")
+            if let connectText, !connectText.isEmpty {
+                Text(ProposeFlowCopy.clawPumpSteps)
+                    .font(MonacoTheme.Typo.callout)
+                    .foregroundStyle(MonacoTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("agent-clawpump-steps")
+                Button(ProposeFlowCopy.copyConnectInstructions) {
+                    copy(connectText, message: ProposeFlowCopy.connectCopied)
+                }
+                .buttonStyle(.monacoPrimary)
+                .accessibilityIdentifier("agent-connect-copy")
+            }
             Button(ProposeFlowCopy.copyKey) {
-                UIPasteboard.general.string = apiKey
-                Haptics.success()
-                onCopied()
+                copy(apiKey, message: ProposeFlowCopy.keyCopied)
             }
             .buttonStyle(.monacoSecondary)
             .accessibilityIdentifier("agent-key-copy")
         }
+    }
+
+    private func copy(_ text: String, message: String) {
+        UIPasteboard.general.string = text
+        Haptics.success()
+        onCopied(message)
     }
 }

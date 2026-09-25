@@ -26,12 +26,11 @@ const (
 )
 
 type options struct {
-	api, groupID, key string
-	priceURL          string
-	symbols           []string
-	tradeUSD, maxUSD  float64
-	yes               bool
-	cfg               Config
+	api, key         string
+	symbols          []string
+	tradeUSD, maxUSD float64
+	yes              bool
+	cfg              Config
 }
 
 func main() {
@@ -50,13 +49,13 @@ func run(args []string, getenv func(string) string, stdin io.Reader, stdout io.W
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	monaco := NewMonacoClient(opts.api, opts.groupID, opts.key, nil)
-	assets, err := discover(ctx, monaco, opts.symbols, stdout)
+	monaco := NewMonacoClient(opts.api, opts.key, nil)
+	agent, assets, err := discover(ctx, monaco, opts.symbols, stdout)
 	if err != nil {
 		return err
 	}
 
-	printBanner(stdout, opts, assets)
+	printBanner(stdout, opts, agent, assets)
 	if opts.cfg.Live && !opts.yes {
 		if !confirm(stdin, stdout) {
 			return errors.New("not confirmed, nothing was sent")
@@ -64,7 +63,7 @@ func run(args []string, getenv func(string) string, stdin io.Reader, stdout io.W
 	}
 
 	budget := NewBudget(usdToMicros(opts.tradeUSD), usdToMicros(opts.maxUSD))
-	bot := NewBot(opts.cfg, assets, monaco, NewPriceClient(opts.priceURL, nil), budget, stdout, useColor(stdout, getenv))
+	bot := NewBot(opts.cfg, assets, monaco, monaco, budget, stdout, useColor(stdout, getenv))
 	return bot.Run(ctx)
 }
 
@@ -89,9 +88,7 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 		fmt.Fprintln(fs.Output(), "Usage: momentum-bot [flags]")
 		fmt.Fprintln(fs.Output(), "\nEnvironment:")
 		fmt.Fprintln(fs.Output(), "  MONACO_API          API base URL, e.g. http://127.0.0.1:8080 (required)")
-		fmt.Fprintln(fs.Output(), "  MONACO_GROUP_ID     the cabal's group id (required)")
-		fmt.Fprintln(fs.Output(), "  MONACO_AGENT_KEY    the key shown in the app after the add-bot vote (required; env only, never a flag)")
-		fmt.Fprintln(fs.Output(), "  JUPITER_PRICE_URL   override the price feed (default "+defaultPriceURL+")")
+		fmt.Fprintln(fs.Output(), "  MONACO_AGENT_KEY    the agent key from Group > Agent in the app (required; env only, never a flag)")
 		fmt.Fprintln(fs.Output(), "\nFlags:")
 		fs.PrintDefaults()
 	}
@@ -107,10 +104,8 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 	opts.cfg.Live = live
 
 	opts.api = strings.TrimSpace(getenv("MONACO_API"))
-	opts.groupID = strings.TrimSpace(getenv("MONACO_GROUP_ID"))
 	opts.key = strings.TrimSpace(getenv("MONACO_AGENT_KEY"))
-	opts.priceURL = strings.TrimSpace(getenv("JUPITER_PRICE_URL"))
-	for _, name := range []string{"MONACO_API", "MONACO_GROUP_ID", "MONACO_AGENT_KEY"} {
+	for _, name := range []string{"MONACO_API", "MONACO_AGENT_KEY"} {
 		if strings.TrimSpace(getenv(name)) == "" {
 			return options{}, fmt.Errorf("%s is not set", name)
 		}
@@ -137,70 +132,91 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 	return opts, nil
 }
 
-// discover resolves what to watch from the cabal's own catalog, so the bot only ever
-// names symbols the server can route. Transient failures back off; a bad key does not retry.
-func discover(ctx context.Context, monaco *MonacoClient, symbols []string, stdout io.Writer) ([]Asset, error) {
+// discover reads the agent's cabal and budget, then resolves what to watch from the
+// cabal's own catalog, so the bot only ever names symbols the server can route.
+func discover(ctx context.Context, monaco *MonacoClient, symbols []string, stdout io.Writer) (AgentInfo, []Asset, error) {
 	out := &printer{w: stdout}
-	fetch := func(query string, limit int) ([]Asset, error) {
-		for failures := 0; ; {
-			assets, err := monaco.Assets(ctx, query, limit)
-			var throttled *ThrottledError
-			var wait time.Duration
-			switch {
-			case err == nil:
-				return assets, nil
-			case errors.Is(err, ErrBadKey):
-				return nil, fmt.Errorf("%w: check MONACO_AGENT_KEY and MONACO_GROUP_ID", err)
-			case ctx.Err() != nil:
-				return nil, ctx.Err()
-			case errors.As(err, &throttled):
-				wait = throttled.RetryAfter
-			default:
-				failures++
-				wait = backoff(failures)
-			}
-			out.warn(time.Now(), "catalog unavailable (%v), retrying in %s", err, short(wait))
-			if err := sleepCtx(ctx, wait); err != nil {
-				return nil, err
-			}
-		}
+	var agent AgentInfo
+	err := retry(ctx, out, "agent", func() (err error) {
+		agent, err = monaco.Agent(ctx)
+		return err
+	})
+	if err != nil {
+		return AgentInfo{}, nil, err
+	}
+	fetch := func(query string, limit int) (assets []Asset, err error) {
+		err = retry(ctx, out, "catalog", func() (err error) {
+			assets, err = monaco.Assets(ctx, query, limit)
+			return err
+		})
+		return assets, err
 	}
 
 	if len(symbols) == 0 {
 		page, err := fetch("", catalogPageSize)
 		if err != nil {
-			return nil, err
+			return AgentInfo{}, nil, err
 		}
 		var assets []Asset
 		for _, asset := range page {
-			if asset.Routable && asset.SolanaMint != "" && len(assets) < defaultWatchCount {
+			if asset.Routable && len(assets) < defaultWatchCount {
 				assets = append(assets, asset)
 			}
 		}
 		if len(assets) == 0 {
-			return nil, errors.New("the cabal's catalog has no routable assets")
+			return AgentInfo{}, nil, errors.New("the cabal's catalog has no routable assets")
 		}
-		return assets, nil
+		return agent, assets, nil
 	}
 
 	var assets []Asset
 	for _, symbol := range symbols {
 		page, err := fetch(symbol, 1)
 		if err != nil {
-			return nil, err
+			return AgentInfo{}, nil, err
 		}
-		if len(page) == 0 || !strings.EqualFold(page[0].Symbol, symbol) || page[0].SolanaMint == "" {
-			return nil, fmt.Errorf("%s is not in the cabal's catalog", symbol)
+		if len(page) == 0 || !strings.EqualFold(page[0].Symbol, symbol) {
+			return AgentInfo{}, nil, fmt.Errorf("%s is not in the cabal's catalog", symbol)
 		}
 		if !page[0].Routable {
-			return nil, fmt.Errorf("%s has no Jupiter route right now", symbol)
+			return AgentInfo{}, nil, fmt.Errorf("%s has no Jupiter route right now", symbol)
 		}
 		assets = append(assets, page[0])
 	}
-	return assets, nil
+	return agent, assets, nil
 }
 
-func printBanner(w io.Writer, opts options, assets []Asset) {
+// retry runs a startup read until it succeeds. Transient failures back off and a 429
+// waits out its Retry-After. A bad key or any other 4xx does not retry.
+func retry(ctx context.Context, out *printer, what string, read func() error) error {
+	for failures := 0; ; {
+		err := read()
+		var throttled *ThrottledError
+		var status *StatusError
+		var wait time.Duration
+		switch {
+		case err == nil:
+			return nil
+		case errors.Is(err, ErrBadKey):
+			return fmt.Errorf("%w: check MONACO_AGENT_KEY", err)
+		case errors.As(err, &status) && status.Status < 500:
+			return fmt.Errorf("%s: %w: check MONACO_API points at a Monaco API with the /v1/agent routes", what, err)
+		case ctx.Err() != nil:
+			return ctx.Err()
+		case errors.As(err, &throttled):
+			wait = throttled.RetryAfter
+		default:
+			failures++
+			wait = backoff(failures)
+		}
+		out.warn(time.Now(), "%s unavailable (%v), retrying in %s", what, err, short(wait))
+		if err := sleepCtx(ctx, wait); err != nil {
+			return err
+		}
+	}
+}
+
+func printBanner(w io.Writer, opts options, agent AgentInfo, assets []Asset) {
 	names := make([]string, len(assets))
 	for i, asset := range assets {
 		names[i] = asset.Symbol
@@ -212,7 +228,8 @@ func printBanner(w io.Writer, opts options, assets []Asset) {
 	fmt.Fprintf(w, "Monaco momentum bot\n")
 	fmt.Fprintf(w, "  mode      %s\n", mode)
 	fmt.Fprintf(w, "  api       %s\n", opts.api)
-	fmt.Fprintf(w, "  cabal     %s\n", opts.groupID)
+	fmt.Fprintf(w, "  cabal     %s, as agent %s (%s)\n", agent.CabalName, agent.AgentName, agent.Status)
+	fmt.Fprintf(w, "  budget    $%s of $%s available\n", agent.Budget.AvailableUsd, agent.Budget.AllocationUsd)
 	fmt.Fprintf(w, "  key       set (hidden)\n")
 	fmt.Fprintf(w, "  watching  %s\n", strings.Join(names, ", "))
 	fmt.Fprintf(w, "  rule      buy at +%.2f%%, sell at -%.2f%% over %s, sampled every %s\n",

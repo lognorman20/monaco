@@ -37,12 +37,16 @@ const (
 	envTesseraEnabled               = "TESSERA_ENABLED"
 	envPreStocksAPIBaseURL          = "PRESTOCKS_API_BASE_URL"
 	envPreStocksEnabled             = "PRESTOCKS_ENABLED"
+	envPublicAPIBaseURL             = "PUBLIC_API_BASE_URL"
 )
 
 const (
 	defaultTesseraAPIBaseURL   = "https://rest-api.tessera.pe"
 	defaultPreStocksAPIBaseURL = "https://prestocks.com"
 )
+
+// DefaultPublicAPIBaseURL is the API's own address when PUBLIC_API_BASE_URL is unset.
+const DefaultPublicAPIBaseURL = "http://127.0.0.1:8080"
 
 // maxFlashSlippage caps FLASH_MAX_SLIPPAGE so a typo cannot open a treasury swap to a bad fill.
 const maxFlashSlippage = 0.05
@@ -87,6 +91,8 @@ const maxFlashSlippage = 0.05
 //   - SOLANA_RPC_URL: Solana JSON-RPC endpoint for every chain read and confirmation. Unset
 //     falls back to the public cluster endpoint, which has no SLA: set a paid RPC outside
 //     local dev.
+//   - PUBLIC_API_BASE_URL: the URL agents reach this API at, written into the agent connect
+//     text and skill.md (default http://127.0.0.1:8080). Not a secret.
 //   - DB_MAX_OPEN_CONNS, DB_MAX_IDLE_CONNS, DB_CONN_MAX_LIFETIME, DB_CONN_MAX_IDLE_TIME: see DBPool.
 type Config struct {
 	DatabaseURL                  string
@@ -109,6 +115,8 @@ type Config struct {
 	SwapProvider                 string
 	FlashAPIKey                  string
 	FlashMaxSlippage             string
+	// PublicAPIBaseURL has no trailing slash.
+	PublicAPIBaseURL string
 	// PrivyVerificationKey is the parsed PRIVY_VERIFICATION_KEY.
 	PrivyVerificationKey *ecdsa.PublicKey
 	DBPool               DBPool
@@ -137,6 +145,7 @@ func Load() (*Config, error) {
 		SolanaCluster:                SolanaCluster,
 		FlashAPIKey:                  strings.TrimSpace(os.Getenv(envFlashAPIKey)),
 		FlashMaxSlippage:             strings.TrimSpace(os.Getenv(envFlashMaxSlippage)),
+		PublicAPIBaseURL:             PublicAPIBaseURL(os.Getenv(envPublicAPIBaseURL)),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -190,6 +199,16 @@ func Load() (*Config, error) {
 	cfg.DBPool = pool
 
 	return cfg, nil
+}
+
+// PublicAPIBaseURL normalizes PUBLIC_API_BASE_URL: trimmed, no trailing slash, and the
+// default when unset.
+func PublicAPIBaseURL(raw string) string {
+	base := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if base == "" {
+		return DefaultPublicAPIBaseURL
+	}
+	return base
 }
 
 // SolanaRPCEndpoint is the JSON-RPC endpoint every Solana client uses: SOLANA_RPC_URL when

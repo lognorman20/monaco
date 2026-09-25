@@ -12,22 +12,24 @@ import (
 
 // AgentIntentRow is a row in agent_intents.
 type AgentIntentRow struct {
-	ID           string
-	GroupAgentID string
-	GroupID      string
-	Side         domain.AgentIntentSide
-	Symbol       string
-	UsdcMicros   sql.NullInt64
-	TokenAmount  sql.NullInt64
-	Status       string
-	RejectReason sql.NullString
-	TransactionID sql.NullString
+	ID             string
+	GroupAgentID   string
+	GroupID        string
+	Side           domain.AgentIntentSide
+	Symbol         string
+	UsdcMicros     sql.NullInt64
+	TokenAmount    sql.NullInt64
+	Status         string
+	RejectReason   sql.NullString
+	TransactionID  sql.NullString
 	IdempotencyKey sql.NullString
-	Mint         sql.NullString
-	CreatedAt    time.Time
+	Mint           sql.NullString
+	// Reason is the agent's own note on why it traded.
+	Reason    sql.NullString
+	CreatedAt time.Time
 }
 
-const agentIntentSelectColumns = `id, group_agent_id, group_id, side, symbol, usdc_micros, token_amount, status, reject_reason, transaction_id, idempotency_key, mint, created_at`
+const agentIntentSelectColumns = `id, group_agent_id, group_id, side, symbol, usdc_micros, token_amount, status, reject_reason, transaction_id, idempotency_key, mint, reason, created_at`
 
 func scanAgentIntentRow(scanner interface{ Scan(dest ...any) error }) (AgentIntentRow, error) {
 	var row AgentIntentRow
@@ -45,6 +47,7 @@ func scanAgentIntentRow(scanner interface{ Scan(dest ...any) error }) (AgentInte
 		&row.TransactionID,
 		&row.IdempotencyKey,
 		&row.Mint,
+		&row.Reason,
 		&row.CreatedAt,
 	); err != nil {
 		return AgentIntentRow{}, err
@@ -77,8 +80,8 @@ func (s *Store) InsertAgentIntent(ctx context.Context, row AgentIntentRow) (Agen
 // InsertAgentIntentTx records an agent intent within tx.
 func (s *Store) InsertAgentIntentTx(ctx context.Context, tx *sql.Tx, row AgentIntentRow) (AgentIntentRow, error) {
 	const insertSQL = `
-INSERT INTO agent_intents (group_agent_id, group_id, side, symbol, usdc_micros, token_amount, status, reject_reason, transaction_id, idempotency_key, mint)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+INSERT INTO agent_intents (group_agent_id, group_id, side, symbol, usdc_micros, token_amount, status, reject_reason, transaction_id, idempotency_key, mint, reason)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING ` + agentIntentSelectColumns
 
 	var usdc any
@@ -105,6 +108,10 @@ RETURNING ` + agentIntentSelectColumns
 	if row.Mint.Valid {
 		mint = row.Mint.String
 	}
+	var reason any
+	if row.Reason.Valid {
+		reason = row.Reason.String
+	}
 
 	out, err := scanAgentIntentRow(tx.QueryRowContext(ctx, insertSQL,
 		row.GroupAgentID,
@@ -118,6 +125,7 @@ RETURNING ` + agentIntentSelectColumns
 		txID,
 		idempotencyKey,
 		mint,
+		reason,
 	))
 	if err != nil {
 		return AgentIntentRow{}, fmt.Errorf("insert agent intent: %w", err)
@@ -171,4 +179,60 @@ func (s *Store) GetAgentIntentByID(ctx context.Context, intentID string) (AgentI
 		return AgentIntentRow{}, false, fmt.Errorf("get agent intent: %w", err)
 	}
 	return row, true, nil
+}
+
+// AgentIntentWithFill is one intent and the ledger row of its swap, when there is one.
+type AgentIntentWithFill struct {
+	Intent AgentIntentRow
+	// TransactionID, TransactionStatus and TxSignature come from the intent's swap row.
+	TransactionID     sql.NullString
+	TransactionStatus sql.NullString
+	TxSignature       sql.NullString
+	// FilledTokenAmount and FilledUsdcMicros are set once the swap confirmed. A buy spent
+	// FilledUsdcMicros for FilledTokenAmount; a sell gave FilledTokenAmount for FilledUsdcMicros.
+	FilledTokenAmount sql.NullInt64
+	FilledUsdcMicros  sql.NullInt64
+}
+
+// GetAgentIntentByIDForAgent returns one of agentID's intents with its swap. Another agent's
+// intent reads as not found.
+func (s *Store) GetAgentIntentByIDForAgent(ctx context.Context, agentID, intentID string) (AgentIntentWithFill, bool, error) {
+	const selectSQL = `
+SELECT ai.id, ai.group_agent_id, ai.group_id, ai.side, ai.symbol, ai.usdc_micros, ai.token_amount, ai.status,
+       ai.reject_reason, ai.transaction_id, ai.idempotency_key, ai.mint, ai.reason, ai.created_at,
+       t.id, t.status, t.tx_signature,
+       CASE WHEN t.status = 'confirmed' THEN CASE WHEN t.action = 'buy' THEN t.cost_basis_amount ELSE t.amount END END,
+       CASE WHEN t.status = 'confirmed' THEN CASE WHEN t.action = 'buy' THEN t.amount ELSE t.cost_basis_amount END END
+FROM agent_intents ai
+LEFT JOIN LATERAL (
+  SELECT id, status, tx_signature, action, amount, cost_basis_amount
+  FROM transactions
+  WHERE agent_intent_id = ai.id
+  ORDER BY created_at DESC
+  LIMIT 1
+) t ON true
+WHERE ai.id::text = $1 AND ai.group_agent_id = $2`
+	var out AgentIntentWithFill
+	row := s.db.QueryRowContext(ctx, selectSQL, intentID, agentID)
+	intent, err := scanAgentIntentRow(fillScanner{row: row, extra: []any{
+		&out.TransactionID, &out.TransactionStatus, &out.TxSignature, &out.FilledTokenAmount, &out.FilledUsdcMicros,
+	}})
+	if errors.Is(err, sql.ErrNoRows) {
+		return AgentIntentWithFill{}, false, nil
+	}
+	if err != nil {
+		return AgentIntentWithFill{}, false, fmt.Errorf("get agent intent for agent: %w", err)
+	}
+	out.Intent = intent
+	return out, true, nil
+}
+
+// fillScanner appends extra destinations after the intent columns.
+type fillScanner struct {
+	row   *sql.Row
+	extra []any
+}
+
+func (f fillScanner) Scan(dest ...any) error {
+	return f.row.Scan(append(dest, f.extra...)...)
 }
