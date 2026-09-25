@@ -650,14 +650,16 @@ public final class MonacoAPIClient: @unchecked Sendable {
         )
     }
 
-    private func getJSON<T: Decodable>(
+    // lane: news — internal, not private, so a `MonacoAPIClient+<Feature>.swift` extension can
+    // use it; an empty query no longer leaves a bare "?" on the URL.
+    func getJSON<T: Decodable>(
         path: String,
         route: String,
         queryItems: [URLQueryItem],
         as type: T.Type
     ) async throws -> T {
         var components = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)!
-        components.queryItems = queryItems
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
         guard let url = components.url else {
             throw MonacoAPIError.invalidResponse
         }

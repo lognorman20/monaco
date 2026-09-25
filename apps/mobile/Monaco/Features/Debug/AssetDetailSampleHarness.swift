@@ -129,6 +129,8 @@ struct AssetDetailSampleHarness: View {
                 symbol: scenario == .sparse ? "NEWx" : "AAPLx",
                 dataSource: AssetDetailSampleDataSource(scenario: scenario),
                 socialDataSource: AssetDetailSampleSocialSource(scenario: scenario),
+                // lane: news
+                newsDataSource: NewsSampleSource(scenario: .detail),
                 // The scripted price walk is the point of `ticking`; at the shipping
                 // cadence a screenshot would wait ten seconds for the first move.
                 pricePollInterval: scenario == .ticking ? .seconds(2) : AssetDetailPolling.price,

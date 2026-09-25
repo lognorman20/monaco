@@ -16,6 +16,10 @@ struct AssetDetailView: View {
     /// separate read at a separate cadence: the price is polled every ten seconds,
     /// this changes when somebody votes.
     @State private var social: AssetSocialModel
+    // lane: news
+    /// Headlines about the stock. Its own read, loaded beside the social one so the hero
+    /// and the chart never wait on a feed.
+    @State private var news: NewsFeedModel
     /// The one screen this one is pushing, if any. See `AssetDetailRoute`.
     @State private var route: AssetDetailRoute?
     @State private var toast: MonacoToast?
@@ -38,6 +42,8 @@ struct AssetDetailView: View {
         symbol: String,
         dataSource: AssetDetailDataSource? = nil,
         socialDataSource: AssetSocialDataSource? = nil,
+        // lane: news
+        newsDataSource: NewsDataSource? = nil,
         pricePollInterval: Duration = AssetDetailPolling.price,
         chartPollInterval: Duration = AssetDetailPolling.chart,
         scrubbedIndexOnLoad: Int? = nil
@@ -55,6 +61,9 @@ struct AssetDetailView: View {
             symbol: symbol,
             dataSource: socialDataSource ?? LiveAssetSocialDataSource(auth: auth)
         ))
+        // lane: news
+        let newsSource: NewsDataSource = newsDataSource ?? LiveNewsDataSource(auth: auth)
+        _news = State(initialValue: NewsFeedModel(fetch: { try await newsSource.assetNews(symbol: symbol) }))
     }
 
     var body: some View {
@@ -119,6 +128,9 @@ struct AssetDetailView: View {
             holdScrubIfAsked()
         }
         .task { await social.load() }
+        // lane: news
+        .task { await news.load() }
+        .pollWhileVisible(every: NewsRefresh.interval) { await news.refresh() }
         // The hero keeps itself current while the member is looking at it. Both loops
         // are silent: a tick that fails leaves the screen exactly as they last saw it.
         .pollWhileVisible(every: pricePollInterval) { await model.refreshDetail() }
@@ -167,6 +179,9 @@ struct AssetDetailView: View {
             AssetDetailView(auth: auth, symbol: variantSymbol)
         case .proposal(let id):
             ProposalDetailView(auth: auth, proposalId: id)
+        // lane: news
+        case .news:
+            AssetNewsView(model: news, companyName: heroDisplayName)
         }
     }
 
@@ -244,6 +259,7 @@ struct AssetDetailView: View {
     //   1. Your cabals' position — holdings, P&L, open votes            (#341)
     //   2. Stats — open/high/low, 52-week range, trading cost           (#342)
     //   3. Stock vs token — NASDAQ against the xStock, premium          (#347)
+    //   3b. News — the newest three headlines, "See all" for the rest   (lane: news)
     //   4. About — what the token is, and the tracker disclosure        (#343)
     //   5. Activity on this stock — proposals, fills and comments       (#344)
     //
@@ -291,6 +307,9 @@ struct AssetDetailView: View {
             if let card = stockVsTokenCard {
                 StockVsTokenCardView(card: card)
             }
+            // lane: news
+            // 3b. News — what happened to it today: the newest three headlines
+            AssetNewsSection(model: news, companyName: heroDisplayName, seeAll: { route = .news })
             // 4. About — what the token is, and the tracker disclosure        (#343)
             if let detail = model.detail {
                 AssetAboutCard(about: AssetAboutCopy.make(

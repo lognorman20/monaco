@@ -18,15 +18,27 @@ struct AssetsTabView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var model: StocksTabModel
+    // lane: news
+    /// The market pulse under the movers. Its own read: the tab never waits on a feed.
+    @State private var marketNews: NewsFeedModel
     @State private var searchQuery = ""
     @State private var selectedSymbol: String?
 
     /// `model` is the seam the sample harness uses: some states — rows on screen
     /// plus a failed refresh — are a sequence of two responses, not one canned
     /// answer, so the harness drives the model into them before the view appears.
-    init(auth: PrivyAuthService, dataSource: StocksTabDataSource? = nil, model: StocksTabModel? = nil) {
+    init(
+        auth: PrivyAuthService,
+        dataSource: StocksTabDataSource? = nil,
+        model: StocksTabModel? = nil,
+        // lane: news
+        newsDataSource: NewsDataSource? = nil
+    ) {
         self.auth = auth
         _model = State(initialValue: model ?? StocksTabModel(dataSource: dataSource ?? LiveStocksTabDataSource(auth: auth)))
+        // lane: news
+        let newsSource: NewsDataSource = newsDataSource ?? LiveNewsDataSource(auth: auth)
+        _marketNews = State(initialValue: NewsFeedModel(fetch: { try await newsSource.marketNews() }))
     }
 
     var body: some View {
@@ -70,6 +82,9 @@ struct AssetsTabView: View {
             model.seedPopular(session.popularAssets)
             await refreshTab()
         }
+        // lane: news
+        .task { await marketNews.load() }
+        .pollWhileVisible(every: NewsRefresh.interval) { await marketNews.refresh() }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await refreshTab() }
@@ -165,6 +180,8 @@ struct AssetsTabView: View {
                     inYourCabalsSection
                     upForVoteSection
                     topMoversSection
+                    // lane: news
+                    MarketNewsSection(model: marketNews)
                     popularSection
                     preIpoSection
                 }
@@ -377,8 +394,11 @@ struct AssetsTabView: View {
     }
 
     private func forceRefreshTab() async {
+        // lane: news
+        async let news: Void = marketNews.refresh()
         await model.refreshEverything()
         syncPopularToSession()
+        await news
     }
 
     private func syncPopularToSession() {
