@@ -2,7 +2,7 @@
 
 One-off helper. Not the product deposit poller. Sells **non-USDC SPL** (xStocks, etc.) to USDC on Jupiter, then moves **mainnet USDC** from Monaco-controlled Privy Solana wallets to `--destination`.
 
-Product path stays: member inbox → treasury (poller) → **in-app redeem**. Use this when funds are stuck in Privy and redeem cannot reach them, or when cleaning QA wallets.
+The product path stays: fund (member wallet → treasury), then cash out and withdraw in the app. Use this script when funds are stuck in Privy and the app cannot reach them, or when cleaning QA wallets.
 
 ## Danger
 

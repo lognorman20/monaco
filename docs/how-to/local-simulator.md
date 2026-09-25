@@ -26,7 +26,7 @@ across relaunches and reinstalls, while `CODE_SIGNING_REQUIRED=NO` keeps the
 build from failing if a stricter signing requirement is inherited from the
 project or environment.
 
-Some older QA docs (`docs/qa/148`, `docs/qa/160`) used to show
+Some older QA docs (`docs/archive/qa/148`, `docs/archive/qa/160`) used to show
 `CODE_SIGNING_ALLOWED=NO` in their reproduction commands — that's a copy/paste
 trap for exactly this bug, and both have been updated to the ad-hoc flags
 above. If you're pasting an `xcodebuild` command from an old doc or PR,

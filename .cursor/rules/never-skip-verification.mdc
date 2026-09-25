@@ -9,7 +9,7 @@ alwaysApply: true
 
 Verification includes:
 - Ticket Done-when / verification commands
-- Milestone "Manual verification" / demo scripts (e.g. `docs/milestones/m4-domain.md`, `docs/milestones/m5-demo-script.md`)
+- Milestone "Manual verification" / demo scripts (e.g. `docs/archive/milestones/m4-domain.md`, `docs/how-to/demo-checklist.md`)
 - `just test` / `just build` gates
 - Gold-sim QA / tap-through (UDID `7B30D45E-62FD-42E2-871A-787B19D38CCF`)
 - Browser verification for web UI

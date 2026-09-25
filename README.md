@@ -1,6 +1,8 @@
 # Monaco
 
-iOS app: friends pool USDC and buy tokenized US stocks on Solana. Product rules: [`docs/product.md`](docs/product.md). Milestone backlog: [`docs/index.md`](docs/index.md).
+iOS app: friends pool USDC and buy tokenized US stocks on Solana.
+
+This README covers cloning, configuring and running the repo. To understand the system, start with the [docs index](docs/index.md): [product rules](docs/product.md), then [architecture](docs/architecture.md) (components, outside services, wallets and money flows).
 
 Monaco lets you create a hedge fund with friends by pooling money to buy stocks together. Members propose and vote on trades, and approved trades execute for the group; as the pool profits, each member’s stake increases in value through NAV. You can even add an agent to your cabal to trade on your behalf. Built as a social trading app, Monaco turns investing into an easy group game anyone can join simply by depositing money.
 
@@ -35,12 +37,13 @@ Fixed OTP. Dashboard Login Methods must have **Email** and **SMS** on. Product p
 You can fund a group from **personal Phantom** (iOS app or browser extension). That is your wallet, not the [agent MCP wallet](#agent-qa-phantom-mcp). No Cursor or coding agent required.
 
 1. `just run`. Sign in (OTP above).
-2. Join or create a group → **Add money**. Copy the **Privy member** deposit address (deposit inbox). Not the group treasury.
-3. In Phantom, send **USDC on Solana mainnet**. Mint must be `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. USDC on Ethereum or Base is a different token; the poller will not see it.
-4. The backend poller detects USDC in the member wallet, **sweeps** it into the group treasury, then credits share units. Watch API logs or the group view. Do not treat USDC sitting only in the member wallet as credited pot — wait for sweep confirm.
-5. Member wallet and vault do not need SOL (relayer pays fees).
+2. Tap **Add money** and copy your deposit address (your Privy member wallet). Not the cabal treasury.
+3. In Phantom, send **USDC on Solana mainnet**. Mint must be `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`. USDC on Ethereum or Base is a different token and will not show up.
+4. The USDC shows as your **account balance**. It is not in any cabal yet.
+5. Open a cabal and **fund** it with an amount. The backend sweeps exactly that amount into the treasury, then credits share units once Solana confirms. Watch API logs or the cabal screen.
+6. Member wallet and treasury do not need SOL (the relayer pays fees).
 
-To pull leftover QA cash back out, use in-app **redeem** (Phantom cannot spend Privy wallets). Agent-driven deposit and refund: [Agent QA: Phantom MCP](#agent-qa-phantom-mcp).
+To get QA cash back out: **Cash out** of the cabal (USDC returns to the account balance), then withdraw it to your Phantom address (the **Cash out** button on the account balance card on Home or Profile). Phantom cannot spend Privy wallets. Agent-driven deposit and refund: [Agent QA: Phantom MCP](#agent-qa-phantom-mcp). The full flows are in [architecture.md](docs/architecture.md#flows).
 
 ## Commands
 
@@ -349,26 +352,26 @@ Product path does **not** need SOL on the member wallet or vault (relayer pays).
 Same deposit path from **personal Phantom** works without MCP; see [Deposits](#deposits).
 
 1. `just run` (API + sim). Sign in (SMS or email OTP).
-2. Join or create a group → Add money. Copy the **Privy member** address (deposit inbox). Not the group treasury.
-3. In Cursor: transfer **small** USDC on `solana:mainnet` to that address, mint above. MCP `transfer` / `transfer_tokens` simulates first; approve only if dest matches the copied inbox.
-4. Poller detects member USDC, **sweeps** to the group treasury, then credits shares. Watch API logs / group view. Do not treat member-wallet balance as credited pot.
+2. Tap **Add money** and copy the deposit address (the Privy member wallet). Not the cabal treasury.
+3. In Cursor: transfer **small** USDC on `solana:mainnet` to that address, mint above. MCP `transfer` / `transfer_tokens` simulates first; approve only if dest matches the copied address.
+4. The USDC shows as account balance. Fund a cabal from it; the backend sweeps that amount to the treasury and credits shares once confirmed.
 5. Explorer: [solscan.io](https://solscan.io) on the sweep signature.
 
 ### Sweep leftover back to the agent wallet (vault → Phantom)
 
-Phantom MCP cannot pull from Privy. Reverse of deposit is **in-app redeem** to the agent Solana address.
+Phantom MCP cannot pull from Privy. The reverse of deposit is **cash out**, then **withdraw** to the agent Solana address.
 
 1. Agent: print Solana address again. Confirm it is **your** MCP wallet.
-2. Group screen → redeem leftover equity (slider at max if you want the pot empty). Payout address = that agent Solana address.
-3. Wait for payout confirm. Agent: `wallet_balances` — USDC should be back. Treasury USDC for that test should be ~0 (dust from swaps possible).
-4. If USDC is still sitting **only** in the member inbox (sweep not confirmed): do not “withdraw with Phantom.” Wait for sweep, then redeem. Or stop funding that inbox.
-5. If the pot holds xStocks, redeem sells that slice to USDC first, then pays USDC. Tiny leftover stock/USDC dust can remain; keep QA notionals small.
+2. Cabal screen → **Cash out** the leftover stake (the maximum empties it). USDC lands in the account balance.
+3. Withdraw the account balance to that agent Solana address (the **Cash out** button on the balance card on Home or Profile).
+4. Wait for confirm. Agent: `wallet_balances` — USDC should be back. Treasury USDC for that test should be ~0 (dust from swaps possible).
+5. If the pot holds stock tokens, cash out sells that slice to USDC first. Tiny leftover dust can remain; keep QA notionals small.
 
 After a funding run, leftover **agent-test USDC belongs on the agent Phantom**, not in a group vault and not in a sim user’s inbox.
 
 ## Sweep USDC out of Privy wallets
 
-Product path is poller member-inbox → treasury, then **in-app redeem**. Use this script only when USDC is stuck in Privy (inbox or treasury) and you must send it to a known Solana address (usually the agent Phantom).
+Product path is fund (member wallet → treasury), then cash out and withdraw in the app. Use this script only when USDC is stuck in Privy (inbox or treasury) and you must send it to a known Solana address (usually the agent Phantom).
 
 **Danger.** Mainnet USDC. Wrong `DATABASE_URL` or `--all` against the prod Privy app can empty live pots and break share credits. Relayer still pays SOL fees.
 
@@ -426,7 +429,7 @@ Do not copy these skills into another machine's home path. Clone the repo; Curso
 
 Backend tests never touch the app database: they derive `{dbname}_test` from `DATABASE_URL`, create it if missing, and migrate it (`apps/backend/internal/postgres/testdb.go`). Without `just`: export `DATABASE_URL` and run `go test -race -p 1 ./...` from `apps/backend` (`-p 1` because the packages share that one test database).
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to `main`: a Go job (Postgres 16 service container, migrations on a clean database, `go vet`, `go test -race` for `apps/backend`, `packages/domain` and `agents/momentum-bot`) and a macOS job (`swift test` in `packages/mobile-core`). The iOS app target is not built in CI.
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`: a Go job (Postgres 16 service container, migrations on a clean database, `go vet`, `go test -race` for `apps/backend`, `packages/domain` and `agents/momentum-bot`), a macOS job (`swift test` in `packages/mobile-core`), a job for the `apps/web` landing page, and an iOS app build and test job on pull requests that touch the app. A nightly run adds UI tests and screenshots. Details: [`docs/how-to/overnight-qa.md`](docs/how-to/overnight-qa.md).
 
 ## Deploy
 
@@ -461,14 +464,15 @@ monaco/
 ├── .env.example
 ├── AGENTS.md
 ├── README.md                 this file
-├── apps/backend/             Go API
+├── apps/backend/             Go API and background pollers
+├── apps/mobile/              iOS app (SwiftUI)
+├── apps/web/                 waitlist landing page
+├── packages/domain/          Go money math (shares, votes, P&L)
+├── packages/mobile-core/     Swift logic tested on the host
 ├── agents/momentum-bot/      reference trading agent
-├── apps/mobile/              SwiftUI
-├── packages/mobile-core/     host Swift tests
-├── docs/product.md           product + architecture
-├── docs/index.md             milestone backlog
-├── docs/submission/          hackathon submission notes
-└── scripts/
+├── supabase/migrations/      database schema
+├── docs/                     start at docs/index.md
+└── scripts/                  dev scripts behind the just recipes
 ```
 
-More: TestFlight notes in [`apps/mobile/TestFlight.md`](apps/mobile/TestFlight.md). Sweep ops in [`docs/ops-sweep-wallets.md`](docs/ops-sweep-wallets.md).
+What each part does and how they connect: [`docs/architecture.md`](docs/architecture.md#repo-map).
