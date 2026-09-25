@@ -22,6 +22,8 @@ const (
 	defaultBaseURL     = "https://api.jup.ag/swap/v2"
 	defaultTimeout     = 15 * time.Second
 	defaultSlippageBps = 50
+	// PreIPOSlippageBps is the slippage tolerance for Tessera pre-IPO token swaps.
+	PreIPOSlippageBps = 100
 )
 
 // ErrNoRoute means Jupiter returned no routable path for the requested swap.
@@ -105,17 +107,36 @@ func NewHTTPClientWithBaseURL(baseURL string, httpClient *http.Client) *HTTPClie
 }
 
 type quoteResponse struct {
-	InputMint    string          `json:"inputMint"`
-	OutputMint   string          `json:"outputMint"`
-	InAmount     string          `json:"inAmount"`
-	OutAmount    string          `json:"outAmount"`
-	Transaction  string          `json:"transaction"`
-	RoutePlan    json.RawMessage `json:"routePlan"`
-	RequestID    string          `json:"requestId"`
-	Router       string          `json:"router"`
-	ErrorCode    float64         `json:"errorCode"`
-	ErrorMessage string          `json:"errorMessage"`
-	Error        string          `json:"error"`
+	InputMint      string          `json:"inputMint"`
+	OutputMint     string          `json:"outputMint"`
+	InAmount       string          `json:"inAmount"`
+	OutAmount      string          `json:"outAmount"`
+	Transaction    string          `json:"transaction"`
+	RoutePlan      json.RawMessage `json:"routePlan"`
+	RequestID      string          `json:"requestId"`
+	Router         string          `json:"router"`
+	PriceImpactPct jsonFloat       `json:"priceImpactPct"`
+	ErrorCode      float64         `json:"errorCode"`
+	ErrorMessage   string          `json:"errorMessage"`
+	Error          string          `json:"error"`
+}
+
+// PriceImpactPctFromOrderJSON reads Jupiter v2 order priceImpactPct when present.
+func PriceImpactPctFromOrderJSON(body []byte) (float64, bool) {
+	var raw quoteResponse
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return 0, false
+	}
+	return raw.PriceImpactPct.Float64(), true
+}
+
+// ProbeBuyOrderJSON requests a price-only buy order for dev tooling (no taker).
+func (c *HTTPClient) ProbeBuyOrderJSON(ctx context.Context, outputMint string, usdcAmount int64, slippageBps int) ([]byte, error) {
+	return c.fetchBuyOrder(ctx, buyOrderRequest{
+		OutputMint:  outputMint,
+		Amount:      usdcAmount,
+		SlippageBps: slippageBps,
+	}, "", "", "")
 }
 
 // QuoteBuy requests a USDC inputMint quote for an xStock outputMint.
@@ -209,10 +230,18 @@ func isRoutableBuyQuote(raw quoteResponse, requireTransaction bool) bool {
 }
 
 type buyOrderRequest struct {
-	InputMint  string
-	OutputMint string
-	Amount     int64
-	Taker      string
+	InputMint   string
+	OutputMint  string
+	Amount      int64
+	Taker       string
+	SlippageBps int
+}
+
+func slippageBpsForOrder(req buyOrderRequest) int {
+	if req.SlippageBps > 0 {
+		return req.SlippageBps
+	}
+	return defaultSlippageBps
 }
 
 func (c *HTTPClient) fetchBuyOrder(ctx context.Context, req buyOrderRequest, groupID, userID, symbol string) ([]byte, error) {
@@ -232,7 +261,7 @@ func (c *HTTPClient) fetchBuyOrder(ctx context.Context, req buyOrderRequest, gro
 	query.Set("outputMint", req.OutputMint)
 	query.Set("amount", strconv.FormatInt(req.Amount, 10))
 	query.Set("swapMode", "ExactIn")
-	query.Set("slippageBps", strconv.Itoa(defaultSlippageBps))
+	query.Set("slippageBps", strconv.Itoa(slippageBpsForOrder(req)))
 	taker := strings.TrimSpace(req.Taker)
 	if taker != "" {
 		query.Set("taker", taker)

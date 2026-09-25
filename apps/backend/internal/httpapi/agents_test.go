@@ -13,6 +13,7 @@ import (
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
+	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 	"github.com/monaco/monaco/packages/domain"
 )
@@ -92,13 +93,17 @@ type agentIntentTestApp struct {
 	Handlers   *AgentHandlers
 	Governance *app.GovernanceService
 	Jupiter    jupiter.Client
+	Catalog    xstocks.CatalogSearcher
+	Marks      pyth.AssetPriceClient
 	GroupID    string
 	CreatorID  string
 	Key        string
 }
 
+const agentTestBaseURL = "https://api.monaco.test"
+
 // integrationAgentIntentApp is a cabal with $100 in its treasury and an active agent that
-// was voted a $1 allocation, behind the real intent handler and the request id middleware.
+// was voted a $1 allocation, behind the real agent handlers and the request id middleware.
 func integrationAgentIntentApp(t *testing.T) agentIntentTestApp {
 	t.Helper()
 
@@ -107,12 +112,24 @@ func integrationAgentIntentApp(t *testing.T) agentIntentTestApp {
 	key := installGuardTestAgent(t, groupHandlers.Governance, string(token), groupID, creatorID)
 	xstocks.RegisterSolanaMint(resolver, "AAPLx", jupiter.AAPLxMint)
 
-	symbols := app.NewSymbolResolver(xstocks.NewFakeCatalogSearcher())
+	catalog := xstocks.NewFakeCatalogSearcher()
+	marks := pyth.NewFakeAssetPriceClient()
+	symbols := app.NewSymbolResolver(catalog)
 	swap := app.NewSwapService(quoteHandlers.Store, quoteHandlers.Buy, jupiterClient, privyClient, app.NewFakePrivyTreasurySigner(), "", symbols)
+	docs, err := app.NewAgentDocs(agentTestBaseURL)
+	if err != nil {
+		t.Fatalf("agent docs: %v", err)
+	}
 	return agentIntentTestApp{
-		Handlers:   &AgentHandlers{Intents: app.NewAgentIntentService(quoteHandlers.Store, swap, symbols)},
+		Handlers: &AgentHandlers{
+			Store:   quoteHandlers.Store,
+			Intents: app.NewAgentIntentService(quoteHandlers.Store, swap, symbols).WithMarketData(catalog, marks),
+			Docs:    docs,
+		},
 		Governance: groupHandlers.Governance,
 		Jupiter:    jupiterClient,
+		Catalog:    catalog,
+		Marks:      marks,
 		GroupID:    groupID,
 		CreatorID:  creatorID,
 		Key:        key,

@@ -3,44 +3,37 @@ import MonacoCore
 
 /// Strips xStocks catalog branding from user-facing asset names.
 enum AssetDisplayName {
-    static func format(catalogName: String) -> String {
-        var name = catalogName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return name }
-
-        let suffixes = [" xStock", " xStocks", " xstock", " xstocks"]
-        for suffix in suffixes {
-            if name.lowercased().hasSuffix(suffix.lowercased()) {
-                name = String(name.dropLast(suffix.count))
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                break
-            }
-        }
-        return name
+    static func format(catalogName: String, kind: AssetKind = .stock) -> String {
+        CatalogAssetNameFormatter.format(catalogName, kind: kind)
     }
 }
 
 extension CatalogAssetDTO {
     var displayName: String {
-        AssetDisplayName.format(catalogName: name)
+        AssetCatalogDisplayName.format(catalogName: name, symbol: symbol, kind: resolvedKind)
+    }
+
+    var displayTicker: String {
+        AssetSymbolFormatter.display(symbol, kind: resolvedKind)
     }
 }
 
 extension MarketAssetDTO {
     var displayName: String {
-        AssetDisplayName.format(catalogName: name)
+        AssetCatalogDisplayName.format(catalogName: name, symbol: symbol, kind: resolvedKind)
     }
 
     var displayTicker: String {
-        AssetSymbolFormatter.format(symbol)
+        AssetSymbolFormatter.display(symbol, kind: resolvedKind)
     }
 }
 
 extension AssetDetailDTO {
     var displayName: String {
-        AssetDisplayName.format(catalogName: name)
+        AssetCatalogDisplayName.format(catalogName: name, symbol: symbol, kind: resolvedKind)
     }
 
     var displayTicker: String {
-        AssetSymbolFormatter.format(symbol)
+        AssetSymbolFormatter.display(symbol, kind: resolvedKind)
     }
 }

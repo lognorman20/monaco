@@ -399,6 +399,17 @@ func logSwapSellSuccess(groupID, userID, symbol, txID string, created bool) {
 	)
 }
 
+func logSwapSellFill(groupID, userID, symbol string, sentIn, quotedIn, fillInput int64) {
+	slog.Info("swap sell fill",
+		"group_id", groupID,
+		"user_id", userID,
+		"symbol", symbol,
+		"sent_in", sentIn,
+		"quoted_in", quotedIn,
+		"fill_input", fillInput,
+	)
+}
+
 func logSwapBranchError(msg string, err error, attrs ...any) {
 	args := append([]any{"err", err}, attrs...)
 	slog.Error(msg, args...)

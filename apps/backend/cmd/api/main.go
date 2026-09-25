@@ -15,18 +15,22 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/catalog"
 	"github.com/monaco/monaco/apps/backend/internal/config"
 	"github.com/monaco/monaco/apps/backend/internal/faker"
 	"github.com/monaco/monaco/apps/backend/internal/flash"
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
+	"github.com/monaco/monaco/apps/backend/internal/prestocks"
 	"github.com/monaco/monaco/apps/backend/internal/pricechain"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/solana/balance"
+	"github.com/monaco/monaco/apps/backend/internal/solana/mintinfo"
 	"github.com/monaco/monaco/apps/backend/internal/storage"
 	"github.com/monaco/monaco/apps/backend/internal/swapprovider"
+	"github.com/monaco/monaco/apps/backend/internal/tessera"
 	"github.com/monaco/monaco/apps/backend/internal/worker"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
@@ -100,6 +104,11 @@ var apiRoutes = []string{
 	"GET /v1/proposals/{id}",
 	"POST /v1/proposals/{id}/votes",
 	"POST /v1/groups/{id}/agents/intents",
+	"GET /v1/agent",
+	"GET /v1/agent/assets",
+	"POST /v1/agent/intents",
+	"GET /v1/agent/intents/{intentId}",
+	"GET /v1/agent/skill.md",
 	"GET /v1/proposals/{id}/comments",
 	"POST /v1/proposals/{id}/comments",
 }
@@ -195,12 +204,25 @@ func boot(ctx context.Context) (*bootResult, error) {
 	var pythClient pyth.Client = priceChain
 	catalogSearcher := xstocks.NewHTTPCatalogSearcher()
 	jupiterClient := jupiter.NewHTTPClientWithPayer(relayer.PublicKey())
-	catalogRoutability := xstocks.NewCachedRoutabilityProber(
-		app.NewJupiterCatalogRoutabilityProber(jupiterClient),
-		xstocks.NewRoutabilityCache(xstocks.DefaultRoutabilityCacheTTL),
-	)
-	catalogSearcher.SetRoutabilityProber(catalogRoutability)
-	symbols := app.NewSymbolResolver(catalogSearcher)
+	mintReader := mintinfo.NewHTTPReader(cfg.SolanaRPCEndpoint())
+	var catalogSources []catalog.TaggedSource
+	if cfg.TesseraEnabled {
+		catalogSources = append(catalogSources, catalog.TaggedSource{
+			Source:   tessera.NewHTTPCatalogWithClient(cfg.TesseraAPIBaseURL, nil),
+			SourceID: xstocks.AssetSourceTessera,
+		})
+	}
+	if cfg.PreStocksEnabled {
+		catalogSources = append(catalogSources, catalog.TaggedSource{
+			Source:   prestocks.NewHTTPCatalogWithClient(cfg.PreStocksAPIBaseURL, nil),
+			SourceID: xstocks.AssetSourcePreStocks,
+		})
+	}
+	// Nil routability prober: lists must not Jupiter-quote every symbol.
+	catalogComposite := catalog.NewCompositeWithSources(catalogSearcher, catalogSources, nil, mintReader, jupiterPriceClient)
+	slog.Info("catalog sources ready", "xstocks", true, "tessera", cfg.TesseraEnabled, "prestocks", cfg.PreStocksEnabled)
+	symbols := app.NewSymbolResolver(catalogComposite)
+	symbols.SetMintInfo(mintReader)
 	deposits := app.NewDepositService(store, privyClient, pythClient, symbols)
 	platformWithdrawals := app.NewPlatformWithdrawService(store, privyClient, deposits, solanaRPC, relayer.PrivateKey())
 	sessions := app.NewSessionService(store, privyClient).
@@ -225,10 +247,15 @@ func boot(ctx context.Context) (*bootResult, error) {
 		NotifySweepPoll: sweepWake.Notify,
 	}
 	platformWithdrawHandlers := &httpapi.PlatformWithdrawHandlers{Withdrawals: platformWithdrawals}
-	buy := app.NewBuyService(jupiterClient, xstocksResolver)
+	mintResolver := catalog.NewResolverWithCatalog(xstocksResolver, catalogComposite)
+	buy := app.NewBuyService(jupiterClient, mintResolver)
+	buy.SetMintCatalog(catalogComposite)
+	buy.SetBuyVariantPicker(catalogComposite)
+	buy.SetMintInfo(mintReader)
 	signer := app.NewPrivyTreasurySigner(privyClient)
 	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, relayer.PrivateKey(), symbols)
 	swap.SetPriceClient(pythClient)
+	swap.SetMintInfo(mintReader)
 	if cfg.SwapProvider == swapprovider.NameFlash {
 		swap.SetSwapProvider(flash.NewSwapProvider(
 			flash.NewHTTPClient(cfg.FlashAPIKey),
@@ -261,21 +288,22 @@ func boot(ctx context.Context) (*bootResult, error) {
 	transactionHandlers := &httpapi.TransactionHandlers{
 		Store:   store,
 		Privy:   privyClient,
-		XStocks: xstocksResolver,
+		XStocks: mintResolver,
 		Swap:    swap,
 		Symbols: symbols,
+		Catalog: catalogComposite,
 	}
 	agentKeyGuard := httpapi.NewAgentKeyGuard(trustProxyHeaders())
 	catalogHandlers := &httpapi.CatalogHandlers{
 		Store:    store,
 		Privy:    privyClient,
-		Catalog:  catalogSearcher,
+		Catalog:  catalogComposite,
 		KeyGuard: agentKeyGuard,
 	}
 	assetsHandlers := &httpapi.AssetsHandlers{
 		Store:   store,
 		Privy:   privyClient,
-		Catalog: catalogSearcher,
+		Catalog: catalogComposite,
 		Pyth:    priceChain,
 		Jupiter: jupiterClient,
 		Price:   jupiterPriceClient,
@@ -297,8 +325,19 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Privy:      privyClient,
 		Governance: governance,
 	}
-	agentIntents := app.NewAgentIntentService(store, swap, symbols)
-	agentHandlers := &httpapi.AgentHandlers{Intents: agentIntents, KeyGuard: agentKeyGuard}
+	agentDocs, err := app.NewAgentDocs(cfg.PublicAPIBaseURL)
+	if err != nil {
+		return nil, err
+	}
+	groupHandlers.AgentDocs = agentDocs
+	agentIntents := app.NewAgentIntentService(store, swap, symbols).WithMarketData(catalogSearcher, priceChain)
+	agentHandlers := &httpapi.AgentHandlers{
+		Store:    store,
+		Intents:  agentIntents,
+		KeyGuard: agentKeyGuard,
+		Limits:   httpapi.NewAgentRateLimits(time.Now),
+		Docs:     agentDocs,
+	}
 
 	addr := "127.0.0.1:8080"
 	if v := os.Getenv("API_ADDR"); v != "" {
@@ -378,6 +417,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/proposals/{id}", proposalHandlers.GetProposalDetailHandler)
 	mux.HandleFunc("POST /v1/proposals/{id}/votes", proposalHandlers.CastVoteHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/agents/intents", agentHandlers.SubmitAgentIntentHandler)
+	mux.HandleFunc("GET /v1/agent", agentHandlers.AgentAccountHandler)
+	mux.HandleFunc("GET /v1/agent/assets", agentHandlers.AgentAssetsHandler)
+	mux.HandleFunc("POST /v1/agent/intents", agentHandlers.SubmitKeyAgentIntentHandler)
+	mux.HandleFunc("GET /v1/agent/intents/{intentId}", agentHandlers.GetAgentIntentHandler)
+	mux.HandleFunc("GET /v1/agent/skill.md", agentHandlers.AgentSkillHandler)
 	mux.HandleFunc("GET /v1/proposals/{id}/comments", proposalHandlers.ListProposalCommentsHandler)
 	mux.HandleFunc("POST /v1/proposals/{id}/comments", proposalHandlers.CreateProposalCommentHandler)
 	routes := registerDevFakerRoute(mux, fakerHandlers, apiRoutes)

@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/app"
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
 // GroupHandlers serves group HTTP routes.
@@ -20,7 +22,11 @@ type GroupHandlers struct {
 	Redeem     *app.RedeemService
 	// Market decorates holdings rows with the same day change and day series the
 	// Stocks tab shows. Nil leaves those fields out; the pot itself is unaffected.
-	Market *MarketRowSource
+	Market  *MarketRowSource
+	Catalog xstocks.CatalogSearcher
+	Price   jupiter.PriceClient
+	// AgentDocs writes the agent connect text members copy. Nil leaves it out.
+	AgentDocs *app.AgentDocs
 }
 
 type joinPolicyRequest struct {
@@ -122,6 +128,29 @@ func (h *GroupHandlers) CreateGroupHandler(w http.ResponseWriter, r *http.Reques
 	logJSONOK(ctx, log, "group_created", "group_id", result.GroupID)
 }
 
+// foldUUIDHomoglyphs maps lookalike letters back to hex. A phone keyboard can
+// turn the "a" in a cabal id into Cyrillic "а", which Postgres then rejects.
+func foldUUIDHomoglyphs(id string) string {
+	return strings.NewReplacer(
+		"а", "a", "А", "A",
+		"е", "e", "Е", "E",
+		"о", "o", "О", "O",
+		"с", "c", "С", "C",
+		"р", "p", "Р", "P",
+		"х", "x", "Х", "X",
+		"у", "y", "У", "Y",
+		"і", "i", "І", "I",
+		"ѕ", "s", "Ѕ", "S",
+		"һ", "h", "Һ", "H",
+		"ԁ", "d", "Ԁ", "D",
+		"В", "B",
+		"К", "K",
+		"М", "M",
+		"Н", "H",
+		"Т", "T",
+	).Replace(strings.TrimSpace(id))
+}
+
 // JoinGroupHandler handles POST /v1/groups/{id}/join.
 func (h *GroupHandlers) JoinGroupHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -133,8 +162,8 @@ func (h *GroupHandlers) JoinGroupHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	groupID := r.PathValue("id")
-	if strings.TrimSpace(groupID) == "" {
+	groupID := foldUUIDHomoglyphs(r.PathValue("id"))
+	if groupID == "" {
 		logJSONError(ctx, log, "missing_group_id", w, http.StatusNotFound, "group not found")
 		return
 	}
@@ -406,10 +435,16 @@ type groupViewPotRowResponse struct {
 	// equity; Change24h comes from Jupiter, which prices the xStock token. They
 	// diverge, and a row that drew one and tinted it by the other was asserting
 	// they were the same thing.
-	SparkBasis       string `json:"sparkBasis,omitempty"`
-	SparkBasisSymbol string `json:"sparkBasisSymbol,omitempty"`
-	ChangeBasis      string `json:"changeBasis,omitempty"`
-	LogoURL          string `json:"logoUrl,omitempty"`
+	SparkBasis         string `json:"sparkBasis,omitempty"`
+	SparkBasisSymbol   string `json:"sparkBasisSymbol,omitempty"`
+	ChangeBasis        string `json:"changeBasis,omitempty"`
+	LogoURL            string `json:"logoUrl,omitempty"`
+	TokenDecimals      int    `json:"tokenDecimals,omitempty"`
+	AssetKind          string `json:"assetKind,omitempty"`
+	PremiumBps         *int   `json:"premiumBps,omitempty"`
+	UiAmountMultiplier string `json:"uiAmountMultiplier,omitempty"`
+	Issuer             string `json:"issuer,omitempty"`
+	IssuerName         string `json:"issuerName,omitempty"`
 }
 
 type groupViewMemberSliceResponse struct {
@@ -435,6 +470,8 @@ type groupViewAgentResponse struct {
 	AgentDisplayName     string `json:"agentDisplayName"`
 	AllocationUsdcMicros string `json:"allocationUsdcMicros"`
 	APIKey               string `json:"apiKey,omitempty"`
+	// ConnectText is set only alongside APIKey: the block a member pastes into an agent.
+	ConnectText string `json:"connectText,omitempty"`
 }
 
 type groupViewResponse struct {
@@ -507,6 +544,9 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 					AllocationUsdcMicros: strconv.FormatInt(agentView.AllocationUsdcMicros, 10),
 					APIKey:               agentView.APIKey,
 				}
+				if agentView.APIKey != "" && h.AgentDocs != nil {
+					agentResp.ConnectText = h.AgentDocs.ConnectText(result.Name, agentView.AgentDisplayName, agentView.APIKey)
+				}
 			}
 		}
 	}
@@ -530,7 +570,7 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 		PictureURL: optionalString(result.PictureURL),
 		IsCreator:  result.IsCreator,
 		Proposals:  []any{},
-		Agent:     agentResp,
+		Agent:      agentResp,
 	})
 	logJSONOK(ctx, log, "ok", "group_id", groupID)
 }
@@ -547,6 +587,9 @@ type groupActivityItemResponse struct {
 	TxSignature        string `json:"txSignature,omitempty"`
 	InitiatedBy        string `json:"initiatedBy,omitempty"`
 	AgentDisplayName   string `json:"agentDisplayName,omitempty"`
+	TokenDecimals      int    `json:"tokenDecimals,omitempty"`
+	AssetKind          string `json:"assetKind,omitempty"`
+	UiAmountMultiplier string `json:"uiAmountMultiplier,omitempty"`
 }
 
 type groupActivityResponse struct {
@@ -602,6 +645,13 @@ func (h *GroupHandlers) ListGroupActivityHandler(w http.ResponseWriter, r *http.
 		}
 		if item.ProceedsUsdcMicros > 0 {
 			resp.ProceedsUsdcMicros = strconv.FormatInt(item.ProceedsUsdcMicros, 10)
+		}
+		if item.Symbol != "" && item.Symbol != "USDC" {
+			resp.AssetKind = assetKindForSymbol(ctx, h.Catalog, item.Symbol)
+			if asset, ok := lookupCatalogAssetBySymbol(ctx, h.Catalog, item.Symbol); ok {
+				resp.TokenDecimals = asset.Decimals
+				resp.UiAmountMultiplier = uiAmountMultiplierForAsset(asset)
+			}
 		}
 		respItems = append(respItems, resp)
 	}

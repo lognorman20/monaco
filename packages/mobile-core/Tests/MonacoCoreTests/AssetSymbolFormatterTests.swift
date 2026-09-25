@@ -12,6 +12,10 @@ final class AssetSymbolFormatterTests: XCTestCase {
         XCTAssertEqual(AssetSymbolFormatter.format(mint), "Unknown stock")
     }
 
+    func testAssetSymbolFormatter_stock_stripsAAPLx() {
+        XCTAssertEqual(AssetSymbolFormatter.display("AAPLx"), "AAPL")
+    }
+
     func testDisplay_stripsXStocksSuffix() {
         XCTAssertEqual(AssetSymbolFormatter.display("AAPLx"), "AAPL")
         XCTAssertEqual(AssetSymbolFormatter.display("NVDAx"), "NVDA")

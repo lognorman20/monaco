@@ -171,10 +171,12 @@ struct StockMark: View {
     private let size: CGFloat
     private let logoURL: URL?
 
-    init(symbol: String, size: CGFloat = 44, logoURL: URL? = nil) {
+    init(symbol: String, displayName: String? = nil, assetKind: AssetKind = .stock, size: CGFloat = 44, logoURL: URL? = nil) {
         let ticker = AssetSymbolFormatter.display(symbol)
         if ticker.uppercased() == "USDC" {
             content = .symbol("dollarsign")
+        } else if assetKind == .preIpo, let displayName, let first = displayName.first {
+            content = .letter(String(first).uppercased())
         } else {
             content = .letter(StockMark.tileText(forTicker: ticker))
         }

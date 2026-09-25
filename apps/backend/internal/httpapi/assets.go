@@ -96,10 +96,9 @@ type marketAssetResponse struct {
 	// for the same reason.
 	ChangeBasis       string `json:"changeBasis,omitempty"`
 	ChangeBasisSymbol string `json:"changeBasisSymbol,omitempty"`
-	// LogoURL is the company's logo, as the xStocks catalogue publishes it. Empty
-	// when the catalogue has none, in which case the app falls back to its ticker
-	// tile — the resting state of the mark rather than a placeholder.
-	LogoURL string `json:"logoUrl,omitempty"`
+	// assetCatalogJSONFields.LogoURL is the company's logo. Empty when the catalogue
+	// has none, in which case the app falls back to its ticker tile.
+	assetCatalogJSONFields
 }
 
 type listAssetsResponse struct {
@@ -189,6 +188,8 @@ type assetDetailResponse struct {
 	Market        *marketStatusResponse `json:"market,omitempty"`
 	Stats         *assetStatsResponse   `json:"stats,omitempty"`
 	StockVsToken  *stockVsTokenResponse `json:"stockVsToken,omitempty"`
+	assetCatalogJSONFields
+	Variants []assetVariantResponse `json:"variants,omitempty"`
 }
 
 type assetChartResponse struct {
@@ -336,17 +337,23 @@ func (h *AssetsHandlers) GetAssetChartHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if _, found, err := h.lookupAsset(ctx, symbol); err != nil {
+	asset, found, err := h.lookupAsset(ctx, symbol)
+	if err != nil {
 		logJSONError(ctx, log, "asset_lookup_failed", w, http.StatusInternalServerError, "internal server error", "symbol", symbol, "err", err.Error())
 		return
-	} else if !found {
+	}
+	if !found {
 		logJSONError(ctx, log, "asset_not_found", w, http.StatusNotFound, "asset not found", "symbol", symbol)
 		return
 	}
 
 	var series pyth.AssetChartSeries
 	if h.Pyth != nil {
-		series, err = h.Pyth.ChartSeries(ctx, symbol, chartRange)
+		series, err = chartSeries(ctx, h.Pyth, pyth.ChartQuery{
+			Symbol: symbol,
+			Kind:   string(asset.Normalize().Kind),
+			Range:  chartRange,
+		})
 		if err != nil {
 			logJSONError(ctx, log, "chart_failed", w, http.StatusInternalServerError, "internal server error", "symbol", symbol, "err", err.Error())
 			return
@@ -408,8 +415,29 @@ func (h *AssetsHandlers) marketRows() *MarketRowSource {
 	return &MarketRowSource{Catalog: h.Catalog, Pyth: h.Pyth, Price: h.Price}
 }
 
+func chartSeries(ctx context.Context, client pyth.AssetPriceClient, q pyth.ChartQuery) (pyth.AssetChartSeries, error) {
+	if querier, ok := client.(interface {
+		ChartSeriesQuery(context.Context, pyth.ChartQuery) (pyth.AssetChartSeries, error)
+	}); ok {
+		return querier.ChartSeriesQuery(ctx, q)
+	}
+	return client.ChartSeries(ctx, q.Symbol, q.Range)
+}
+
 func (h *AssetsHandlers) lookupAsset(ctx context.Context, symbol string) (xstocks.CatalogAsset, bool, error) {
-	return h.marketRows().LookupAsset(ctx, symbol)
+	if asset, ok, err := h.marketRows().LookupAsset(ctx, symbol); err != nil || ok {
+		return asset, ok, err
+	}
+	page, err := h.Catalog.Search(ctx, symbol, 25, 0)
+	if err != nil {
+		return xstocks.CatalogAsset{}, false, err
+	}
+	for _, item := range page.Assets {
+		if assetMatchesLookup(item, symbol) {
+			return item, true, nil
+		}
+	}
+	return xstocks.CatalogAsset{}, false, nil
 }
 
 // enrichAssets marks every asset with one batched Jupiter Price API call instead
@@ -433,8 +461,8 @@ func marketAssetResponseFor(
 		Name:       asset.Name,
 		SolanaMint: asset.SolanaMint,
 		Routable:   asset.Routable,
-		LogoURL:    asset.LogoURL,
 	}
+	resp.LogoURL = asset.LogoURL
 	if price, ok := prices[asset.SolanaMint]; ok && price.PriceUsdcMicros > 0 {
 		resp.PriceUsdcMicros = &price.PriceUsdcMicros
 		resp.Change24h = price.Change24h
@@ -536,6 +564,17 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset xstocks.Cat
 		}
 	}
 	detail.Stats = assetStatsResponseFor(asset.Symbol, day, year, detail.Liquidity.SpreadBps, confMicros)
+	n := asset.Normalize()
+	var pricePtr *jupiter.TokenPrice
+	if price, ok := prices[n.SolanaMint]; ok {
+		priceCopy := price
+		pricePtr = &priceCopy
+	}
+	detail.assetCatalogJSONFields = catalogJSONFields(n, pricePtr, variantCountFor(ctx, h.Catalog, n))
+	detail.Variants = variantResponses(ctx, h.Catalog, h.Price, n)
+	if n.Kind == xstocks.AssetKindPreIPO {
+		detail.AfterHours = false
+	}
 	return detail
 }
 

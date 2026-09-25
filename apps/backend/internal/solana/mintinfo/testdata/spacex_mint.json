@@ -1,0 +1,53 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "context": { "slot": 1 },
+    "value": {
+      "executable": false,
+      "lamports": 1000000,
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "rentEpoch": 0,
+      "data": {
+        "program": "spl-token-2022",
+        "parsed": {
+          "type": "mint",
+          "info": {
+            "decimals": 9,
+            "extensions": [
+              {
+                "extension": "transferFeeConfig",
+                "state": {
+                  "olderTransferFee": {
+                    "epoch": 0,
+                    "transferFeeBasisPoints": 50
+                  },
+                  "newerTransferFee": {
+                    "epoch": 1039,
+                    "transferFeeBasisPoints": 100
+                  }
+                }
+              },
+              {
+                "extension": "scaledUiAmountConfig",
+                "state": {
+                  "multiplier": "1",
+                  "newMultiplier": "5",
+                  "newMultiplierEffectiveTimestamp": 1781049600
+                }
+              },
+              {
+                "extension": "pausableConfig",
+                "state": { "paused": false }
+              },
+              {
+                "extension": "permanentDelegate",
+                "state": { "delegate": "11111111111111111111111111111111" }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "id": 1
+}

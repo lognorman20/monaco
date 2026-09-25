@@ -11,6 +11,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/solana/mintinfo"
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 	"github.com/monaco/monaco/packages/domain"
 )
@@ -504,7 +505,8 @@ func (r *RedeemService) sellRedeemShortfall(ctx context.Context, view *RedeemJob
 	shortfall := owed - cash
 
 	for _, holding := range holdings {
-		sellAmount := jupiter.RedeemShortfallSellAmount(holding.Amount, shortfall, stockValue)
+		bufferBps := redeemSellSlippageBufferBps(ctx, r.redeemSymbols(), r.swapMintInfo(), holding.Mint)
+		sellAmount := jupiter.RedeemShortfallSellAmount(holding.Amount, shortfall, stockValue, bufferBps)
 		if sellAmount <= 0 {
 			continue
 		}
@@ -927,6 +929,13 @@ func (r *RedeemService) redeemSymbols() *SymbolResolver {
 		return nil
 	}
 	return r.swap.symbols
+}
+
+func (r *RedeemService) swapMintInfo() mintinfo.Reader {
+	if r.swap == nil {
+		return nil
+	}
+	return r.swap.mintinfo
 }
 
 // reconcileActiveRedeemBeforeWithdraw clears stuck debited jobs or resumes in-flight payout work.

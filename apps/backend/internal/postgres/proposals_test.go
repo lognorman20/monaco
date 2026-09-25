@@ -86,12 +86,24 @@ func TestInsertProposalTx_roundTripsBuyAndSellAmounts(t *testing.T) {
 	if gotBuy.Kind != domain.ProposalKindBuy || gotBuy.UsdcMicros != 2_000_000 || gotBuy.TokenAmount != 0 {
 		t.Fatalf("buy row = %+v", gotBuy)
 	}
+	if gotBuy.TokenDecimals != 8 {
+		t.Fatalf("buy token_decimals = %d, want 8", gotBuy.TokenDecimals)
+	}
+	if gotBuy.PremiumBps != nil {
+		t.Fatalf("buy premium_bps = %v, want nil", gotBuy.PremiumBps)
+	}
 	gotSell, ok, err := store.GetProposalByID(ctx, sell.ID)
 	if err != nil || !ok {
 		t.Fatalf("GetProposalByID sell: %v ok=%v", err, ok)
 	}
 	if gotSell.Kind != domain.ProposalKindSell || gotSell.TokenAmount != 50_000_000 || gotSell.UsdcMicros != 0 {
 		t.Fatalf("sell row = %+v", gotSell)
+	}
+	if gotSell.TokenDecimals != 8 {
+		t.Fatalf("sell token_decimals = %d, want 8", gotSell.TokenDecimals)
+	}
+	if gotSell.PremiumBps != nil {
+		t.Fatalf("sell premium_bps = %v, want nil", gotSell.PremiumBps)
 	}
 }
 

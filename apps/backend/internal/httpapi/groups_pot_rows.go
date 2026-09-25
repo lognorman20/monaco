@@ -34,15 +34,7 @@ func (h *GroupHandlers) potRowResponses(ctx context.Context, rows []app.GroupVie
 
 	out := make([]groupViewPotRowResponse, 0, len(rows))
 	for _, row := range rows {
-		resp := groupViewPotRowResponse{
-			Symbol:      row.Symbol,
-			Units:       row.Units,
-			MarkUsd:     row.MarkUsd,
-			ValueUsd:    row.ValueUsd,
-			DollarPnL:   row.DollarPnL,
-			AfterHours:  row.AfterHours,
-			TokenAmount: row.TokenAmount,
-		}
+		resp := h.enrichPotRow(ctx, row)
 		if decorated, ok := market[strings.ToUpper(strings.TrimSpace(row.Symbol))]; ok {
 			resp.Change24h = decorated.Change24h
 			resp.Spark = decorated.Spark

@@ -56,7 +56,7 @@ With `--source`, only the listed wallets run through the per-wallet pipeline. Un
 Per wallet:
 
 1. Skip `RELAYER_PRIVATE_KEY` fee payer (never drain).
-2. For each non-USDC SPL balance: Jupiter sell → USDC (relayer pays SOL when treasury holds 0 SOL).
+2. For each non-USDC SPL balance: resolve decimals from the catalog (else Jupiter Price, else 8), skip a balance worth under $0.50 (`skip dust`), then Jupiter sell → USDC. Pre-IPO sells use 100 bps slippage. The relayer pays SOL when the treasury holds 0 SOL.
 3. Sweep all USDC to `--destination`.
 
 Skips: zero USDC after sells, source address equal to destination, relayer. Native SOL is not swept. Amounts are token atomics (USDC micro-units: `1_000_000` = $1).

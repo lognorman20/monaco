@@ -17,6 +17,8 @@ type GroupActivityItem struct {
 	Kind               string
 	Status             string
 	Symbol             string
+	Issuer             string
+	IssuerName         string
 	AmountMicros       int64
 	TokenAmount        int64
 	ProceedsUsdcMicros int64
@@ -132,8 +134,18 @@ func (h *HomeService) activityItemFromTransaction(ctx context.Context, tx postgr
 	switch tx.Action {
 	case postgres.TransactionActionBuy:
 		item.Symbol = h.symbolForMint(ctx, tx.OutputMint)
+		if h.symbols != nil {
+			fields := h.symbols.IssuerFieldsForMint(ctx, tx.OutputMint)
+			item.Issuer = fields.Issuer
+			item.IssuerName = fields.IssuerName
+		}
 	case postgres.TransactionActionSell:
 		item.Symbol = h.symbolForMint(ctx, tx.InputMint)
+		if h.symbols != nil {
+			fields := h.symbols.IssuerFieldsForMint(ctx, tx.InputMint)
+			item.Issuer = fields.Issuer
+			item.IssuerName = fields.IssuerName
+		}
 		item.TokenAmount = tx.Amount
 		item.ProceedsUsdcMicros = usdcMicros
 	}

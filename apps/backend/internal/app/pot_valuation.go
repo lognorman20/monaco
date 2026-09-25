@@ -177,12 +177,16 @@ func marksForLedgerHoldings(groupID string, ledger []pyth.CostBasis, marked []py
 	out := make([]pyth.MarkedHolding, 0, len(ledger))
 	for _, holding := range ledger {
 		mark, found := markForHolding(holding, marked)
-		live := found && mark.MarkUsdc > 0 && mark.Source != pyth.MarkSourceCostBasis
+		_, multResolved := pyth.EffectiveUiMultiplier(holding.UiMultiplier, string(holding.Kind))
+		live := found && mark.MarkUsdc > 0 && mark.Source != pyth.MarkSourceCostBasis && multResolved
 		if !live && policy == potMarksLiveOnly {
+			if !multResolved {
+				return nil, fmt.Errorf("%w: %s multiplier unresolved (group %s)", ErrPotMarkUnavailable, holding.Symbol, groupID)
+			}
 			return nil, fmt.Errorf("%w: %s has no live price (group %s)", ErrPotMarkUnavailable, holding.Symbol, groupID)
 		}
 		if !found || mark.MarkUsdc <= 0 {
-			costMark, err := costBasisMarkPerUnitMicros(holding.Price, holding.Amount)
+			costMark, err := pyth.CostBasisMarkPerUnitMicros(holding.Price, holding.Amount, holding.Decimals, holding.UiMultiplier, holding.Kind)
 			if err != nil {
 				return nil, err
 			}
@@ -192,6 +196,9 @@ func marksForLedgerHoldings(groupID string, ledger []pyth.CostBasis, marked []py
 		mark.Mint = holding.Mint
 		mark.Units = holding.Units
 		mark.CostBasis = holding.Price
+		mark.Decimals = holding.Decimals
+		mark.Kind = holding.Kind
+		mark.UiMultiplier = holding.UiMultiplier
 		out = append(out, mark)
 	}
 	return out, nil

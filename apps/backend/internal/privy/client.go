@@ -28,6 +28,8 @@ type Client interface {
 	PrepareUSDCPayout(ctx context.Context, req PayUSDCRequest) (PreparedPayout, error)
 	BroadcastUSDCPayout(ctx context.Context, payout PreparedPayout) error
 	USDCPayoutStatus(ctx context.Context, payout PreparedPayout) (PayoutStatus, error)
+	// TokenBalanceDelta returns the net token balance change for owner and mint in signature.
+	TokenBalanceDelta(ctx context.Context, signature, owner, mint string) (int64, error)
 }
 
 // SweepClient is the sweep poller's view of Privy. Sweeps are split in two so the poller can

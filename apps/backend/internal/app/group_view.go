@@ -26,6 +26,9 @@ type GroupViewPotRow struct {
 	MarkUsdcMicros      int64
 	ValueUsdcMicros     int64
 	DollarPnLUsdcMicros int64
+	UiAmountMultiplier  string
+	Issuer              string
+	IssuerName          string
 }
 
 // GroupViewMemberSlice is the authenticated viewer's slice in a group.

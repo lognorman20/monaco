@@ -15,6 +15,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -39,6 +40,7 @@ type Config struct {
 	// FailureCooldown keeps a source closed after an outage-style failure.
 	FailureCooldown time.Duration
 	// MinLiquidityUsd rejects a Jupiter price backed by a pool thin enough to push around.
+	// Tessera pre-IPO pools measured $120k–$520k on 2026-09-22; the floor stays $10k.
 	MinLiquidityUsd float64
 	// MaxDeviationBps rejects a Jupiter price this far from the last accepted market mark.
 	MaxDeviationBps int64
@@ -208,13 +210,16 @@ func (c *Chain) MarkedPot(ctx context.Context, treasury pyth.TreasuryRef, holdin
 
 func (c *Chain) markHolding(ctx context.Context, treasury pyth.TreasuryRef, holding pyth.CostBasis) (pyth.MarkedHolding, error) {
 	out := pyth.MarkedHolding{
-		Symbol:    holding.Symbol,
-		Mint:      holding.Mint,
-		Units:     holding.Units,
-		CostBasis: holding.Price,
+		Symbol:       holding.Symbol,
+		Mint:         holding.Mint,
+		Units:        holding.Units,
+		CostBasis:    holding.Price,
+		Decimals:     holding.Decimals,
+		Kind:         holding.Kind,
+		UiMultiplier: holding.UiMultiplier,
 	}
 
-	mark := c.marketMark(ctx, holding.Symbol, holding.Mint)
+	mark := c.marketMark(ctx, holding.Symbol, holding.Mint, xstocks.AssetKind(holding.Kind))
 	if mark.ok && mark.source == pyth.MarkSourceJupiter {
 		if err := c.checkAgainstCostBasis(mark.priceMicros, holding); err != nil {
 			c.warn("cost-basis-bound:"+markKey(holding.Symbol, holding.Mint), "jupiter price rejected against cost basis",
@@ -225,11 +230,14 @@ func (c *Chain) markHolding(ctx context.Context, treasury pyth.TreasuryRef, hold
 	if mark.ok {
 		out.MarkUsdc = mark.priceMicros
 		out.AfterHours = mark.afterHours
+		if holding.Kind == string(xstocks.AssetKindPreIPO) {
+			out.AfterHours = false
+		}
 		out.Source = mark.source
 		return out, nil
 	}
 
-	costMark, err := costBasisMarkPerUnitMicros(holding.Price, holding.Amount)
+	costMark, err := pyth.CostBasisMarkPerUnitMicros(holding.Price, holding.Amount, holding.Decimals, holding.UiMultiplier, holding.Kind)
 	if err != nil {
 		return pyth.MarkedHolding{}, fmt.Errorf("no live price for %s and %w", holding.Symbol, err)
 	}
@@ -243,7 +251,7 @@ func (c *Chain) markHolding(ctx context.Context, treasury pyth.TreasuryRef, hold
 
 // marketMark returns the shared live mark for a holding, resolving it at most once per
 // MarkTTL no matter how many callers ask concurrently.
-func (c *Chain) marketMark(ctx context.Context, symbol, mint string) marketMark {
+func (c *Chain) marketMark(ctx context.Context, symbol, mint string, kind xstocks.AssetKind) marketMark {
 	key := markKey(symbol, mint)
 	if mark, ok := c.cachedMark(key); ok {
 		return mark
@@ -256,7 +264,7 @@ func (c *Chain) marketMark(ctx context.Context, symbol, mint string) marketMark 
 		// callers sharing this resolution.
 		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.cfg.FetchTimeout)
 		defer cancel()
-		mark := c.resolveMarketMark(fetchCtx, symbol, mint)
+		mark := c.resolveMarketMark(fetchCtx, symbol, mint, kind)
 		mark.fetchedAt = c.cfg.Now()
 		c.mu.Lock()
 		c.marks[key] = mark
@@ -279,10 +287,12 @@ func (c *Chain) cachedMark(key string) (marketMark, bool) {
 	return mark, true
 }
 
-func (c *Chain) resolveMarketMark(ctx context.Context, symbol, mint string) marketMark {
-	if mark, ok := c.pythMark(ctx, symbol); ok {
-		slog.Info("price chain mark", "symbol", symbol, "mint", mint, "source", mark.source, "price_usdc_micros", mark.priceMicros)
-		return mark
+func (c *Chain) resolveMarketMark(ctx context.Context, symbol, mint string, kind xstocks.AssetKind) marketMark {
+	if kind != xstocks.AssetKindPreIPO {
+		if mark, ok := c.pythMark(ctx, symbol); ok {
+			slog.Info("price chain mark", "symbol", symbol, "mint", mint, "source", mark.source, "price_usdc_micros", mark.priceMicros)
+			return mark
+		}
 	}
 	if mark, ok := c.jupiterMark(ctx, symbol, mint); ok {
 		slog.Info("price chain mark", "symbol", symbol, "mint", mint, "source", mark.source, "price_usdc_micros", mark.priceMicros)
@@ -409,7 +419,7 @@ func (c *Chain) checkJupiterPrice(key string, price jupiter.TokenPrice) error {
 // checkAgainstCostBasis is the only sanity reference on a cold start, when no market
 // mark has been accepted yet.
 func (c *Chain) checkAgainstCostBasis(priceMicros int64, holding pyth.CostBasis) error {
-	costMark, err := costBasisMarkPerUnitMicros(holding.Price, holding.Amount)
+	costMark, err := pyth.CostBasisMarkPerUnitMicros(holding.Price, holding.Amount, holding.Decimals, holding.UiMultiplier, holding.Kind)
 	if err != nil {
 		// No usable cost basis to compare against (e.g. a catalog probe); nothing to check.
 		return nil
@@ -424,23 +434,6 @@ func (c *Chain) checkAgainstCostBasis(priceMicros int64, holding pyth.CostBasis)
 	return nil
 }
 
-func costBasisMarkPerUnitMicros(totalUSDCMicros, tokenAtomics int64) (int64, error) {
-	if totalUSDCMicros < 0 {
-		return 0, errors.New("cost basis usdc must be non-negative")
-	}
-	if tokenAtomics <= 0 {
-		return 0, errors.New("cost basis token amount must be positive")
-	}
-	mark, err := domain.MulDivFloor(totalUSDCMicros, jupiter.XStockAtomicScale, tokenAtomics)
-	if err != nil {
-		return 0, fmt.Errorf("derive mark per unit: %w", err)
-	}
-	if mark <= 0 {
-		return 0, errors.New("derived mark per unit must be positive")
-	}
-	return mark, nil
-}
-
 // AssetMark passes through to Pyth; catalog display prices come from Jupiter directly.
 func (c *Chain) AssetMark(ctx context.Context, symbol string) (pyth.AssetMark, error) {
 	if c.charts == nil {
@@ -449,26 +442,24 @@ func (c *Chain) AssetMark(ctx context.Context, symbol string) (pyth.AssetMark, e
 	return c.charts.AssetMark(ctx, symbol)
 }
 
-// ChartSeries serves Pyth price history. The Hermes sampler asks for one point per
-// request and reports a denied feed as an empty series, so the chain first confirms
-// the feed is entitled (one shared, breaker-guarded mark lookup) instead of letting
-// every chart load fire 25-31 requests that are all going to be refused.
-//
-// That gate is about the sampler, not about history in general. A chart client with
-// a keyless one-call source (Pyth Benchmarks) can serve the range whatever Hermes
-// thinks of our key, and gating it on entitlement would lose charts we can draw.
-//
-// The caller's deadline is honoured. The shared fetch still runs to completion on a
-// detached context — it is what fills the cache, and one caller walking away must
-// not throw that away — but a caller that arrives with a budget gets its own
-// deadline error when the budget runs out instead of waiting out FetchTimeout.
-// Before that, a caller's context was observed nowhere past this function's first
-// two lines, so every documented budget upstream was decoration.
+// ChartSeries serves Pyth price history for stocks. Pre-IPO history uses ChartSeriesQuery.
 func (c *Chain) ChartSeries(ctx context.Context, symbol string, chartRange pyth.ChartRange) (pyth.AssetChartSeries, error) {
+	return c.ChartSeriesQuery(ctx, pyth.ChartQuery{Symbol: symbol, Range: chartRange})
+}
+
+// ChartSeriesQuery serves price history when the caller knows the asset kind.
+// Stocks still go through the shared chart fetch. Pre-IPO tokens have no history,
+// so they return empty without opening a Pyth entitlement check.
+func (c *Chain) ChartSeriesQuery(ctx context.Context, q pyth.ChartQuery) (pyth.AssetChartSeries, error) {
 	unavailable := pyth.AssetChartSeries{EmptyReason: pyth.EmptyReasonNoHistory}
+	if q.Kind == string(xstocks.AssetKindPreIPO) {
+		return unavailable, nil
+	}
 	if c.charts == nil {
 		return unavailable, nil
 	}
+	symbol := q.Symbol
+	chartRange := q.Range
 	cacheKey := normalizeSymbol(symbol) + "|" + string(chartRange)
 	if series, ok := c.cachedChart(cacheKey); ok {
 		return series, nil

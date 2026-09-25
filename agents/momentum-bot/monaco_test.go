@@ -18,12 +18,12 @@ func newTestClient(t *testing.T, handler http.HandlerFunc) *MonacoClient {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	return NewMonacoClient(srv.URL+"/", "group-1", testKey, srv.Client())
+	return NewMonacoClient(srv.URL+"/", testKey, srv.Client())
 }
 
 func TestSubmitIntent_sendsKeyHeaderAndBuyBody(t *testing.T) {
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/groups/group-1/agents/intents" {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/agent/intents" {
 			t.Errorf("got %s %s", r.Method, r.URL.Path)
 		}
 		if got := r.Header.Get("X-Monaco-Agent-Key"); got != testKey {
@@ -153,7 +153,7 @@ func TestSubmitIntent_errorStatuses(t *testing.T) {
 
 func TestClient_networkErrorNeverLeaksTheKey(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
-	client := NewMonacoClient(srv.URL, "group-1", testKey, srv.Client())
+	client := NewMonacoClient(srv.URL, testKey, srv.Client())
 	srv.Close()
 	_, err := client.Assets(context.Background(), "", 10)
 	if err == nil {
@@ -164,9 +164,9 @@ func TestClient_networkErrorNeverLeaksTheKey(t *testing.T) {
 	}
 }
 
-func TestAssets_queriesTheCabalCatalogWithTheKey(t *testing.T) {
+func TestAssets_queriesTheAgentCatalogWithTheKeyOnly(t *testing.T) {
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/groups/group-1/assets" || r.URL.Query().Get("query") != "GOOGLx" || r.URL.Query().Get("limit") != "1" {
+		if r.URL.Path != "/v1/agent/assets" || r.URL.Query().Get("query") != "GOOGLx" || r.URL.Query().Get("limit") != "1" {
 			t.Errorf("got %s", r.URL.String())
 		}
 		if r.Header.Get("X-Monaco-Agent-Key") != testKey || r.Header.Get("Authorization") != "" {
@@ -183,32 +183,101 @@ func TestAssets_queriesTheCabalCatalogWithTheKey(t *testing.T) {
 	}
 }
 
-func TestPrices_parsesJupiterV3AndSkipsMissingMints(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("ids") != "mintG,mintA" {
-			t.Errorf("ids %q", r.URL.Query().Get("ids"))
+func TestSubmitIntent_sendsTheReason(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != `{"side":"buy","symbol":"AAPLx","usdcMicros":1000000,"idempotencyKey":"k-1","reason":"momentum +1.00% over 5m"}` {
+			t.Errorf("body %s", body)
 		}
-		_, _ = w.Write([]byte(`{"mintG":{"usdPrice":351.73,"decimals":8,"priceChange24h":0.34},"mintZ":{"usdPrice":0}}`))
-	}))
-	defer srv.Close()
-	prices, err := NewPriceClient(srv.URL, srv.Client()).Prices(context.Background(), []string{"mintG", "mintA"})
+		_, _ = w.Write([]byte(`{"intentId":"i-3","status":"executed"}`))
+	})
+	intent := Intent{Side: "buy", Symbol: "AAPLx", UsdcMicros: 1_000_000, IdempotencyKey: "k-1", Reason: "momentum +1.00% over 5m"}
+	if _, err := client.SubmitIntent(context.Background(), intent); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAgent_readsCabalAndBudgetFromTheKey(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/agent" || r.Header.Get("X-Monaco-Agent-Key") != testKey {
+			t.Errorf("got %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"cabalName":"Tech Bros","agentName":"Momentum","status":"active","budget":{"allocationUsd":"100.00","allocationUsdcMicros":100000000,"availableUsd":"42.10","availableUsdcMicros":42100000}}`))
+	})
+	agent, err := client.Agent(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(prices) != 1 || prices["mintG"] != 351.73 {
+	if agent.CabalName != "Tech Bros" || agent.AgentName != "Momentum" || agent.Status != "active" || agent.Budget.AvailableUsd != "42.10" || agent.Budget.AllocationUsd != "100.00" {
+		t.Fatalf("agent %+v", agent)
+	}
+}
+
+func TestIntent_readsOneIntentsOutcome(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/agent/intents/intent-7" {
+			t.Errorf("got %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"intentId":"intent-7","side":"buy","symbol":"AAPLx","status":"executed","transactionId":"tx-7","txSignature":"5x","filledTokenAmount":4560000,"filledUsdcMicros":10500000}`))
+	})
+	record, err := client.Intent(context.Background(), "intent-7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Status != "executed" || record.TransactionID != "tx-7" || record.FilledTokenAmount == nil || *record.FilledTokenAmount != 4_560_000 {
+		t.Fatalf("record %+v", record)
+	}
+}
+
+func TestPrices_comeFromMonacoMarksAcrossPages(t *testing.T) {
+	var offsets []string
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/agent/assets" || r.URL.Query().Get("limit") != "100" {
+			t.Errorf("got %s", r.URL.String())
+		}
+		offsets = append(offsets, r.URL.Query().Get("offset"))
+		switch r.URL.Query().Get("offset") {
+		case "":
+			_, _ = w.Write([]byte(`{"assets":[{"symbol":"GOOGLx","markUsdcMicros":351730000},{"symbol":"NVDAx","markUsdcMicros":null},{"symbol":"TSLAx","markUsdcMicros":1}],"hasMore":true}`))
+		case "3":
+			_, _ = w.Write([]byte(`{"assets":[{"symbol":"AAPLx","markUsd":"230.12","markUsdcMicros":230120000}],"hasMore":true}`))
+		default:
+			t.Errorf("read past the page that had every symbol: offset %s", r.URL.Query().Get("offset"))
+		}
+	})
+	prices, err := client.Prices(context.Background(), []string{"GOOGLx", "NVDAx", "AAPLx"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prices) != 2 || prices["GOOGLx"] != 351.73 || prices["AAPLx"] != 230.12 {
+		t.Fatalf("prices %v, want GOOGLx and AAPLx only (NVDAx has no mark)", prices)
+	}
+	if len(offsets) != 2 {
+		t.Fatalf("read offsets %v, want two pages", offsets)
+	}
+}
+
+func TestPrices_stopsAtTheLastPage(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"assets":[{"symbol":"GOOGLx","markUsdcMicros":100000000}],"hasMore":false}`))
+	})
+	prices, err := client.Prices(context.Background(), []string{"GOOGLx", "GONEx"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prices) != 1 || prices["GOOGLx"] != 100 {
 		t.Fatalf("prices %v", prices)
 	}
 }
 
-func TestPrices_unhappyPaths(t *testing.T) {
-	for name, handler := range map[string]http.HandlerFunc{
-		"500":       func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) },
-		"malformed": func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`[`)) },
-	} {
-		srv := httptest.NewServer(handler)
-		if _, err := NewPriceClient(srv.URL, srv.Client()).Prices(context.Background(), []string{"m"}); err == nil {
-			t.Errorf("%s: want error", name)
-		}
-		srv.Close()
+func TestPrices_errorStatusesSurface(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusTooManyRequests)
+	})
+	_, err := client.Prices(context.Background(), []string{"GOOGLx"})
+	var throttled *ThrottledError
+	if !errors.As(err, &throttled) || throttled.RetryAfter != 30*time.Second {
+		t.Fatalf("got %v", err)
 	}
 }

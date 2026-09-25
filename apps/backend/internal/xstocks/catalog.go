@@ -6,17 +6,37 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
-// CatalogAsset is a backend-resolved xStock catalog row for mobile search.
+// AssetKind classifies catalog rows (listed stock vs pre-IPO token).
+type AssetKind string
+
+const (
+	AssetKindStock  AssetKind = "stock"
+	AssetKindPreIPO AssetKind = "pre_ipo"
+)
+
+// AssetSource identifies which catalog API populated a row.
+type AssetSource string
+
+const (
+	AssetSourceXStocks   AssetSource = "xstocks"
+	AssetSourceTessera   AssetSource = "tessera"
+	AssetSourcePreStocks AssetSource = "prestocks"
+)
+
+// CatalogAsset is a backend-resolved catalog row for mobile search.
 type CatalogAsset struct {
 	Symbol     string
 	Name       string
@@ -24,7 +44,66 @@ type CatalogAsset struct {
 	Routable   bool
 	// LogoURL is the company logo the catalogue publishes for this xStock. Empty
 	// when the catalogue has none, in which case a row draws its ticker tile.
-	LogoURL string
+	Kind           AssetKind
+	Source         AssetSource
+	Decimals       int
+	TransferFeeBps int
+	Sector         string
+	LogoURL        string
+	UnderlyingID   string
+	Issuer         string
+	IssuerName     string
+
+	UiAmountMultiplier *big.Rat // nil = unresolved
+	Paused             bool
+
+	ReferenceMarkUsdcMicros *int64
+	ReferenceValuationUsd   *int64
+	ReferenceUpdatedAt      *time.Time
+	ReferenceSource         string
+	Holders                 *int
+
+	LiquidityUsd int64
+}
+
+// Normalize applies stock/xStocks defaults for unset kind, source, and decimals.
+func (a CatalogAsset) Normalize() CatalogAsset {
+	if a.Kind == "" {
+		a.Kind = AssetKindStock
+	}
+	if a.Decimals == 0 {
+		a.Decimals = jupiter.XStockDecimals
+	}
+	if a.Source == "" {
+		a.Source = AssetSourceXStocks
+	}
+	return a
+}
+
+// AtomicScale returns 10^Decimals for this asset.
+func (a CatalogAsset) AtomicScale() int64 {
+	return jupiter.AtomicScale(a.Normalize().Decimals)
+}
+
+// CatalogAssetFromXStockNode builds a normalized xStocks catalog row.
+func CatalogAssetFromXStockNode(symbol, name, solanaMint string) CatalogAsset {
+	symbol = strings.TrimSpace(symbol)
+	return CatalogAsset{
+		Symbol:       symbol,
+		Name:         strings.TrimSpace(name),
+		SolanaMint:   strings.TrimSpace(solanaMint),
+		Kind:         AssetKindStock,
+		Source:       AssetSourceXStocks,
+		Decimals:     jupiter.XStockDecimals,
+		Issuer:       string(AssetSourceXStocks),
+		UnderlyingID: UnderlyingIDFromXStockSymbol(symbol),
+	}.Normalize()
+}
+
+// UnderlyingIDFromXStockSymbol derives the company slug from an xStock ticker.
+func UnderlyingIDFromXStockSymbol(symbol string) string {
+	s := strings.ToLower(strings.TrimSpace(symbol))
+	return strings.TrimSuffix(s, "x")
 }
 
 // CatalogSearchPage is one page of catalog search results.
@@ -47,6 +126,10 @@ type HTTPCatalogSearcher struct {
 	httpClient  *http.Client
 	catalog     catalogIndex
 	routability RoutabilityProber
+
+	catalogMu    sync.Mutex
+	catalogRows  []CatalogAsset
+	catalogUntil time.Time
 }
 
 // NewHTTPCatalogSearcher returns a catalog searcher backed by the production API.
@@ -105,12 +188,9 @@ type catalogAssetNode struct {
 // so a field added here reaches every path that resolves an asset — search by
 // ticker, the paginated filter, and the index — rather than two of the three.
 func catalogAssetFromNode(node catalogAssetNode, mint string) CatalogAsset {
-	return CatalogAsset{
-		Symbol:     strings.TrimSpace(node.Symbol),
-		Name:       strings.TrimSpace(node.Name),
-		SolanaMint: mint,
-		LogoURL:    normalizeLogoURL(node.Logo),
-	}
+	asset := CatalogAssetFromXStockNode(node.Symbol, node.Name, mint)
+	asset.LogoURL = normalizeLogoURL(node.Logo)
+	return asset
 }
 
 // normalizeLogoURL keeps only a logo the app can actually load. A relative path or
@@ -178,14 +258,10 @@ func (s *HTTPCatalogSearcher) searchBySymbol(ctx context.Context, query string) 
 	return nil, nil
 }
 
+const catalogPageBatch = 6
+
 // searchPaginatedList filters the catalogue index rather than re-walking every
 // catalogue page.
-//
-// It used to crawl the whole catalogue per call, which made every query — and
-// every pinned symbol the popular list resolves, and every symbol a cabal holds —
-// its own full crawl of a third-party API. The catalogue is one small list that
-// changes when a new xStock is listed, so it is crawled once and searched in
-// memory.
 func (s *HTTPCatalogSearcher) searchPaginatedList(ctx context.Context, query string, limit, offset int) (CatalogSearchPage, error) {
 	needle := strings.ToLower(strings.TrimSpace(query))
 	entries, err := s.index(ctx)
@@ -215,6 +291,117 @@ func (s *HTTPCatalogSearcher) searchPaginatedList(ctx context.Context, query str
 		Assets:  matches[offset:end],
 		HasMore: hasMore,
 	}, nil
+}
+
+func (s *HTTPCatalogSearcher) cachedCatalog() ([]CatalogAsset, bool) {
+	s.catalogMu.Lock()
+	defer s.catalogMu.Unlock()
+	if len(s.catalogRows) == 0 || time.Now().After(s.catalogUntil) {
+		return nil, false
+	}
+	return append([]CatalogAsset(nil), s.catalogRows...), true
+}
+
+func (s *HTTPCatalogSearcher) storeCatalog(rows []CatalogAsset) {
+	s.catalogMu.Lock()
+	defer s.catalogMu.Unlock()
+	s.catalogRows = append([]CatalogAsset(nil), rows...)
+	s.catalogUntil = time.Now().Add(5 * time.Minute)
+}
+
+func (s *HTTPCatalogSearcher) fetchRemainingCatalog(ctx context.Context, start int) ([]CatalogAsset, error) {
+	var all []CatalogAsset
+	for page := start; page < start+48; page += catalogPageBatch {
+		batch := catalogPageBatch
+		type pageResult struct {
+			assets  []CatalogAsset
+			hasNext bool
+			missing bool
+			err     error
+		}
+		results := make([]pageResult, batch)
+		var wg sync.WaitGroup
+		for i := 0; i < batch; i++ {
+			wg.Add(1)
+			go func(i, page int) {
+				defer wg.Done()
+				assets, hasNext, err := s.fetchCatalogPage(ctx, page)
+				if errors.Is(err, ErrNotFound) {
+					results[i].missing = true
+					return
+				}
+				results[i] = pageResult{assets: assets, hasNext: hasNext, err: err}
+			}(i, page+i)
+		}
+		wg.Wait()
+
+		stop := false
+		for i := 0; i < batch; i++ {
+			if results[i].err != nil {
+				return nil, results[i].err
+			}
+			if results[i].missing {
+				stop = true
+				break
+			}
+			all = append(all, results[i].assets...)
+			if !results[i].hasNext {
+				stop = true
+				break
+			}
+		}
+		if stop {
+			break
+		}
+	}
+	return all, nil
+}
+
+func (s *HTTPCatalogSearcher) fetchCatalogPage(ctx context.Context, page int) ([]CatalogAsset, bool, error) {
+	body, err := s.fetchCatalogListPage(ctx, page)
+	if err != nil {
+		return nil, false, err
+	}
+	var list catalogListResponse
+	if err := json.Unmarshal(body, &list); err != nil {
+		return nil, false, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
+	}
+	assets := make([]CatalogAsset, 0, len(list.Nodes))
+	for _, node := range list.Nodes {
+		mint, err := solanaMintFromDeployments(node.Deployments)
+		if err != nil {
+			continue
+		}
+		assets = append(assets, CatalogAssetFromXStockNode(node.Symbol, node.Name, mint))
+	}
+	return assets, list.Page.HasNextPage, nil
+}
+
+func filterCatalogAssets(assets []CatalogAsset, needle string) []CatalogAsset {
+	if needle == "" {
+		return append([]CatalogAsset(nil), assets...)
+	}
+	matches := make([]CatalogAsset, 0)
+	for _, asset := range assets {
+		if catalogNodeMatches(catalogAssetNode{Symbol: asset.Symbol, Name: asset.Name}, needle) {
+			matches = append(matches, asset)
+		}
+	}
+	return matches
+}
+
+func pageFilteredAssets(ctx context.Context, prober RoutabilityProber, assets []CatalogAsset, needle string, limit, offset int) CatalogSearchPage {
+	matches := filterCatalogAssets(assets, needle)
+	rankCatalogAssets(ctx, prober, matches)
+	hasMore := len(matches) > offset+limit
+	if offset >= len(matches) {
+		return CatalogSearchPage{Assets: nil, HasMore: hasMore}
+	}
+	end := offset + limit
+	if end > len(matches) {
+		end = len(matches)
+	}
+	return CatalogSearchPage{Assets: matches[offset:end], HasMore: hasMore}
 }
 
 func (s *HTTPCatalogSearcher) fetchCatalogListPage(ctx context.Context, page int) ([]byte, error) {
@@ -313,6 +500,27 @@ func xStockSymbolCandidates(query string) []string {
 	return []string{upper + "x", q + "x"}
 }
 
+// catalogAssetsFromListResponse parses one catalog list page JSON and filters by query.
+func catalogAssetsFromListResponse(body []byte, query string) ([]CatalogAsset, error) {
+	var list catalogListResponse
+	if err := json.Unmarshal(body, &list); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
+	}
+
+	needle := strings.ToLower(strings.TrimSpace(query))
+	assets := make([]CatalogAsset, 0)
+	for _, node := range list.Nodes {
+		if !catalogNodeMatches(node, needle) {
+			continue
+		}
+		mint, err := solanaMintFromDeployments(node.Deployments)
+		if err != nil {
+			continue
+		}
+		assets = append(assets, CatalogAssetFromXStockNode(node.Symbol, node.Name, mint))
+	}
+	return assets, nil
+}
 func catalogNodeMatches(node catalogAssetNode, needle string) bool {
 	symbol := strings.ToLower(strings.TrimSpace(node.Symbol))
 	name := strings.ToLower(strings.TrimSpace(node.Name))

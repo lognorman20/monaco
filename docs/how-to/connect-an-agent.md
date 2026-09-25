@@ -1,57 +1,68 @@
 # Connect an agent to a cabal
 
-A 10-minute demo of #202: a cabal votes in a trading bot with a USDC budget, the app hands
-back an API key, and the bot trades by POSTing intents. No real money moves in this
-walkthrough — use `--dry-run` or point `--api` at a local/staging backend only.
+A cabal votes in a trading agent with a USDC budget. The app hands back connect instructions with the agent's key. The agent trades by sending intents to Monaco, using the key alone. Monaco executes each trade from the cabal treasury, so the agent never holds the money.
+
+For a walkthrough with no real money, point `MONACO_API` at a local or staging backend, or use the bot's default dry run.
 
 ## In the app
 
-1. Open a cabal you're a member of, tap **Propose**.
+1. Open a cabal you're a member of and tap **Propose**.
 2. Tap **Add a trading bot**.
-3. Enter a bot name and a budget (this is the USDC allocation from the pot), then tap **Send to cabal**.
-4. Once the cabal votes yes, open the passed proposal. The bot's key appears on the
-   proposal, for the proposer only, for 15 minutes after the vote passes. Tap **Copy key**.
-   After the window the proposal no longer shows it; any cabal member can still copy it from
-   the bot's detail screen (tap the bot on the cabal page) until the bot is removed.
-5. Store the key in your bot's secret manager as `MONACO_AGENT_KEY`. Never log it.
-6. To manage the bot later, use the same **Propose** sheet: **Pause the trading bot**,
-   **Turn the trading bot back on**, or **Remove the trading bot** — each is a cabal vote.
+3. Enter a name and a budget (the USDC the agent may spend from the pot), then tap **Send to cabal**.
+4. Once the cabal votes yes, open **Group → Agent**.
+5. Tap **Copy connect instructions**. The text holds the key, the API base URL and a link to `/v1/agent/skill.md`. **Copy key** copies the key alone, for a bot that reads it from `MONACO_AGENT_KEY`.
+6. To manage the agent later, use the same **Propose** sheet: **Pause the trading bot**, **Turn the trading bot back on**, or **Remove the trading bot**. Each is a cabal vote.
+
+Never log the key. Any cabal member can copy it again until the agent is removed.
+
+## Connect a ClawPump agent
+
+ClawPump runs the agent. Monaco holds the money and executes the trades. Monaco never stores a ClawPump key; connecting is copy and paste.
+
+1. In ClawPump, create an agent.
+2. Add a custom skill. Paste the connect instructions you copied from **Group → Agent → Copy connect instructions**.
+3. Add an automation that runs the skill on a schedule. For example, hourly: "Check `/v1/agent` and decide trades."
+4. Turn off ClawPump's own trading skill. Otherwise the agent may trade from its own ClawPump wallet instead of through Monaco.
+
+On each run the agent reads `/v1/agent/skill.md`, calls `GET /v1/agent` for its budget, cash and holdings, reads prices from `GET /v1/agent/assets`, and trades with `POST /v1/agent/intents`. Every trade shows in the cabal's activity with the agent's `reason`.
+
+The same text works as the system prompt of any other LLM agent.
+
+The API base in the connect text is the server's `PUBLIC_API_BASE_URL`. A ClawPump agent runs on ClawPump's servers, so that URL must be reachable from the internet. `http://127.0.0.1:8080` only works for an agent on your own machine.
 
 ## One intent from the terminal
 
 ```bash
-export MONACO_AGENT_KEY=<the key from step 4>
+export MONACO_AGENT_KEY=<the key from Group → Agent>
+export MONACO_API=http://127.0.0.1:8080   # the default
 
 # See the request without sending it
-scripts/demo/agent-intent.sh buy AAPLx 10 --group <group-id> --dry-run
+scripts/demo/agent-intent.sh buy AAPLx 1 --dry-run
 
-# Send it for real (against a local/dev backend only)
-scripts/demo/agent-intent.sh buy AAPLx 10 --group <group-id>
-scripts/demo/agent-intent.sh sell AAPLx 0.5 --group <group-id>
+# Send it (against a local or dev backend)
+REASON="demo buy" scripts/demo/agent-intent.sh buy AAPLx 1
+scripts/demo/agent-intent.sh sell AAPLx 0.25
+
+# Resend after a timeout: same body, same key, no second trade
+IDEMPOTENCY_KEY=<key the first run printed> scripts/demo/agent-intent.sh buy AAPLx 1
 ```
 
-`buy` amounts are USD; `sell` amounts are shares. The script converts both to the API's
-integer units, prints the request with the key redacted, and pretty-prints the response.
-Run `scripts/demo/agent-intent.sh --help` for all flags.
+A buy amount is USD, sent as `usd`. A sell amount is shares, sent as `shares`. The script adds a fresh `idempotencyKey`, prints the request with the key redacted, and prints the response.
 
 ## Run the reference bot
 
-`agents/momentum-bot` is a small Go program (standard library only) that trades a cabal's bot
-budget with one rule: compare each price to where it was one lookback ago, buy what is up
-past a threshold, sell what the bot bought once it is down past one. It is meant to be read
-and forked.
+`agents/momentum-bot` is a small Go program (standard library only) that trades an agent's budget with one rule. It compares each price to where it was one lookback ago. It buys what is up past a threshold, and sells what it bought once that is down past one. It is meant to be read and forked.
 
 ```bash
 export MONACO_API=http://127.0.0.1:8080
-export MONACO_GROUP_ID=<group-id>
-export MONACO_AGENT_KEY=<the key from step 4>   # env only; there is no flag for it
+export MONACO_AGENT_KEY=<the key from Group → Agent>   # env only; there is no flag for it
 
 cd agents/momentum-bot
 
 # Dry run is the default: real catalog, real prices, nothing sent
 go run . --symbols GOOGLx,NVDAx
 
-# One decision, then exit. Short lookback so a recording does not wait five minutes
+# One decision, then exit. A short lookback so a recording does not wait five minutes
 go run . --symbols GOOGLx --once --interval 10s --lookback 1m --buy-pct 0.05
 
 # Real intents. Asks y/N first; --yes skips the question
@@ -61,6 +72,12 @@ go run . --symbols GOOGLx --live --trade-usd 1 --max-spend-usd 5
 What it prints:
 
 ```
+Monaco momentum bot
+  mode      LIVE, intents will move the cabal's money
+  api       http://127.0.0.1:8080
+  cabal     Tech Bros, as agent Momentum (active)
+  budget    $42.10 of $100.00 available
+  ...
 14:07:10  GOOGLx  $ 352.10  +0.80% over 5m  buy signal
 14:07:10  NVDAx   $ 222.02  +0.02% over 5m  hold
 14:07:10  → buy $1.00 of GOOGLx
@@ -69,54 +86,27 @@ What it prints:
 
 How it behaves:
 
-- **Symbols come from the cabal.** It reads `GET /v1/groups/{id}/assets` with the agent key
-  and only watches routable assets. Without `--symbols` it takes the first five.
-- **Prices are public.** Jupiter's Price API v3, keyed by each asset's Solana mint — the same
-  API the backend prices the asset list with. Override with `JUPITER_PRICE_URL`.
-- **Two caps of its own**, `--trade-usd` per buy and `--max-spend-usd` per run. Set the total
-  below the budget the cabal voted; the server enforces that budget either way. The total is
-  per process: it resets on restart, the server's count does not.
-- **One trade per tick, one per symbol per lookback.** Sells go before buys, then the biggest move wins.
-- **Sells are sized from its own buys.** The API has no holdings endpoint for agents, so the
-  bot estimates what each buy returned (less 2%) and sells that. It never sells what members
-  bought, and the server would refuse it if it tried: an agent can only sell what its own
-  buys returned, net of its own sells.
-- **`401` stops it.** Retrying a bad key only trips the wrong-key throttle. **`403`** (paused
-  by vote) and **`429`** (honours `Retry-After`) make it stand down and keep watching.
-  **`422`** prints the body's `rejectReason` and `intentId`; "exceeds agent allocation" ends
-  buying for the run. A `5xx` or `409` that names an intent prints its `intentId` and `status`.
-- **An intent is only resent under its idempotency key.** Every trade decision gets a fresh
-  random `idempotencyKey`. On a timeout, a `5xx` or a `409` the swap may have gone through,
-  so the bot resends the identical intent twice, five seconds apart; the server answers a
-  key it has seen with the first outcome and never trades twice. Still no clear answer: the
-  bot counts the buy against its cap and points you at the activity feed.
-- **The key is never printed**, in the banner, the log, or an error.
+- **The key is all it needs.** It reads its cabal and budget from `GET /v1/agent` at startup.
+- **Symbols and prices come from Monaco.** It reads `GET /v1/agent/assets` and watches only routable stocks. Without `--symbols` it takes the first five. Each tick it prices them from `markUsdcMicros` in the same list. A stock with no mark is skipped for that tick.
+- **Keep `--interval` at 30s or more.** Reads refill one every 30 seconds, and the bot reads the catalog once a tick. A `429` makes it wait out `Retry-After`.
+- **Two caps of its own,** `--trade-usd` per buy and `--max-spend-usd` per run. Set the total below the cabal's budget. The server enforces the budget either way. The run total resets on restart; the server's count does not.
+- **One trade per tick, and one per symbol per lookback.** Sells go before buys, then the biggest move wins.
+- **Every intent carries a reason,** such as `momentum +0.80% over 5m, buy rule +0.50%`.
+- **Sells are sized from its own buys.** The bot estimates what each buy returned (less 2%) and sells that. The server refuses any sell beyond what the agent bought.
+- **`401` stops it.** Retrying a bad key only trips the wrong-key throttle. `403` (paused by vote) and `429` make it stand down and keep watching. `422` prints the `rejectReason` and `intentId`; "exceeds agent allocation" ends buying for the run.
+- **An intent is only resent under its idempotency key.** Each trade decision gets a fresh random `idempotencyKey`. On a timeout, a `5xx` or a `409`, the bot resends the identical intent twice, five seconds apart. If the answer names an intent but still has no outcome, the bot reads `GET /v1/agent/intents/{id}`. With still no clear answer, it counts the buy against its cap and points you at the activity feed.
+- **The key is never printed,** in the banner, the log, or an error.
 
-Tests: `cd agents/momentum-bot && go test ./...` (strategy, caps, and every HTTP status above
-against `httptest` servers).
+Tests: `cd agents/momentum-bot && go test ./...` covers the strategy, the caps, and every HTTP status above against `httptest` servers.
 
 ## What judges see
 
-- **A vote, not a form.** Adding a bot is a cabal proposal like any buy or sell — same
-  quorum, same "the group decides" model, extended to an autonomous trader.
-- **The key never leaves the app.** The proposer sees it on the passed proposal for 15
-  minutes; after that, cabal members (and nobody else) can copy it from the bot's detail
-  screen. Never emailed. Bots authenticate against a SHA-256 hash; the server also keeps the
-  plaintext so members can retrieve it, and wipes both when the cabal votes the bot out.
-- **The budget is enforced server-side.** The bot can't spend past its allocation; a request
-  that would exceed it comes back rejected, not silently capped. Intents are decided one at
-  a time per bot and reserve their amount before the swap, so firing them in parallel does
-  not get past the cap. The budget is a lifetime spend cap: selling does not refill it.
-- **The bot can only sell what it bought.** Positions the cabal voted in are out of its
-  reach; the server checks every sell against the bot's own buys in the ledger.
-- **The key cannot be guessed.** It is `monaco_ak_` plus 32 random characters, about 158
-  bits. Wrong keys are still throttled: after 10 from one address the API answers that
-  address `429` with `Retry-After` and allows one more try per minute. Wrong keys aimed at a
-  cabal from elsewhere do not lock its bot out, and a key sent to the wrong cabal gets the
-  same `401` as an unknown key. (Five-character keys from before this format still work and
-  are also throttled per cabal; re-add the bot to get a long one.)
-- **The cabal keeps control after install.** Pause, resume, and revoke are each their own
-  vote — pausing keeps the key valid but blocks trades, revoking kills the key outright.
-- **Same execution path as a member's vote.** Agent trades settle through the identical
-  Jupiter + Privy treasury flow a human-approved buy uses — fills land in the same cabal
-  activity feed.
+- **A vote, not a form.** Adding an agent is a cabal proposal like any buy or sell. Same quorum, same "the cabal decides" model, extended to an autonomous trader.
+- **Paste the key and it trades.** The connect instructions are all an agent needs. No group id, no wallet, no custody.
+- **The key stays with the cabal.** Only cabal members can copy it, and it is never emailed. Agents authenticate against a SHA-256 hash. The server also keeps the plaintext so members can retrieve it, and wipes both when the cabal votes the agent out.
+- **The budget is enforced server-side.** A trade past the budget comes back rejected, not silently capped. Intents are decided one at a time per agent and reserve their amount before the swap, so parallel intents cannot get past the budget. Sells refill it.
+- **The agent can only sell what it bought.** Stocks the cabal voted in are out of its reach.
+- **Every trade says why.** The agent's `reason` is stored with each intent.
+- **The key cannot be guessed.** It is `monaco_ak_` plus 32 random characters, about 158 bits. After 10 wrong keys from one address, the API answers that address `429` and allows one more try a minute. Each key may also send at most 30 intents an hour.
+- **The cabal keeps control.** Pause, resume and revoke are each a vote. Pausing keeps the key but blocks trades. Revoking kills the key.
+- **Same execution path as a member's vote.** Agent trades settle through the same Jupiter and Privy treasury flow a member-approved buy uses, and land in the same activity feed.

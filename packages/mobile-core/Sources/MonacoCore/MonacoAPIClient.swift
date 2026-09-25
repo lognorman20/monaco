@@ -370,17 +370,24 @@ public final class MonacoAPIClient: @unchecked Sendable {
     public func listMarketAssets(
         query: String = "",
         limit: Int = 25,
-        offset: Int = 0
+        offset: Int = 0,
+        catalogKind: AssetKind? = nil
     ) async throws -> ListMarketAssetsResponseDTO {
         var components = URLComponents(
             url: baseURL.appending(path: "v1/assets"),
             resolvingAgainstBaseURL: false
         )!
-        components.queryItems = [
-            URLQueryItem(name: "query", value: query),
+        var items = [
             URLQueryItem(name: "limit", value: String(limit)),
             URLQueryItem(name: "offset", value: String(offset)),
         ]
+        if !query.isEmpty {
+            items.insert(URLQueryItem(name: "query", value: query), at: 0)
+        }
+        if let catalogKind {
+            items.append(URLQueryItem(name: "kind", value: catalogKind.rawValue))
+        }
+        components.queryItems = items
         guard let url = components.url else {
             throw MonacoAPIError.invalidResponse
         }

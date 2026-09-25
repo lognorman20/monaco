@@ -10,12 +10,13 @@ import (
 
 // QuoteSellParams identifies an xStock → USDC sell quote request.
 type QuoteSellParams struct {
-	GroupID   string
-	UserID    string
-	Symbol    string
-	InputMint string
-	Amount    int64
-	Taker     string
+	GroupID     string
+	UserID      string
+	Symbol      string
+	InputMint   string
+	Amount      int64
+	Taker       string
+	SlippageBps int
 }
 
 // SellToUSDCParams executes a signed treasury sell to USDC.
@@ -46,10 +47,11 @@ func (c *HTTPClient) QuoteSell(ctx context.Context, params QuoteSellParams) (Sel
 	}
 
 	body, err := c.fetchBuyOrder(ctx, buyOrderRequest{
-		InputMint:  params.InputMint,
-		OutputMint: USDCMint,
-		Amount:     params.Amount,
-		Taker:      params.Taker,
+		InputMint:   params.InputMint,
+		OutputMint:  USDCMint,
+		Amount:      params.Amount,
+		Taker:       params.Taker,
+		SlippageBps: params.SlippageBps,
 	}, params.GroupID, params.UserID, params.Symbol)
 	if err != nil {
 		logQuoteRefusal(params.GroupID, params.UserID, params.Symbol, err.Error())
@@ -124,13 +126,13 @@ const RedeemSellSlippageBufferBps = 100
 // in USDC. It sizes the sale to the treasury's cash shortfall against the marked value of the
 // holdings, not to the member's whole slice: a job that already sold once then raises only what
 // is still missing instead of selling the slice twice. The result is capped at the whole holding.
-func RedeemShortfallSellAmount(holdingAtomics, shortfallUsdc, stockValueUsdc int64) int64 {
+func RedeemShortfallSellAmount(holdingAtomics, shortfallUsdc, stockValueUsdc, bufferBps int64) int64 {
 	if holdingAtomics <= 0 || shortfallUsdc <= 0 || stockValueUsdc <= 0 {
 		return 0
 	}
 
 	target := new(big.Int).SetInt64(shortfallUsdc)
-	buffer := new(big.Int).Mul(target, big.NewInt(RedeemSellSlippageBufferBps))
+	buffer := new(big.Int).Mul(target, big.NewInt(bufferBps))
 	buffer.Div(buffer, big.NewInt(10_000))
 	target.Add(target, buffer)
 	target.Add(target, big.NewInt(1))

@@ -22,15 +22,16 @@ func assertIntentAcceptanceIsSafe(t *testing.T, agent GroupAgent, intent AgentIn
 		if intent.UsdcMicros <= 0 {
 			t.Fatalf("accepted buy of %d micros", intent.UsdcMicros)
 		}
+		if agent.AllocationUsdcMicros < 0 || snap.AgentSpentUsdcMicros < 0 || snap.PendingAgentUsdcMicros < 0 || snap.AgentSellProceedsUsdcMicros < 0 {
+			t.Fatalf("accepted buy against a negative ledger value: %+v %+v", agent, snap)
+		}
 		available := big.NewInt(agent.AllocationUsdcMicros)
+		available.Add(available, big.NewInt(snap.AgentSellProceedsUsdcMicros))
 		available.Sub(available, big.NewInt(snap.AgentSpentUsdcMicros))
 		available.Sub(available, big.NewInt(snap.PendingAgentUsdcMicros))
 		if big.NewInt(intent.UsdcMicros).Cmp(available) > 0 {
-			t.Fatalf("accepted buy of %d with allocation %d − spent %d − pending %d = %s",
-				intent.UsdcMicros, agent.AllocationUsdcMicros, snap.AgentSpentUsdcMicros, snap.PendingAgentUsdcMicros, available)
-		}
-		if intent.UsdcMicros > agent.AllocationUsdcMicros {
-			t.Fatalf("accepted buy of %d above total allocation %d", intent.UsdcMicros, agent.AllocationUsdcMicros)
+			t.Fatalf("accepted buy of %d with allocation %d + proceeds %d − spent %d − pending %d = %s",
+				intent.UsdcMicros, agent.AllocationUsdcMicros, snap.AgentSellProceedsUsdcMicros, snap.AgentSpentUsdcMicros, snap.PendingAgentUsdcMicros, available)
 		}
 		if intent.UsdcMicros > snap.TreasuryUsdcMicros {
 			t.Fatalf("accepted buy of %d with treasury %d", intent.UsdcMicros, snap.TreasuryUsdcMicros)
@@ -82,6 +83,7 @@ func TestValidateIntent_randomInputs_acceptedIntentsRespectEveryLimit(t *testing
 			s.TreasuryUsdcMicros = randomAmount(rng)
 			s.AgentSpentUsdcMicros = randomAmount(rng)
 			s.PendingAgentUsdcMicros = randomAmount(rng)
+			s.AgentSellProceedsUsdcMicros = randomAmount(rng)
 			s.TokenHoldingsBySymbol = map[string]int64{"AAPLx": randomAmount(rng)}
 			s.AgentTokenHoldingsBySymbol = map[string]int64{"AAPLx": randomAmount(rng)}
 		})

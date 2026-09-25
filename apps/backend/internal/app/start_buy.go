@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/monaco/monaco/apps/backend/internal/catalog"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/privy"
+	"github.com/monaco/monaco/apps/backend/internal/solana/mintinfo"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 )
 
@@ -27,21 +29,51 @@ type StartBuyRequest struct {
 	UserID     string
 	Symbol     string
 	USDCAmount int64
+	// SelectBestVariant runs live-quote variant pick for pre-IPO buys with multiple variants.
+	SelectBestVariant bool
 	// Taker is the group treasury wallet. When set, Jupiter must return a buildable
 	// unsigned transaction (same /order constraints as execute OrderBuy).
 	Taker string
 }
 
+// QuoteProvider names the issuer chosen for a buy quote.
+type QuoteProvider struct {
+	Issuer     string
+	IssuerName string
+}
+
 // StartBuyResult holds a routable Jupiter quote ready for execute.
 type StartBuyResult struct {
-	OutputMint string
-	Quote      jupiter.BuyQuote
+	Symbol          string
+	OutputMint      string
+	Quote           jupiter.BuyQuote
+	Provider        *QuoteProvider
+	PriceComparison *catalog.Comparison
+}
+
+// MintCatalog resolves mint addresses to catalog rows (decimals, kind).
+type MintCatalog interface {
+	LookupByMint(ctx context.Context, mint string) (xstocks.CatalogAsset, bool, error)
+}
+
+// BuyVariantPicker compares live Jupiter quotes across pre-IPO variants (catalog.Composite).
+type BuyVariantPicker interface {
+	PickBuyVariantLive(
+		ctx context.Context,
+		resolved xstocks.CatalogAsset,
+		requestedSymbol string,
+		usdcMicros int64,
+		quoteFn func(ctx context.Context, asset xstocks.CatalogAsset) (outAmount string, err error),
+	) (chosen xstocks.CatalogAsset, cmp catalog.Comparison, picked bool)
 }
 
 // BuyService gates treasury buys behind quote availability.
 type BuyService struct {
-	jupiter jupiter.Client
-	xstocks xstocks.Resolver
+	jupiter  jupiter.Client
+	xstocks  xstocks.Resolver
+	catalog  MintCatalog
+	variants BuyVariantPicker
+	mintinfo mintinfo.Reader
 }
 
 // NewBuyService wires Jupiter quote and xStocks mint resolution.
@@ -50,6 +82,42 @@ func NewBuyService(jupiterClient jupiter.Client, resolver xstocks.Resolver) *Buy
 		jupiter: jupiterClient,
 		xstocks: resolver,
 	}
+}
+
+// SetMintCatalog attaches a catalog for ResolveAsset decimals (optional until wiring).
+func (s *BuyService) SetMintCatalog(catalog MintCatalog) {
+	if s == nil {
+		return
+	}
+	s.catalog = catalog
+}
+
+// SetBuyVariantPicker attaches live-quote variant picking (optional until wiring).
+func (s *BuyService) SetBuyVariantPicker(picker BuyVariantPicker) {
+	if s == nil {
+		return
+	}
+	s.variants = picker
+}
+
+// SetMintInfo wires live mint reads for pre-IPO pause checks at quote time.
+func (s *BuyService) SetMintInfo(reader mintinfo.Reader) {
+	if s == nil {
+		return
+	}
+	s.mintinfo = reader
+}
+
+// LookupAssetByMint resolves a mint to a catalog row for sell sizing and decimals.
+func (s *BuyService) LookupAssetByMint(ctx context.Context, mint string) (xstocks.CatalogAsset, bool) {
+	if s == nil || s.catalog == nil || strings.TrimSpace(mint) == "" {
+		return xstocks.CatalogAsset{}, false
+	}
+	asset, found, err := s.catalog.LookupByMint(ctx, mint)
+	if err != nil || !found {
+		return xstocks.CatalogAsset{}, false
+	}
+	return asset.Normalize(), true
 }
 
 // JupiterCatalogRoutabilityProber probes Jupiter for USDC→xStock routes during catalog ranking.
@@ -84,23 +152,92 @@ func (p *JupiterCatalogRoutabilityProber) IsRoutable(ctx context.Context, asset 
 
 // ResolveOutputMint returns the Solana mint for a catalog symbol.
 func (s *BuyService) ResolveOutputMint(ctx context.Context, symbol string) (string, error) {
-	return s.xstocks.ResolveSolanaMint(ctx, symbol)
+	asset, err := s.ResolveAsset(ctx, symbol)
+	if err != nil {
+		return "", err
+	}
+	return asset.SolanaMint, nil
+}
+
+// ResolveAsset returns the catalog row for a symbol, including token decimals.
+func (s *BuyService) ResolveAsset(ctx context.Context, symbol string) (xstocks.CatalogAsset, error) {
+	if s == nil || s.xstocks == nil {
+		return xstocks.CatalogAsset{}, fmt.Errorf("buy service is not configured")
+	}
+	mint, err := s.xstocks.ResolveSolanaMint(ctx, symbol)
+	if err != nil {
+		return xstocks.CatalogAsset{}, err
+	}
+	if s.catalog != nil {
+		if asset, found, lookupErr := s.catalog.LookupByMint(ctx, mint); lookupErr == nil && found {
+			return asset.Normalize(), nil
+		}
+	}
+	return xstocks.CatalogAssetFromXStockNode(symbol, "", mint), nil
 }
 
 // StartBuy resolves the xStock mint and refuses when Jupiter has no route.
 func (s *BuyService) StartBuy(ctx context.Context, req StartBuyRequest) (StartBuyResult, error) {
 	logSwapQuoteAttempt(req.GroupID, req.UserID, req.Symbol, req.USDCAmount)
 
-	outputMint, err := s.ResolveOutputMint(ctx, req.Symbol)
-	if err != nil {
-		logSwapRefusal(req.GroupID, req.UserID, req.Symbol, err.Error())
+	requestedSymbol := strings.TrimSpace(req.Symbol)
+	quoteSymbol := requestedSymbol
+	var priceComparison *catalog.Comparison
+	var provider *QuoteProvider
+
+	resolved, resolveErr := s.ResolveAsset(ctx, requestedSymbol)
+	if resolveErr != nil {
+		logSwapRefusal(req.GroupID, req.UserID, req.Symbol, resolveErr.Error())
+		return StartBuyResult{}, resolveErr
+	}
+	resolved = resolved.Normalize()
+
+	if req.SelectBestVariant && s.variants != nil && resolved.Kind == xstocks.AssetKindPreIPO {
+		chosen, cmp, picked := s.variants.PickBuyVariantLive(ctx, resolved, requestedSymbol, req.USDCAmount, func(ctx context.Context, asset xstocks.CatalogAsset) (string, error) {
+			quote, err := s.jupiter.QuoteBuy(ctx, jupiter.QuoteBuyParams{
+				GroupID:    req.GroupID,
+				UserID:     req.UserID,
+				Symbol:     asset.Symbol,
+				OutputMint: asset.SolanaMint,
+				USDCAmount: req.USDCAmount,
+			})
+			if err != nil {
+				return "", err
+			}
+			if !quote.Routable {
+				return "", jupiter.ErrNoRoute
+			}
+			return quote.OutAmount, nil
+		})
+		priceComparison = &cmp
+		if picked {
+			switch cmp.Basis {
+			case "live_quote", "single":
+				quoteSymbol = cmp.ChosenSymbol
+				resolved = chosen.Normalize()
+			}
+		}
+	}
+
+	if err := preIPOSwapGuard(ctx, s.mintinfo, resolved); err != nil {
+		logSwapRefusal(req.GroupID, req.UserID, quoteSymbol, "issuer_paused")
 		return StartBuyResult{}, err
+	}
+
+	outputMint := resolved.SolanaMint
+	if outputMint == "" {
+		var err error
+		outputMint, err = s.ResolveOutputMint(ctx, quoteSymbol)
+		if err != nil {
+			logSwapRefusal(req.GroupID, req.UserID, req.Symbol, err.Error())
+			return StartBuyResult{}, err
+		}
 	}
 
 	quote, err := s.jupiter.QuoteBuy(ctx, jupiter.QuoteBuyParams{
 		GroupID:    req.GroupID,
 		UserID:     req.UserID,
-		Symbol:     req.Symbol,
+		Symbol:     quoteSymbol,
 		OutputMint: outputMint,
 		USDCAmount: req.USDCAmount,
 		Taker:      req.Taker,
@@ -110,20 +247,28 @@ func (s *BuyService) StartBuy(ctx context.Context, req StartBuyRequest) (StartBu
 		if errors.Is(err, jupiter.ErrNoRoute) {
 			reason = "no route"
 		}
-		logSwapRefusal(req.GroupID, req.UserID, req.Symbol, reason)
+		logSwapRefusal(req.GroupID, req.UserID, quoteSymbol, reason)
 		if errors.Is(err, jupiter.ErrNoRoute) {
 			return StartBuyResult{}, fmt.Errorf("%w: %s", ErrQuoteNotRoutable, reason)
 		}
 		return StartBuyResult{}, err
 	}
 	if !quote.Routable {
-		logSwapRefusal(req.GroupID, req.UserID, req.Symbol, "no route")
+		logSwapRefusal(req.GroupID, req.UserID, quoteSymbol, "no route")
 		return StartBuyResult{}, fmt.Errorf("%w: no route", ErrQuoteNotRoutable)
 	}
 
+	fields := issuerFieldsFromAsset(resolved)
+	if fields.Issuer != "" || fields.IssuerName != "" {
+		provider = &QuoteProvider{Issuer: fields.Issuer, IssuerName: fields.IssuerName}
+	}
+
 	return StartBuyResult{
-		OutputMint: outputMint,
-		Quote:      quote,
+		Symbol:          quoteSymbol,
+		OutputMint:      outputMint,
+		Quote:           quote,
+		Provider:        provider,
+		PriceComparison: priceComparison,
 	}, nil
 }
 

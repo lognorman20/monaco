@@ -1,0 +1,46 @@
+[
+  {
+    "id": "T-OpenAI",
+    "name": "T-OpenAI",
+    "symbol": "T-OpenAI",
+    "code": "tOpenAI",
+    "sector": "Artificial Intelligence",
+    "mint": "oPAiAikWTaFj9RYoRFD35ccfwhnMcB3ThgBZRHSkjTZ",
+    "markPrice": 812.79,
+    "holders": 8771,
+    "markValuation": 950000000000
+  },
+  {
+    "id": "T-Kalshi",
+    "name": "T-Kalshi",
+    "symbol": "T-Kalshi",
+    "code": "tKalshi",
+    "sector": "Prediction Markets",
+    "mint": "TKLSidmLVt3cqGaaodG8tyRzoANfQwoh67AccjmubeZ",
+    "markPrice": 413.8,
+    "holders": 2629,
+    "markValuation": 14000000000
+  },
+  {
+    "id": "T-SpaceX",
+    "name": "T-SpaceX",
+    "symbol": "T-SpaceX",
+    "code": "tSpaceX",
+    "sector": "Aerospace",
+    "mint": "TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v",
+    "markPrice": 423,
+    "holders": 1249,
+    "markValuation": 800000000000
+  },
+  {
+    "id": "T-Bad",
+    "name": "T-Bad",
+    "symbol": "T-Bad",
+    "code": "tBad",
+    "sector": "Test",
+    "mint": "not-a-valid-mint!!!",
+    "markPrice": 1,
+    "holders": 1,
+    "markValuation": 1
+  }
+]

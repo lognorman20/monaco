@@ -92,13 +92,17 @@ func (f agentLimitsFixture) countTransactions(t *testing.T, where string) int {
 }
 
 func registerAgentSellFill(f agentLimitsFixture, mint string, tokens int64) {
+	registerAgentSellFillWithProceeds(f, mint, tokens, tokens)
+}
+
+func registerAgentSellFillWithProceeds(f agentLimitsFixture, mint string, tokens, proceeds int64) {
 	requestID := fmt.Sprintf("agent-sell-%s-%d", f.ISO.Suffix(), tokens)
 	jupiter.RegisterSellQuote(f.Jupiter, mint, tokens, jupiter.SellQuote{
 		Routable:    true,
 		InputMint:   mint,
 		OutputMint:  jupiter.USDCMint,
 		InAmount:    strconv.FormatInt(tokens, 10),
-		OutAmount:   strconv.FormatInt(tokens, 10),
+		OutAmount:   strconv.FormatInt(proceeds, 10),
 		RequestID:   requestID,
 		Transaction: "unsigned-sell-tx",
 	})
@@ -107,8 +111,35 @@ func registerAgentSellFill(f agentLimitsFixture, mint string, tokens int64) {
 		Code:               0,
 		Signature:          "sig-" + requestID,
 		InputAmountResult:  strconv.FormatInt(tokens, 10),
-		OutputAmountResult: strconv.FormatInt(tokens, 10),
+		OutputAmountResult: strconv.FormatInt(proceeds, 10),
 	}})
+}
+
+// Buy $100 with a $100 allocation, sell it for $110: the agent may now spend $110.
+func TestAgentIntent_sellProceedsRefillBudget(t *testing.T) {
+	f := newAgentLimitsFixture(t, "refill", 1_000_000_000, 100_000_000)
+	registerAgentBuyFill(t, f.Jupiter, f.XStocks, f.ISO.Suffix(), "AAPLx", 100_000_000)
+	if result, err := f.submit(domain.AgentIntentBuy, "AAPLx", 100_000_000, ""); err != nil || result.Status != "executed" {
+		t.Fatalf("agent buy: result = %+v, err = %v", result, err)
+	}
+	registerAgentBuyFill(t, f.Jupiter, f.XStocks, f.ISO.Suffix(), "AAPLx", 1_000_000)
+	if _, err := f.submit(domain.AgentIntentBuy, "AAPLx", 1_000_000, ""); !errors.Is(err, ErrAgentIntentRejected) {
+		t.Fatalf("buy with the allocation spent: err = %v, want ErrAgentIntentRejected", err)
+	}
+
+	registerAgentSellFillWithProceeds(f, "MintAAPLx", 100_000_000, 110_000_000)
+	if result, err := f.submit(domain.AgentIntentSell, "AAPLx", 100_000_000, ""); err != nil || result.Status != "executed" {
+		t.Fatalf("agent sell: result = %+v, err = %v", result, err)
+	}
+
+	registerAgentBuyFill(t, f.Jupiter, f.XStocks, f.ISO.Suffix(), "AAPLx", 110_000_001)
+	if _, err := f.submit(domain.AgentIntentBuy, "AAPLx", 110_000_001, ""); !errors.Is(err, ErrAgentIntentRejected) {
+		t.Fatalf("buy one micro past the refilled $110: err = %v, want ErrAgentIntentRejected", err)
+	}
+	registerAgentBuyFill(t, f.Jupiter, f.XStocks, f.ISO.Suffix(), "AAPLx", 110_000_000)
+	if result, err := f.submit(domain.AgentIntentBuy, "AAPLx", 110_000_000, ""); err != nil || result.Status != "executed" {
+		t.Fatalf("buy of the refilled $110: result = %+v, err = %v", result, err)
+	}
 }
 
 func TestAgentIntent_sellOfMemberBoughtPositionRejected(t *testing.T) {

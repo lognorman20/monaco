@@ -535,17 +535,24 @@ final class MonacoAPIClient {
         accessToken: String,
         query: String = "",
         limit: Int = 25,
-        offset: Int = 0
+        offset: Int = 0,
+        catalogKind: AssetKind? = nil
     ) async throws -> ListMarketAssetsResponse {
         var components = URLComponents(
             url: baseURL.appending(path: "v1/assets"),
             resolvingAgainstBaseURL: false
         )!
-        components.queryItems = [
-            URLQueryItem(name: "query", value: query),
+        var items = [
             URLQueryItem(name: "limit", value: String(limit)),
             URLQueryItem(name: "offset", value: String(offset)),
         ]
+        if !query.isEmpty {
+            items.insert(URLQueryItem(name: "query", value: query), at: 0)
+        }
+        if let catalogKind {
+            items.append(URLQueryItem(name: "kind", value: catalogKind.rawValue))
+        }
+        components.queryItems = items
         guard let url = components.url else {
             throw MonacoAPIError.invalidResponse
         }
@@ -688,7 +695,8 @@ final class MonacoAPIClient {
         symbol: String,
         kind: String = "buy",
         usdc: Int64? = nil,
-        tokenAmount: Int64? = nil
+        tokenAmount: Int64? = nil,
+        selectBestVariant: Bool = false
     ) async throws -> BuyQuoteDTO {
         let url = baseURL.appending(path: "v1/groups/\(groupId)/quotes")
         var request = URLRequest(url: url)
@@ -696,7 +704,7 @@ final class MonacoAPIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         try applyAuthorizationHeader(accessToken: accessToken, to: &request)
         request.httpBody = try JSONEncoder().encode(
-            QuoteRequest(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount)
+            QuoteRequest(symbol: symbol, kind: kind, usdc: usdc, tokenAmount: tokenAmount, selectBestVariant: selectBestVariant)
         )
 
         let (data, response) = try await session.data(for: request)
@@ -908,9 +916,10 @@ private struct QuoteRequest: Encodable {
     let kind: String?
     let usdc: Int64?
     let tokenAmount: Int64?
+    let selectBestVariant: Bool
 
     enum CodingKeys: String, CodingKey {
-        case symbol, kind, usdc, tokenAmount
+        case symbol, kind, usdc, tokenAmount, selectBestVariant
     }
 
     func encode(to encoder: Encoder) throws {
@@ -919,6 +928,7 @@ private struct QuoteRequest: Encodable {
         if let kind { try container.encode(kind, forKey: .kind) }
         if let usdc { try container.encode(usdc, forKey: .usdc) }
         if let tokenAmount { try container.encode(tokenAmount, forKey: .tokenAmount) }
+        if selectBestVariant { try container.encode(true, forKey: .selectBestVariant) }
     }
 }
 
