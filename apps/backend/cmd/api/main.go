@@ -62,6 +62,10 @@ var apiRoutes = []string{
 	"GET /v1/me/balance",
 	"POST /v1/me/withdrawals",
 	"GET /v1/me/withdrawals/{id}",
+	// lane: portfolio
+	"GET /v1/me/portfolio",
+	"GET /v1/me/transactions",
+	"GET /v1/me/transactions/export.csv",
 	"GET /v1/home",
 	"GET /v1/home/dashboard",
 	"GET /v1/home/pnl-series",
@@ -302,6 +306,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 	auth := &httpapi.AuthHandlers{Sessions: sessions}
 	me := &httpapi.MeHandlers{Sessions: sessions, ProfilePhoto: profilePhotos}
 	homeHandlers := &httpapi.HomeHandlers{Home: home}
+	// lane: portfolio
+	portfolioHandlers := &httpapi.PortfolioHandlers{Portfolio: app.NewPortfolioService(home)}
 	assetSocialHandlers := &httpapi.AssetSocialHandlers{Home: home}
 	groupHandlers := &httpapi.GroupHandlers{
 		Groups:     groups,
@@ -418,6 +424,10 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/me/balance", depositHandlers.GetPlatformBalanceHandler)
 	mux.HandleFunc("POST /v1/me/withdrawals", platformWithdrawHandlers.CreatePlatformWithdrawalHandler)
 	mux.HandleFunc("GET /v1/me/withdrawals/{id}", platformWithdrawHandlers.GetPlatformWithdrawalHandler)
+	// lane: portfolio
+	mux.HandleFunc("GET /v1/me/portfolio", portfolioHandlers.GetPortfolioHandler)
+	mux.HandleFunc("GET /v1/me/transactions", portfolioHandlers.ListHistoryHandler)
+	mux.HandleFunc("GET /v1/me/transactions/export.csv", portfolioHandlers.ExportHistoryCSVHandler)
 	mux.HandleFunc("GET /v1/home", homeHandlers.HomeHandler)
 	mux.HandleFunc("GET /v1/home/dashboard", homeHandlers.HomeDashboardHandler)
 	mux.HandleFunc("GET /v1/home/pnl-series", homeHandlers.HomePnLSeriesHandler)

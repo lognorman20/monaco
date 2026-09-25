@@ -238,6 +238,8 @@ Skip a row when net USDC in is 0 (no divide by zero, no fake 0% clubs).
 - **Group board.** One row per group with net USDC in greater than 0. Equity is that group's pot NAV. Net USDC in is all member sweeps into that treasury minus all redeems out of it. This is how clubs compete with each other. A join password still hides entry, not the score. The row shows the group name, percent, and dollar P&L of the pot. Tap through to join or open.
 - **People board.** One row per user with net USDC in greater than 0 across **all** groups they belong to. Equity is the sum of their slices. Net USDC in is the sum of their per-group net USDC in. Alex in three clubs is one row, not three. Tap through to their profile list of groups.
 
+**Your portfolio** (`GET /v1/me/portfolio`, opened from Home's "Your money in cabals"). The same money as the Home figure, taken apart by stock: a member in three cabals that each own Apple sees one Apple row worth the sum of their slices, with each cabal's part under it. Cash in the pots and the account balance sit below. **History** (`GET /v1/me/transactions`, CSV export) lists every dollar that moved: adds, cabal funds, cash outs, and the member's slice of each cabal buy and sell. Trade amounts use the member's current slice; the ledger does not keep past slices. Contract: [api.md](api.md#portfolio-and-history).
+
 **Why two boards.** Friends care who is winning this pot. The app-wide loop is which clubs are hot and who is good across clubs. The people board only works if one user can sit in many groups.
 
 Postgres stores NAV snapshots on deposit, fill, and redeem so charts and both boards are replayable. Do not recompute history only from live wallets.
