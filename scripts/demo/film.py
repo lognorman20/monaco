@@ -15,7 +15,8 @@ faster than life ("a-b" in seconds of the take, "a-b@z:cx,cy" punched in z times
 around a point), or two takes side by side, or a card the script draws itself: the
 title, the cast, the pot counting up, the sign-off. Every phone settles into place,
 every caption slides up, and the joins are hard cuts except where one phone hands
-over to another.
+over to another. Punch-ins ("a-b@z:cx,cy") exist but the film does not use them;
+a zoom in the middle of a screen read as a glitch.
 """
 from __future__ import annotations
 
@@ -85,18 +86,18 @@ BEATS: list[Clip | Split | Card] = [
     Split(Clip("fund", "6-8.5,21-23.5,25.5-27", 1.8), Clip("fund-priya", "12-14,21-23,28-30.5", 1.8),
           "Fund the pot", transition="cut"),
     Card("counter", 3.4, transition="fade", values=["$500", "$800", "$1,000"]),
-    Clip("stocks", "3-6,10-13,14.5-17,18-20@1.3:0.5,0.42,23-25", 1.8, "Browse real stocks", transition="smoothup"),
-    Clip("propose", "4.5-6.5,9.5-11,18.5-21.5@1.3:0.5,0.5,32.5-34.5,38.5-40.5", 1.9, "Propose a buy"),
+    Clip("stocks", "3-6,10-13,14.5-17,18-20,23-25", 1.8, "Browse real stocks", transition="smoothup"),
+    Clip("propose", "4.5-6.5,9.5-11,18.5-21.5,32.5-34.5,38.5-40.5", 1.9, "Propose a buy"),
     Split(Clip("vote-priya", "5-8.5,17-20", 1.6), Clip("vote-maya", "4.5-6.5,9-10.5,17-19.5", 1.6),
           "Everyone votes", transition="slideleft"),
-    Clip("vote-maya", "42.5-46@1.12:0.6,0.6", 1.3, "Majority wins, the cabal buys", coins_at=1.2, faces_at=1.3, transition="cut"),
+    Clip("vote-maya", "42.5-46", 1.3, "Majority wins, the cabal buys", coins_at=1.2, faces_at=1.3, transition="cut"),
     Split(Clip("chat-jordan", "21-23,30.5-33", 1.6), Clip("chat-maya", "16-20", 1.6), "Talk it over"),
     Clip("pre-ipo", "12.5-15,24-26.5,35.5-38", 1.8, "Pre-IPO too", transition="slideleft"),
     Clip("bot", "7-9.5,24-26,33-35,40-43", 1.9, "Add a trading bot", transition="slideleft"),
-    Clip("bot-key", "24.5-27,39-41.5@1.25:0.5,0.5,56-59", 1.8, "Connect it to ClawPump", transition="slideleft"),
-    Clip("bot-activity", "0.5-3,4-6.5@1.3:0.5,0.62", 1.4, "Watch it trade", coins_at=2.3),
-    Clip("profit", "1.5-4,25.5-27.5,34.5-37.5,56-57.5@1.3:0.5,0.45", 1.8, "Cash out any time", coins_at=4.2, transition="slideleft"),
-    Clip("board-outro", "2-4.5,16-20.5@1.25:0.5,0.62", 1.6, "See who's up", faces_at=2.4),
+    Clip("bot-key", "24.5-27,39-41.5,56-59", 1.8, "Connect it to ClawPump", transition="slideleft"),
+    Clip("bot-activity", "0.5-3,4-6.5", 1.4, "Watch it trade", coins_at=2.3),
+    Clip("profit", "1.5-4,25.5-27.5,34.5-37.5,56-57.5", 1.8, "Cash out any time", coins_at=4.2, transition="slideleft"),
+    Clip("board-outro", "2-4.5,16-20.5", 1.6, "See who's up", faces_at=2.4),
     Card("outro", 3.2),
 ]
 
@@ -132,7 +133,7 @@ def duration(path: Path) -> float:
     return float(out)
 
 
-VERSION = 4
+VERSION = 5
 
 
 def spec_of(beat: object) -> dict:
@@ -536,7 +537,7 @@ def render_card(fmt: str, beat: Card, name: str) -> tuple[Path, float]:
         if beat.kind == "outro":
             # The cast comes back to wave the film off.
             size = 150 if vertical else 120
-            faces = [face_png(a, n, size) for n, a in CAST]
+            faces = [face_png(a, "", size) for _, a in CAST]
             gap = 10
             total = 3 * (size + FACE_PAD) + 2 * gap
             fy = 1300 if vertical else 700
