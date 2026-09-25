@@ -81,23 +81,25 @@ func computeGroupPotView(
 		return groupPotView{}, err
 	}
 
+	// USDC sent to an agent wallet (deployed or recalling, minus what came back) is still the
+	// cabal's. It is only counted once the outbound transfer confirmed, so it is never also
+	// sitting in treasuryUSDC.
+	deployedUSDC, err := store.SumOutstandingAgentDeploymentsByGroup(ctx, groupID)
+	if err != nil {
+		return groupPotView{}, err
+	}
+
 	if len(holdings) == 0 {
-		potNav := treasuryUSDC
-		if totalSharesMicro > 0 && potNav > totalSharesMicro {
-			potNav = totalSharesMicro
-		}
-		if potNav == 0 && totalSharesMicro > 0 {
-			potNav = totalSharesMicro
-		}
+		rows := []GroupViewPotRow{{
+			Symbol:    "USDC",
+			Units:     formatMicrosAsUsdDecimal(treasuryUSDC),
+			MarkUsd:   "1.00",
+			ValueUsd:  formatMicrosAsUsdDecimal(treasuryUSDC),
+			DollarPnL: formatSignedDollarPnL(0),
+		}}
 		return groupPotView{
-			PotNavMicros: potNav,
-			Rows: []GroupViewPotRow{{
-				Symbol:    "USDC",
-				Units:     formatMicrosAsUsdDecimal(treasuryUSDC),
-				MarkUsd:   "1.00",
-				ValueUsd:  formatMicrosAsUsdDecimal(treasuryUSDC),
-				DollarPnL: formatSignedDollarPnL(0),
-			}},
+			PotNavMicros: postgres.USDCOnlyPotNavMicros(treasuryUSDC, deployedUSDC, totalSharesMicro),
+			Rows:         appendDeployedUSDCRow(rows, deployedUSDC),
 		}, nil
 	}
 
@@ -110,6 +112,7 @@ func computeGroupPotView(
 	if err != nil {
 		return groupPotView{}, err
 	}
+	navInput.TreasuryUsdc += domain.USDCMicros(deployedUSDC)
 	nav, err := ComputePotNAV(navInput)
 	if err != nil {
 		return groupPotView{}, fmt.Errorf("compute pot nav: %w", err)
@@ -122,9 +125,25 @@ func computeGroupPotView(
 
 	return groupPotView{
 		PotNavMicros: int64(nav.TotalUsdc),
-		Rows:         rows,
+		Rows:         appendDeployedUSDCRow(rows, deployedUSDC),
 		AfterHours:   pythInput.AfterHours,
 	}, nil
+}
+
+// DeployedUSDCPotSymbol labels the pot row for USDC out with agent wallets.
+const DeployedUSDCPotSymbol = "Deployed USDC"
+
+func appendDeployedUSDCRow(rows []GroupViewPotRow, deployedUSDC int64) []GroupViewPotRow {
+	if deployedUSDC <= 0 {
+		return rows
+	}
+	return append(rows, GroupViewPotRow{
+		Symbol:    DeployedUSDCPotSymbol,
+		Units:     formatMicrosAsUsdDecimal(deployedUSDC),
+		MarkUsd:   "1.00",
+		ValueUsd:  formatMicrosAsUsdDecimal(deployedUSDC),
+		DollarPnL: formatSignedDollarPnL(0),
+	})
 }
 
 func fetchMarkedPotInput(

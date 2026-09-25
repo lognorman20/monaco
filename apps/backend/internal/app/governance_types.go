@@ -67,4 +67,6 @@ const (
 	ProposalKindPauseAgent  = domain.ProposalKindPauseAgent
 	ProposalKindResumeAgent = domain.ProposalKindResumeAgent
 	ProposalKindRevokeAgent = domain.ProposalKindRevokeAgent
+	ProposalKindDeployAgent = domain.ProposalKindDeployAgent
+	ProposalKindRecallAgent = domain.ProposalKindRecallAgent
 )

@@ -70,6 +70,11 @@ func MemberMayVote(vs VoterSet, memberID string, allMemberIDs []string) bool {
 	}
 }
 
+// IsAgentDeploymentKind reports whether kind moves USDC to or from an outside agent wallet.
+func IsAgentDeploymentKind(kind ProposalKind) bool {
+	return kind == ProposalKindDeployAgent || kind == ProposalKindRecallAgent
+}
+
 // Proposal is a buy or sell vote under consideration in a group.
 type Proposal struct {
 	ID          string
@@ -93,9 +98,14 @@ const (
 	ProposalKindPauseAgent  ProposalKind = "pause_agent"
 	ProposalKindResumeAgent ProposalKind = "resume_agent"
 	ProposalKindRevokeAgent ProposalKind = "revoke_agent"
+	// ProposalKindDeployAgent sends treasury USDC to an outside agent's own Solana wallet.
+	ProposalKindDeployAgent ProposalKind = "deploy_agent"
+	// ProposalKindRecallAgent asks for deployed USDC back from that agent wallet.
+	ProposalKindRecallAgent ProposalKind = "recall_agent"
 )
 
-// IsAgentGovernanceKind reports whether kind is an agent lifecycle vote.
+// IsAgentGovernanceKind reports whether kind is a group_agents lifecycle vote. Deploy and
+// recall votes move USDC to an outside agent wallet and are not part of that lifecycle.
 func IsAgentGovernanceKind(kind ProposalKind) bool {
 	switch kind {
 	case ProposalKindAddAgent, ProposalKindPauseAgent, ProposalKindResumeAgent, ProposalKindRevokeAgent:
@@ -109,7 +119,8 @@ func IsAgentGovernanceKind(kind ProposalKind) bool {
 func ParseProposalKind(raw string) (ProposalKind, error) {
 	switch ProposalKind(raw) {
 	case ProposalKindBuy, ProposalKindSell,
-		ProposalKindAddAgent, ProposalKindPauseAgent, ProposalKindResumeAgent, ProposalKindRevokeAgent:
+		ProposalKindAddAgent, ProposalKindPauseAgent, ProposalKindResumeAgent, ProposalKindRevokeAgent,
+		ProposalKindDeployAgent, ProposalKindRecallAgent:
 		return ProposalKind(raw), nil
 	default:
 		return "", fmt.Errorf("invalid proposal kind: %q", raw)

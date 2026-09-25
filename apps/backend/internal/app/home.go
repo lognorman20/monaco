@@ -11,6 +11,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/auth"
 	"github.com/monaco/monaco/apps/backend/internal/marks"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
+	soltreasury "github.com/monaco/monaco/apps/backend/internal/solana/treasury"
 	"github.com/monaco/monaco/apps/backend/internal/wallets"
 	"github.com/monaco/monaco/packages/domain"
 )
@@ -23,6 +24,7 @@ type HomeService struct {
 	pyth     marks.Client
 	deposits *DepositService
 	symbols  *SymbolResolver
+	solana   soltreasury.Client
 }
 
 // NewHomeService wires home dependencies.
@@ -343,7 +345,51 @@ func (h *HomeService) computeGroupPotNavAndShares(ctx context.Context, groupID s
 	return potView.PotNavMicros, totalSharesMicro, nil
 }
 
+// SetSolanaTreasury makes pot treasury USDC include the group's Solana treasury SPL USDC, so
+// USDC deployed to an agent and later returned there keeps the pot whole.
+func (h *HomeService) SetSolanaTreasury(client soltreasury.Client) {
+	h.solana = client
+}
+
+// PotTreasuryUSDCMicros is the treasury USDC pot NAV values for groupID, as the group view reads it.
+func (h *HomeService) PotTreasuryUSDCMicros(ctx context.Context, groupID string) (int64, error) {
+	netUsdcIn, err := h.groupNetUsdcIn(ctx, groupID)
+	if err != nil {
+		return 0, err
+	}
+	return h.groupTreasuryUSDC(ctx, groupID, netUsdcIn)
+}
+
 func (h *HomeService) groupTreasuryUSDC(ctx context.Context, groupID string, netUsdcIn int64) (int64, error) {
+	cash, err := h.groupBaseTreasuryUSDC(ctx, groupID, netUsdcIn)
+	if err != nil {
+		return 0, err
+	}
+	return cash + h.groupSolanaTreasuryUSDC(ctx, groupID), nil
+}
+
+// groupSolanaTreasuryUSDC is SPL USDC held by the group's Solana treasury, 0 when the group has
+// none. A failed read is logged and valued at 0 rather than failing the pot.
+func (h *HomeService) groupSolanaTreasuryUSDC(ctx context.Context, groupID string) int64 {
+	if h.solana == nil {
+		return 0
+	}
+	treasury, found, err := h.store.GetGroupSolanaTreasury(ctx, groupID)
+	if err != nil || !found {
+		if err != nil {
+			slog.Warn("solana treasury lookup failed", "group_id", groupID, "err", err)
+		}
+		return 0
+	}
+	balance, err := h.solana.TreasuryUSDCBalance(ctx, treasury.SolanaAddress)
+	if err != nil {
+		slog.Warn("solana treasury usdc balance failed", "group_id", groupID, "err", err)
+		return 0
+	}
+	return balance
+}
+
+func (h *HomeService) groupBaseTreasuryUSDC(ctx context.Context, groupID string, netUsdcIn int64) (int64, error) {
 	isFaker, err := h.store.IsFakerGroup(ctx, groupID)
 	if err != nil {
 		return 0, err
