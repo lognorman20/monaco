@@ -48,6 +48,8 @@ type bootResult struct {
 	stopExecutePoller context.CancelFunc
 	stopRedeemPoller  context.CancelFunc
 	stopSparkWarmer   context.CancelFunc
+	// lane: watchlist
+	stopAlertPoller context.CancelFunc
 	// workers tracks the poller goroutines so shutdown can wait for an in-flight tick.
 	workers *sync.WaitGroup
 }
@@ -114,6 +116,14 @@ var apiRoutes = []string{
 	"GET /v1/agent/skill.md",
 	"GET /v1/proposals/{id}/comments",
 	"POST /v1/proposals/{id}/comments",
+	// lane: watchlist
+	"GET /v1/me/watchlist",
+	"PUT /v1/me/watchlist",
+	"PUT /v1/me/watchlist/{symbol}",
+	"DELETE /v1/me/watchlist/{symbol}",
+	"GET /v1/me/alerts",
+	"POST /v1/me/alerts",
+	"DELETE /v1/me/alerts/{id}",
 }
 
 // boot loads config, registers the relayer fee payer, applies migrations, and builds the HTTP server.
@@ -356,6 +366,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 		}
 		assetsHandlers.Quotes = quotes
 	}
+	// lane: watchlist
+	// Alerts are priced the way the Stocks tab prices a row: catalogue mint, Jupiter mark.
+	alertMarks := &app.CatalogMarkSource{Catalog: catalogComposite, Price: jupiterPriceClient}
+	watchlist := app.NewWatchlistService(store, privyClient, catalogComposite, alertMarks)
+	assetsHandlers.Watchlist = watchlist
+	watchlistHandlers := &httpapi.WatchlistHandlers{Watchlist: watchlist, Assets: assetsHandlers}
 	quoteHandlers := &httpapi.QuoteHandlers{
 		Store:      store,
 		Privy:      privyClient,
@@ -470,6 +486,14 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/agent/skill.md", agentHandlers.AgentSkillHandler)
 	mux.HandleFunc("GET /v1/proposals/{id}/comments", proposalHandlers.ListProposalCommentsHandler)
 	mux.HandleFunc("POST /v1/proposals/{id}/comments", proposalHandlers.CreateProposalCommentHandler)
+	// lane: watchlist
+	mux.HandleFunc("GET /v1/me/watchlist", watchlistHandlers.GetWatchlistHandler)
+	mux.HandleFunc("PUT /v1/me/watchlist", watchlistHandlers.ReorderWatchlistHandler)
+	mux.HandleFunc("PUT /v1/me/watchlist/{symbol}", watchlistHandlers.AddToWatchlistHandler)
+	mux.HandleFunc("DELETE /v1/me/watchlist/{symbol}", watchlistHandlers.RemoveFromWatchlistHandler)
+	mux.HandleFunc("GET /v1/me/alerts", watchlistHandlers.ListPriceAlertsHandler)
+	mux.HandleFunc("POST /v1/me/alerts", watchlistHandlers.CreatePriceAlertHandler)
+	mux.HandleFunc("DELETE /v1/me/alerts/{id}", watchlistHandlers.DeletePriceAlertHandler)
 	routes := registerDevFakerRoute(mux, fakerHandlers, apiRoutes)
 	logRoutesReady(routes)
 
@@ -510,6 +534,16 @@ func boot(ctx context.Context) (*bootResult, error) {
 		slog.Info("spark warmer started")
 	}
 
+	// lane: watchlist
+	// Fires price alerts once a minute. The notifier logs until push delivery is wired.
+	alertPoller := worker.NewAlertPoller(store, alertMarks, app.LogAlertNotifier{}, nil)
+	alertCtx, stopAlertPoller := context.WithCancel(context.Background())
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		worker.RunAlertPoller(alertCtx, alertPoller, worker.DefaultAlertPollInterval)
+	}()
+
 	return &bootResult{
 		Server:            newHTTPServer(addr, platformHandler(mux, privyClient, httpapi.NewIdempotency(store, privyClient))),
 		Config:            cfg,
@@ -519,7 +553,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 		stopExecutePoller: stopExecutePoller,
 		stopRedeemPoller:  stopRedeemPoller,
 		stopSparkWarmer:   stopSparkWarmer,
-		workers:           workers,
+		// lane: watchlist
+		stopAlertPoller: stopAlertPoller,
+		workers:         workers,
 	}, nil
 }
 
@@ -588,6 +624,8 @@ func main() {
 	result.stopExecutePoller()
 	result.stopRedeemPoller()
 	result.stopSparkWarmer()
+	// lane: watchlist
+	result.stopAlertPoller()
 	if waitWorkers(result.workers, workerStopTimeout) {
 		slog.Info("pollers stopped")
 	} else {

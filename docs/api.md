@@ -126,7 +126,7 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/assets` | Catalog search with prices and the market session. Optional `kind=stock\|pre_ipo`. Same catalog fields as group assets. |
 | `GET /v1/assets/popular` | Popular assets with prices and the market session. |
 | `GET /v1/assets/held` | What the caller's cabals own and have open votes on, in one scan. Read-only. |
-| `GET /v1/assets/{symbol}` | Asset detail: price, liquidity, market session, the stats grid, the underlying equity against the token (`stockVsToken`), and `variants[]` when several issuers share an `underlyingId` (each names the issuer, fee, and whether it is the best price). |
+| `GET /v1/assets/{symbol}` | Asset detail: price, liquidity, market session, the stats grid, the underlying equity against the token (`stockVsToken`), and `variants[]` when several issuers share an `underlyingId` (each names the issuer, fee, and whether it is the best price). Also the caller's own `watching` and `alertCount` (active alerts on this stock); both are omitted when they could not be read. |
 | `GET /v1/assets/{symbol}/chart` | Price history. `range` is `1D`, `1W`, `1M`, `3M`, `1Y` or `ALL` (default `1D`); the response echoes the range, names its `source`, and carries the `previousCloseUsdcMicros` baseline. |
 | `GET /v1/assets/{symbol}/social` | What the caller's own cabals are doing with one stock: `holdings` (units, value, cost basis, P&L and the caller's slice), `openProposals` (tally, the caller's ballot and who voted) and `activity` (proposals and fills). Scoped to the caller's memberships, so a non-member never appears in another cabal's answer. `unvaluedGroups` counts cabals that could not be priced on this pass. |
 | `POST /v1/groups/{id}/quotes` | Check that a buy or sell can route, and at what price. `kind` stays `buy` or `sell`. A buy may send `selectBestVariant: true`; the response symbol is the issuer that was chosen. Buy responses add `tokenDecimals`, `assetKind` (`stock` or `pre_ipo`), `issuer`, and live `premiumBps` when a fresh Jupiter reference exists. |
@@ -136,6 +136,13 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `POST /v1/proposals/{id}/votes` | Cast a vote. |
 | `GET /v1/proposals/{id}/comments` | Comment thread, oldest first. |
 | `POST /v1/proposals/{id}/comments` | Add a comment or reply. |
+| `GET /v1/me/watchlist` | The caller's watchlist as market rows, in their order. See [Watchlist and price alerts](#watchlist-and-price-alerts). |
+| `PUT /v1/me/watchlist/{symbol}` | Add a catalogue stock at the end. `201` when added, `200` when it was already there (it keeps its place). |
+| `DELETE /v1/me/watchlist/{symbol}` | Take a stock off. `204` whether or not it was there. |
+| `PUT /v1/me/watchlist` | Reorder: `{ "symbols": [...] }` naming every stock on the list once. |
+| `GET /v1/me/alerts` | The caller's active alerts, then the ones that fired in the last 30 days, with a market row per stock. Optional `symbol`. |
+| `POST /v1/me/alerts` | Set a price alert: `{ "symbol", "direction": "above"\|"below", "priceUsdcMicros" }`. At most 20 active. |
+| `DELETE /v1/me/alerts/{id}` | Remove one of the caller's alerts, waiting or fired. |
 | `GET /v1/groups/{id}/messages` | A page of cabal chat. |
 | `POST /v1/groups/{id}/messages` | Post a chat message. |
 | `GET /v1/transactions/{id}` | One swap. `404 transaction not found` for an unknown id and for a club you cannot read alike. |
@@ -173,3 +180,37 @@ series.
 `spark` is always served from cache. A list route never fetches price history: a miss
 is a row without a sparkline now and a background warm for the next request, so no
 page of rows can ever wait on a vendor.
+
+## Watchlist and price alerts
+
+A member follows stocks before (or without) a cabal buying them, and asks to be told when one
+moves. Both are the member's own; no cabal sees them.
+
+**Watchlist.** `GET /v1/me/watchlist` answers `{ "assets": [...], "market": {...} }`, the
+envelope and row shape of `GET /v1/assets/popular`, in the member's order. A symbol the
+catalogue cannot resolve on this pass still ships as a row with its symbol, so a stock never
+drops off the member's own list. `PUT /v1/me/watchlist/{symbol}` checks the symbol against the
+catalogue and stores the catalogue's spelling; it answers `{ "symbol", "position", "createdAt" }`.
+A watchlist holds 40 stocks (the most one row response decorates); past that is `409` with
+`reason: "watchlist_full"`. `PUT /v1/me/watchlist` answers `{ "symbols": [...] }` in the new
+order; a list that does not name every stock on the watchlist exactly once is `409` with
+`reason: "watchlist_changed"` (reload and retry); a blank symbol, one over 32 characters, or
+more than 40 of them is `400`. An unknown symbol is `404 stock not found`; a catalogue that cannot be asked is `503`.
+
+**Alerts.** An alert is a line and a side: fire when the mark is **at or above** `priceUsdcMicros`
+(`above`) or **at or below** it (`below`). The mark is the row's `priceUsdcMicros`: the
+catalogue names the mint and Jupiter prices it, exactly as the Stocks tab does. A line the
+stock has already reached is refused with `422`, `reason: "alert_already_met"` (checked
+against a fresh mark when one can be read; without one the alert is stored). More than 20
+active alerts is `409`, `reason: "alert_limit"`. `priceUsdcMicros` must be above zero and at
+most $1,000,000 (`400` otherwise).
+
+An alert is one-shot. The alert poller (`internal/worker/alert_poller.go`) reads the active
+alerts' symbols every 60 seconds, prices them in one batched call, and fires every alert whose
+line its mark has reached. Firing stamps `triggeredAt` and `triggeredPriceUsdcMicros`, clears
+`active`, and selects the row in one statement, so an alert fires exactly once however many
+API processes poll. Each fired alert is handed to `app.AlertNotifier` once; the default logs it.
+
+Alert JSON: `{ "id", "symbol", "direction", "priceUsdcMicros", "active", "createdAt",
+"triggeredAt"?, "triggeredPriceUsdcMicros"? }`. `GET /v1/me/alerts` answers
+`{ "alerts": [...], "assets": [market rows, one per stock named], "market": {...} }`.
