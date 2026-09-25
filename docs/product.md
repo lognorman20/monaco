@@ -24,6 +24,10 @@ Formula and worked numbers: [NAV and share units](#nav-and-share-units).
 
 Two boards, both percent return. Inside a cabal: who in this pot is ahead. Across the app: which cabals and which people are ahead. The boards are why people come back and argue about the next trade. Buys and cash-out exist so those numbers are real.
 
+## Matchups
+
+Every cabal gets a game each week. On Monday 00:00 UTC every cabal with two or more members and more than $1 in the pot is paired with the cabal closest to it in pot size, so a $200 pot does not race a $20,000 one; an odd cabal out sits the week out on a bye. The two race on percent return from the draw to the next Monday, counting money added or taken out as money, not as gains. The higher return gets the W, equal returns tie, and a bye counts for nothing. The season table ranks cabals by wins, then by the sum of their weekly returns. A cabal can also challenge another for next week; if a member of the other cabal accepts, the pair plays ahead of the draw. A cabal created mid-week joins the next Monday's draw. HTTP: [Matchups](api.md#matchups).
+
 ## Agents
 
 A cabal can vote to hand a slice of the treasury to an agent. Example: 10% of the pot, one strategy. That slice sits in the portfolio next to positions members picked and USDC left idle.

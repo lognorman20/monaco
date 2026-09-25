@@ -48,6 +48,8 @@ type bootResult struct {
 	stopExecutePoller context.CancelFunc
 	stopRedeemPoller  context.CancelFunc
 	stopSparkWarmer   context.CancelFunc
+	// lane: matchups
+	stopMatchupPoller context.CancelFunc
 	// workers tracks the poller goroutines so shutdown can wait for an in-flight tick.
 	workers *sync.WaitGroup
 }
@@ -114,6 +116,12 @@ var apiRoutes = []string{
 	"GET /v1/agent/skill.md",
 	"GET /v1/proposals/{id}/comments",
 	"POST /v1/proposals/{id}/comments",
+	// lane: matchups
+	"GET /v1/groups/{id}/matchup",
+	"GET /v1/home/matchups",
+	"GET /v1/matchups/table",
+	"POST /v1/groups/{id}/matchups/challenge",
+	"POST /v1/groups/{id}/matchups/challenges/{challengeId}/accept",
 }
 
 // boot loads config, registers the relayer fee payer, applies migrations, and builds the HTTP server.
@@ -315,6 +323,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Market: &httpapi.MarketRowSource{Catalog: catalogComposite, Pyth: priceChain, Price: jupiterPriceClient},
 	}
 	groupsTabHandlers := &httpapi.GroupsTabHandlers{GroupsTab: app.NewGroupsTabService(home, store)}
+	// lane: matchups
+	matchups := app.NewMatchupService(store, home)
+	matchupHandlers := &httpapi.MatchupHandlers{Matchups: matchups}
 	groupPictureHandlers := &httpapi.GroupPictureHandlers{Pictures: groupPictures}
 	executeOnPass := app.NewExecuteOnPassService(swap, store)
 	governance.SetBuyService(buy)
@@ -470,6 +481,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/agent/skill.md", agentHandlers.AgentSkillHandler)
 	mux.HandleFunc("GET /v1/proposals/{id}/comments", proposalHandlers.ListProposalCommentsHandler)
 	mux.HandleFunc("POST /v1/proposals/{id}/comments", proposalHandlers.CreateProposalCommentHandler)
+	// lane: matchups
+	mux.HandleFunc("GET /v1/groups/{id}/matchup", matchupHandlers.GroupMatchupHandler)
+	mux.HandleFunc("GET /v1/home/matchups", matchupHandlers.HomeMatchupsHandler)
+	mux.HandleFunc("GET /v1/matchups/table", matchupHandlers.MatchupTableHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/matchups/challenge", matchupHandlers.CreateMatchupChallengeHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/matchups/challenges/{challengeId}/accept", matchupHandlers.AcceptMatchupChallengeHandler)
 	routes := registerDevFakerRoute(mux, fakerHandlers, apiRoutes)
 	logRoutesReady(routes)
 
@@ -510,6 +527,14 @@ func boot(ctx context.Context) (*bootResult, error) {
 		slog.Info("spark warmer started")
 	}
 
+	// lane: matchups — freezes ended weeks and draws the current one, on boot and every few minutes.
+	matchupCtx, stopMatchupPoller := context.WithCancel(context.Background())
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		worker.RunMatchupPoller(matchupCtx, matchups, worker.DefaultMatchupInterval)
+	}()
+
 	return &bootResult{
 		Server:            newHTTPServer(addr, platformHandler(mux, privyClient, httpapi.NewIdempotency(store, privyClient))),
 		Config:            cfg,
@@ -519,6 +544,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 		stopExecutePoller: stopExecutePoller,
 		stopRedeemPoller:  stopRedeemPoller,
 		stopSparkWarmer:   stopSparkWarmer,
+		// lane: matchups
+		stopMatchupPoller: stopMatchupPoller,
 		workers:           workers,
 	}, nil
 }
@@ -588,6 +615,8 @@ func main() {
 	result.stopExecutePoller()
 	result.stopRedeemPoller()
 	result.stopSparkWarmer()
+	// lane: matchups
+	result.stopMatchupPoller()
 	if waitWorkers(result.workers, workerStopTimeout) {
 		slog.Info("pollers stopped")
 	} else {
