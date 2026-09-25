@@ -10,9 +10,9 @@ Two masters: a 9:16 vertical for social, and a 16:9 for the site with the phone 
 | --- | --- | --- | --- |
 | Alfred | +1 555 555 7177 / 465354 | Maya | cat (the animal her id hashes to) |
 | Bartholomez | +1 555 555 9638 / 648588 | Jordan | rabbit (same) |
-| Cayman | +1 555 555 8215 / 115543 | Priya | penguin (picked on camera in the face sheet) |
+| Cayman | +1 555 555 8215 / 115543 | Priya | penguin (picked in the face sheet on Profile, off camera) |
 
-Names are set once in onboarding. A member without a photo wears the animal their id hashes to, and the face sheet on Profile lets them pick another or a photo. Everyone starts with $1,000 (demo mode).
+Names are set once in onboarding. A member without a photo wears the animal their id hashes to, and the face sheet on Profile lets them pick another or a photo; the film does not show the sheet, it is something to find. Everyone starts with $1,000 (demo mode).
 
 ## Beats
 
@@ -29,22 +29,21 @@ One take per row, shot in this order because each needs the state the one before
 | 6 | `fund` | Jordan | Fund the pot | Add money, $500, the pot reads $500 |
 | 7 | `join-priya` | Priya | Anyone with the code can join | Same join, three faces in the hero |
 | 8 | `fund-priya` | Priya | Everyone owns a slice | $300 in, the pot reads $800, her slice |
-| 9 | `face-priya` | Priya | Pick your face | Profile, the face sheet, penguin |
-| 10 | `fund-maya` | Maya | | $200 in, the pot reads $1,000 |
-| 11 | `stocks` | Jordan | Browse real stocks | Stocks tab, Alphabet, scrub, 1M, 1Y, stats |
-| 12 | `propose` | Jordan | Propose a buy | $250, "Super bullish. This stock will only keep growing.", Review, Send |
-| 13 | `vote-priya` | Priya | Everyone votes | Needs your vote, Yes, 1 of 3 |
-| 14 | `vote-maya` | Maya | Majority wins, the cabal buys | Yes, passes, the tracker reaches Done, Bought |
-| 15 | `chat-jordan` | Jordan | Talk it over | "In. Told you" |
-| 16 | `chat-maya` | Maya | | "We own Google now" |
-| 17 | `pre-ipo` | Jordan | Pre-IPO too | Pre-IPO section, SpaceX, the reference price and premium, the issuers |
-| 18 | `bot` | Maya | Add a trading bot | Propose, Add a trading bot, $200, "Scout", Send |
-| 19 | `vote-bot` | Jordan | | Yes, Passed |
-| 20 | `bot-key` | Jordan | Connect it to ClawPump | The bot's screen, the key card, Copy connect instructions |
-| 21 | `bot-activity` | Jordan | Watch it trade | Activity: Scout bought $40 of Nvidia (`scripts/demo/agent-intent.sh buy NVDAx 40`) |
-| 22 | `profit` | Maya | Cash out any time | Cash out, 25%, the pot and slice shrink, the balance grows |
-| 23 | `board-outro` | Maya | See who's up | Cabals tab, Home top investors with the three faces |
-| 24 | outro card | | trymonaco.xyz | |
+| 9 | `fund-maya` | Maya | | $200 in, the pot reads $1,000 |
+| 10 | `stocks` | Jordan | Browse real stocks | Stocks tab, Alphabet, scrub, 1M, 1Y, stats |
+| 11 | `propose` | Jordan | Propose a buy | $250, "Super bullish. This stock will only keep growing.", Review, Send |
+| 12 | `vote-priya` | Priya | Everyone votes | Needs your vote, Yes, 1 of 3 |
+| 13 | `vote-maya` | Maya | Majority wins, the cabal buys | Yes, passes, the tracker reaches Done, Bought |
+| 14 | `chat-jordan` | Jordan | Talk it over | "In. Told you" |
+| 15 | `chat-maya` | Maya | | "We own Google now" |
+| 16 | `pre-ipo` | Jordan | Pre-IPO too | Pre-IPO section, SpaceX, the reference price and premium, the issuers |
+| 17 | `bot` | Maya | Add a trading bot | Propose, Add a trading bot, $200, "Scout", Send |
+| 18 | `vote-bot` | Jordan | | Yes, Passed |
+| 19 | `bot-key` | Jordan | Connect it to ClawPump | The bot's screen, the key card, Copy connect instructions |
+| 20 | `bot-activity` | Jordan | Watch it trade | Activity: Scout bought $40 of Nvidia (`scripts/demo/agent-intent.sh buy NVDAx 40`) |
+| 21 | `profit` | Maya | Cash out any time | Cash out, 25%, the pot and slice shrink, the balance grows |
+| 22 | `board-outro` | Maya | See who's up | Cabals tab, Home top investors with the three faces |
+| 23 | outro card | | trymonaco.xyz | |
 
 ## Rules for every clip
 

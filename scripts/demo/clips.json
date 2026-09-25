@@ -283,6 +283,9 @@
       "account": "priya",
       "steps": [
         {
+          "note": "off camera, not in the film: this is how Priya becomes the penguin"
+        },
+        {
           "tap": {
             "id": "tab-profile"
           }

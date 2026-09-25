@@ -35,7 +35,6 @@ beats=(
   "fund|1.3|Fund the pot|5.5-8.5,20.5-23.5,25.5-27"
   "join-priya|1.5|Anyone with the code can join|5.5-8.5,14.5-17.5,22-25,38-39.9,46.5-50.5"
   "fund-priya|1.4|Everyone owns a slice|11.5-14.5,16.8-17.9,20.6-23.2,27-30.5"
-  "face-priya|1.4|Pick your face|8-10,25.5-28,34-38.5"
   "fund-maya|1.3||28.5-31.5,33.2-34.3,35-37.8"
   "stocks|1.5|Browse real stocks|3-6.5,9.5-20,23-25.2"
   "propose|1.6|Propose a buy|3.5-6.5,8.5-11,17.5-22,25.5-28.5,31.5-35,37.5-41"
