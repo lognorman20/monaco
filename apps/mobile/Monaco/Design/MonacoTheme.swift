@@ -263,25 +263,53 @@ enum MonacoTheme {
     /// Saturated identity tints. Picked from the group id, never from the name, so a rename keeps
     /// the colour. `soft` is the low-alpha wash for tinted areas that still hold ink text.
     ///
-    /// Left as they were when the brand moved from electric blue to forest: none of the five is a
-    /// money colour, and the move actually *widened* the gap — `sky` used to sit near the old blue
-    /// brand and no longer sits near anything. `sage` is a teal at hue 185°, 30° off `profit`, and
-    /// it only ever draws inside a 44pt mark or a stripe, never on a figure.
+    /// Retuned for the forest brand. The old five were carried over from the electric-blue app and
+    /// none of them was a money colour, which was the correctness bar — but at full saturation a
+    /// teal, a safety orange and a hot crimson are a different design language from cream paper and
+    /// forest ink, and a cabal row sat between the two. These five keep the same job and the same
+    /// separation while belonging to the palette around them.
     ///
-    /// White initials on `fill` clear the 3:1 large-text minimum, not the 4.5:1 body minimum — in
-    /// dark the lighter fills sit at 3.5:1. That is the right bar for what draws there (bold tile
-    /// initials at 15pt and up), but it does mean `fill` must not be used behind small white text.
+    /// The constraint is not contrast, it is *hue*. Five cabals have to be five colours at a glance,
+    /// and none of them may be mistaken for `profit` or `loss` in a row that also carries money:
+    ///
+    /// | tint   | hue  | L*    | from `profit` | from `loss` |
+    /// |--------|------|-------|---------------|-------------|
+    /// | pine   | 190° | 0.487 | 35°           | 159°        |
+    /// | ochre  |  78° | 0.535 | 78°           |  46°        |
+    /// | plum   | 341° | 0.447 | 175°          |  51°        |
+    /// | indigo | 255° | 0.452 |  99°          | 137°        |
+    /// | moss   | 118° | 0.438 |  38°          |  93°        |
+    ///
+    /// Hue alone is not enough, which a first pass proved on the Home list: ochre and moss are the
+    /// closest pair at 40°, and at equal lightness two cabals in adjacent rows read as one colour.
+    /// So every pair is separated by 60° of hue *or* 0.08 of L\*, and ochre and moss take the
+    /// second route — moss is a deep olive where ochre is a mid gold.
+    ///
+    /// That is also why moss barely lifts in dark while the others do. Lifting each fill to the
+    /// same contrast floor independently flattened the ladder and put ochre and moss back within
+    /// 0.024 of each other; the ladder is the constraint, and white initials clear AA on a darker
+    /// tile anyway.
+    ///
+    /// The closest approach to a money colour is moss at 38° from profit. Hue is what does that
+    /// work — these tints are not quieter than the money colours, they run 0.9× to 1.2× profit's
+    /// chroma — and it is enough because a tint only ever fills a mark or a stripe, never a figure.
+    ///
+    /// White initials clear 4.5:1 on every fill in both schemes, where the old palette met only the
+    /// 3:1 large-text bar in dark. That was defensible for 15pt bold initials; holding the body bar
+    /// costs nothing here and means `fill` is safe behind small white text too.
     enum CabalTint: CaseIterable {
-        case sage, peach, butter, clay, sky
+        // Order is the identity mapping: a cabal's tint is its id hashed mod 5, so these stay in
+        // their slots and no existing cabal changes which of the five it gets.
+        case pine, ochre, plum, indigo, moss
 
         /// Mark tile, accent stripe, chart key.
         var fill: Color {
             switch self {
-            case .sage: return Color.adaptive(light: 0x0D7D74, dark: 0x10938A)
-            case .peach: return Color.adaptive(light: 0xC2570C, dark: 0xD9681A)
-            case .butter: return Color.adaptive(light: 0xA16207, dark: 0xBC7A10)
-            case .clay: return Color.adaptive(light: 0xBE3455, dark: 0xD44467)
-            case .sky: return Color.adaptive(light: 0x17627D, dark: 0x1E7A99)
+            case .pine: return Color.adaptive(light: 0x0E6E6A, dark: 0x11827D)
+            case .ochre: return Color.adaptive(light: 0x8F6410, dark: 0x9A6C11)
+            case .plum: return Color.adaptive(light: 0x7A3A66, dark: 0xB15494)
+            case .indigo: return Color.adaptive(light: 0x2F5788, dark: 0x4076B9)
+            case .moss: return Color.adaptive(light: 0x4E5817, dark: 0x545F19)
             }
         }
 
@@ -294,22 +322,22 @@ enum MonacoTheme {
         /// Brighter than `fill` so the tint still reads as a mark or stripe on a deep ink hero card.
         var onInk: Color {
             switch self {
-            case .sage: return Color(hex: 0x2CC3B4)
-            case .peach: return Color(hex: 0xFF9248)
-            case .butter: return Color(hex: 0xEBB13C)
-            case .clay: return Color(hex: 0xFF6C8B)
-            case .sky: return Color(hex: 0x46B3DB)
+            case .pine: return Color(hex: 0x35C4BD)
+            case .ochre: return Color(hex: 0xE2B04A)
+            case .plum: return Color(hex: 0xD68CC2)
+            case .indigo: return Color(hex: 0x7DAFE0)
+            case .moss: return Color(hex: 0xB8CC63)
             }
         }
 
         /// Chart line colour for this cabal.
         var stroke: Color {
             switch self {
-            case .sage: return Color.adaptive(light: 0x0D7D74, dark: 0x2CC3B4)
-            case .peach: return Color.adaptive(light: 0xC2570C, dark: 0xFF9248)
-            case .butter: return Color.adaptive(light: 0xA16207, dark: 0xEBB13C)
-            case .clay: return Color.adaptive(light: 0xBE3455, dark: 0xFF6C8B)
-            case .sky: return Color.adaptive(light: 0x17627D, dark: 0x46B3DB)
+            case .pine: return Color.adaptive(light: 0x0E6E6A, dark: 0x35C4BD)
+            case .ochre: return Color.adaptive(light: 0x8F6410, dark: 0xE2B04A)
+            case .plum: return Color.adaptive(light: 0x7A3A66, dark: 0xD68CC2)
+            case .indigo: return Color.adaptive(light: 0x2F5788, dark: 0x7DAFE0)
+            case .moss: return Color.adaptive(light: 0x4E5817, dark: 0xB8CC63)
             }
         }
 

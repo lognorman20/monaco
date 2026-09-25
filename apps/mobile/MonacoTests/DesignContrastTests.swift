@@ -316,6 +316,58 @@ struct MonacoContrastTests {
         }
     }
 
+    /// Five cabals have to be five colours at a glance, and hue alone does not deliver that.
+    ///
+    /// A first pass at the forest tints separated them by hue only, with the two earthiest sitting
+    /// at nearly the same lightness. On the Home list, two cabals in adjacent rows came out as one
+    /// brown. Hue separation is what keeps a tint off the money colours; *lightness* separation is
+    /// what keeps two tints off each other when they happen to land next to one another, and which
+    /// pair lands next to which is a hash of the group id, so every pair has to survive it.
+    ///
+    /// Either route is enough on its own: 60° of hue, or 0.08 of L*.
+    @Test func everyPairOfCabalTintsIsTellableApart() {
+        let tints = MonacoTheme.CabalTint.allCases
+        for scheme in [UIUserInterfaceStyle.light, .dark] {
+            let name = scheme == .light ? "light" : "dark"
+            for (index, first) in tints.enumerated() {
+                for second in tints[(index + 1)...] {
+                    let a = OKLCh.value(first.fill, scheme)
+                    let b = OKLCh.value(second.fill, scheme)
+                    let hueGap = abs(a.hue - b.hue)
+                    let deltaHue = min(hueGap, 360 - hueGap)
+                    let deltaLightness = abs(a.lightness - b.lightness)
+                    #expect(
+                        deltaHue >= 60 || deltaLightness >= 0.08,
+                        "\(first) and \(second) in \(name) are only \(deltaHue)° apart at ΔL* \(deltaLightness): two cabals would read as one"
+                    )
+                }
+            }
+        }
+    }
+
+    /// A cabal tile sits in a row that also carries a gain or a loss, so no tint may be mistaken for
+    /// either.
+    ///
+    /// Hue is the whole guard here, and deliberately so. The tints are *not* quieter than the money
+    /// colours — measured, they run 0.9× to 1.2× profit's chroma — so a "the tint is more muted"
+    /// assertion would have been asserting something false. What separates them is that no tint
+    /// shares a hue with a money colour, and the two that come nearest are moss (a yellow-green, 38°
+    /// off profit) and ochre (a gold, 46° off loss).
+    @Test func noCabalTintReadsAsAMoneyColour() {
+        for scheme in [UIUserInterfaceStyle.light, .dark] {
+            let name = scheme == .light ? "light" : "dark"
+            for tint in MonacoTheme.CabalTint.allCases {
+                for (label, money) in [("profit", MonacoTheme.profit), ("loss", MonacoTheme.loss)] {
+                    let hueGap = abs(OKLCh.value(tint.fill, scheme).hue - OKLCh.value(money, scheme).hue)
+                    #expect(
+                        min(hueGap, 360 - hueGap) >= 30,
+                        "\(tint) vs \(label) in \(name): only \(min(hueGap, 360 - hueGap))° of hue apart"
+                    )
+                }
+            }
+        }
+    }
+
     /// `disabledLabel` is the one token held *below* AA on purpose, so it needs a two-sided guard:
     /// AA-or-better makes an unavailable control read as a live one, and too low makes it
     /// unreadable. The upper bound is expressed against `tertiaryText` rather than a bare number,

@@ -27,8 +27,8 @@ struct CabalTintTests {
 
     @Test func tintIsPinnedForKnownIds() {
         // Pinned so a change to the hash or the case list is a deliberate, visible decision.
-        #expect(MonacoTheme.CabalTint.forGroupId("") == .butter)
-        #expect(MonacoTheme.CabalTint.forGroupId("a") == .peach)
+        #expect(MonacoTheme.CabalTint.forGroupId("") == .plum)
+        #expect(MonacoTheme.CabalTint.forGroupId("a") == .ochre)
     }
 
     @Test func tintsSpreadAcrossAllFive() {
