@@ -1,0 +1,77 @@
+{
+  "note": "Every step names the element by its accessibility identifier (id) or its visible label (text). `paste` types a value into the focused field. Seconds are the storyboard's target per clip; record a little longer and let the cut trim.",
+  "accounts": {
+    "maya":   {"phone": "+15555557177", "otp": "465354", "name": "Maya"},
+    "jordan": {"phone": "+15555559638", "otp": "648588", "name": "Jordan"},
+    "priya":  {"phone": "+15555558215", "otp": "115543", "name": "Priya"}
+  },
+  "clips": [
+    {"name": "login", "account": "maya", "seconds": 6, "steps": [
+      {"tap": {"id": "smsPhoneField"}}, {"paste": "5555557177"}, {"tap": {"id": "smsSendCodeButton"}},
+      {"wait_for": {"id": "smsCodeField"}}, {"tap": {"id": "smsCodeField"}}, {"paste": "465354"},
+      {"tap": {"id": "smsVerifyButton"}}, {"wait_for": {"id": "home-root"}}, {"still": 1.5}
+    ]},
+    {"name": "onboarding", "account": "maya", "seconds": 0, "steps": [
+      {"note": "first sign-in only, not in the film"},
+      {"tap": {"id": "onboarding-name-field"}}, {"paste": "Maya"}, {"tap": {"id": "onboarding-continue"}}
+    ]},
+    {"name": "start-cabal", "account": "maya", "seconds": 10, "steps": [
+      {"tap": {"id": "tab-cabals"}}, {"tap": {"id": "cabals-new-button"}}, {"tap": {"id": "new-cabal-create-row"}},
+      {"tap": {"id": "create-group-name"}}, {"paste": "Sunday Investors"},
+      {"tap": {"text": "Everyone"}}, {"tap": {"text": "Majority"}}, {"tap": {"text": "24 hours"}},
+      {"tap": {"id": "create-group-submit"}}, {"wait_for": {"text": "In the pot"}}, {"still": 2}
+    ]},
+    {"name": "invite-join", "account": "maya, then jordan, then priya", "seconds": 10, "steps": [
+      {"tap": {"id": "group-details-button"}}, {"tap": {"text": "Copy code"}}, {"still": 1},
+      {"note": "cut. Sign out (Profile → Sign out), sign in as Jordan, then:"},
+      {"tap": {"id": "tab-cabals"}}, {"tap": {"id": "cabals-new-button"}}, {"tap": {"id": "new-cabal-join-row"}},
+      {"tap": {"id": "join-group-name"}}, {"paste": "<invite code>"}, {"tap": {"id": "join-group-submit"}},
+      {"wait_for": {"text": "In the pot"}}, {"still": 1.5},
+      {"note": "cut. Same again as Priya, faster."}
+    ]},
+    {"name": "fund", "account": "maya, then priya", "seconds": 9, "steps": [
+      {"tap": {"text": "Add money"}}, {"tap": {"text": "Fund a cabal"}}, {"tap": {"text": "$500"}},
+      {"tap": {"text": "Add $500.00 to the pot"}}, {"wait_for": {"text": "$500.00"}}, {"still": 1.5},
+      {"note": "cut. As Priya: $300 the same way; the pot reads $800."}
+    ]},
+    {"name": "stocks", "account": "jordan", "seconds": 10, "steps": [
+      {"tap": {"id": "tab-assets"}}, {"still": 1.5}, {"scroll": "down a little"}, {"tap": {"id": "assets-popular-GOOGLx"}},
+      {"wait_for": {"id": "asset-detail-chart"}}, {"still": 1}, {"drag": {"id": "asset-detail-chart", "from": "left", "to": "right"}},
+      {"tap": {"id": "asset-chart-range-1M"}}, {"still": 1}, {"tap": {"id": "asset-chart-range-1Y"}}, {"still": 1}, {"scroll": "down"}, {"still": 1}
+    ]},
+    {"name": "propose", "account": "jordan", "seconds": 10, "steps": [
+      {"tap": {"id": "asset-trade-bar-buy"}}, {"tap": {"text": "Sunday Investors"}},
+      {"tap": {"id": "amount-entry-field"}}, {"paste": "250"},
+      {"tap": {"id": "proposal-thesis-field"}}, {"paste": "Super bullish. This stock will only keep growing."},
+      {"tap": {"text": "Review"}}, {"still": 2}, {"tap": {"text": "Send to cabal"}}, {"wait_for": {"text": "Sent"}}, {"still": 1}
+    ]},
+    {"name": "vote", "account": "maya, then priya", "seconds": 12, "steps": [
+      {"tap": {"id": "tab-home"}}, {"wait_for": {"text": "Needs your vote"}}, {"still": 1}, {"tap": {"text": "Vote"}},
+      {"tap": {"text": "Yes"}}, {"wait_for": {"text": "You voted yes"}}, {"still": 1.5},
+      {"note": "cut. As Priya: open the proposal, Yes; the tracker moves Voting → Buying → Done, the chip reads Bought."},
+      {"still": 2.5}
+    ]},
+    {"name": "chat", "account": "jordan, then maya", "seconds": 6, "steps": [
+      {"tap": {"text": "Chat"}}, {"tap": {"id": "group-chat-composer"}}, {"paste": "in. told you"}, {"tap": {"id": "group-chat-send"}},
+      {"note": "cut. As Maya:"}, {"paste": "we own Google now"}, {"tap": {"id": "group-chat-send"}}, {"still": 1.5}
+    ]},
+    {"name": "pre-ipo", "account": "priya", "seconds": 8, "steps": [
+      {"tap": {"id": "tab-assets"}}, {"scroll": "to Pre-IPO"}, {"tap": {"id": "assets-preipo-<first symbol>"}},
+      {"wait_for": {"id": "asset-pre-ipo-reference"}}, {"still": 1.5}, {"scroll": "down"}, {"still": 1.5}
+    ]},
+    {"name": "bot", "account": "maya, then jordan and priya", "seconds": 12, "steps": [
+      {"tap": {"text": "Propose"}}, {"tap": {"text": "Add a trading bot"}}, {"tap": {"id": "amount-entry-field"}}, {"paste": "200"},
+      {"tap": {"text": "Bot name"}}, {"paste": "Scout"}, {"tap": {"text": "Send to cabal"}},
+      {"note": "cut. Jordan and Priya vote yes. Cut back to Maya: the proposal screen shows the key card."},
+      {"wait_for": {"id": "agent-key-reveal"}}, {"still": 1}, {"tap": {"id": "agent-connect-copy"}}, {"still": 1},
+      {"note": "cut. The cabal's activity: Scout bought $40 of NVDA (drive an intent with scripts/demo/agent-intent.sh)."}
+    ]},
+    {"name": "profit", "account": "maya", "seconds": 8, "steps": [
+      {"tap": {"text": "Cash out"}}, {"tap": {"text": "25%"}}, {"still": 1}, {"tap": {"text": "Cash out"}},
+      {"wait_for": {"text": "Account balance"}}, {"still": 2}
+    ]},
+    {"name": "board-outro", "account": "jordan", "seconds": 7, "steps": [
+      {"tap": {"id": "tab-cabals"}}, {"still": 2}, {"tap": {"id": "tab-home"}}, {"scroll": "to Top investors"}, {"still": 2.5}
+    ]}
+  ]
+}
