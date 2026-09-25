@@ -6,6 +6,9 @@ This README covers cloning, configuring and running the repo. To understand the 
 
 Monaco lets you create a hedge fund with friends by pooling money to buy stocks together. Members propose and vote on trades, and approved trades execute for the group; as the pool profits, each member’s stake increases in value through NAV. You can even add an agent to your cabal to trade on your behalf. Built as a social trading app, Monaco turns investing into an easy group game anyone can join simply by depositing money.
 
+<img width="339" height="677" alt="image" src="https://github.com/user-attachments/assets/59c70f26-8049-4bc2-9c39-2946bb8013e7" />
+
+
 ## Prereqs
 
 macOS, Xcode (iOS 18+ simulator), Docker, Go 1.25+, [just](https://github.com/casey/just), [dotenvx CLI](https://dotenvx.com/docs/install). SimSlim is optional.
