@@ -138,6 +138,37 @@ WHERE ai.group_agent_id = $1
 	return proceeds, nil
 }
 
+// ListAgentBoughtMintsTx is every mint the agent's confirmed buys returned, the only mints it
+// can hold a position in.
+func (s *Store) ListAgentBoughtMintsTx(ctx context.Context, tx *sql.Tx, agentID string) ([]string, error) {
+	const selectSQL = `
+SELECT DISTINCT t.output_mint
+FROM transactions t
+JOIN agent_intents ai ON ai.id = t.agent_intent_id
+WHERE ai.group_agent_id = $1
+  AND t.initiated_by = 'agent'
+  AND t.action = 'buy'
+  AND t.status = 'confirmed'
+ORDER BY t.output_mint`
+	rows, err := tx.QueryContext(ctx, selectSQL, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("list agent bought mints: %w", err)
+	}
+	defer rows.Close()
+	var mints []string
+	for rows.Next() {
+		var mint string
+		if err := rows.Scan(&mint); err != nil {
+			return nil, fmt.Errorf("scan agent bought mint: %w", err)
+		}
+		mints = append(mints, mint)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list agent bought mints: %w", err)
+	}
+	return mints, nil
+}
+
 // AgentSellableTokenAmountTx is how much of mint the agent may still sell: what its own
 // confirmed buys returned, less its own pending or confirmed sells, less its accepted sells
 // that have not reached the ledger yet. Positions bought by member vote never count.
