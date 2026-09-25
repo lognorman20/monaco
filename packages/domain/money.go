@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 )
 
 // USDCMicros is a USDC amount in micro-units (1 USDC = 1_000_000 micros).
@@ -113,4 +114,53 @@ func MulDivFloor(a, b, c int64) (int64, error) {
 		return 0, fmt.Errorf("mul-div result overflows int64")
 	}
 	return product.Int64(), nil
+}
+
+// USDCDecimals is the number of decimal places in one USDC.
+const USDCDecimals = 6
+
+// ParseUSDDecimal parses a positive dollar amount such as "10.50" into USDC micros.
+func ParseUSDDecimal(s string) (int64, error) {
+	micros, err := ParseTokenDecimal(s, USDCDecimals)
+	if err != nil {
+		return 0, fmt.Errorf("usd: %w", err)
+	}
+	return micros, nil
+}
+
+// ParseTokenDecimal parses a positive decimal amount such as "0.25" into atomic units of a
+// token with the given decimals. It accepts plain digits with at most one point and at most
+// decimals fractional digits, and never rounds: an amount the token cannot represent is an
+// error, not a smaller trade.
+func ParseTokenDecimal(s string, decimals int) (int64, error) {
+	if decimals < 0 {
+		return 0, fmt.Errorf("decimals must be non-negative")
+	}
+	whole, frac, hasPoint := strings.Cut(s, ".")
+	if whole == "" && frac == "" || hasPoint && frac == "" || !allDigits(whole) || !allDigits(frac) {
+		return 0, fmt.Errorf("invalid amount %q: use digits with an optional decimal point, like 10.50", s)
+	}
+	if len(frac) > decimals {
+		return 0, fmt.Errorf("amount %q has more than %d decimal places", s, decimals)
+	}
+	atomic, ok := new(big.Int).SetString(whole+frac+strings.Repeat("0", decimals-len(frac)), 10)
+	if !ok {
+		return 0, fmt.Errorf("invalid amount %q", s)
+	}
+	if !atomic.IsInt64() {
+		return 0, fmt.Errorf("amount %q is too large", s)
+	}
+	if atomic.Sign() <= 0 {
+		return 0, fmt.Errorf("amount %q must be positive", s)
+	}
+	return atomic.Int64(), nil
+}
+
+func allDigits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
