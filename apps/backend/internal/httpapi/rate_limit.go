@@ -17,11 +17,14 @@ import (
 )
 
 // Route classes carry their own budget. Reads are not limited here: they are
-// cheap, idempotent, and the app polls them on a timer.
+// cheap, idempotent, and the app polls them on a timer. The exception is a read
+// that needs no session (rateClassPublic), which only an IP budget can hold back.
 const (
 	rateClassAuth  = "auth"
 	rateClassMoney = "money"
 	rateClassWrite = "write"
+	// lane: invites
+	rateClassPublic = "public"
 )
 
 // rateLimitRule is one class's per-user and per-IP token buckets.
@@ -43,6 +46,10 @@ var rateLimitRules = map[string]rateLimitRule{
 	rateClassMoney: {userBurst: 5, userInterval: 10 * time.Second, ipBurst: 20, ipInterval: 3 * time.Second},
 	// Everything else a client writes: chat, votes, comments, proposals, joins.
 	rateClassWrite: {userBurst: 20, userInterval: 2 * time.Second, ipBurst: 60, ipInterval: time.Second},
+	// lane: invites
+	// Reads that answer without a session (the invite preview). Limited like a write even
+	// though they are GETs: the IP is the only thing that identifies the caller.
+	rateClassPublic: {userBurst: 20, userInterval: 2 * time.Second, ipBurst: 60, ipInterval: time.Second},
 }
 
 // RateLimiter holds the token buckets for every route class.
@@ -133,6 +140,10 @@ func (l *RateLimiter) reject(w http.ResponseWriter, r *http.Request, class, dime
 // classifyRateLimit maps a request onto a route class. Every state-changing
 // method is limited: a new write route is covered the day it is added.
 func classifyRateLimit(method, path string) (string, bool) {
+	// lane: invites
+	if isPublicPath(path) {
+		return rateClassPublic, true
+	}
 	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return "", false
@@ -155,6 +166,21 @@ var moneyPathSuffixes = []string{
 	"/retry",
 	"/agents/intents",
 	"/agent/intents",
+}
+
+// lane: invites
+// publicPathPrefixes are the routes that answer without a session, whatever the method.
+var publicPathPrefixes = []string{
+	"/v1/invites/",
+}
+
+func isPublicPath(path string) bool {
+	for _, prefix := range publicPathPrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func isMoneyPath(path string) bool {

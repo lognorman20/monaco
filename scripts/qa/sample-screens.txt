@@ -197,3 +197,15 @@ news-all                      -MonacoNewsSample all
 news-tab                      -MonacoNewsSample tab -MonacoNewsScroll 0.7
 news-tab-loading              -MonacoNewsSample tabLoading -MonacoNewsScroll 0.7
 news-tab-failed               -MonacoNewsSample tabFailed -MonacoNewsScroll 0.7
+# lane: invites — the invite card on the details sheet, the join screen's code route, and a
+# link opening the app.
+invite-details                -MonacoInviteSample details
+invite-details-loading        -MonacoInviteSample detailsLoading
+invite-details-failed         -MonacoInviteSample detailsFailed
+invite-join-preview           -MonacoInviteSample joinPreview
+invite-join-typing            -MonacoInviteSample joinTyping
+invite-join-request           -MonacoInviteSample joinRequest
+invite-join-unknown           -MonacoInviteSample joinUnknown
+invite-join-link              -MonacoInviteSample joinLink
+invite-details-large-text     -MonacoInviteSample details -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+invite-join-preview-large-text -MonacoInviteSample joinPreview -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL

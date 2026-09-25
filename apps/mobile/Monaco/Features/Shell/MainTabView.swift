@@ -59,5 +59,7 @@ struct MainTabView: View {
         .onChange(of: selectedTab) { _, _ in
             Haptics.selection()
         }
+        // lane: invites
+        .inviteLinkSheet(auth: auth)
     }
 }

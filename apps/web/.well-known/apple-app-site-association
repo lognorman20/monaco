@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["JSF53DFS29.com.monaco.app"],
+        "components": [
+          { "/": "/join/*", "comment": "Cabal invite links open the app's join screen" }
+        ],
+        "appID": "JSF53DFS29.com.monaco.app",
+        "paths": ["/join/*"]
+      }
+    ]
+  }
+}

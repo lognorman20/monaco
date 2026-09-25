@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Join a cabal · Monaco</title>
+<meta name="description" content="A friend invited you to their cabal on Monaco. Pool money, vote on what to buy, and own a slice of the pot.">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#F8F5EE">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="You're invited to a cabal on Monaco">
+<meta property="og:description" content="Pool money with your friends, vote on what to buy, and everyone owns a slice of the pot.">
+<meta property="og:image" content="https://trymonaco.xyz/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://trymonaco.xyz/assets/og.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap">
+<style>
+  /* Tokens are the landing page's (index.html). */
+  :root {
+    color-scheme: light;
+    --bg: #F8F5EE;
+    --bg-2: #FFFFFF;
+    --sunken: #F1ECE2;
+    --ink: #0F291C;
+    --ink-2: rgba(15, 41, 28, 0.68);
+    --ink-3: rgba(15, 41, 28, 0.48);
+    --line: rgba(15, 41, 28, 0.10);
+    --line-strong: rgba(15, 41, 28, 0.18);
+    --green: #1E8C55;
+    --radius: 14px;
+    --sans: "Outfit", "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); font-size: 17px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh; display: flex; flex-direction: column;
+  }
+  a { color: inherit; }
+  .wrap { width: 100%; max-width: 1120px; margin: 0 auto; padding-inline: 20px; }
+
+  .nav { padding-top: env(safe-area-inset-top, 0px); border-bottom: 1px solid var(--line); }
+  .nav .wrap { display: flex; align-items: center; height: 68px; }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+  .brand .m { width: 30px; height: 30px; }
+  .brand .w { height: 21px; width: auto; }
+
+  main { flex: 1; }
+  .invite { max-width: 460px; margin: 0 auto; padding: 56px 20px 48px; display: grid; gap: 28px; }
+
+  /* The cabal: its mark, the name, what it is. Left-aligned, like a row in the app. */
+  .cabal { display: grid; grid-template-columns: 64px 1fr; gap: 16px; align-items: center; }
+  .mark { width: 64px; height: 64px; border-radius: 18px; display: grid; place-items: center; overflow: hidden;
+          background: var(--ink); color: #fff; font-weight: 600; font-size: 23px; letter-spacing: 0.01em; }
+  .mark img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .mark .glyph { width: 30px; height: 30px; }
+  .kicker { margin: 0; font-size: 15px; color: var(--ink-2); }
+  h1 { margin: 2px 0 0; font-weight: 600; font-size: clamp(30px, 7vw, 40px); line-height: 1.08; letter-spacing: -0.025em; overflow-wrap: anywhere; }
+  .lines { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; color: var(--ink-2); font-size: 16px; }
+  .lines .facts { color: var(--ink); font-weight: 500; }
+  .bar { display: block; height: 14px; border-radius: 7px; background: var(--sunken); }
+  .bar.title { height: 30px; width: 70%; margin-top: 8px; }
+
+  .btn { font: inherit; font-weight: 600; font-size: 16px; border-radius: 999px; padding: 13px 20px; min-height: 50px; width: 100%;
+         border: 1px solid var(--ink); background: var(--ink); color: #fff; cursor: pointer; text-decoration: none;
+         display: inline-flex; align-items: center; justify-content: center; gap: 8px; touch-action: manipulation;
+         transition: transform .15s ease, background .15s ease; }
+  .btn:hover { background: #1A3D2B; border-color: #1A3D2B; }
+  .btn:active { transform: scale(0.98); }
+  .btn.ghost { background: transparent; color: var(--ink); border-color: var(--line-strong); }
+  .btn.ghost:hover { border-color: var(--ink-2); background: transparent; }
+  .btn:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+
+  /* The one card: the code a friend can type into the app. */
+  .code { background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: 16px; padding: 18px 18px 16px; display: grid; gap: 12px; }
+  .code .label { margin: 0; font-size: 14px; font-weight: 500; color: var(--ink-2); }
+  .code .value { margin: 0; font-family: var(--mono); font-weight: 600; font-size: clamp(30px, 9vw, 38px); letter-spacing: 0.06em; line-height: 1.1; user-select: all; }
+  .code .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .code .copy { width: auto; min-height: 44px; padding: 9px 16px; font-size: 15px; }
+  .code .hint { margin: 0; font-size: 14px; color: var(--ink-3); }
+
+  .get { display: grid; }
+
+  [hidden] { display: none !important; }
+
+  footer { border-top: 1px solid var(--line); padding-block: 24px calc(24px + env(safe-area-inset-bottom, 0px)); color: var(--ink-3); font-size: 14px; }
+  footer .wrap { display: flex; justify-content: center; }
+
+  @media (max-width: 480px) {
+    .wrap { padding-inline: 16px; }
+    .invite { padding: 36px 16px 40px; gap: 24px; }
+    .brand .w { height: 18px; }
+  }
+</style>
+<script src="/config.js"></script>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Monaco home">
+      <img class="m" src="/assets/mark-ink.svg" alt="" width="30" height="30">
+      <img class="w" src="/assets/wordmark-ink.svg" alt="monaco" width="133" height="21">
+    </a>
+  </div>
+</header>
+
+<main>
+  <section class="invite" aria-live="polite" aria-busy="true" data-invite>
+    <div class="cabal">
+      <div class="mark" data-mark aria-hidden="true"><img class="glyph" src="/assets/mark.svg" alt=""></div>
+      <div>
+        <p class="kicker" data-kicker>You're invited to</p>
+        <h1 data-title aria-label="Loading the cabal"><span class="bar title"></span></h1>
+      </div>
+    </div>
+    <ul class="lines" data-lines></ul>
+    <noscript><p class="kicker">Open this link on your iPhone to join in Monaco.</p></noscript>
+
+    <a class="btn" data-open href="/">Open in Monaco</a>
+
+    <div class="code" data-code-card>
+      <p class="label" id="code-label">Invite code</p>
+      <div class="row">
+        <p class="value" data-code aria-labelledby="code-label"></p>
+        <button class="btn ghost copy" type="button" data-copy>Copy code</button>
+      </div>
+      <p class="hint">In Monaco, tap Cabals, then New cabal, then Join with an invite code.</p>
+    </div>
+
+    <div class="get">
+      <a class="btn ghost" data-get href="https://apps.apple.com/app/monaco">Get Monaco on the App Store</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Monaco home"><img class="m" src="/assets/mark-ink.svg" alt="" width="24" height="24" style="width:24px;height:24px"><img class="w" src="/assets/wordmark-ink.svg" alt="monaco" style="height:16px;width:auto"></a>
+  </div>
+</footer>
+
+<script type="module">
+import { APP_STORE_URL, codeFromPath, deepLink, displayCode, fetchPreview, pageModel } from "/lib/invite.js";
+
+const root = document.querySelector("[data-invite]");
+const el = (name) => root.querySelector(`[data-${name}]`);
+const code = codeFromPath(location.pathname);
+
+el("get").href = APP_STORE_URL;
+
+function render(model) {
+  document.title = model.docTitle;
+  root.setAttribute("aria-busy", model.state === "loading" ? "true" : "false");
+
+  const kicker = el("kicker");
+  kicker.hidden = !model.kicker;
+  kicker.textContent = model.kicker || "";
+
+  const title = el("title");
+  if (model.title === null) {
+    title.replaceChildren(Object.assign(document.createElement("span"), { className: "bar title" }));
+    title.setAttribute("aria-label", "Loading the cabal");
+  } else {
+    title.textContent = model.title;
+    title.removeAttribute("aria-label");
+  }
+
+  el("lines").replaceChildren(...model.lines.map((line, index) => Object.assign(document.createElement("li"), {
+    textContent: line,
+    className: model.state === "ok" && index === 0 ? "facts" : "",
+  })));
+
+  const mark = el("mark");
+  if (model.mark) {
+    mark.style.background = model.mark.color;
+    mark.replaceChildren(document.createTextNode(model.mark.initials));
+    if (model.mark.pictureUrl) {
+      const img = new Image();
+      img.alt = "";
+      img.onload = () => mark.replaceChildren(img);
+      img.src = model.mark.pictureUrl;
+    }
+  }
+
+  el("open").hidden = !model.showCode;
+  el("code-card").hidden = !model.showCode;
+  if (model.showCode) {
+    el("open").href = deepLink(code);
+    el("code").textContent = displayCode(code);
+  }
+}
+
+el("copy").addEventListener("click", async () => {
+  const button = el("copy");
+  try {
+    await navigator.clipboard.writeText(code);
+    button.textContent = "Copied";
+  } catch {
+    // No clipboard (an older in-app browser): select the code so a long-press copies it.
+    const range = document.createRange();
+    range.selectNodeContents(el("code"));
+    const selection = getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    button.textContent = "Selected";
+  }
+  setTimeout(() => { button.textContent = "Copy code"; }, 2000);
+});
+
+if (!code) {
+  render(pageModel(null));
+} else {
+  render(pageModel(code, { status: "loading" }));
+  const result = await fetchPreview({ base: window.MONACO_API_BASE, code, fetch: window.fetch.bind(window) });
+  render(pageModel(code, result));
+}
+</script>
+</body>
+</html>

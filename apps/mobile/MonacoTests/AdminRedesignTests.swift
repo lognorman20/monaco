@@ -19,8 +19,8 @@ struct CabalRulesCopyTests {
         }
     }
 
-    /// The app has no invite links. What a member shares is the invite code, so the join rule
-    /// must not promise a link that does not exist.
+    /// The join rule is who gets in, not how the invite travels: a link and a code lead to the
+    /// same rule, so the rule's words never mention a link.
     @Test func joiningNeverPromisesALink() {
         for mode in JoinPolicyMode.allCases {
             #expect(!mode.label.lowercased().contains("link"))

@@ -3,12 +3,16 @@ import UIKit
 
 /// "Cabal details" from the cabal screen's toolbar.
 ///
-/// The invite code is what a member comes here for, so it is the one card: the code, Copy and
-/// Share. The cabal's account on Solana follows as a quiet ruled section for developers — a raw
-/// address is the most "crypto" thing in the app, so it is here and not on the cabal screen, and
-/// even here it comes second. Leave sits at the bottom.
+/// The invite is what a member comes here for, so it is the one card: the code, its QR code,
+/// Share invite, Copy link and Copy code (`CabalInviteCard`). The cabal's account on Solana
+/// follows as a quiet ruled section for developers — a raw address is the most "crypto" thing
+/// in the app, so it is here and not on the cabal screen, and even here it comes second. Leave
+/// sits at the bottom.
 struct GroupDetailsSheet: View {
     let groupId: String
+    // lane: invites
+    let groupName: String
+    let invites: InviteSource
     let treasuryAddress: String?
     let isLeaving: Bool
     let onLeave: () -> Void
@@ -16,14 +20,17 @@ struct GroupDetailsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var copiedField: CopiedField?
+    // lane: invites
+    @State private var toast: MonacoToast?
 
-    private enum CopiedField { case address, invite }
+    private enum CopiedField { case address }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: MonacoTheme.Space.xl) {
-                    inviteCard
+                    // lane: invites
+                    CabalInviteCard(groupId: groupId, cabalName: groupName, source: invites) { toast = $0 }
                         .padding(.horizontal, MonacoTheme.Space.m)
 
                     if let treasuryAddress, !treasuryAddress.isEmpty {
@@ -55,73 +62,9 @@ struct GroupDetailsSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        // lane: invites
+        .monacoToast($toast)
         .accessibilityIdentifier("group-details-sheet")
-    }
-
-    // MARK: - Invite code
-
-    private var inviteCard: some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
-                Text(JoinCabalCopy.codeLabel)
-                    .font(MonacoTheme.Typo.captionStrong)
-                    .foregroundStyle(MonacoTheme.muted)
-                inviteCode
-                    .accessibilityIdentifier("group-invite-code")
-            }
-            Text(CabalDetailsCopy.inviteHint)
-                .font(MonacoTheme.Typo.caption)
-                .foregroundStyle(MonacoTheme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-
-            let actions = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(spacing: MonacoTheme.Space.sm))
-                : AnyLayout(HStackLayout(spacing: MonacoTheme.Space.sm))
-            actions {
-                Button {
-                    copy(.invite, value: groupId)
-                } label: {
-                    copyLabel(.invite, idle: CabalDetailsCopy.copyCode)
-                }
-                .buttonStyle(.monacoPrimary)
-                .accessibilityIdentifier("group-invite-copy-button")
-
-                ShareLink(item: groupId, subject: Text(CabalDetailsCopy.shareSubject)) {
-                    Label(CabalDetailsCopy.share, systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(.monacoSecondary)
-                .accessibilityIdentifier("group-invite-share-button")
-            }
-            .monacoFullWidthButtons()
-            .padding(.top, MonacoTheme.Space.xs)
-        }
-        .padding(MonacoTheme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            MonacoTheme.surface,
-            in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
-                .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
-        }
-    }
-
-    /// One line of mono at the default sizes, shrinking a little on the narrowest phones. At the
-    /// accessibility sizes it wraps by character instead of shrinking past legibility — and
-    /// never at a hyphen of its own making, which would read as part of the code.
-    @ViewBuilder
-    private var inviteCode: some View {
-        if dynamicTypeSize.isAccessibilitySize {
-            MonacoWalletAddressText(address: groupId, textStyle: .subheadline)
-        } else {
-            Text(groupId)
-                .font(MonacoTheme.Typo.data)
-                .foregroundStyle(MonacoTheme.ink)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .textSelection(.enabled)
-        }
     }
 
     // MARK: - For developers
@@ -196,21 +139,17 @@ struct GroupDetailsSheet: View {
     }
 }
 
-/// The details sheet in the member's words.
+/// The details sheet in the member's words. The invite card's are `CabalInviteCopy`.
 enum CabalDetailsCopy {
-    static let inviteHint = "Friends paste this code to join the cabal."
-    static let copyCode = "Copy code"
     static let copy = "Copy"
     static let copied = "Copied"
-    static let share = "Share"
-    static let shareSubject = "Monaco invite code"
     static let developersTitle = "For developers"
     static let accountTitle = "Cabal account on Solana"
     static let viewOnSolscan = "View on Solscan"
 
     static let auditedStrings: [String] = [
-        inviteHint, copyCode, copy, copied, share, shareSubject, developersTitle, accountTitle, viewOnSolscan,
-    ]
+        copy, copied, developersTitle, accountTitle, viewOnSolscan,
+    ] + CabalInviteCopy.auditedStrings
 }
 
 private extension View {
