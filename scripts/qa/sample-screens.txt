@@ -46,6 +46,7 @@ propose-sheet                 -MonacoProposalFeedSample -MonacoProposeSample -Mo
 
 profile-placeholder           -MonacoProfileSample placeholder
 profile-photo                 -MonacoProfileSample photo
+profile-face-picker           -MonacoProfileSample facePicker
 profile-validation            -MonacoProfileSample validation
 profile-cabals                -MonacoProfileSample cabals
 profile-empty                 -MonacoProfileSample empty

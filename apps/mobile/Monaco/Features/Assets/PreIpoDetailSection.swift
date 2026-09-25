@@ -33,13 +33,21 @@ struct PreIpoDetailSection: View {
                 .font(MonacoTheme.Typo.caption)
                 .foregroundStyle(MonacoTheme.muted)
         }
+        .padding(.horizontal, MonacoTheme.Space.m)
     }
 
+    /// The label keeps its whole width and wraps if it must; the figures are sized to
+    /// themselves. As a `MonacoRow` the figures won and the label read "Private-market…".
+    /// The company value goes under the row rather than beside the figures, where three
+    /// stacked lines on the right made the row a column.
     private var referenceRow: some View {
-        MonacoGroupedList {
-            MonacoRow(title: PreIpoCopy.privateMarketReference, isLast: true) {
-                EmptyView()
-            } trailing: {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.m) {
+                Text(PreIpoCopy.privateMarketReference)
+                    .font(MonacoTheme.Typo.rowTitle)
+                    .foregroundStyle(MonacoTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 VStack(alignment: .trailing, spacing: 4) {
                     if let mark = detail.referenceMarkUsdcMicros, detail.premiumBps != nil {
                         MoneyText(micros: mark, style: .row)
@@ -54,38 +62,51 @@ struct PreIpoDetailSection: View {
                             .foregroundStyle(abs(bps) >= 1000 ? MonacoTheme.warning : MonacoTheme.muted)
                             .accessibilityIdentifier("asset-pre-ipo-premium")
                     }
-                    if let caption = companyValueCaption {
-                        Text(caption)
-                            .font(MonacoTheme.Typo.micro)
-                            .foregroundStyle(MonacoTheme.tertiaryText)
-                            .multilineTextAlignment(.trailing)
-                    }
                 }
+                .fixedSize()
+            }
+            if let caption = companyValueCaption {
+                Text(caption)
+                    .font(MonacoTheme.Typo.micro)
+                    .foregroundStyle(MonacoTheme.tertiaryText)
             }
         }
+        .padding(.horizontal, MonacoTheme.Space.m)
+        .padding(.vertical, MonacoTheme.Space.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) { MonacoRule() }
+        .overlay(alignment: .bottom) { MonacoRule() }
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("asset-pre-ipo-reference")
     }
 
     private var about: some View {
         DisclosureGroup(isExpanded: $aboutExpanded) {
-            Text(PreIpoCopy.disclosure)
-                .font(MonacoTheme.Typo.callout)
-                .foregroundStyle(MonacoTheme.muted)
-                .padding(.top, MonacoTheme.Space.xs)
-            if let terms = URL(string: PreIpoCopy.termsURL) {
-                Link(destination: terms) {
-                    MonacoRow(title: PreIpoCopy.termsLinkTitle, chevron: true, isLast: true) {
-                        EmptyView()
-                    } trailing: { EmptyView() }
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                Text(PreIpoCopy.disclosure)
+                    .font(MonacoTheme.Typo.callout)
+                    .foregroundStyle(MonacoTheme.muted)
+                if let terms = URL(string: PreIpoCopy.termsURL) {
+                    Link(destination: terms) {
+                        HStack(spacing: MonacoTheme.Space.xs) {
+                            Text(PreIpoCopy.termsLinkTitle)
+                            Image(systemName: "arrow.up.right")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .font(MonacoTheme.Typo.captionStrong)
+                        .foregroundStyle(MonacoTheme.ink)
+                    }
+                    .accessibilityIdentifier("asset-pre-ipo-terms")
                 }
-                .buttonStyle(.plain)
             }
+            .padding(.top, MonacoTheme.Space.xs)
         } label: {
             Text(PreIpoCopy.aboutCardTitle)
                 .font(MonacoTheme.Typo.section)
                 .foregroundStyle(MonacoTheme.ink)
         }
         .tint(MonacoTheme.ink)
+        .padding(.horizontal, MonacoTheme.Space.m)
         .accessibilityIdentifier("asset-pre-ipo-about")
     }
 
@@ -95,6 +116,7 @@ struct PreIpoDetailSection: View {
         if variants.count > 1 {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
                 MonacoSectionHeader(PreIpoCopy.alsoAvailableFrom)
+                    .padding(.horizontal, MonacoTheme.Space.m)
                 MonacoGroupedList {
                     ForEach(Array(variants.enumerated()), id: \.element.id) { index, variant in
                         let isCurrent = variant.symbol == detail.symbol
@@ -127,14 +149,8 @@ struct PreIpoDetailSection: View {
     private var companyValueCaption: String? {
         guard let valuation = detail.referenceValuationUsd else { return nil }
         let value = UsdAmountFormatter.compact(decimalString: String(valuation))
-        guard let updated = detail.referenceUpdatedAt else {
-            return "\(PreIpoCopy.companyValueCaption) \(value)"
-        }
-        let age = RelativeTimeFormatter.label(iso: updated)
-        guard !age.isEmpty else {
-            return "\(PreIpoCopy.companyValueCaption) \(value)"
-        }
-        return "\(PreIpoCopy.companyValueCaption) \(value) · updated \(age) ago"
+        let age = detail.referenceUpdatedAt.map { RelativeTimeFormatter.label(iso: $0) }
+        return PreIpoCopy.referenceCaption(companyValue: value, age: age)
     }
 
     private func variantTitle(_ variant: AssetVariantDTO) -> String {

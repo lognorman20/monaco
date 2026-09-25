@@ -321,6 +321,9 @@ public enum ReferenceQuoteSource: String, Codable, Sendable {
     case pythEquity = "pyth_equity"
     case pythCrypto = "pyth_crypto"
     case jupiter
+    /// The equity leg read off the underlying's day chart when the Pyth key is not
+    /// entitled to the equity feed. A stock price, not a Pyth print.
+    case yahoo
     case unknown
 
     public init(from decoder: Decoder) throws {

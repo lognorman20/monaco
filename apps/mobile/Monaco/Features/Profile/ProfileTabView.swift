@@ -12,6 +12,8 @@ struct ProfileTabView: View {
     var initialNameDraft: String?
     /// Debug sample harness only: open the edit sheet immediately (to screenshot validation).
     var initiallyShowEditProfile = false
+    /// Debug sample harness only: open the face sheet immediately.
+    var initiallyShowFacePicker = false
     /// Debug sample harness only: stand in for the store's save so the *success* path — sheet
     /// closes, toast lands on the uncovered screen — can be exercised without a backend.
     var saveName: (any DisplayNameSaving)?
@@ -148,7 +150,7 @@ struct ProfileTabView: View {
 
     private var header: some View {
         VStack(spacing: MonacoTheme.Space.s) {
-            ProfilePhotoPicker(auth: auth, size: 96) { toast = $0 }
+            ProfilePhotoPicker(auth: auth, size: 96, initiallyOpen: initiallyShowFacePicker) { toast = $0 }
 
             HStack(spacing: MonacoTheme.Space.xs) {
                 Text(displayName)

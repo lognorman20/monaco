@@ -106,6 +106,19 @@ final class StockVsTokenCardTests: XCTestCase {
         XCTAssertNil(card.token.confidence)
     }
 
+    /// The equity leg off Yahoo's day chart is a stock price and says whose it is;
+    /// it is never labelled Pyth either.
+    func testYahooEquityLeg_isLabelledYahoo() throws {
+        let fromChart = StockVsTokenDTO(
+            equity: ReferenceQuoteDTO(source: .yahoo, status: .stale, priceUsdcMicros: 178_200_000),
+            token: ReferenceQuoteDTO(source: .jupiter, status: .live, priceUsdcMicros: 179_050_000)
+        )
+        let card = try XCTUnwrap(card(fromChart))
+        XCTAssertEqual(card.equity.source, "Yahoo Finance")
+        XCTAssertFalse(card.equity.source.lowercased().contains("pyth"))
+        XCTAssertEqual(card.equity.priceUsdcMicros, 178_200_000)
+    }
+
     func testJupiterLeg_dropsAStrayConfidenceInterval() throws {
         let odd = StockVsTokenDTO(
             equity: ReferenceQuoteDTO(source: .pythEquity, status: .live, priceUsdcMicros: 178_200_000),

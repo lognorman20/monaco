@@ -64,9 +64,16 @@ struct AssetChartCard: View {
                 .accessibilityIdentifier("asset-detail-chart-loading")
         case .series(let series):
             curve(series)
+        case .empty where model.detail?.resolvedKind == .preIpo:
+            // A token with no candles yet is not a failed read, and a retry would only
+            // ask the same question again.
+            EmptyState(title: PreIpoCopy.chartEmpty, message: PreIpoCopy.chartEmptyMessage)
+                .frame(minHeight: Self.chartHeight)
+                .padding(.horizontal, MonacoTheme.Space.m)
+                .accessibilityIdentifier("asset-detail-chart-empty")
         case .empty:
             EmptyState(
-                title: model.detail?.resolvedKind == .preIpo ? PreIpoCopy.chartEmpty : "No price history for this window yet",
+                title: "No price history for this window yet",
                 message: "Try another range, or ask again.",
                 actionTitle: "Try again",
                 action: { reload() }

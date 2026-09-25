@@ -140,6 +140,8 @@ final class DisplayFormatterTests: XCTestCase {
         XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "100000"), "$100K")
         XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "124500"), "$124.5K")
         XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "12431180"), "$12.4M")
+        XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "1951100000000"), "$2T")
+        XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "1500000000000"), "$1.5T")
         XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "2000000000"), "$2B")
         XCTAssertEqual(UsdAmountFormatter.compact(decimalString: "0"), "$0.00")
     }

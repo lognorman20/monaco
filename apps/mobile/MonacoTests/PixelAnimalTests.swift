@@ -26,5 +26,17 @@ struct PixelAnimalTests {
     @Test func spokenNamesAreWords() {
         #expect(PixelAnimal.fox.spokenName == "Fox")
         #expect(PixelAnimal.penguin.spokenName == "Penguin")
+        #expect(PixelAnimal.fox.withArticle == "a fox")
+        #expect(PixelAnimal.owl.withArticle == "an owl")
+    }
+
+    /// A picked animal is uploaded as the profile photo, so every one must encode, and
+    /// well under the 2 MB the server accepts.
+    @Test func everyAnimalUploadsAsASmallPNG() {
+        for animal in PixelAnimal.allCases {
+            let data = UIImage(named: animal.imageName)?.pngData()
+            #expect((data?.count ?? 0) > 0, "\(animal.imageName) has no PNG")
+            #expect((data?.count ?? .max) < 512 * 1024, "\(animal.imageName) is too big to upload")
+        }
     }
 }

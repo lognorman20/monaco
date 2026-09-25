@@ -14,6 +14,12 @@ enum PixelAnimal: String, CaseIterable, Sendable {
     /// Spoken as the alternative to a photo: "Fox".
     var spokenName: String { rawValue.capitalized }
 
+    /// In a sentence: "a fox", "an owl".
+    var withArticle: String {
+        let article = "aeiou".contains(rawValue.first!) ? "an" : "a"
+        return "\(article) \(rawValue)"
+    }
+
     /// FNV-1a over the seed's bytes: cheap, stable across runs and devices, and unlike
     /// `hashValue` not randomised per process.
     static func forSeed(_ seed: String) -> PixelAnimal {

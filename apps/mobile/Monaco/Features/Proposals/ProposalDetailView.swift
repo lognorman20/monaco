@@ -527,6 +527,9 @@ enum ProposalBallotList {
                 id: "ballot-viewer-waiting",
                 name: ProposalDiscussionCopy.you,
                 faceName: "",
+                // Their own animal, not the one an empty seed hashes to: the row read as a
+                // stranger's face until the ballot named them.
+                faceSeed: viewerId,
                 choice: .waiting,
                 castAt: nil,
                 isViewer: true

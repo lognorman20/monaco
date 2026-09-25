@@ -2,8 +2,9 @@ import MonacoCore
 import PhotosUI
 import SwiftUI
 
-/// Avatar that opens the photo library on tap and uploads the pick for the signed-in
-/// user. The one place profile photos are changed; Profile embeds it.
+/// Avatar that opens the face sheet on tap: the eight pixel animals, or the photo library.
+/// Either way the pick is uploaded as the signed-in member's profile photo. The one place
+/// faces are changed; Profile and the first-run screen embed it.
 struct ProfilePhotoPicker: View {
     @ObservedObject var auth: PrivyAuthService
     @Environment(AppSessionStore.self) private var session
@@ -11,14 +12,27 @@ struct ProfilePhotoPicker: View {
     var size: CGFloat = 96
     /// Overridden by the first-run screen, which QA drives as `onboarding-photo`.
     var accessibilityID: String = "profile-photo-picker"
+    /// Debug sample harness only: open the face sheet as soon as the screen is up.
+    var initiallyOpen = false
     /// Reports upload results so the host screen can toast them.
     var onResult: (MonacoToast) -> Void
 
-    @State private var selection: PhotosPickerItem?
+    @State private var showFaces = false
     @State private var isUploading = false
 
+    /// The animal the avatar shows now, so the sheet can ring it. Resolved the way
+    /// `MonacoAvatar` resolves it, and nil once a photo is set.
+    private var currentAnimal: PixelAnimal? {
+        let photo = session.me?.profilePhotoUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard photo.isEmpty else { return nil }
+        let id = session.me?.userId ?? ""
+        return PixelAnimal.forSeed(id.isEmpty ? (session.me?.displayName ?? "") : id)
+    }
+
     var body: some View {
-        PhotosPicker(selection: $selection, matching: .images, photoLibrary: .shared()) {
+        Button {
+            showFaces = true
+        } label: {
             ZStack(alignment: .bottomTrailing) {
                 MonacoAvatar(
                     photoURL: session.me?.profilePhotoUrl,
@@ -46,22 +60,38 @@ struct ProfilePhotoPicker: View {
             }
         }
         .buttonStyle(.plain)
-        .disabled(isUploading || auth.accessToken == nil)
-        .accessibilityLabel(session.me?.profilePhotoUrl == nil ? "Add profile photo" : "Change profile photo")
+        .disabled(isUploading || (auth.accessToken == nil && !initiallyOpen))
+        .accessibilityLabel(session.me?.profilePhotoUrl == nil ? "Choose your face" : "Change your face")
         .accessibilityIdentifier(accessibilityID)
-        .onChange(of: selection) { _, item in
-            guard let item else { return }
-            Task { await upload(item) }
+        .sheet(isPresented: $showFaces) {
+            FacePickerSheet(
+                currentAnimal: currentAnimal,
+                onPickAnimal: { animal in
+                    showFaces = false
+                    Task { await wear(animal) }
+                },
+                onPickPhoto: { item in
+                    showFaces = false
+                    Task { await upload(item) }
+                }
+            )
+        }
+        .onAppear {
+            if initiallyOpen { showFaces = true }
         }
     }
 
-    private func upload(_ item: PhotosPickerItem) async {
-        isUploading = true
-        defer {
-            isUploading = false
-            selection = nil
+    /// An animal is uploaded as a PNG straight from the catalog: the preparer's JPEG
+    /// pass is for photos, and would only soften the pixels.
+    private func wear(_ animal: PixelAnimal) async {
+        guard let data = UIImage(named: animal.imageName)?.pngData() else {
+            onResult(MonacoToast(message: "That face is missing. Try another.", isSuccess: false))
+            return
         }
+        await save(data, mimeType: "image/png", success: "You're \(animal.withArticle) now.")
+    }
 
+    private func upload(_ item: PhotosPickerItem) async {
         let data: Data?
         do {
             data = try await item.loadTransferable(type: Data.self)
@@ -81,9 +111,15 @@ struct ProfilePhotoPicker: View {
             return
         }
 
-        switch await session.uploadProfilePhoto(prepared.data, mimeType: prepared.mimeType, auth: auth) {
+        await save(prepared.data, mimeType: prepared.mimeType, success: "Profile photo updated.")
+    }
+
+    private func save(_ data: Data, mimeType: String, success: String) async {
+        isUploading = true
+        defer { isUploading = false }
+        switch await session.uploadProfilePhoto(data, mimeType: mimeType, auth: auth) {
         case .saved, .unchanged:
-            onResult(MonacoToast(message: "Profile photo updated.", isSuccess: true))
+            onResult(MonacoToast(message: success, isSuccess: true))
         case .failed(let message):
             onResult(MonacoToast(message: message, isSuccess: false))
         }

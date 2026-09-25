@@ -150,13 +150,15 @@ struct ProposalBallotListTests {
         #expect(lines.map(\.choice) == [.yes, .no, .waiting, .waiting])
         #expect(lines.map(\.isViewer) == [false, false, true, false])
         #expect(lines.first?.castAt == "2026-09-24T10:00:00Z")
+        // Their seat wears their own animal before the ballot names them.
+        #expect(lines[2].faceSeed == "viewer")
     }
 
-    /// The viewer's own ballot reads "You" and is washed; its face still shows their initials.
+    /// The viewer's own ballot reads "You" and is washed; its face is still their own animal.
     @Test func theViewersBallotIsTheirs() {
         let voted = proposal(canVote: false, votes: [ballot("viewer", "Logan Norman", "yes")], yes: 1, no: 0)
         let lines = ProposalBallotList.lines(for: voted, viewerId: "viewer", viewerChoice: "yes")
-        #expect(lines.first == ProposalBallotLine(id: "ballot-viewer", name: "You", faceName: "Logan Norman", choice: .yes, castAt: nil, isViewer: true))
+        #expect(lines.first == ProposalBallotLine(id: "ballot-viewer", name: "You", faceName: "Logan Norman", faceSeed: "viewer", choice: .yes, castAt: nil, isViewer: true))
         #expect(lines.last?.name == "4 more members")
     }
 

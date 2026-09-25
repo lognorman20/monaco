@@ -293,7 +293,8 @@ struct ProposalCardView<Destination: View>: View {
     /// names the ballots — the faces of the members already behind it.
     @ViewBuilder
     private var standing: some View {
-        let yesNames = ProposalYesVoters.names(in: proposal.votes ?? [], excluding: viewerId)
+        let yesVotes = ProposalYesVoters.votes(in: proposal.votes ?? [], excluding: viewerId)
+        let yesNames = yesVotes.map(\.displayName)
         let comments = proposal.commentCount ?? 0
         if proposal.voteSummary != nil || comments > 0 || !yesNames.isEmpty {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
@@ -302,7 +303,7 @@ struct ProposalCardView<Destination: View>: View {
                 }
                 if let sentence = ProposalYesVoters.sentence(yesNames) {
                     HStack(spacing: MonacoTheme.Space.s) {
-                        BallotFaces(names: yesNames, ring: faceRing)
+                        BallotFaces(votes: yesVotes, ring: faceRing)
                         Text(sentence)
                             .font(MonacoTheme.Typo.caption)
                             .foregroundStyle(MonacoTheme.muted)
@@ -465,11 +466,23 @@ enum ProposalYesVoters {
     /// they are known: their vote has its own line on the card, and "You voted yes" twice on
     /// one screen reads as a mistake.
     static func names(in votes: [ProposalVoteDTO], excluding viewerId: String?) -> [String] {
+        self.votes(in: votes, excluding: viewerId).map(\.displayName)
+    }
+
+    /// The same ballots with their ids, which is what picks each voter's face.
+    static func votes(in votes: [ProposalVoteDTO], excluding viewerId: String?) -> [ProposalVoteDTO] {
         votes
             .filter { $0.choice.lowercased() == ProposalVoteChoice.yes.rawValue }
             .filter { vote in viewerId.map { vote.voterId != $0 } ?? true }
-            .map { $0.displayName.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+            .map { vote in
+                ProposalVoteDTO(
+                    voterId: vote.voterId,
+                    displayName: vote.displayName.trimmingCharacters(in: .whitespacesAndNewlines),
+                    choice: vote.choice,
+                    castAt: vote.castAt
+                )
+            }
+            .filter { !$0.displayName.isEmpty }
     }
 
     /// "Ada voted yes", "Ada and Ben voted yes", "Ada, Ben and Cy voted yes",
@@ -512,11 +525,12 @@ enum ProposalYesVoters {
 /// Up to four faces of the members behind a proposal, overlapped the way a group avatar row is.
 /// Decoration: the sentence beside it says the names, and VoiceOver reads that instead.
 ///
-/// Drawn here rather than with `MonacoAvatar`, whose resting fill is the paper itself: on the
-/// proposal screen, which sits on the paper, overlapped faces of that colour lose their edges and
-/// the row reads as loose initials. A sunken disc keeps each face whole on the card and the page.
+/// Each face is the voter's pixel animal, the same one their id picks everywhere else, cut
+/// out of the one it overlaps by a ring in the colour behind the row. These were initials on
+/// a sunken disc until the animals arrived, and a row of letters beside a row of animals on
+/// the same screen read as two different apps.
 struct BallotFaces: View {
-    let names: [String]
+    let votes: [ProposalVoteDTO]
     /// The colour behind the row, so each face is cut out of the one it overlaps.
     var ring: Color = MonacoTheme.surface
     var size: CGFloat = 24
@@ -525,19 +539,14 @@ struct BallotFaces: View {
 
     var body: some View {
         HStack(spacing: -size / 4) {
-            ForEach(Array(names.prefix(Self.visibleLimit).enumerated()), id: \.offset) { _, name in
-                Circle()
-                    .fill(MonacoTheme.surfaceSunken)
-                    .overlay {
-                        Text(AvatarInitials.from(name))
-                            .font(.custom("AvenirNext-DemiBold", fixedSize: size * 0.38))
-                            .foregroundStyle(MonacoTheme.brand)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
-                            .padding(.horizontal, 2)
-                    }
-                    .overlay(Circle().strokeBorder(ring, lineWidth: 2))
+            ForEach(Array(votes.prefix(Self.visibleLimit).enumerated()), id: \.offset) { _, vote in
+                Image(PixelAnimal.forSeed(vote.voterId.isEmpty ? vote.displayName : vote.voterId).imageName)
+                    .resizable()
+                    .interpolation(.none)
+                    .scaledToFill()
                     .frame(width: size, height: size)
+                    .clipShape(Circle())
+                    .overlay(Circle().strokeBorder(ring, lineWidth: 2))
             }
         }
         .accessibilityHidden(true)
