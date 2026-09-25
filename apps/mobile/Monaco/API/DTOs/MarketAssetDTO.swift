@@ -14,6 +14,7 @@ import MonacoCore
 
 typealias MarketAssetDTO = MonacoCore.MarketAssetDTO
 typealias AssetLiquidityDTO = MonacoCore.AssetLiquidityDTO
+typealias AssetVariantDTO = MonacoCore.AssetVariantDTO
 typealias AssetDetailDTO = MonacoCore.AssetDetailDTO
 typealias AssetStatsDTO = MonacoCore.AssetStatsDTO
 typealias StockVsTokenDTO = MonacoCore.StockVsTokenDTO

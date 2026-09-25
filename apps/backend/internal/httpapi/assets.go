@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -96,10 +97,7 @@ type marketAssetResponse struct {
 	// for the same reason.
 	ChangeBasis       string `json:"changeBasis,omitempty"`
 	ChangeBasisSymbol string `json:"changeBasisSymbol,omitempty"`
-	// LogoURL is the company's logo, as the xStocks catalogue publishes it. Empty
-	// when the catalogue has none, in which case the app falls back to its ticker
-	// tile — the resting state of the mark rather than a placeholder.
-	LogoURL string `json:"logoUrl,omitempty"`
+	assetCatalogJSONFields
 }
 
 type listAssetsResponse struct {
@@ -189,6 +187,8 @@ type assetDetailResponse struct {
 	Market        *marketStatusResponse `json:"market,omitempty"`
 	Stats         *assetStatsResponse   `json:"stats,omitempty"`
 	StockVsToken  *stockVsTokenResponse `json:"stockVsToken,omitempty"`
+	assetCatalogJSONFields
+	Variants []assetVariantResponse `json:"variants,omitempty"`
 }
 
 type assetChartResponse struct {
@@ -229,8 +229,13 @@ func (h *AssetsHandlers) ListAssetsHandler(w http.ResponseWriter, r *http.Reques
 	query := strings.TrimSpace(r.URL.Query().Get("query"))
 	limit := parseCatalogLimit(r.URL.Query().Get("limit"))
 	offset := parseCatalogOffset(r.URL.Query().Get("offset"))
+	kind, kindErr := parseCatalogKindQuery(r.URL.Query().Get("kind"))
+	if kindErr != nil {
+		logJSONError(ctx, log, "invalid_catalog_kind", w, http.StatusBadRequest, "invalid catalog kind", "query", query)
+		return
+	}
 
-	page, err := h.Catalog.Search(ctx, query, limit, offset)
+	page, err := catalogSearch(ctx, h.Catalog, query, kind, limit, offset)
 	if err != nil {
 		if errors.Is(err, xstocks.ErrInvalidResponse) {
 			logJSONError(ctx, log, "invalid_catalog_query", w, http.StatusBadRequest, "invalid catalog query", "query", query)
@@ -241,7 +246,7 @@ func (h *AssetsHandlers) ListAssetsHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	resp := listAssetsResponse{
-		Assets:  h.enrichAssets(ctx, page.Assets),
+		Assets:  h.enrichAssets(ctx, page.Assets, true),
 		HasMore: page.HasMore,
 		Market:  h.marketStatus(),
 	}
@@ -270,7 +275,7 @@ func (h *AssetsHandlers) PopularAssetsHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	resp := popularAssetsResponse{Assets: h.enrichAssets(ctx, assets), Market: h.marketStatus()}
+	resp := popularAssetsResponse{Assets: h.enrichAssets(ctx, assets, true), Market: h.marketStatus()}
 	writeMarketJSON(ctx, log, w, http.StatusOK, resp, "ok", "limit", limit, "result_count", len(resp.Assets))
 }
 
@@ -336,7 +341,8 @@ func (h *AssetsHandlers) GetAssetChartHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if _, found, err := h.lookupAsset(ctx, symbol); err != nil {
+	asset, found, err := h.lookupAsset(ctx, symbol)
+	if err != nil {
 		logJSONError(ctx, log, "asset_lookup_failed", w, http.StatusInternalServerError, "internal server error", "symbol", symbol, "err", err.Error())
 		return
 	} else if !found {
@@ -346,7 +352,11 @@ func (h *AssetsHandlers) GetAssetChartHandler(w http.ResponseWriter, r *http.Req
 
 	var series pyth.AssetChartSeries
 	if h.Pyth != nil {
-		series, err = h.Pyth.ChartSeries(ctx, symbol, chartRange)
+		series, err = chartSeries(ctx, h.Pyth, pyth.ChartQuery{
+			Symbol: symbol,
+			Kind:   asset.Normalize().Kind,
+			Range:  chartRange,
+		})
 		if err != nil {
 			logJSONError(ctx, log, "chart_failed", w, http.StatusInternalServerError, "internal server error", "symbol", symbol, "err", err.Error())
 			return
@@ -408,15 +418,46 @@ func (h *AssetsHandlers) marketRows() *MarketRowSource {
 	return &MarketRowSource{Catalog: h.Catalog, Pyth: h.Pyth, Price: h.Price}
 }
 
+func chartSeries(ctx context.Context, client pyth.AssetPriceClient, q pyth.ChartQuery) (pyth.AssetChartSeries, error) {
+	if querier, ok := client.(interface {
+		ChartSeriesQuery(context.Context, pyth.ChartQuery) (pyth.AssetChartSeries, error)
+	}); ok {
+		return querier.ChartSeriesQuery(ctx, q)
+	}
+	return client.ChartSeries(ctx, q.Symbol, q.Range)
+}
+
+// lookupAsset resolves a route's symbol through the catalogue's symbol index. A
+// name or an issuer alias ("T-SpaceX") is not a ticker the index knows, so a miss
+// falls back to search, which still finds the row it names.
 func (h *AssetsHandlers) lookupAsset(ctx context.Context, symbol string) (xstocks.CatalogAsset, bool, error) {
-	return h.marketRows().LookupAsset(ctx, symbol)
+	asset, found, err := h.marketRows().LookupAsset(ctx, symbol)
+	if err != nil || found || h.Catalog == nil {
+		return asset, found, err
+	}
+	page, err := h.Catalog.Search(ctx, symbol, 25, 0)
+	if err != nil {
+		return xstocks.CatalogAsset{}, false, err
+	}
+	for _, candidate := range page.Assets {
+		if assetMatchesLookup(candidate, symbol) {
+			return candidate, true, nil
+		}
+	}
+	return xstocks.CatalogAsset{}, false, nil
 }
 
 // enrichAssets marks every asset with one batched Jupiter Price API call instead
 // of a per-asset round trip (Pyth or Jupiter QuoteBuy). Shared by the list and
 // popular routes — both just display current price, so both get the same source.
-func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []xstocks.CatalogAsset) []marketAssetResponse {
-	return h.marketRows().Enrich(ctx, assets)
+func (h *AssetsHandlers) enrichAssets(ctx context.Context, assets []xstocks.CatalogAsset, withVariantCount bool) []marketAssetResponse {
+	rows := h.marketRows().Enrich(ctx, assets)
+	if withVariantCount {
+		for i := range rows {
+			rows[i].VariantCount = variantCountFor(ctx, h.Catalog, assets[i].Normalize())
+		}
+	}
+	return rows
 }
 
 func (h *AssetsHandlers) fetchPrices(ctx context.Context, assets []xstocks.CatalogAsset) map[string]jupiter.TokenPrice {
@@ -428,28 +469,35 @@ func marketAssetResponseFor(
 	prices map[string]jupiter.TokenPrice,
 	sparks map[string]rowSeries,
 ) marketAssetResponse {
+	n := asset.Normalize()
 	resp := marketAssetResponse{
-		Symbol:     asset.Symbol,
-		Name:       asset.Name,
-		SolanaMint: asset.SolanaMint,
-		Routable:   asset.Routable,
-		LogoURL:    asset.LogoURL,
+		Symbol:     n.Symbol,
+		Name:       n.Name,
+		SolanaMint: n.SolanaMint,
+		Routable:   n.Routable,
 	}
-	if price, ok := prices[asset.SolanaMint]; ok && price.PriceUsdcMicros > 0 {
-		resp.PriceUsdcMicros = &price.PriceUsdcMicros
-		resp.Change24h = price.Change24h
-		if price.Change24h != nil {
-			// Jupiter prices the mint, so this move is the xStock's, not the
-			// equity's. The row is told, because the series next to it is not.
-			resp.ChangeBasis = pyth.PriceBasisToken
-			resp.ChangeBasisSymbol = asset.Symbol
+	var pricePtr *jupiter.TokenPrice
+	if price, ok := prices[n.SolanaMint]; ok {
+		priceCopy := price
+		pricePtr = &priceCopy
+		if price.PriceUsdcMicros > 0 {
+			resp.PriceUsdcMicros = &price.PriceUsdcMicros
+			resp.Change24h = price.Change24h
+			if price.Change24h != nil {
+				// Jupiter prices the mint, so this move is the xStock's, not the
+				// equity's. The row is told, because the series next to it is not.
+				resp.ChangeBasis = pyth.PriceBasisToken
+				resp.ChangeBasisSymbol = n.Symbol
+			}
 		}
 	}
-	if series, ok := sparks[asset.SolanaMint]; ok && len(series.spark) > 1 {
+	if series, ok := sparks[n.SolanaMint]; ok && len(series.spark) > 1 {
 		resp.Spark = series.spark
 		resp.SparkBasis = series.basis
 		resp.SparkBasisSymbol = series.basisSymbol
 	}
+	// A row on its own does not count its variants; the list routes add that.
+	resp.assetCatalogJSONFields = catalogJSONFields(n, pricePtr, 0)
 	return resp
 }
 
@@ -476,20 +524,28 @@ func (h *AssetsHandlers) marketStatus() *marketStatusResponse {
 }
 
 func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset xstocks.CatalogAsset) assetDetailResponse {
+	n := asset.Normalize()
 	// The mark is needed for the spread, so price first and probe once. Probing before the
 	// price as well would double every Jupiter quote this screen costs.
-	prices := h.fetchPrices(ctx, []xstocks.CatalogAsset{asset})
-	var markMicros *int64
+	prices := h.fetchPrices(ctx, []xstocks.CatalogAsset{n})
+	var (
+		markMicros *int64
+		pricePtr   *jupiter.TokenPrice
+	)
 	detail := assetDetailResponse{
-		Symbol:     asset.Symbol,
-		Name:       asset.Name,
-		SolanaMint: asset.SolanaMint,
-		Routable:   asset.Routable,
+		Symbol:     n.Symbol,
+		Name:       n.Name,
+		SolanaMint: n.SolanaMint,
+		Routable:   n.Routable,
 	}
-	if price, ok := prices[asset.SolanaMint]; ok && price.PriceUsdcMicros > 0 {
-		detail.PriceUsdcMicros = &price.PriceUsdcMicros
-		detail.Change24h = price.Change24h
-		markMicros = &price.PriceUsdcMicros
+	if price, ok := prices[n.SolanaMint]; ok {
+		priceCopy := price
+		pricePtr = &priceCopy
+		if price.PriceUsdcMicros > 0 {
+			detail.PriceUsdcMicros = &price.PriceUsdcMicros
+			detail.Change24h = price.Change24h
+			markMicros = &price.PriceUsdcMicros
+		}
 	}
 
 	status := h.marketStatus()
@@ -497,35 +553,45 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset xstocks.Cat
 	detail.MarketSession = status.Session
 	detail.AfterHours = status.AfterHours
 
-	// The liquidity probes, the two Pyth feeds and the two chart ranges are all
-	// independent reads. Run them together so the screen costs one round trip's
-	// latency instead of four.
+	// The liquidity probes, the two Pyth feeds, the two chart ranges and the issuer
+	// variants are all independent reads. Run them together so the screen costs one
+	// round trip's latency instead of five.
 	sectionCtx, cancel := context.WithTimeout(ctx, marketSectionTimeout)
 	defer cancel()
 
 	var (
-		quotes    pyth.ReferenceQuotes
-		hasQuotes bool
-		day       pyth.AssetChartSeries
-		year      pyth.AssetChartSeries
-		wg        sync.WaitGroup
+		quotes       pyth.ReferenceQuotes
+		hasQuotes    bool
+		day          pyth.AssetChartSeries
+		year         pyth.AssetChartSeries
+		variantCount int
+		variants     []assetVariantResponse
+		wg           sync.WaitGroup
 	)
-	wg.Add(3)
+	wg.Add(4)
 	go func() {
 		defer wg.Done()
-		quotes, hasQuotes = h.referenceQuotes(sectionCtx, asset, markMicros)
+		quotes, hasQuotes = h.referenceQuotes(sectionCtx, n, markMicros)
 	}()
 	go func() {
 		defer wg.Done()
-		day = h.chartSeries(sectionCtx, asset.Symbol, pyth.ChartRange1D)
+		day = h.chartSeries(sectionCtx, pyth.ChartQuery{Symbol: n.Symbol, Kind: n.Kind, Range: pyth.ChartRange1D})
 	}()
 	go func() {
 		defer wg.Done()
-		year = h.chartSeries(sectionCtx, asset.Symbol, pyth.ChartRange1Y)
+		year = h.chartSeries(sectionCtx, pyth.ChartQuery{Symbol: n.Symbol, Kind: n.Kind, Range: pyth.ChartRange1Y})
 	}()
-	detail.Liquidity = h.liquiditySnippet(ctx, asset, markMicros)
+	go func() {
+		defer wg.Done()
+		variantCount = variantCountFor(ctx, h.Catalog, n)
+		variants = variantResponses(ctx, h.Catalog, h.Price, n)
+	}()
+	detail.Liquidity = h.liquiditySnippet(ctx, n, markMicros)
 	detail.Routable = detail.Liquidity.Routable
 	wg.Wait()
+
+	detail.assetCatalogJSONFields = catalogJSONFields(n, pricePtr, variantCount)
+	detail.Variants = variants
 
 	var confMicros *int64
 	if hasQuotes {
@@ -535,7 +601,11 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset xstocks.Cat
 			confMicros = &conf
 		}
 	}
-	detail.Stats = assetStatsResponseFor(asset.Symbol, day, year, detail.Liquidity.SpreadBps, confMicros)
+	// The stats grid folds a price history, and a pre-IPO token has none: its only
+	// figure would be the spread, which Liquidity already carries.
+	if n.Kind != xstocks.AssetKindPreIPO {
+		detail.Stats = assetStatsResponseFor(n.Symbol, day, year, detail.Liquidity.SpreadBps, confMicros)
+	}
 	return detail
 }
 
@@ -543,7 +613,9 @@ func (h *AssetsHandlers) buildAssetDetail(ctx context.Context, asset xstocks.Cat
 // for the token leg when the symbol has no Pyth crypto feed. The substitution is
 // labelled as Jupiter, so nothing ever reads as a Pyth price that is not one.
 func (h *AssetsHandlers) referenceQuotes(ctx context.Context, asset xstocks.CatalogAsset, markMicros *int64) (pyth.ReferenceQuotes, bool) {
-	if h.Quotes == nil {
+	// A pre-IPO token has no listed stock and no Pyth feed; its reference price is
+	// the catalogue's, on the detail's own fields.
+	if h.Quotes == nil || asset.Normalize().Kind == xstocks.AssetKindPreIPO {
 		return pyth.ReferenceQuotes{}, false
 	}
 	quotes, err := h.Quotes.ReferenceQuotes(ctx, asset.Symbol)
@@ -560,11 +632,11 @@ func (h *AssetsHandlers) referenceQuotes(ctx context.Context, asset xstocks.Cata
 	return quotes, true
 }
 
-func (h *AssetsHandlers) chartSeries(ctx context.Context, symbol string, chartRange pyth.ChartRange) pyth.AssetChartSeries {
+func (h *AssetsHandlers) chartSeries(ctx context.Context, q pyth.ChartQuery) pyth.AssetChartSeries {
 	if h.Pyth == nil {
 		return pyth.AssetChartSeries{}
 	}
-	series, err := h.Pyth.ChartSeries(ctx, symbol, chartRange)
+	series, err := chartSeries(ctx, h.Pyth, q)
 	if err != nil {
 		return pyth.AssetChartSeries{}
 	}
@@ -633,13 +705,25 @@ func referenceQuoteResponseFor(quote pyth.ReferenceQuote) referenceQuoteResponse
 }
 
 func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset xstocks.CatalogAsset, markMicros *int64) assetLiquidityResponse {
+	n := asset.Normalize()
 	snippet := assetLiquidityResponse{
 		Label:              "Via Jupiter",
-		Routable:           asset.Routable,
+		Routable:           n.Routable,
 		BuyProbeUsdcMicros: app.CatalogRoutabilityProbeMicros,
 	}
-	if h.Jupiter == nil || strings.TrimSpace(asset.SolanaMint) == "" {
+	if h.Jupiter == nil || strings.TrimSpace(n.SolanaMint) == "" {
 		return snippet
+	}
+
+	sellProbeAmount := jupiter.AtomicScale(n.Decimals)
+	if mult := n.UiAmountMultiplier; mult != nil {
+		if raw, err := pyth.RawAtomicsForOneScaledUnit(n.Decimals, mult); err == nil {
+			sellProbeAmount = raw
+		}
+	} else if n.Kind == xstocks.AssetKindPreIPO {
+		if raw, err := pyth.RawAtomicsForOneScaledUnit(n.Decimals, big.NewRat(1, 1)); err == nil {
+			sellProbeAmount = raw
+		}
 	}
 
 	// Both probes are independent reads; the buy one alone decides routability.
@@ -654,17 +738,17 @@ func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset xstocks.Cat
 	go func() {
 		defer wg.Done()
 		buyQuote, buyErr = h.Jupiter.QuoteBuy(ctx, jupiter.QuoteBuyParams{
-			Symbol:     asset.Symbol,
-			OutputMint: asset.SolanaMint,
+			Symbol:     n.Symbol,
+			OutputMint: n.SolanaMint,
 			USDCAmount: app.CatalogRoutabilityProbeMicros,
 		})
 	}()
 	go func() {
 		defer wg.Done()
 		sellQuote, sellErr = h.Jupiter.QuoteSell(ctx, jupiter.QuoteSellParams{
-			Symbol:    asset.Symbol,
-			InputMint: asset.SolanaMint,
-			Amount:    jupiter.XStockAtomicScale,
+			Symbol:    n.Symbol,
+			InputMint: n.SolanaMint,
+			Amount:    sellProbeAmount,
 		})
 	}()
 	wg.Wait()
@@ -678,7 +762,7 @@ func (h *AssetsHandlers) liquiditySnippet(ctx context.Context, asset xstocks.Cat
 	if buyErr == nil && buyQuote.Routable {
 		snippet.BuyProbeOutAmount = buyQuote.OutAmount
 		if markMicros != nil {
-			snippet.SpreadBps = pyth.MidSpreadBps(*markMicros, buyQuote.OutAmount, app.CatalogRoutabilityProbeMicros, jupiter.XStockDecimals)
+			snippet.SpreadBps = pyth.MidSpreadBps(*markMicros, buyQuote.OutAmount, app.CatalogRoutabilityProbeMicros, int32(n.Decimals))
 		}
 	}
 	if sellErr == nil && sellQuote.Routable {

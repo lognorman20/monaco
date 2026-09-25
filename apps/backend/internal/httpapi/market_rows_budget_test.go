@@ -260,3 +260,38 @@ func TestMarketRowSource_noChangeMeansNoChangeBasis(t *testing.T) {
 		t.Fatalf("changeBasis = %q, want empty when there is no change", rows[0].ChangeBasis)
 	}
 }
+
+// A pre-IPO token has no price history, so its row neither draws a line nor sends
+// a fill upstream for one. Its price still arrives.
+func TestMarketRowSource_aPreIPORowIsNeverChartedButStillPriced(t *testing.T) {
+	t.Parallel()
+	source := newMarketRowSource(t)
+	cached := newCachedSeriesClient()
+	source.Pyth = cached
+	const mint = "TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v"
+	asset := xstocks.CatalogAsset{
+		Symbol:     "tSpaceX",
+		Name:       "T-SpaceX",
+		SolanaMint: mint,
+		Kind:       xstocks.AssetKindPreIPO,
+		Decimals:   9,
+	}
+	jupiter.RegisterPrice(source.Price, mint, jupiter.TokenPrice{PriceUsdcMicros: 562_000_000})
+
+	rows := source.Enrich(context.Background(), []xstocks.CatalogAsset{asset})
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].Spark != nil {
+		t.Fatalf("spark = %v, want none for a pre-IPO token", rows[0].Spark)
+	}
+	if warms := cached.warms.Load(); warms != 0 {
+		t.Fatalf("chart reads = %d, want 0 for a pre-IPO token", warms)
+	}
+	if rows[0].PriceUsdcMicros == nil || *rows[0].PriceUsdcMicros != 562_000_000 {
+		t.Fatalf("price = %v, want 562000000", rows[0].PriceUsdcMicros)
+	}
+	if rows[0].Kind != string(xstocks.AssetKindPreIPO) || rows[0].TokenDecimals != 9 {
+		t.Fatalf("kind/decimals = %q/%d, want pre_ipo/9", rows[0].Kind, rows[0].TokenDecimals)
+	}
+}

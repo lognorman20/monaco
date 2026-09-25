@@ -21,13 +21,14 @@ type ExecuteBuyParams struct {
 
 // OrderBuyParams fetches an unsigned buy order for a treasury taker.
 type OrderBuyParams struct {
-	GroupID    string
-	UserID     string
-	Symbol     string
-	InputMint  string
-	OutputMint string
-	Amount     int64
-	Taker      string
+	GroupID     string
+	UserID      string
+	Symbol      string
+	InputMint   string
+	OutputMint  string
+	Amount      int64
+	Taker       string
+	SlippageBps int
 }
 
 // PollExecuteParams re-submits /execute to poll swap status.
@@ -89,10 +90,11 @@ func (c *HTTPClient) OrderBuy(ctx context.Context, params OrderBuyParams) (BuyOr
 	}
 
 	body, err := c.fetchBuyOrder(ctx, buyOrderRequest{
-		InputMint:  params.InputMint,
-		OutputMint: params.OutputMint,
-		Amount:     params.Amount,
-		Taker:      params.Taker,
+		InputMint:   params.InputMint,
+		OutputMint:  params.OutputMint,
+		Amount:      params.Amount,
+		Taker:       params.Taker,
+		SlippageBps: params.SlippageBps,
 	}, params.GroupID, params.UserID, params.Symbol)
 	if err != nil {
 		logOrderResult(params.GroupID, params.UserID, params.Symbol, "", err)

@@ -1,4 +1,4 @@
-package jupiter
+package jupitercharts
 
 import (
 	"context"

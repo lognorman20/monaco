@@ -23,8 +23,21 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
     public let sparkBasisSymbol: String?
     public let changeBasis: MarketPriceBasis?
     public let logoUrl: String?
+    public let assetKind: AssetKind?
+    public let tokenDecimals: Int?
+    public let premiumBps: Int?
+    public let uiAmountMultiplier: String?
+    public let issuerName: String?
 
     public var id: String { symbol }
+    public var resolvedAssetKind: AssetKind { assetKind ?? .stock }
+    public var resolvedTokenDecimals: Int { tokenDecimals ?? AssetCatalogDefaults.decimals }
+    public var resolvedUiMultiplier: Decimal {
+        guard let uiAmountMultiplier, let value = Decimal(string: uiAmountMultiplier, locale: Locale(identifier: "en_US_POSIX")), value > 0 else {
+            return 1
+        }
+        return value
+    }
 
     /// True when the drawn line and the reported day change are about different
     /// instruments.
@@ -62,7 +75,12 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
         sparkBasis: MarketPriceBasis? = nil,
         sparkBasisSymbol: String? = nil,
         changeBasis: MarketPriceBasis? = nil,
-        logoUrl: String? = nil
+        logoUrl: String? = nil,
+        assetKind: AssetKind? = nil,
+        tokenDecimals: Int? = nil,
+        premiumBps: Int? = nil,
+        uiAmountMultiplier: String? = nil,
+        issuerName: String? = nil
     ) {
         self.symbol = symbol
         self.units = units
@@ -77,6 +95,11 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
         self.sparkBasisSymbol = sparkBasisSymbol
         self.changeBasis = changeBasis
         self.logoUrl = logoUrl
+        self.assetKind = assetKind
+        self.tokenDecimals = tokenDecimals
+        self.premiumBps = premiumBps
+        self.uiAmountMultiplier = uiAmountMultiplier
+        self.issuerName = issuerName
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -84,6 +107,7 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
         case sparkUsdcMicros = "spark"
         case sparkBasis, sparkBasisSymbol, changeBasis
         case logoUrl
+        case assetKind, tokenDecimals, premiumBps, uiAmountMultiplier, issuerName
     }
 
     public init(from decoder: Decoder) throws {
@@ -101,6 +125,11 @@ public struct PotRowDTO: Codable, Equatable, Sendable, Identifiable {
         sparkBasisSymbol = try container.decodeIfPresent(String.self, forKey: .sparkBasisSymbol)
         changeBasis = try container.decodeIfPresent(MarketPriceBasis.self, forKey: .changeBasis)
         logoUrl = try container.decodeIfPresent(String.self, forKey: .logoUrl)
+        assetKind = try container.decodeIfPresent(AssetKind.self, forKey: .assetKind)
+        tokenDecimals = try container.decodeIfPresent(Int.self, forKey: .tokenDecimals)
+        premiumBps = try container.decodeIfPresent(Int.self, forKey: .premiumBps)
+        uiAmountMultiplier = try container.decodeIfPresent(String.self, forKey: .uiAmountMultiplier)
+        issuerName = try container.decodeIfPresent(String.self, forKey: .issuerName)
     }
 }
 
@@ -160,19 +189,23 @@ public struct GroupAgentDTO: Codable, Equatable, Sendable {
     public let allocationUsdcMicros: String
     /// Plaintext bot key for cabal members; omitted for spectators and revoked agents.
     public let apiKey: String?
+    /// Paste-ready setup text for an external agent; sent only alongside apiKey.
+    public let connectText: String?
 
     public init(
         id: String,
         status: String,
         agentDisplayName: String,
         allocationUsdcMicros: String,
-        apiKey: String? = nil
+        apiKey: String? = nil,
+        connectText: String? = nil
     ) {
         self.id = id
         self.status = status
         self.agentDisplayName = agentDisplayName
         self.allocationUsdcMicros = allocationUsdcMicros
         self.apiKey = apiKey
+        self.connectText = connectText
     }
 }
 

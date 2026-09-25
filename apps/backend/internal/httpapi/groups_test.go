@@ -775,3 +775,56 @@ func TestGET_groupView_includesAgentAPIKeyForMembers(t *testing.T) {
 		t.Fatalf("expected apiKey for member, got %+v", payload.Agent)
 	}
 }
+
+func TestGET_groupView_connectTextForMembersOnly(t *testing.T) {
+	t.Parallel()
+	groupHandlers, authHandlers, privyClient, _, iso := integrationGroupApp(t)
+	docs, err := app.NewAgentDocs("https://agents.monaco.example")
+	if err != nil {
+		t.Fatalf("agent docs: %v", err)
+	}
+	groupHandlers.AgentDocs = docs
+	creator, creatorToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "connect-text-creator", "Creator")
+	_, outsiderToken := seedAuthenticatedUser(t, iso, authHandlers, privyClient, "connect-text-outsider", "Outsider")
+	createRec := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/groups", strings.NewReader(`{"name":"Connect Club"}`))
+	createReq.Header.Set("Authorization", "Bearer "+string(creatorToken))
+	groupHandlers.CreateGroupHandler(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create group: %d %s", createRec.Code, createRec.Body.String())
+	}
+	var created createGroupResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create group: %v", err)
+	}
+	trackCreatedGroup(iso, created.GroupID)
+	privy.SetTreasuryUSDCBalance(privyClient, created.TreasuryAddress, 5_000_000)
+	key := installGuardTestAgent(t, groupHandlers.Governance, string(creatorToken), created.GroupID, creator.UserID)
+
+	view := func(token privy.AccessToken) (int, *groupViewAgentResponse) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/v1/groups/"+created.GroupID+"/view", nil)
+		req.SetPathValue("id", created.GroupID)
+		req.Header.Set("Authorization", "Bearer "+string(token))
+		groupHandlers.GetGroupViewHandler(rec, req)
+		var payload groupViewResponse
+		_ = json.Unmarshal(rec.Body.Bytes(), &payload)
+		return rec.Code, payload.Agent
+	}
+
+	code, agent := view(creatorToken)
+	if code != http.StatusOK || agent == nil {
+		t.Fatalf("member view: %d, agent %+v", code, agent)
+	}
+	for _, want := range []string{`"Connect Club"`, `"Guard Bot"`, "X-Monaco-Agent-Key: " + key, "https://agents.monaco.example/v1/agent/skill.md", "idempotencyKey"} {
+		if !strings.Contains(agent.ConnectText, want) {
+			t.Errorf("connectText is missing %q:\n%s", want, agent.ConnectText)
+		}
+	}
+
+	// A non-member either cannot read the cabal at all or reads it without the key.
+	code, agent = view(outsiderToken)
+	if code != http.StatusNotFound && (code != http.StatusOK || agent == nil || agent.ConnectText != "" || agent.APIKey != "") {
+		t.Fatalf("outsider view: %d, agent %+v; want 404, or the agent without key or connect text", code, agent)
+	}
+}

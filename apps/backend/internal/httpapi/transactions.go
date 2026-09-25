@@ -22,26 +22,30 @@ type TransactionHandlers struct {
 	XStocks xstocks.Resolver
 	Swap    *app.SwapService
 	Symbols *app.SymbolResolver
+	Catalog xstocks.CatalogSearcher
 }
 
 type getTransactionResponse struct {
-	TransactionID    string `json:"transactionId"`
-	GroupID          string `json:"groupId"`
-	Action           string `json:"action"`
-	Status           string `json:"status"`
-	AmountMicros     int64  `json:"amountMicros"`
-	InputMint        string `json:"inputMint,omitempty"`
-	OutputMint       string `json:"outputMint,omitempty"`
-	InputSymbol      string `json:"inputSymbol,omitempty"`
-	OutputSymbol     string `json:"outputSymbol,omitempty"`
-	TxSignature      string `json:"txSignature,omitempty"`
-	ExecuteRequestID string `json:"executeRequestId,omitempty"`
-	ProposalID       string `json:"proposalId,omitempty"`
-	CostBasisPrice   int64  `json:"costBasisPrice,omitempty"`
-	CostBasisAmount  int64  `json:"costBasisAmount,omitempty"`
-	CreatedAt        string `json:"createdAt"`
-	ConfirmedAt      string `json:"confirmedAt,omitempty"`
-	FailureReason    string `json:"failureReason,omitempty"`
+	TransactionID      string `json:"transactionId"`
+	GroupID            string `json:"groupId"`
+	Action             string `json:"action"`
+	Status             string `json:"status"`
+	AmountMicros       int64  `json:"amountMicros"`
+	InputMint          string `json:"inputMint,omitempty"`
+	OutputMint         string `json:"outputMint,omitempty"`
+	InputSymbol        string `json:"inputSymbol,omitempty"`
+	OutputSymbol       string `json:"outputSymbol,omitempty"`
+	TxSignature        string `json:"txSignature,omitempty"`
+	ExecuteRequestID   string `json:"executeRequestId,omitempty"`
+	ProposalID         string `json:"proposalId,omitempty"`
+	CostBasisPrice     int64  `json:"costBasisPrice,omitempty"`
+	CostBasisAmount    int64  `json:"costBasisAmount,omitempty"`
+	CreatedAt          string `json:"createdAt"`
+	ConfirmedAt        string `json:"confirmedAt,omitempty"`
+	FailureReason      string `json:"failureReason,omitempty"`
+	TokenDecimals      int    `json:"tokenDecimals,omitempty"`
+	AssetKind          string `json:"assetKind,omitempty"`
+	UiAmountMultiplier string `json:"uiAmountMultiplier,omitempty"`
 }
 
 type treasuryTokenBalance struct {
@@ -194,7 +198,33 @@ func (h *TransactionHandlers) transactionRowToResponse(ctx context.Context, row 
 	if row.Status == postgres.TransactionStatusFailed {
 		resp.FailureReason = "swap failed"
 	}
+	if row.TokenDecimals > 0 {
+		resp.TokenDecimals = row.TokenDecimals
+	}
+	resp.AssetKind = h.assetKindForTransaction(ctx, row)
+	mint := strings.TrimSpace(row.OutputMint)
+	if row.Action == postgres.TransactionActionSell {
+		mint = strings.TrimSpace(row.InputMint)
+	}
+	resp.UiAmountMultiplier = uiAmountMultiplierForMint(ctx, h.Catalog, mint)
 	return resp
+}
+
+func (h *TransactionHandlers) assetKindForTransaction(ctx context.Context, row postgres.TransactionRow) string {
+	mint := strings.TrimSpace(row.OutputMint)
+	if row.Action == postgres.TransactionActionSell {
+		mint = strings.TrimSpace(row.InputMint)
+	}
+	if h.Catalog != nil && mint != "" {
+		if asset, ok, err := h.Catalog.LookupByMint(ctx, mint); err == nil && ok {
+			return string(asset.Normalize().Kind)
+		}
+	}
+	symbol := h.symbolForMint(ctx, mint)
+	if symbol != "" {
+		return assetKindForSymbol(ctx, h.Catalog, symbol)
+	}
+	return string(xstocks.AssetKindStock)
 }
 
 // GetTreasuryTokenBalancesHandler handles GET /v1/groups/{id}/treasury/tokens.

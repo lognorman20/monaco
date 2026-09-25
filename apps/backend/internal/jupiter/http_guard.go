@@ -45,3 +45,9 @@ func wrapHTTPClientForTests(client *http.Client) *http.Client {
 	wrapped.Transport = blockLiveJupiterTransport{inner: transport}
 	return &wrapped
 }
+
+// WrapHTTPClientForTests applies the same guard to a Jupiter client that lives in
+// its own package, so a live call from a test fails there too.
+func WrapHTTPClientForTests(client *http.Client) *http.Client {
+	return wrapHTTPClientForTests(client)
+}

@@ -20,24 +20,23 @@ public enum ProposalAmountFormatter {
     }()
 }
 
-/// Share count for a sell proposal's `tokenAmount` (atomic units, 8 decimals), e.g. "0.5".
+/// Share or token count for a sell proposal's `tokenAmount` (atomic units), e.g. "0.5".
 public enum ProposalShareFormatter {
-    public static let decimals = 8
+    public static let defaultDecimals = AssetCatalogDefaults.decimals
 
-    public static func shares(fromAtomics raw: String) -> String {
-        guard let atomics = Decimal(string: raw.trimmingCharacters(in: .whitespaces)), atomics >= 0 else { return raw }
-        let shares = atomics / Decimal(sign: .plus, exponent: decimals, significand: 1)
-        return sharesFormatter.string(from: shares as NSDecimalNumber) ?? raw
+    public static func shares(fromAtomics raw: String, decimals: Int = defaultDecimals) -> String {
+        guard let quantity = TokenQuantityFormatter.quantity(fromAtomics: raw, decimals: decimals) else { return raw }
+        return sharesFormatter(maxFractionDigits: decimals).string(from: quantity as NSDecimalNumber) ?? raw
     }
 
-    private static let sharesFormatter: NumberFormatter = {
+    private static func sharesFormatter(maxFractionDigits: Int) -> NumberFormatter {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "en_US")
         formatter.numberStyle = .decimal
         formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = decimals
+        formatter.maximumFractionDigits = maxFractionDigits
         return formatter
-    }()
+    }
 }
 
 /// One dot per eligible voter on a proposal card: yes votes first, then no, then still to vote.
@@ -150,7 +149,7 @@ extension ProposalDTO {
 
 public enum ProposalTimeFormatter {
     public static func parse(_ raw: String) -> Date? {
-        SharedFormatters.iso8601WholeSeconds.date(from: raw) ?? SharedFormatters.iso8601Fractional.date(from: raw)
+        SharedFormatters.iso8601Date(from: raw)
     }
 
     /// Time left on an open vote, e.g. "Closes in 2d", "Closes in 20h", "Closes in 12m".

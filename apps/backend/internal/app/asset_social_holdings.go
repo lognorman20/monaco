@@ -3,11 +3,13 @@ package app
 import (
 	"context"
 	"log/slog"
+	"math/big"
 	"sort"
 	"strings"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -78,7 +80,8 @@ func (h *HomeService) assetHoldingsForGroups(
 		return nil, 0, err
 	}
 
-	marks := h.marksForHoldings(ctx, matches, tickerByMint)
+	scales := h.scalesForHoldings(ctx, matches)
+	marks := h.marksForHoldings(ctx, matches, tickerByMint, scales)
 
 	holdings := make([]AssetSocialHolding, 0, len(matches))
 	unvalued := 0
@@ -93,13 +96,14 @@ func (h *HomeService) assetHoldingsForGroups(
 			continue
 		}
 
+		scale := scales[match.Mint]
 		marked, ok := marks[match.Mint]
 		markUsdc := marked.MarkUsdc
 		afterHours := marked.AfterHours
 		if !ok || markUsdc <= 0 {
 			// No live mark. The cabal carries the holding at what it paid, which is
 			// what every other screen does when an oracle is down.
-			costMark, err := costBasisMarkPerUnitMicros(match.CostBasisUsdc, match.Units)
+			costMark, err := pyth.CostBasisMarkPerUnitMicros(match.CostBasisUsdc, match.Units, scale.decimals, scale.mult, scale.kind)
 			if err != nil {
 				// Neither a price nor a cost basis: there is no honest number to
 				// show, so the card says this cabal went unchecked.
@@ -113,12 +117,15 @@ func (h *HomeService) assetHoldingsForGroups(
 		}
 
 		build, err := assetHoldingRow(name, match.GroupID, pyth.MarkedHolding{
-			Symbol:     symbol,
-			Mint:       match.Mint,
-			Units:      match.Units,
-			MarkUsdc:   markUsdc,
-			CostBasis:  match.CostBasisUsdc,
-			AfterHours: afterHours,
+			Symbol:       symbol,
+			Mint:         match.Mint,
+			Units:        match.Units,
+			MarkUsdc:     markUsdc,
+			CostBasis:    match.CostBasisUsdc,
+			AfterHours:   afterHours,
+			Decimals:     scale.decimals,
+			Kind:         scale.kind,
+			UiMultiplier: scale.mult,
 		})
 		if err != nil {
 			slog.Warn("asset social: cabal holding could not be valued",
@@ -182,6 +189,31 @@ func (h *HomeService) holdingsOfSymbol(
 	return matches, tickerByMint
 }
 
+// mintScale is how one mint's raw atomics become units and dollars.
+type mintScale struct {
+	decimals int
+	kind     xstocks.AssetKind
+	mult     *big.Rat
+}
+
+// scalesForHoldings resolves each matched mint's scale once for the whole request.
+// A mint's decimals are the largest any cabal's fills recorded for it, the rule the
+// pot valuation uses too.
+func (h *HomeService) scalesForHoldings(ctx context.Context, matches []postgres.GroupSymbolHolding) map[string]mintScale {
+	decimalsByMint := make(map[string]int, len(matches))
+	for _, match := range matches {
+		if current, seen := decimalsByMint[match.Mint]; !seen || match.TokenDecimals > current {
+			decimalsByMint[match.Mint] = match.TokenDecimals
+		}
+	}
+	out := make(map[string]mintScale, len(decimalsByMint))
+	for mint, tokenDecimals := range decimalsByMint {
+		decimals, kind, mult := holdingScale(ctx, h.symbols, mint, tokenDecimals)
+		out[mint] = mintScale{decimals: decimals, kind: kind, mult: mult}
+	}
+	return out
+}
+
 // marksForHoldings resolves one mark per mint for the whole request, keyed by mint.
 //
 // Every cabal holding the same stock is asking the price source the same question, so
@@ -192,6 +224,7 @@ func (h *HomeService) marksForHoldings(
 	ctx context.Context,
 	matches []postgres.GroupSymbolHolding,
 	tickerByMint map[string]string,
+	scales map[string]mintScale,
 ) map[string]pyth.MarkedHolding {
 	out := make(map[string]pyth.MarkedHolding)
 	if h.pyth == nil || len(matches) == 0 {
@@ -221,12 +254,16 @@ func (h *HomeService) marksForHoldings(
 	costBasis := make([]pyth.CostBasis, 0, len(order))
 	for _, mint := range order {
 		agg := byMint[mint]
+		scale := scales[mint]
 		costBasis = append(costBasis, pyth.CostBasis{
-			Symbol: tickerByMint[mint],
-			Mint:   mint,
-			Units:  agg.units,
-			Price:  agg.usdc,
-			Amount: agg.units,
+			Symbol:       tickerByMint[mint],
+			Mint:         mint,
+			Units:        agg.units,
+			Price:        agg.usdc,
+			Amount:       agg.units,
+			Decimals:     scale.decimals,
+			Kind:         scale.kind,
+			UiMultiplier: scale.mult,
 		})
 	}
 

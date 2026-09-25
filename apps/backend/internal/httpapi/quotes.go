@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,13 +23,35 @@ type QuoteHandlers struct {
 	Privy      privy.Client
 	Buy        *app.BuyService
 	Governance *app.GovernanceService
+	Price      jupiter.PriceClient
 }
 
 type quoteRequest struct {
-	Kind        string `json:"kind"`
-	Symbol      string `json:"symbol"`
-	USDC        int64  `json:"usdc"`
-	TokenAmount int64  `json:"tokenAmount"`
+	Kind              string `json:"kind"`
+	Symbol            string `json:"symbol"`
+	USDC              int64  `json:"usdc"`
+	TokenAmount       int64  `json:"tokenAmount"`
+	SelectBestVariant bool   `json:"selectBestVariant"`
+}
+
+type quoteProviderResponse struct {
+	Issuer     string `json:"issuer"`
+	IssuerName string `json:"issuerName"`
+}
+
+type quoteComparisonCandidateResponse struct {
+	Symbol             string `json:"symbol"`
+	Issuer             string `json:"issuer,omitempty"`
+	IssuerName         string `json:"issuerName,omitempty"`
+	ExposureUsdcMicros string `json:"exposureUsdcMicros,omitempty"`
+	CostRatioBps       int64  `json:"costRatioBps,omitempty"`
+	DeltaBps           int64  `json:"deltaBps,omitempty"`
+	Reason             string `json:"reason,omitempty"`
+}
+
+type quoteComparisonResponse struct {
+	Basis      string                             `json:"basis"`
+	Candidates []quoteComparisonCandidateResponse `json:"candidates,omitempty"`
 }
 
 type quoteResponse struct {
@@ -37,9 +60,17 @@ type quoteResponse struct {
 	USDCMicros       string `json:"usdcMicros,omitempty"`
 	TokenAmount      string `json:"tokenAmount,omitempty"`
 	Routable         bool   `json:"routable"`
+	Reason           string `json:"reason,omitempty"`
 	OutputAmount     string `json:"outputAmount,omitempty"`
 	OutputUsdcMicros string `json:"outputUsdcMicros,omitempty"`
 	PriceUsdcMicros  string `json:"priceUsdcMicros,omitempty"`
+	TokenDecimals    int    `json:"tokenDecimals,omitempty"`
+	PremiumBps       *int   `json:"premiumBps,omitempty"`
+	// AssetKind is stock or pre_ipo. Kind stays buy/sell.
+	AssetKind          string                   `json:"assetKind,omitempty"`
+	UiAmountMultiplier string                   `json:"uiAmountMultiplier,omitempty"`
+	Provider           *quoteProviderResponse   `json:"provider,omitempty"`
+	PriceComparison    *quoteComparisonResponse `json:"priceComparison,omitempty"`
 }
 
 // ProposalQuoteInput is the quote gate input shared with proposal create (M4-T13).
@@ -174,15 +205,37 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	asset, assetErr := h.Buy.ResolveAsset(ctx, req.Symbol)
+	if assetErr != nil {
+		if errors.Is(assetErr, xstocks.ErrNotFound) {
+			logJSONError(ctx, log, "symbol_not_found", w, http.StatusNotFound, "symbol not found", "group_id", groupID, "symbol", req.Symbol, "user_id", userID)
+			return
+		}
+		logJSONError(ctx, log, "quote_check_failed", w, http.StatusInternalServerError, "internal server error", "group_id", groupID, "symbol", req.Symbol, "user_id", userID, "err", assetErr.Error())
+		return
+	}
+
 	result, err := h.Buy.StartBuy(ctx, app.StartBuyRequest{
-		GroupID:    groupID,
-		UserID:     userID,
-		Symbol:     req.Symbol,
-		USDCAmount: req.USDC,
+		GroupID:           groupID,
+		UserID:            userID,
+		Symbol:            req.Symbol,
+		USDCAmount:        req.USDC,
+		SelectBestVariant: req.SelectBestVariant,
 	})
 	if err != nil {
 		if errors.Is(err, xstocks.ErrNotFound) {
 			logJSONError(ctx, log, "symbol_not_found", w, http.StatusNotFound, "symbol not found", "group_id", groupID, "symbol", req.Symbol, "user_id", userID)
+			return
+		}
+		if errors.Is(err, app.ErrIssuerPaused) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(quoteResponse{
+				Symbol:     req.Symbol,
+				USDCMicros: strconv.FormatInt(req.USDC, 10),
+				Routable:   false,
+				Reason:     "issuer_paused",
+			})
 			return
 		}
 		if errors.Is(err, app.ErrQuoteNotRoutable) {
@@ -206,14 +259,42 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := quoteResponse{
-		Symbol:       req.Symbol,
-		USDCMicros:   strconv.FormatInt(req.USDC, 10),
-		Routable:     result.Quote.Routable,
-		OutputAmount: strings.TrimSpace(result.Quote.OutAmount),
+	n := asset.Normalize()
+	quoteSymbol := req.Symbol
+	if strings.TrimSpace(result.Symbol) != "" {
+		quoteSymbol = result.Symbol
+		if picked, err := h.Buy.ResolveAsset(ctx, quoteSymbol); err == nil {
+			n = picked.Normalize()
+		}
 	}
-	if price, ok := quotePriceUsdcMicros(req.USDC, resp.OutputAmount); ok {
+	resp := quoteResponse{
+		Symbol:             quoteSymbol,
+		USDCMicros:         strconv.FormatInt(req.USDC, 10),
+		Routable:           result.Quote.Routable,
+		OutputAmount:       strings.TrimSpace(result.Quote.OutAmount),
+		TokenDecimals:      n.Decimals,
+		AssetKind:          string(n.Kind),
+		UiAmountMultiplier: uiAmountMultiplierForAsset(n),
+	}
+	if price, ok := quotePriceUsdcMicros(req.USDC, resp.OutputAmount, n.Decimals, n.UiAmountMultiplier, n.Kind); ok {
 		resp.PriceUsdcMicros = strconv.FormatInt(price, 10)
+	}
+	if h.Price != nil {
+		if prices, err := h.Price.Prices(ctx, []string{n.SolanaMint}); err == nil {
+			if p, ok := prices[n.SolanaMint]; ok {
+				fields := catalogJSONFields(n, &p, 0)
+				resp.PremiumBps = fields.PremiumBps
+			}
+		}
+	}
+	if result.Provider != nil {
+		resp.Provider = &quoteProviderResponse{
+			Issuer:     result.Provider.Issuer,
+			IssuerName: result.Provider.IssuerName,
+		}
+	}
+	if result.PriceComparison != nil {
+		resp.PriceComparison = quoteComparisonToJSON(*result.PriceComparison)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -228,7 +309,7 @@ func (h *QuoteHandlers) QuoteHandler(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
-func quotePriceUsdcMicros(usdcMicros int64, outputAmount string) (int64, bool) {
+func quotePriceUsdcMicros(usdcMicros int64, outputAmount string, decimals int, uiMultiplier *big.Rat, kind xstocks.AssetKind) (int64, bool) {
 	outputAmount = strings.TrimSpace(outputAmount)
 	if usdcMicros <= 0 || outputAmount == "" {
 		return 0, false
@@ -237,8 +318,30 @@ func quotePriceUsdcMicros(usdcMicros int64, outputAmount string) (int64, bool) {
 	if err != nil || outAtomics <= 0 {
 		return 0, false
 	}
-	// USDC micros (6 dp) per whole xStock share; Jupiter outAmount uses 8 dp atomics.
-	return (usdcMicros * jupiter.XStockAtomicScale) / outAtomics, true
+	if decimals == 0 {
+		decimals = jupiter.XStockDecimals
+	}
+	mult := uiMultiplier
+	if mult == nil {
+		mult = big.NewRat(1, 1)
+	}
+	if mult.Sign() <= 0 {
+		return 0, false
+	}
+	scale := jupiter.AtomicScale(decimals)
+	num := new(big.Int).SetInt64(usdcMicros)
+	num.Mul(num, big.NewInt(scale))
+	num.Mul(num, mult.Denom())
+	den := new(big.Int).SetInt64(outAtomics)
+	den.Mul(den, mult.Num())
+	if den.Sign() <= 0 {
+		return 0, false
+	}
+	price := new(big.Int).Quo(num, den)
+	if !price.IsInt64() || price.Int64() <= 0 {
+		return 0, false
+	}
+	return price.Int64(), true
 }
 
 func (h *QuoteHandlers) authorizeGroupMember(ctx context.Context, accessToken, groupID string) (string, error) {

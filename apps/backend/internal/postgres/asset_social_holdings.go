@@ -31,6 +31,8 @@ type GroupSymbolHolding struct {
 	// HasCostBasis is false when the ledger cannot say what the units cost. The card
 	// still shows the holding, at no cost basis, rather than hiding it.
 	HasCostBasis bool
+	// TokenDecimals is the mint's scale as the group's confirmed fills recorded it.
+	TokenDecimals int
 }
 
 // ListGroupNamesByIDs returns group id to name for every group in groupIDs that exists.
@@ -201,18 +203,21 @@ func (s *Store) ListGroupHoldings(ctx context.Context, groupIDs []string) ([]Gro
 WITH buys AS (
   SELECT group_id, output_mint AS mint,
          COALESCE(SUM(cost_basis_price), 0)  AS usdc,
-         COALESCE(SUM(cost_basis_amount), 0) AS tokens
+         COALESCE(SUM(cost_basis_amount), 0) AS tokens,
+         MAX(token_decimals)                 AS token_decimals
   FROM transactions
   WHERE group_id = ANY($1::uuid[]) AND action = 'buy' AND status = 'confirmed'
   GROUP BY group_id, output_mint
 ),
 sells AS (
-  SELECT group_id, input_mint AS mint, COALESCE(SUM(amount), 0) AS tokens
+  SELECT group_id, input_mint AS mint, COALESCE(SUM(amount), 0) AS tokens,
+         MAX(token_decimals) AS token_decimals
   FROM transactions
   WHERE group_id = ANY($1::uuid[]) AND action = 'sell' AND status = 'confirmed'
   GROUP BY group_id, input_mint
 )
-SELECT buys.group_id, buys.mint, buys.usdc, buys.tokens, COALESCE(sells.tokens, 0)
+SELECT buys.group_id, buys.mint, buys.usdc, buys.tokens, COALESCE(sells.tokens, 0),
+       GREATEST(buys.token_decimals, COALESCE(sells.token_decimals, 0))
 FROM buys
 LEFT JOIN sells ON sells.group_id = buys.group_id AND sells.mint = buys.mint
 WHERE buys.tokens - COALESCE(sells.tokens, 0) > 0
@@ -228,14 +233,15 @@ ORDER BY buys.group_id, buys.mint`
 	for rows.Next() {
 		var groupID, mint string
 		var buyUSDC, buyTokens, sellTokens int64
-		if err := rows.Scan(&groupID, &mint, &buyUSDC, &buyTokens, &sellTokens); err != nil {
+		var tokenDecimals int
+		if err := rows.Scan(&groupID, &mint, &buyUSDC, &buyTokens, &sellTokens, &tokenDecimals); err != nil {
 			return nil, fmt.Errorf("scan group holding: %w", err)
 		}
 		remaining := buyTokens - sellTokens
 		if buyTokens <= 0 || remaining <= 0 {
 			continue
 		}
-		holding := GroupSymbolHolding{GroupID: groupID, Mint: mint, Units: remaining}
+		holding := GroupSymbolHolding{GroupID: groupID, Mint: mint, Units: remaining, TokenDecimals: tokenDecimals}
 		remainingBasis, err := domain.MulDivFloor(buyUSDC, remaining, buyTokens)
 		if err != nil {
 			return nil, fmt.Errorf("remaining cost basis for group %s mint %s: %w", groupID, mint, err)

@@ -1,6 +1,11 @@
 package pyth
 
-import "time"
+import (
+	"math/big"
+	"time"
+
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+)
 
 // TreasuryRef identifies a group treasury for pot valuation.
 type TreasuryRef struct {
@@ -11,11 +16,14 @@ type TreasuryRef struct {
 
 // CostBasis is fill-derived holding metadata from confirmed buy transactions.
 type CostBasis struct {
-	Symbol string
-	Mint   string
-	Units  int64
-	Price  int64
-	Amount int64
+	Symbol       string
+	Mint         string
+	Units        int64
+	Price        int64
+	Amount       int64
+	Decimals     int
+	Kind         xstocks.AssetKind
+	UiMultiplier *big.Rat
 }
 
 // MarkSource names the price source a mark came from, so a valuation is auditable.
@@ -43,13 +51,16 @@ type EquityMark struct {
 // MarkedHolding is a treasury xStock position with a live mark. Source records
 // which price source produced MarkUsdc; empty means the producer did not say.
 type MarkedHolding struct {
-	Symbol     string
-	Mint       string
-	Units      int64
-	MarkUsdc   int64
-	CostBasis  int64
-	AfterHours bool
-	Source     MarkSource
+	Symbol       string
+	Mint         string
+	Units        int64
+	MarkUsdc     int64
+	CostBasis    int64
+	AfterHours   bool
+	Source       MarkSource
+	Decimals     int
+	Kind         xstocks.AssetKind
+	UiMultiplier *big.Rat
 }
 
 // NavInput is the marked-pot valuation input for domain NAV callers (M4-T5).
@@ -59,9 +70,20 @@ type NavInput struct {
 	AfterHours   bool
 }
 
-// PotAfterHours reports whether any holding uses a frozen equity mark.
+// ChartQuery selects asset price history. Empty Kind uses the stock (Pyth) path.
+type ChartQuery struct {
+	Symbol string
+	Range  ChartRange
+	Kind   xstocks.AssetKind
+}
+
+// PotAfterHours reports whether any stock holding uses a frozen equity mark.
+// Pre-IPO tokens trade around the clock and are excluded from the pot flag.
 func PotAfterHours(holdings []MarkedHolding) bool {
 	for _, holding := range holdings {
+		if holding.Kind == xstocks.AssetKindPreIPO {
+			continue
+		}
 		if holding.AfterHours {
 			return true
 		}

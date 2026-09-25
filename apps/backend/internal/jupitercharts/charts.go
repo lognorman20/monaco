@@ -1,4 +1,4 @@
-package jupiter
+package jupitercharts
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/logsnippet"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
@@ -30,6 +31,9 @@ const (
 	// the signature of every unattended scraper. Any honest name is accepted — this
 	// one says who is calling, which is what the header is for.
 	chartsUserAgent = "monaco-backend/1.0 (+https://monacolabs.xyz)"
+	// maxUsdPrice is the same sanity ceiling the Jupiter Price API client puts on a
+	// mark: nothing this app lists trades anywhere near it.
+	maxUsdPrice = 1e9
 )
 
 // MintResolver turns a catalog symbol into the Solana mint Jupiter prices.
@@ -75,7 +79,7 @@ func NewChartsClientWithBaseURL(baseURL string, httpClient *http.Client, mints M
 		baseURL: strings.TrimRight(baseURL, "/"),
 		// Wrapped like every other Jupiter client: a test that reaches the live API
 		// by accident fails loudly rather than depending on the network.
-		httpClient: wrapHTTPClientForTests(telemetry.InstrumentClient(telemetry.UpstreamJupiter, httpClient)),
+		httpClient: jupiter.WrapHTTPClientForTests(telemetry.InstrumentClient(telemetry.UpstreamJupiter, httpClient)),
 		apiKey:     strings.TrimSpace(apiKey),
 		mints:      mints,
 	}

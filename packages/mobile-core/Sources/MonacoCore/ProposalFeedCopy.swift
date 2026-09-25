@@ -59,7 +59,10 @@ public enum ProposalFeedCopy {
         if proposal.isTrade {
             // The ticker, as on every other row: the card is a feed entry, and the
             // proposal screen it opens is where the company's name belongs.
-            return AssetSymbolFormatter.display(proposal.symbol)
+            if proposal.resolvedAssetKind == .preIpo {
+                return AssetCatalogDisplayName.format(catalogName: "", symbol: proposal.symbol, kind: .preIpo)
+            }
+            return AssetSymbolFormatter.display(proposal.symbol, kind: proposal.resolvedAssetKind)
         }
         let name = proposal.agentDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return name.isEmpty ? agentTitle : name
@@ -71,7 +74,13 @@ public enum ProposalFeedCopy {
         let symbol = AssetSymbolFormatter.format(proposal.symbol)
         switch proposal.resolvedKind {
         case "sell":
-            return sellHeadline(symbol: symbol, shares: ProposalShareFormatter.shares(fromAtomics: proposal.tokenAmount ?? "0"))
+            return sellHeadline(
+                symbol: symbol,
+                shares: ProposalShareFormatter.shares(
+                    fromAtomics: proposal.tokenAmount ?? "0",
+                    decimals: proposal.resolvedTokenDecimals
+                )
+            )
         case "add_agent":
             let name = proposal.agentDisplayName ?? proposal.symbol
             let budget = ProposalAmountFormatter.dollars(fromMicros: proposal.allocationUsdcMicros ?? "0")
@@ -287,6 +296,9 @@ public enum ProposeFlowCopy {
     public static let agentKeyMissing = "No key on file. If this bot was added before keys were saved, remove it and add a new bot."
     public static let copyKey = "Copy key"
     public static let keyCopied = "Key copied"
+    public static let copyConnectInstructions = "Copy connect instructions"
+    public static let connectCopied = "Connect instructions copied"
+    public static let clawPumpSteps = "In ClawPump, paste these into your agent as a custom skill. Then add an automation that runs it every hour."
     public static func lifecycleTitle(kind: String) -> String {
         switch kind {
         case "pause_agent": "Pause the trading bot?"
@@ -314,6 +326,7 @@ public enum ProposeFlowCopy {
         sellTitle, holdingsTitle, sellTooSmall, sellNoLongerAvailable,
         sellSummary(amount: "$139", name: "Apple", shares: "0.6 shares"), sellHelper("$278.47"), overHoldings,
         addBotTitle, botNamePlaceholder, botBudgetHelper, botExplainer, botKeyExplainer, agentKeyExplainer, agentDetailTitle, agentKeySection, agentKeyMissing, copyKey, keyCopied,
+        copyConnectInstructions, connectCopied, clawPumpSteps,
         lifecycleTitle(kind: "pause_agent"), lifecycleTitle(kind: "resume_agent"), lifecycleTitle(kind: "revoke_agent"),
         lifecycleMessage(kind: "pause_agent", botName: "Scout"), lifecycleMessage(kind: "resume_agent", botName: "Scout"),
         lifecycleMessage(kind: "revoke_agent", botName: "Scout"),

@@ -18,6 +18,8 @@ enum AssetDetailRoute: Hashable, Identifiable {
     /// One open vote, from a vote row. The proposal screen is where a ballot is
     /// actually cast — this screen only ever counted them.
     case proposal(id: String)
+    /// The same pre-IPO company from another issuer, from the variants list.
+    case variant(symbol: String)
 
     var id: Self { self }
 }

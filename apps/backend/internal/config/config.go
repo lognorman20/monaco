@@ -34,7 +34,20 @@ const (
 	envFlashAPIKey                  = "FLASH_API_KEY"
 	envFlashMaxSlippage             = "FLASH_MAX_SLIPPAGE"
 	envPrivyVerificationKey         = "PRIVY_VERIFICATION_KEY"
+	envTesseraAPIBaseURL            = "TESSERA_API_BASE_URL"
+	envTesseraEnabled               = "TESSERA_ENABLED"
+	envPreStocksAPIBaseURL          = "PRESTOCKS_API_BASE_URL"
+	envPreStocksEnabled             = "PRESTOCKS_ENABLED"
+	envPublicAPIBaseURL             = "PUBLIC_API_BASE_URL"
 )
+
+const (
+	defaultTesseraAPIBaseURL   = "https://rest-api.tessera.pe"
+	defaultPreStocksAPIBaseURL = "https://prestocks.com"
+)
+
+// DefaultPublicAPIBaseURL is the API's own address when PUBLIC_API_BASE_URL is unset.
+const DefaultPublicAPIBaseURL = "http://127.0.0.1:8080"
 
 // maxFlashSlippage caps FLASH_MAX_SLIPPAGE so a typo cannot open a treasury swap to a bad fill.
 const maxFlashSlippage = 0.05
@@ -69,6 +82,10 @@ const maxFlashSlippage = 0.05
 //   - JUPITER_API_KEY: Jupiter Price API key (x-api-key header) for catalog/popular display
 //     prices. Optional — the Price API also serves unauthenticated requests at a lower rate
 //     limit — but set it in production to avoid 429s.
+//   - TESSERA_API_BASE_URL: Tessera public catalog API base (default https://rest-api.tessera.pe).
+//   - TESSERA_ENABLED: include Tessera pre-IPO tokens in the composite catalog (default true).
+//   - PRESTOCKS_API_BASE_URL: PreStocks public catalog base (default https://prestocks.com).
+//   - PRESTOCKS_ENABLED: include PreStocks pre-IPO tokens (default true). Set false for a Tessera-only catalog.
 //   - SWAP_PROVIDER: venue for treasury buys and sells: "jupiter" (default) or "flash"
 //     (Definitive Flash), including cash-out sells. Display quotes and routability probes stay on Jupiter.
 //   - FLASH_API_KEY: Definitive Flash integrator key (x-definitive-api-key header). Required
@@ -78,6 +95,8 @@ const maxFlashSlippage = 0.05
 //   - SOLANA_RPC_URL: Solana JSON-RPC endpoint for every chain read and confirmation. Unset
 //     falls back to the public cluster endpoint, which has no SLA: set a paid RPC outside
 //     local dev.
+//   - PUBLIC_API_BASE_URL: the URL agents reach this API at, written into the agent connect
+//     text and skill.md (default http://127.0.0.1:8080). Not a secret.
 //   - DB_MAX_OPEN_CONNS, DB_MAX_IDLE_CONNS, DB_CONN_MAX_LIFETIME, DB_CONN_MAX_IDLE_TIME: see DBPool.
 type Config struct {
 	DatabaseURL                  string
@@ -91,12 +110,18 @@ type Config struct {
 	PythHermesBaseURL            string
 	PythBenchmarksBaseURL        string
 	JupiterAPIKey                string
+	TesseraAPIBaseURL            string
+	TesseraEnabled               bool
+	PreStocksAPIBaseURL          string
+	PreStocksEnabled             bool
 	SupabaseURL                  string
 	SupabaseServiceRoleKey       string
 	SolanaCluster                string
 	SwapProvider                 string
 	FlashAPIKey                  string
 	FlashMaxSlippage             string
+	// PublicAPIBaseURL has no trailing slash.
+	PublicAPIBaseURL string
 	// PrivyVerificationKey is the parsed PRIVY_VERIFICATION_KEY.
 	PrivyVerificationKey *ecdsa.PublicKey
 	DBPool               DBPool
@@ -117,11 +142,16 @@ func Load() (*Config, error) {
 		PythHermesBaseURL:            strings.TrimRight(strings.TrimSpace(os.Getenv(envPythHermesBaseURL)), "/"),
 		PythBenchmarksBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv(envPythBenchmarksBaseURL)), "/"),
 		JupiterAPIKey:                strings.TrimSpace(os.Getenv(envJupiterAPIKey)),
+		TesseraAPIBaseURL:            tesseraAPIBaseURLFromEnv(),
+		TesseraEnabled:               tesseraEnabledFromEnv(),
+		PreStocksAPIBaseURL:          preStocksAPIBaseURLFromEnv(),
+		PreStocksEnabled:             enabledFromEnv(envPreStocksEnabled),
 		SupabaseURL:                  strings.TrimSpace(os.Getenv(envSupabaseURL)),
 		SupabaseServiceRoleKey:       strings.TrimSpace(os.Getenv(envSupabaseServiceRoleKey)),
 		SolanaCluster:                SolanaCluster,
 		FlashAPIKey:                  strings.TrimSpace(os.Getenv(envFlashAPIKey)),
 		FlashMaxSlippage:             strings.TrimSpace(os.Getenv(envFlashMaxSlippage)),
+		PublicAPIBaseURL:             PublicAPIBaseURL(os.Getenv(envPublicAPIBaseURL)),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -177,6 +207,16 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// PublicAPIBaseURL normalizes PUBLIC_API_BASE_URL: trimmed, no trailing slash, and the
+// default when unset.
+func PublicAPIBaseURL(raw string) string {
+	base := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if base == "" {
+		return DefaultPublicAPIBaseURL
+	}
+	return base
+}
+
 // SolanaRPCEndpoint is the JSON-RPC endpoint every Solana client uses: SOLANA_RPC_URL when
 // set, else the public endpoint of the cluster.
 func (c *Config) SolanaRPCEndpoint() string {
@@ -192,6 +232,35 @@ func SolanaRPCEndpoint(cluster, rpcURL string) string {
 		cluster = SolanaCluster
 	}
 	return fmt.Sprintf("https://api.%s.solana.com", cluster)
+}
+
+func tesseraAPIBaseURLFromEnv() string {
+	raw := strings.TrimRight(strings.TrimSpace(os.Getenv(envTesseraAPIBaseURL)), "/")
+	if raw == "" {
+		return defaultTesseraAPIBaseURL
+	}
+	return raw
+}
+
+func tesseraEnabledFromEnv() bool {
+	return enabledFromEnv(envTesseraEnabled)
+}
+
+func preStocksAPIBaseURLFromEnv() string {
+	raw := strings.TrimRight(strings.TrimSpace(os.Getenv(envPreStocksAPIBaseURL)), "/")
+	if raw == "" {
+		return defaultPreStocksAPIBaseURL
+	}
+	return raw
+}
+
+func enabledFromEnv(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
 }
 
 func validateSolanaRPCURL(raw string) error {

@@ -9,41 +9,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 	"github.com/monaco/monaco/packages/domain"
 )
-
-func tokenAtomicsToDecimalUnits(atomics int64) (domain.ShareUnits, error) {
-	if atomics < 0 {
-		return "", fmt.Errorf("token atomics must be non-negative")
-	}
-	if atomics == 0 {
-		return domain.ShareUnits("0"), nil
-	}
-	r := new(big.Rat).SetFrac(big.NewInt(atomics), big.NewInt(jupiter.XStockAtomicScale))
-	s := strings.TrimRight(r.FloatString(8), "0")
-	s = strings.TrimRight(s, ".")
-	return domain.ShareUnits(s), nil
-}
-
-func costBasisMarkPerUnitMicros(totalUSDCMicros, tokenAtomics int64) (int64, error) {
-	if totalUSDCMicros < 0 {
-		return 0, fmt.Errorf("cost basis usdc must be non-negative")
-	}
-	if tokenAtomics <= 0 {
-		return 0, fmt.Errorf("cost basis token amount must be positive")
-	}
-	mark, err := domain.MulDivFloor(totalUSDCMicros, jupiter.XStockAtomicScale, tokenAtomics)
-	if err != nil {
-		return 0, fmt.Errorf("derive mark per unit: %w", err)
-	}
-	if mark <= 0 {
-		return 0, fmt.Errorf("derived mark per unit must be positive")
-	}
-	return mark, nil
-}
 
 // groupPotView is marked treasury NAV plus per-asset pot rows for group screens.
 type groupPotView struct {
@@ -67,7 +37,7 @@ func computeGroupPotView(
 		return groupPotView{}, err
 	}
 
-	rows, err := potRowsFromPythInput(valuation.Marked)
+	rows, err := potRowsFromPythInput(ctx, symbols, valuation.Marked)
 	if err != nil {
 		return groupPotView{}, err
 	}
@@ -171,15 +141,43 @@ func costBasisForHoldings(
 		if !found || amount <= 0 {
 			return nil, fmt.Errorf("cost basis not found for mint %s", holding.Mint)
 		}
+		decimals, kind, mult := holdingScale(ctx, symbols, holding.Mint, holding.TokenDecimals)
 		out = append(out, pyth.CostBasis{
-			Symbol: symbolForOutputMint(ctx, symbols, holding.Mint),
-			Mint:   holding.Mint,
-			Units:  holding.Amount,
-			Price:  price,
-			Amount: amount,
+			Symbol:       symbolForOutputMint(ctx, symbols, holding.Mint),
+			Mint:         holding.Mint,
+			Units:        holding.Amount,
+			Price:        price,
+			Amount:       amount,
+			Decimals:     decimals,
+			Kind:         kind,
+			UiMultiplier: mult,
 		})
 	}
 	return out, nil
+}
+
+// holdingScale is how a ledger holding's raw atomics become units: the decimals the
+// ledger recorded for the mint, the asset kind those decimals imply, and the
+// scaled-ui multiplier the catalogue or the mint reports.
+func holdingScale(ctx context.Context, symbols *SymbolResolver, mint string, tokenDecimals int) (int, xstocks.AssetKind, *big.Rat) {
+	decimals := pyth.NormalizeTokenDecimals(tokenDecimals)
+	kind := xstocks.AssetKindStock
+	if decimals == 9 {
+		kind = xstocks.AssetKindPreIPO
+	}
+	var mult *big.Rat
+	if symbols != nil {
+		var multOk bool
+		mult, multOk = symbols.ResolveUiMultiplier(ctx, mint, kind)
+		if !multOk {
+			mult = nil
+		}
+	} else if kind == xstocks.AssetKindPreIPO {
+		mult = big.NewRat(1, 1)
+	} else {
+		mult, _ = pyth.EffectiveUiMultiplier(nil, kind)
+	}
+	return decimals, kind, mult
 }
 
 func fillDerivedCostBasis(
@@ -197,17 +195,20 @@ func fillDerivedCostBasis(
 func costBasisMarkedPotInput(treasuryUSDC int64, costBasis []pyth.CostBasis) (pyth.NavInput, error) {
 	marked := make([]pyth.MarkedHolding, 0, len(costBasis))
 	for _, holding := range costBasis {
-		markPerUnit, err := costBasisMarkPerUnitMicros(holding.Price, holding.Amount)
+		markPerUnit, err := pyth.CostBasisMarkPerUnitMicros(holding.Price, holding.Amount, holding.Decimals, holding.UiMultiplier, holding.Kind)
 		if err != nil {
 			return pyth.NavInput{}, err
 		}
 		marked = append(marked, pyth.MarkedHolding{
-			Symbol:    holding.Symbol,
-			Mint:      holding.Mint,
-			Units:     holding.Units,
-			MarkUsdc:  markPerUnit,
-			CostBasis: holding.Price,
-			Source:    pyth.MarkSourceCostBasis,
+			Symbol:       holding.Symbol,
+			Mint:         holding.Mint,
+			Units:        holding.Units,
+			MarkUsdc:     markPerUnit,
+			CostBasis:    holding.Price,
+			Source:       pyth.MarkSourceCostBasis,
+			Decimals:     holding.Decimals,
+			Kind:         holding.Kind,
+			UiMultiplier: holding.UiMultiplier,
 		})
 	}
 	return pyth.NavInput{
@@ -220,7 +221,7 @@ func costBasisMarkedPotInput(treasuryUSDC int64, costBasis []pyth.CostBasis) (py
 func domainNavInputFromPyth(input pyth.NavInput, totalShares domain.ShareUnits) (domain.NavInput, error) {
 	holdings := make([]domain.MarkedHolding, 0, len(input.Holdings))
 	for _, holding := range input.Holdings {
-		units, err := tokenAtomicsToDecimalUnits(holding.Units)
+		units, err := pyth.TokenAtomicsToScaledDecimalUnits(holding.Units, holding.Decimals, holding.UiMultiplier, holding.Kind)
 		if err != nil {
 			return domain.NavInput{}, err
 		}
@@ -244,7 +245,7 @@ func domainNavInputFromPyth(input pyth.NavInput, totalShares domain.ShareUnits) 
 	}, nil
 }
 
-func potRowsFromPythInput(input pyth.NavInput) ([]GroupViewPotRow, error) {
+func potRowsFromPythInput(ctx context.Context, symbols *SymbolResolver, input pyth.NavInput) ([]GroupViewPotRow, error) {
 	rows := []GroupViewPotRow{{
 		Symbol:    "USDC",
 		Units:     formatMicrosAsUsdDecimal(input.TreasuryUsdc),
@@ -260,11 +261,12 @@ func potRowsFromPythInput(input pyth.NavInput) ([]GroupViewPotRow, error) {
 		if holding.Units <= 0 {
 			continue
 		}
-		units, err := tokenAtomicsToDecimalUnits(holding.Units)
+		decimals := pyth.NormalizeTokenDecimals(holding.Decimals)
+		units, err := pyth.TokenAtomicsToScaledDecimalUnits(holding.Units, decimals, holding.UiMultiplier, holding.Kind)
 		if err != nil {
 			return nil, err
 		}
-		valueMicros, err := domain.MulDivFloor(holding.Units, holding.MarkUsdc, jupiter.XStockAtomicScale)
+		valueMicros, err := pyth.HoldingValueUSDCMicros(holding.Units, holding.MarkUsdc, decimals, holding.UiMultiplier, holding.Kind)
 		if err != nil {
 			return nil, fmt.Errorf("value %s holding: %w", holding.Symbol, err)
 		}
@@ -272,19 +274,26 @@ func potRowsFromPythInput(input pyth.NavInput) ([]GroupViewPotRow, error) {
 		if holding.AfterHours {
 			afterHours = boolPtr(true)
 		}
-		rows = append(rows, GroupViewPotRow{
-			Symbol:      holding.Symbol,
-			Units:       string(units),
-			MarkUsd:     formatMicrosAsUsdDecimal(holding.MarkUsdc),
-			ValueUsd:    formatMicrosAsUsdDecimal(valueMicros),
-			DollarPnL:   formatSignedDollarPnL(valueMicros - holding.CostBasis),
-			AfterHours:  afterHours,
-			TokenAmount: strconv.FormatInt(holding.Units, 10),
+		row := GroupViewPotRow{
+			Symbol:             holding.Symbol,
+			Units:              string(units),
+			MarkUsd:            formatMicrosAsUsdDecimal(holding.MarkUsdc),
+			ValueUsd:           formatMicrosAsUsdDecimal(valueMicros),
+			DollarPnL:          formatSignedDollarPnL(valueMicros - holding.CostBasis),
+			AfterHours:         afterHours,
+			TokenAmount:        strconv.FormatInt(holding.Units, 10),
+			UiAmountMultiplier: pyth.UiMultiplierDecimalString(holding.UiMultiplier),
 
 			MarkUsdcMicros:      holding.MarkUsdc,
 			ValueUsdcMicros:     valueMicros,
 			DollarPnLUsdcMicros: valueMicros - holding.CostBasis,
-		})
+		}
+		if holding.Kind == xstocks.AssetKindPreIPO && symbols != nil {
+			fields := symbols.IssuerFieldsForMint(ctx, holding.Mint)
+			row.Issuer = fields.Issuer
+			row.IssuerName = fields.IssuerName
+		}
+		rows = append(rows, row)
 	}
 	return rows, nil
 }

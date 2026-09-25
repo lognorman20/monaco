@@ -10,6 +10,12 @@ protocol StocksTabDataSource {
     /// What the viewer's cabals hold and are voting on. One request for both
     /// sections; see `MonacoAPIClient.getHeldAssets`.
     func held() async throws -> HeldAssetsResponse
+    /// The pre-IPO tokens the catalogue lists, for their own section under Popular.
+    func preIpo(limit: Int) async throws -> [MarketAssetDTO]
+}
+
+extension StocksTabDataSource {
+    func preIpo(limit: Int) async throws -> [MarketAssetDTO] { [] }
 }
 
 @MainActor
@@ -31,6 +37,12 @@ struct LiveStocksTabDataSource: StocksTabDataSource {
 
     func held() async throws -> HeldAssetsResponse {
         try await auth.withAccessToken { try await apiClient.getHeldAssets(accessToken: $0) }
+    }
+
+    func preIpo(limit: Int) async throws -> [MarketAssetDTO] {
+        try await auth.withAccessToken {
+            try await apiClient.listMarketAssets(accessToken: $0, limit: limit, offset: 0, catalogKind: .preIpo).assets
+        }
     }
 }
 
@@ -92,6 +104,8 @@ final class StocksTabModel {
     /// The day's biggest moves among the popular rows, re-sorted here rather than
     /// asked of the backend: it is the same set of stocks in a different order.
     private(set) var moverRows: [MarketRowData] = []
+    /// Pre-IPO tokens, their own section. A read that fails leaves the last rows up.
+    private(set) var preIpoRows: [MarketRowData] = []
     private(set) var popularState: PopularState = .loading
 
     private(set) var heldRows: [MarketRowData] = []
@@ -154,7 +168,9 @@ final class StocksTabModel {
 
     func refreshPopularIfStale() async {
         guard let loadedAt = popularLoadedAt else {
-            await loadPopular()
+            async let catalogue: Void = loadPopular()
+            async let preIpo: Void = loadPreIpo()
+            _ = await (catalogue, preIpo)
             return
         }
         guard clock().timeIntervalSince(loadedAt) >= Self.popularStaleAfter else { return }
@@ -250,8 +266,20 @@ final class StocksTabModel {
     func refreshEverything() async {
         async let catalogue: Void = loadPopular()
         async let social: Void = loadSocial()
-        _ = await (catalogue, social)
+        async let preIpo: Void = loadPreIpo()
+        _ = await (catalogue, social, preIpo)
     }
+
+    func loadPreIpo() async {
+        do {
+            let assets = try await dataSource.preIpo(limit: Self.preIpoLimit)
+            preIpoRows = assets.map { MarketRowData(asset: $0) }
+        } catch {
+            handle(error) {}
+        }
+    }
+
+    static let preIpoLimit = 10
 
     // MARK: Search
 

@@ -82,12 +82,23 @@ struct PotSectionView: View {
         PotHoldingRow(row: row, isLast: isLast)
     }
 
-    /// Shares from the raw token amount when present; the decimal `units` string otherwise.
-    static func sharesLabel(_ row: PotRowDTO) -> String {
-        if let atomics = row.tokenAmount, !atomics.isEmpty {
-            return ProposalShareFormatter.sharesLabel(fromAtomics: atomics)
+    /// "12 shares · $231.40", or for a pre-IPO token its count, mark and issuer.
+    static func potSubtitle(_ row: PotRowDTO) -> String {
+        var text = "\(quantityLabel(row)) · \(UsdAmountFormatter.format(decimalString: row.markUsd))"
+        if row.resolvedAssetKind == .preIpo, let name = row.issuerName, !name.isEmpty {
+            text += " · via \(name)"
         }
-        return "\(row.units) shares"
+        return text
+    }
+
+    static func quantityLabel(_ row: PotRowDTO) -> String {
+        if let atomics = row.tokenAmount, !atomics.isEmpty,
+           let qty = ProposeMath.shares(fromAtomics: atomics, decimals: row.resolvedTokenDecimals, multiplier: row.resolvedUiMultiplier) {
+            let unit = row.resolvedAssetKind == .preIpo ? PreIpoCopy.tokenLabelPlural : "shares"
+            return "\(qty) \(unit)"
+        }
+        let unit = row.resolvedAssetKind == .preIpo ? PreIpoCopy.tokenLabelPlural : "shares"
+        return "\(row.units) \(unit)"
     }
 
     static func isCash(_ row: PotRowDTO) -> Bool {
@@ -136,12 +147,17 @@ private struct PotHoldingRow: View {
     /// and it costs the row no height.
     var body: some View {
         MonacoRow(
-            title: AssetSymbolFormatter.display(row.symbol),
-            subtitle: "\(PotSectionView.sharesLabel(row)) · \(UsdAmountFormatter.format(decimalString: row.markUsd))",
+            title: AssetSymbolFormatter.display(row.symbol, kind: row.resolvedAssetKind),
+            subtitle: PotSectionView.potSubtitle(row),
             chevron: true,
             isLast: isLast
         ) {
-            StockMark(symbol: AssetSymbolFormatter.display(row.symbol), logoURL: row.logoURL)
+            StockMark(
+                symbol: row.symbol,
+                displayName: AssetCatalogDisplayName.format(catalogName: "", symbol: row.symbol, kind: row.resolvedAssetKind),
+                assetKind: row.resolvedAssetKind,
+                logoURL: row.logoURL
+            )
         } trailing: {
             HStack(spacing: MonacoTheme.Space.s) {
                 if let spark, !layout.isStacked {
@@ -149,7 +165,8 @@ private struct PotHoldingRow: View {
                 }
                 VStack(alignment: .trailing, spacing: 2) {
                     HStack(spacing: MonacoTheme.Space.s) {
-                        if row.afterHours == true {
+                        // A pre-IPO token trades round the clock; it has no after hours.
+                        if row.afterHours == true, row.resolvedAssetKind != .preIpo {
                             Image(systemName: "moon.fill")
                                 .font(.caption2)
                                 .foregroundStyle(MonacoTheme.warning)

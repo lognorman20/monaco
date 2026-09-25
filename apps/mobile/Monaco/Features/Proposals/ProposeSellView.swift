@@ -45,12 +45,16 @@ struct ProposeSellView: View {
                             picked = PickedHolding(row: row)
                         } label: {
                             MonacoRow(
-                                title: AssetSymbolFormatter.display(row.symbol),
-                                subtitle: ProposalShareFormatter.sharesLabel(fromAtomics: row.tokenAmount ?? "0"),
+                                title: AssetSymbolFormatter.display(row.symbol, kind: row.resolvedAssetKind),
+                                subtitle: ProposalShareFormatter.sharesLabel(
+                                    fromAtomics: row.tokenAmount ?? "0",
+                                    decimals: row.resolvedTokenDecimals,
+                                    kind: row.resolvedAssetKind
+                                ),
                                 chevron: true,
                                 isLast: index == holdings.count - 1
                             ) {
-                                StockMark(symbol: row.symbol)
+                                StockMark(symbol: row.symbol, displayName: row.symbol, assetKind: row.resolvedAssetKind)
                             } trailing: {
                                 MoneyText(decimalString: row.valueUsd, style: .row)
                             }
@@ -131,7 +135,12 @@ struct ProposeSellAmountView: View {
         _pot = State(initialValue: pot)
     }
 
-    private var name: String { ProposeStock.displayName(symbol: holding.symbol) }
+    private var name: String {
+        AssetCatalogDisplayName.format(catalogName: "", symbol: holding.symbol, kind: holding.resolvedAssetKind)
+    }
+    private var quantityRowLabel: String {
+        holding.resolvedAssetKind == .preIpo ? PreIpoCopy.tokensRowLabel : ProposeFlowCopy.sharesRow
+    }
     private var ceilingAtomics: Int64 { Int64(holding.tokenAmount ?? "0") ?? 0 }
     private var markUsd: Decimal? {
         Decimal(string: holding.markUsd, locale: Locale(identifier: "en_US_POSIX")).flatMap { $0 > 0 ? $0 : nil }
@@ -150,9 +159,16 @@ struct ProposeSellAmountView: View {
             // "All" (the full value, in cents) sells every atomic, never leaving dust behind.
             if entered > valueUsd { return nil }
             if entered >= AmountEntryText.roundDownToCents(valueUsd) { return ceilingAtomics }
-            return ProposeMath.atomics(forUsd: entered, markUsd: markUsd, ceiling: ceilingAtomics)
+            return ProposeMath.atomics(
+                forUsd: entered,
+                markUsd: markUsd,
+                ceiling: ceilingAtomics,
+                decimals: holding.resolvedTokenDecimals,
+                multiplier: holding.resolvedUiMultiplier
+            )
         }
-        guard let atomics = ProposeMath.atomics(fromShares: amountText), atomics <= ceilingAtomics else { return nil }
+        guard let atomics = ProposeMath.atomics(fromShares: amountText, decimals: holding.resolvedTokenDecimals, multiplier: holding.resolvedUiMultiplier),
+              atomics <= ceilingAtomics else { return nil }
         return atomics
     }
 
@@ -163,7 +179,7 @@ struct ProposeSellAmountView: View {
     private var isOverHoldings: Bool {
         guard let entered = enteredValue else { return false }
         if entersDollars, let valueUsd { return entered > valueUsd }
-        return (ProposeMath.atomics(fromShares: amountText) ?? 0) > ceilingAtomics
+        return (ProposeMath.atomics(fromShares: amountText, decimals: holding.resolvedTokenDecimals, multiplier: holding.resolvedUiMultiplier) ?? 0) > ceilingAtomics
     }
 
     var body: some View {
@@ -208,7 +224,13 @@ struct ProposeSellAmountView: View {
                             .font(MonacoTheme.Typo.title)
                             .foregroundStyle(MonacoTheme.ink)
                             .lineLimit(1)
-                        Text(ProposalShareFormatter.sharesLabel(fromAtomics: holding.tokenAmount ?? "0"))
+                        Text(
+                            ProposalShareFormatter.sharesLabel(
+                                fromAtomics: holding.tokenAmount ?? "0",
+                                decimals: holding.resolvedTokenDecimals,
+                                kind: holding.resolvedAssetKind
+                            )
+                        )
                             .font(MonacoTheme.Typo.caption.monospacedDigit())
                             .foregroundStyle(MonacoTheme.muted)
                     }
@@ -226,9 +248,17 @@ struct ProposeSellAmountView: View {
                     )
                 } else {
                     VStack(spacing: MonacoTheme.Space.s) {
-                        MonacoTextField(ProposeFlowCopy.sharesRow, text: $amountText, keyboard: .decimalPad)
+                        MonacoTextField(quantityRowLabel, text: $amountText, keyboard: .decimalPad)
                             .accessibilityIdentifier("proposal-sell-amount")
-                        Text(isOverHoldings ? ProposeFlowCopy.overHoldings : ProposalShareFormatter.sharesLabel(fromAtomics: holding.tokenAmount ?? "0"))
+                        Text(
+                            isOverHoldings
+                                ? ProposeFlowCopy.overHoldings
+                                : ProposalShareFormatter.sharesLabel(
+                                    fromAtomics: holding.tokenAmount ?? "0",
+                                    decimals: holding.resolvedTokenDecimals,
+                                    kind: holding.resolvedAssetKind
+                                )
+                        )
                             .font(MonacoTheme.Typo.callout)
                             .foregroundStyle(isOverHoldings ? MonacoTheme.loss : MonacoTheme.muted)
                     }
@@ -272,7 +302,8 @@ struct ProposeSellAmountView: View {
             }
             let estimate = quote.outputUsdcMicros.flatMap { Int64($0) }
                 ?? markUsd.flatMap { mark in
-                    ProposeMath.shares(fromAtomics: String(tokenAmount)).flatMap { ProposeMath.micros(fromUsd: $0 * mark) }
+                    ProposeMath.shares(fromAtomics: String(tokenAmount), decimals: holding.resolvedTokenDecimals)
+                        .flatMap { ProposeMath.micros(fromUsd: $0 * mark) }
                 }
             review = ProposeSellReview(
                 symbol: holding.symbol,
@@ -281,7 +312,9 @@ struct ProposeSellAmountView: View {
                 estimateMicros: estimate,
                 cabalId: pot?.groupId ?? groupId,
                 cabalName: pot?.name,
-                thesis: reason.trimmingCharacters(in: .whitespacesAndNewlines)
+                thesis: reason.trimmingCharacters(in: .whitespacesAndNewlines),
+                assetKind: holding.resolvedAssetKind,
+                tokenDecimals: holding.resolvedTokenDecimals
             )
         } catch {
             if error.isRequestCancellation { return }
@@ -302,11 +335,17 @@ struct ProposeSellReview: Hashable, Identifiable {
     let cabalId: String
     let cabalName: String?
     let thesis: String
+    let assetKind: AssetKind
+    let tokenDecimals: Int
 
     var id: String { "\(symbol)-\(tokenAmount)" }
 
     var sharesLabel: String {
-        ProposalShareFormatter.sharesLabel(fromAtomics: String(tokenAmount))
+        ProposalShareFormatter.sharesLabel(
+            fromAtomics: String(tokenAmount),
+            decimals: tokenDecimals,
+            kind: assetKind
+        )
     }
 }
 

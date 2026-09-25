@@ -162,6 +162,7 @@ struct AssetsTabView: View {
                     upForVoteSection
                     topMoversSection
                     popularSection
+                    preIpoSection
                 }
             }
             .refreshable { await forceRefreshTab() }
@@ -260,6 +261,17 @@ struct AssetsTabView: View {
     private var popularSection: some View {
         section("Popular", identifier: "assets-popular") {
             assetList(model.popularRows, identifierPrefix: "assets-popular")
+        }
+    }
+
+    /// No header when the catalogue lists no pre-IPO tokens; a section of nothing teaches
+    /// people to skip it.
+    @ViewBuilder
+    private var preIpoSection: some View {
+        if !model.preIpoRows.isEmpty {
+            section(PreIpoCopy.sectionTitle, identifier: "assets-preipo") {
+                assetList(model.preIpoRows, identifierPrefix: "assets-preipo")
+            }
         }
     }
 

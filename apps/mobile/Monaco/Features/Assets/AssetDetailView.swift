@@ -81,7 +81,7 @@ struct AssetDetailView: View {
         }
         .monacoCanvas()
         .foregroundStyle(MonacoTheme.ink)
-        .navigationTitle(AssetSymbolFormatter.display(symbol))
+        .navigationTitle(AssetSymbolFormatter.display(symbol, kind: model.detail?.resolvedKind ?? .stock))
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("asset-detail-root")
         // The bar sits in the safe area, not in the scroll view: this screen is five
@@ -130,6 +130,8 @@ struct AssetDetailView: View {
             )
         case let .cabal(id, name):
             GroupDetailView(auth: auth, groupId: id, groupName: name)
+        case .variant(let variantSymbol):
+            AssetDetailView(auth: auth, symbol: variantSymbol)
         case .proposal(let id):
             ProposalDetailView(auth: auth, proposalId: id)
         }
@@ -159,22 +161,36 @@ struct AssetDetailView: View {
             name: ProposeStock.displayName(symbol: detail.symbol, catalogName: detail.name),
             priceMicros: detail.priceUsdcMicros,
             change24h: detail.change24h,
-            isTradable: detail.liquidity.routable
+            isTradable: detail.liquidity.routable,
+            assetKind: detail.resolvedKind,
+            tokenDecimals: detail.resolvedDecimals
+        )
+    }
+
+    private var isPreIpo: Bool { model.detail?.resolvedKind == .preIpo }
+
+    /// Same resolver as the list rows, so one stock never carries two names. A pre-IPO
+    /// token has no ticker convention, so it goes by the catalogue's name.
+    private var heroDisplayName: String {
+        if isPreIpo, let detail = model.detail {
+            return AssetCatalogDisplayName.format(catalogName: detail.name, symbol: detail.symbol, kind: .preIpo)
+        }
+        return ProposeStock.displayName(
+            symbol: model.detail?.symbol ?? symbol,
+            catalogName: model.detail?.name ?? ""
         )
     }
 
     private var hero: some View {
         AssetDetailHero(
             // Same resolver as the list rows, so one stock never carries two names.
-            displayName: ProposeStock.displayName(
-                symbol: model.detail?.symbol ?? symbol,
-                catalogName: model.detail?.name ?? ""
-            ),
+            displayName: heroDisplayName,
             priceUsdcMicros: model.heroPriceUsdcMicros,
             move: model.move,
             isScrubbing: model.isScrubbing,
             tick: model.heroTick,
-            session: model.sessionChip
+            // A pre-IPO token trades round the clock, so a session chip would be a lie.
+            session: isPreIpo ? nil : model.sessionChip
         )
     }
 
@@ -226,6 +242,11 @@ struct AssetDetailView: View {
             // A read that failed is not an answer of "nobody holds this". Say so, and
             // offer the way back — the same retry restores the activity card below.
             AssetSocialFailedCard(symbol: symbol, retry: { Task { await social.load() } })
+        }
+        // 1b. What a pre-IPO token carries that a stock does not: reference price,
+        //     premium, the issuer's disclosure and the other issuers it comes from.
+        if let detail = model.detail, detail.resolvedKind == .preIpo {
+            PreIpoDetailSection(detail: detail, openVariant: { route = .variant(symbol: $0) })
         }
         // 2. Stats grid — open/high/low, 52-week range, trading cost      (#342)
         if let grid = AssetStatsGrid.make(model.detail?.stats, currentUsdcMicros: model.detail?.priceUsdcMicros) {

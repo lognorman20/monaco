@@ -111,14 +111,23 @@ type rowSeries struct {
 // A history client that can answer from memory is read directly, with no
 // goroutines and no budget, because there is nothing to wait for. Everything else
 // goes through the bounded fan-out below.
+//
+// A pre-IPO token has no price history to draw, so its row is never asked for
+// one: a cache miss would otherwise send a background fill upstream on every page.
 func (s *MarketRowSource) Sparklines(ctx context.Context, assets []xstocks.CatalogAsset) map[string]rowSeries {
 	if s == nil || s.Pyth == nil || len(assets) == 0 {
 		return nil
 	}
-	if cached, ok := s.Pyth.(pyth.CachedSeriesSource); ok {
-		return s.cachedSparklines(ctx, cached, assets)
+	charted := make([]xstocks.CatalogAsset, 0, len(assets))
+	for _, asset := range assets {
+		if asset.Normalize().Kind != xstocks.AssetKindPreIPO {
+			charted = append(charted, asset)
+		}
 	}
-	return s.fetchedSparklines(ctx, assets)
+	if cached, ok := s.Pyth.(pyth.CachedSeriesSource); ok {
+		return s.cachedSparklines(ctx, cached, charted)
+	}
+	return s.fetchedSparklines(ctx, charted)
 }
 
 // cachedSparklines reads every row's series out of the client's cache. A miss is

@@ -6,25 +6,105 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
+	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 )
 
-// CatalogAsset is a backend-resolved xStock catalog row for mobile search.
+// AssetKind classifies catalog rows (listed stock vs pre-IPO token).
+type AssetKind string
+
+const (
+	AssetKindStock  AssetKind = "stock"
+	AssetKindPreIPO AssetKind = "pre_ipo"
+)
+
+// AssetSource identifies which catalog API populated a row.
+type AssetSource string
+
+const (
+	AssetSourceXStocks   AssetSource = "xstocks"
+	AssetSourceTessera   AssetSource = "tessera"
+	AssetSourcePreStocks AssetSource = "prestocks"
+)
+
+// CatalogAsset is a backend-resolved catalog row for mobile search.
 type CatalogAsset struct {
 	Symbol     string
 	Name       string
 	SolanaMint string
 	Routable   bool
-	// LogoURL is the company logo the catalogue publishes for this xStock. Empty
+
+	Kind           AssetKind
+	Source         AssetSource
+	Decimals       int
+	TransferFeeBps int
+	Sector         string
+	// LogoURL is the company logo the catalogue publishes for this asset. Empty
 	// when the catalogue has none, in which case a row draws its ticker tile.
-	LogoURL string
+	LogoURL      string
+	UnderlyingID string
+	Issuer       string
+	IssuerName   string
+
+	UiAmountMultiplier *big.Rat // nil = unresolved
+	Paused             bool
+
+	ReferenceMarkUsdcMicros *int64
+	ReferenceValuationUsd   *int64
+	ReferenceUpdatedAt      *time.Time
+	ReferenceSource         string
+	Holders                 *int
+
+	LiquidityUsd int64
+}
+
+// Normalize applies stock/xStocks defaults for unset kind, source, and decimals.
+func (a CatalogAsset) Normalize() CatalogAsset {
+	if a.Kind == "" {
+		a.Kind = AssetKindStock
+	}
+	if a.Decimals == 0 {
+		a.Decimals = jupiter.XStockDecimals
+	}
+	if a.Source == "" {
+		a.Source = AssetSourceXStocks
+	}
+	return a
+}
+
+// AtomicScale returns 10^Decimals for this asset.
+func (a CatalogAsset) AtomicScale() int64 {
+	return jupiter.AtomicScale(a.Normalize().Decimals)
+}
+
+// CatalogAssetFromXStockNode builds a normalized xStocks catalog row.
+func CatalogAssetFromXStockNode(symbol, name, solanaMint string) CatalogAsset {
+	symbol = strings.TrimSpace(symbol)
+	return CatalogAsset{
+		Symbol:       symbol,
+		Name:         strings.TrimSpace(name),
+		SolanaMint:   strings.TrimSpace(solanaMint),
+		Kind:         AssetKindStock,
+		Source:       AssetSourceXStocks,
+		Decimals:     jupiter.XStockDecimals,
+		Issuer:       string(AssetSourceXStocks),
+		UnderlyingID: UnderlyingIDFromXStockSymbol(symbol),
+	}.Normalize()
+}
+
+// UnderlyingIDFromXStockSymbol derives the company slug from an xStock ticker.
+func UnderlyingIDFromXStockSymbol(symbol string) string {
+	s := strings.ToLower(strings.TrimSpace(symbol))
+	return strings.TrimSuffix(s, "x")
 }
 
 // CatalogSearchPage is one page of catalog search results.
@@ -105,12 +185,9 @@ type catalogAssetNode struct {
 // so a field added here reaches every path that resolves an asset — search by
 // ticker, the paginated filter, and the index — rather than two of the three.
 func catalogAssetFromNode(node catalogAssetNode, mint string) CatalogAsset {
-	return CatalogAsset{
-		Symbol:     strings.TrimSpace(node.Symbol),
-		Name:       strings.TrimSpace(node.Name),
-		SolanaMint: mint,
-		LogoURL:    normalizeLogoURL(node.Logo),
-	}
+	asset := CatalogAssetFromXStockNode(node.Symbol, node.Name, mint)
+	asset.LogoURL = normalizeLogoURL(node.Logo)
+	return asset
 }
 
 // normalizeLogoURL keeps only a logo the app can actually load. A relative path or

@@ -13,15 +13,16 @@ import (
 type fakeJupiterClient struct {
 	mu sync.Mutex
 
-	quotes       map[string]BuyQuote
-	quoteErrs    map[string]error
-	orders       map[string]BuyOrder
-	sellQuotes   map[string]SellQuote
-	sellQuoteErr map[string]error
-	executePolls  map[string][]ExecuteResult
-	executeErrs   map[string]error
-	lastSuccesses map[string]ExecuteResult
-	quoteBuyCalls int
+	quotes             map[string]BuyQuote
+	quoteErrs          map[string]error
+	orders             map[string]BuyOrder
+	sellQuotes         map[string]SellQuote
+	sellQuoteErr       map[string]error
+	executePolls       map[string][]ExecuteResult
+	executeErrs        map[string]error
+	lastSuccesses      map[string]ExecuteResult
+	quoteBuyCalls      int
+	lastQuoteBuyParams []QuoteBuyParams
 
 	settlementHooks map[string]func(ExecuteResult)
 	settled         map[string]struct{}
@@ -30,11 +31,11 @@ type fakeJupiterClient struct {
 // NewFakeClient returns an in-memory Jupiter client for tests.
 func NewFakeClient() Client {
 	return &fakeJupiterClient{
-		quotes:       make(map[string]BuyQuote),
-		quoteErrs:    make(map[string]error),
-		orders:       make(map[string]BuyOrder),
-		sellQuotes:   make(map[string]SellQuote),
-		sellQuoteErr: make(map[string]error),
+		quotes:        make(map[string]BuyQuote),
+		quoteErrs:     make(map[string]error),
+		orders:        make(map[string]BuyOrder),
+		sellQuotes:    make(map[string]SellQuote),
+		sellQuoteErr:  make(map[string]error),
 		executePolls:  make(map[string][]ExecuteResult),
 		executeErrs:   make(map[string]error),
 		lastSuccesses: make(map[string]ExecuteResult),
@@ -153,6 +154,31 @@ func RegisterSellQuote(client Client, inputMint string, amount int64, quote Sell
 	fake.mu.Unlock()
 }
 
+// ResetQuoteBuyRequests clears recorded QuoteBuy params on a fake client. Test hook.
+func ResetQuoteBuyRequests(client Client) {
+	fake, ok := client.(*fakeJupiterClient)
+	if !ok {
+		return
+	}
+	fake.mu.Lock()
+	fake.lastQuoteBuyParams = nil
+	fake.quoteBuyCalls = 0
+	fake.mu.Unlock()
+}
+
+// LastQuoteBuyRequests returns QuoteBuy params in call order. Test hook.
+func LastQuoteBuyRequests(client Client) []QuoteBuyParams {
+	fake, ok := client.(*fakeJupiterClient)
+	if !ok {
+		return nil
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	out := make([]QuoteBuyParams, len(fake.lastQuoteBuyParams))
+	copy(out, fake.lastQuoteBuyParams)
+	return out
+}
+
 // QuoteBuyCallCount returns how many QuoteBuy calls hit this fake client. Test hook.
 func QuoteBuyCallCount(client Client) int {
 	fake, ok := client.(*fakeJupiterClient)
@@ -167,6 +193,7 @@ func QuoteBuyCallCount(client Client) int {
 func (f *fakeJupiterClient) QuoteBuy(ctx context.Context, params QuoteBuyParams) (BuyQuote, error) {
 	f.mu.Lock()
 	f.quoteBuyCalls++
+	f.lastQuoteBuyParams = append(f.lastQuoteBuyParams, params)
 	f.mu.Unlock()
 
 	logQuoteAttempt(params.GroupID, params.UserID, params.Symbol, params.USDCAmount)

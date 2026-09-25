@@ -93,6 +93,7 @@ struct ProposalCardView<Destination: View>: View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
             header
             amount
+            premiumNudge
             reason
             if let summary = proposal.voteSummary {
                 ProposalVoteTally(progress: ProposalVoteProgress(summary: summary), isOpen: proposal.isOpen)
@@ -136,11 +137,28 @@ struct ProposalCardView<Destination: View>: View {
     }
 
     @ViewBuilder
+    private var premiumNudge: some View {
+        if let bps = proposal.premiumBps,
+           PreIpoCopy.showsPremiumNudge(premiumBps: bps, assetKind: proposal.resolvedAssetKind) {
+            Text(PreIpoCopy.tradingPremiumNudge(bps: bps))
+                .font(MonacoTheme.Typo.callout)
+                .foregroundStyle(MonacoTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
     private var amount: some View {
         Group {
             switch proposal.resolvedKind {
             case "sell":
-                Text(ProposalShareFormatter.sharesLabel(fromAtomics: proposal.tokenAmount ?? "0"))
+                Text(
+                    ProposalShareFormatter.sharesLabel(
+                        fromAtomics: proposal.tokenAmount ?? "0",
+                        decimals: proposal.resolvedTokenDecimals,
+                        kind: proposal.resolvedAssetKind
+                    )
+                )
                     .font(MonacoTheme.Typo.moneyLarge)
                     .foregroundStyle(MonacoTheme.ink)
                     .lineLimit(1)

@@ -1,0 +1,34 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "context": { "slot": 1 },
+    "value": {
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "data": {
+        "parsed": {
+          "info": {
+            "decimals": 9,
+            "extensions": [
+              {
+                "extension": "transferFeeConfig",
+                "state": {
+                  "olderTransferFee": { "epoch": 0, "transferFeeBasisPoints": 50 },
+                  "newerTransferFee": { "epoch": 1039, "transferFeeBasisPoints": 100 }
+                }
+              },
+              {
+                "extension": "scaledUiAmountConfig",
+                "state": {
+                  "multiplier": "1",
+                  "newMultiplier": "1.4861347",
+                  "newMultiplierEffectiveTimestamp": 1752710400
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "id": 1
+}

@@ -160,7 +160,7 @@ struct StockListRow: View {
     }
 
     private var title: String {
-        AssetSymbolFormatter.display(asset.symbol)
+        AssetSymbolFormatter.display(asset.symbol, kind: asset.resolvedKind)
     }
 
     /// Only the rows with something to say get a second line ("2 cabals · your slice").
@@ -235,7 +235,7 @@ struct StockListRow: View {
     static let markSize: CGFloat = 46
 
     private var mark: some View {
-        StockMark(symbol: asset.symbol, size: StockListRow.markSize, logoURL: asset.logoURL)
+        StockMark(symbol: asset.symbol, displayName: asset.name, assetKind: asset.resolvedKind, size: StockListRow.markSize, logoURL: asset.logoURL)
             .frame(width: StockListRow.markSize, height: StockListRow.markSize)
     }
 
@@ -309,8 +309,8 @@ struct StockMoverCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             HStack(spacing: MonacoTheme.Space.s) {
-                StockMark(symbol: asset.symbol, size: 28, logoURL: asset.logoURL)
-                Text(AssetSymbolFormatter.display(asset.symbol))
+                StockMark(symbol: asset.symbol, displayName: asset.name, assetKind: asset.resolvedKind, size: 28, logoURL: asset.logoURL)
+                Text(AssetSymbolFormatter.display(asset.symbol, kind: asset.resolvedKind))
                     .font(MonacoTheme.Typo.rowTitle)
                     .foregroundStyle(MonacoTheme.ink)
                     .lineLimit(1)

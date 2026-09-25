@@ -22,6 +22,8 @@ func clearConfigEnv(t *testing.T) {
 	t.Setenv("FLASH_MAX_SLIPPAGE", "")
 	t.Setenv("PRIVY_VERIFICATION_KEY", "")
 	t.Setenv("SOLANA_RPC_URL", "")
+	t.Setenv("TESSERA_API_BASE_URL", "")
+	t.Setenv("TESSERA_ENABLED", "")
 	for _, name := range []string{"DB_MAX_OPEN_CONNS", "DB_MAX_IDLE_CONNS", "DB_CONN_MAX_LIFETIME", "DB_CONN_MAX_IDLE_TIME"} {
 		t.Setenv(name, "")
 	}
@@ -258,6 +260,63 @@ func TestLoad_trimsWhitespaceFromEnvValues(t *testing.T) {
 	}
 }
 
+func TestConfig_tesseraDefaults(t *testing.T) {
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.TesseraEnabled {
+		t.Fatal("TesseraEnabled = false, want true by default")
+	}
+	if cfg.TesseraAPIBaseURL != defaultTesseraAPIBaseURL {
+		t.Fatalf("TesseraAPIBaseURL = %q, want %q", cfg.TesseraAPIBaseURL, defaultTesseraAPIBaseURL)
+	}
+}
+
+func TestConfig_prestocksDefaults(t *testing.T) {
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.PreStocksEnabled || cfg.PreStocksAPIBaseURL != defaultPreStocksAPIBaseURL {
+		t.Fatalf("prestocks = enabled %v url %q", cfg.PreStocksEnabled, cfg.PreStocksAPIBaseURL)
+	}
+}
+
+func TestConfig_prestocksDisabled(t *testing.T) {
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+	t.Setenv("PRESTOCKS_ENABLED", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.PreStocksEnabled {
+		t.Fatal("PreStocksEnabled = true, want false")
+	}
+}
+
+func TestConfig_tesseraDisabled(t *testing.T) {
+	clearConfigEnv(t)
+	setValidConfigEnv(t)
+	t.Setenv("TESSERA_ENABLED", "false")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.TesseraEnabled {
+		t.Fatal("TesseraEnabled = true, want false")
+	}
+}
+
 func TestLoad_swapProvider_defaultsToJupiter(t *testing.T) {
 	clearConfigEnv(t)
 	setValidConfigEnv(t)
@@ -315,6 +374,21 @@ func TestLoad_swapProvider_unknownOrBadSlippage_returnsError(t *testing.T) {
 
 		if _, err := Load(); err == nil || !strings.Contains(err.Error(), env[0]) {
 			t.Fatalf("%s: Load error = %v, want %s error", name, err, env[0])
+		}
+	}
+}
+
+func TestPublicAPIBaseURL_defaultsAndTrimsTrailingSlash(t *testing.T) {
+	cases := map[string]string{
+		"":                            DefaultPublicAPIBaseURL,
+		"   ":                         DefaultPublicAPIBaseURL,
+		"https://api.monaco.test/":    "https://api.monaco.test",
+		" https://api.monaco.test// ": "https://api.monaco.test",
+		"http://10.0.0.2:8080":        "http://10.0.0.2:8080",
+	}
+	for raw, want := range cases {
+		if got := PublicAPIBaseURL(raw); got != want {
+			t.Errorf("PublicAPIBaseURL(%q) = %q, want %q", raw, got, want)
 		}
 	}
 }

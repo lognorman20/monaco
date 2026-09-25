@@ -12,13 +12,16 @@ import (
 
 // GroupViewPotRow is one line in the group pot section.
 type GroupViewPotRow struct {
-	Symbol      string
-	Units       string
-	MarkUsd     string
-	ValueUsd    string
-	DollarPnL   string
-	AfterHours  *bool
-	TokenAmount string
+	Symbol             string
+	Units              string
+	MarkUsd            string
+	ValueUsd           string
+	DollarPnL          string
+	AfterHours         *bool
+	TokenAmount        string
+	UiAmountMultiplier string
+	Issuer             string
+	IssuerName         string
 	// MarkUsdcMicros and ValueUsdcMicros are the same two figures the display
 	// strings were formatted from. Callers that need to do arithmetic — the
 	// viewer's slice of one position, for instance — should not have to parse

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/packages/domain"
@@ -189,11 +188,11 @@ type assetHoldingBuild struct {
 }
 
 func assetHoldingRow(groupName, groupID string, marked pyth.MarkedHolding) (assetHoldingBuild, error) {
-	units, err := tokenAtomicsToDecimalUnits(marked.Units)
+	units, err := pyth.TokenAtomicsToScaledDecimalUnits(marked.Units, marked.Decimals, marked.UiMultiplier, marked.Kind)
 	if err != nil {
 		return assetHoldingBuild{}, err
 	}
-	valueMicros, err := domain.MulDivFloor(marked.Units, marked.MarkUsdc, jupiter.XStockAtomicScale)
+	valueMicros, err := pyth.HoldingValueUSDCMicros(marked.Units, marked.MarkUsdc, marked.Decimals, marked.UiMultiplier, marked.Kind)
 	if err != nil {
 		return assetHoldingBuild{}, fmt.Errorf("value %s holding: %w", marked.Symbol, err)
 	}

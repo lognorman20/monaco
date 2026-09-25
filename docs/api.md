@@ -7,7 +7,8 @@ detail. A test (`cmd/api/routes_doc_test.go`) fails if a route is missing from t
 ## Conventions
 
 **Auth.** `Authorization: Bearer <Privy access token>` on every `/v1` route. Agents instead send
-`X-Monaco-Agent-Key` on `POST /v1/groups/{id}/agents/intents` and `GET /v1/groups/{id}/assets`.
+`X-Monaco-Agent-Key` on the `/v1/agent` routes (the key names the cabal), `POST /v1/groups/{id}/agents/intents`
+and `GET /v1/groups/{id}/assets`. `GET /v1/agent/skill.md` is public.
 A valid token with no Monaco user yet gets `404 user not found`: call `POST /v1/auth/session` first.
 
 **Errors.** `{ "error": "message", "requestId": "…" }`. Send your own `X-Request-Id` (1–64 of
@@ -15,7 +16,9 @@ A valid token with no Monaco user yet gets `404 user not found`: call `POST /v1/
 A blocked `POST /v1/groups/{id}/leave` is `409` with the same shape plus a machine-readable `reason`
 (for example `share_units_remaining`, `creator_must_transfer`).
 
-**Money.** USDC is integer micros (1 USDC = 1,000,000). Timestamps are UTC RFC 3339.
+**Money.** USDC is integer micros (1 USDC = 1,000,000). Timestamps are UTC RFC 3339. `priceUsdcMicros` is the price of one whole token, whatever that token's decimals are.
+
+**Catalog kind.** Asset rows carry `kind` (`stock` or `pre_ipo`), `source`, `issuer`, `underlyingId`, `tokenDecimals`, `sector`, `logoUrl`, `alwaysOpen`, reference fields (`referenceMarkUsdcMicros`, `referenceValuationUsd`, `referenceUpdatedAt`), `premiumBps`, `holders`, and `variantCount`. Filter with `?kind=stock` or `?kind=pre_ipo`; any other value is `400`. Quote JSON keeps `kind` as `buy` or `sell`. Buy quotes add `assetKind` and `tokenDecimals`. Detail adds `variants[]` when several issuers share an underlying. Pre-IPO chart responses are empty until a sampler has history.
 
 **Market data.** The asset routes carry a `market` object — `session`
 (`pre_market | open | after_hours | closed`), `isOpen`, `afterHours`, `nextSession`,
@@ -119,14 +122,14 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/groups/{id}/treasury/tokens` | Treasury USDC plus token holdings. |
 | `GET /v1/groups/{id}/cost-basis/{symbol}` | Fill-derived cost basis for one symbol. |
 | `POST /v1/groups/{id}/withdraw-to-balance` ● | Cash out a slice of the cabal to the account balance. |
-| `GET /v1/groups/{id}/assets` | Tradable catalog for a cabal. Bearer or agent key. |
-| `GET /v1/assets` | Catalog search with prices and the market session. |
+| `GET /v1/groups/{id}/assets` | Tradable catalog for a cabal. Bearer or agent key. Optional `kind=stock\|pre_ipo`. Rows include `kind`, `source`, `issuer`, `tokenDecimals`, `uiAmountMultiplier`, reference fields, `premiumBps`, `variantCount`. |
+| `GET /v1/assets` | Catalog search with prices and the market session. Optional `kind=stock\|pre_ipo`. Same catalog fields as group assets. |
 | `GET /v1/assets/popular` | Popular assets with prices and the market session. |
 | `GET /v1/assets/held` | What the caller's cabals own and have open votes on, in one scan. Read-only. |
-| `GET /v1/assets/{symbol}` | Asset detail: price, liquidity, market session, the stats grid, and the underlying equity against the token (`stockVsToken`). |
+| `GET /v1/assets/{symbol}` | Asset detail: price, liquidity, market session, the stats grid, the underlying equity against the token (`stockVsToken`), and `variants[]` when several issuers share an `underlyingId` (each names the issuer, fee, and whether it is the best price). |
 | `GET /v1/assets/{symbol}/chart` | Price history. `range` is `1D`, `1W`, `1M`, `3M`, `1Y` or `ALL` (default `1D`); the response echoes the range, names its `source`, and carries the `previousCloseUsdcMicros` baseline. |
 | `GET /v1/assets/{symbol}/social` | What the caller's own cabals are doing with one stock: `holdings` (units, value, cost basis, P&L and the caller's slice), `openProposals` (tally, the caller's ballot and who voted) and `activity` (proposals and fills). Scoped to the caller's memberships, so a non-member never appears in another cabal's answer. `unvaluedGroups` counts cabals that could not be priced on this pass. |
-| `POST /v1/groups/{id}/quotes` | Check that a buy or sell can route, and at what price. |
+| `POST /v1/groups/{id}/quotes` | Check that a buy or sell can route, and at what price. `kind` stays `buy` or `sell`. A buy may send `selectBestVariant: true`; the response symbol is the issuer that was chosen. Buy responses add `tokenDecimals`, `assetKind` (`stock` or `pre_ipo`), `issuer`, and live `premiumBps` when a fresh Jupiter reference exists. |
 | `GET /v1/groups/{id}/proposals` | List proposals. |
 | `POST /v1/groups/{id}/proposals` ● | Open a proposal: buy, sell, or add, pause, resume, revoke an agent. |
 | `GET /v1/proposals/{id}` | Proposal detail, votes and execution state. |
@@ -138,6 +141,11 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/transactions/{id}` | One swap. `404 transaction not found` for an unknown id and for a club you cannot read alike. |
 | `POST /v1/transactions/{id}/retry` ● | Retry a failed swap. Members only; a non-member gets the same `404` as an unknown id. |
 | `POST /v1/groups/{id}/agents/intents` | An agent submits a trade. Agent key only. See [agent trading](agent-trading.md). |
+| `GET /v1/agent` | The agent's cabal, budget, cash and holdings. Agent key only. |
+| `GET /v1/agent/assets` | Tradable stocks with marks. Agent key only. |
+| `POST /v1/agent/intents` | An agent submits a trade; the key names the cabal. Agent key only. |
+| `GET /v1/agent/intents/{intentId}` | One of the agent's intents with its fill. Agent key only. |
+| `GET /v1/agent/skill.md` | Public markdown instructions for agents. |
 | `POST /v1/dev/faker` | Seed demo data. Only with `FAKER_ENABLED`, from loopback, on a local database. |
 
 ## Market rows

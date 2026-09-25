@@ -10,10 +10,12 @@ import (
 // potRowResponses renders a cabal's holdings, with the market's own figures for
 // each stock alongside the cabal's.
 //
-// A holdings row and a Stocks-tab row are the same instrument, so they now read
-// the same way: same day change, same day series, from the same caches. The
-// market read is decoration — a nil `Market` (or a slow one) simply leaves those
-// fields out, and the pot, which is what this route is for, is untouched.
+// Each row starts from enrichPotRow, which carries the catalogue's facts about
+// the holding (kind, decimals, issuer). A holdings row and a Stocks-tab row are
+// the same instrument, so they then read the market the same way: same day
+// change, same day series, from the same caches. The market read is decoration —
+// a nil `Market` (or a slow one) simply leaves those fields out, and the pot,
+// which is what this route is for, is untouched.
 //
 // Cash is skipped: it has no day change, and asking the catalogue for "USDC"
 // would be a lookup that can only fail.
@@ -34,15 +36,7 @@ func (h *GroupHandlers) potRowResponses(ctx context.Context, rows []app.GroupVie
 
 	out := make([]groupViewPotRowResponse, 0, len(rows))
 	for _, row := range rows {
-		resp := groupViewPotRowResponse{
-			Symbol:      row.Symbol,
-			Units:       row.Units,
-			MarkUsd:     row.MarkUsd,
-			ValueUsd:    row.ValueUsd,
-			DollarPnL:   row.DollarPnL,
-			AfterHours:  row.AfterHours,
-			TokenAmount: row.TokenAmount,
-		}
+		resp := h.enrichPotRow(ctx, row)
 		if decorated, ok := market[strings.ToUpper(strings.TrimSpace(row.Symbol))]; ok {
 			resp.Change24h = decorated.Change24h
 			resp.Spark = decorated.Spark

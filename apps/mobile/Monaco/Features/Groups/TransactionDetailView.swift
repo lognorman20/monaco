@@ -157,8 +157,6 @@ struct TransactionReceipt: Equatable {
     let failureMessage: String?
     let signature: String?
 
-    private static let atomicsPerShare = 100_000_000.0
-
     init(deposit: GetDepositResponse) {
         glyph = "plus"
         headline = "Money added"
@@ -189,11 +187,24 @@ struct TransactionReceipt: Equatable {
             fallbackHero = nil
             var rows: [Row] = []
             if let atomics = transaction.costBasisAmount, atomics > 0 {
-                let shares = Double(atomics) / Self.atomicsPerShare
-                rows.append(Row(label: "Shares", value: GroupActivityRules.sharesLabel(shares)))
-                if let spent = transaction.costBasisPrice, spent > 0 {
-                    let perShare = Int64((Double(spent) / shares).rounded())
-                    rows.append(Row(label: "Price", value: "\(UsdAmountFormatter.format(micros: perShare)) a share"))
+                let quantityLabel = TokenQuantityFormatter.label(
+                    fromAtomics: String(atomics),
+                    decimals: transaction.resolvedTokenDecimals,
+                    kind: transaction.resolvedAssetKind
+                )
+                let quantityRow = transaction.resolvedAssetKind == .preIpo ? PreIpoCopy.tokensRowLabel : "Shares"
+                rows.append(Row(label: quantityRow, value: quantityLabel))
+                if let spent = transaction.costBasisPrice, spent > 0,
+                   let quantity = TokenQuantityFormatter.quantity(fromAtomics: String(atomics), decimals: transaction.resolvedTokenDecimals),
+                   quantity > 0 {
+                    var perUnitSource = Decimal(spent) / quantity
+                    var perUnit = Decimal()
+                    NSDecimalRound(&perUnit, &perUnitSource, 0, .plain)
+                    let unit = transaction.resolvedAssetKind == .preIpo ? PreIpoCopy.tokenLabelSingular : "share"
+                    rows.append(Row(
+                        label: "Price",
+                        value: "\(UsdAmountFormatter.format(micros: (perUnit as NSDecimalNumber).int64Value)) a \(unit)"
+                    ))
                 }
             }
             rows.append(dateRow)
@@ -207,21 +218,35 @@ struct TransactionReceipt: Equatable {
             default: "Selling \(name)"
             }
             let proceeds = transaction.proceedsUsdcMicros ?? transaction.costBasisAmount
-            let shares = Double(transaction.amountMicros) / Self.atomicsPerShare
+            let quantityLabel = TokenQuantityFormatter.label(
+                fromAtomics: String(transaction.amountMicros),
+                decimals: transaction.resolvedTokenDecimals,
+                kind: transaction.resolvedAssetKind
+            )
             if let proceeds, proceeds > 0 {
                 amountMicros = proceeds
                 fallbackHero = nil
             } else {
                 amountMicros = nil
-                fallbackHero = GroupActivityRules.sharesLabel(shares)
+                fallbackHero = quantityLabel
             }
             var rows: [Row] = []
-            // When the hero already shows shares, don't repeat them as a row.
-            if shares > 0, fallbackHero == nil {
-                rows.append(Row(label: "Shares", value: GroupActivityRules.sharesLabel(shares)))
-                if let proceeds, proceeds > 0 {
-                    let perShare = Int64((Double(proceeds) / shares).rounded())
-                    rows.append(Row(label: "Price", value: "\(UsdAmountFormatter.format(micros: perShare)) a share"))
+            if transaction.amountMicros > 0, fallbackHero == nil {
+                let quantityRow = transaction.resolvedAssetKind == .preIpo ? PreIpoCopy.tokensRowLabel : "Shares"
+                rows.append(Row(label: quantityRow, value: quantityLabel))
+                if let proceeds, proceeds > 0,
+                   let quantity = TokenQuantityFormatter.quantity(
+                    fromAtomics: String(transaction.amountMicros),
+                    decimals: transaction.resolvedTokenDecimals
+                   ), quantity > 0 {
+                    var perUnitSource = Decimal(proceeds) / quantity
+                    var perUnit = Decimal()
+                    NSDecimalRound(&perUnit, &perUnitSource, 0, .plain)
+                    let unit = transaction.resolvedAssetKind == .preIpo ? PreIpoCopy.tokenLabelSingular : "share"
+                    rows.append(Row(
+                        label: "Price",
+                        value: "\(UsdAmountFormatter.format(micros: (perUnit as NSDecimalNumber).int64Value)) a \(unit)"
+                    ))
                 }
             }
             rows.append(dateRow)

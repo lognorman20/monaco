@@ -64,10 +64,11 @@ public enum AssetSymbolFormatter {
         return trimmed
     }
 
-    /// Ticker as people know it: "AAPLx" → "AAPL", "BRK.Bx" → "BRK.B". "USDC" stays; a mint → "Unknown stock".
+    /// Ticker as people know it: "AAPLx" → "AAPL", "BRK.Bx" → "BRK.B". Pre-IPO symbols stay as sent (`tSpaceX`).
     /// Keep the raw symbol for API calls.
-    public static func display(_ symbol: String) -> String {
+    public static func display(_ symbol: String, kind: AssetKind = .stock) -> String {
         let formatted = format(symbol)
+        if kind == .preIpo { return formatted }
         guard formatted.count >= 2, formatted.count <= 7, formatted.last == "x" else { return formatted }
         let body = formatted.dropLast()
         let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ.")
@@ -250,9 +251,16 @@ public enum StakeWithdrawConverter {
 
 public enum CatalogAssetNameFormatter {
     /// User-facing catalog name without trailing xStocks branding (e.g. "Apple xStock" → "Apple").
-    public static func format(_ catalogName: String) -> String {
+    public static func format(_ catalogName: String, kind: AssetKind = .stock) -> String {
         var name = catalogName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return name }
+
+        if kind == .preIpo {
+            if name.hasPrefix("T-") {
+                name = String(name.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            return name
+        }
 
         let suffixes = [" xStock", " xStocks", " xstock", " xstocks"]
         for suffix in suffixes {
@@ -264,6 +272,57 @@ public enum CatalogAssetNameFormatter {
         }
         return name
     }
+}
+
+/// Kind-aware display name for catalog rows (never uses the static equity table for pre-IPO).
+public enum AssetCatalogDisplayName {
+    public static func format(catalogName: String, symbol: String, kind: AssetKind) -> String {
+        if kind == .preIpo {
+            let name = CatalogAssetNameFormatter.format(catalogName, kind: .preIpo)
+            if !name.isEmpty { return name }
+            return AssetSymbolFormatter.display(symbol, kind: .preIpo)
+        }
+        if let known = AssetDisplayNames.name(forSymbol: symbol) {
+            return known
+        }
+        let stripped = CatalogAssetNameFormatter.format(catalogName, kind: .stock)
+        if !stripped.isEmpty { return stripped }
+        return AssetSymbolFormatter.display(symbol, kind: kind)
+    }
+}
+
+public enum TokenQuantityFormatter {
+    public static func quantity(fromAtomics raw: String, decimals: Int) -> Decimal? {
+        guard let atomics = Decimal(string: raw.trimmingCharacters(in: .whitespaces), locale: Locale(identifier: "en_US_POSIX")),
+              atomics >= 0 else { return nil }
+        return atomics / Decimal(sign: .plus, exponent: decimals, significand: 1)
+    }
+
+    /// "1.5 tokens", "1 token", "1.2034 shares" — at most 4 decimals, trailing zeros trimmed.
+    public static func label(fromAtomics raw: String, decimals: Int, kind: AssetKind) -> String {
+        guard let quantity = quantity(fromAtomics: raw, decimals: decimals) else { return raw }
+        var rounded = Decimal()
+        var copy = quantity
+        NSDecimalRound(&rounded, &copy, 4, .plain)
+        let unit = kind == .preIpo ? PreIpoCopy.tokenLabelPlural : "shares"
+        let singular = kind == .preIpo ? PreIpoCopy.tokenLabelSingular : "share"
+        if rounded == 0, quantity > 0 {
+            return kind == .preIpo ? "< 0.0001 \(unit)" : "< 0.0001 shares"
+        }
+        let body = quantityLabelFormatter.string(from: rounded as NSDecimalNumber) ?? "\(rounded)"
+        return rounded == 1 ? "1 \(singular)" : "\(body) \(unit)"
+    }
+
+    private static let quantityLabelFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        formatter.groupingSeparator = ","
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 4
+        return formatter
+    }()
 }
 
 extension UsdAmountFormatter {
@@ -287,29 +346,10 @@ extension UsdAmountFormatter {
 }
 
 extension ProposalShareFormatter {
-    /// "1.2034 shares", "0.5 shares", "1 share" from 8-decimal atomics. At most 4 decimals, trailing zeros trimmed.
-    /// Dust below 0.0001 reads "< 0.0001 shares" rather than "0 shares".
-    public static func sharesLabel(fromAtomics raw: String) -> String {
-        guard let atomics = Decimal(string: raw.trimmingCharacters(in: .whitespaces), locale: Locale(identifier: "en_US_POSIX")),
-              atomics >= 0 else { return raw }
-        var shares = atomics / Decimal(sign: .plus, exponent: decimals, significand: 1)
-        var rounded = Decimal()
-        NSDecimalRound(&rounded, &shares, 4, .plain)
-        if rounded == 0, shares > 0 { return "< 0.0001 shares" }
-        let body = sharesLabelFormatter.string(from: rounded as NSDecimalNumber) ?? "\(rounded)"
-        return rounded == 1 ? "1 share" : "\(body) shares"
+    /// "1.2034 shares", "0.5 shares", "1 share" from atomics at the row's decimals.
+    public static func sharesLabel(fromAtomics raw: String, decimals: Int = ProposalShareFormatter.defaultDecimals, kind: AssetKind = .stock) -> String {
+        TokenQuantityFormatter.label(fromAtomics: raw, decimals: decimals, kind: kind)
     }
-
-    private static let sharesLabelFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.numberStyle = .decimal
-        formatter.usesGroupingSeparator = true
-        formatter.groupingSeparator = ","
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 4
-        return formatter
-    }()
 }
 
 /// Compact age from an ISO-8601 UTC timestamp: "now", "15m", "3h", then "Sep 14" (local calendar).

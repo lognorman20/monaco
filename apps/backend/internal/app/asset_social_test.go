@@ -2,12 +2,14 @@ package app
 
 import (
 	"database/sql"
+	"math/big"
 	"testing"
 	"time"
 
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/pyth"
+	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 	"github.com/monaco/monaco/packages/domain"
 )
 
@@ -42,6 +44,35 @@ func TestAssetHoldingRow_valuesUnitsAndReturn(t *testing.T) {
 	}
 	if got := *build.row.PercentReturn; got != "0.071" {
 		t.Fatalf("percentReturn = %q, want 0.071", got)
+	}
+}
+
+// A pre-IPO token is valued at its own nine decimals. At an xStock's eight the
+// cabal's position would read ten times too large.
+func TestAssetHoldingRow_valuesAPreIPOHoldingAtItsOwnDecimals(t *testing.T) {
+	t.Parallel()
+
+	// 3 tSpaceX at $774.00, bought for $1,500.00.
+	build, err := assetHoldingRow("Moonshots", "g1", pyth.MarkedHolding{
+		Symbol:       "tSpaceX",
+		Units:        3 * 1_000_000_000,
+		MarkUsdc:     774_000_000,
+		CostBasis:    1_500_000_000,
+		Decimals:     9,
+		Kind:         xstocks.AssetKindPreIPO,
+		UiMultiplier: big.NewRat(1, 1),
+	})
+	if err != nil {
+		t.Fatalf("assetHoldingRow: %v", err)
+	}
+	if build.row.Units != "3" {
+		t.Fatalf("units = %q, want 3", build.row.Units)
+	}
+	if build.row.ValueUsd != "2322.00" {
+		t.Fatalf("valueUsd = %q, want 2322.00", build.row.ValueUsd)
+	}
+	if build.valueMicros != 2_322_000_000 {
+		t.Fatalf("valueMicros = %d, want 2322000000", build.valueMicros)
 	}
 }
 

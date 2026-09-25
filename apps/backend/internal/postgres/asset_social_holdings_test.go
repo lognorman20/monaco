@@ -155,6 +155,57 @@ func TestListGroupHoldings_keepsEachCabalsUnitsSeparate(t *testing.T) {
 	}
 }
 
+// A holding carries the scale its fills were recorded at, so a nine-decimal pre-IPO
+// token is not read at an xStock's eight.
+func TestListGroupHoldings_reportsEachMintsRecordedDecimals(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := integrationDB(t)
+	iso := prepareIsolation(t, db)
+	store := NewStore(db)
+
+	user, err := store.UpsertUser(ctx, iso.UniquePrivyID("holdings-decimals"), "Holder")
+	if err != nil {
+		t.Fatalf("UpsertUser: %v", err)
+	}
+	iso.TrackUser(user.ID)
+	groupID := insertOpenGroup(t, ctx, store, iso, user.ID, "Decimals Cabal")
+	sfx := iso.Suffix()
+
+	const tesseraMint = "TSPXcLV76s6V2zDiZQ18kBfcbnjaE2ZzNT3ga2Pd99v"
+	if _, _, err := store.ConfirmBuyTransaction(ctx, ConfirmBuyTransactionParams{
+		GroupID:          groupID,
+		Amount:           10_000_000,
+		InputMint:        testUSDCMint,
+		OutputMint:       tesseraMint,
+		TxSignature:      "sig-tessera-" + sfx,
+		ExecuteRequestID: "req-tessera-" + sfx,
+		CostBasisPrice:   10_000_000,
+		CostBasisAmount:  1_000_000_000,
+		TokenDecimals:    9,
+	}); err != nil {
+		t.Fatalf("ConfirmBuyTransaction: %v", err)
+	}
+	insertConfirmedSwap(t, ctx, db, groupID, "buy", testUSDCMint, testAAPLxMint,
+		1_000_000_000, 1_000_000_000, 5_000_000_000, "aapl-"+sfx)
+
+	holdings, err := store.ListGroupHoldings(ctx, []string{groupID})
+	if err != nil {
+		t.Fatalf("ListGroupHoldings: %v", err)
+	}
+	decimals := make(map[string]int, len(holdings))
+	for _, holding := range holdings {
+		decimals[holding.Mint] = holding.TokenDecimals
+	}
+	if decimals[tesseraMint] != 9 {
+		t.Errorf("decimals[tSpaceX] = %d, want 9", decimals[tesseraMint])
+	}
+	if decimals[testAAPLxMint] != 8 {
+		t.Errorf("decimals[AAPLx] = %d, want the ledger default of 8", decimals[testAAPLxMint])
+	}
+}
+
 // The share base is every claim on the pot, so units a redeem job has debited but not
 // yet paid out still count. Leaving them out would make each remaining member's slice
 // look bigger than it is.

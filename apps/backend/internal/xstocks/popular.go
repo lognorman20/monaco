@@ -40,9 +40,6 @@ func Popular(ctx context.Context, searcher CatalogSearcher, limit int) ([]Catalo
 		}(i, symbol)
 	}
 	wg.Wait()
-	if firstErr != nil {
-		return nil, firstErr
-	}
 
 	out := make([]CatalogAsset, 0, limit)
 	seen := make(map[string]struct{}, limit)
@@ -62,6 +59,9 @@ func Popular(ctx context.Context, searcher CatalogSearcher, limit int) ([]Catalo
 		}
 		seen[key] = struct{}{}
 		out = append(out, item.asset)
+	}
+	if len(out) == 0 && firstErr != nil {
+		return nil, firstErr
 	}
 	return out, nil
 }

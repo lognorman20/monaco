@@ -558,13 +558,15 @@ func insertVotes(ctx context.Context, tx *sql.Tx, proposalID string, ids map[str
 	return nil
 }
 
+const fakerXStockDecimals = 8
+
 // tokenAtomics converts USDC spent at a whole-share price into xStock SPL atomics
-// (8 decimals, jupiter.XStockAtomicScale per whole share), matching real Jupiter fills.
+// (8 decimals per whole share), matching real Jupiter fills for faker clubs.
 func tokenAtomics(usdcMicros, pxMicros int64) int64 {
 	if pxMicros <= 0 {
 		return 0
 	}
-	return usdcMicros * jupiter.XStockAtomicScale / pxMicros
+	return usdcMicros * jupiter.AtomicScale(fakerXStockDecimals) / pxMicros
 }
 
 func insertSwaps(ctx context.Context, tx *sql.Tx, groupID, sigKey string, club clubSpec, ids map[string]string, pids map[string]string, mark int64, now time.Time) error {
@@ -593,7 +595,7 @@ VALUES ($1, $2, $3, 'buy', $4, $5, 'confirmed', $6, $7, $3, $8, $9, $9)`,
 		return nil
 	}
 	sold := int64(float64(tokens) * club.SellFrac)
-	proceeds := int64(math.Round(float64(sold) * float64(costPx) * club.SellPx / float64(jupiter.XStockAtomicScale)))
+	proceeds := int64(math.Round(float64(sold) * float64(costPx) * club.SellPx / float64(jupiter.AtomicScale(fakerXStockDecimals))))
 	soldAt := hoursAgo(now, club.SellHours)
 
 	// Governed sell (main's proposal kind model): passed sell proposal carrying token_amount,

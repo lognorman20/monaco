@@ -60,7 +60,7 @@ struct AssetChartCard: View {
             curve(series)
         case .empty:
             EmptyState(
-                title: "No price history for this window yet",
+                title: model.detail?.resolvedKind == .preIpo ? PreIpoCopy.chartEmpty : "No price history for this window yet",
                 message: "Try another range, or ask again.",
                 actionTitle: "Try again",
                 action: { reload() }

@@ -58,6 +58,10 @@ func (c *failingEnsureTreasuryClient) USDCPayoutStatus(ctx context.Context, payo
 	return c.inner.USDCPayoutStatus(ctx, payout)
 }
 
+func (c *failingEnsureTreasuryClient) TokenBalanceDelta(ctx context.Context, signature, owner, mint string) (int64, error) {
+	return c.inner.TokenBalanceDelta(ctx, signature, owner, mint)
+}
+
 func TestCreateGroup_privyTreasuryFailure_rollsBackGroupRow(t *testing.T) {
 	// Arrange
 	ctx := context.Background()

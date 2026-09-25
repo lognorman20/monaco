@@ -35,6 +35,19 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
     /// The company's logo. Nil — or a URL that fails to load — falls back to the
     /// ticker tile, so a row never waits on an image to be readable.
     public let logoUrl: String?
+    public let kind: AssetKind?
+    public let source: String?
+    public let issuer: String?
+    public let underlyingId: String?
+    public let tokenDecimals: Int?
+    public let sector: String?
+    public let alwaysOpen: Bool?
+    public let referenceMarkUsdcMicros: Int64?
+    public let referenceValuationUsd: Int64?
+    public let referenceUpdatedAt: String?
+    public let premiumBps: Int?
+    public let holders: Int?
+    public let variantCount: Int?
 
     public var id: String { symbol }
 
@@ -50,6 +63,9 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         return sparkBasis != changeBasis
     }
 
+    public var resolvedKind: AssetKind { kind ?? .stock }
+    public var resolvedDecimals: Int { tokenDecimals ?? AssetCatalogDefaults.decimals }
+
     public init(
         symbol: String,
         name: String,
@@ -62,7 +78,20 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         sparkBasisSymbol: String? = nil,
         changeBasis: MarketPriceBasis? = nil,
         changeBasisSymbol: String? = nil,
-        logoUrl: String? = nil
+        logoUrl: String? = nil,
+        kind: AssetKind? = nil,
+        source: String? = nil,
+        issuer: String? = nil,
+        underlyingId: String? = nil,
+        tokenDecimals: Int? = nil,
+        sector: String? = nil,
+        alwaysOpen: Bool? = nil,
+        referenceMarkUsdcMicros: Int64? = nil,
+        referenceValuationUsd: Int64? = nil,
+        referenceUpdatedAt: String? = nil,
+        premiumBps: Int? = nil,
+        holders: Int? = nil,
+        variantCount: Int? = nil
     ) {
         self.symbol = symbol
         self.name = name
@@ -76,6 +105,19 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         self.changeBasis = changeBasis
         self.changeBasisSymbol = changeBasisSymbol
         self.logoUrl = logoUrl
+        self.kind = kind
+        self.source = source
+        self.issuer = issuer
+        self.underlyingId = underlyingId
+        self.tokenDecimals = tokenDecimals
+        self.sector = sector
+        self.alwaysOpen = alwaysOpen
+        self.referenceMarkUsdcMicros = referenceMarkUsdcMicros
+        self.referenceValuationUsd = referenceValuationUsd
+        self.referenceUpdatedAt = referenceUpdatedAt
+        self.premiumBps = premiumBps
+        self.holders = holders
+        self.variantCount = variantCount
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -83,6 +125,7 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         case sparkUsdcMicros = "spark"
         case sparkBasis, sparkBasisSymbol, changeBasis, changeBasisSymbol
         case logoUrl
+        case kind, source, issuer, underlyingId, tokenDecimals, sector, alwaysOpen, referenceMarkUsdcMicros, referenceValuationUsd, referenceUpdatedAt, premiumBps, holders, variantCount
     }
 
     public init(from decoder: Decoder) throws {
@@ -104,6 +147,19 @@ public struct MarketAssetDTO: Codable, Equatable, Sendable, Identifiable {
         changeBasis = try container.decodeIfPresent(MarketPriceBasis.self, forKey: .changeBasis)
         changeBasisSymbol = try container.decodeIfPresent(String.self, forKey: .changeBasisSymbol)
         logoUrl = try container.decodeIfPresent(String.self, forKey: .logoUrl)
+        kind = try container.decodeIfPresent(AssetKind.self, forKey: .kind)
+        source = try container.decodeIfPresent(String.self, forKey: .source)
+        issuer = try container.decodeIfPresent(String.self, forKey: .issuer)
+        underlyingId = try container.decodeIfPresent(String.self, forKey: .underlyingId)
+        tokenDecimals = try container.decodeIfPresent(Int.self, forKey: .tokenDecimals)
+        sector = try container.decodeIfPresent(String.self, forKey: .sector)
+        alwaysOpen = try container.decodeIfPresent(Bool.self, forKey: .alwaysOpen)
+        referenceMarkUsdcMicros = try container.decodeIfPresent(Int64.self, forKey: .referenceMarkUsdcMicros)
+        referenceValuationUsd = try container.decodeIfPresent(Int64.self, forKey: .referenceValuationUsd)
+        referenceUpdatedAt = try container.decodeIfPresent(String.self, forKey: .referenceUpdatedAt)
+        premiumBps = try container.decodeIfPresent(Int.self, forKey: .premiumBps)
+        holders = try container.decodeIfPresent(Int.self, forKey: .holders)
+        variantCount = try container.decodeIfPresent(Int.self, forKey: .variantCount)
     }
 }
 
@@ -403,6 +459,49 @@ public struct StockVsTokenDTO: Codable, Equatable, Sendable {
     }
 }
 
+public struct AssetVariantDTO: Codable, Equatable, Sendable, Identifiable {
+    public let symbol: String
+    public let issuer: String
+    public let issuerName: String?
+    public let solanaMint: String
+    public let priceUsdcMicros: Int64?
+    public let liquidityUsd: String?
+    public let routable: Bool
+    public let transferFeeBps: Int?
+    public let bestPrice: Bool?
+    public let paused: Bool?
+
+    public var id: String { symbol }
+    public var resolvedIssuerName: String {
+        if let issuerName, !issuerName.isEmpty { return issuerName }
+        return issuer.capitalized
+    }
+
+    public init(
+        symbol: String,
+        issuer: String,
+        solanaMint: String,
+        priceUsdcMicros: Int64? = nil,
+        liquidityUsd: String? = nil,
+        routable: Bool,
+        issuerName: String? = nil,
+        transferFeeBps: Int? = nil,
+        bestPrice: Bool? = nil,
+        paused: Bool? = nil
+    ) {
+        self.symbol = symbol
+        self.issuerName = issuerName
+        self.transferFeeBps = transferFeeBps
+        self.bestPrice = bestPrice
+        self.paused = paused
+        self.issuer = issuer
+        self.solanaMint = solanaMint
+        self.priceUsdcMicros = priceUsdcMicros
+        self.liquidityUsd = liquidityUsd
+        self.routable = routable
+    }
+}
+
 public struct AssetDetailDTO: Codable, Equatable, Sendable {
     public let symbol: String
     public let name: String
@@ -417,6 +516,24 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
     public let market: MarketStatusDTO?
     public let stats: AssetStatsDTO?
     public let stockVsToken: StockVsTokenDTO?
+    public let kind: AssetKind?
+    public let source: String?
+    public let issuer: String?
+    public let underlyingId: String?
+    public let tokenDecimals: Int?
+    public let sector: String?
+    public let logoUrl: String?
+    public let alwaysOpen: Bool?
+    public let referenceMarkUsdcMicros: Int64?
+    public let referenceValuationUsd: Int64?
+    public let referenceUpdatedAt: String?
+    public let premiumBps: Int?
+    public let holders: Int?
+    public let variantCount: Int?
+    public let variants: [AssetVariantDTO]?
+
+    public var resolvedKind: AssetKind { kind ?? .stock }
+    public var resolvedDecimals: Int { tokenDecimals ?? AssetCatalogDefaults.decimals }
 
     public init(
         symbol: String,
@@ -430,7 +547,22 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
         afterHours: Bool = false,
         market: MarketStatusDTO? = nil,
         stats: AssetStatsDTO? = nil,
-        stockVsToken: StockVsTokenDTO? = nil
+        stockVsToken: StockVsTokenDTO? = nil,
+        kind: AssetKind? = nil,
+        source: String? = nil,
+        issuer: String? = nil,
+        underlyingId: String? = nil,
+        tokenDecimals: Int? = nil,
+        sector: String? = nil,
+        logoUrl: String? = nil,
+        alwaysOpen: Bool? = nil,
+        referenceMarkUsdcMicros: Int64? = nil,
+        referenceValuationUsd: Int64? = nil,
+        referenceUpdatedAt: String? = nil,
+        premiumBps: Int? = nil,
+        holders: Int? = nil,
+        variantCount: Int? = nil,
+        variants: [AssetVariantDTO]? = nil
     ) {
         self.symbol = symbol
         self.name = name
@@ -444,11 +576,27 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
         self.market = market
         self.stats = stats
         self.stockVsToken = stockVsToken
+        self.kind = kind
+        self.source = source
+        self.issuer = issuer
+        self.underlyingId = underlyingId
+        self.tokenDecimals = tokenDecimals
+        self.sector = sector
+        self.logoUrl = logoUrl
+        self.alwaysOpen = alwaysOpen
+        self.referenceMarkUsdcMicros = referenceMarkUsdcMicros
+        self.referenceValuationUsd = referenceValuationUsd
+        self.referenceUpdatedAt = referenceUpdatedAt
+        self.premiumBps = premiumBps
+        self.holders = holders
+        self.variantCount = variantCount
+        self.variants = variants
     }
 
     private enum CodingKeys: String, CodingKey {
         case symbol, name, solanaMint, routable, priceUsdcMicros, change24h, liquidity
         case marketSession, afterHours, market, stats, stockVsToken
+        case kind, source, issuer, underlyingId, tokenDecimals, sector, logoUrl, alwaysOpen, referenceMarkUsdcMicros, referenceValuationUsd, referenceUpdatedAt, premiumBps, holders, variantCount, variants
     }
 
     public init(from decoder: Decoder) throws {
@@ -468,6 +616,21 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
         let decodedStats = try container.decodeIfPresent(AssetStatsDTO.self, forKey: .stats)
         stats = (decodedStats?.isEmpty ?? true) ? nil : decodedStats
         stockVsToken = try container.decodeIfPresent(StockVsTokenDTO.self, forKey: .stockVsToken)
+        kind = try container.decodeIfPresent(AssetKind.self, forKey: .kind)
+        source = try container.decodeIfPresent(String.self, forKey: .source)
+        issuer = try container.decodeIfPresent(String.self, forKey: .issuer)
+        underlyingId = try container.decodeIfPresent(String.self, forKey: .underlyingId)
+        tokenDecimals = try container.decodeIfPresent(Int.self, forKey: .tokenDecimals)
+        sector = try container.decodeIfPresent(String.self, forKey: .sector)
+        logoUrl = try container.decodeIfPresent(String.self, forKey: .logoUrl)
+        alwaysOpen = try container.decodeIfPresent(Bool.self, forKey: .alwaysOpen)
+        referenceMarkUsdcMicros = try container.decodeIfPresent(Int64.self, forKey: .referenceMarkUsdcMicros)
+        referenceValuationUsd = try container.decodeIfPresent(Int64.self, forKey: .referenceValuationUsd)
+        referenceUpdatedAt = try container.decodeIfPresent(String.self, forKey: .referenceUpdatedAt)
+        premiumBps = try container.decodeIfPresent(Int.self, forKey: .premiumBps)
+        holders = try container.decodeIfPresent(Int.self, forKey: .holders)
+        variantCount = try container.decodeIfPresent(Int.self, forKey: .variantCount)
+        variants = try container.decodeIfPresent([AssetVariantDTO].self, forKey: .variants)
     }
 }
 

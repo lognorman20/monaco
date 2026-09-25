@@ -218,8 +218,8 @@ struct ProposalDetailView: View {
         if proposal.resolvedKind == "add_agent", let key = proposal.mintedAgentKey, !key.isEmpty {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
                 MonacoSectionHeader(ProposeFlowCopy.copyKey)
-                AgentKeyRevealView(apiKey: key) {
-                    toast = MonacoToast(message: ProposeFlowCopy.keyCopied, isSuccess: true)
+                AgentKeyRevealView(apiKey: key) { message in
+                    toast = MonacoToast(message: message, isSuccess: true)
                 }
             }
             .accessibilityIdentifier("proposal-detail-agent")
