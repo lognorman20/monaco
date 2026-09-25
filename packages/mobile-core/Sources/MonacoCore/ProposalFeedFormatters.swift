@@ -150,7 +150,7 @@ extension ProposalDTO {
 
 public enum ProposalTimeFormatter {
     public static func parse(_ raw: String) -> Date? {
-        SharedFormatters.iso8601WholeSeconds.date(from: raw) ?? SharedFormatters.iso8601Fractional.date(from: raw)
+        SharedFormatters.iso8601Date(from: raw)
     }
 
     /// Time left on an open vote, e.g. "Closes in 2d", "Closes in 20h", "Closes in 12m".
