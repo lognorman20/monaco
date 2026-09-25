@@ -7,11 +7,14 @@ final class FormatterHotPathTests: XCTestCase {
     func testOneScreenOfLabels_staysWellInsideAFrame() {
         // The first call builds each formatter; scrolling cost is every call after that.
         renderOneScreenOfLabels()
-        let started = Date()
-        renderOneScreenOfLabels()
-        let elapsedMilliseconds = Date().timeIntervalSince(started) * 1000
+        // Take the fastest of several passes: a shared CI runner can stall any single pass,
+        // but it cannot make one faster, so the minimum is the cost of the code itself.
+        let clock = ContinuousClock()
+        let fastest = (0..<10).map { _ in clock.measure { renderOneScreenOfLabels() } }.min()!
+        let fastestMilliseconds = Double(fastest.components.attoseconds) / 1e15
+            + Double(fastest.components.seconds) * 1000
         // A 60Hz frame is 16.7ms. Building formatters per call took ~23ms here on a fast Mac.
-        XCTAssertLessThan(elapsedMilliseconds, 8)
+        XCTAssertLessThan(fastestMilliseconds, 8)
     }
 
     /// Roughly what a busy feed renders per pass: 60 money labels, 60 ages, 30 share counts.
