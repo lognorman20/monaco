@@ -29,12 +29,12 @@ Shoot in the storyboard's order, because later beats need the state earlier ones
 ## The cut
 
 ```bash
-scripts/demo/compose.sh            # both masters
-scripts/demo/compose.sh stocks     # one beat, no cards, to check it
-MONACO_DEMO_REUSE=1 scripts/demo/compose.sh   # keep beats already rendered; only the join and cards redo
+scripts/demo/film.py                 # both masters
+scripts/demo/film.py stocks vote     # only these takes' beats, to check them
+scripts/demo/film.py cards login     # the drawn cards too
 ```
 
-writes `docs/demo/out/monaco-demo-vertical.mp4` (9:16) and `monaco-demo-site.mp4` (16:9). Missing takes are skipped. The beat list at the top of `compose.sh` sets each beat's segments, speed and caption.
+writes `docs/demo/out/monaco-demo-vertical.mp4` (9:16) and `monaco-demo-site.mp4` (16:9). The film is the `BEATS` list at the top of `film.py`: which seconds of each take to keep, how fast to play them, where to punch in, which two takes run side by side, and the cards the script draws itself (the title, the cast, the pot counting up, the sign-off). Pieces are cached under `docs/demo/out/film/` by their spec, so a change to one beat re-renders one beat.
 
 ## Faces
 

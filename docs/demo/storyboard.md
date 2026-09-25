@@ -1,6 +1,6 @@
 # Monaco demo film — storyboard
 
-One film, about three minutes, cut from takes recorded on the simulator with three real accounts and fake money (`DEMO_MODE=1`). It tells one story: three friends pool money, vote on a stock, watch it fill, and take profit. Every feature appears because the story needs it, not as a tour.
+One film, about 85 seconds, cut from takes recorded on the simulator with three real accounts and fake money (`DEMO_MODE=1`). It tells one story: three friends pool money, vote on a stock, watch it fill, and take profit. Every feature appears because the story needs it, not as a tour.
 
 Two masters: a 9:16 vertical for social, and a 16:9 for the site with the phone centred on paper and the caption beside it. Same clips, same timing.
 
@@ -16,7 +16,7 @@ Names are set once in onboarding. A member without a photo wears the animal thei
 
 ## Beats
 
-One take per row, shot in this order because each needs the state the one before leaves behind. Captions are one short line on the paper; a blank one lets the screen speak. The cut (segments and speed per beat) lives in `scripts/demo/compose.sh`.
+One take per row, shot in this order because each needs the state the one before leaves behind. Captions are one short line on the paper; a blank one lets the screen speak. The cut (segments, speed, punches and cards per beat) lives in `scripts/demo/film.py`.
 
 | # | Take | Account | Caption | On screen |
 | --- | --- | --- | --- | --- |
@@ -60,9 +60,10 @@ Record in story order, because later takes depend on earlier state (the cabal ex
 
 ## Composition
 
-`scripts/demo/compose.sh` assembles the film:
+`scripts/demo/film.py` cuts the film, about 85 seconds:
 
-- Intro and outro cards are the app's icon and the brand type on paper, faded in and out.
-- Each beat is a few segments of its take, played a little faster than life, with its caption faded in and out. Vertical: the phone on an ink bezel with the caption under it. Site: the phone at the right, the caption beside it.
-- Joins are 300ms cross-dissolves.
+- The title card pops the icon and types the wordmark; a cast card bounces the three faces in; the pot counts up on its own card with coins; the sign-off brings the cast back.
+- Each beat is a few segments of its take at 1.6 to 2 times life, some punched in on the moment that matters. Where two people do the same thing, their phones run side by side. Every phone settles into place and every caption slides up.
+- Coins fly when money moves (the pot, the buy, the bot's trade, the cash-out), and the cast cheers the buy from the foot of the frame.
+- Joins are hard cuts within one phone and slides or dissolves when one phone hands to another.
 - Music: none is bundled; a file at `docs/demo/music.m4a` is mixed in when present.
