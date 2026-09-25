@@ -657,7 +657,7 @@ private struct GroupChatBubble: View {
     private var face: some View {
         Group {
             if row.endsRun {
-                MonacoAvatar(photoURL: nil, displayName: message.authorName, size: Self.faceSize)
+                MonacoAvatar(photoURL: nil, displayName: message.authorName, size: Self.faceSize, seed: message.authorId)
             } else {
                 Color.clear
             }

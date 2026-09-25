@@ -23,7 +23,8 @@ struct ProfilePhotoPicker: View {
                 MonacoAvatar(
                     photoURL: session.me?.profilePhotoUrl,
                     displayName: session.me?.displayName ?? "",
-                    size: size
+                    size: size,
+                    seed: session.me?.userId
                 )
                 .overlay {
                     if isUploading {

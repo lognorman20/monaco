@@ -495,6 +495,8 @@ struct ProposalBallotLine: Identifiable, Equatable {
     /// Whose initials the face shows. Empty draws a plain person, which is the viewer before
     /// their ballot names them; nil draws an open ring, which is a seat nobody has filled.
     let faceName: String?
+    /// The voter's id, so their face is the same animal as on every board.
+    var faceSeed: String? = nil
     let choice: Choice
     /// When the ballot was cast, as the server sent it. Nil for a ballot still to come.
     let castAt: String?
@@ -511,6 +513,7 @@ enum ProposalBallotList {
                 id: "ballot-\(vote.voterId)",
                 name: isViewer ? ProposalDiscussionCopy.you : vote.displayName,
                 faceName: vote.displayName,
+                faceSeed: vote.voterId,
                 choice: vote.choice.lowercased() == ProposalVoteChoice.yes.rawValue ? .yes : .no,
                 castAt: vote.castAt,
                 isViewer: isViewer
@@ -590,7 +593,7 @@ private struct BallotRow: View {
     private var face: some View {
         Group {
             if let faceName = line.faceName {
-                MonacoAvatar(photoURL: nil, displayName: faceName, size: Self.faceSize)
+                MonacoAvatar(photoURL: nil, displayName: faceName, size: Self.faceSize, seed: line.faceSeed)
             } else {
                 Circle()
                     .strokeBorder(MonacoTheme.hairline, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))

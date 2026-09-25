@@ -868,7 +868,7 @@ struct GroupJoinRequestsCard: View {
                 ForEach(requests) { request in
                     let name = request.displayName.isEmpty ? "Member" : request.displayName
                     HStack(spacing: MonacoTheme.Space.sm) {
-                        MonacoAvatar(photoURL: request.profilePhotoUrl, displayName: name, size: 40)
+                        MonacoAvatar(photoURL: request.profilePhotoUrl, displayName: name, size: 40, seed: request.userId)
                         Text(name)
                             .font(MonacoTheme.Typo.rowTitle)
                             .foregroundStyle(MonacoTheme.ink)

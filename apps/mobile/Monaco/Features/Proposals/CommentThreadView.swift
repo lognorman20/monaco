@@ -136,7 +136,7 @@ struct CommentRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: MonacoTheme.Space.sm) {
-            MonacoAvatar(photoURL: nil, displayName: row.comment.authorName, size: CommentThreadLayout.avatarSize)
+            MonacoAvatar(photoURL: nil, displayName: row.comment.authorName, size: CommentThreadLayout.avatarSize, seed: row.comment.authorId)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.s) {
                     Text(row.comment.authorName)

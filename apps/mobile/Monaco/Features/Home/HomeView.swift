@@ -123,7 +123,8 @@ struct HomeView: View {
             MonacoAvatar(
                 photoURL: session.me?.profilePhotoUrl,
                 displayName: session.me?.displayName ?? "",
-                size: 32
+                size: 32,
+                seed: session.me?.userId
             )
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
