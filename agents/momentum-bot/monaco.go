@@ -20,7 +20,7 @@ const agentKeyHeader = "X-Monaco-Agent-Key"
 
 // Errors the bot reacts to differently. Anything else is a transient failure.
 var (
-	// ErrBadKey is a 401: the key is unknown, revoked, or belongs to another cabal.
+	// ErrBadKey is a 401: the key is unknown or revoked.
 	// Retrying only feeds the server's wrong-key throttle, so the bot stops.
 	ErrBadKey = errors.New("agent key rejected")
 	// ErrPaused is a 403: the cabal voted to pause the agent. The key still works,
@@ -68,16 +68,18 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("monaco api status %d: %s (intent %s %s)", e.Status, e.Message, e.IntentID, e.IntentStatus)
 }
 
-// Asset is one tradable xStock from the cabal's catalog.
+// Asset is one tradable xStock from the cabal's catalog. MarkUsdcMicros is Monaco's
+// current price for one share, or nil when Monaco has no mark for it right now.
 type Asset struct {
-	Symbol     string `json:"symbol"`
-	Name       string `json:"name"`
-	SolanaMint string `json:"solanaMint"`
-	Routable   bool   `json:"routable"`
+	Symbol         string `json:"symbol"`
+	Name           string `json:"name"`
+	SolanaMint     string `json:"solanaMint"`
+	Routable       bool   `json:"routable"`
+	MarkUsdcMicros *int64 `json:"markUsdcMicros"`
 }
 
-// Intent is the body of POST /v1/groups/{id}/agents/intents. Buys carry usdcMicros
-// (USD x 1e6); sells carry tokenAmount (shares x 1e8).
+// Intent is the body of POST /v1/agent/intents. Buys carry usdcMicros (USD x 1e6);
+// sells carry tokenAmount (shares x 1e8).
 type Intent struct {
 	Side        string `json:"side"`
 	Symbol      string `json:"symbol"`
@@ -86,6 +88,8 @@ type Intent struct {
 	// IdempotencyKey makes a resend safe: the server answers a key it has already seen
 	// with the first intent's outcome instead of trading again.
 	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+	// Reason is why the bot made the trade; the cabal sees it next to the trade.
+	Reason string `json:"reason,omitempty"`
 }
 
 // IntentResult is the server's 2xx answer. An intent that was refused or failed comes back
@@ -97,32 +101,68 @@ type IntentResult struct {
 	RejectReason  string `json:"rejectReason"`
 }
 
-// MonacoClient talks to one cabal's agent endpoints. The key only ever leaves this
-// struct as a request header.
+// IntentRecord is GET /v1/agent/intents/{id}: where an intent ended up.
+// FilledTokenAmount is set once a swap executed.
+type IntentRecord struct {
+	IntentID          string `json:"intentId"`
+	Status            string `json:"status"`
+	RejectReason      string `json:"rejectReason"`
+	TransactionID     string `json:"transactionId"`
+	FilledTokenAmount *int64 `json:"filledTokenAmount"`
+}
+
+// AgentInfo is the part of GET /v1/agent the bot shows at startup.
+type AgentInfo struct {
+	CabalName string `json:"cabalName"`
+	AgentName string `json:"agentName"`
+	Status    string `json:"status"`
+	Budget    struct {
+		AllocationUsd string `json:"allocationUsd"`
+		AvailableUsd  string `json:"availableUsd"`
+	} `json:"budget"`
+}
+
+// MonacoClient talks to Monaco's agent endpoints. The key alone names the agent and its
+// cabal, and it only ever leaves this struct as a request header.
 type MonacoClient struct {
 	baseURL string
-	groupID string
 	key     string
 	http    *http.Client
 }
 
-// NewMonacoClient returns a client for one cabal. httpClient may be nil.
-func NewMonacoClient(baseURL, groupID, key string, httpClient *http.Client) *MonacoClient {
+// NewMonacoClient returns a client for the agent the key belongs to. httpClient may be nil.
+func NewMonacoClient(baseURL, key string, httpClient *http.Client) *MonacoClient {
 	if httpClient == nil {
 		// Intents settle an on-chain swap before answering, so this is generous.
 		httpClient = &http.Client{Timeout: 90 * time.Second}
 	}
 	return &MonacoClient{
 		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
-		groupID: groupID,
 		key:     key,
 		http:    httpClient,
 	}
 }
 
+// Agent returns the agent's cabal, status and budget.
+func (c *MonacoClient) Agent(ctx context.Context) (AgentInfo, error) {
+	var out AgentInfo
+	err := c.get(ctx, "/v1/agent", &out)
+	return out, err
+}
+
 // Assets returns one page of the cabal's tradable catalog. A ticker query
 // ("GOOGLx") resolves to that single asset.
 func (c *MonacoClient) Assets(ctx context.Context, query string, limit int) ([]Asset, error) {
+	page, err := c.assetPage(ctx, query, limit, 0)
+	return page.Assets, err
+}
+
+type assetPage struct {
+	Assets  []Asset `json:"assets"`
+	HasMore bool    `json:"hasMore"`
+}
+
+func (c *MonacoClient) assetPage(ctx context.Context, query string, limit, offset int) (assetPage, error) {
 	q := url.Values{}
 	if query != "" {
 		q.Set("query", query)
@@ -130,18 +170,57 @@ func (c *MonacoClient) Assets(ctx context.Context, query string, limit int) ([]A
 	if limit > 0 {
 		q.Set("limit", strconv.Itoa(limit))
 	}
-	endpoint := fmt.Sprintf("%s/v1/groups/%s/assets?%s", c.baseURL, url.PathEscape(c.groupID), q.Encode())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if offset > 0 {
+		q.Set("offset", strconv.Itoa(offset))
+	}
+	var out assetPage
+	err := c.get(ctx, "/v1/agent/assets?"+q.Encode(), &out)
+	return out, err
+}
+
+// Prices returns USD per share for the given symbols from Monaco's marks, reading
+// catalog pages until every symbol is found. Symbols without a mark are absent.
+func (c *MonacoClient) Prices(ctx context.Context, symbols []string) (map[string]float64, error) {
+	want := make(map[string]bool, len(symbols))
+	for _, symbol := range symbols {
+		want[symbol] = true
+	}
+	out := make(map[string]float64, len(symbols))
+	for offset, found := 0, 0; found < len(want); {
+		page, err := c.assetPage(ctx, "", catalogPageSize, offset)
+		if err != nil {
+			return nil, err
+		}
+		for _, asset := range page.Assets {
+			if !want[asset.Symbol] {
+				continue
+			}
+			found++
+			if asset.MarkUsdcMicros != nil && *asset.MarkUsdcMicros > 0 {
+				out[asset.Symbol] = float64(*asset.MarkUsdcMicros) / usdcMicrosPerUSD
+			}
+		}
+		if !page.HasMore || len(page.Assets) == 0 {
+			break
+		}
+		offset += len(page.Assets)
+	}
+	return out, nil
+}
+
+// Intent reads where an intent ended up, for an outcome a submit could not settle.
+func (c *MonacoClient) Intent(ctx context.Context, intentID string) (IntentRecord, error) {
+	var out IntentRecord
+	err := c.get(ctx, "/v1/agent/intents/"+url.PathEscape(intentID), &out)
+	return out, err
+}
+
+func (c *MonacoClient) get(ctx context.Context, path string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var out struct {
-		Assets []Asset `json:"assets"`
-	}
-	if err := c.do(req, &out); err != nil {
-		return nil, err
-	}
-	return out.Assets, nil
+	return c.do(req, out)
 }
 
 // NewIdempotencyKey returns 128 random bits as hex, one per trade decision.
@@ -167,8 +246,7 @@ func (c *MonacoClient) SubmitIntent(ctx context.Context, intent Intent) (IntentR
 	if err != nil {
 		return IntentResult{}, err
 	}
-	endpoint := fmt.Sprintf("%s/v1/groups/%s/agents/intents", c.baseURL, url.PathEscape(c.groupID))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/agent/intents", bytes.NewReader(body))
 	if err != nil {
 		return IntentResult{}, err
 	}

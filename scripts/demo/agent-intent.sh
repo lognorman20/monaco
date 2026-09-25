@@ -1,32 +1,31 @@
 #!/usr/bin/env bash
-# Send one buy/sell intent to a Monaco cabal's trading agent endpoint, using the agent's
-# minted API key. Built for demos and local dev — it never moves real money by itself; that
-# depends entirely on which --api URL you point it at and which cabal's key you use.
+# Send one buy or sell intent for a Monaco cabal's agent. The key alone names the agent
+# and its cabal. Built for demos and local dev. Whether real money moves depends on which
+# API you point it at and whose key you use.
 #
 # Usage:
-#   MONACO_AGENT_KEY=monaco_ak_... ./scripts/demo/agent-intent.sh buy  AAPLx 10  --group <group-id>
-#   MONACO_AGENT_KEY=monaco_ak_... ./scripts/demo/agent-intent.sh sell AAPLx 0.5 --group <group-id>
+#   MONACO_AGENT_KEY=monaco_ak_... ./scripts/demo/agent-intent.sh buy  AAPLx 1
+#   MONACO_AGENT_KEY=monaco_ak_... ./scripts/demo/agent-intent.sh sell AAPLx 0.25
 #
 # Args:
 #   buy|sell   Trade side.
-#   SYMBOL     xStock symbol, e.g. AAPLx.
-#   AMOUNT     For buy: USD, converted to usdcMicros (USD x 1e6).
-#              For sell: shares, converted to tokenAmount atomics (shares x 1e8).
+#   SYMBOL     xStock symbol from GET /v1/agent/assets, e.g. AAPLx.
+#   AMOUNT     Buy: USD to spend, sent as "usd" (up to 6 decimals).
+#              Sell: shares to sell, sent as "shares" (up to 8 decimals).
 #
 # Flags:
-#   --group <id>   Cabal group id. Required (or set MONACO_GROUP_ID).
-#   --api <url>    API base URL. Default: http://127.0.0.1:8080
-#   --dry-run      Print the curl command (key redacted) instead of sending it.
-#   -h, --help     Show this help.
+#   --dry-run   Print the request (key redacted) instead of sending it.
+#   -h, --help  Show this help.
 #
 # Env:
-#   MONACO_AGENT_KEY   The monaco_ak_... key revealed once in the app after the cabal's
-#                      add-agent vote passes. Required. Never printed by this script.
-#   MONACO_GROUP_ID    Default --group value if the flag is omitted.
+#   MONACO_AGENT_KEY  The agent key from Group > Agent in the app. Required. Never printed.
+#   MONACO_API        API base URL. Default: http://127.0.0.1:8080
+#   IDEMPOTENCY_KEY   Reuse a key to resend the same intent after a timeout. Default: a new uuid.
+#   REASON            Why the agent is trading, up to 280 characters. Optional.
 set -euo pipefail
 
 usage() {
-	sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+	sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 die() {
@@ -34,26 +33,19 @@ die() {
 	exit 1
 }
 
-api="http://127.0.0.1:8080"
-group="${MONACO_GROUP_ID:-}"
+json_string() {
+	local s="$1"
+	s="${s//\\/\\\\}"
+	s="${s//\"/\\\"}"
+	printf '"%s"' "$s"
+}
+
+api="${MONACO_API:-http://127.0.0.1:8080}"
 dry_run=false
-side=""
-symbol=""
-amount=""
 positional=()
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
-	--group)
-		group="${2:-}"
-		[[ -n "$group" ]] || die "--group needs a value"
-		shift 2
-		;;
-	--api)
-		api="${2:-}"
-		[[ -n "$api" ]] || die "--api needs a value"
-		shift 2
-		;;
 	--dry-run)
 		dry_run=true
 		shift
@@ -81,50 +73,36 @@ symbol="${positional[1]}"
 amount="${positional[2]}"
 
 case "$side" in
-buy | sell) ;;
+buy) amount_field="usd" ;;
+sell) amount_field="shares" ;;
 *) die "side must be 'buy' or 'sell', got '$side'" ;;
 esac
 
-[[ -n "$symbol" ]] || die "SYMBOL is required, e.g. AAPLx"
-
-if ! [[ "$amount" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-	die "AMOUNT must be a positive number, got '$amount'"
-fi
-if ! awk -v n="$amount" 'BEGIN { exit !(n > 0) }'; then
-	die "AMOUNT must be greater than zero, got '$amount'"
-fi
-
-[[ -n "$group" ]] || die "missing cabal group id: pass --group <id> or set MONACO_GROUP_ID"
+[[ "$symbol" =~ ^[A-Za-z0-9.]+$ ]] || die "SYMBOL must be an xStock symbol such as AAPLx, got '$symbol'"
+[[ "$amount" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "AMOUNT must be a positive decimal, got '$amount'"
+[[ "$amount" =~ [1-9] ]] || die "AMOUNT must be greater than zero, got '$amount'"
 
 if [[ "$dry_run" != true ]]; then
-	[[ -n "${MONACO_AGENT_KEY:-}" ]] || die "missing MONACO_AGENT_KEY env var (the key revealed once in the app after the add-agent vote passes)"
+	[[ -n "${MONACO_AGENT_KEY:-}" ]] || die "MONACO_AGENT_KEY is not set (copy it from Group > Agent in the app)"
 fi
 
-if [[ "$side" == "buy" ]]; then
-	# USD -> usdcMicros (USD x 1e6), rounded to the nearest integer micro-dollar.
-	usdc_micros="$(awk -v n="$amount" 'BEGIN { printf "%d", (n * 1000000) + 0.5 }')"
-	body="{\"side\":\"buy\",\"symbol\":\"${symbol}\",\"usdcMicros\":${usdc_micros}}"
-else
-	# shares -> tokenAmount atomics (shares x 1e8, xStock 8-decimal precision).
-	token_amount="$(awk -v n="$amount" 'BEGIN { printf "%d", (n * 100000000) + 0.5 }')"
-	body="{\"side\":\"sell\",\"symbol\":\"${symbol}\",\"tokenAmount\":${token_amount}}"
-fi
+idempotency_key="${IDEMPOTENCY_KEY:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
 
-url="${api%/}/v1/groups/${group}/agents/intents"
+body="{\"side\":\"${side}\",\"symbol\":\"${symbol}\",\"${amount_field}\":\"${amount}\",\"idempotencyKey\":$(json_string "$idempotency_key")"
+if [[ -n "${REASON:-}" ]]; then
+	body+=",\"reason\":$(json_string "$REASON")"
+fi
+body+="}"
+
+url="${api%/}/v1/agent/intents"
 
 echo "POST ${url}"
 echo "  X-Monaco-Agent-Key: <redacted>"
-echo "  Content-Type: application/json"
 echo "  body: ${body}"
+echo "  resend safely with: IDEMPOTENCY_KEY=${idempotency_key}"
 echo
 
 if [[ "$dry_run" == true ]]; then
-	echo "# --dry-run: not sending. Equivalent curl:"
-	echo "curl -sS -X POST \\"
-	echo "  -H \"X-Monaco-Agent-Key: \$MONACO_AGENT_KEY\" \\"
-	echo "  -H 'Content-Type: application/json' \\"
-	echo "  \"${url}\" \\"
-	echo "  -d '${body}'"
 	exit 0
 fi
 
@@ -140,8 +118,6 @@ payload="${response%$'\n'*}"
 echo "HTTP ${status}"
 if command -v jq >/dev/null 2>&1; then
 	echo "${payload}" | jq .
-elif command -v python3 >/dev/null 2>&1; then
-	echo "${payload}" | python3 -m json.tool
 else
 	echo "${payload}"
 fi

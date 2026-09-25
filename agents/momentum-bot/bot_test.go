@@ -25,7 +25,7 @@ type scriptedPrices struct {
 	n     int
 }
 
-func (s *scriptedPrices) Prices(context.Context, []string) (map[string]float64, error) {
+func (s *scriptedPrices) Prices(_ context.Context, symbols []string) (map[string]float64, error) {
 	i := s.n
 	s.n++
 	if err := s.errs[i]; err != nil {
@@ -34,14 +34,35 @@ func (s *scriptedPrices) Prices(context.Context, []string) (map[string]float64, 
 	return s.ticks[i], nil
 }
 
-// intentServer records every intent the bot posts and answers with respond.
+// intentServer records every intent the bot posts and answers with respond. It serves
+// GET /v1/agent/intents/{id} from records, and 404s an id it has no record for.
 type intentServer struct {
 	mu      sync.Mutex
 	intents []Intent
+	reads   []string
 	respond func(w http.ResponseWriter, n int)
+	records map[string]string
 }
 
 func (s *intentServer) handler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		id, found := strings.CutPrefix(r.URL.Path, "/v1/agent/intents/")
+		s.mu.Lock()
+		s.reads = append(s.reads, id)
+		record, ok := s.records[id]
+		s.mu.Unlock()
+		if !found || !ok {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"intent not found"}`))
+			return
+		}
+		_, _ = w.Write([]byte(record))
+		return
+	}
+	if r.URL.Path != "/v1/agent/intents" {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
 	var intent Intent
 	_ = json.NewDecoder(r.Body).Decode(&intent)
 	s.mu.Lock()
@@ -71,7 +92,7 @@ func newHarness(t *testing.T, live bool, prices *scriptedPrices, budget *Budget)
 	srv := httptest.NewServer(http.HandlerFunc(h.server.handler))
 	t.Cleanup(srv.Close)
 	cfg := Config{Interval: time.Minute, Lookback: 2 * time.Minute, Rule: Rule{BuyPct: 0.5, SellPct: 0.5}, Live: live}
-	h.bot = NewBot(cfg, watchlist, NewMonacoClient(srv.URL, "group-1", testKey, srv.Client()), prices, budget, h.log, false)
+	h.bot = NewBot(cfg, watchlist, NewMonacoClient(srv.URL, testKey, srv.Client()), prices, budget, h.log, false)
 	h.bot.now = func() time.Time { return h.clock }
 	h.bot.sleep = func(_ context.Context, d time.Duration) error {
 		h.slept = append(h.slept, d)
@@ -91,7 +112,7 @@ func (h *harness) ticks(t *testing.T, n int) {
 	}
 }
 
-func flat(g, a float64) map[string]float64 { return map[string]float64{"mintG": g, "mintA": a} }
+func flat(g, a float64) map[string]float64 { return map[string]float64{"GOOGLx": g, "AAPLx": a} }
 
 func TestBot_dryRunNeverPosts(t *testing.T) {
 	prices := &scriptedPrices{ticks: []map[string]float64{flat(100, 200), flat(100, 200), flat(101, 200)}}
@@ -326,7 +347,7 @@ func TestBot_failedReplayIsNotResentAndCountsAgainstTheCap(t *testing.T) {
 
 func TestBot_priceFeedFailureBacksOffAndRecovers(t *testing.T) {
 	prices := &scriptedPrices{
-		ticks: []map[string]float64{nil, nil, flat(100, 200), {"mintG": 100}},
+		ticks: []map[string]float64{nil, nil, flat(100, 200), {"GOOGLx": 100}},
 		errs:  map[int]error{0: errors.New("connection refused"), 1: errors.New("connection refused")},
 	}
 	h := newHarness(t, true, prices, NewBudget(1_000_000, 5_000_000))
@@ -353,7 +374,7 @@ func TestBot_priceFeedFailureBacksOffAndRecovers(t *testing.T) {
 			t.Fatalf("slept %v, want %v", h.slept, want)
 		}
 	}
-	if !strings.Contains(h.log.String(), "AAPLx          —  no price from Jupiter, skipping") {
+	if !strings.Contains(h.log.String(), "AAPLx          —  no mark from Monaco, skipping") {
 		t.Fatalf("log:\n%s", h.log.String())
 	}
 }
@@ -370,5 +391,96 @@ func TestBot_onceExitsAfterTheFirstRealDecision(t *testing.T) {
 	}
 	if !strings.Contains(h.log.String(), "+0.10% over 2m  hold") {
 		t.Fatalf("log:\n%s", h.log.String())
+	}
+}
+
+func TestBot_intentCarriesTheRuleAsItsReason(t *testing.T) {
+	prices := &scriptedPrices{ticks: []map[string]float64{
+		flat(100, 200), flat(100, 200), flat(101, 200),
+		flat(101, 200), flat(101, 200), flat(100, 200),
+	}}
+	h := newHarness(t, true, prices, NewBudget(1_000_000, 5_000_000))
+	h.ticks(t, 6)
+	if len(h.server.intents) != 2 {
+		t.Fatalf("posted %d intents, want buy then sell", len(h.server.intents))
+	}
+	if got := h.server.intents[0].Reason; got != "momentum +1.00% over 2m, buy rule +0.50%" {
+		t.Fatalf("buy reason %q", got)
+	}
+	if got := h.server.intents[1].Reason; got != "momentum -0.99% over 2m, sell rule -0.50%" {
+		t.Fatalf("sell reason %q", got)
+	}
+}
+
+func TestBot_statusReadSettlesAnIntentTheSubmitCouldNot(t *testing.T) {
+	for name, tc := range map[string]struct {
+		record   string
+		spent    int64
+		position int64
+		logLine  string
+	}{
+		"executed uses the reported fill": {
+			`{"intentId":"intent-9","status":"executed","transactionId":"tx-9","filledTokenAmount":987654}`,
+			1_000_000, 987654, "✓ filled  tx tx-9  intent intent-9, confirmed by status read",
+		},
+		"failed counts nothing": {
+			`{"intentId":"intent-9","status":"failed","rejectReason":"execution failed"}`,
+			0, 0, "✗ intent intent-9 failed: execution failed; nothing traded",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			prices := &scriptedPrices{ticks: []map[string]float64{flat(100, 200), flat(100, 200), flat(101, 200)}}
+			h := newHarness(t, true, prices, NewBudget(1_000_000, 5_000_000))
+			h.server.records = map[string]string{"intent-9": tc.record}
+			h.server.respond = func(w http.ResponseWriter, _ int) {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":"internal server error","intentId":"intent-9","status":"accepted"}`))
+			}
+			h.ticks(t, 3)
+			if len(h.server.intents) != 1+maxResends {
+				t.Fatalf("posted %d intents, want 1 and %d resends", len(h.server.intents), maxResends)
+			}
+			if len(h.server.reads) != 1 || h.server.reads[0] != "intent-9" {
+				t.Fatalf("status reads %v, want one read of intent-9", h.server.reads)
+			}
+			if h.bot.budget.Spent() != tc.spent || h.bot.positions["GOOGLx"] != tc.position {
+				t.Fatalf("spent %d, position %d; want %d and %d", h.bot.budget.Spent(), h.bot.positions["GOOGLx"], tc.spent, tc.position)
+			}
+			if !strings.Contains(h.log.String(), tc.logLine) {
+				t.Fatalf("log:\n%s", h.log.String())
+			}
+		})
+	}
+}
+
+func TestBot_throttledPricesWaitOutRetryAfter(t *testing.T) {
+	prices := &scriptedPrices{
+		ticks: []map[string]float64{nil, flat(100, 200), flat(100, 200), flat(100, 200)},
+		errs:  map[int]error{0: &ThrottledError{RetryAfter: 45 * time.Second}},
+	}
+	h := newHarness(t, true, prices, NewBudget(1_000_000, 5_000_000))
+	h.bot.cfg.Once = true
+	if err := h.bot.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := []time.Duration{45 * time.Second, time.Minute, time.Minute}
+	if len(h.slept) != len(want) {
+		t.Fatalf("slept %v, want %v", h.slept, want)
+	}
+	for i := range want {
+		if h.slept[i] != want[i] {
+			t.Fatalf("slept %v, want %v", h.slept, want)
+		}
+	}
+	if !strings.Contains(h.log.String(), "prices throttled by Monaco, asking again in 45s") {
+		t.Fatalf("log:\n%s", h.log.String())
+	}
+}
+
+func TestBot_badKeyOnPricesStopsTheBot(t *testing.T) {
+	prices := &scriptedPrices{ticks: []map[string]float64{nil}, errs: map[int]error{0: ErrBadKey}}
+	h := newHarness(t, true, prices, NewBudget(1_000_000, 5_000_000))
+	if err := h.bot.Run(context.Background()); !errors.Is(err, ErrBadKey) {
+		t.Fatalf("got %v, want ErrBadKey", err)
 	}
 }
