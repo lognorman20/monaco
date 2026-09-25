@@ -18,6 +18,8 @@ type GroupHandlers struct {
 	Governance *app.GovernanceService
 	Home       *app.HomeService
 	Redeem     *app.RedeemService
+	// AgentDocs writes the agent connect text members copy. Nil leaves it out.
+	AgentDocs *app.AgentDocs
 }
 
 type joinPolicyRequest struct {
@@ -408,6 +410,8 @@ type groupViewAgentResponse struct {
 	AgentDisplayName     string `json:"agentDisplayName"`
 	AllocationUsdcMicros string `json:"allocationUsdcMicros"`
 	APIKey               string `json:"apiKey,omitempty"`
+	// ConnectText is set only alongside APIKey: the block a member pastes into an agent.
+	ConnectText string `json:"connectText,omitempty"`
 }
 
 type groupViewResponse struct {
@@ -488,6 +492,9 @@ func (h *GroupHandlers) GetGroupViewHandler(w http.ResponseWriter, r *http.Reque
 					AgentDisplayName:     agentView.AgentDisplayName,
 					AllocationUsdcMicros: strconv.FormatInt(agentView.AllocationUsdcMicros, 10),
 					APIKey:               agentView.APIKey,
+				}
+				if agentView.APIKey != "" && h.AgentDocs != nil {
+					agentResp.ConnectText = h.AgentDocs.ConnectText(result.Name, agentView.AgentDisplayName, agentView.APIKey)
 				}
 			}
 		}

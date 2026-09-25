@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
+	"github.com/monaco/monaco/apps/backend/internal/pyth"
 	"github.com/monaco/monaco/apps/backend/internal/telemetry"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
 	"github.com/monaco/monaco/packages/domain"
@@ -16,6 +18,9 @@ import (
 const (
 	// MaxAgentIdempotencyKeyLength bounds the client-supplied idempotency key.
 	MaxAgentIdempotencyKeyLength = 128
+
+	// MaxAgentIntentReasonRunes bounds the agent's note on why it traded.
+	MaxAgentIntentReasonRunes = 280
 
 	// agentIntentAbandonedAfter is how long an accepted intent with no ledger row keeps its
 	// reservation. It is far past the API's 3 minute write timeout, so only an intent whose
@@ -36,6 +41,9 @@ type AgentIntentService struct {
 	store   *postgres.Store
 	swap    *SwapService
 	symbols *SymbolResolver
+	// catalog and marks serve the agent's read routes; see WithMarketData.
+	catalog xstocks.CatalogSearcher
+	marks   pyth.AssetPriceClient
 }
 
 // NewAgentIntentService wires agent intent execution.
@@ -54,6 +62,8 @@ type SubmitAgentIntentInput struct {
 	// IdempotencyKey is optional and unique per agent. A resend under the same key returns
 	// the first intent's outcome instead of trading again.
 	IdempotencyKey string
+	// Reason is the agent's optional note on why it traded, at most MaxAgentIntentReasonRunes.
+	Reason string
 }
 
 // SubmitAgentIntentResult is the persisted intent and optional transaction.
@@ -101,6 +111,9 @@ func (s *AgentIntentService) submitAgentIntent(ctx context.Context, in SubmitAge
 	}
 	if len(in.IdempotencyKey) > MaxAgentIdempotencyKeyLength {
 		return refusedAgentIntent(fmt.Sprintf("idempotency key is longer than %d characters", MaxAgentIdempotencyKeyLength))
+	}
+	if utf8.RuneCountInString(in.Reason) > MaxAgentIntentReasonRunes {
+		return refusedAgentIntent(fmt.Sprintf("reason is longer than %d characters", MaxAgentIntentReasonRunes))
 	}
 
 	accepted, answer, err := s.reserveIntent(ctx, agentRow.ID, keyHash, in)
@@ -230,6 +243,7 @@ func (s *AgentIntentService) reserveIntent(ctx context.Context, agentID, keyHash
 		Status:         "accepted",
 		IdempotencyKey: nullString(in.IdempotencyKey),
 		Mint:           nullString(sellMint),
+		Reason:         nullString(in.Reason),
 	}
 	if validationErr != nil {
 		row.Status = "rejected"
