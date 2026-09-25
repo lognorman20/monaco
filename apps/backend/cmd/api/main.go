@@ -145,16 +145,31 @@ func boot(ctx context.Context) (*bootResult, error) {
 		return nil, err
 	}
 	privyClient := privy.NewHTTPClient(cfg)
-	// Chart history comes from Pyth Benchmarks in one call per range, and Benchmarks
-	// is a public endpoint that takes no key. Building this inside a
-	// `PythAPIKey != ""` branch made keyless history depend on exactly the Hermes
-	// entitlement it exists not to need: with the key unset there were no charts at
-	// all, while .env.example promised operators that charts keep working on a
-	// crypto-only key. The client is built unconditionally; the Hermes per-sample
-	// path stays behind a breaker as the fallback, and it is the fallback that needs
-	// the key.
+	xstocksResolver := xstocks.NewHTTPResolver()
+	// Chart history comes from Jupiter's candles for the xStock itself, in one call
+	// per range, and Jupiter needs no key.
+	//
+	// It used to come from Pyth Benchmarks. Every Pyth history source prices the
+	// *underlying equity*, and reaching an equity feed needs an entitlement our key
+	// does not carry: Hermes refuses `Equity.US.AAPL/USD` and `Crypto.AAPLX/USD`
+	// alike with a 403, and the public Benchmarks TradingView shim now 404s outright.
+	// Charts were empty whichever of them answered, and no retry was going to change
+	// that. Jupiter has no such gate and prices the thing a cabal can actually buy.
+	//
+	// Benchmarks stays reachable for an operator who sets PYTH_BENCHMARKS_BASE_URL at
+	// a deployment that does serve equity history; it is no longer wired to the public
+	// host by default, because that host has nothing for us.
+	seriesSources := []pyth.SeriesSource{jupiter.NewChartsClient(xstocksResolver, cfg.JupiterAPIKey)}
+	if cfg.PythBenchmarksBaseURL != "" {
+		seriesSources = append(seriesSources, pyth.NewBenchmarksClientWithHTTP(cfg.PythBenchmarksBaseURL, nil))
+		slog.Info("pyth benchmarks wired as chart fallback", "base_url", cfg.PythBenchmarksBaseURL)
+	}
+	// Built unconditionally. Building it inside a `PythAPIKey != ""` branch made
+	// keyless history depend on exactly the entitlement it exists not to need; the
+	// Hermes per-sample path stays behind a breaker as the last resort, and it is
+	// that path, not this one, that needs the key.
 	chartClient := pyth.NewHermesClientWithBaseURL(cfg.PythHermesBaseURL, cfg.PythAPIKey).
-		WithSeriesSource(pyth.NewBenchmarksClientWithHTTP(cfg.PythBenchmarksBaseURL, nil))
+		WithSeriesSource(pyth.NewFallbackSeriesSource(seriesSources...))
 	// Latest marks and the stock-vs-token feeds do need a key; without one they are
 	// left unwired rather than wired to something that would 401 on every call.
 	var hermes *pyth.HermesClient
@@ -162,7 +177,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 		hermes = chartClient
 		slog.Info("pyth client ready")
 	} else {
-		slog.Info("pyth marks skipped", "reason", "PYTH_API_KEY unset; Benchmarks chart history stays active")
+		slog.Info("pyth marks skipped", "reason", "PYTH_API_KEY unset; Jupiter chart history stays active")
 	}
 	jupiterPriceClient := jupiter.NewHTTPPriceClient(cfg.JupiterAPIKey)
 	if cfg.JupiterAPIKey != "" {
@@ -210,7 +225,6 @@ func boot(ctx context.Context) (*bootResult, error) {
 		NotifySweepPoll: sweepWake.Notify,
 	}
 	platformWithdrawHandlers := &httpapi.PlatformWithdrawHandlers{Withdrawals: platformWithdrawals}
-	xstocksResolver := xstocks.NewHTTPResolver()
 	buy := app.NewBuyService(jupiterClient, xstocksResolver)
 	signer := app.NewPrivyTreasurySigner(privyClient)
 	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, relayer.PrivateKey(), symbols)

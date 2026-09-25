@@ -161,3 +161,7 @@ func dayWindow(now time.Time) chartRangeWindow {
 // underlying equity is as much history as the chart can honestly claim to be about
 // the thing the user can buy.
 const allRangeYears = 5
+
+// ChartSourceJupiter names a series built from Jupiter's candles for the xStock
+// itself, rather than from a Pyth feed for the underlying equity.
+const ChartSourceJupiter = "jupiter"

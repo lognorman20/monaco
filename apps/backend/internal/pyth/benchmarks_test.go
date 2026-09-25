@@ -369,9 +369,9 @@ func TestBenchmarks_Series_contextCancellationIsAnError(t *testing.T) {
 func TestDownsample_keepsEndpointsAndRespectsTheCap(t *testing.T) {
 	t.Parallel()
 
-	bars := make([]ohlcBar, 0, 2_000)
+	bars := make([]OHLCBar, 0, 2_000)
 	for i := 0; i < 2_000; i++ {
-		bars = append(bars, ohlcBar{timestamp: int64(1_700_000_000 + i*60), close: int64(1_000_000 + i)})
+		bars = append(bars, OHLCBar{Timestamp: int64(1_700_000_000 + i*60), Close: int64(1_000_000 + i)})
 	}
 	out := downsample(bars, maxChartPoints)
 	if len(out) > maxChartPoints {
@@ -384,7 +384,7 @@ func TestDownsample_keepsEndpointsAndRespectsTheCap(t *testing.T) {
 		t.Fatal("last bar must survive downsampling")
 	}
 	for i := 1; i < len(out); i++ {
-		if out[i].timestamp <= out[i-1].timestamp {
+		if out[i].Timestamp <= out[i-1].Timestamp {
 			t.Fatalf("downsampled series is not strictly increasing at %d", i)
 		}
 	}
