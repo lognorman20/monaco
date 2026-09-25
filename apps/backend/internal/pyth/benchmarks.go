@@ -106,16 +106,7 @@ func (c *BenchmarksClient) Series(ctx context.Context, symbol string, chartRange
 	return series, nil
 }
 
-// ohlcBar is one Benchmarks candle, already converted to USDC micros.
-type ohlcBar struct {
-	timestamp int64
-	open      int64
-	high      int64
-	low       int64
-	close     int64
-}
-
-func (c *BenchmarksClient) history(ctx context.Context, querySymbol, resolution string, from, to time.Time) ([]ohlcBar, error) {
+func (c *BenchmarksClient) history(ctx context.Context, querySymbol, resolution string, from, to time.Time) ([]OHLCBar, error) {
 	endpoint := fmt.Sprintf(
 		"%s/v1/shims/tradingview/history?symbol=%s&resolution=%s&from=%d&to=%d",
 		c.baseURL, url.QueryEscape(querySymbol), url.QueryEscape(resolution), from.Unix(), to.Unix(),
@@ -163,7 +154,7 @@ func (c *BenchmarksClient) history(ctx context.Context, querySymbol, resolution 
 
 // decodeBars drops any bar whose price is missing or unusable rather than letting a
 // partial payload become a chart with a zero-dollar spike in it.
-func decodeBars(payload benchmarksHistoryResponse) ([]ohlcBar, error) {
+func decodeBars(payload benchmarksHistoryResponse) ([]OHLCBar, error) {
 	count := len(payload.Timestamp)
 	if count == 0 {
 		return nil, nil
@@ -172,19 +163,19 @@ func decodeBars(payload benchmarksHistoryResponse) ([]ohlcBar, error) {
 		return nil, fmt.Errorf("pyth benchmarks history: %d timestamps but %d closes", count, len(payload.Close))
 	}
 
-	bars := make([]ohlcBar, 0, count)
+	bars := make([]OHLCBar, 0, count)
 	for i := 0; i < count; i++ {
 		closeMicros, ok := usdToMicros(payload.Close[i])
 		if !ok || payload.Timestamp[i] <= 0 {
 			continue
 		}
-		bar := ohlcBar{timestamp: payload.Timestamp[i], close: closeMicros}
-		bar.open = optionalMicros(payload.Open, i, closeMicros)
-		bar.high = optionalMicros(payload.High, i, closeMicros)
-		bar.low = optionalMicros(payload.Low, i, closeMicros)
+		bar := OHLCBar{Timestamp: payload.Timestamp[i], Close: closeMicros}
+		bar.Open = optionalMicros(payload.Open, i, closeMicros)
+		bar.High = optionalMicros(payload.High, i, closeMicros)
+		bar.Low = optionalMicros(payload.Low, i, closeMicros)
 		bars = append(bars, bar)
 	}
-	sort.Slice(bars, func(i, j int) bool { return bars[i].timestamp < bars[j].timestamp })
+	sort.Slice(bars, func(i, j int) bool { return bars[i].Timestamp < bars[j].Timestamp })
 	return bars, nil
 }
 
@@ -214,7 +205,7 @@ func usdToMicros(value float64) (int64, bool) {
 // one that supplies the previous close. Both boundaries come from the window — that
 // is, from the exchange calendar — never from the bars, which keep arriving after
 // the bell whether or not a session is running.
-func assembleSeries(bars []ohlcBar, window chartRangeWindow) AssetChartSeries {
+func assembleSeries(bars []OHLCBar, window chartRangeWindow) AssetChartSeries {
 	if len(bars) == 0 {
 		return AssetChartSeries{EmptyReason: EmptyReasonNoHistory}
 	}
@@ -231,13 +222,13 @@ func assembleSeries(bars []ohlcBar, window chartRangeWindow) AssetChartSeries {
 		previousCloseUnix = window.previousCloseAt.Unix()
 	}
 
-	inWindow := make([]ohlcBar, 0, len(bars))
+	inWindow := make([]OHLCBar, 0, len(bars))
 	var previousClose int64
 	for _, bar := range bars {
-		if bar.timestamp <= previousCloseUnix {
-			previousClose = bar.close
+		if bar.Timestamp <= previousCloseUnix {
+			previousClose = bar.Close
 		}
-		if bar.timestamp >= fromUnix && bar.timestamp <= toUnix {
+		if bar.Timestamp >= fromUnix && bar.Timestamp <= toUnix {
 			inWindow = append(inWindow, bar)
 		}
 	}
@@ -249,11 +240,11 @@ func assembleSeries(bars []ohlcBar, window chartRangeWindow) AssetChartSeries {
 	points := make([]ChartPoint, 0, len(inWindow))
 	for _, bar := range inWindow {
 		points = append(points, ChartPoint{
-			Timestamp:       bar.timestamp,
-			PriceUsdcMicros: bar.close,
-			OpenUsdcMicros:  bar.open,
-			HighUsdcMicros:  bar.high,
-			LowUsdcMicros:   bar.low,
+			Timestamp:       bar.Timestamp,
+			PriceUsdcMicros: bar.Close,
+			OpenUsdcMicros:  bar.Open,
+			HighUsdcMicros:  bar.High,
+			LowUsdcMicros:   bar.Low,
 		})
 	}
 
@@ -271,18 +262,18 @@ func assembleSeries(bars []ohlcBar, window chartRangeWindow) AssetChartSeries {
 
 // downsample keeps the first and last bar and spreads the rest evenly, so the
 // endpoints a chart labels stay exact even when the middle is thinned.
-func downsample(bars []ohlcBar, limit int) []ohlcBar {
+func downsample(bars []OHLCBar, limit int) []OHLCBar {
 	if limit <= 2 || len(bars) <= limit {
 		return bars
 	}
-	out := make([]ohlcBar, 0, limit)
+	out := make([]OHLCBar, 0, limit)
 	step := float64(len(bars)-1) / float64(limit-1)
 	for i := 0; i < limit; i++ {
 		index := int(math.Round(float64(i) * step))
 		if index >= len(bars) {
 			index = len(bars) - 1
 		}
-		if len(out) > 0 && out[len(out)-1].timestamp == bars[index].timestamp {
+		if len(out) > 0 && out[len(out)-1].Timestamp == bars[index].Timestamp {
 			continue
 		}
 		out = append(out, bars[index])
