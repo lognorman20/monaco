@@ -126,6 +126,10 @@ Tessera and PreStocks tokens sit in the same catalog, propose, buy, hold, and se
 
 The xStocks public API is mint metadata only. It is not an execution rail. Poll `/execute` for confirmation. Do not use a Jupiter WebSocket. Do not use Privy production webhooks (Enterprise-only).
 
+## News
+
+A member deciding whether to propose a stock wants to know what happened to it today. The stock screen shows the newest three headlines about it (all twelve behind "See all"), and the Stocks tab shows the day's market headlines under the movers. The API reads free public RSS, Yahoo Finance by ticker and Google News by company name for pre-IPO tokens, and caches each list for ten minutes; the app never calls a feed. Articles open in Safari's in-app reader. Contract: [News](api.md#news).
+
 ## Architecture
 
 Who does what is in [Solana, Privy, and Bankr](#solana-privy-and-bankr). The API signs the treasury. The product UI does not explain custody.

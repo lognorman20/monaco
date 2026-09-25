@@ -23,6 +23,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/jupitercharts"
+	"github.com/monaco/monaco/apps/backend/internal/news"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/prestocks"
 	"github.com/monaco/monaco/apps/backend/internal/pricechain"
@@ -98,6 +99,9 @@ var apiRoutes = []string{
 	"GET /v1/assets/popular",
 	"GET /v1/assets/{symbol}/chart",
 	"GET /v1/assets/{symbol}/social",
+	// lane: news
+	"GET /v1/assets/{symbol}/news",
+	"GET /v1/news/market",
 	"GET /v1/assets/{symbol}",
 	"POST /v1/groups/{id}/quotes",
 	"GET /v1/groups/{id}/proposals",
@@ -356,6 +360,10 @@ func boot(ctx context.Context) (*bootResult, error) {
 		}
 		assetsHandlers.Quotes = quotes
 	}
+	// lane: news
+	// Headlines from keyless RSS (Yahoo Finance per ticker, Google News by name),
+	// cached per company for ten minutes; a feed that fails serves its last list.
+	newsHandlers := &httpapi.NewsHandlers{Assets: assetsHandlers, News: news.NewService(news.NewClient(nil))}
 	quoteHandlers := &httpapi.QuoteHandlers{
 		Store:      store,
 		Privy:      privyClient,
@@ -454,6 +462,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/assets/popular", assetsHandlers.PopularAssetsHandler)
 	mux.HandleFunc("GET /v1/assets/{symbol}/chart", assetsHandlers.GetAssetChartHandler)
 	mux.HandleFunc("GET /v1/assets/{symbol}/social", assetSocialHandlers.GetAssetSocialHandler)
+	// lane: news
+	mux.HandleFunc("GET /v1/assets/{symbol}/news", newsHandlers.GetAssetNewsHandler)
+	mux.HandleFunc("GET /v1/news/market", newsHandlers.GetMarketNewsHandler)
 	mux.HandleFunc("GET /v1/assets/{symbol}", assetsHandlers.GetAssetHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/quotes", quoteHandlers.QuoteHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/proposals", proposalHandlers.ListGroupProposalsHandler)

@@ -129,6 +129,8 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/assets/{symbol}` | Asset detail: price, liquidity, market session, the stats grid, the underlying equity against the token (`stockVsToken`), and `variants[]` when several issuers share an `underlyingId` (each names the issuer, fee, and whether it is the best price). |
 | `GET /v1/assets/{symbol}/chart` | Price history. `range` is `1D`, `1W`, `1M`, `3M`, `1Y` or `ALL` (default `1D`); the response echoes the range, names its `source`, and carries the `previousCloseUsdcMicros` baseline. |
 | `GET /v1/assets/{symbol}/social` | What the caller's own cabals are doing with one stock: `holdings` (units, value, cost basis, P&L and the caller's slice), `openProposals` (tally, the caller's ballot and who voted) and `activity` (proposals and fills). Scoped to the caller's memberships, so a non-member never appears in another cabal's answer. `unvaluedGroups` counts cabals that could not be priced on this pass. |
+| `GET /v1/assets/{symbol}/news` | Headlines about one stock: `items[]` (`title`, `url`, `source`, `publishedAt`) newest first, at most 12, plus `asOf`. See [News](#news). |
+| `GET /v1/news/market` | The day's market headlines for the Stocks tab, same shape. |
 | `POST /v1/groups/{id}/quotes` | Check that a buy or sell can route, and at what price. `kind` stays `buy` or `sell`. A buy may send `selectBestVariant: true`; the response symbol is the issuer that was chosen. Buy responses add `tokenDecimals`, `assetKind` (`stock` or `pre_ipo`), `issuer`, and live `premiumBps` when a fresh Jupiter reference exists. |
 | `GET /v1/groups/{id}/proposals` | List proposals. |
 | `POST /v1/groups/{id}/proposals` ● | Open a proposal: buy, sell, or add, pause, resume, revoke an agent. |
@@ -147,6 +149,24 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/agent/intents/{intentId}` | One of the agent's intents with its fill. Agent key only. |
 | `GET /v1/agent/skill.md` | Public markdown instructions for agents. |
 | `POST /v1/dev/faker` | Seed demo data. Only with `FAKER_ENABLED`, from loopback, on a local database. |
+
+## News
+
+`GET /v1/assets/{symbol}/news` and `GET /v1/news/market` answer
+`{ "items": [{ "title", "url", "source", "publishedAt" }], "asOf" }`. Both read keyless
+public RSS on the server; the app never calls a feed.
+
+| Subject | Feed |
+| --- | --- |
+| Listed stock | Yahoo Finance's headline feed for the underlying ticker (`GOOGLx` reads `GOOGL`, the chart's mapping), then a Google News search for `"<name>" stock` if Yahoo fails or is empty. |
+| Pre-IPO token | Google News search for the company's name (`"SpaceX"`). Both issuers of one company share a list. |
+| Market | Google News search for the day's `"stock market" OR "Wall Street"` coverage, then Yahoo's S&P 500 and Nasdaq feed. |
+
+- `items` is always a list. `publishedAt` is RFC 3339 UTC, or `null` when the feed gave no usable date; those items sort last.
+- `url` is an absolute `http(s)` link with tracking parameters removed. A Google News item links through `news.google.com`, which redirects to the publisher.
+- `source` is the item's own publisher, else the article's host when it is off the feed's site, else the feed's name.
+- Cached per company for 10 minutes (2 when a feed has nothing). When every feed fails, the last list is served with the `asOf` it was read at; with nothing cached the route answers `503`. A failure is not retried for a minute.
+- An unknown symbol is `404`, a symbol that is not ticker-shaped is `400`.
 
 ## Market rows
 
