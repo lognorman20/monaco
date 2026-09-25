@@ -4,7 +4,7 @@ import MonacoCore
 import SwiftUI
 
 /// Debug-only in-memory proposal backend for simulator QA without a Privy session.
-/// Launch with `-MonacoProposalFeedSample` to open the feed on sample data (see docs/qa/149).
+/// Launch with `-MonacoProposalFeedSample` to open the feed on sample data (see docs/archive/qa/149).
 ///
 /// The cabal is five people: the viewer and four friends. Every ballot the detail read returns is
 /// named and dated, and the vote counts are derived from those ballots, so a card's tally, its

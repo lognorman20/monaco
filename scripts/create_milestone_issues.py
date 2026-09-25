@@ -13,7 +13,7 @@ from typing import Optional
 
 REPO = "lognorman20/monaco"
 ROOT = Path(__file__).resolve().parents[1]
-DOCS = ROOT / "docs" / "milestones"
+DOCS = ROOT / "docs" / "archive" / "milestones"
 
 MILESTONES = [
     ("M0 — Scaffold", "Runnable monorepo skeleton"),
@@ -76,12 +76,12 @@ class Ticket:
 
 
 MILESTONE_DOC = {
-    0: "docs/milestones/m0-scaffold.md",
-    1: "docs/milestones/m1-auth-wallets.md",
-    2: "docs/milestones/m2-deposits.md",
-    3: "docs/milestones/m3-jupiter.md",
-    4: "docs/milestones/m4-domain.md",
-    5: "docs/milestones/m5-mobile.md",
+    0: "docs/archive/milestones/m0-scaffold.md",
+    1: "docs/archive/milestones/m1-auth-wallets.md",
+    2: "docs/archive/milestones/m2-deposits.md",
+    3: "docs/archive/milestones/m3-jupiter.md",
+    4: "docs/archive/milestones/m4-domain.md",
+    5: "docs/archive/milestones/m5-mobile.md",
 }
 
 REQUIRED_HEADINGS = [

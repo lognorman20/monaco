@@ -69,7 +69,7 @@ xcodebuild -exportArchive \
 
 ## Smoke after install
 
-Follow [`docs/m5-demo-script.md`](../../docs/m5-demo-script.md) on a physical device. The backend at the archive's `MONACO_API_BASE_URL` must be reachable over https for live JSON flows.
+Follow [`docs/how-to/demo-checklist.md`](../../docs/how-to/demo-checklist.md) on a physical device. The backend at the archive's `MONACO_API_BASE_URL` must be reachable over https for live JSON flows.
 
 ## Done when
 

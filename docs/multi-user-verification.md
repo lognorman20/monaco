@@ -1,6 +1,6 @@
 # Multi-user verification
 
-Rerun this after you change auth, membership, account balance or cabal funding, governance, the member board, or Home P&L. It pairs the automated backend suite with a two-account pass on the gold simulator. The style follows [`m5-demo-script.md`](m5-demo-script.md).
+Rerun this after you change auth, membership, account balance or cabal funding, governance, the member board, or Home P&L. It pairs the automated backend suite with a two-account pass on the gold simulator. The style follows the [demo checklist](how-to/demo-checklist.md).
 
 Never `simctl erase`. Never hardcode another laptop's simulator UDID.
 

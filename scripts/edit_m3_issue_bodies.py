@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Edit existing M3 GitHub issue bodies from docs/milestones/m3-jupiter.md. Idempotent."""
+"""Edit existing M3 GitHub issue bodies from docs/archive/milestones/m3-jupiter.md. Idempotent."""
 from __future__ import annotations
 
 import json
@@ -11,7 +11,7 @@ from pathlib import Path
 
 REPO = "lognorman20/monaco"
 ROOT = Path(__file__).resolve().parents[1]
-DOC = ROOT / "docs" / "milestones" / "m3-jupiter.md"
+DOC = ROOT / "docs" / "archive" / "milestones" / "m3-jupiter.md"
 
 SECTIONS = [
     "Context",
