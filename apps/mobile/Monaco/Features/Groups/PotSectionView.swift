@@ -136,7 +136,7 @@ private struct PotHoldingRow: View {
     /// and it costs the row no height.
     var body: some View {
         MonacoRow(
-            title: AssetDisplayNames.name(forSymbol: row.symbol) ?? AssetSymbolFormatter.display(row.symbol),
+            title: AssetSymbolFormatter.display(row.symbol),
             subtitle: "\(PotSectionView.sharesLabel(row)) · \(UsdAmountFormatter.format(decimalString: row.markUsd))",
             chevron: true,
             isLast: isLast

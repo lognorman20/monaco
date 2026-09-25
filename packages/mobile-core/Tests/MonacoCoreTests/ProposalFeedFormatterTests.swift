@@ -176,15 +176,20 @@ final class ProposalFeedFormatterTests: XCTestCase {
         XCTAssertEqual(ProposalFeedCopy.viewerVoted("NO"), "You voted no")
     }
 
-    func testTitle_tradeUsesCompanyNameThenTicker() {
-        XCTAssertEqual(ProposalFeedCopy.title(for: ProposalDTO(id: "p", symbol: "AAPLx", status: "open")), "Apple")
-        XCTAssertEqual(ProposalFeedCopy.title(for: ProposalDTO(id: "p", symbol: "NVDAx", status: "open", kind: "sell")), "Nvidia")
+    /// The card is a feed row, and rows carry the ticker; the company's name is for the
+    /// proposal screen the card opens. A symbol the app has no name for reads the same
+    /// as one it does, which is the point — the label never depends on the lookup table.
+    func testTitle_tradeIsTheTicker() {
+        XCTAssertEqual(ProposalFeedCopy.title(for: ProposalDTO(id: "p", symbol: "AAPLx", status: "open")), "AAPL")
+        XCTAssertEqual(ProposalFeedCopy.title(for: ProposalDTO(id: "p", symbol: "NVDAx", status: "open", kind: "sell")), "NVDA")
         XCTAssertEqual(ProposalFeedCopy.title(for: ProposalDTO(id: "p", symbol: "ZZZZx", status: "open")), "ZZZZ")
     }
 
-    func testSubtitle_tradeShowsTickerAndSide() {
-        XCTAssertEqual(ProposalFeedCopy.subtitle(for: ProposalDTO(id: "p", symbol: "AAPLx", status: "open")), "AAPL · Buy")
-        XCTAssertEqual(ProposalFeedCopy.subtitle(for: ProposalDTO(id: "p", symbol: "AAPLx", status: "open", kind: "sell")), "AAPL · Sell")
+    /// The title already carries the ticker, so the subtitle must not — a card that read
+    /// "AAPL" over "AAPL · Buy" said the same thing twice in the space of one line.
+    func testSubtitle_tradeIsJustTheSide() {
+        XCTAssertEqual(ProposalFeedCopy.subtitle(for: ProposalDTO(id: "p", symbol: "AAPLx", status: "open")), "Buy")
+        XCTAssertEqual(ProposalFeedCopy.subtitle(for: ProposalDTO(id: "p", symbol: "AAPLx", status: "open", kind: "sell")), "Sell")
         XCTAssertEqual(
             ProposalFeedCopy.subtitle(for: ProposalDTO(id: "p", symbol: "", status: "open", kind: "add_agent", allocationUsdcMicros: "500000000")),
             "New trading bot · Budget from the pot"

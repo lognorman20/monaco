@@ -80,7 +80,7 @@ struct HomeMissedVotesSection: View {
                         onOpen(row.proposalId)
                     } label: {
                         MonacoRow(
-                            title: AssetDisplayNames.name(forSymbol: row.symbol) ?? AssetSymbolFormatter.display(row.symbol),
+                            title: AssetSymbolFormatter.display(row.symbol),
                             subtitle: subtitle(for: row, now: now),
                             chevron: true,
                             isLast: row.proposalId == rows.last?.proposalId

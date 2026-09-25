@@ -304,15 +304,16 @@ private struct ProposePotUnavailable: View {
     }
 }
 
-/// Stock row for the pick step: mark, name over ticker (or why it can't be bought), price over 24h move.
+/// Stock row for the pick step: mark, ticker, price over 24h move. The company name
+/// waits for the amount screen, which is where the member has committed to a stock
+/// and has room to be told what it is.
 struct ProposeStockRow: View {
     let stock: ProposeStock
     var isLast = false
 
     var body: some View {
         MonacoRow(
-            title: stock.name,
-            subtitle: stock.ticker,
+            title: stock.ticker,
             chevron: true,
             isLast: isLast
         ) {

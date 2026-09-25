@@ -129,8 +129,13 @@ enum DayChangeSpeech {
     }
 }
 
-/// A market row: logo, name over a second line, the day's shape, the price and a
-/// day-change pill.
+/// A market row: logo, ticker over an optional second line, the day's shape, the
+/// price and a day-change pill.
+///
+/// The ticker is the label, the way a watchlist reads. The company name is what the
+/// detail screen is for — it sits under the price there, with the ticker in the nav
+/// bar — so a row never spends its one line on "Apple" when "AAPL" is what a member
+/// scans for and what every other trading app has taught them to scan for.
 ///
 /// One row for the Stocks tab, the cabal's holdings and anything else that lists a
 /// stock, so the three cannot drift. It is built on `MonacoRowLayout` rather than
@@ -155,11 +160,14 @@ struct StockListRow: View {
     }
 
     private var title: String {
-        ProposeStock.displayName(symbol: asset.symbol, catalogName: asset.name)
+        AssetSymbolFormatter.display(asset.symbol)
     }
 
-    private var subtitle: String {
-        row.subtitle ?? AssetSymbolFormatter.display(asset.symbol)
+    /// Only the rows with something to say get a second line ("2 cabals · your slice").
+    /// The ticker used to be the fallback here; it is the title now, and repeating it
+    /// underneath itself would be noise.
+    private var subtitle: String? {
+        row.subtitle
     }
 
     var body: some View {
@@ -238,11 +246,13 @@ struct StockListRow: View {
                 .foregroundStyle(MonacoTheme.ink)
                 .lineLimit(layout.titleLineLimit)
                 .truncationMode(.tail)
-            Text(subtitle)
-                .font(MonacoTheme.Typo.caption)
-                .foregroundStyle(MonacoTheme.muted)
-                .lineLimit(layout.subtitleLineLimit)
-                .truncationMode(.tail)
+            if let subtitle {
+                Text(subtitle)
+                    .font(MonacoTheme.Typo.caption)
+                    .foregroundStyle(MonacoTheme.muted)
+                    .lineLimit(layout.subtitleLineLimit)
+                    .truncationMode(.tail)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
