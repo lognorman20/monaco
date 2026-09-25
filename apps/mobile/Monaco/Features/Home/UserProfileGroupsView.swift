@@ -56,7 +56,7 @@ struct UserProfileGroupsView: View {
 
     private var header: some View {
         HStack(spacing: MonacoTheme.Space.sm) {
-            MonacoAvatar(photoURL: profilePhotoUrl, displayName: displayName, size: 56)
+            MonacoAvatar(photoURL: profilePhotoUrl, displayName: displayName, size: 56, seed: userId)
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayName)
                     .font(MonacoTheme.Typo.title)

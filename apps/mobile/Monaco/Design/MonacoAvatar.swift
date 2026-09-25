@@ -7,6 +7,9 @@ struct MonacoAvatar: View {
     let photoURL: String?
     let displayName: String
     var size: CGFloat = 44
+    /// What picks the member's animal when there is no photo: their id where the screen has
+    /// one, so a renamed member keeps their face; the name otherwise.
+    var seed: String? = nil
 
     private var resolvedURL: URL? {
         let trimmed = photoURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -66,29 +69,26 @@ struct MonacoAvatar: View {
         }
     }
 
+    /// One of the pixel animals, on its own wash. Initials used to sit here; a row of grey
+    /// circles with letters in them read as an org chart, and a member without a photo is
+    /// most of a new cabal.
     private var placeholder: some View {
-        let initials = AvatarInitials.from(displayName)
-        return ZStack {
-            Circle().fill(MonacoTheme.canvasWash)
-            if initials.isEmpty {
-                Image(systemName: "person.fill")
-                    .font(.system(size: size * 0.42, weight: .semibold))
-                    .foregroundStyle(MonacoTheme.accent)
-            } else {
-                Text(initials)
-                    .font(.custom("AvenirNext-DemiBold", size: size * 0.38))
-                    .foregroundStyle(MonacoTheme.accent)
-                    .minimumScaleFactor(0.5)
-                    .lineLimit(1)
-            }
-        }
+        Image(animal.imageName)
+            .resizable()
+            .interpolation(.none)
+            .scaledToFill()
+    }
+
+    private var animal: PixelAnimal {
+        let key = (seed ?? "").isEmpty ? displayName : seed!
+        return PixelAnimal.forSeed(key)
     }
 }
 
 #Preview {
     HStack(spacing: 16) {
         MonacoAvatar(photoURL: nil, displayName: "Logan Norman", size: 96)
-        MonacoAvatar(photoURL: nil, displayName: "", size: 44)
+        MonacoAvatar(photoURL: nil, displayName: "", size: 44, seed: "user-2")
         MonacoAvatar(photoURL: nil, displayName: "Ana", size: 28)
     }
     .padding()

@@ -128,7 +128,7 @@ struct HomeLeaderboardSection: View {
                         dollarPnl: row.dollarPnl,
                         isLast: row.userId == people.last?.userId
                     ) {
-                        MonacoAvatar(photoURL: row.profilePhotoUrl, displayName: row.displayName, size: 40)
+                        MonacoAvatar(photoURL: row.profilePhotoUrl, displayName: row.displayName, size: 40, seed: row.userId)
                     }
                 }
                 .buttonStyle(.monacoRow)

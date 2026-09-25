@@ -27,6 +27,7 @@ const (
 	envPythAPIKey                   = "PYTH_API_KEY"
 	envPythHermesBaseURL            = "PYTH_HERMES_BASE_URL"
 	envPythBenchmarksBaseURL        = "PYTH_BENCHMARKS_BASE_URL"
+	envChartSource                  = "CHART_SOURCE"
 	envJupiterAPIKey                = "JUPITER_API_KEY"
 	envSupabaseURL                  = "SUPABASE_URL"
 	envSupabaseServiceRoleKey       = "SUPABASE_SERVICE_ROLE_KEY"
@@ -109,17 +110,21 @@ type Config struct {
 	PythAPIKey                   string
 	PythHermesBaseURL            string
 	PythBenchmarksBaseURL        string
-	JupiterAPIKey                string
-	TesseraAPIBaseURL            string
-	TesseraEnabled               bool
-	PreStocksAPIBaseURL          string
-	PreStocksEnabled             bool
-	SupabaseURL                  string
-	SupabaseServiceRoleKey       string
-	SolanaCluster                string
-	SwapProvider                 string
-	FlashAPIKey                  string
-	FlashMaxSlippage             string
+	// ChartSource picks where a stock's curve comes from: "yahoo" (the underlying
+	// equity, free, the default while history is not worth paying for) or "jupiter"
+	// (the xStock's own on-chain candles).
+	ChartSource            string
+	JupiterAPIKey          string
+	TesseraAPIBaseURL      string
+	TesseraEnabled         bool
+	PreStocksAPIBaseURL    string
+	PreStocksEnabled       bool
+	SupabaseURL            string
+	SupabaseServiceRoleKey string
+	SolanaCluster          string
+	SwapProvider           string
+	FlashAPIKey            string
+	FlashMaxSlippage       string
 	// PublicAPIBaseURL has no trailing slash.
 	PublicAPIBaseURL string
 	// PrivyVerificationKey is the parsed PRIVY_VERIFICATION_KEY.
@@ -141,6 +146,7 @@ func Load() (*Config, error) {
 		PythAPIKey:                   strings.TrimSpace(os.Getenv(envPythAPIKey)),
 		PythHermesBaseURL:            strings.TrimRight(strings.TrimSpace(os.Getenv(envPythHermesBaseURL)), "/"),
 		PythBenchmarksBaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv(envPythBenchmarksBaseURL)), "/"),
+		ChartSource:                  chartSource(os.Getenv(envChartSource)),
 		JupiterAPIKey:                strings.TrimSpace(os.Getenv(envJupiterAPIKey)),
 		TesseraAPIBaseURL:            tesseraAPIBaseURLFromEnv(),
 		TesseraEnabled:               tesseraEnabledFromEnv(),
@@ -273,4 +279,12 @@ func validateSolanaRPCURL(raw string) error {
 		return fmt.Errorf("%s must be an http(s) URL", envSolanaRPCURL)
 	}
 	return nil
+}
+
+// chartSource normalizes CHART_SOURCE. Anything but "jupiter" is the free equity source.
+func chartSource(raw string) string {
+	if strings.EqualFold(strings.TrimSpace(raw), "jupiter") {
+		return "jupiter"
+	}
+	return "yahoo"
 }

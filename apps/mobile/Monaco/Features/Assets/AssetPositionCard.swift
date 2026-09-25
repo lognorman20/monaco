@@ -535,7 +535,7 @@ private struct VoterFaces: View {
     var body: some View {
         HStack(spacing: -9) {
             ForEach(shown) { voter in
-                MonacoAvatar(photoURL: voter.profilePhotoUrl, displayName: voter.displayName, size: 22)
+                MonacoAvatar(photoURL: voter.profilePhotoUrl, displayName: voter.displayName, size: 22, seed: voter.userId)
                     // A ring of the paper behind each face, so the overlap reads as a cut
                     // and every face keeps its own hairline. It used to be a white stroke
                     // drawn over the face, from when this sat on a white card; on the

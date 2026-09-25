@@ -78,6 +78,13 @@ private struct GalleryPrimitivesPage: View {
                 }
 
                 VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+                    MonacoSectionHeader("Faces")
+                    HStack(spacing: MonacoTheme.Space.s) {
+                        ForEach(PixelAnimal.allCases, id: \.self) { animal in
+                            MonacoAvatar(photoURL: nil, displayName: animal.spokenName, size: 40, seed: animal.rawValue)
+                        }
+                    }
+
                     MonacoSectionHeader("Stock marks")
                     HStack(spacing: MonacoTheme.Space.sm) {
                         StockMark(symbol: "AAPLx")

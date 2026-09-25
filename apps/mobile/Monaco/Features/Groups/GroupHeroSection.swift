@@ -276,13 +276,9 @@ struct GroupMemberAvatarStack: View {
     private func avatar(_ member: LeaderboardRowDTO) -> some View {
         let photo = member.profilePhotoUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if photo.isEmpty {
-            bubble {
-                Text(CabalMark.initials(for: member.displayName))
-                    .font(.custom("AvenirNext-DemiBold", fixedSize: size * 0.36))
-                    .foregroundStyle(MonacoTheme.heroInk)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
+            // The member's animal, the same one they are everywhere else.
+            MonacoAvatar(photoURL: nil, displayName: member.displayName, size: size, seed: member.userId)
+                .overlay(Circle().strokeBorder(ringColor, lineWidth: 2))
         } else {
             MonacoAvatar(photoURL: photo, displayName: member.displayName, size: size)
                 .overlay(Circle().strokeBorder(ringColor, lineWidth: 2))

@@ -34,6 +34,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/tessera"
 	"github.com/monaco/monaco/apps/backend/internal/worker"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/yahoocharts"
 )
 
 // bootResult holds API wiring produced at startup.
@@ -169,7 +170,13 @@ func boot(ctx context.Context) (*bootResult, error) {
 	// Benchmarks stays reachable for an operator who sets PYTH_BENCHMARKS_BASE_URL at
 	// a deployment that does serve equity history; it is no longer wired to the public
 	// host by default, because that host has nothing for us.
+	// The free equity curve first (CHART_SOURCE=yahoo, the default for now), the
+	// token's own candles behind it; CHART_SOURCE=jupiter draws the token alone.
 	seriesSources := []pyth.SeriesSource{jupitercharts.NewChartsClient(xstocksResolver, cfg.JupiterAPIKey)}
+	if cfg.ChartSource == "yahoo" {
+		seriesSources = append([]pyth.SeriesSource{yahoocharts.New()}, seriesSources...)
+		slog.Info("chart history from yahoo finance (underlying equity); jupiter candles as fallback")
+	}
 	if cfg.PythBenchmarksBaseURL != "" {
 		seriesSources = append(seriesSources, pyth.NewBenchmarksClientWithHTTP(cfg.PythBenchmarksBaseURL, nil))
 		slog.Info("pyth benchmarks wired as chart fallback", "base_url", cfg.PythBenchmarksBaseURL)
