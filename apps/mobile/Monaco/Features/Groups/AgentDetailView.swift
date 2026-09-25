@@ -4,7 +4,7 @@ import SwiftUI
 /// Full agent screen: name, budget, status, and the bot API key cabal members can copy until the bot is removed.
 struct AgentDetailView: View {
     let agent: GroupAgentDTO
-    var onCopied: () -> Void = {}
+    var onCopied: (String) -> Void = { _ in }
 
     var body: some View {
         ScrollView {
@@ -21,7 +21,7 @@ struct AgentDetailView: View {
                 VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
                     MonacoSectionHeader(ProposeFlowCopy.agentKeySection)
                     if let key = agent.apiKey, !key.isEmpty {
-                        AgentKeyRevealView(apiKey: key, explainer: ProposeFlowCopy.agentKeyExplainer, onCopied: onCopied)
+                        AgentKeyRevealView(apiKey: key, connectText: agent.connectText, explainer: ProposeFlowCopy.agentKeyExplainer, onCopied: onCopied)
                     } else {
                         Text(ProposeFlowCopy.agentKeyMissing)
                             .font(MonacoTheme.Typo.callout)

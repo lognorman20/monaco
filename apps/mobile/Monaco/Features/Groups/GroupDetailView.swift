@@ -567,8 +567,8 @@ struct GroupDetailContent: View {
                 }
 
                 if let agent = view.agent {
-                    AgentSectionView(agent: agent) {
-                        onToast(MonacoToast(message: ProposeFlowCopy.keyCopied, isSuccess: true))
+                    AgentSectionView(agent: agent) { message in
+                        onToast(MonacoToast(message: message, isSuccess: true))
                     }
                 }
 
