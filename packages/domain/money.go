@@ -121,11 +121,7 @@ const USDCDecimals = 6
 
 // ParseUSDDecimal parses a positive dollar amount such as "10.50" into USDC micros.
 func ParseUSDDecimal(s string) (int64, error) {
-	micros, err := ParseTokenDecimal(s, USDCDecimals)
-	if err != nil {
-		return 0, fmt.Errorf("usd: %w", err)
-	}
-	return micros, nil
+	return ParseTokenDecimal(s, USDCDecimals)
 }
 
 // ParseTokenDecimal parses a positive decimal amount such as "0.25" into atomic units of a
