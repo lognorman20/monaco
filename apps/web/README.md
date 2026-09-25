@@ -1,16 +1,41 @@
 # trymonaco.xyz
 
-Waitlist landing page. Static HTML plus two serverless functions. No build step.
+Waitlist landing page and the cabal invite page. Static HTML plus serverless functions. No build step.
 
 | Path | What it is |
 |---|---|
-| `index.html` | The page |
+| `index.html` | The waitlist page |
+| `join/index.html` | The invite page, served at `/join/<code>` |
 | `lib/waitlist.js` | Signup and health logic, tested in `test/` |
+| `lib/invite.js` | Invite page logic (code parsing, preview fetch, page copy), loaded by the page as a module and tested in `test/` |
+| `config.js` | `window.MONACO_API_BASE` for the invite preview |
 | `functions/api/waitlist.js`, `functions/api/health.js` | Cloudflare Pages adapters |
+| `functions/join/[code].js` | Cloudflare: serves `join/index.html` for every `/join/<code>` |
 | `api/waitlist.js`, `api/health.js` | Vercel adapters |
+| `.well-known/apple-app-site-association` | Universal links: `/join/*` opens the app |
 | `_headers`, `wrangler.toml` | Cloudflare config |
-| `vercel.json` | Vercel config |
+| `vercel.json` | Vercel config (`/join/:code` rewrite, AASA content type) |
 | `assets/video-poster.png` | Poster for the demo video slot |
+
+## Invite links
+
+`https://trymonaco.xyz/join/<code>` is what a member shares from the app. With Monaco
+installed, iOS opens the app on the join screen with the code filled in (universal link, via
+`.well-known/apple-app-site-association`). Without it, the page shows the cabal's mark, name,
+member count and pot, an "Open in Monaco" button (`monaco://join/<code>`), the code with a copy
+button, and the App Store link (a placeholder until the listing exists).
+
+The page reads `MONACO_API_BASE + "/v1/invites/<code>"` in the browser. Until the API has a
+public URL, `config.js` leaves it empty and the page shows the code and buttons without the
+cabal's name. To turn the preview on:
+
+1. Set `window.MONACO_API_BASE` in `config.js` to the API's public https URL.
+2. Add `https://trymonaco.xyz` (and the `www` host) to the API's `CORS_ALLOWED_ORIGINS`.
+
+The association file names team `JSF53DFS29` (the project's `DEVELOPMENT_TEAM`) and bundle
+`com.monaco.app`. Apple fetches it from its CDN when the app is installed, so a change takes a
+while to reach phones. The app's Associated Domains capability must be on for that bundle id in
+the developer portal.
 
 `api/` and `functions/` are two thin adapters over the same two functions in
 `lib/waitlist.js` — `handleSignup()` and `checkHealth()`, both returning

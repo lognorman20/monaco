@@ -8,7 +8,7 @@ detail. A test (`cmd/api/routes_doc_test.go`) fails if a route is missing from t
 
 **Auth.** `Authorization: Bearer <Privy access token>` on every `/v1` route. Agents instead send
 `X-Monaco-Agent-Key` on the `/v1/agent` routes (the key names the cabal), `POST /v1/groups/{id}/agents/intents`
-and `GET /v1/groups/{id}/assets`. `GET /v1/agent/skill.md` is public.
+and `GET /v1/groups/{id}/assets`. `GET /v1/agent/skill.md` and `GET /v1/invites/{code}` are public.
 A valid token with no Monaco user yet gets `404 user not found`: call `POST /v1/auth/session` first.
 
 **Errors.** `{ "error": "message", "requestId": "…" }`. Send your own `X-Request-Id` (1–64 of
@@ -58,6 +58,7 @@ callers: per agent key). A bearer token that fails verification is limited per I
 | `auth` | `POST /v1/auth/session` | burst 10, +1 per 6s | burst 20, +1 per 3s |
 | `money` | fund, withdraw-to-balance, withdrawals, retry, agent intents | burst 5, +1 per 10s | burst 20, +1 per 3s |
 | `write` | every other non-GET route | burst 20, +1 per 2s | burst 60, +1 per 1s |
+| `public` | `GET /v1/invites/{code}` (no session, so any method) | burst 20, +1 per 2s | burst 60, +1 per 1s |
 
 Chat, comments, display name and profile photo have their own tighter per-user limits.
 Set `TRUST_PROXY_HEADERS=true` only behind a proxy that overwrites `X-Forwarded-For`.
@@ -110,6 +111,11 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `POST /v1/groups/{id}/picture` | Set or replace the cabal picture (`multipart/form-data`, field `picture`). Creator only. |
 | `DELETE /v1/groups/{id}/picture` | Remove the cabal picture, falling back to its initials. Creator only. |
 | `POST /v1/groups/{id}/join` | Join, or ask to join when the cabal is by request. |
+| `POST /v1/groups/join-by-code` | `{ "code" }`. The same join through an invite code; see [Invites](#invites). |
+| `GET /v1/groups/{id}/invites` | The cabal's live invite `{ "code", "url" }`, made on the spot if it has none. Members only. |
+| `POST /v1/groups/{id}/invites` | `201` with a new `{ "code", "url" }`. The old code stops working. Members only. |
+| `POST /v1/groups/{id}/invites/revoke` | `204`. The cabal has no live code until a member asks again. Members only. |
+| `GET /v1/invites/{code}` | Public preview of the cabal behind a live code. No auth, limited per IP. |
 | `POST /v1/groups/{id}/leave` ● | Leave a cabal. |
 | `GET /v1/groups/{id}/join-requests` | Pending join requests. |
 | `POST /v1/groups/{id}/join-requests/{requestId}/approve` | Approve a join request. |
@@ -147,6 +153,30 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/agent/intents/{intentId}` | One of the agent's intents with its fill. Agent key only. |
 | `GET /v1/agent/skill.md` | Public markdown instructions for agents. |
 | `POST /v1/dev/faker` | Seed demo data. Only with `FAKER_ENABLED`, from loopback, on a local database. |
+
+## Invites
+
+A cabal has at most one live invite code: eight characters from `23456789ABCDEFGHJKLMNPQRSTUVWXYZ`
+(no `0`, `O`, `1` or `I`), shared as `https://trymonaco.xyz/join/<code>`. Codes are case-insensitive
+and may carry spaces or dashes (`k7qm-4xpd`). A revoked code is never reissued.
+
+`GET /v1/invites/{code}` answers without a session, for the landing page and a signed-out phone:
+
+```json
+{ "code": "K7QM4XPD", "groupId": "…", "name": "Sunday Investors", "memberCount": 9,
+  "tint": "pine", "pictureUrl": null, "joinPolicy": "open", "potValueUsd": "1240.50" }
+```
+
+`tint` is the app's cabal tint (`pine`, `ochre`, `plum`, `indigo`, `moss`), from the same hash of
+the id. `joinPolicy` is `open` or `request`. `potValueUsd` is the Groups tab's pot value (cached for
+30 seconds). A malformed, unknown or revoked code is `404 invite not found`, the same for all three.
+It is sent with `Cache-Control: no-store`, so a revoked code stops previewing at once. A browser
+page reading it needs its origin in `CORS_ALLOWED_ORIGINS`.
+
+`POST /v1/groups/join-by-code` runs `POST /v1/groups/{id}/join` for the code's cabal and answers the
+same way: `204` when the member is in (or already was), `202 { "status": "pending", "groupId" }` when
+the cabal's admin approves members. Both carry `Location: /v1/groups/{id}`. An unknown or revoked
+code is `404 invite not found`; a demo cabal is `403`. The old id route keeps working.
 
 ## Market rows
 

@@ -93,6 +93,8 @@ At create, the **group creator** sets:
 - **Vote threshold.** Unanimous among the voter set, or majority among the voter set.
 - **Vote expiry.** A duration the creator chooses. If the proposal does not pass before expiry, it dies and no swap runs.
 
+**Invites.** Any member shares the cabal with one tap: a link (`trymonaco.xyz/join/<code>`), the eight-character code inside it, or a QR code of the link, from the cabal's details sheet. The link opens the app on the join screen with the code filled in; without the app it opens a page with the cabal's name, member count, and the code. A friend who is signed out signs in first and lands on the same join screen. Joining through a code follows the cabal's join policy: an open cabal takes them in, one by request sends the admin a request. One code is live per cabal; "New code" retires the old one for everyone.
+
 ## Votes and buys
 
 On-chain governance is out of scope. Votes live in Postgres. The Go API is the source of truth.

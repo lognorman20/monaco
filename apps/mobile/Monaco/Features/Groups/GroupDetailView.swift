@@ -202,6 +202,9 @@ struct GroupDetailView: View {
                 if let groupView {
                     GroupDetailsSheet(
                         groupId: groupId,
+                        // lane: invites
+                        groupName: displayName,
+                        invites: LiveInviteSource(auth: auth),
                         treasuryAddress: groupView.treasuryAddress,
                         isLeaving: isLeaving,
                         onLeave: {

@@ -114,6 +114,12 @@ var apiRoutes = []string{
 	"GET /v1/agent/skill.md",
 	"GET /v1/proposals/{id}/comments",
 	"POST /v1/proposals/{id}/comments",
+	// lane: invites
+	"GET /v1/groups/{id}/invites",
+	"POST /v1/groups/{id}/invites",
+	"POST /v1/groups/{id}/invites/revoke",
+	"GET /v1/invites/{code}",
+	"POST /v1/groups/join-by-code",
 }
 
 // boot loads config, registers the relayer fee payer, applies migrations, and builds the HTTP server.
@@ -315,6 +321,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Market: &httpapi.MarketRowSource{Catalog: catalogComposite, Pyth: priceChain, Price: jupiterPriceClient},
 	}
 	groupsTabHandlers := &httpapi.GroupsTabHandlers{GroupsTab: app.NewGroupsTabService(home, store)}
+	// lane: invites
+	inviteHandlers := &httpapi.InviteHandlers{Invites: app.NewInviteService(store, privyClient, governance, groupsTabHandlers.GroupsTab)}
 	groupPictureHandlers := &httpapi.GroupPictureHandlers{Pictures: groupPictures}
 	executeOnPass := app.NewExecuteOnPassService(swap, store)
 	governance.SetBuyService(buy)
@@ -470,6 +478,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/agent/skill.md", agentHandlers.AgentSkillHandler)
 	mux.HandleFunc("GET /v1/proposals/{id}/comments", proposalHandlers.ListProposalCommentsHandler)
 	mux.HandleFunc("POST /v1/proposals/{id}/comments", proposalHandlers.CreateProposalCommentHandler)
+	// lane: invites
+	mux.HandleFunc("GET /v1/groups/{id}/invites", inviteHandlers.GetGroupInviteHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/invites", inviteHandlers.CreateGroupInviteHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/invites/revoke", inviteHandlers.RevokeGroupInviteHandler)
+	mux.HandleFunc("GET /v1/invites/{code}", inviteHandlers.GetInvitePreviewHandler)
+	mux.HandleFunc("POST /v1/groups/join-by-code", inviteHandlers.JoinByCodeHandler)
 	routes := registerDevFakerRoute(mux, fakerHandlers, apiRoutes)
 	logRoutesReady(routes)
 

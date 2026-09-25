@@ -193,9 +193,10 @@ struct NewCabalSheet: View {
                     .accessibilityIdentifier("new-cabal-create-row")
 
                     Button(action: onJoin) {
+                        // lane: invites
                         MonacoRow(
                             title: "Join with an invite code",
-                            subtitle: "Paste the code a friend sent you",
+                            subtitle: "Paste the code or link a friend sent you",
                             chevron: true,
                             isLast: true
                         ) {

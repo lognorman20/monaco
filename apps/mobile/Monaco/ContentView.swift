@@ -8,6 +8,12 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .monacoRootAppearance()
             .onAppear { MonacoLaunchTrace.markFirstFrame() }
+            // lane: invites — monaco://join/<code> and https://trymonaco.xyz/join/<code> wait
+            // in PendingInviteStore until the signed-in tabs present the join sheet.
+            .onOpenURL { PendingInviteStore.shared.receive($0) }
+            .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                if let url = activity.webpageURL { PendingInviteStore.shared.receive(url) }
+            }
     }
 
     @ViewBuilder
@@ -33,6 +39,9 @@ struct ContentView: View {
             AssetDetailSampleHarness(scenario: scenario, auth: auth)
         } else if let scenario = MoneyFlowSampleScenario.requested {
             MoneyFlowSampleHarness(scenario: scenario, auth: auth)
+        // lane: invites
+        } else if let scenario = InviteSampleScenario.requested {
+            InviteSampleHarness(scenario: scenario, auth: auth)
         } else if SampleProposalFeedService.isRequested {
             SampleProposalFeedRoot()
         } else {
