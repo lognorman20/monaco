@@ -362,8 +362,13 @@ func (s *AgentIntentService) buildAgentSnapshotTx(ctx context.Context, tx *sql.T
 		if err != nil {
 			return domain.AgentTreasurySnapshot{}, err
 		}
+		proceeds, err := s.store.SumAgentSellProceedsUSDCTx(ctx, tx, agent.ID)
+		if err != nil {
+			return domain.AgentTreasurySnapshot{}, err
+		}
 		snap.AgentSpentUsdcMicros = spent
 		snap.PendingAgentUsdcMicros = reserved
+		snap.AgentSellProceedsUsdcMicros = proceeds
 	case domain.AgentIntentSell:
 		held, err := s.store.NetTokenHoldingByGroupAndMintTx(ctx, tx, agent.GroupID, sellMint)
 		if err != nil {

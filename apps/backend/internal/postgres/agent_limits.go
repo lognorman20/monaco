@@ -94,8 +94,8 @@ WHERE ai.group_agent_id = $1
 // SumAgentBuyUSDCTx is the USDC an agent's buys hold against its allocation. spent is every
 // buy confirmed on the ledger. reserved is every buy not settled yet: accepted and still in
 // flight, or pending on the ledger. Reading it under LockGroupAgentTx and inserting the
-// accepted intent in the same tx is what reserves budget before the swap is submitted. Sells
-// do not give budget back: the allocation is a lifetime cap on what the agent may spend.
+// accepted intent in the same tx is what reserves budget before the swap is submitted. Sell
+// proceeds come back through SumAgentSellProceedsUSDCTx.
 func (s *Store) SumAgentBuyUSDCTx(ctx context.Context, tx *sql.Tx, agentID string) (spent, reserved int64, err error) {
 	const selectSQL = `
 SELECT
@@ -118,6 +118,24 @@ FROM (
 		return 0, 0, fmt.Errorf("sum agent buy usdc: %w", err)
 	}
 	return spent, reserved, nil
+}
+
+// SumAgentSellProceedsUSDCTx is the USDC the agent's confirmed sells returned to the treasury.
+// A confirmed sell row stores its proceeds in cost_basis_amount.
+func (s *Store) SumAgentSellProceedsUSDCTx(ctx context.Context, tx *sql.Tx, agentID string) (int64, error) {
+	const selectSQL = `
+SELECT COALESCE(SUM(t.cost_basis_amount), 0)
+FROM transactions t
+JOIN agent_intents ai ON ai.id = t.agent_intent_id
+WHERE ai.group_agent_id = $1
+  AND t.initiated_by = 'agent'
+  AND t.action = 'sell'
+  AND t.status = 'confirmed'`
+	var proceeds int64
+	if err := tx.QueryRowContext(ctx, selectSQL, agentID).Scan(&proceeds); err != nil {
+		return 0, fmt.Errorf("sum agent sell proceeds: %w", err)
+	}
+	return proceeds, nil
 }
 
 // AgentSellableTokenAmountTx is how much of mint the agent may still sell: what its own
