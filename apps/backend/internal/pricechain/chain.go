@@ -569,6 +569,17 @@ func (c *Chain) warmChart(ctx context.Context, cacheKey, symbol string, chartRan
 	}()
 }
 
+// WarmChartRanges hands a chart screen's interest in a symbol to the chart client,
+// which owns the cache the warm fills and the breaker that decides whether its
+// source is worth asking. The chain's own chart cache is not filled: it sits in
+// front of that one with a far shorter TTL, and a miss here finds the warmed range
+// one memory read further down.
+func (c *Chain) WarmChartRanges(symbol string) {
+	if warmer, ok := c.charts.(pyth.ChartRangeWarmer); ok {
+		warmer.WarmChartRanges(symbol)
+	}
+}
+
 // chartsAreKeyless reports whether the chart client can serve history without a
 // Hermes entitlement.
 func (c *Chain) chartsAreKeyless() bool {

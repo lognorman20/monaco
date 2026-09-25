@@ -353,3 +353,25 @@ private enum MarkGeometry {
         size * MonacoTheme.Radius.tile / 44
     }
 }
+
+/// An ink glyph on a sunken disc: the mark for something that is not a stock and not a cabal —
+/// a trading bot, an action in a sheet (start a cabal, join with a code). Coins are for stocks;
+/// tinted marks are for cabals.
+struct SunkenGlyphMark: View {
+    let systemImage: String
+    var size: CGFloat = 44
+    /// For a bot that was removed: the glyph drops to the quiet ink.
+    var isMuted = false
+
+    var body: some View {
+        Circle()
+            .fill(MonacoTheme.surfaceSunken)
+            .frame(width: size, height: size)
+            .overlay {
+                Image(systemName: systemImage)
+                    .font(.system(size: size * 0.40, weight: .semibold))
+                    .foregroundStyle(isMuted ? MonacoTheme.tertiaryText : MonacoTheme.ink)
+            }
+            .accessibilityHidden(true)
+    }
+}

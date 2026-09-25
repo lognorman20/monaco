@@ -17,10 +17,14 @@ struct HomeLeaderboardSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             MonacoSectionHeader("Top investors")
+                .padding(.horizontal, MonacoTheme.Space.m)
 
             rangeChips
+                .padding(.horizontal, MonacoTheme.Space.m)
+                .padding(.bottom, MonacoTheme.Space.xs)
 
             if model.failed {
+
                 EmptyState(
                     title: "Couldn't load the board",
                     message: "Tap try again, or pull down to refresh Home.",
@@ -55,23 +59,26 @@ struct HomeLeaderboardSection: View {
         }
     }
 
-    /// A range pill on `surfaceSunken`, 44 pt tall so it can be hit, unlike the caption-sized
-    /// chip it replaces.
+    /// A range chip in the market's voice — it names a window of time, which is data. Drawn
+    /// 34pt tall and padded out to a 44pt target, so the row of five reads as a control strip
+    /// rather than as five buttons.
     private struct RangeChip: View {
         let title: String
         let isSelected: Bool
 
         var body: some View {
             Text(title)
-                .font(MonacoTheme.Typo.callout.weight(.semibold))
+                .font(MonacoTheme.Typo.dataCaption)
                 .foregroundStyle(isSelected ? MonacoTheme.primaryButtonLabel : MonacoTheme.muted)
                 .lineLimit(1)
-                .padding(.horizontal, 16)
-                .frame(minWidth: 56, minHeight: 44)
+                .padding(.horizontal, 14)
+                .frame(minWidth: 48, minHeight: 34)
                 .background(Capsule().fill(isSelected ? MonacoTheme.primaryButtonFill : MonacoTheme.surfaceSunken))
+                .padding(.vertical, 5)
                 .contentShape(Capsule())
         }
     }
+
 
     /// An empty board is almost never "nobody has joined": ranged windows drop everyone whose
     /// cabal has no snapshot from before the window started, which is every brand-new cabal.
@@ -94,20 +101,18 @@ struct HomeLeaderboardSection: View {
         }
     }
 
+    /// Three rows in the shape of `BoardRow` — rank, face, name, figure — between the rules
+    /// the board will draw, so nothing jumps when the people arrive.
     private var loadingBoard: some View {
-        VStack(spacing: MonacoTheme.Space.s) {
-            ForEach(0..<3, id: \.self) { _ in
-                SkeletonBlock(height: 60, radius: MonacoTheme.Radius.card)
-            }
-        }
-        .accessibilityIdentifier("home-leaderboard-loading")
+        BoardRowSkeleton(rows: 3)
+            .accessibilityIdentifier("home-leaderboard-loading")
     }
 
     /// Rows already on screen stay put while the next window loads — dimmed, so nobody reads
     /// last window's numbers as this one's.
     private var board: some View {
         MonacoGroupedList {
-            ForEach(people) { row in
+            ForEach(Array(people.enumerated()), id: \.element.userId) { index, row in
                 NavigationLink {
                     UserProfileGroupsView(
                         auth: auth,
@@ -116,21 +121,21 @@ struct HomeLeaderboardSection: View {
                         profilePhotoUrl: row.profilePhotoUrl
                     )
                 } label: {
-                    MonacoRow(
-                        title: row.displayName,
-                        chevron: true,
-                        isLast: row.userId == people.last?.userId,
-                        leading: { MonacoAvatar(photoURL: row.profilePhotoUrl, displayName: row.displayName, size: 44) },
-                        trailing: {
-                            PercentText(percentReturn: row.percentReturn, style: .row)
-                            PnLText(dollarPnl: row.dollarPnl, style: .caption)
-                        }
-                    )
+                    BoardRow(
+                        rank: index + 1,
+                        name: row.displayName,
+                        percentReturn: row.percentReturn,
+                        dollarPnl: row.dollarPnl,
+                        isLast: row.userId == people.last?.userId
+                    ) {
+                        MonacoAvatar(photoURL: row.profilePhotoUrl, displayName: row.displayName, size: 40, seed: row.userId)
+                    }
                 }
                 .buttonStyle(.monacoRow)
                 .accessibilityIdentifier("home-leaderboard-row-\(row.userId)")
             }
         }
+
         .opacity(model.isLoading ? 0.4 : 1)
         .overlay {
             if model.isLoading {

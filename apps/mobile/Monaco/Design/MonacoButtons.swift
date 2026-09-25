@@ -44,7 +44,8 @@ private struct MonacoButtonLabel: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .font(MonacoTheme.Typo.body.weight(.semibold))
+            .font(MonacoTheme.Typo.button)
+
             .lineLimit(1)
             .minimumScaleFactor(0.8)
             .padding(.horizontal, 20)
@@ -61,13 +62,18 @@ private extension View {
 struct MonacoPrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
 
+    /// A disabled primary button is the same ink at under half its strength, not a sunken grey
+    /// capsule: that fill is also the text field's, and "Send code" under an empty phone field
+    /// read as a second field.
+    static let disabledFillOpacity = 0.45
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .monacoButtonLabel()
-            .foregroundStyle(isEnabled ? MonacoTheme.primaryButtonLabel : MonacoTheme.disabledLabel)
+            .foregroundStyle(MonacoTheme.primaryButtonLabel.opacity(isEnabled ? 1 : 0.9))
             .background(
                 Capsule()
-                    .fill(isEnabled ? MonacoTheme.primaryButtonFill : MonacoTheme.surfaceSunken)
+                    .fill(MonacoTheme.primaryButtonFill.opacity(isEnabled ? 1 : Self.disabledFillOpacity))
             )
             .contentShape(Capsule())
             .modifier(MonacoPressEffect(isPressed: configuration.isPressed))
@@ -214,7 +220,8 @@ struct CircleAction: View {
                     .frame(width: discSize, height: discSize)
                     .background(Circle().fill(isEnabled ? MonacoTheme.brandFill : MonacoTheme.surfaceSunken))
                 Text(title)
-                    .font(.system(.footnote, weight: .medium))
+                    .font(MonacoTheme.Typo.caption)
+
                     .foregroundStyle(isEnabled ? MonacoTheme.ink : MonacoTheme.disabledLabel)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)

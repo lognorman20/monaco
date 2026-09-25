@@ -13,8 +13,10 @@ struct HomePositionsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             MonacoSectionHeader("Your cabals")
+                .padding(.horizontal, MonacoTheme.Space.m)
 
             if rows.isEmpty {
+
                 EmptyState(
                     title: "No cabals yet",
                     message: "Start one with friends or join an open one.",

@@ -12,6 +12,16 @@ struct MonacoSectionHeader: View {
         self.action = action
     }
 
+    /// A count beside the title — "Needs your vote" with a `2` — for a section that is an errand.
+    private var count: Int?
+
+    init(_ title: String, count: Int? = nil, trailing: String? = nil, action: (() -> Void)? = nil) {
+        self.title = title
+        self.count = count
+        self.trailing = trailing
+        self.action = action
+    }
+
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.s) {
             Text(title)
@@ -19,12 +29,22 @@ struct MonacoSectionHeader: View {
                 .foregroundStyle(MonacoTheme.ink)
                 .lineLimit(2)
                 .accessibilityAddTraits(.isHeader)
+            if let count, count > 0 {
+                Text("\(count)")
+                    .font(MonacoTheme.Typo.dataMicro)
+                    .foregroundStyle(MonacoTheme.onBrand)
+                    .padding(.horizontal, 7)
+                    .frame(minWidth: 22, minHeight: 22)
+                    .background(Capsule().fill(MonacoTheme.brandFill))
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
+                    .accessibilityLabel("\(count)")
+            }
             Spacer(minLength: MonacoTheme.Space.s)
             if let trailing {
                 if let action {
                     Button(action: action) {
                         Text(trailing)
-                            .font(MonacoTheme.Typo.callout.weight(.semibold))
+                            .font(MonacoTheme.Typo.calloutStrong)
                             .foregroundStyle(MonacoTheme.brand)
                             .lineLimit(1)
                             .frame(minHeight: 44)
@@ -43,11 +63,19 @@ struct MonacoSectionHeader: View {
     }
 }
 
-/// One surface container for a run of `MonacoRow`s. No stroke; children are clipped to the radius.
+/// A run of `MonacoRow`s as a ruled table on the paper: a rule above the first row, a rule below
+/// the last, the rows' own rules between. No surface and no radius.
+///
+/// This used to be a white card with a 24pt radius, and every list in the app was one — Home,
+/// Profile and the cabal screen were each three cards on a cream canvas, which is the shape of
+/// a settings app. The rules are the whole container now: they say "table" the way a ledger
+/// does, they cost no height, and a section's header sits directly on them.
 struct MonacoGroupedList<Content: View>: View {
     private let content: Content
+    private let rules: MonacoListRules
 
-    init(@ViewBuilder content: () -> Content) {
+    init(rules: MonacoListRules = .both, @ViewBuilder content: () -> Content) {
+        self.rules = rules
         self.content = content()
     }
 
@@ -56,15 +84,42 @@ struct MonacoGroupedList<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity)
-        .background(MonacoTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
+        .overlay(alignment: .top) {
+            if rules.contains(.top) { MonacoRule() }
+        }
+        .overlay(alignment: .bottom) {
+            if rules.contains(.bottom) { MonacoRule() }
+        }
     }
 }
+
+/// Which of a list's outer rules to draw. Both, by default; a list that sits directly under a
+/// ruled band, or directly above another list, drops the one that would double up.
+struct MonacoListRules: OptionSet {
+    let rawValue: Int
+    static let top = MonacoListRules(rawValue: 1)
+    static let bottom = MonacoListRules(rawValue: 2)
+    static let both: MonacoListRules = [.top, .bottom]
+}
+
+/// A 1pt hairline, full width. The ledger's line.
+struct MonacoRule: View {
+    var color: Color = MonacoTheme.hairline
+
+    var body: some View {
+        Rectangle()
+            .fill(color)
+            .frame(height: 1)
+            .accessibilityHidden(true)
+    }
+}
+
 
 /// Leading 44pt mark, title over subtitle, trailing figures. Wrap in a `Button` or `NavigationLink`
 /// with `.buttonStyle(.monacoRow)` for the pressed state.
 struct MonacoRow<Leading: View, Trailing: View>: View {
     private let title: String
+    private let titleFont: Font
     private let subtitle: String?
     private let subtitleColor: Color
     private let chevron: Bool
@@ -72,8 +127,11 @@ struct MonacoRow<Leading: View, Trailing: View>: View {
     private let leading: Leading
     private let trailing: Trailing
 
+    /// `titleFont` is the brand's row title unless the row is a stock, whose label is its ticker
+    /// and sets in the market's voice (`MonacoTheme.Typo.ticker`).
     init(
         title: String,
+        titleFont: Font = MonacoTheme.Typo.rowTitle,
         subtitle: String? = nil,
         subtitleColor: Color = MonacoTheme.muted,
         chevron: Bool = false,
@@ -82,6 +140,7 @@ struct MonacoRow<Leading: View, Trailing: View>: View {
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.title = title
+        self.titleFont = titleFont
         self.subtitle = subtitle
         self.subtitleColor = subtitleColor
         self.chevron = chevron
@@ -89,6 +148,7 @@ struct MonacoRow<Leading: View, Trailing: View>: View {
         self.leading = leading()
         self.trailing = trailing()
     }
+
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .body)
@@ -104,11 +164,12 @@ struct MonacoRow<Leading: View, Trailing: View>: View {
     private var labels: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(MonacoTheme.Typo.rowTitle)
+                .font(titleFont)
                 .foregroundStyle(MonacoTheme.ink)
                 .lineLimit(layout.titleLineLimit)
                 .truncationMode(.tail)
             if let subtitle, !subtitle.isEmpty {
+
                 Text(subtitle)
                     .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(subtitleColor)
@@ -236,6 +297,7 @@ struct MonacoRowLayout: Equatable {
 extension MonacoRow where Trailing == EmptyView {
     init(
         title: String,
+        titleFont: Font = MonacoTheme.Typo.rowTitle,
         subtitle: String? = nil,
         subtitleColor: Color = MonacoTheme.muted,
         chevron: Bool = false,
@@ -244,7 +306,9 @@ extension MonacoRow where Trailing == EmptyView {
     ) {
         self.init(
             title: title,
+            titleFont: titleFont,
             subtitle: subtitle,
+
             subtitleColor: subtitleColor,
             chevron: chevron,
             isLast: isLast,
@@ -267,11 +331,21 @@ extension ButtonStyle where Self == MonacoRowButtonStyle {
 }
 
 /// Empty state without an icon: one title, one muted line, an optional secondary action.
+///
+/// Centred, 24pt all round, and nothing behind it, so it reads the same between a section's
+/// rules as under a bare header: the padding is the room the rules need, not a card. Neither
+/// line truncates, and past a readable measure (iPad, landscape) the lines stop getting longer.
+///
+/// No accessibility container on purpose: call sites put their identifier on this view and UI
+/// tests find the retry button by it, which only works while the identifier reaches the button.
 struct EmptyState: View {
     private let title: String
     private let message: String?
     private let actionTitle: String?
     private let action: (() -> Void)?
+
+    /// About 60 characters of `callout`.
+    private static let readableWidth: CGFloat = 480
 
     init(title: String, message: String? = nil, actionTitle: String? = nil, action: (() -> Void)? = nil) {
         self.title = title
@@ -283,9 +357,11 @@ struct EmptyState: View {
     var body: some View {
         VStack(spacing: MonacoTheme.Space.s) {
             Text(title)
-                .font(.system(.body, weight: .semibold))
+                .font(MonacoTheme.Typo.bodyStrong)
                 .foregroundStyle(MonacoTheme.ink)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
             if let message, !message.isEmpty {
                 Text(message)
                     .font(MonacoTheme.Typo.callout)
@@ -299,6 +375,7 @@ struct EmptyState: View {
                     .padding(.top, MonacoTheme.Space.s)
             }
         }
+        .frame(maxWidth: Self.readableWidth)
         .frame(maxWidth: .infinity)
         .padding(.horizontal, MonacoTheme.Space.l)
         .padding(.vertical, MonacoTheme.Space.l)

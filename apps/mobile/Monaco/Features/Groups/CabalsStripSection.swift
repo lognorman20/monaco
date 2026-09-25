@@ -19,11 +19,12 @@ struct CabalsStripSection: View {
     var onSelect: (CabalsRoute) -> Void
     var onRetry: () -> Void = {}
 
-    private static let cardSize = CGSize(width: 176, height: 148)
+    private static let cardSize = CGSize(width: 168, height: 152)
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             MonacoSectionHeader("Your cabals")
+                .padding(.horizontal, MonacoTheme.Space.m)
 
             if !rows.isEmpty {
                 strip
@@ -74,6 +75,7 @@ struct CabalsStripSection: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("cabals-strip-new")
             }
+            .padding(.horizontal, MonacoTheme.Space.m)
             .padding(.vertical, 2)
         }
         .accessibilityIdentifier("cabals-strip")
@@ -100,15 +102,21 @@ struct CabalsStripSection: View {
             }
             Spacer(minLength: 0)
         }
+        .padding(.horizontal, MonacoTheme.Space.m)
         .accessibilityElement()
         .accessibilityLabel("Loading your cabals")
         .accessibilityIdentifier("cabals-strip-loading")
     }
 }
 
+/// One of the viewer's cabals: its mark, its name, the pot and how it has done, on a wash of
+/// the cabal's own tint. Five cabals in the strip are five colours, which is the point of the
+/// tint — and the only place it is allowed to be a surface, because the card is the cabal.
 private struct CabalStripCard: View {
     let row: HomeGroupBoardRowDTO
     let size: CGSize
+
+    private var tint: MonacoTheme.CabalTint { .forGroupId(row.groupId) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
@@ -119,6 +127,7 @@ private struct CabalStripCard: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, MonacoTheme.Space.xs)
             Spacer(minLength: 0)
             MoneyText(decimalString: row.potValueUsd, style: .large)
             PnLBadge(dollarPnl: row.dollarPnl, percentReturn: row.percentReturn, style: .caption)
@@ -127,12 +136,12 @@ private struct CabalStripCard: View {
         .frame(width: size.width, alignment: .topLeading)
         .frame(minHeight: size.height, alignment: .topLeading)
         .background(
-            MonacoTheme.surface,
+            tint.soft,
             in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
         )
         .overlay {
             RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
-                .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+                .strokeBorder(tint.fill.opacity(0.22), lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
     }
@@ -147,7 +156,7 @@ private struct NewCabalStripCard: View {
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(MonacoTheme.muted)
             Text("New cabal")
-                .font(MonacoTheme.Typo.callout.weight(.semibold))
+                .font(MonacoTheme.Typo.calloutStrong)
                 .foregroundStyle(MonacoTheme.muted)
         }
         .frame(width: size.width, height: size.height)

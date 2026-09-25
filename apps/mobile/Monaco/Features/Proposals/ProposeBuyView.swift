@@ -3,6 +3,10 @@ import SwiftUI
 
 /// Buy, step 1 of 3: pick a stock. Popular stocks show before typing; search results page in as the
 /// last row appears. Tapping a stock pushes the amount step.
+///
+/// The list reads like the Stocks tab, because it is the same market: the coin, the ticker in the
+/// market's voice, the price and the day's move. The one addition is the company's name under the
+/// ticker — here the member is choosing, not scanning a watchlist, and "AMBR" alone is a guess.
 struct ProposeBuyView: View {
     let groupId: String
     var initialSymbol: String?
@@ -33,23 +37,8 @@ struct ProposeBuyView: View {
 
     /// Entry from Stock detail's cabal picker (no chooser sheet): on success the flow pops back
     /// here and confirms with a toast.
-    init(
-        auth: PrivyAuthService,
-        groupId: String,
-        initialSymbol: String? = nil,
-        initialKind: AssetKind = .stock,
-        initialDecimals: Int = AssetCatalogDefaults.decimals,
-        onProposed: ((_ proposalId: String) -> Void)? = nil
-    ) {
-        self.init(
-            service: LiveProposeService(auth: auth),
-            groupId: groupId,
-            pot: nil,
-            initialSymbol: initialSymbol,
-            initialKind: initialKind,
-            initialDecimals: initialDecimals,
-            onProposed: onProposed
-        )
+    init(auth: PrivyAuthService, groupId: String, initialSymbol: String? = nil, onProposed: ((_ proposalId: String) -> Void)? = nil) {
+        self.init(service: LiveProposeService(auth: auth), groupId: groupId, pot: nil, initialSymbol: initialSymbol, onProposed: onProposed)
     }
 
     init(
@@ -57,15 +46,11 @@ struct ProposeBuyView: View {
         groupId: String,
         pot: ProposePot?,
         initialSymbol: String? = nil,
-        initialKind: AssetKind = .stock,
-        initialDecimals: Int = AssetCatalogDefaults.decimals,
         onProposed: ((_ proposalId: String) -> Void)? = nil
     ) {
         self.service = service
         self.groupId = groupId
         self.initialSymbol = initialSymbol
-        self.initialKind = initialKind
-        self.initialDecimals = initialDecimals
         self.onProposed = onProposed
         _pot = State(initialValue: pot)
     }
@@ -76,12 +61,15 @@ struct ProposeBuyView: View {
 
     var body: some View {
         ScrollView {
+            // No side padding on the stack: the ruled lists run edge to edge, and the search field
+            // and each header inset themselves.
             VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
                 MonacoSearchField(placeholder: ProposeFlowCopy.searchPlaceholder, text: $query)
                     .textInputAutocapitalization(.words)
                     .autocorrectionDisabled()
                     .submitLabel(.search)
                     .accessibilityIdentifier("proposal-search-field")
+                    .padding(.horizontal, MonacoTheme.Space.m)
 
                 if trimmedQuery.isEmpty {
                     popularSection
@@ -89,7 +77,6 @@ struct ProposeBuyView: View {
                     resultsSection
                 }
             }
-            .padding(.horizontal, MonacoTheme.Space.gutter)
             .padding(.top, MonacoTheme.Space.s)
             .padding(.bottom, MonacoTheme.Space.xl)
         }
@@ -138,13 +125,14 @@ struct ProposeBuyView: View {
     private var popularSection: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             MonacoSectionHeader(ProposeFlowCopy.popularTitle)
+                .padding(.horizontal, MonacoTheme.Space.m)
             if popular.isEmpty {
                 if popularLoadFailed {
                     EmptyState(title: ProposeFlowCopy.stocksLoadFailed, actionTitle: ProposalFeedCopy.tryAgain) {
                         Task { await loadPopular(force: true) }
                     }
                 } else {
-                    skeletonRows
+                    ProposeStockSkeleton(rows: 5)
                 }
             } else {
                 stockList(popular)
@@ -156,7 +144,7 @@ struct ProposeBuyView: View {
     private var resultsSection: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             if isSearching && results.isEmpty {
-                skeletonRows
+                ProposeStockSkeleton(rows: 3)
             } else if searchFailed && results.isEmpty {
                 EmptyState(title: ProposeFlowCopy.stocksLoadFailed, actionTitle: ProposalFeedCopy.tryAgain) {
                     Task { await search(reset: true) }
@@ -183,34 +171,22 @@ struct ProposeBuyView: View {
                 Button {
                     pick(stock)
                 } label: {
-                    ProposeStockRow(stock: stock, isLast: isLast)
+                    ProposeStockRow(
+                        stock: stock,
+                        logoURL: ProposeStockLogo.url(for: stock.symbol, in: session),
+                        isLast: isLast
+                    )
                 }
                 .buttonStyle(.monacoRow)
+                // A stock with no route cannot be bought whatever amount is typed next, so the row
+                // is not a way in. It stays in the list, dimmed, saying why.
+                .disabled(!stock.isTradable)
                 .accessibilityIdentifier("proposal-asset-\(stock.symbol)")
                 .onAppear {
                     if paginates, isLast, hasMore { Task { await search(reset: false) } }
                 }
             }
         }
-    }
-
-    private var skeletonRows: some View {
-        MonacoGroupedList {
-            ForEach(0..<4, id: \.self) { index in
-                HStack(spacing: MonacoTheme.Space.sm) {
-                    SkeletonBlock(width: 44, height: 44, radius: MonacoTheme.Radius.tile)
-                    VStack(alignment: .leading, spacing: 6) {
-                        SkeletonBlock(width: 120, height: 14)
-                        SkeletonBlock(width: 56, height: 12)
-                    }
-                    Spacer()
-                    SkeletonBlock(width: 64, height: 14)
-                }
-                .padding(.horizontal, MonacoTheme.Space.m)
-                .frame(minHeight: 60)
-            }
-        }
-        .accessibilityLabel("Loading stocks")
     }
 
     // MARK: Actions
@@ -224,7 +200,7 @@ struct ProposeBuyView: View {
         guard !didApplyInitialSymbol, let initialSymbol, !initialSymbol.isEmpty else { return }
         didApplyInitialSymbol = true
         let known = (session?.popularAssets ?? []).first { $0.symbol.caseInsensitiveCompare(initialSymbol) == .orderedSame }
-        picked = known.map(ProposeStock.init(market:))
+        picked = known.map { ProposeStock(market: $0) }
             ?? ProposeStock(symbol: initialSymbol, kind: initialKind, tokenDecimals: initialDecimals)
     }
 
@@ -257,7 +233,7 @@ struct ProposeBuyView: View {
 
     private func loadPopular(force: Bool = false) async {
         if !force, let cached = session?.popularAssets, !cached.isEmpty {
-            popular = cached.map(ProposeStock.init(market:))
+            popular = cached.map { ProposeStock(market: $0) }
             return
         }
         popularLoadFailed = false
@@ -314,9 +290,8 @@ private struct ProposePotUnavailable: View {
                 EmptyState(title: ProposeFlowCopy.potLoadFailed, actionTitle: ProposalFeedCopy.tryAgain, action: onRetry)
                     .accessibilityIdentifier("propose-pot-error")
             } else {
-                ProgressView()
-                    .tint(MonacoTheme.muted)
-                    .accessibilityLabel("Loading")
+                ProposeAmountSkeleton()
+                    .frame(maxHeight: .infinity, alignment: .top)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -326,32 +301,188 @@ private struct ProposePotUnavailable: View {
     }
 }
 
-/// Stock row for the pick step: mark, ticker, price over 24h move. The company name
-/// waits for the amount screen, which is where the member has committed to a stock
-/// and has room to be told what it is.
+/// The amount step while the pot loads, in the step's own shape: the stock's line, the figure,
+/// the pot line and the chips. Nothing in it can be typed into or tapped.
+private struct ProposeAmountSkeleton: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            ProposeStockSkeleton(rows: 1)
+            VStack(spacing: MonacoTheme.Space.l) {
+                SkeletonBlock(width: 120, height: 48)
+                SkeletonBlock(width: 150, height: 14)
+            }
+            .padding(.top, MonacoTheme.Space.xl)
+            HStack(spacing: MonacoTheme.Space.s) {
+                ForEach(0..<4, id: \.self) { _ in
+                    SkeletonBlock(width: 64, height: 44, radius: 22)
+                }
+            }
+            .padding(.top, MonacoTheme.Space.m)
+        }
+        .padding(.top, MonacoTheme.Space.s)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading")
+    }
+}
+
+/// The company's logo for a stock the propose flow knows only by symbol. `ProposeStock` carries no
+/// logo; the popular list the session already holds does, so the flow's rows borrow it. Nil falls
+/// back to the ticker struck on the coin, which is the mark's resting state anyway.
+enum ProposeStockLogo {
+    @MainActor
+    static func url(for symbol: String, in session: AppSessionStore?) -> URL? {
+        session?.popularAssets.first { $0.symbol.caseInsensitiveCompare(symbol) == .orderedSame }?.logoURL
+    }
+}
+
+/// A stock in the propose flow, in the market's voice: the coin, the ticker over the company's
+/// name, and the price over the day's move on the right.
+///
+/// Laid out like `StockListRow` (the Stocks tab's row) without its sparkline, and on the same
+/// `MonacoRowLayout` rules: the labels keep a floor and truncate, the figures shrink, and at the
+/// accessibility sizes the figures drop under the labels. A search result carries no price, so it
+/// shows none rather than a dash per row. A stock that cannot be bought dims and says why.
 struct ProposeStockRow: View {
     let stock: ProposeStock
+    var logoURL: URL?
     var isLast = false
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body) private var titleWidthFloor = MonacoRowLayout.baseMinimumTitleWidth
+
+    /// The Stocks tab's mark, so the same coin is the same size on both lists.
+    static let markSize: CGFloat = StockListRow.markSize
+
+    private var layout: MonacoRowLayout {
+        MonacoRowLayout(dynamicTypeSize: dynamicTypeSize, scaledTitleWidthFloor: titleWidthFloor)
+    }
+
+    private var caption: String? {
+        if !stock.isTradable { return ProposeScreenCopy.cantBuyCaption(name: stock.name) }
+        // A stock the catalogue has no name for falls back to its ticker, which is already the title.
+        return stock.name == stock.ticker ? nil : stock.name
+    }
+
     var body: some View {
-        MonacoRow(
-            title: stock.ticker,
-            chevron: true,
-            isLast: isLast
-        ) {
-            StockMark(symbol: stock.symbol, displayName: stock.name, assetKind: stock.assetKind)
-        } trailing: {
-            VStack(alignment: .trailing, spacing: 4) {
-                if stock.assetKind == .preIpo {
-                    MonacoChip(title: PreIpoCopy.chipLabel, isSelected: false)
+        content
+            .padding(.horizontal, MonacoTheme.Space.m)
+            .padding(.vertical, 8)
+            .frame(minHeight: 64)
+            .contentShape(Rectangle())
+            .overlay(alignment: .bottom) {
+                if !isLast {
+                    MonacoRule()
+                        .padding(.leading, layout.separatorLeadingInset(markSize: Self.markSize))
                 }
-                if let micros = stock.priceMicros {
-                    MoneyText(micros: micros, style: .row)
-                    if let change = stock.change24h, !change.isEmpty {
-                        PercentText(percentReturn: change, style: .caption)
+            }
+            .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if layout.isStacked {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                HStack(spacing: MonacoTheme.Space.sm) {
+                    mark
+                    labels
+                }
+                if hasFigures {
+                    HStack(spacing: MonacoTheme.Space.s) {
+                        figures
+                    }
+                }
+            }
+        } else {
+            HStack(spacing: MonacoTheme.Space.sm) {
+                mark
+                labels.frame(minWidth: layout.minimumTitleWidth, alignment: .leading)
+                if hasFigures {
+                    VStack(alignment: .trailing, spacing: 3) {
+                        figures
+                    }
+                    .layoutPriority(1)
+                }
+            }
+        }
+    }
+
+    private var mark: some View {
+        StockMark(symbol: stock.symbol, displayName: stock.name, assetKind: stock.assetKind, size: Self.markSize, logoURL: logoURL)
+            .frame(width: Self.markSize, height: Self.markSize)
+            .opacity(stock.isTradable ? 1 : 0.45)
+    }
+
+    private var labels: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(stock.ticker)
+                .font(MonacoTheme.Typo.ticker)
+                .foregroundStyle(stock.isTradable ? MonacoTheme.ink : MonacoTheme.disabledLabel)
+                .lineLimit(layout.titleLineLimit)
+                .truncationMode(.tail)
+            if let caption {
+                Text(caption)
+                    .font(MonacoTheme.Typo.caption)
+                    .foregroundStyle(MonacoTheme.muted)
+                    .lineLimit(layout.subtitleLineLimit)
+                    .truncationMode(.tail)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var hasFigures: Bool {
+        stock.priceMicros != nil
+    }
+
+    /// The price, then the day's move. A stock that cannot be bought keeps its price, greyed, and
+    /// drops the coloured pill: a green or red capsule is the loudest thing on a row, and this row
+    /// is the one the member should pass over.
+    @ViewBuilder
+    private var figures: some View {
+        if let micros = stock.priceMicros {
+            MoneyText(
+                micros: micros,
+                style: .row,
+                color: stock.isTradable ? MonacoTheme.ink : MonacoTheme.disabledLabel,
+                voice: .market
+            )
+            // No day figure, no pill: a row of grey dashes says nothing the price does not.
+            if stock.isTradable, stock.change24h != nil {
+                DayChangePill(change24h: stock.change24h, priceUsdcMicros: micros)
+            }
+        }
+    }
+}
+
+/// Loading rows in the shape of `ProposeStockRow`: the coin, two lines, the price over the pill.
+struct ProposeStockSkeleton: View {
+    var rows = 4
+
+    var body: some View {
+        MonacoGroupedList {
+            ForEach(0..<rows, id: \.self) { index in
+                HStack(spacing: MonacoTheme.Space.sm) {
+                    SkeletonBlock(width: ProposeStockRow.markSize, height: ProposeStockRow.markSize, radius: ProposeStockRow.markSize / 2)
+                    VStack(alignment: .leading, spacing: 6) {
+                        SkeletonBlock(width: 64, height: 14)
+                        SkeletonBlock(width: 96, height: 12)
+                    }
+                    Spacer(minLength: MonacoTheme.Space.s)
+                    VStack(alignment: .trailing, spacing: 6) {
+                        SkeletonBlock(width: 72, height: 14)
+                        SkeletonBlock(width: 52, height: 20, radius: 10)
+                    }
+                }
+                .padding(.horizontal, MonacoTheme.Space.m)
+                .frame(minHeight: 64)
+                .overlay(alignment: .bottom) {
+                    if index < rows - 1 {
+                        MonacoRule().padding(.leading, MonacoTheme.Space.m + ProposeStockRow.markSize + MonacoTheme.Space.sm)
                     }
                 }
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading stocks")
     }
 }

@@ -22,6 +22,8 @@ struct SellCabalView: View {
 
     var body: some View {
         ScrollView {
+            // The same stack as Fund this cabal's amount step — figure, chips, helper, then the
+            // sentence saying what the money will do — so the two read as one pair.
             VStack(spacing: MonacoTheme.Space.l) {
                 if hasStake {
                     AmountEntry(
@@ -37,31 +39,26 @@ struct SellCabalView: View {
                         problem: CashOutAmountRule.problem(for: verdict),
                         showsKeyboardDoneButton: true
                     )
-                    .padding(.top, MonacoTheme.Space.xl)
                     .accessibilityIdentifier("sell-cabal-amount-display")
-                    Text(CashOutAmountRule.explainer(for: verdict))
-                        .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.muted)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, MonacoTheme.Space.sm)
+                    AmountEntryNote(CashOutAmountRule.explainer(for: verdict))
                         .accessibilityIdentifier("sell-cabal-explainer")
                 } else if sliceIsTooSmall {
                     EmptyState(
                         title: "Too small to cash out",
                         message: "Your slice is worth \(UsdAmountFormatter.format(micros: maxEquityUsdMicros)). Cash out starts at \(UsdAmountFormatter.format(micros: RedeemDustMinimum.usdcMicros)), so this one has to grow first."
                     )
-                    .padding(.top, 48)
                     .accessibilityIdentifier("sell-cabal-below-minimum")
                 } else {
                     EmptyState(
                         title: "Nothing to cash out yet",
                         message: "Add money to this cabal first. Your slice shows up here."
                     )
-                    .padding(.top, 48)
                     .accessibilityIdentifier("sell-cabal-empty")
                 }
             }
             .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.top, MonacoTheme.Space.xl)
+            .padding(.bottom, MonacoTheme.Space.xl)
         }
         .scrollDismissesKeyboard(.never)
         .monacoCanvas()

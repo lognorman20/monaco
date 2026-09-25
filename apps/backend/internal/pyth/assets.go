@@ -3,6 +3,7 @@ package pyth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -128,14 +129,34 @@ func (c *HermesClient) ChartSeries(ctx context.Context, symbol string, chartRang
 // failure opens a short breaker so a Benchmarks outage does not cost every chart
 // load a timeout before it falls back.
 func (c *HermesClient) seriesFromSource(ctx context.Context, symbol string, chartRange ChartRange, now time.Time) (AssetChartSeries, bool) {
-	if c.seriesSource == nil || !c.seriesBreaker.allows(now) {
+	series, err := c.sourceSeries(ctx, symbol, chartRange, now)
+	if errors.Is(err, errSeriesSourceClosed) {
 		return AssetChartSeries{}, false
+	}
+	if err != nil {
+		logSeriesSource(symbol, chartRange, err)
+		return AssetChartSeries{}, false
+	}
+	return series, true
+}
+
+// errSeriesSourceClosed means the source was not asked at all: none is wired, or
+// its breaker is open. It is not a failure worth logging, because nothing failed.
+var errSeriesSourceClosed = errors.New("pyth series source not available")
+
+// sourceSeries is one breaker-guarded call to the history source. It is shared by
+// the chart path, which falls back to the Hermes sampler when it fails, and by the
+// range warm, which never does. What a failure means is left to the caller; what
+// it does to the breaker is the same for both, because either way it is evidence
+// the source is down.
+func (c *HermesClient) sourceSeries(ctx context.Context, symbol string, chartRange ChartRange, now time.Time) (AssetChartSeries, error) {
+	if c.seriesSource == nil || !c.seriesBreaker.allows(now) {
+		return AssetChartSeries{}, errSeriesSourceClosed
 	}
 	series, err := c.seriesSource.Series(ctx, symbol, chartRange, now)
 	if err != nil {
 		c.seriesBreaker.trip(now)
-		logSeriesSource(symbol, chartRange, err)
-		return AssetChartSeries{}, false
+		return AssetChartSeries{}, err
 	}
 	c.seriesBreaker.reset()
 	if len(series.Points) == 0 {
@@ -145,10 +166,10 @@ func (c *HermesClient) seriesFromSource(ctx context.Context, symbol string, char
 		series.Source = ChartSourceBenchmarks
 		series.EmptyReason = EmptyReasonNoHistory
 		logChartSeries(symbol, chartRange, series.RequestedSamples, 0, 0)
-		return series, true
+		return series, nil
 	}
 	logChartSeries(symbol, chartRange, series.RequestedSamples, 0, len(series.Points))
-	return series, true
+	return series, nil
 }
 
 // seriesFromHermes is the fallback: one request per sample against the historical

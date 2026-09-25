@@ -181,6 +181,7 @@ public struct StockVsTokenCard: Equatable, Sendable {
         case .pythEquity: return "Pyth equity feed"
         case .pythCrypto: return "Pyth crypto feed"
         case .jupiter: return "On-chain price"
+        case .yahoo: return "Yahoo Finance"
         case .unknown: return "Reference price"
         }
     }

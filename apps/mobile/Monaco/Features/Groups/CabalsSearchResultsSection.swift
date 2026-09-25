@@ -13,6 +13,8 @@ struct CabalsSearchResultsSection: View {
                 EmptyView()
             case .tooShort:
                 hint("Type at least \(GroupSearchQuery.minimumLength) letters.", id: "cabals-search-too-short")
+                    .padding(.horizontal, MonacoTheme.Space.m)
+
             case .loading:
                 ProgressView()
                     .tint(MonacoTheme.accent)
@@ -37,11 +39,15 @@ struct CabalsSearchResultsSection: View {
     }
 
     private var results: some View {
-        LazyVStack(spacing: MonacoTheme.Space.s) {
+        LazyVStack(spacing: MonacoTheme.Space.sm) {
             MonacoGroupedList {
+
                 ForEach(Array(model.results.enumerated()), id: \.element.id) { index, row in
                     Button {
-                        onSelect(CabalsRoute(row: row.groupID, name: row.name, isJoined: row.isJoined, joinMode: row.joinMode))
+                        onSelect(CabalsRoute(
+                                row: row.groupID, name: row.name, isJoined: row.isJoined, joinMode: row.joinMode,
+                                memberCount: row.memberCount, pictureUrl: row.pictureUrl
+                            ))
                     } label: {
                         CabalDiscoveryRowContent(
                             rank: nil,

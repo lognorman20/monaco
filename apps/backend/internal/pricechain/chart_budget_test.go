@@ -144,3 +144,25 @@ func TestChain_CachedChartSeries_withNoChartClientIsAMiss(t *testing.T) {
 		t.Fatal("want a miss when there is no chart client")
 	}
 }
+
+// The chart screen's warm has to reach the client that owns the cache it fills;
+// the chain in front of that client is the one the handlers hold.
+func TestChain_WarmChartRanges_reachesTheChartClient(t *testing.T) {
+	t.Parallel()
+	charts := pyth.NewFakeAssetPriceClient()
+	chain := New(nil, nil, charts, testConfig(newFakeClock()))
+
+	chain.WarmChartRanges(testSymbol)
+
+	if got := pyth.ChartRangeWarmCount(charts, testSymbol); got != 1 {
+		t.Fatalf("warms passed through = %d, want 1", got)
+	}
+}
+
+// A chart client that cannot warm, or no chart client at all, makes the warm a
+// no-op rather than a panic.
+func TestChain_WarmChartRanges_withoutAWarmerIsANoOp(t *testing.T) {
+	t.Parallel()
+	New(nil, nil, nil, testConfig(newFakeClock())).WarmChartRanges(testSymbol)
+	New(nil, nil, newSlowCharts(time.Millisecond), testConfig(newFakeClock())).WarmChartRanges(testSymbol)
+}

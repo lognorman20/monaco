@@ -29,15 +29,17 @@ struct UserProfileGroupsView: View {
 
     var body: some View {
         ScrollView {
+            // Edge to edge like every other screen: the header is inset, the ruled list is not.
             VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
                 header
+                    .padding(.horizontal, MonacoTheme.Space.m)
 
                 VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-                    MonacoSectionHeader("Cabals you share")
+                    MonacoSectionHeader("Cabals you share", count: groups.isEmpty ? nil : groups.count)
+                        .padding(.horizontal, MonacoTheme.Space.m)
                     content
                 }
             }
-            .padding(.horizontal, MonacoTheme.Space.m)
             .padding(.vertical, MonacoTheme.Space.m)
         }
         .scrollBounceBehavior(.always)
@@ -54,10 +56,17 @@ struct UserProfileGroupsView: View {
 
     private var header: some View {
         HStack(spacing: MonacoTheme.Space.sm) {
-            MonacoAvatar(photoURL: profilePhotoUrl, displayName: displayName, size: 44)
-            Text(displayName)
-                .font(MonacoTheme.Typo.section)
-                .foregroundStyle(MonacoTheme.ink)
+            MonacoAvatar(photoURL: profilePhotoUrl, displayName: displayName, size: 56, seed: userId)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayName)
+                    .font(MonacoTheme.Typo.title)
+                    .foregroundStyle(MonacoTheme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text("Member")
+                    .font(MonacoTheme.Typo.caption)
+                    .foregroundStyle(MonacoTheme.muted)
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("user-profile-header")
@@ -66,12 +75,8 @@ struct UserProfileGroupsView: View {
     @ViewBuilder
     private var content: some View {
         if isLoading, groups.isEmpty {
-            VStack(spacing: MonacoTheme.Space.s) {
-                ForEach(0..<2, id: \.self) { _ in
-                    SkeletonBlock(height: 60, radius: MonacoTheme.Radius.card)
-                }
-            }
-            .accessibilityIdentifier("user-profile-groups-loading")
+            BoardRowSkeleton(rows: 2)
+                .accessibilityIdentifier("user-profile-groups-loading")
         } else if let failure {
             switch failure {
             case .couldNotLoad:

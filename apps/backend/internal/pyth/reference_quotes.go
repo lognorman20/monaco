@@ -39,6 +39,9 @@ const (
 	// QuoteSourceJupiter is the on-chain fallback for an xStock with no Pyth crypto
 	// feed. It is labelled differently in the app so nobody reads it as a Pyth price.
 	QuoteSourceJupiter QuoteSource = "jupiter"
+	// QuoteSourceYahoo is the equity leg read off Yahoo's day chart of the
+	// underlying, for when our Pyth key is not entitled to the equity feed.
+	QuoteSourceYahoo QuoteSource = "yahoo"
 )
 
 // Reasons a quote is unavailable. These are stable strings the app maps to copy.

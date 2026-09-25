@@ -24,23 +24,15 @@ struct TransactionDetailView: View {
                     onRetry: canRetry ? { onRetry?(activityItem) } : nil
                 )
             } else if let errorMessage {
-                VStack(spacing: 16) {
-                    Text(errorMessage)
-                        .font(.body)
-                        .foregroundStyle(MonacoTheme.muted)
-                        .multilineTextAlignment(.center)
-                    Button("Try again") {
-                        Task { await loadDetail() }
-                    }
-                    .buttonStyle(.monacoSecondary)
-                }
-                .padding(24)
+                EmptyState(
+                    title: errorMessage,
+                    actionTitle: "Try again",
+                    action: { Task { await loadDetail() } }
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("transaction-detail-error")
             } else {
-                ProgressView()
-                    .tint(MonacoTheme.ink)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                TransactionReceiptSkeleton()
             }
         }
         .monacoCanvas()
@@ -113,7 +105,7 @@ struct TransactionDetailView: View {
             if error.isRequestCancellation { return }
             // A failed re-read leaves the receipt the member is reading exactly as it was.
             guard receipt == nil else { return }
-            errorMessage = "Couldn't load this. Try again"
+            errorMessage = "Couldn't load this receipt"
         }
     }
 
@@ -138,6 +130,8 @@ struct TransactionDetailView: View {
 
 /// Everything a receipt shows, derived from the deposit or swap DTO. No ids, no mints.
 struct TransactionReceipt: Equatable {
+    /// A fact under the receipt's header. The label says what it is ("Shares"), so the value
+    /// is only the figure ("1.0803").
     struct Row: Equatable, Identifiable {
         let label: String
         let value: String
@@ -159,10 +153,16 @@ struct TransactionReceipt: Equatable {
 
     init(deposit: GetDepositResponse) {
         glyph = "plus"
-        headline = "Money added"
+        status = Self.status(deposit.status)
+        // The same words the activity row uses, so a deposit still on its way into the pot is
+        // not headed "Money added" above a Pending chip.
+        headline = switch status {
+        case .confirmed: "Money added"
+        case .failed: "Couldn't add money"
+        default: "Adding money"
+        }
         amountMicros = deposit.amount
         fallbackHero = nil
-        status = Self.status(deposit.status)
         rows = [Row(label: "Date", value: Self.date(deposit.createdAt))]
         failureMessage = status == .failed ? "The transfer didn't go through" : nil
         signature = deposit.txSignature
@@ -186,24 +186,15 @@ struct TransactionReceipt: Equatable {
             amountMicros = transaction.amountMicros
             fallbackHero = nil
             var rows: [Row] = []
-            if let atomics = transaction.costBasisAmount, atomics > 0 {
-                let quantityLabel = TokenQuantityFormatter.label(
-                    fromAtomics: String(atomics),
-                    decimals: transaction.resolvedTokenDecimals,
-                    kind: transaction.resolvedAssetKind
-                )
-                let quantityRow = transaction.resolvedAssetKind == .preIpo ? PreIpoCopy.tokensRowLabel : "Shares"
-                rows.append(Row(label: quantityRow, value: quantityLabel))
-                if let spent = transaction.costBasisPrice, spent > 0,
-                   let quantity = TokenQuantityFormatter.quantity(fromAtomics: String(atomics), decimals: transaction.resolvedTokenDecimals),
-                   quantity > 0 {
-                    var perUnitSource = Decimal(spent) / quantity
-                    var perUnit = Decimal()
-                    NSDecimalRound(&perUnit, &perUnitSource, 0, .plain)
-                    let unit = transaction.resolvedAssetKind == .preIpo ? PreIpoCopy.tokenLabelSingular : "share"
+            if let atomics = transaction.costBasisAmount, atomics > 0,
+               let quantity = TokenQuantityFormatter.quantity(fromAtomics: String(atomics), decimals: transaction.resolvedTokenDecimals),
+               quantity > 0 {
+                let isToken = transaction.resolvedAssetKind == .preIpo
+                rows.append(Row(label: isToken ? PreIpoCopy.tokensRowLabel : "Shares", value: Self.quantityFigure(quantity)))
+                if let spent = transaction.costBasisPrice, spent > 0 {
                     rows.append(Row(
-                        label: "Price",
-                        value: "\(UsdAmountFormatter.format(micros: (perUnit as NSDecimalNumber).int64Value)) a \(unit)"
+                        label: isToken ? "Price a \(PreIpoCopy.tokenLabelSingular)" : "Price a share",
+                        value: UsdAmountFormatter.format(micros: Self.perUnitMicros(spent, quantity: quantity))
                     ))
                 }
             }
@@ -218,34 +209,24 @@ struct TransactionReceipt: Equatable {
             default: "Selling \(name)"
             }
             let proceeds = transaction.proceedsUsdcMicros ?? transaction.costBasisAmount
-            let quantityLabel = TokenQuantityFormatter.label(
-                fromAtomics: String(transaction.amountMicros),
-                decimals: transaction.resolvedTokenDecimals,
-                kind: transaction.resolvedAssetKind
-            )
+            let sold = String(transaction.amountMicros)
+            let quantity = TokenQuantityFormatter.quantity(fromAtomics: sold, decimals: transaction.resolvedTokenDecimals) ?? 0
+            let isToken = transaction.resolvedAssetKind == .preIpo
             if let proceeds, proceeds > 0 {
                 amountMicros = proceeds
                 fallbackHero = nil
             } else {
                 amountMicros = nil
-                fallbackHero = quantityLabel
+                fallbackHero = TokenQuantityFormatter.label(fromAtomics: sold, decimals: transaction.resolvedTokenDecimals, kind: transaction.resolvedAssetKind)
             }
             var rows: [Row] = []
-            if transaction.amountMicros > 0, fallbackHero == nil {
-                let quantityRow = transaction.resolvedAssetKind == .preIpo ? PreIpoCopy.tokensRowLabel : "Shares"
-                rows.append(Row(label: quantityRow, value: quantityLabel))
-                if let proceeds, proceeds > 0,
-                   let quantity = TokenQuantityFormatter.quantity(
-                    fromAtomics: String(transaction.amountMicros),
-                    decimals: transaction.resolvedTokenDecimals
-                   ), quantity > 0 {
-                    var perUnitSource = Decimal(proceeds) / quantity
-                    var perUnit = Decimal()
-                    NSDecimalRound(&perUnit, &perUnitSource, 0, .plain)
-                    let unit = transaction.resolvedAssetKind == .preIpo ? PreIpoCopy.tokenLabelSingular : "share"
+            // When the hero already shows the count, don't repeat it as a row.
+            if quantity > 0, fallbackHero == nil {
+                rows.append(Row(label: isToken ? PreIpoCopy.tokensRowLabel : "Shares", value: Self.quantityFigure(quantity)))
+                if let proceeds, proceeds > 0 {
                     rows.append(Row(
-                        label: "Price",
-                        value: "\(UsdAmountFormatter.format(micros: (perUnit as NSDecimalNumber).int64Value)) a \(unit)"
+                        label: isToken ? "Price a \(PreIpoCopy.tokenLabelSingular)" : "Price a share",
+                        value: UsdAmountFormatter.format(micros: Self.perUnitMicros(proceeds, quantity: quantity))
                     ))
                 }
             }
@@ -277,6 +258,27 @@ struct TransactionReceipt: Equatable {
         }
     }
 
+    /// "1.0803": up to four decimals, trailing zeros dropped, no unit — the row is labelled.
+    /// A count of shares or tokens with the token's own decimals, trimmed like `sharesFigure`.
+    static func quantityFigure(_ quantity: Decimal) -> String {
+        sharesFigure(NSDecimalNumber(decimal: quantity).doubleValue)
+    }
+
+    /// What one share or token cost, from the money and the count, rounded to the micro.
+    static func perUnitMicros(_ micros: Int64, quantity: Decimal) -> Int64 {
+        var source = Decimal(micros) / quantity
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &source, 0, .plain)
+        return NSDecimalNumber(decimal: rounded).int64Value
+    }
+
+    static func sharesFigure(_ shares: Double) -> String {
+        var figure = String(format: "%.4f", shares)
+        while figure.hasSuffix("0") { figure.removeLast() }
+        if figure.hasSuffix(".") { figure.removeLast() }
+        return figure
+    }
+
     private static func status(_ raw: String) -> Status {
         if DepositStatusNormalizer.isConfirmed(raw) { return .confirmed }
         if DepositStatusNormalizer.isPending(raw) { return .pending }
@@ -296,7 +298,11 @@ struct TransactionReceipt: Equatable {
     }
 }
 
-/// Receipt layout: glyph, what happened, the amount, status, a few facts, Solscan.
+/// A receipt as a ledger entry: what happened and for how much, its state, then the facts as
+/// ruled lines and the way to check it on Solscan.
+///
+/// Set on the paper and left-aligned to the margin the lines under it share. The amount is in
+/// Avenir because it is the cabal's own money; every fact under it is in the market's voice.
 struct TransactionReceiptView: View {
     let receipt: TransactionReceipt
     var isRetrying = false
@@ -304,117 +310,262 @@ struct TransactionReceiptView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 28) {
-                VStack(spacing: 12) {
-                    Image(systemName: receipt.glyph)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(MonacoTheme.ink)
-                        .frame(width: 56, height: 56)
-                        .background(Circle().fill(MonacoTheme.surfaceSunken))
-                        .accessibilityHidden(true)
-                    Text(receipt.headline)
-                        .font(MonacoTheme.Typo.title)
-                        .foregroundStyle(MonacoTheme.ink)
-                        .multilineTextAlignment(.center)
-                    Group {
-                        if let micros = receipt.amountMicros {
-                            MoneyText(micros: micros, style: .hero)
-                        } else {
-                            Text(receipt.fallbackHero ?? "—")
-                                .font(MonacoTheme.Typo.moneyHero)
-                                .foregroundStyle(MonacoTheme.ink)
-                        }
-                    }
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
-                    Text(receipt.statusLabel)
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(statusColor)
-                        .accessibilityIdentifier("transaction-detail-status")
-                }
-                .frame(maxWidth: .infinity)
-                .accessibilityElement(children: .combine)
-
-                if let failure = receipt.failureMessage {
-                    Text(failure)
-                        .font(.subheadline)
-                        .foregroundStyle(MonacoTheme.muted)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-                }
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.xl) {
+                header
+                    .padding(.horizontal, MonacoTheme.Space.m)
 
                 MonacoGroupedList {
                     ForEach(receipt.rows) { row in
-                        HStack {
-                            Text(row.label)
-                                .foregroundStyle(MonacoTheme.muted)
-                            Spacer(minLength: 12)
-                            Text(row.value)
-                                .fontWeight(.semibold)
-                                .monospacedDigit()
-                                .foregroundStyle(MonacoTheme.ink)
-                                .multilineTextAlignment(.trailing)
-                        }
-                        .font(MonacoTheme.Typo.body)
-                        .padding(.horizontal, MonacoTheme.Space.m)
-                        .frame(minHeight: 52)
-                        .overlay(alignment: .bottom) {
-                            if row.id != receipt.rows.last?.id || receipt.solscanURL != nil {
-                                Rectangle().fill(MonacoTheme.hairline).frame(height: 1).padding(.leading, MonacoTheme.Space.m)
-                            }
-                        }
-                        .accessibilityElement(children: .combine)
+                        ReceiptLine(
+                            label: row.label,
+                            value: .data(row.value),
+                            isLast: row.id == receipt.rows.last?.id && receipt.solscanURL == nil
+                        )
                     }
                     if let url = receipt.solscanURL {
-                        Link(destination: url) {
-                            HStack {
-                                Text("View on Solscan")
-                                Spacer()
-                                Image(systemName: "arrow.up.right")
-                                    .imageScale(.small)
-                            }
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(MonacoTheme.ink)
-                            .padding(.horizontal, 16)
-                            .frame(minHeight: 52)
-                            .contentShape(Rectangle())
-                        }
-                        .accessibilityIdentifier("transaction-detail-solscan")
+                        solscanLine(url)
                     }
                 }
 
+                // A failed receipt keeps its way to try again, under the facts it is about.
                 if let onRetry {
-                    Group {
-                        if isRetrying {
-                            ProgressView()
-                                .tint(MonacoTheme.ink)
-                                .frame(minHeight: 50)
-                                .accessibilityIdentifier("transaction-detail-retry-loading")
-                        } else {
-                            Button(action: onRetry) {
-                                Text("Try again").frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.monacoPrimary)
-                                .accessibilityIdentifier("transaction-detail-retry")
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
+                    retry(onRetry)
+                        .padding(.horizontal, MonacoTheme.Space.m)
                 }
             }
-            .padding(.horizontal, MonacoTheme.Space.gutter)
             .padding(.top, MonacoTheme.Space.m)
             .padding(.bottom, MonacoTheme.Space.xl)
         }
         .accessibilityIdentifier("transaction-receipt")
     }
 
-    private var statusColor: Color {
-        switch receipt.status {
-        case .confirmed: MonacoTheme.muted
-        case .pending: MonacoTheme.warning
-        case .failed: MonacoTheme.loss
-        case .other: MonacoTheme.muted
+    /// The same glyph as the activity row it was opened from, then the headline, the amount
+    /// and its state — read by VoiceOver as one sentence.
+    private var header: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+            Image(systemName: receipt.glyph)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(MonacoTheme.ink)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(MonacoTheme.surfaceSunken))
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
+                Text(receipt.headline)
+                    .font(MonacoTheme.Typo.title)
+                    .foregroundStyle(MonacoTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                amount
+            }
+
+            ReceiptStatusChip(status: receipt.status, label: receipt.statusLabel)
+                .accessibilityIdentifier("transaction-detail-status")
+
+            if let failure = receipt.failureMessage {
+                Text(failure)
+                    .font(MonacoTheme.Typo.callout)
+                    .foregroundStyle(MonacoTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var amount: some View {
+        Group {
+            if let micros = receipt.amountMicros {
+                MoneyText(micros: micros, style: .hero)
+            } else {
+                Text(receipt.fallbackHero ?? "—")
+                    .moneyFont(.hero)
+                    .foregroundStyle(MonacoTheme.ink)
+            }
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+    }
+
+    private func solscanLine(_ url: URL) -> some View {
+        Link(destination: url) {
+            HStack(spacing: MonacoTheme.Space.sm) {
+                Text("View on Solscan")
+                    .font(MonacoTheme.Typo.bodyStrong)
+                    .foregroundStyle(MonacoTheme.ink)
+                Spacer(minLength: MonacoTheme.Space.sm)
+                Image(systemName: "arrow.up.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(MonacoTheme.tertiaryText)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, MonacoTheme.Space.m)
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.monacoRow)
+        .accessibilityIdentifier("transaction-detail-solscan")
+    }
+
+    @ViewBuilder
+    private func retry(_ action: @escaping () -> Void) -> some View {
+        if isRetrying {
+            ProgressView()
+                .tint(MonacoTheme.ink)
+                .frame(maxWidth: .infinity, minHeight: MonacoButtonMetrics.minimumHeight)
+                .accessibilityIdentifier("transaction-detail-retry-loading")
+        } else {
+            Button("Try again", action: action)
+                .buttonStyle(.monacoPrimary)
+                .monacoFullWidthButtons()
+                .accessibilityIdentifier("transaction-detail-retry")
+        }
+    }
+}
+
+/// One line of a receipt: what it is on the left in the brand's voice, the value on the right.
+/// Figures, dates and addresses set in the market's voice; words stay in the brand's. An
+/// address — and any line at the accessibility text sizes — puts its value under the label
+/// instead of squeezing either.
+struct ReceiptLine: View {
+    enum Value: Equatable {
+        /// A figure or a date, in SF Mono.
+        case data(String)
+        /// A word or a phrase, in Avenir Next.
+        case words(String)
+        /// An address, in SF Mono, wrapped by character and never hyphenated.
+        case address(String)
+    }
+
+    let label: String
+    let value: Value
+    var isLast = false
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var isStacked: Bool {
+        if case .address = value { return true }
+        return dynamicTypeSize.isAccessibilitySize
+    }
+
+    var body: some View {
+        Group {
+            if isStacked {
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
+                    labelText
+                    valueView(alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.sm) {
+                    labelText
+                    Spacer(minLength: MonacoTheme.Space.sm)
+                    valueView(alignment: .trailing)
+                }
+            }
+        }
+        .padding(.horizontal, MonacoTheme.Space.m)
+        .padding(.vertical, MonacoTheme.Space.sm)
+        .frame(minHeight: 52)
+        .overlay(alignment: .bottom) {
+            if !isLast {
+                MonacoRule()
+                    .padding(.leading, MonacoTheme.Space.m)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var labelText: some View {
+        Text(label)
+            .font(MonacoTheme.Typo.body)
+            .foregroundStyle(MonacoTheme.muted)
+    }
+
+    @ViewBuilder
+    private func valueView(alignment: TextAlignment) -> some View {
+        switch value {
+        case .data(let text):
+            Text(text)
+                .font(MonacoTheme.Typo.data)
+                .foregroundStyle(MonacoTheme.ink)
+                .multilineTextAlignment(alignment)
+        case .words(let text):
+            Text(text)
+                .font(MonacoTheme.Typo.body)
+                .foregroundStyle(MonacoTheme.ink)
+                .multilineTextAlignment(alignment)
+        case .address(let address):
+            MonacoWalletAddressText(address: address, textStyle: .subheadline)
+        }
+    }
+}
+
+/// A receipt's state as a chip: amber while it is on its way, the loss red when it failed,
+/// muted once it is done — done is the normal case and should not shout.
+struct ReceiptStatusChip: View {
+    let status: TransactionReceipt.Status
+    let label: String
+
+    var body: some View {
+        Text(label)
+            .font(MonacoTheme.Typo.micro)
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(fill))
+            .fixedSize()
+    }
+
+    private var tint: Color {
+        switch status {
+        case .pending: MonacoTheme.warning
+        case .failed: MonacoTheme.lossOnWash
+        case .confirmed, .other: MonacoTheme.muted
+        }
+    }
+
+    private var fill: Color {
+        status == .failed ? MonacoTheme.lossWash : MonacoTheme.surfaceSunken
+    }
+}
+
+/// A receipt before its detail has loaded, in the receipt's own shape: the glyph, the headline,
+/// the amount, the chip, and three ruled lines.
+struct TransactionReceiptSkeleton: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.xl) {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+                SkeletonBlock(width: 44, height: 44, radius: 22)
+                SkeletonBlock(width: 180, height: 24)
+                SkeletonBlock(width: 160, height: 44)
+                SkeletonBlock(width: 76, height: 22, radius: 11)
+            }
+            .padding(.horizontal, MonacoTheme.Space.m)
+
+            MonacoGroupedList {
+                ForEach(0..<3, id: \.self) { index in
+                    HStack(spacing: MonacoTheme.Space.sm) {
+                        SkeletonBlock(width: 72, height: 14)
+                        Spacer(minLength: MonacoTheme.Space.sm)
+                        SkeletonBlock(width: 120, height: 14)
+                    }
+                    .padding(.horizontal, MonacoTheme.Space.m)
+                    .frame(minHeight: 52)
+                    .overlay(alignment: .bottom) {
+                        if index < 2 {
+                            MonacoRule()
+                                .padding(.leading, MonacoTheme.Space.m)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.top, MonacoTheme.Space.m)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading")
+        .accessibilityIdentifier("transaction-detail-loading")
     }
 }

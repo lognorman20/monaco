@@ -46,6 +46,7 @@ propose-sheet                 -MonacoProposalFeedSample -MonacoProposeSample -Mo
 
 profile-placeholder           -MonacoProfileSample placeholder
 profile-photo                 -MonacoProfileSample photo
+profile-face-picker           -MonacoProfileSample facePicker
 profile-validation            -MonacoProfileSample validation
 profile-cabals                -MonacoProfileSample cabals
 profile-empty                 -MonacoProfileSample empty
@@ -104,3 +105,82 @@ asset-no-cabals               -MonacoAssetDetailSample noCabals
 asset-cabals-partial          -MonacoAssetDetailSample cabalsPartial
 asset-cabals-failed           -MonacoAssetDetailSample cabalsFailed
 asset-not-routable            -MonacoAssetDetailSample notRoutable
+asset-scrubbed                -MonacoAssetDetailSample scrubbed
+asset-votes-only              -MonacoAssetDetailSample votesOnly -MonacoAssetDetailScroll 0.25
+
+# The stock screen runs to about three screens under the chart, and the Stocks tab to two;
+# these open them scrolled to a fraction of the way down, the middle, or the end.
+asset-cabals-position         -MonacoAssetDetailSample cabals -MonacoAssetDetailScroll 0.25
+asset-cabals-center           -MonacoAssetDetailSample cabals -MonacoAssetDetailScroll center
+asset-cabals-bottom           -MonacoAssetDetailSample cabals -MonacoAssetDetailScroll bottom
+asset-one-cabal-center        -MonacoAssetDetailSample oneCabal -MonacoAssetDetailScroll center
+asset-open-center             -MonacoAssetDetailSample open -MonacoAssetDetailScroll center
+asset-open-bottom             -MonacoAssetDetailSample open -MonacoAssetDetailScroll bottom
+asset-after-hours-center      -MonacoAssetDetailSample afterHours -MonacoAssetDetailScroll center
+asset-not-entitled-center     -MonacoAssetDetailSample notEntitled -MonacoAssetDetailScroll center
+asset-not-entitled-bottom     -MonacoAssetDetailSample notEntitled -MonacoAssetDetailScroll bottom
+asset-sparse-bottom           -MonacoAssetDetailSample sparse -MonacoAssetDetailScroll bottom
+asset-cabals-partial-position -MonacoAssetDetailSample cabalsPartial -MonacoAssetDetailScroll 0.25
+asset-cabals-failed-center    -MonacoAssetDetailSample cabalsFailed -MonacoAssetDetailScroll center
+asset-not-routable-bottom     -MonacoAssetDetailSample notRoutable -MonacoAssetDetailScroll bottom
+stocks-tab-full-bottom        -MonacoStocksTabSample full -MonacoStocksTabScroll bottom
+
+# Screens around the cabal screen: start, join, the New cabal sheet, and the trading bot.
+group-nav-start               -MonacoGroupNavSample start
+group-nav-new-cabal           -MonacoGroupNavSample newCabal
+group-nav-join-code           -MonacoGroupNavSample joinCode
+group-nav-join                -MonacoGroupNavSample join
+group-nav-ask-to-join         -MonacoGroupNavSample askToJoin
+group-nav-bots                -MonacoGroupNavSample bots
+group-nav-bot                 -MonacoGroupNavSample bot
+group-nav-bot-removed         -MonacoGroupNavSample botRemoved
+
+login-signed-out              -MonacoWelcomeSample signedOut
+login-code                    -MonacoWelcomeSample code
+login-email-code              -MonacoWelcomeSample emailCode
+login-code-rejected           -MonacoWelcomeSample codeRejected
+gate-restoring                -MonacoWelcomeSample restoring
+gate-restore-failed           -MonacoWelcomeSample restoreFailed
+gate-loading                  -MonacoWelcomeSample gateLoading
+gate-failed                   -MonacoWelcomeSample gateFailed
+empty-states                  -MonacoWelcomeSample emptyStates
+
+money-add                     -MonacoMoneyFlowSample addMoney
+money-add-loading             -MonacoMoneyFlowSample addMoneyLoading
+money-add-failed              -MonacoMoneyFlowSample addMoneyFailed
+money-fund                    -MonacoMoneyFlowSample fundCabal
+money-fund-picker             -MonacoMoneyFlowSample fundCabalPicker
+money-fund-empty              -MonacoMoneyFlowSample fundCabalEmpty
+money-fund-loading            -MonacoMoneyFlowSample fundCabalLoading
+money-withdraw                -MonacoMoneyFlowSample withdraw
+money-withdraw-failed         -MonacoMoneyFlowSample withdrawFailed
+money-withdraw-confirm        -MonacoMoneyFlowSample withdrawConfirm
+money-withdraw-confirm-failed -MonacoMoneyFlowSample withdrawConfirmFailed
+money-receipt-pending         -MonacoMoneyFlowSample receiptPending
+money-receipt-loading         -MonacoMoneyFlowSample receiptLoading
+
+proposal-feed-closed              -MonacoProposalFeedSample -MonacoProposalSampleClosed
+proposal-detail-swap-failed       -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-24
+proposal-detail-commented-bottom  -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-0 -MonacoProposalSampleBottom
+proposal-detail-passed-bottom     -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-20 -MonacoProposalSampleBottom
+proposal-detail-failed-bottom     -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-21 -MonacoProposalSampleBottom
+proposal-feed-empty               -MonacoProposalFeedSample -MonacoProposalSampleEmpty
+proposal-feed-failed              -MonacoProposalFeedSample -MonacoProposalSampleFailing
+proposal-feed-loading             -MonacoProposalFeedSample -MonacoProposalSampleLoading
+proposal-detail-loading           -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-0 -MonacoProposalSampleLoading
+proposal-detail-unavailable       -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-0 -MonacoProposalSampleFailing
+chat-loading                      -MonacoChatSampleQA -MonacoChatSampleLoading
+
+propose-buy                   -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleBuy
+propose-amount                -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleAmount
+propose-review                -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleReview
+propose-sell                  -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleSell
+propose-sell-amount           -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleSellAmount
+propose-sell-review           -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleSellReview
+propose-add-bot               -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleAddBot
+propose-pause-bot             -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSamplePauseBot
+propose-sheet-cash-only       -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleCashOnly
+propose-pick-cabal            -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSamplePickCabal
+propose-pick-cabal-sell       -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSamplePickCabalSell
+propose-buy-large-text        -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleBuy -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+propose-review-large-text     -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleReview -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL

@@ -56,7 +56,7 @@ struct ProfileNameEditor: View {
     }
 
     var body: some View {
-        MonacoCard {
+        VStack(alignment: .leading, spacing: 0) {
             DisplayNameField(
                 draft: $draft,
                 identifierPrefix: "profile-name",
@@ -83,6 +83,8 @@ struct ProfileNameEditor: View {
                 .accessibilityIdentifier("profile-name-save")
             }
         }
+        .padding(.horizontal, MonacoTheme.Space.m)
+        .padding(.top, MonacoTheme.Space.s)
         .onAppear {
             if draft.isEmpty {
                 draft = savedName

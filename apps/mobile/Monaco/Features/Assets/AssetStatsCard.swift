@@ -36,27 +36,31 @@ struct AssetStatsCard: View {
             trailing: grid.basisCaption,
             identifier: "asset-detail-stats"
         ) {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
-                VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
-                    ForEach(rows, id: \.first?.id) { row in
-                        HStack(alignment: .top, spacing: MonacoTheme.Space.m) {
-                            ForEach(row) { cell in
-                                StatCell(cell: cell)
-                            }
-                            // An odd last row keeps its cell in the left column
-                            // rather than letting it stretch across both.
-                            if row.count < columnCount {
-                                Color.clear.frame(maxWidth: .infinity)
-                            }
+            // A ruled table: one rule between rows, each row two cells set on the same
+            // baseline — the label on one line, the figure on the next, in every column.
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.element.first?.id) { index, row in
+                    if index > 0 { AssetCardDivider() }
+                    HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.m) {
+                        ForEach(row) { cell in
+                            StatCell(cell: cell)
+                        }
+                        // An odd last row keeps its cell in the left column
+                        // rather than letting it stretch across both.
+                        if row.count < columnCount {
+                            Color.clear.frame(maxWidth: .infinity, maxHeight: 0)
                         }
                     }
+                    .padding(.vertical, MonacoTheme.Space.sm)
                 }
                 if let position = grid.week52Position {
+                    AssetCardDivider()
                     Week52Bar(
                         position: position,
                         lowLabel: grid.week52LowLabel,
                         highLabel: grid.week52HighLabel
                     )
+                    .padding(.vertical, MonacoTheme.Space.sm)
                 }
             }
         }
@@ -74,7 +78,7 @@ private struct StatCell: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
             Text(cell.value)
-                .moneyFont(.row)
+                .font(MonacoTheme.Typo.dataStrong)
                 .foregroundStyle(MonacoTheme.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -104,6 +108,12 @@ private struct Week52Bar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // Labelled like the cells above it: the two ends repeat the 52-week low and
+            // high, and without a name the bar reads as a scroll indicator.
+            Text("52-week range")
+                .font(MonacoTheme.Typo.caption)
+                .foregroundStyle(MonacoTheme.muted)
+                .padding(.bottom, 2)
             GeometryReader { geometry in
                 let width = geometry.size.width
                 ZStack(alignment: .leading) {
@@ -128,7 +138,7 @@ private struct Week52Bar: View {
                 Spacer(minLength: MonacoTheme.Space.s)
                 Text(highLabel ?? "")
             }
-            .font(MonacoTheme.Typo.micro)
+            .font(MonacoTheme.Typo.dataMicro)
             .foregroundStyle(MonacoTheme.tertiaryText)
         }
         .accessibilityElement(children: .ignore)

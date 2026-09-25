@@ -295,6 +295,8 @@ public enum ProposeFlowCopy {
     public static let agentKeySection = "Bot key"
     public static let agentKeyMissing = "No key on file. If this bot was added before keys were saved, remove it and add a new bot."
     public static let copyKey = "Copy key"
+    /// The header over the key on the proposal screen; the button under it says "Copy key".
+    public static let botKeyTitle = "Bot key"
     public static let keyCopied = "Key copied"
     public static let copyConnectInstructions = "Copy connect instructions"
     public static let connectCopied = "Connect instructions copied"
@@ -325,7 +327,7 @@ public enum ProposeFlowCopy {
         proposalSentGeneric, priceCheckFailed, cantBuyStock("Apple"), changeAmount, sendFailed, noConnection,
         sellTitle, holdingsTitle, sellTooSmall, sellNoLongerAvailable,
         sellSummary(amount: "$139", name: "Apple", shares: "0.6 shares"), sellHelper("$278.47"), overHoldings,
-        addBotTitle, botNamePlaceholder, botBudgetHelper, botExplainer, botKeyExplainer, agentKeyExplainer, agentDetailTitle, agentKeySection, agentKeyMissing, copyKey, keyCopied,
+        addBotTitle, botNamePlaceholder, botBudgetHelper, botExplainer, botKeyExplainer, agentKeyExplainer, agentDetailTitle, agentKeySection, agentKeyMissing, copyKey, botKeyTitle, keyCopied,
         copyConnectInstructions, connectCopied, clawPumpSteps,
         lifecycleTitle(kind: "pause_agent"), lifecycleTitle(kind: "resume_agent"), lifecycleTitle(kind: "revoke_agent"),
         lifecycleMessage(kind: "pause_agent", botName: "Scout"), lifecycleMessage(kind: "resume_agent", botName: "Scout"),

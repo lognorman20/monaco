@@ -165,3 +165,8 @@ const allRangeYears = 5
 // ChartSourceJupiter names a series built from Jupiter's candles for the xStock
 // itself, rather than from a Pyth feed for the underlying equity.
 const ChartSourceJupiter = "jupiter"
+
+// ChartSourceYahoo names a series from Yahoo Finance's public chart endpoint: the
+// underlying equity on its home exchange, keyless and free. A stand-in until the
+// tokenized stock's own history is worth paying for.
+const ChartSourceYahoo = "yahoo"

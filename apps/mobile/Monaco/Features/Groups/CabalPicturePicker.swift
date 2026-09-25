@@ -44,33 +44,13 @@ struct CabalPicturePicker: View {
     }
 
     private var editableMark: some View {
-        PhotosPicker(selection: $selection, matching: .images, photoLibrary: .shared()) {
-            ZStack(alignment: .bottomTrailing) {
-                CabalMark(
-                    groupId: groupId,
-                    name: name,
-                    size: size,
-                    onInk: onInk,
-                    pictureUrl: editor.pictureUrl
-                )
-                .overlay {
-                    if editor.isWorking {
-                        RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                            .fill(MonacoTheme.canvas.opacity(0.6))
-                        ProgressView()
-                            .controlSize(size >= 64 ? .regular : .mini)
-                            .tint(MonacoTheme.ink)
-                    }
-                }
-
-                Image(systemName: "camera.fill")
-                    .font(.system(size: max(9, size * 0.28), weight: .semibold))
-                    .foregroundStyle(MonacoTheme.primaryButtonLabel)
-                    .frame(width: max(18, size * 0.44), height: max(18, size * 0.44))
-                    .background(MonacoTheme.primaryButtonFill, in: Circle())
-                    .overlay { Circle().strokeBorder(MonacoTheme.canvas, lineWidth: 1.5) }
-                    .offset(x: 5, y: 5)
-            }
+        // Built out here and handed to the picker whole: its label builder is not main-actor
+        // isolated and the editor is, so reading the editor inside it is an isolation error
+        // the compiler was only warning about. The picker re-renders with the editor, so the
+        // label is never stale.
+        let label = editableLabel(pictureUrl: editor.pictureUrl, isWorking: editor.isWorking)
+        return PhotosPicker(selection: $selection, matching: .images, photoLibrary: .shared()) {
+            label
         }
         .buttonStyle(.plain)
         .disabled(editor.isWorking)
@@ -87,6 +67,42 @@ struct CabalPicturePicker: View {
                 .accessibilityIdentifier("cabal-picture-remove")
             }
         }
+    }
+
+    private func editableLabel(pictureUrl: String?, isWorking: Bool) -> some View {
+        ZStack(alignment: .bottomTrailing) {
+            CabalMark(
+                groupId: groupId,
+                name: name,
+                size: size,
+                onInk: onInk,
+                pictureUrl: pictureUrl
+            )
+            .overlay {
+                if isWorking {
+                    // The mark's own corner, so the veil covers the tile and nothing else.
+                    RoundedRectangle(cornerRadius: size * MonacoTheme.Radius.tile / 44, style: .continuous)
+                        .fill(MonacoTheme.canvas.opacity(0.6))
+                    ProgressView()
+                        .controlSize(size >= 64 ? .regular : .mini)
+                        .tint(MonacoTheme.ink)
+                }
+            }
+            cameraBadge
+        }
+    }
+
+    /// The camera on the mark's corner. On the hero's ink it is paper with an ink glyph: in the
+    /// brand fill it was ink on ink, and only its ring showed. Off the hero it is the brand fill.
+    private var cameraBadge: some View {
+        let diameter = max(18, size * 0.44)
+        return Image(systemName: "camera.fill")
+            .font(.system(size: max(9, size * 0.22), weight: .semibold))
+            .foregroundStyle(onInk ? MonacoTheme.heroInk : MonacoTheme.primaryButtonLabel)
+            .frame(width: diameter, height: diameter)
+            .background(onInk ? MonacoTheme.onHero : MonacoTheme.primaryButtonFill, in: Circle())
+            .overlay { Circle().strokeBorder(onInk ? MonacoTheme.heroInk : MonacoTheme.canvas, lineWidth: 1.5) }
+            .offset(x: 5, y: 5)
     }
 
     /// VoiceOver still needs to be told there is a picture, even where the mark

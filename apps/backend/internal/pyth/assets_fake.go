@@ -15,6 +15,7 @@ type fakeAssetPriceClient struct {
 	charts     map[string]AssetChartSeries
 	chartDelay map[string]time.Duration
 	chartCalls map[string]int
+	warmCalls  map[string]int
 }
 
 // NewFakeAssetPriceClient returns an in-memory asset price client for tests.
@@ -25,6 +26,7 @@ func NewFakeAssetPriceClient() AssetPriceClient {
 		charts:     make(map[string]AssetChartSeries),
 		chartDelay: make(map[string]time.Duration),
 		chartCalls: make(map[string]int),
+		warmCalls:  make(map[string]int),
 	}
 }
 
@@ -89,6 +91,25 @@ func ChartSeriesCallCount(client AssetPriceClient, symbol string, chartRange Cha
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
 	return fake.chartCalls[chartKey(symbol, chartRange)]
+}
+
+// ChartRangeWarmCount reports how many times a chart range warm was asked for a
+// symbol.
+func ChartRangeWarmCount(client AssetPriceClient, symbol string) int {
+	fake, ok := client.(*fakeAssetPriceClient)
+	if !ok {
+		panic("pyth: ChartRangeWarmCount requires NewFakeAssetPriceClient")
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	return fake.warmCalls[normalizeSymbol(symbol)]
+}
+
+// WarmChartRanges records the request and fetches nothing.
+func (f *fakeAssetPriceClient) WarmChartRanges(symbol string) {
+	f.mu.Lock()
+	f.warmCalls[normalizeSymbol(symbol)]++
+	f.mu.Unlock()
 }
 
 func chartKey(symbol string, chartRange ChartRange) string {

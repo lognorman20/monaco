@@ -35,22 +35,22 @@ struct AssetActivityCard: View {
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(visibleLines.enumerated()), id: \.element.id) { index, line in
-                    ActivityRow(line: line, openCabal: openCabal)
-                    if index < visibleLines.count - 1 {
-                        AssetCardDivider()
+                    if index > 0 {
+                        AssetCardDivider(leading: AssetCardDivider.inset(afterMark: ActivityRow.glyphWidth))
                     }
+                    ActivityRow(line: line, openCabal: openCabal)
                 }
                 if lines.count > Self.visibleCount {
-                    Button(showsAll ? "Show less" : "Show \(lines.count - Self.visibleCount) more") {
+                    AssetSectionTextButton(title: showsAll ? "Show less" : "Show \(lines.count - Self.visibleCount) more") {
                         if reduceMotion {
                             showsAll.toggle()
                         } else {
                             withAnimation(.easeInOut(duration: 0.2)) { showsAll.toggle() }
                         }
                     }
-                    .font(MonacoTheme.Typo.callout.weight(.semibold))
-                    .foregroundStyle(MonacoTheme.brand)
-                    .frame(minHeight: 44, alignment: .leading)
+                    // Lined up with the sentences, not with the glyphs.
+                    .padding(.leading, AssetCardDivider.inset(afterMark: ActivityRow.glyphWidth))
+                    .padding(.top, MonacoTheme.Space.xs)
                     .accessibilityIdentifier("asset-activity-toggle")
                 }
             }
@@ -77,24 +77,30 @@ private struct ActivityRow: View {
         .accessibilityIdentifier("asset-activity-row-\(line.id)")
     }
 
+    /// The glyph's column. The rules between rows start past it, under the sentence.
+    static let glyphWidth: CGFloat = 22
+
     private var content: some View {
-        HStack(alignment: .top, spacing: MonacoTheme.Space.sm) {
+        // On the sentence's first baseline: the glyph and the age sit on the line they
+        // are about, not at the top of a two-line row.
+        HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.sm) {
             Image(systemName: line.glyph)
-                .font(.system(size: 15))
+                .font(MonacoTheme.Typo.callout)
                 .foregroundStyle(tint)
-                .frame(width: 22, height: 22)
+                .frame(width: Self.glyphWidth)
                 .accessibilityHidden(true)
             Text(line.title)
                 .font(MonacoTheme.Typo.callout)
                 .foregroundStyle(MonacoTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: MonacoTheme.Space.s)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Text(line.age)
-                .font(MonacoTheme.Typo.caption)
+                .font(MonacoTheme.Typo.stamp)
                 .foregroundStyle(MonacoTheme.tertiaryText)
-                .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize()
         }
-        .padding(.vertical, MonacoTheme.Space.s)
+        .padding(.vertical, MonacoTheme.Space.sm)
         .frame(minHeight: 44)
         .contentShape(Rectangle())
     }

@@ -5,11 +5,13 @@ import UIKit
 
 /// Debug-only: renders Profile from canned `AppSessionStore` data so QA can screenshot
 /// each state without Privy or a backend. Launch with
-/// `-MonacoProfileSample <placeholder|photo|validation|saveFailure|saveSuccess|cabals|empty|loading|error>`.
+/// `-MonacoProfileSample <placeholder|photo|facePicker|validation|saveFailure|saveSuccess|cabals|empty|loading|error>`.
 /// `cabals` and `empty` open scrolled to the bottom so the cabal list is on screen.
 enum ProfileSampleScenario: String, CaseIterable {
     case placeholder
     case photo
+    /// The face sheet open over the placeholder, so the grid and its ring can be screenshotted.
+    case facePicker
     case validation
     /// Edit profile open on a valid new name. There is no session here, so tapping Save is
     /// a rejected save — which is how the failure is meant to be readable inside the sheet.
@@ -50,6 +52,7 @@ struct ProfileSampleHarness: View {
                 initiallyShowEditProfile: scenario == .validation
                     || scenario == .saveFailure
                     || scenario == .saveSuccess,
+                initiallyShowFacePicker: scenario == .facePicker,
                 saveName: saveNameOverride
             )
         }

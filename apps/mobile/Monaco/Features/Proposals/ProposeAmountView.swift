@@ -2,6 +2,9 @@ import MonacoCore
 import SwiftUI
 
 /// Buy, step 2 of 3: how much, and optionally why. "Review" checks the price, then pushes the receipt.
+///
+/// The stock sits at the top as the one line of the ledger this step is about, the amount is the
+/// hero, the pot is the line under it, and the presets are quick picks in the market's voice.
 struct ProposeAmountView: View {
     let groupId: String
     let stock: ProposeStock
@@ -12,9 +15,12 @@ struct ProposeAmountView: View {
 
     private let service: ProposeService
 
+    @Environment(AppSessionStore.self) private var session: AppSessionStore?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var priceMicros: Int64?
-    @State private var amountText = ""
-    @State private var reason = ""
+    @State private var amountText: String
+    @State private var reason: String
     @State private var showsReason = false
     @State private var isQuoting = false
     @State private var quoteError: String?
@@ -22,13 +28,25 @@ struct ProposeAmountView: View {
     @State private var referencePremiumBps: Int?
     @FocusState private var reasonFocused: Bool
 
-    init(service: ProposeService, groupId: String, stock: ProposeStock, pot: ProposePot, onProposed: @escaping (_ proposalId: String) -> Void) {
+    /// `initialAmount` and `initialReason` start the step part-filled, as plain decimal text ("25")
+    /// and the reason as typed. Empty by default, which is how the flow opens it.
+    init(
+        service: ProposeService,
+        groupId: String,
+        stock: ProposeStock,
+        pot: ProposePot,
+        initialAmount: String = "",
+        initialReason: String = "",
+        onProposed: @escaping (_ proposalId: String) -> Void
+    ) {
         self.service = service
         self.groupId = groupId
         self.stock = stock
         self.pot = pot
         self.onProposed = onProposed
         _priceMicros = State(initialValue: stock.priceMicros)
+        _amountText = State(initialValue: AmountEntryText.sanitize(initialAmount))
+        _reason = State(initialValue: initialReason)
     }
 
     private var amountMicros: Int64? {
@@ -50,6 +68,13 @@ struct ProposeAmountView: View {
 
     private var canReview: Bool {
         amountMicros != nil && !isOverPot && !reasonTooLong && !isQuoting
+    }
+
+    /// The stock as the header shows it: the price this step loaded, when the pick carried none.
+    private var shownStock: ProposeStock {
+        var shown = stock
+        shown.priceMicros = priceMicros
+        return shown
     }
 
     var body: some View {
@@ -88,29 +113,54 @@ struct ProposeAmountView: View {
 
     private var form: some View {
         ScrollView {
-            VStack(spacing: MonacoTheme.Space.l) {
-                header
-                AmountEntry(
-                    amountText: $amountText,
-                    max: potUsd,
-                    presets: [.dollars(25), .dollars(50), .dollars(100), .fraction(1, label: "Max")],
-                    helper: potHelper,
-                    overLimitHelper: ProposeFlowCopy.overPot
-                )
-                .onChange(of: amountText) { _, _ in quoteError = nil }
+            VStack(spacing: 0) {
+                MonacoGroupedList {
+                    ProposeStockRow(
+                        stock: shownStock,
+                        logoURL: ProposeStockLogo.url(for: stock.symbol, in: session),
+                        isLast: true
+                    )
+                }
+
+                VStack(spacing: MonacoTheme.Space.m) {
+                    AmountEntry(
+                        amountText: $amountText,
+                        max: potUsd,
+                        helper: potHelper,
+                        overLimitHelper: ProposeFlowCopy.overPot
+                    )
+                    .onChange(of: amountText) { _, _ in quoteError = nil }
+
+                    ProposePresetChips(
+                        amountText: $amountText,
+                        presets: [.dollars(25), .dollars(50), .dollars(100), .fraction(1, label: "Max")],
+                        max: potUsd
+                    )
+                }
+                .padding(.top, MonacoTheme.Space.xl)
+                .padding(.horizontal, MonacoTheme.Space.m)
+
                 premiumNudge
+                    .padding(.top, MonacoTheme.Space.m)
+                    .padding(.horizontal, MonacoTheme.Space.m)
+
                 reasonField
+                    .padding(.top, MonacoTheme.Space.xl)
+                    .padding(.horizontal, MonacoTheme.Space.m)
+
                 if let quoteError {
                     Text(quoteError)
                         .font(MonacoTheme.Typo.callout)
                         .foregroundStyle(MonacoTheme.loss)
                         .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity)
+                        .padding(.top, MonacoTheme.Space.l)
+                        .padding(.horizontal, MonacoTheme.Space.m)
                         .accessibilityIdentifier("proposal-quote-error")
                 }
             }
-            .padding(.horizontal, MonacoTheme.Space.gutter)
-            .padding(.top, MonacoTheme.Space.m)
+            .padding(.top, MonacoTheme.Space.s)
             .padding(.bottom, MonacoTheme.Space.l)
         }
         .scrollDismissesKeyboard(.interactively)
@@ -118,42 +168,6 @@ struct ProposeAmountView: View {
 
     private var potHelper: String {
         ProposeFlowCopy.potHelper(UsdAmountFormatter.format(decimal: potUsd))
-    }
-
-    @ViewBuilder
-    private var premiumNudge: some View {
-        if let bps = referencePremiumBps, PreIpoCopy.showsPremiumNudge(premiumBps: bps, assetKind: stock.assetKind) {
-            Text(PreIpoCopy.tradingPremiumNudge(bps: bps))
-                .font(MonacoTheme.Typo.callout)
-                .foregroundStyle(MonacoTheme.muted)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
-                .accessibilityIdentifier("proposal-premium-nudge")
-        }
-    }
-
-    private var header: some View {
-        HStack(spacing: MonacoTheme.Space.sm) {
-            StockMark(symbol: stock.symbol, displayName: stock.name, assetKind: stock.assetKind, size: 56)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(stock.name)
-                    .font(MonacoTheme.Typo.title)
-                    .foregroundStyle(MonacoTheme.ink)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                HStack(spacing: 6) {
-                    Text(stock.ticker)
-                        .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.muted)
-                    if let priceMicros {
-                        Text("·").font(MonacoTheme.Typo.caption).foregroundStyle(MonacoTheme.tertiaryText)
-                        MoneyText(micros: priceMicros, style: .caption, color: MonacoTheme.muted)
-                    }
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder
@@ -168,18 +182,32 @@ struct ProposeAmountView: View {
             )
         } else {
             Button {
-                withAnimation(.snappy) { showsReason = true }
+                withAnimation(reduceMotion ? nil : .snappy) { showsReason = true }
                 reasonFocused = true
             } label: {
                 Label(ProposeFlowCopy.addReason, systemImage: "plus")
-                    .font(MonacoTheme.Typo.callout.weight(.semibold))
-                    .foregroundStyle(MonacoTheme.ink)
+                    .font(MonacoTheme.Typo.calloutStrong)
+                    .foregroundStyle(MonacoTheme.brand)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity)
             .accessibilityIdentifier("proposal-add-reason")
+        }
+    }
+
+    /// A pre-IPO token trading far from its private-market reference says so before the
+    /// member commits a number to it.
+    @ViewBuilder
+    private var premiumNudge: some View {
+        if let bps = referencePremiumBps, PreIpoCopy.showsPremiumNudge(premiumBps: bps, assetKind: stock.assetKind) {
+            Text(PreIpoCopy.tradingPremiumNudge(bps: bps))
+                .font(MonacoTheme.Typo.callout)
+                .foregroundStyle(MonacoTheme.muted)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("proposal-premium-nudge")
         }
     }
 
@@ -216,7 +244,8 @@ struct ProposeAmountView: View {
                 fallbackPriceMicros: priceMicros,
                 cabalId: pot.groupId.isEmpty ? groupId : pot.groupId,
                 cabalName: pot.name,
-                thesis: reason.trimmingCharacters(in: .whitespacesAndNewlines)
+                thesis: reason.trimmingCharacters(in: .whitespacesAndNewlines),
+                potMicros: pot.totalMicros
             )
         } catch {
             if error.isRequestCancellation { return }
@@ -226,9 +255,92 @@ struct ProposeAmountView: View {
     }
 }
 
+/// Quick amounts under the figure, as capsules set in the market's voice — the same chips the
+/// cabal hero uses for its ranges, sized to a thumb. The selected one fills with ink.
+///
+/// `AmountEntry` draws its own presets in the brand's face; this step passes it none and draws
+/// these instead, under the pot line. Four chips wrap into two rows rather than squeeze once the
+/// text is too large to fit them across.
+struct ProposePresetChips: View {
+    @Binding var amountText: String
+    let presets: [AmountPreset]
+    /// What a fraction preset is a share of; nil disables the fractions.
+    let max: Decimal?
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: MonacoTheme.Space.s) {
+                chips(presets)
+            }
+            VStack(spacing: MonacoTheme.Space.s) {
+                let half = (presets.count + 1) / 2
+                HStack(spacing: MonacoTheme.Space.s) { chips(Array(presets.prefix(half))) }
+                HStack(spacing: MonacoTheme.Space.s) { chips(Array(presets.dropFirst(half))) }
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func chips(_ items: [AmountPreset]) -> some View {
+        ForEach(Array(items.enumerated()), id: \.offset) { _, preset in
+            chip(preset)
+        }
+    }
+
+    private func chip(_ preset: AmountPreset) -> some View {
+        let target = ProposePresets.amount(for: preset, max: max)
+        let selected = target != nil && AmountEntryText.decimal(amountText) == target
+        return Button {
+            guard let target else { return }
+            Haptics.selection()
+            amountText = AmountEntryText.plain(target)
+        } label: {
+            Text(ProposePresets.label(for: preset))
+                .font(MonacoTheme.Typo.dataStrong)
+                .lineLimit(1)
+                .foregroundStyle(
+                    selected ? MonacoTheme.onBrand : (target == nil ? MonacoTheme.disabledLabel : MonacoTheme.ink)
+                )
+                .padding(.horizontal, MonacoTheme.Space.m)
+                .frame(minWidth: 64, minHeight: 44)
+                .background(Capsule().fill(selected ? MonacoTheme.brandFill : MonacoTheme.surfaceSunken))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(target == nil)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// What a preset chip puts in the field, and what it says. Kept apart from the view so the rules
+/// are checked in `ProposeRedesignTests`.
+enum ProposePresets {
+    /// The amount a chip enters: its dollars, or its share of `max` rounded down to the cent so a
+    /// "Max" never asks for a fraction of a cent more than there is. Nil without a `max`.
+    static func amount(for preset: AmountPreset, max: Decimal?) -> Decimal? {
+        switch preset {
+        case .dollars(let dollars):
+            return dollars
+        case .fraction(let fraction, _):
+            guard let max, max > 0 else { return nil }
+            return AmountEntryText.roundDownToCents(max * Decimal(fraction))
+        }
+    }
+
+    /// "$25", "$1,000", or the fraction's own label ("Max", "50%").
+    static func label(for preset: AmountPreset) -> String {
+        switch preset {
+        case .dollars(let dollars):
+            return AmountEntryText.display(AmountEntryText.plain(dollars))
+        case .fraction(_, let label):
+            return label
+        }
+    }
+}
+
 /// The optional reason on a buy or sell amount step: a growing field on `surfaceSunken` with an ink
-/// stroke while focused, and a counter once the reason nears the limit. Tagged `scrollID` so the step
-/// can keep it above the keyboard and the pinned Review button.
+/// stroke while focused, and a counter once the reason nears the limit. Tagged `scrollID` so the
+/// step can keep it above the keyboard and the pinned Review button.
 struct ProposeReasonField: View {
     static let scrollID = "propose-reason"
 
@@ -241,26 +353,35 @@ struct ProposeReasonField: View {
     private var length: Int { ProposeFlowCopy.reasonLength(text) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            TextField(placeholder, text: $text, axis: .vertical)
-                .font(MonacoTheme.Typo.body)
-                .foregroundStyle(MonacoTheme.ink)
-                .lineLimit(lineLimit)
-                .focused(focused)
-                .padding(MonacoTheme.Space.m)
-                .background(MonacoTheme.surfaceSunken, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous)
-                        .strokeBorder(focused.wrappedValue ? MonacoTheme.ink : .clear, lineWidth: 1)
-                }
-                .accessibilityIdentifier(identifier)
+        VStack(alignment: .trailing, spacing: MonacoTheme.Space.s) {
+            TextField(
+                "",
+                text: $text,
+                prompt: Text(placeholder).foregroundStyle(MonacoTheme.disabledLabel),
+                axis: .vertical
+            )
+            .font(MonacoTheme.Typo.body)
+            .foregroundStyle(MonacoTheme.ink)
+            .tint(MonacoTheme.ink)
+            .lineLimit(lineLimit)
+            .focused(focused)
+            .padding(MonacoTheme.Space.m)
+            .background(MonacoTheme.surfaceSunken, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous)
+                    .strokeBorder(focused.wrappedValue ? MonacoTheme.ink : .clear, lineWidth: 1)
+            }
+            .accessibilityLabel(placeholder)
+            .accessibilityIdentifier(identifier)
             if length >= ProposeFlowCopy.reasonCounterFrom {
+                // A count, so it sets in the market's voice with the other figures that tick.
                 Text(ProposeFlowCopy.reasonCounter(length))
-                    .font(MonacoTheme.Typo.caption.monospacedDigit())
-                    .foregroundStyle(length > ProposeFlowCopy.reasonMax ? MonacoTheme.loss : MonacoTheme.muted)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .font(MonacoTheme.Typo.stamp)
+                    .foregroundStyle(length > ProposeFlowCopy.reasonMax ? MonacoTheme.loss : MonacoTheme.tertiaryText)
+                    .accessibilityIdentifier("proposal-reason-counter")
             }
         }
+        .frame(maxWidth: .infinity)
         .id(Self.scrollID)
     }
 }
@@ -274,6 +395,8 @@ struct ProposeBuyReview: Hashable, Identifiable {
     let cabalId: String
     let cabalName: String
     let thesis: String
+    /// The whole pot when the price was checked, which the receipt measures the buy against.
+    var potMicros: Int64 = 0
 
     var id: String { "\(stock.symbol)-\(usdcMicros)-\(thesis.hashValue)" }
 

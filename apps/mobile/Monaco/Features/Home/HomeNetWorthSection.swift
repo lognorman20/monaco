@@ -38,43 +38,45 @@ enum HomeHeroChart: Equatable {
     }
 }
 
-/// The hero: total money across every cabal, all-time P&L, and the P&L curve — on the
-/// premium deep-ink money card, in both light and dark. No actions live here —
-/// see `HomeBalanceRowSection` for Add money / Cash out.
+/// The top of Home: total money across every cabal, all-time P&L, and the past hour's curve —
+/// set straight on the paper, the way a brokerage opens on the figure rather than on a card.
+///
+/// This used to be a deep ink card. It was the only designed moment on the screen, which made
+/// the rest of Home read as the settings that came after it, and it made the money look like a
+/// wallet balance. The figure is the title now; the curve bleeds to the screen's edges under it.
 struct HomeNetWorthSection: View {
     let dashboard: HomeDashboardDTO
 
     /// The 1H curve's slot, resolved by `HomeView` from the dashboard and the series.
     var chart: HomeHeroChart = .hidden
 
-    private static let chartHeight: CGFloat = 104
+    private static let chartHeight: CGFloat = 92
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
                 Text("Your money in cabals")
                     .font(MonacoTheme.Typo.caption)
-                    .foregroundStyle(MonacoTheme.onHeroMuted)
+                    .foregroundStyle(MonacoTheme.muted)
 
-                MoneyText(decimalString: dashboard.netWorthUsd, style: .hero, color: MonacoTheme.onHero)
+                MoneyText(decimalString: dashboard.netWorthUsd, style: .hero)
 
                 HStack(spacing: MonacoTheme.Space.s) {
                     PnLBadge(
                         dollarPnl: dashboard.netWorthDollarPnl,
-                        percentReturn: dashboard.netWorthPercentReturn,
-                        onInk: true
+                        percentReturn: dashboard.netWorthPercentReturn
                     )
                     Text("all time")
                         .font(MonacoTheme.Typo.caption)
-                        .foregroundStyle(MonacoTheme.onHeroMuted)
+                        .foregroundStyle(MonacoTheme.muted)
                 }
             }
+            .padding(.horizontal, MonacoTheme.Space.m)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("home-net-worth")
 
             chartSlot
         }
-        .monacoHeroCard(padding: MonacoTheme.Space.l)
     }
 
     /// The badge above says "all time"; the curve is the past hour, so it says so too —
@@ -86,23 +88,19 @@ struct HomeNetWorthSection: View {
             EmptyView()
         case .curve(let points):
             slot {
-                HomePnLChartSection(points: points, onInk: true, height: Self.chartHeight)
-                    // The curve bleeds to the card's edges; the caption keeps its inset.
-                    .padding(.horizontal, -MonacoTheme.Space.m)
+                HomePnLChartSection(points: points, height: Self.chartHeight)
             }
         case .reserved(let hasResolved):
             slot {
                 ZStack {
-                    Rectangle()
-                        .fill(MonacoTheme.onHeroMuted.opacity(0.25))
-                        .frame(height: 1)
+                    MonacoRule(color: MonacoTheme.hairline)
                     // Silent until a series has actually come back: on a cold start the curve
                     // lands about a second later, and "No curve yet" in the meantime is a
                     // sentence the member watches appear and then be taken away.
                     if hasResolved {
                         Text("No curve yet")
                             .font(MonacoTheme.Typo.caption)
-                            .foregroundStyle(MonacoTheme.onHeroMuted)
+                            .foregroundStyle(MonacoTheme.muted)
                             .padding(.bottom, MonacoTheme.Space.s)
                     }
                 }
@@ -115,11 +113,12 @@ struct HomeNetWorthSection: View {
     }
 
     private func slot<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Past hour")
-                .font(MonacoTheme.Typo.caption)
-                .foregroundStyle(MonacoTheme.onHeroMuted)
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
             content()
+            Text("Past hour")
+                .font(MonacoTheme.Typo.stamp)
+                .foregroundStyle(MonacoTheme.tertiaryText)
+                .padding(.horizontal, MonacoTheme.Space.m)
         }
         .padding(.top, MonacoTheme.Space.m)
     }

@@ -23,3 +23,5 @@ build/
 .mobai
 .xcodebuildmcp
 supabase/.temp/
+docs/demo/clips/
+docs/demo/out/

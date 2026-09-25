@@ -14,13 +14,16 @@ struct GroupActivitySection: View {
     static let previewLimit = 5
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if items.count > Self.previewLimit {
-                MonacoSectionHeader("Activity", trailing: "See all", action: onSeeAll)
-                    .accessibilityIdentifier("group-activity-see-all")
-            } else {
-                MonacoSectionHeader("Activity")
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            Group {
+                if items.count > Self.previewLimit {
+                    MonacoSectionHeader("Activity", trailing: "See all", action: onSeeAll)
+                        .accessibilityIdentifier("group-activity-see-all")
+                } else {
+                    MonacoSectionHeader("Activity")
+                }
             }
+            .padding(.horizontal, MonacoTheme.Space.m)
 
             if isLoading && items.isEmpty {
                 VStack(spacing: 12) {
@@ -28,6 +31,7 @@ struct GroupActivitySection: View {
                         SkeletonBlock(height: 44)
                     }
                 }
+                .padding(.horizontal, MonacoTheme.Space.m)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Loading activity")
                 .accessibilityIdentifier("group-activity-loading")
@@ -35,13 +39,16 @@ struct GroupActivitySection: View {
                 Text(errorMessage)
                     .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(MonacoTheme.muted)
+                    .padding(.horizontal, MonacoTheme.Space.m)
                     .accessibilityIdentifier("group-activity-error")
             } else if items.isEmpty {
                 Text("Nothing yet. Money in, buys, and sells show up here.")
                     .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(MonacoTheme.muted)
+                    .padding(.horizontal, MonacoTheme.Space.m)
                     .accessibilityIdentifier("group-activity-empty")
             } else {
+
                 GroupActivityList(
                     auth: auth,
                     items: Array(items.prefix(Self.previewLimit)),
@@ -97,7 +104,7 @@ struct GroupActivityList: View {
                 .accessibilityIdentifier("group-activity-retry-loading-\(item.id)")
         } else {
             Button("Retry") { onRetry(item) }
-                .font(.subheadline.weight(.semibold))
+                .font(MonacoTheme.Typo.calloutStrong)
                 .foregroundStyle(MonacoTheme.loss)
                 .frame(minWidth: 44, minHeight: 44)
                 .padding(.leading, 8)
@@ -144,14 +151,16 @@ struct GroupActivityRow: View {
                     .lineLimit(1)
                 HStack(spacing: 4) {
                     Text(GroupActivityRules.timeLabel(item.createdAt))
-                        .foregroundStyle(MonacoTheme.muted)
+                        .font(MonacoTheme.Typo.stamp)
+                        .foregroundStyle(MonacoTheme.tertiaryText)
                     if let status = GroupActivityRules.statusLabel(item.status) {
                         Text("·").foregroundStyle(MonacoTheme.muted)
                         Text(status.text)
-                            .fontWeight(.semibold)
+                            .font(MonacoTheme.Typo.captionStrong)
                             .foregroundStyle(status.isFailure ? MonacoTheme.loss : MonacoTheme.warning)
                     }
                 }
+
                 .font(MonacoTheme.Typo.caption)
                 .lineLimit(1)
             }

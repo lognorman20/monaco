@@ -361,6 +361,15 @@ func (h *AssetsHandlers) GetAssetChartHandler(w http.ResponseWriter, r *http.Req
 			logJSONError(ctx, log, "chart_failed", w, http.StatusInternalServerError, "internal server error", "symbol", symbol, "err", err.Error())
 			return
 		}
+		// The screen shows one range at a time, and the chips beside it are the next
+		// thing someone taps. Fetching them now is what keeps that tap from waiting
+		// on the vendor. Only for a symbol that has history at all: a pre-IPO token
+		// or a symbol the source knows nothing about would warm five empty answers.
+		if len(series.Points) > 0 {
+			if warmer, ok := h.Pyth.(pyth.ChartRangeWarmer); ok {
+				warmer.WarmChartRanges(symbol)
+			}
+		}
 	} else {
 		series = pyth.AssetChartSeries{EmptyReason: "price history unavailable"}
 	}

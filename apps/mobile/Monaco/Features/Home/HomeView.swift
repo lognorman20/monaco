@@ -123,7 +123,8 @@ struct HomeView: View {
             MonacoAvatar(
                 photoURL: session.me?.profilePhotoUrl,
                 displayName: session.me?.displayName ?? "",
-                size: 32
+                size: 32,
+                seed: session.me?.userId
             )
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
@@ -135,7 +136,10 @@ struct HomeView: View {
 
     private func dashboardScroll(_ dashboard: HomeDashboardDTO) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
+            // No horizontal padding on the stack: the ruled lists run edge to edge, and each
+            // section insets its own header and figures.
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.xl) {
+
                 // The 1H series loads after first paint (#217); the slot is sized from the
                 // dashboard so the layout does not move when it lands. `homePnLSeries` is nil
                 // until that read finishes, which is what tells the slot to stay silent
@@ -185,10 +189,11 @@ struct HomeView: View {
                     onRetry: { leaderboard.retry(from: leaderboardSource) }
                 )
             }
-            .padding(.horizontal, MonacoTheme.Space.m)
-            .padding(.bottom, MonacoTheme.Space.l)
+            .padding(.top, MonacoTheme.Space.s)
+            .padding(.bottom, MonacoTheme.Space.xl)
         }
     }
+
 
     /// The failed state lives in a ScrollView, so the "pull down to try again" the store asks
     /// for is a gesture this screen actually has (#278).
@@ -263,30 +268,16 @@ struct HomeView: View {
     }
 }
 
-/// Skeleton hero + three rows, per the plan's Home loading spec.
+/// The loading shape Home shares with the session gate, under Home's own navigation bar.
 private struct HomeSkeletonView: View {
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
-                VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-                    SkeletonBlock(width: 140, height: 14)
-                    SkeletonBlock(width: 180, height: 44)
-                }
-
-                SkeletonBlock(height: 64, radius: MonacoTheme.Radius.card)
-
-                VStack(spacing: MonacoTheme.Space.s) {
-                    ForEach(0..<3, id: \.self) { _ in
-                        SkeletonBlock(height: 60, radius: MonacoTheme.Radius.card)
-                    }
-                }
-            }
-            .padding(.horizontal, MonacoTheme.Space.m)
-            .padding(.top, MonacoTheme.Space.m)
+            HomeShapedSkeleton()
         }
         .accessibilityIdentifier("home-loading")
     }
 }
+
 
 #Preview {
     let session = AppSessionStore()

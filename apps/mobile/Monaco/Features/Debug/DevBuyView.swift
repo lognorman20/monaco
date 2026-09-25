@@ -18,7 +18,7 @@ struct DevBuyView: View {
         Form {
             Section("Dev buy (M3 stub)") {
                 Text("Triggers backend POST /v1/dev/groups/{id}/buy. No Jupiter or catalog API calls from Swift.")
-                    .font(.footnote)
+                    .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(.secondary)
             }
 
@@ -54,7 +54,7 @@ struct DevBuyView: View {
             } else if let errorMessage {
                 Section {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
+                        .font(MonacoTheme.Typo.caption)
                         .foregroundStyle(.orange)
                 }
             }
@@ -68,7 +68,7 @@ struct DevBuyView: View {
     private func detailRow(title: String, value: String, monospaced: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.caption)
+                .font(MonacoTheme.Typo.caption)
                 .foregroundStyle(.secondary)
             Group {
                 if monospaced {

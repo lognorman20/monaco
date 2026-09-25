@@ -155,7 +155,12 @@ struct MonacoContrastTests {
             pairs.append(Pair("brandOnWash", MonacoTheme.brandOnWash, on: [surface, MonacoTheme.brandWash]))
             // `brand` as a label: "See all", "Show more", "Try again", the selected tab item.
             pairs.append(Pair("brand", MonacoTheme.brand, on: [surface]))
+            // `gold` as text: the rank-1 caption on a board. `goldGlyph` is not here on purpose —
+            // the crown is decoration beside a rank the row also prints, so it is exempt.
+            pairs.append(Pair("gold", MonacoTheme.gold, on: [surface]))
+            pairs.append(Pair("gold on wash", MonacoTheme.gold, on: [surface, MonacoTheme.goldWash]))
         }
+
         pairs.append(Pair("onBrand", MonacoTheme.onBrand, on: [MonacoTheme.brandFill]))
         // The same pair through the role aliases, so repointing a role is caught even if the
         // token it aliased stayed put.

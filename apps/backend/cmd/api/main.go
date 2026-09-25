@@ -17,6 +17,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/app"
 	"github.com/monaco/monaco/apps/backend/internal/catalog"
 	"github.com/monaco/monaco/apps/backend/internal/config"
+	"github.com/monaco/monaco/apps/backend/internal/demochain"
 	"github.com/monaco/monaco/apps/backend/internal/faker"
 	"github.com/monaco/monaco/apps/backend/internal/flash"
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
@@ -34,6 +35,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/tessera"
 	"github.com/monaco/monaco/apps/backend/internal/worker"
 	"github.com/monaco/monaco/apps/backend/internal/xstocks"
+	"github.com/monaco/monaco/apps/backend/internal/yahoocharts"
 )
 
 // bootResult holds API wiring produced at startup.
@@ -128,11 +130,22 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}
 	slog.Info("relayer loaded", "pubkey", relayer.PublicKey())
 
-	solanaRPC := worker.NewHTTPSolanaRPC(cfg.SolanaRPCEndpoint())
-	if err := balance.MustHaveSOL(ctx, solanaRPC, relayer.PublicKey(), balance.FeePayerMinLamports); err != nil {
-		return nil, err
+	var solanaRPC interface {
+		worker.SolanaRPC
+		app.SolanaConfirmer
 	}
-	slog.Info("relayer SOL balance ok", "pubkey", relayer.PublicKey(), "min_lamports", balance.FeePayerMinLamports)
+	httpRPC := worker.NewHTTPSolanaRPC(cfg.SolanaRPCEndpoint())
+	if cfg.DemoMode {
+		// DEMO_MODE: nothing touches Solana, so the fee payer's balance is irrelevant.
+		solanaRPC = demochain.NewRPC()
+		slog.Warn("DEMO MODE: fake money. Balances, fills and cash-outs live in memory and reset on restart; nothing reaches Solana.")
+	} else {
+		if err := balance.MustHaveSOL(ctx, httpRPC, relayer.PublicKey(), balance.FeePayerMinLamports); err != nil {
+			return nil, err
+		}
+		slog.Info("relayer SOL balance ok", "pubkey", relayer.PublicKey(), "min_lamports", balance.FeePayerMinLamports)
+		solanaRPC = httpRPC
+	}
 
 	if err := postgres.ApplyFromEnv(ctx, cfg.DatabaseURL, postgres.MigrationsDir()); err != nil {
 		return nil, fmt.Errorf("apply migrations: %w", err)
@@ -154,7 +167,15 @@ func boot(ctx context.Context) (*bootResult, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	privyClient := privy.NewHTTPClient(cfg)
+	httpPrivy := privy.NewHTTPClient(cfg)
+	var privyClient privy.Client = httpPrivy
+	var sweepClient privy.SweepClient = httpPrivy
+	var demoChain *demochain.Client
+	if cfg.DemoMode {
+		demoChain = demochain.NewClient(httpPrivy, demochain.StartingBalance)
+		privyClient = demoChain
+		sweepClient = demoChain
+	}
 	xstocksResolver := xstocks.NewHTTPResolver()
 	// Chart history comes from Jupiter's candles for the xStock itself, in one call
 	// per range, and Jupiter needs no key.
@@ -169,7 +190,13 @@ func boot(ctx context.Context) (*bootResult, error) {
 	// Benchmarks stays reachable for an operator who sets PYTH_BENCHMARKS_BASE_URL at
 	// a deployment that does serve equity history; it is no longer wired to the public
 	// host by default, because that host has nothing for us.
+	// The free equity curve first (CHART_SOURCE=yahoo, the default for now), the
+	// token's own candles behind it; CHART_SOURCE=jupiter draws the token alone.
 	seriesSources := []pyth.SeriesSource{jupitercharts.NewChartsClient(xstocksResolver, cfg.JupiterAPIKey)}
+	if cfg.ChartSource == "yahoo" {
+		seriesSources = append([]pyth.SeriesSource{yahoocharts.New()}, seriesSources...)
+		slog.Info("chart history from yahoo finance (underlying equity); jupiter candles as fallback")
+	}
 	if cfg.PythBenchmarksBaseURL != "" {
 		seriesSources = append(seriesSources, pyth.NewBenchmarksClientWithHTTP(cfg.PythBenchmarksBaseURL, nil))
 		slog.Info("pyth benchmarks wired as chart fallback", "base_url", cfg.PythBenchmarksBaseURL)
@@ -253,7 +280,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	buy.SetMintCatalog(catalogComposite)
 	buy.SetBuyVariantPicker(catalogComposite)
 	buy.SetMintInfo(mintReader)
-	signer := app.NewPrivyTreasurySigner(privyClient)
+	signer := app.NewPrivyTreasurySigner(httpPrivy)
 	swap := app.NewSwapService(store, buy, jupiterClient, privyClient, signer, relayer.PrivateKey(), symbols)
 	swap.SetPriceClient(pythClient)
 	swap.SetMintInfo(mintReader)
@@ -261,9 +288,13 @@ func boot(ctx context.Context) (*bootResult, error) {
 		swap.SetSwapProvider(flash.NewSwapProvider(
 			flash.NewHTTPClient(cfg.FlashAPIKey),
 			signer,
-			app.NewPrivyFlashSetupSubmitter(privyClient, relayer.PrivateKey()),
+			app.NewPrivyFlashSetupSubmitter(httpPrivy, relayer.PrivateKey()),
 			flash.ProviderConfig{MaxSlippage: cfg.FlashMaxSlippage, SponsorAddress: relayer.PublicKey()},
 		))
+	}
+	if demoChain != nil {
+		swap.SetSwapProvider(demochain.NewSwapProvider(jupiterPriceClient, demoChain.Chain()))
+		slog.Warn("DEMO MODE: swaps fill at Jupiter's live price on the in-memory ledger")
 	}
 	slog.Info("swap provider ready", "provider", swap.SwapProviderName())
 	redeem := app.NewRedeemService(store, privyClient, pythClient, jupiterClient, swap, signer)
@@ -316,7 +347,14 @@ func boot(ctx context.Context) (*bootResult, error) {
 	if hermes != nil {
 		// The stock-vs-token card reads the raw feeds, not the valuation chain: its
 		// whole point is to show where the two prices disagree.
-		assetsHandlers.Quotes = hermes
+		var quotes pyth.ReferenceQuoteClient = hermes
+		if cfg.ChartSource == "yahoo" {
+			// Our key is not entitled to the equity feeds, so the equity leg is read
+			// off Yahoo's day chart of the same stock instead, labelled as Yahoo's.
+			// Through the price chain, so it is the series the screen already cached.
+			quotes = pyth.WithEquityQuoteFallback(hermes, priceChain)
+		}
+		assetsHandlers.Quotes = quotes
 	}
 	quoteHandlers := &httpapi.QuoteHandlers{
 		Store:      store,
@@ -370,7 +408,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}
 
 	mux := http.NewServeMux()
-	health := &httpapi.HealthHandlers{Checks: healthChecks(db, solanaRPC, relayer.PublicKey(), jupiterPriceClient, privyClient)}
+	health := &httpapi.HealthHandlers{Checks: healthChecks(db, httpRPC, relayer.PublicKey(), jupiterPriceClient, httpPrivy)}
 	mux.HandleFunc("GET /health", health.HealthHandler)
 	mux.Handle("GET /metrics", metricsHandler())
 	mux.HandleFunc("POST /v1/auth/session", auth.SessionHandler)
@@ -435,7 +473,7 @@ func boot(ctx context.Context) (*bootResult, error) {
 	routes := registerDevFakerRoute(mux, fakerHandlers, apiRoutes)
 	logRoutesReady(routes)
 
-	poller := worker.NewSweepPoller(store, privyClient, solanaRPC, deposits, relayer.PrivateKey(), nil)
+	poller := worker.NewSweepPoller(store, sweepClient, solanaRPC, deposits, relayer.PrivateKey(), nil)
 	pollerCtx, stopPoller := context.WithCancel(context.Background())
 	workers := &sync.WaitGroup{}
 	workers.Add(3)

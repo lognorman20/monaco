@@ -1,9 +1,18 @@
 import MonacoCore
 import SwiftUI
 
+/// Which voice a figure speaks in. See `MonacoTheme.Typo`.
+enum MoneyVoice {
+    /// Avenir Next: money that is someone's — a slice, a pot, a return, a balance.
+    case own
+    /// SF Mono: a market figure — a quote, a day move, a mark.
+    case market
+}
+
 /// Size role for every figure that renders `$`, `%` or a share count.
 enum MoneyStyle {
     case hero, large, row, caption
+
 
     /// Design size at the default text size.
     var baseSize: CGFloat {
@@ -32,8 +41,12 @@ enum MoneyStyle {
         }
     }
 
+    /// A row quote in the market's voice. See `MoneyFont.marketRow`.
+    static let marketRowBaseSize: CGFloat = 15
+
     /// Hero figures shrink before they wrap; rows keep their size and truncate last.
     var minimumScaleFactor: CGFloat {
+
         switch self {
         case .hero: return 0.5
         case .large: return 0.6
@@ -48,6 +61,8 @@ enum MoneyStyle {
 struct MoneyFont: ViewModifier {
     let style: MoneyStyle
     var weightOverride: Font.Weight?
+    var voice: MoneyVoice = .own
+
 
     // `@ScaledMetric` needs its text style and base size as literals in the property wrapper, so
     // there is one per role rather than one driven by `style`. The sizes come from `MoneyStyle`
@@ -56,27 +71,46 @@ struct MoneyFont: ViewModifier {
     @ScaledMetric(relativeTo: .title) private var large = MoneyStyle.large.baseSize
     @ScaledMetric(relativeTo: .body) private var row = MoneyStyle.row.baseSize
     @ScaledMetric(relativeTo: .footnote) private var caption = MoneyStyle.caption.baseSize
+    /// The market's row size. SF Mono is wide, so a quote in a row sets two points smaller
+    /// than money in Avenir Next and still carries the same weight in the column.
+    @ScaledMetric(relativeTo: .subheadline) private var marketRow = MoneyStyle.marketRowBaseSize
 
     private var size: CGFloat {
         switch style {
         case .hero: return hero
         case .large: return large
-        case .row: return row
+        case .row: return voice == .market ? marketRow : row
         case .caption: return caption
         }
     }
 
-    func body(content: Content) -> some View {
-        content.font(.system(size: size, weight: weightOverride ?? style.weight).monospacedDigit())
+    private var weight: Font.Weight {
+        if let weightOverride { return weightOverride }
+        // A hero quote in mono is set a weight lighter: at 44pt semibold SF Mono reads as a
+        // terminal, medium reads as a price board.
+        if voice == .market, style == .hero { return .medium }
+        return style.weight
     }
+
+    func body(content: Content) -> some View {
+        switch voice {
+        case .own:
+            // Avenir Next's lining figures are tabular already; see `MonacoTheme.Typo`.
+            content.font(.custom(MonacoTypeface.avenirNext(weight), fixedSize: size))
+        case .market:
+            content.font(.system(size: size, weight: weight, design: .monospaced).monospacedDigit())
+        }
+    }
+
 }
 
 extension View {
     /// The one way to set a money figure's font.
-    func moneyFont(_ style: MoneyStyle, weight: Font.Weight? = nil) -> some View {
-        modifier(MoneyFont(style: style, weightOverride: weight))
+    func moneyFont(_ style: MoneyStyle, weight: Font.Weight? = nil, voice: MoneyVoice = .own) -> some View {
+        modifier(MoneyFont(style: style, weightOverride: weight, voice: voice))
     }
 }
+
 
 /// "$1,248.50" in tabular SF Pro. Rolls digits on change unless Reduce Motion is on.
 struct MoneyText: View {
@@ -84,16 +118,20 @@ struct MoneyText: View {
     private let numericValue: Double?
     private let style: MoneyStyle
     private let color: Color
+    private let voice: MoneyVoice
 
-    init(_ usd: Decimal, style: MoneyStyle, color: Color = MonacoTheme.ink) {
+    /// `voice` is `.own` for money that is someone's, `.market` for a quote. See `MonacoTheme.Typo`.
+    init(_ usd: Decimal, style: MoneyStyle, color: Color = MonacoTheme.ink, voice: MoneyVoice = .own) {
         text = UsdAmountFormatter.format(decimal: usd)
         numericValue = (usd as NSDecimalNumber).doubleValue
         self.style = style
         self.color = color
+        self.voice = voice
     }
 
     /// Unparseable input renders "—" in muted.
-    init(decimalString: String, style: MoneyStyle, color: Color = MonacoTheme.ink) {
+    init(decimalString: String, style: MoneyStyle, color: Color = MonacoTheme.ink, voice: MoneyVoice = .own) {
+        self.voice = voice
         let trimmed = decimalString.trimmingCharacters(in: .whitespacesAndNewlines)
         if let decimal = Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX")),
            trimmed.allSatisfy({ $0.isNumber || $0 == "." || $0 == "-" || $0 == "+" }) {
@@ -108,12 +146,12 @@ struct MoneyText: View {
         self.style = style
     }
 
-    init(micros: Int64, style: MoneyStyle, color: Color = MonacoTheme.ink) {
-        self.init(Decimal(micros) / Decimal(1_000_000), style: style, color: color)
+    init(micros: Int64, style: MoneyStyle, color: Color = MonacoTheme.ink, voice: MoneyVoice = .own) {
+        self.init(Decimal(micros) / Decimal(1_000_000), style: style, color: color, voice: voice)
     }
 
     var body: some View {
-        MoneyFigure(text: text, value: numericValue, style: style, color: color)
+        MoneyFigure(text: text, value: numericValue, style: style, color: color, voice: voice)
     }
 }
 
@@ -218,12 +256,13 @@ private struct MoneyFigure: View {
     let value: Double?
     let style: MoneyStyle
     let color: Color
+    var voice: MoneyVoice = .own
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Text(text)
-            .moneyFont(style)
+            .moneyFont(style, voice: voice)
             .foregroundStyle(color)
             .lineLimit(1)
             .minimumScaleFactor(style.minimumScaleFactor)

@@ -93,7 +93,7 @@ struct DayChangePill: View {
 
     var body: some View {
         Text(label)
-            .moneyFont(style, weight: .semibold)
+            .moneyFont(style, weight: .semibold, voice: .market)
             .foregroundStyle(isReadable ? tone.washColor : MonacoTheme.muted)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
@@ -139,10 +139,16 @@ enum DayChangeSpeech {
 ///
 /// One row for the Stocks tab, the cabal's holdings and anything else that lists a
 /// stock, so the three cannot drift. It is built on `MonacoRowLayout` rather than
-/// on `MonacoRow` because of the sparkline column, and follows the same rules: the
-/// labels keep a floor and truncate, the figures shrink, and at accessibility text
-/// sizes the whole thing stacks and the sparkline steps aside — it is decoration,
-/// and the pill beside it says the same thing in words.
+/// on `MonacoRow` because of the sparkline, and follows the same rules: the labels
+/// keep a floor, the figures shrink, and at accessibility text sizes the whole thing
+/// stacks and the sparkline steps aside — it is decoration, and the pill beside it
+/// says the same thing in words.
+///
+/// The sparkline sits on the ticker's line, not in a column of its own. A ticker is
+/// four or five characters and leaves most of its line empty; the second line is a
+/// sentence — "Weekend investors · your slice $77.38" — and a sparkline column beside
+/// it cut that sentence off before the one figure in it that is the member's own.
+/// Under the ticker and the curve, the sentence has the width of both.
 struct StockListRow: View {
     let row: MarketRowData
     /// The exchange session this page was priced in. A moon next to the price is
@@ -181,9 +187,8 @@ struct StockListRow: View {
                     Rectangle()
                         .fill(MonacoTheme.hairline)
                         .frame(height: 1)
-                        // Derived from this row's own 40pt mark, so the separator
-                        // starts where the text does — as it does in every other
-                        // list in the app.
+                        // Derived from this row's own mark, so the separator starts
+                        // where the text does — as it does in every other list in the app.
                         .padding(.leading, layout.separatorLeadingInset(markSize: StockListRow.markSize))
                 }
             }
@@ -202,7 +207,11 @@ struct StockListRow: View {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
                 HStack(spacing: MonacoTheme.Space.sm) {
                     mark
-                    labels
+                    VStack(alignment: .leading, spacing: 2) {
+                        ticker
+                        subtitleLine
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 HStack(spacing: MonacoTheme.Space.s) {
                     price
@@ -212,14 +221,24 @@ struct StockListRow: View {
         } else {
             HStack(spacing: MonacoTheme.Space.sm) {
                 mark
-                labels.frame(minWidth: layout.minimumTitleWidth, alignment: .leading)
-                if let spark = row.spark {
-                    Sparkline(
-                        series: spark,
-                        tone: PnLTone(sparkTint: row.sparkTint, change24h: asset.change24h)
-                    )
-                    .padding(.horizontal, MonacoTheme.Space.xs)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: MonacoTheme.Space.s) {
+                        ticker
+                        Spacer(minLength: MonacoTheme.Space.s)
+                        if let spark = row.spark {
+                            Sparkline(
+                                series: spark,
+                                tone: PnLTone(sparkTint: row.sparkTint, change24h: asset.change24h)
+                            )
+                        }
+                    }
+                    subtitleLine
                 }
+                .frame(minWidth: layout.minimumTitleWidth, maxWidth: .infinity, alignment: .leading)
+                // Offered first, so the figures keep their ideal width — and they take no
+                // more than that, being text — then shrink through `MoneyText`'s scale
+                // factor before anything truncates. Never `fixedSize`: at large text a
+                // fixed price column pushed the words out of the row.
                 VStack(alignment: .trailing, spacing: 3) {
                     price
                     DayChangePill(change24h: asset.change24h, priceUsdcMicros: asset.priceUsdcMicros)
@@ -229,32 +248,41 @@ struct StockListRow: View {
         }
     }
 
-    /// The mark on a market row. Smaller than `MonacoRow`'s 44pt because a market
-    /// row carries a sparkline column as well, and the separator inset is derived
-    /// from this rather than assumed.
+    /// The mark on a market row: a touch larger than `MonacoRow`'s 44pt, because the
+    /// logo sits inside a coin's face and rim. The separator inset is derived from it
+    /// rather than assumed.
     static let markSize: CGFloat = 46
+
+    /// Two lines before the second line gives up. Its last words are the member's own
+    /// slice ("your slice $77.38"), and a list that truncates a member's money to fit a
+    /// row is the wrong way round — the row grows by a line instead.
+    static let subtitleLineLimit = 2
 
     private var mark: some View {
         StockMark(symbol: asset.symbol, displayName: asset.name, assetKind: asset.resolvedKind, size: StockListRow.markSize, logoURL: asset.logoURL)
             .frame(width: StockListRow.markSize, height: StockListRow.markSize)
     }
 
-    private var labels: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(MonacoTheme.Typo.rowTitle)
-                .foregroundStyle(MonacoTheme.ink)
-                .lineLimit(layout.titleLineLimit)
+    /// Set in the market's voice: `AAPL` the way a tape prints it, which is also what
+    /// separates a stock row from a cabal row at a glance.
+    private var ticker: some View {
+        Text(title)
+            .font(MonacoTheme.Typo.ticker)
+            .foregroundStyle(MonacoTheme.ink)
+            .lineLimit(layout.titleLineLimit)
+            .truncationMode(.tail)
+    }
+
+    @ViewBuilder
+    private var subtitleLine: some View {
+        if let subtitle {
+            Text(subtitle)
+                .font(MonacoTheme.Typo.caption)
+                .foregroundStyle(MonacoTheme.muted)
+                .lineLimit(StockListRow.subtitleLineLimit)
                 .truncationMode(.tail)
-            if let subtitle {
-                Text(subtitle)
-                    .font(MonacoTheme.Typo.caption)
-                    .foregroundStyle(MonacoTheme.muted)
-                    .lineLimit(layout.subtitleLineLimit)
-                    .truncationMode(.tail)
-            }
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -267,13 +295,56 @@ struct StockListRow: View {
                     .accessibilityLabel("After hours")
             }
             if let micros = asset.priceUsdcMicros {
-                MoneyText(micros: micros, style: .row)
+                MoneyText(micros: micros, style: .row, voice: .market)
             } else {
                 Text("—")
-                    .moneyFont(.row)
+                    .moneyFont(.row, voice: .market)
                     .foregroundStyle(MonacoTheme.muted)
             }
         }
+    }
+}
+
+/// A market row's shape while the list loads: the coin, the ticker and — on the rows
+/// that will carry one — the line under it, then the price over the day's pill.
+///
+/// Drawn from `StockListRow`'s own measurements, separator and all, so nothing moves
+/// when the rows land. The sparkline has no stand-in: it is decoration on the loaded
+/// row, and a grey bar in its place would be the loudest thing on a loading screen.
+struct StockListRowSkeleton: View {
+    var hasSubtitle = false
+    var isLast = false
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        HStack(spacing: MonacoTheme.Space.sm) {
+            SkeletonBlock(width: StockListRow.markSize, height: StockListRow.markSize, radius: StockListRow.markSize / 2)
+            VStack(alignment: .leading, spacing: 8) {
+                SkeletonBlock(width: 52, height: 14, radius: 3)
+                if hasSubtitle {
+                    SkeletonBlock(width: 156, height: 10, radius: 3)
+                }
+            }
+            Spacer(minLength: MonacoTheme.Space.s)
+            VStack(alignment: .trailing, spacing: 7) {
+                SkeletonBlock(width: 64, height: 14, radius: 3)
+                SkeletonBlock(width: 50, height: 22, radius: 11)
+            }
+        }
+        .padding(.horizontal, MonacoTheme.Space.m)
+        .padding(.vertical, 8)
+        .frame(minHeight: 64)
+        .overlay(alignment: .bottom) {
+            if !isLast {
+                MonacoRule()
+                    .padding(
+                        .leading,
+                        MonacoRowLayout(dynamicTypeSize: dynamicTypeSize).separatorLeadingInset(markSize: StockListRow.markSize)
+                    )
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -289,12 +360,10 @@ struct StockMoverCard: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .body) private var cardWidth = StockMoverCard.baseWidth
-    @ScaledMetric(relativeTo: .body) private var sparkWidth = StockMoverCard.baseSparkWidth
     @ScaledMetric(relativeTo: .body) private var sparkHeight = StockMoverCard.baseSparkHeight
     @AppStorage(DayChangeModeStorage.key) private var storedMode = DayChangeMode.percent.rawValue
 
     static let baseWidth: CGFloat = 148
-    static let baseSparkWidth: CGFloat = 104
     static let baseSparkHeight: CGFloat = 30
     /// Past this the card would be wider than a phone, and a horizontal strip of
     /// one-and-a-bit cards is not a scanning affordance any more. The strip hides
@@ -306,12 +375,17 @@ struct StockMoverCard: View {
 
     private var width: CGFloat { min(cardWidth, StockMoverCard.maximumWidth) }
 
+    /// The card's width inside its padding. The curve spans all of it, so the card has
+    /// one left edge and one right edge; at a fixed 104pt it stopped 20pt short of the
+    /// right one and the pill below overhung it.
+    private var innerWidth: CGFloat { width - 2 * MonacoTheme.Space.sm }
+
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             HStack(spacing: MonacoTheme.Space.s) {
                 StockMark(symbol: asset.symbol, displayName: asset.name, assetKind: asset.resolvedKind, size: 28, logoURL: asset.logoURL)
                 Text(AssetSymbolFormatter.display(asset.symbol, kind: asset.resolvedKind))
-                    .font(MonacoTheme.Typo.rowTitle)
+                    .font(MonacoTheme.Typo.ticker)
                     .foregroundStyle(MonacoTheme.ink)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
@@ -320,7 +394,7 @@ struct StockMoverCard: View {
                 Sparkline(
                     series: spark,
                     tone: PnLTone(sparkTint: row.sparkTint, change24h: asset.change24h),
-                    width: min(sparkWidth, StockMoverCard.maximumWidth - 2 * MonacoTheme.Space.sm),
+                    width: innerWidth,
                     height: sparkHeight
                 )
             } else {
@@ -330,7 +404,7 @@ struct StockMoverCard: View {
             }
             HStack(spacing: MonacoTheme.Space.s) {
                 if let micros = asset.priceUsdcMicros {
-                    MoneyText(micros: micros, style: .caption)
+                    MoneyText(micros: micros, style: .caption, voice: .market)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                 }
@@ -342,7 +416,11 @@ struct StockMoverCard: View {
         .padding(MonacoTheme.Space.sm)
         .frame(width: width, alignment: .leading)
         .background(MonacoTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: MonacoTheme.Radius.tile, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
+                .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+        }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         // VoiceOver can hear the day change on this surface; without this it could

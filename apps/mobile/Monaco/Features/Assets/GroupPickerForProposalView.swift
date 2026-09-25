@@ -14,6 +14,10 @@ enum ProposalPickKind: String, Hashable, Identifiable {
 /// in hand, so it never has to fetch one and never renders a ceiling it does not know yet. The
 /// same fan-out answers "who holds this?", so Sell lists only the cabals that hold the stock and
 /// picking one can never dead-end on "this cabal does not hold this stock".
+///
+/// The question sits over the list, with the stock's ticker in the market's voice, and the cabals
+/// are ruled rows: the mark, the name, and on the right the figure the next step turns on — the
+/// pot for a buy, the cabal's holding for a sell.
 struct GroupPickerForProposalView: View {
     @ObservedObject var auth: PrivyAuthService
     @Environment(AppSessionStore.self) private var session
@@ -64,10 +68,14 @@ struct GroupPickerForProposalView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            // No side padding: the rows run edge to edge; the question insets itself.
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+                question
+                    .padding(.horizontal, MonacoTheme.Space.m)
                 content
             }
-            .padding(MonacoTheme.Space.m)
+            .padding(.top, MonacoTheme.Space.s)
+            .padding(.bottom, MonacoTheme.Space.xl)
         }
         .monacoCanvas()
         .foregroundStyle(MonacoTheme.ink)
@@ -79,6 +87,22 @@ struct GroupPickerForProposalView: View {
             guard !cabals.isEmpty else { return }
             await holdings.load(cabals: cabals)
         }
+    }
+
+    /// "Which cabal should buy AAPL?" — what is being picked, and for which stock, with the ticker
+    /// set the way every row in the app sets it.
+    private var question: some View {
+        let parts = ProposeScreenCopy.pickerQuestion(kind: kind)
+        return (
+            Text(parts.lead).font(MonacoTheme.Typo.section)
+                + Text(ticker).font(MonacoTheme.Typo.ticker)
+                + Text(parts.tail).font(MonacoTheme.Typo.section)
+        )
+        .foregroundStyle(MonacoTheme.ink)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityIdentifier("group-picker-question")
     }
 
     @ViewBuilder
@@ -126,6 +150,8 @@ struct GroupPickerForProposalView: View {
         }
     }
 
+    /// The pot is the buy ceiling, so it is the figure on the right: a cabal with $40 in it cannot
+    /// buy $100 of anything, and the member can see that before picking it.
     @ViewBuilder
     private var buyRows: some View {
         let rows = holdings.cabals
@@ -143,13 +169,15 @@ struct GroupPickerForProposalView: View {
                     } label: {
                         MonacoRow(
                             title: cabal.name,
-                            subtitle: "Pot",
                             chevron: true,
                             isLast: index == rows.count - 1
                         ) {
-                            CabalMark(groupId: cabal.groupId, name: cabal.name)
+                            CabalMark(groupId: cabal.groupId, name: cabal.name, pictureUrl: pictureUrl(cabal.groupId))
                         } trailing: {
                             MoneyText(micros: cabal.pot.totalMicros, style: .row)
+                            Text(ProposeScreenCopy.inThePot)
+                                .font(MonacoTheme.Typo.caption)
+                                .foregroundStyle(MonacoTheme.muted)
                         }
                     }
                     .buttonStyle(.monacoRow)
@@ -160,6 +188,8 @@ struct GroupPickerForProposalView: View {
         }
     }
 
+    /// Only the cabals that hold the stock, each with what it holds: the shares under its name and
+    /// what they are worth, with what they have made, on the right.
     @ViewBuilder
     private var sellRows: some View {
         let rows = holdings.holders
@@ -196,13 +226,14 @@ struct GroupPickerForProposalView: View {
                             } label: {
                                 MonacoRow(
                                     title: cabal.name,
-                                    subtitle: ProposalShareFormatter.sharesLabel(fromAtomics: holding.tokenAmount ?? "0"),
+                                    subtitle: PotSectionView.quantityLabel(holding),
                                     chevron: true,
                                     isLast: index == rows.count - 1
                                 ) {
-                                    CabalMark(groupId: cabal.groupId, name: cabal.name)
+                                    CabalMark(groupId: cabal.groupId, name: cabal.name, pictureUrl: pictureUrl(cabal.groupId))
                                 } trailing: {
                                     MoneyText(decimalString: holding.valueUsd, style: .row)
+                                    PnLText(dollarPnl: holding.dollarPnl, style: .caption)
                                 }
                             }
                             .buttonStyle(.monacoRow)
@@ -225,9 +256,10 @@ struct GroupPickerForProposalView: View {
                     .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(MonacoTheme.muted)
                 Button("Retry", action: reloadHoldings)
-                    .font(MonacoTheme.Typo.caption)
+                    .font(MonacoTheme.Typo.captionStrong)
                     .buttonStyle(.plain)
-                    .foregroundStyle(MonacoTheme.accent)
+                    .foregroundStyle(MonacoTheme.brand)
+                    .frame(minHeight: 44)
             }
             .padding(.horizontal, MonacoTheme.Space.m)
             .accessibilityElement(children: .combine)
@@ -235,26 +267,38 @@ struct GroupPickerForProposalView: View {
         }
     }
 
+    /// The cabal's picture from the session's list of the member's cabals; nil draws its initials.
+    private func pictureUrl(_ groupId: String) -> String? {
+        cabals.first { $0.groupId == groupId }?.pictureUrl
+    }
+
     private func reloadHoldings() {
         Task { await holdings.load(cabals: cabals) }
     }
 
+    /// Loading rows in the shape of the cabal rows: the tile, the name, the figure.
     private var skeletonRows: some View {
         MonacoGroupedList {
-            ForEach(0..<3, id: \.self) { _ in
+            ForEach(0..<3, id: \.self) { index in
                 HStack(spacing: MonacoTheme.Space.sm) {
                     SkeletonBlock(width: 44, height: 44, radius: MonacoTheme.Radius.tile)
-                    VStack(alignment: .leading, spacing: 6) {
-                        SkeletonBlock(width: 120, height: 14)
-                        SkeletonBlock(width: 56, height: 12)
+                    SkeletonBlock(width: 140, height: 14)
+                    Spacer(minLength: MonacoTheme.Space.s)
+                    VStack(alignment: .trailing, spacing: 6) {
+                        SkeletonBlock(width: 72, height: 14)
+                        SkeletonBlock(width: 48, height: 10)
                     }
-                    Spacer()
-                    SkeletonBlock(width: 64, height: 14)
                 }
                 .padding(.horizontal, MonacoTheme.Space.m)
                 .frame(minHeight: 60)
+                .overlay(alignment: .bottom) {
+                    if index < 2 {
+                        MonacoRule().padding(.leading, MonacoTheme.Space.m + 44 + MonacoTheme.Space.sm)
+                    }
+                }
             }
         }
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("Loading your cabals")
     }
 

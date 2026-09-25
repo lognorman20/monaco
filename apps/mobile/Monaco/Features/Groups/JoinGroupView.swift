@@ -39,8 +39,41 @@ enum JoinCabalCopy {
     }
 }
 
-/// Join a cabal by pasted invite code, or from a search/board row that already
-/// knows the cabal's name and join policy.
+/// The join screen's titles and lines, so the button a member taps always matches what the
+/// row they came from said about the cabal. Pure, so it is pinned by a test.
+enum JoinCabalScreenCopy {
+    /// The same for every route. The button already says "Ask to join" when the admin approves
+    /// members; saying it in the bar too put the same words twice on one screen.
+    static let title = "Join a cabal"
+
+    /// "Join" when the screen already names the cabal above the button, "Ask to join" when its
+    /// admin approves members, and "Join cabal" for a pasted code, whose cabal is not known yet.
+    static func actionTitle(joinMode: GroupJoinMode?, isJoining: Bool, requestPending: Bool) -> String {
+        if isJoining { return joinMode == .request ? "Sending…" : "Joining…" }
+        if requestPending { return "Request sent" }
+        switch joinMode {
+        case .request: return "Ask to join"
+        case .open: return "Join"
+        case nil: return "Join cabal"
+        }
+    }
+
+    /// "9 members" under the cabal's name. Nil when the route did not carry a count, rather
+    /// than a guess.
+    static func memberLine(_ count: Int?) -> String? {
+        guard let count, count > 0 else { return nil }
+        return count == 1 ? "1 member" : "\(count) members"
+    }
+
+    static func explanation(joinMode: GroupJoinMode?) -> String {
+        joinMode == .request
+            ? "The cabal admin approves new members. You'll show up once they say yes."
+            : "Anyone can join this cabal. You can add money after you're in."
+    }
+}
+
+/// Join a cabal by pasted invite code, or from a search/board row that already knows the
+/// cabal's name and join policy — in which case the screen leads with the cabal itself.
 struct JoinGroupView: View {
     @ObservedObject var auth: PrivyAuthService
     /// Present inside the signed-in shell; refreshed after a join so every tab updates.
@@ -48,6 +81,10 @@ struct JoinGroupView: View {
     private let actions: CabalsActionSource
     private let groupName: String?
     private let joinMode: GroupJoinMode?
+    /// What the row knew about the cabal. Both optional: the Cabals route carries neither yet,
+    /// and the screen draws the tinted initials and leaves the member line out without them.
+    private let memberCount: Int?
+    private let pictureUrl: String?
     /// The viewer is a member now. The owner of the stack takes it from here —
     /// this screen never pushes the cabal itself, so Back cannot land back on a
     /// join form for a cabal the member is already in.
@@ -62,6 +99,8 @@ struct JoinGroupView: View {
         groupId: String = "",
         groupName: String? = nil,
         joinMode: GroupJoinMode? = nil,
+        memberCount: Int? = nil,
+        pictureUrl: String? = nil,
         actions: CabalsActionSource? = nil,
         onJoined: @escaping (_ groupId: String, _ groupName: String?) -> Void = { _, _ in }
     ) {
@@ -69,6 +108,8 @@ struct JoinGroupView: View {
         self.actions = actions ?? LiveCabalsActionSource(auth: auth)
         self.groupName = groupName
         self.joinMode = joinMode
+        self.memberCount = memberCount
+        self.pictureUrl = pictureUrl
         self.onJoined = onJoined
         _groupId = State(initialValue: groupId)
     }
@@ -94,60 +135,84 @@ struct JoinGroupView: View {
     }
 
     private var actionTitle: String {
-        if isJoining { return joinMode == .request ? "Sending…" : "Joining…" }
-        if requestPending { return "Request sent" }
-        return joinMode == .request ? "Ask to join" : "Join cabal"
+        JoinCabalScreenCopy.actionTitle(joinMode: joinMode, isJoining: isJoining, requestPending: requestPending)
     }
 
     var body: some View {
-        Form {
-            if let groupName {
-                Section {
-                    Text(groupName)
-                        .font(MonacoTheme.TypeRole.title)
-                        .accessibilityIdentifier("join-group-name")
-                } footer: {
-                    Text(joinMode == .request
-                        ? "The cabal admin approves new members. You'll show up once they say yes."
-                        : "Anyone can join this cabal. You can add money after you're in.")
-                }
-            } else {
-                Section {
-                    HStack {
-                        TextField(JoinCabalCopy.codeLabel, text: $groupId)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .font(.body.monospaced())
-                            .disabled(isJoining || requestPending)
-                            .accessibilityIdentifier("join-group-id")
-                        PasteButton(payloadType: String.self) { strings in
-                            guard let pasted = strings.first else { return }
-                            Task { @MainActor in
-                                groupId = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
-                            }
-                        }
-                        .labelStyle(.iconOnly)
-                        .buttonBorderShape(.capsule)
-                        .accessibilityIdentifier("join-group-paste")
-                    }
-                } footer: {
-                    Text(trimmedId.isEmpty || isCodeWellFormed
-                        ? JoinCabalCopy.codeFooter
-                        : JoinCabalCopy.malformedCode)
+        ScrollView {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
+                if let groupName {
+                    cabalHeader(groupName)
+                } else {
+                    codeEntry
                 }
             }
-            Section {
+            .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.top, MonacoTheme.Space.m)
+            .padding(.bottom, MonacoTheme.Space.xl)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .monacoCanvas()
+        .safeAreaInset(edge: .bottom) {
+            BottomCTA {
                 Button(actionTitle) {
                     Task { await joinGroup() }
                 }
+                .buttonStyle(.monacoPrimary)
                 .disabled(isJoining || requestPending || !canSubmit)
                 .accessibilityIdentifier("join-group-submit")
             }
         }
-        .monacoFormScreen()
-        .monacoToast($toast)
-        .navigationTitle(joinMode == .request ? "Ask to join" : "Join cabal")
+        .monacoToast($toast, placement: .aboveBottomCTA)
+        .navigationTitle(JoinCabalScreenCopy.title)
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - A cabal the row already knows
+
+    private func cabalHeader(_ name: String) -> some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
+            HStack(spacing: MonacoTheme.Space.sm) {
+                CabalMark(groupId: trimmedId, name: name, size: 56, pictureUrl: pictureUrl)
+                VStack(alignment: .leading, spacing: 2) {
+                    // Its own element, labelled with the name alone: the join UI tests read
+                    // the label back, so the member line must not be combined into it.
+                    Text(name)
+                        .font(MonacoTheme.Typo.title)
+                        .foregroundStyle(MonacoTheme.ink)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("join-group-name")
+                    if let members = JoinCabalScreenCopy.memberLine(memberCount) {
+                        Text(members)
+                            .font(MonacoTheme.Typo.caption)
+                            .foregroundStyle(MonacoTheme.muted)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Text(JoinCabalScreenCopy.explanation(joinMode: joinMode))
+                .font(MonacoTheme.Typo.callout)
+                .foregroundStyle(MonacoTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - A pasted invite code
+
+    private var codeIsMalformed: Bool {
+        !trimmedId.isEmpty && !isCodeWellFormed
+    }
+
+    private var codeEntry: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            InviteCodeField(code: $groupId, isDisabled: isJoining || requestPending)
+            Text(codeIsMalformed ? JoinCabalCopy.malformedCode : JoinCabalCopy.codeFooter)
+                .font(MonacoTheme.Typo.caption)
+                .foregroundStyle(codeIsMalformed ? MonacoTheme.warning : MonacoTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func joinGroup() async {
@@ -173,6 +238,65 @@ struct JoinGroupView: View {
         } catch {
             toast = MonacoToast(message: JoinCabalCopy.failureMessage(for: error, enteredCode: entersCode))
         }
+    }
+}
+
+/// The invite code field: the `MonacoTextField` anatomy, with the code in the market's mono —
+/// a code is data, not words — and the system Paste button inside it, which reads the
+/// clipboard without the paste prompt.
+private struct InviteCodeField: View {
+    @Binding var code: String
+    let isDisabled: Bool
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: MonacoTheme.Space.s) {
+            TextField(
+                "",
+                text: $code,
+                prompt: Text(JoinCabalCopy.codeLabel).foregroundStyle(MonacoTheme.disabledLabel)
+            )
+            .font(MonacoTheme.Typo.data)
+            .foregroundStyle(MonacoTheme.ink)
+            .tint(MonacoTheme.ink)
+            .keyboardType(.asciiCapable)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .submitLabel(.done)
+            .focused($focused)
+            .disabled(isDisabled)
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .contentShape(Rectangle())
+            .onTapGesture { focused = true }
+            .accessibilityLabel(JoinCabalCopy.codeLabel)
+            .accessibilityIdentifier("join-group-id")
+
+            PasteButton(payloadType: String.self) { strings in
+                guard let pasted = strings.first else { return }
+                Task { @MainActor in
+                    code = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+            .labelStyle(.iconOnly)
+            .buttonBorderShape(.capsule)
+            // The Paste button draws its glyph in white on the tint in both schemes, so the tint
+            // is the ink that stays dark in both rather than `brandFill`, which goes light in dark.
+            .tint(MonacoTheme.heroInk)
+            .disabled(isDisabled)
+            .accessibilityIdentifier("join-group-paste")
+        }
+        .padding(.leading, MonacoTheme.Space.m)
+        .padding(.trailing, MonacoTheme.Space.s)
+        .background(
+            RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous)
+                .fill(MonacoTheme.surfaceSunken)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous)
+                .strokeBorder(MonacoTheme.ink, lineWidth: focused ? 1 : 0)
+        }
+        .animation(.easeOut(duration: 0.15), value: focused)
     }
 }
 

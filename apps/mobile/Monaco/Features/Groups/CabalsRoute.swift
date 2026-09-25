@@ -17,8 +17,9 @@ enum CabalsRoute: Hashable, Identifiable {
     /// A cabal the viewer is already in. The name is what the row that pushed
     /// it knew; the invite-code route has none until the cabal loads.
     case cabal(id: String, name: String?)
-    /// A cabal picked from the board or search that the viewer is not in yet.
-    case join(id: String, name: String, mode: GroupJoinMode)
+    /// A cabal picked from the board or search that the viewer is not in yet. The member
+    /// count and picture are what the row knew, so the join screen can lead with them.
+    case join(id: String, name: String, mode: GroupJoinMode, memberCount: Int?, pictureUrl: String?)
     /// Join by pasting an invite code a friend shared.
     case joinByCode
     /// The "New cabal" form.
@@ -27,11 +28,21 @@ enum CabalsRoute: Hashable, Identifiable {
     var id: Self { self }
 
     /// The route a discovery row leads to, from what that row knows.
-    init(row groupId: String, name: String, isJoined: Bool, joinMode: GroupJoinMode) {
+    init(
+        row groupId: String,
+        name: String,
+        isJoined: Bool,
+        joinMode: GroupJoinMode,
+        memberCount: Int? = nil,
+        pictureUrl: String? = nil
+    ) {
         switch GroupDiscoveryDestination(isJoined: isJoined, joinMode: joinMode) {
-        case .detail: self = .cabal(id: groupId, name: name)
-        case .join: self = .join(id: groupId, name: name, mode: .open)
-        case .requestToJoin: self = .join(id: groupId, name: name, mode: .request)
+        case .detail:
+            self = .cabal(id: groupId, name: name)
+        case .join:
+            self = .join(id: groupId, name: name, mode: .open, memberCount: memberCount, pictureUrl: pictureUrl)
+        case .requestToJoin:
+            self = .join(id: groupId, name: name, mode: .request, memberCount: memberCount, pictureUrl: pictureUrl)
         }
     }
 }
@@ -55,9 +66,10 @@ struct CabalsRouteDestination: View {
         switch route {
         case let .cabal(id, name):
             GroupDetailView(auth: auth, groupId: id, groupName: name, onLeft: onChanged)
-        case let .join(id, name, mode):
+        case let .join(id, name, mode, memberCount, pictureUrl):
             JoinGroupView(
                 auth: auth, groupId: id, groupName: name, joinMode: mode,
+                memberCount: memberCount, pictureUrl: pictureUrl,
                 actions: actions, onJoined: onJoined
             )
         case .joinByCode:

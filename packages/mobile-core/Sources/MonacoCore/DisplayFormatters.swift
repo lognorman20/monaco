@@ -301,6 +301,13 @@ public enum TokenQuantityFormatter {
     /// "1.5 tokens", "1 token", "1.2034 shares" — at most 4 decimals, trailing zeros trimmed.
     public static func label(fromAtomics raw: String, decimals: Int, kind: AssetKind) -> String {
         guard let quantity = quantity(fromAtomics: raw, decimals: decimals) else { return raw }
+        return label(quantity: quantity, kind: kind)
+    }
+
+    /// The same label from a quantity already in shares, for a row whose atomics carry a
+    /// display multiplier. A holding of 0.73001856091 shares used to print all eleven
+    /// decimals under the ticker.
+    public static func label(quantity: Decimal, kind: AssetKind) -> String {
         var rounded = Decimal()
         var copy = quantity
         NSDecimalRound(&rounded, &copy, 4, .plain)
@@ -336,7 +343,10 @@ extension UsdAmountFormatter {
         let magnitude = abs(value)
         guard magnitude >= 100_000 else { return format(decimal: decimal) }
         let sign = value < 0 ? typographicMinus : ""
-        let (scaled, suffix): (Double, String) = magnitude >= 1_000_000_000
+        // Up to trillions: a private company's value is "$2.0T", not "$1951.1B".
+        let (scaled, suffix): (Double, String) = magnitude >= 1_000_000_000_000
+            ? (magnitude / 1_000_000_000_000, "T")
+            : magnitude >= 1_000_000_000
             ? (magnitude / 1_000_000_000, "B")
             : magnitude >= 1_000_000 ? (magnitude / 1_000_000, "M") : (magnitude / 1_000, "K")
         var body = String(format: "%.1f", scaled)

@@ -1,0 +1,762 @@
+{
+  "note": "Every step names the element by its accessibility identifier (id) or its visible label (text). `paste` types a value into the focused field. One entry per take, in shooting order; the cut in scripts/demo/compose.sh picks the seconds.",
+  "accounts": {
+    "maya": {
+      "phone": "+15555557177",
+      "otp": "465354",
+      "name": "Maya"
+    },
+    "jordan": {
+      "phone": "+15555559638",
+      "otp": "648588",
+      "name": "Jordan"
+    },
+    "priya": {
+      "phone": "+15555558215",
+      "otp": "115543",
+      "name": "Priya"
+    }
+  },
+  "switch_account": [
+    {
+      "tap": {
+        "id": "tab-profile"
+      }
+    },
+    {
+      "tap": {
+        "text": "Sign out"
+      }
+    },
+    {
+      "tap": {
+        "text": "Sign out"
+      }
+    },
+    {
+      "note": "then the login steps with the next account"
+    }
+  ],
+  "takes": [
+    {
+      "name": "login",
+      "account": "maya",
+      "steps": [
+        {
+          "tap": {
+            "id": "smsPhoneField"
+          }
+        },
+        {
+          "paste": "5555557177"
+        },
+        {
+          "tap": {
+            "id": "smsSendCodeButton"
+          }
+        },
+        {
+          "wait_for": {
+            "id": "smsCodeField"
+          }
+        },
+        {
+          "tap": {
+            "id": "smsCodeField"
+          }
+        },
+        {
+          "paste": "465354"
+        },
+        {
+          "tap": {
+            "id": "smsVerifyButton"
+          }
+        },
+        {
+          "wait_for": {
+            "id": "home-root"
+          }
+        },
+        {
+          "still": 1.5
+        }
+      ]
+    },
+    {
+      "name": "onboarding",
+      "account": "maya",
+      "steps": [
+        {
+          "note": "first sign-in of an account only"
+        },
+        {
+          "tap": {
+            "id": "onboarding-name-field"
+          }
+        },
+        {
+          "paste": "Maya"
+        },
+        {
+          "tap": {
+            "id": "onboarding-continue"
+          }
+        },
+        {
+          "wait_for": {
+            "id": "home-root"
+          }
+        }
+      ]
+    },
+    {
+      "name": "start-cabal",
+      "account": "maya",
+      "steps": [
+        {
+          "tap": {
+            "id": "tab-cabals"
+          }
+        },
+        {
+          "tap": {
+            "id": "cabals-new-button"
+          }
+        },
+        {
+          "tap": {
+            "id": "new-cabal-create-row"
+          }
+        },
+        {
+          "tap": {
+            "id": "create-group-name"
+          }
+        },
+        {
+          "paste": "Sunday Investors"
+        },
+        {
+          "tap": {
+            "text": "Everyone"
+          }
+        },
+        {
+          "tap": {
+            "text": "Majority"
+          }
+        },
+        {
+          "tap": {
+            "text": "24 hours"
+          }
+        },
+        {
+          "tap": {
+            "id": "create-group-submit"
+          }
+        },
+        {
+          "wait_for": {
+            "text": "In the pot"
+          }
+        },
+        {
+          "still": 2
+        }
+      ]
+    },
+    {
+      "name": "invite-join",
+      "account": "maya",
+      "steps": [
+        {
+          "tap": {
+            "id": "group-details-button"
+          }
+        },
+        {
+          "tap": {
+            "text": "Copy code"
+          }
+        },
+        {
+          "still": 1.5
+        }
+      ]
+    },
+    {
+      "name": "join-jordan",
+      "account": "jordan",
+      "steps": [
+        {
+          "tap": {
+            "id": "tab-cabals"
+          }
+        },
+        {
+          "tap": {
+            "id": "cabals-new-button"
+          }
+        },
+        {
+          "tap": {
+            "id": "new-cabal-join-row"
+          }
+        },
+        {
+          "tap": {
+            "id": "join-group-name"
+          }
+        },
+        {
+          "paste": "<invite code>"
+        },
+        {
+          "tap": {
+            "id": "join-group-submit"
+          }
+        },
+        {
+          "wait_for": {
+            "text": "In the pot"
+          }
+        },
+        {
+          "still": 1.5
+        }
+      ]
+    },
+    {
+      "name": "fund",
+      "account": "jordan",
+      "steps": [
+        {
+          "tap": {
+            "text": "Add money"
+          }
+        },
+        {
+          "tap": {
+            "id": "amount-entry-field"
+          }
+        },
+        {
+          "paste": "500"
+        },
+        {
+          "tap": {
+            "text": "Add $500.00 to the pot"
+          }
+        },
+        {
+          "wait_for": {
+            "text": "$500.00"
+          }
+        },
+        {
+          "still": 1.5
+        }
+      ]
+    },
+    {
+      "name": "join-priya",
+      "account": "priya",
+      "steps": [
+        {
+          "note": "the join-jordan steps again"
+        }
+      ]
+    },
+    {
+      "name": "fund-priya",
+      "account": "priya",
+      "steps": [
+        {
+          "note": "the fund steps with 300; the pot reads $800.00"
+        }
+      ]
+    },
+    {
+      "name": "face-priya",
+      "account": "priya",
+      "steps": [
+        {
+          "note": "off camera, not in the film: this is how Priya becomes the penguin"
+        },
+        {
+          "tap": {
+            "id": "tab-profile"
+          }
+        },
+        {
+          "tap": {
+            "id": "profile-photo-picker"
+          }
+        },
+        {
+          "wait_for": {
+            "id": "face-picker-sheet"
+          }
+        },
+        {
+          "still": 1
+        },
+        {
+          "tap": {
+            "id": "face-option-penguin"
+          }
+        },
+        {
+          "wait_for": {
+            "text": "You're a penguin now."
+          }
+        },
+        {
+          "still": 1.5
+        }
+      ]
+    },
+    {
+      "name": "fund-maya",
+      "account": "maya",
+      "steps": [
+        {
+          "note": "the fund steps with 200 from Home > Add money; the pot reads $1,000.00"
+        }
+      ]
+    },
+    {
+      "name": "stocks",
+      "account": "jordan",
+      "steps": [
+        {
+          "tap": {
+            "id": "tab-assets"
+          }
+        },
+        {
+          "still": 1.5
+        },
+        {
+          "tap": {
+            "id": "assets-popular-GOOGLx"
+          }
+        },
+        {
+          "wait_for": {
+            "id": "asset-detail-chart"
+          }
+        },
+        {
+          "still": 1
+        },
+        {
+          "drag": {
+            "id": "asset-detail-chart",
+            "from": "left",
+            "to": "right"
+          }
+        },
+        {
+          "tap": {
+            "id": "asset-chart-range-1M"
+          }
+        },
+        {
+          "still": 1
+        },
+        {
+          "tap": {
+            "id": "asset-chart-range-1Y"
+          }
+        },
+        {
+          "still": 1
+        },
+        {
+          "scroll": "down"
+        },
+        {
+          "still": 1
+        }
+      ]
+    },
+    {
+      "name": "propose",
+      "account": "jordan",
+      "steps": [
+        {
+          "tap": {
+            "id": "asset-trade-bar-buy"
+          }
+        },
+        {
+          "tap": {
+            "text": "Sunday Investors"
+          }
+        },
+        {
+          "tap": {
+            "id": "amount-entry-field"
+          }
+        },
+        {
+          "paste": "250"
+        },
+        {
+          "tap": {
+            "id": "proposal-thesis-field"
+          }
+        },
+        {
+          "paste": "Super bullish. This stock will only keep growing."
+        },
+        {
+          "tap": {
+            "text": "Review"
+          }
+        },
+        {
+          "still": 2
+        },
+        {
+          "tap": {
+            "text": "Send to cabal"
+          }
+        },
+        {
+          "wait_for": {
+            "text": "Proposal sent"
+          }
+        },
+        {
+          "still": 1
+        }
+      ]
+    },
+    {
+      "name": "vote-priya",
+      "account": "priya",
+      "steps": [
+        {
+          "scroll": "to Needs your vote"
+        },
+        {
+          "tap": {
+            "text": "Yes"
+          }
+        },
+        {
+          "wait_for": {
+            "text": "You voted yes"
+          }
+        },
+        {
+          "still": 1.5
+        }
+      ]
+    },
+    {
+      "name": "vote-maya",
+      "account": "maya",
+      "steps": [
+        {
+          "tap": {
+            "text": "Vote"
+          }
+        },
+        {
+          "tap": {
+            "text": "Yes"
+          }
+        },
+        {
+          "wait_for": {
+            "text": "You voted yes"
+          }
+        },
+        {
+          "note": "demo mode fills within about 20 seconds; keep rolling until the tracker reads Done and the chip reads Bought"
+        },
+        {
+          "still": 2
+        }
+      ]
+    },
+    {
+      "name": "chat-jordan",
+      "account": "jordan",
+      "steps": [
+        {
+          "tap": {
+            "text": "Chat"
+          }
+        },
+        {
+          "tap": {
+            "id": "group-chat-composer"
+          }
+        },
+        {
+          "paste": "in. told you"
+        },
+        {
+          "tap": {
+            "id": "group-chat-send"
+          }
+        },
+        {
+          "still": 1.5
+        }
+      ]
+    },
+    {
+      "name": "chat-maya",
+      "account": "maya",
+      "steps": [
+        {
+          "tap": {
+            "text": "Chat"
+          }
+        },
+        {
+          "tap": {
+            "id": "group-chat-composer"
+          }
+        },
+        {
+          "paste": "we own Google now"
+        },
+        {
+          "tap": {
+            "id": "group-chat-send"
+          }
+        },
+        {
+          "still": 1.5
+        }
+      ]
+    },
+    {
+      "name": "pre-ipo",
+      "account": "jordan",
+      "steps": [
+        {
+          "tap": {
+            "id": "tab-assets"
+          }
+        },
+        {
+          "scroll": "to Pre-IPO"
+        },
+        {
+          "tap": {
+            "id": "assets-preipo-tSpaceX"
+          }
+        },
+        {
+          "wait_for": {
+            "id": "asset-pre-ipo-reference"
+          }
+        },
+        {
+          "still": 1.5
+        },
+        {
+          "scroll": "down"
+        },
+        {
+          "still": 1.5
+        }
+      ]
+    },
+    {
+      "name": "bot",
+      "account": "maya",
+      "steps": [
+        {
+          "tap": {
+            "text": "Propose"
+          }
+        },
+        {
+          "tap": {
+            "id": "propose-kind-add-agent"
+          }
+        },
+        {
+          "tap": {
+            "id": "add-agent-allocation-field"
+          }
+        },
+        {
+          "paste": "200"
+        },
+        {
+          "tap": {
+            "id": "add-agent-name-field"
+          }
+        },
+        {
+          "paste": "Scout"
+        },
+        {
+          "tap": {
+            "id": "add-agent-submit"
+          }
+        },
+        {
+          "wait_for": {
+            "text": "Proposal sent"
+          }
+        },
+        {
+          "still": 1
+        }
+      ]
+    },
+    {
+      "name": "vote-bot",
+      "account": "jordan",
+      "steps": [
+        {
+          "tap": {
+            "text": "Vote"
+          }
+        },
+        {
+          "tap": {
+            "text": "Yes"
+          }
+        },
+        {
+          "wait_for": {
+            "text": "Passed"
+          }
+        },
+        {
+          "still": 1.5
+        }
+      ]
+    },
+    {
+      "name": "bot-key",
+      "account": "jordan",
+      "steps": [
+        {
+          "scroll": "to Trading bot"
+        },
+        {
+          "tap": {
+            "text": "Scout"
+          }
+        },
+        {
+          "wait_for": {
+            "id": "agent-key-reveal"
+          }
+        },
+        {
+          "still": 1
+        },
+        {
+          "tap": {
+            "text": "Copy connect instructions"
+          }
+        },
+        {
+          "still": 1.5
+        },
+        {
+          "note": "off camera: Copy key, then MONACO_AGENT_KEY=<key> MONACO_API=http://127.0.0.1:8082 scripts/demo/agent-intent.sh buy NVDAx 40"
+        }
+      ]
+    },
+    {
+      "name": "bot-activity",
+      "account": "jordan",
+      "steps": [
+        {
+          "scroll": "to Activity"
+        },
+        {
+          "wait_for": {
+            "text": "Scout · Bought Nvidia"
+          }
+        },
+        {
+          "still": 2
+        }
+      ]
+    },
+    {
+      "name": "profit",
+      "account": "maya",
+      "steps": [
+        {
+          "tap": {
+            "text": "Cash out"
+          }
+        },
+        {
+          "tap": {
+            "text": "25%"
+          }
+        },
+        {
+          "still": 1
+        },
+        {
+          "tap": {
+            "text": "Cash out $"
+          }
+        },
+        {
+          "wait_for": {
+            "text": "Cashing out"
+          }
+        },
+        {
+          "tap": {
+            "id": "tab-home"
+          }
+        },
+        {
+          "wait_for": {
+            "text": "Account balance"
+          }
+        },
+        {
+          "still": 2
+        }
+      ]
+    },
+    {
+      "name": "board-outro",
+      "account": "maya",
+      "steps": [
+        {
+          "tap": {
+            "id": "tab-cabals"
+          }
+        },
+        {
+          "still": 2
+        },
+        {
+          "tap": {
+            "id": "tab-home"
+          }
+        },
+        {
+          "scroll": "to Top investors"
+        },
+        {
+          "still": 2.5
+        }
+      ]
+    }
+  ]
+}

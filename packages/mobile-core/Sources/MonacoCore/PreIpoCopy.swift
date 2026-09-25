@@ -15,10 +15,22 @@ public enum PreIpoCopy {
     public static let termsURL = "https://terms.tessera.pe"
     public static let alsoAvailableFrom = "Also available from"
     public static let chartEmpty = "Price history builds up over time."
+    public static let chartEmptyMessage = "The curve draws as the token trades."
 
     public static let tokenLabelPlural = "tokens"
     public static let tokenLabelSingular = "token"
     public static let tokensRowLabel = "Tokens"
+
+    /// The line under the reference price: the company's value and how old the mark is.
+    /// `age` is `RelativeTimeFormatter`'s word: "now", "15m", "3h", or a date. Each reads
+    /// differently in a sentence, and "updated now ago" is what gluing them produced.
+    public static func referenceCaption(companyValue: String, age: String?) -> String {
+        let lead = "\(companyValueCaption) \(companyValue)"
+        guard let age = age?.trimmingCharacters(in: .whitespaces), !age.isEmpty else { return lead }
+        if age == "now" { return "\(lead) · updated just now" }
+        let isElapsed = age.last.map { "mhd".contains($0) } == true && age.dropLast().allSatisfy(\.isNumber)
+        return isElapsed ? "\(lead) · updated \(age) ago" : "\(lead) · updated \(age)"
+    }
 
     /// Short chip beside the reference row, e.g. "27% below".
     public static func premiumChip(bps: Int) -> String {
@@ -58,6 +70,8 @@ public enum PreIpoCopy {
         termsLinkTitle,
         alsoAvailableFrom,
         chartEmpty,
+        chartEmptyMessage,
+        referenceCaption(companyValue: "$32.1B", age: "now"),
         tokenLabelPlural,
         tokenLabelSingular,
         tokensRowLabel,

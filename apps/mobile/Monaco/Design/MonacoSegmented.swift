@@ -29,7 +29,8 @@ struct MonacoSegmented<T: Hashable>: View {
                     }
                 } label: {
                     Text(label(option))
-                        .font(MonacoTheme.Typo.callout.weight(.semibold))
+                        .font(MonacoTheme.Typo.calloutStrong)
+
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                         .foregroundStyle(isSelected ? MonacoTheme.primaryButtonLabel : MonacoTheme.muted)

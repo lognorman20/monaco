@@ -73,7 +73,7 @@ struct GroupChatView: View {
                     CabalMark(groupId: groupId, name: GroupChatCopy.title(groupName: groupName), size: 28)
                         .accessibilityHidden(true)
                     Text(GroupChatCopy.title(groupName: groupName))
-                        .font(.headline)
+                        .font(MonacoTheme.Typo.bodyStrong)
                         .foregroundStyle(MonacoTheme.ink)
                         .lineLimit(1)
                 }
@@ -107,13 +107,16 @@ struct GroupChatView: View {
         if !timeline.hasLoadedNewest {
             if let loadError {
                 statusMessage {
-                    Label(loadError, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(MonacoTheme.warning)
+                    Text(loadError)
+                        .font(MonacoTheme.Typo.body)
+                        .foregroundStyle(MonacoTheme.ink)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                     // Offered even when the thread reads as closed. Being removed from a cabal
                     // and a cabal that briefly answered 404 look identical from here, and a
                     // member told they were thrown out of theirs needs something to tap.
                     Button("Try again") { Task { await loadNewest() } }
-                        .buttonStyle(.monacoPrimary)
+                        .buttonStyle(.monacoSecondary)
                         .accessibilityIdentifier("group-chat-retry")
                 }
                 // `.contain` again: a bare identifier on this container was being handed to
@@ -122,19 +125,22 @@ struct GroupChatView: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("group-chat-error")
             } else {
-                statusMessage {
-                    ProgressView("Loading messages…")
-                        .tint(MonacoTheme.accent)
-                        .foregroundStyle(MonacoTheme.secondaryText)
-                }
-                .accessibilityIdentifier("group-chat-loading")
+                GroupChatSkeleton()
+                    .accessibilityIdentifier("group-chat-loading")
             }
         } else if timeline.rows.isEmpty {
+            // The start of the conversation: whose chat this is, then the invitation to open it.
             statusMessage {
+                CabalMark(groupId: groupId, name: GroupChatCopy.title(groupName: groupName), size: 56)
+                Text(GroupChatCopy.title(groupName: groupName))
+                    .font(MonacoTheme.Typo.section)
+                    .foregroundStyle(MonacoTheme.ink)
+                    .multilineTextAlignment(.center)
                 Text(GroupChatCopy.emptyState)
-                    .font(.subheadline)
+                    .font(MonacoTheme.Typo.callout)
                     .foregroundStyle(MonacoTheme.secondaryText)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .contentShape(Rectangle())
             .onTapGesture { composerFocused = true }
@@ -154,10 +160,7 @@ struct GroupChatView: View {
 
                     ForEach(timeline.rows) { row in
                         if let separator = row.timeSeparatorLabel() {
-                            Text(separator)
-                                .font(MonacoTheme.Typo.micro)
-                                .foregroundStyle(MonacoTheme.muted)
-                                .frame(maxWidth: .infinity)
+                            GroupChatDayRule(label: separator)
                                 .padding(.top, row.id == timeline.rows.first?.id ? 8 : 16)
                                 .padding(.bottom, 4)
                                 .accessibilityIdentifier("group-chat-separator-\(row.id)")
@@ -287,7 +290,7 @@ struct GroupChatView: View {
                 ProgressView().tint(MonacoTheme.accent)
             } else {
                 Text(GroupChatCopy.loadEarlier)
-                    .font(.footnote.weight(.semibold))
+                    .font(MonacoTheme.Typo.captionStrong)
             }
         }
         .buttonStyle(.borderless)
@@ -306,7 +309,7 @@ struct GroupChatView: View {
                 Image(systemName: "arrow.down")
                     .font(.caption.weight(.bold))
                 Text(GroupChatCopy.newMessagesPill(count: unreadCount))
-                    .font(.footnote.weight(.semibold))
+                    .font(MonacoTheme.Typo.captionStrong)
             }
             .foregroundStyle(MonacoTheme.primaryButtonLabel)
             .padding(.horizontal, 14)
@@ -323,22 +326,25 @@ struct GroupChatView: View {
     /// Replaces the composer on a closed thread. It keeps a way back: this is the only thing
     /// on screen once the poll is parked, and the reason behind it may have been a blip.
     private func closedBanner(_ message: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .center, spacing: MonacoTheme.Space.sm) {
             Label(message, systemImage: "lock.fill")
-                .font(.footnote)
+                .font(MonacoTheme.Typo.caption)
                 .foregroundStyle(MonacoTheme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Button("Try again") { Task { await loadNewest() } }
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(MonacoTheme.accent)
+                .font(MonacoTheme.Typo.captionStrong)
+                .foregroundStyle(MonacoTheme.brand)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
                 .accessibilityIdentifier("group-chat-closed-retry")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.horizontal, MonacoTheme.Space.m)
+        .padding(.vertical, MonacoTheme.Space.xs)
         .background(MonacoTheme.background)
         .overlay(alignment: .top) {
-            Rectangle().fill(MonacoTheme.border).frame(height: 0.5)
+            MonacoRule()
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("group-chat-closed")
@@ -523,11 +529,21 @@ private struct GroupChatComposer: View {
         let canSend = !isSending && (try? GroupChatDraft.validate(draft).get()) != nil
 
         return VStack(alignment: .trailing, spacing: 4) {
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField(GroupChatCopy.composerPlaceholder, text: $draft, axis: .vertical)
+            HStack(alignment: .bottom, spacing: MonacoTheme.Space.s) {
+                // The title and the prompt are the same words: the title is what VoiceOver and
+                // the UI tests read, the prompt is the placeholder drawn in the palette's own grey.
+                TextField(
+                    GroupChatCopy.composerPlaceholder,
+                    text: $draft,
+                    prompt: Text(GroupChatCopy.composerPlaceholder).foregroundStyle(MonacoTheme.disabledLabel),
+                    axis: .vertical
+                )
+                    .font(MonacoTheme.Typo.body)
+                    .foregroundStyle(MonacoTheme.ink)
+                    .tint(MonacoTheme.ink)
                     .lineLimit(1...5)
                     .focused(focus)
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, MonacoTheme.Space.m)
                     .padding(.vertical, 11)
                     .frame(minHeight: 44)
                     .background(MonacoTheme.surfaceSunken, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -537,20 +553,9 @@ private struct GroupChatComposer: View {
                     Haptics.tap()
                     Task { await submit() }
                 } label: {
-                    ZStack {
-                        Circle()
-                            .fill(canSend || isSending ? MonacoTheme.primaryButtonFill : MonacoTheme.disabled)
-                        if isSending {
-                            ProgressView()
-                                .tint(MonacoTheme.primaryButtonLabel)
-                        } else {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(MonacoTheme.primaryButtonLabel)
-                        }
-                    }
-                    .frame(width: 44, height: 44)
+                    ComposerSendDisc(isLive: canSend || isSending, isSending: isSending)
                 }
+                .buttonStyle(.plain)
                 .disabled(!canSend)
                 .accessibilityLabel("Send message")
                 .accessibilityIdentifier("group-chat-send")
@@ -558,16 +563,16 @@ private struct GroupChatComposer: View {
 
             if trimmedCount > GroupChatDraft.maxCharacters - 200 {
                 Text("\(trimmedCount)/\(GroupChatDraft.maxCharacters)")
-                    .font(.caption2.monospacedDigit())
+                    .font(MonacoTheme.Typo.stamp)
                     .foregroundStyle(trimmedCount > GroupChatDraft.maxCharacters ? MonacoTheme.destructive : MonacoTheme.secondaryText)
                     .accessibilityIdentifier("group-chat-char-count")
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, MonacoTheme.Space.m)
+        .padding(.vertical, MonacoTheme.Space.s)
         .background(MonacoTheme.background)
         .overlay(alignment: .top) {
-            Rectangle().fill(MonacoTheme.border).frame(height: 0.5)
+            MonacoRule()
         }
     }
 
@@ -606,23 +611,38 @@ private struct GroupChatBubble: View {
 
     private var message: GroupMessageDTO { row.message }
 
+    /// The face at the foot of someone else's run, the way a group chat marks who is talking.
+    static let faceSize: CGFloat = 28
+
     var body: some View {
-        HStack {
-            if message.mine { Spacer(minLength: 56) }
+        HStack(alignment: .bottom, spacing: MonacoTheme.Space.s) {
+            if message.mine {
+                Spacer(minLength: 56)
+            } else {
+                face
+            }
             VStack(alignment: message.mine ? .trailing : .leading, spacing: 4) {
                 if !message.mine, row.startsRun {
                     Text(message.authorName)
-                        .font(.caption.weight(.semibold))
+                        .font(MonacoTheme.Typo.captionStrong)
                         .foregroundStyle(MonacoTheme.muted)
+                        .lineLimit(1)
                         .padding(.horizontal, 14)
                 }
                 Text(message.body)
-                    .font(.body)
-                    .foregroundStyle(message.mine ? MonacoTheme.primaryButtonLabel : MonacoTheme.ink)
+                    .font(MonacoTheme.Typo.body)
+                    .foregroundStyle(message.mine ? MonacoTheme.onBrand : MonacoTheme.ink)
                     .textSelection(.enabled)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 9)
-                    .background(bubbleShape.fill(message.mine ? MonacoTheme.primaryButtonFill : MonacoTheme.surface))
+                    .background(bubbleShape.fill(message.mine ? MonacoTheme.brandFill : MonacoTheme.surface))
+                    // Paper on paper needs an edge: white on cream is faint in light and all but
+                    // gone in dark, where the surface and the canvas are two greens apart.
+                    .overlay {
+                        if !message.mine {
+                            bubbleShape.strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+                        }
+                    }
             }
             if !message.mine { Spacer(minLength: 56) }
         }
@@ -631,7 +651,22 @@ private struct GroupChatBubble: View {
         .accessibilityIdentifier("group-chat-message-\(message.id)")
     }
 
-    /// Rounded 20 all round, with a tighter corner on the sender's side at the end of a run.
+    /// Only the last bubble of a run carries the face; the rest keep its column so the run
+    /// lines up.
+    @ViewBuilder
+    private var face: some View {
+        Group {
+            if row.endsRun {
+                MonacoAvatar(photoURL: nil, displayName: message.authorName, size: Self.faceSize, seed: message.authorId)
+            } else {
+                Color.clear
+            }
+        }
+        .frame(width: Self.faceSize, height: Self.faceSize)
+    }
+
+    /// `Radius.bubble` all round, with a tighter corner on the sender's side at the end of a run,
+    /// which on someone else's run points at their face.
     private var bubbleShape: UnevenRoundedRectangle {
         let radius = MonacoTheme.Radius.bubble
         let tail: CGFloat = row.endsRun ? 6 : radius
@@ -648,5 +683,57 @@ private struct GroupChatBubble: View {
         let who = message.mine ? "You" : message.authorName
         guard let date = row.date else { return "\(who): \(message.body)" }
         return "\(who), \(date.formatted(date: .omitted, time: .shortened)): \(message.body)"
+    }
+}
+
+/// The time between two rules, where the conversation picked up again after a gap.
+private struct GroupChatDayRule: View {
+    let label: String
+
+    var body: some View {
+        HStack(spacing: MonacoTheme.Space.sm) {
+            MonacoRule()
+            // The rules give way first; at the largest text sizes the stamp wraps rather than
+            // running off the edge.
+            Text(label)
+                .font(MonacoTheme.Typo.stamp)
+                .foregroundStyle(MonacoTheme.tertiaryText)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .layoutPriority(1)
+            MonacoRule()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+    }
+}
+
+/// The thread in its own shape while the first page loads: a few runs from either side, settled
+/// at the bottom where a chat opens.
+private struct GroupChatSkeleton: View {
+    private let bubbles: [(mine: Bool, width: CGFloat)] = [
+        (false, 188), (false, 132), (true, 172), (false, 216), (true, 112),
+    ]
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Spacer(minLength: 0)
+            ForEach(Array(bubbles.enumerated()), id: \.offset) { _, bubble in
+                HStack(alignment: .bottom, spacing: MonacoTheme.Space.s) {
+                    if bubble.mine {
+                        Spacer(minLength: 56)
+                    } else {
+                        SkeletonBlock(width: GroupChatBubble.faceSize, height: GroupChatBubble.faceSize, radius: GroupChatBubble.faceSize / 2)
+                    }
+                    SkeletonBlock(width: bubble.width, height: 38, radius: MonacoTheme.Radius.bubble)
+                    if !bubble.mine { Spacer(minLength: 56) }
+                }
+            }
+        }
+        .padding(.horizontal, MonacoTheme.Space.m)
+        .padding(.bottom, MonacoTheme.Space.sm)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading messages")
     }
 }
