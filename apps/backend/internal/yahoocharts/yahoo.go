@@ -95,17 +95,23 @@ func (c *Client) Series(ctx context.Context, symbol string, chartRange pyth.Char
 func (c *Client) HasKeylessHistory() bool { return c != nil }
 
 // UnderlyingTicker maps an xStock symbol to the equity's ticker as Yahoo spells it:
-// AAPLx is AAPL, BRK.Bx is BRK-B. A symbol that is not an xStock is passed through
-// upper-cased, so a bare "AAPL" works too. Empty when there is nothing to chart.
+// AAPLx is AAPL, BRK.Bx is BRK-B. Only the xStock form maps, an upper-case ticker
+// with a lower-case x on the end. It used to pass anything else through upper-cased
+// so a bare AAPL would work, which also sent every pre-IPO token in the catalog
+// (tKalshi, tSpaceX, ANDURIL) to Yahoo as a ticker it has never heard of, one 404
+// per chart range. Empty when there is nothing to chart.
 func UnderlyingTicker(symbol string) string {
-	s := strings.ToUpper(strings.TrimSpace(symbol))
-	if s == "" || s == "USDC" {
+	s := strings.TrimSpace(symbol)
+	if len(s) < 2 || !strings.HasSuffix(s, "x") {
 		return ""
 	}
-	if strings.HasSuffix(s, "X") && len(s) > 1 {
-		s = strings.TrimSuffix(s, "X")
+	base := strings.TrimSuffix(s, "x")
+	for _, r := range base {
+		if !(r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.') {
+			return ""
+		}
 	}
-	return strings.ReplaceAll(s, ".", "-")
+	return strings.ReplaceAll(base, ".", "-")
 }
 
 // params picks Yahoo's range and interval for one of the app's chart ranges: fine

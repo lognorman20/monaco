@@ -347,7 +347,14 @@ func boot(ctx context.Context) (*bootResult, error) {
 	if hermes != nil {
 		// The stock-vs-token card reads the raw feeds, not the valuation chain: its
 		// whole point is to show where the two prices disagree.
-		assetsHandlers.Quotes = hermes
+		var quotes pyth.ReferenceQuoteClient = hermes
+		if cfg.ChartSource == "yahoo" {
+			// Our key is not entitled to the equity feeds, so the equity leg is read
+			// off Yahoo's day chart of the same stock instead, labelled as Yahoo's.
+			// Through the price chain, so it is the series the screen already cached.
+			quotes = pyth.WithEquityQuoteFallback(hermes, priceChain)
+		}
+		assetsHandlers.Quotes = quotes
 	}
 	quoteHandlers := &httpapi.QuoteHandlers{
 		Store:      store,

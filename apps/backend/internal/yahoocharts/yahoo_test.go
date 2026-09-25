@@ -13,7 +13,12 @@ import (
 
 func TestUnderlyingTicker(t *testing.T) {
 	t.Parallel()
-	cases := map[string]string{"AAPLx": "AAPL", "aaplx": "AAPL", "BRK.Bx": "BRK-B", "SPYx": "SPY", "AAPL": "AAPL", "USDC": "", "": "", "x": "X"}
+	cases := map[string]string{
+		"AAPLx": "AAPL", "BRK.Bx": "BRK-B", "SPYx": "SPY", " NVDAx ": "NVDA",
+		// Not xStocks: a bare ticker, the stablecoin, and every pre-IPO issuer's spelling.
+		"AAPL": "", "USDC": "", "": "", "x": "", "aaplx": "",
+		"tKalshi": "", "tSpaceX": "", "tOpenAI": "", "ANDURIL": "", "POLYMARKET": "",
+	}
 	for in, want := range cases {
 		if got := UnderlyingTicker(in); got != want {
 			t.Errorf("UnderlyingTicker(%q) = %q, want %q", in, got, want)

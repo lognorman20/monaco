@@ -32,6 +32,13 @@ type HermesClient struct {
 	seriesSource  SeriesSource
 	seriesBreaker *seriesBreaker
 
+	// rangeWarming holds the symbols whose other chart ranges are being fetched in
+	// the background, so a symbol is only ever warmed by one goroutine at a time.
+	rangeWarmMu    sync.Mutex
+	rangeWarming   map[string]struct{}
+	rangeWarmPause time.Duration
+	rangeWarmOff   bool
+
 	quoteCacheMu sync.RWMutex
 	quoteCache   map[string]referenceQuoteEntry
 }
@@ -60,12 +67,13 @@ func newHermesClient(baseURL string, httpClient *http.Client, apiKey string) *He
 		httpClient = &http.Client{Timeout: defaultTimeout}
 	}
 	return &HermesClient{
-		baseURL:       strings.TrimRight(baseURL, "/"),
-		httpClient:    telemetry.InstrumentClient(telemetry.UpstreamPyth, httpClient),
-		apiKey:        strings.TrimSpace(apiKey),
-		chartCache:    NewChartSeriesCache(DefaultChartSeriesCacheTTL),
-		seriesBreaker: newSeriesBreaker(defaultSeriesBreakerCooldown),
-		quoteCache:    make(map[string]referenceQuoteEntry),
+		baseURL:        strings.TrimRight(baseURL, "/"),
+		httpClient:     telemetry.InstrumentClient(telemetry.UpstreamPyth, httpClient),
+		apiKey:         strings.TrimSpace(apiKey),
+		chartCache:     NewChartSeriesCache(DefaultChartSeriesCacheTTL),
+		seriesBreaker:  newSeriesBreaker(defaultSeriesBreakerCooldown),
+		rangeWarmPause: defaultChartRangeWarmPause,
+		quoteCache:     make(map[string]referenceQuoteEntry),
 	}
 }
 

@@ -467,6 +467,44 @@ func TestGET_assets_symbol_chart_servesEveryRangeWithItsPreviousClose(t *testing
 	}
 }
 
+func TestGET_assets_symbol_chart_warmsTheOtherRangesOnlyWhenThereIsHistory(t *testing.T) {
+	t.Parallel()
+
+	// The screen asks for the selected chip only, so the first tap on any other
+	// chip used to go upstream and wait on it. Serving one range is the signal to
+	// fetch the rest in the background. A symbol with nothing in the served range
+	// is not worth five more upstream answers that will almost certainly be empty.
+	handlers, authHandlers, privyClient, _, iso := integrationAssetsApp(t)
+	token := seedAssetsToken(t, iso, authHandlers, privyClient)
+	seedApple(t, handlers)
+
+	get := func(chartRange pyth.ChartRange) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/assets/AAPLx/chart?range="+string(chartRange), nil)
+		req.SetPathValue("symbol", "AAPLx")
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		handlers.GetAssetChartHandler(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200; body = %s", chartRange, rec.Code, rec.Body.String())
+		}
+	}
+
+	get(pyth.ChartRangeAll)
+	if got := pyth.ChartRangeWarmCount(handlers.Pyth, "AAPLx"); got != 0 {
+		t.Fatalf("warms after an empty series = %d, want 0", got)
+	}
+
+	pyth.RegisterChartSeries(handlers.Pyth, "AAPLx", pyth.ChartRange1D, pyth.AssetChartSeries{
+		Range:  pyth.ChartRange1D,
+		Points: []pyth.ChartPoint{{Timestamp: 1, PriceUsdcMicros: 229_400_000}},
+	})
+	get(pyth.ChartRange1D)
+	if got := pyth.ChartRangeWarmCount(handlers.Pyth, "AAPLx"); got != 1 {
+		t.Fatalf("warms after a drawn series = %d, want 1", got)
+	}
+}
+
 func TestGET_assets_symbol_chart_sampledFallbackShipsNoPreviousClose(t *testing.T) {
 	t.Parallel()
 
