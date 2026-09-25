@@ -57,7 +57,9 @@ public enum ProposalFeedCopy {
     /// for agent governance proposals.
     public static func title(for proposal: ProposalDTO) -> String {
         if proposal.isTrade {
-            return AssetDisplayNames.name(forSymbol: proposal.symbol) ?? AssetSymbolFormatter.display(proposal.symbol)
+            // The ticker, as on every other row: the card is a feed entry, and the
+            // proposal screen it opens is where the company's name belongs.
+            return AssetSymbolFormatter.display(proposal.symbol)
         }
         let name = proposal.agentDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return name.isEmpty ? agentTitle : name
@@ -87,10 +89,11 @@ public enum ProposalFeedCopy {
 
     /// Card subtitle under the title, e.g. "AAPL · Buy". The amount line carries the dollars.
     public static func subtitle(for proposal: ProposalDTO) -> String {
-        let ticker = AssetSymbolFormatter.display(proposal.symbol)
         switch proposal.resolvedKind {
-        case "buy": return "\(ticker) · Buy"
-        case "sell": return "\(ticker) · Sell"
+        // The ticker is the card's title now, so the line under it says only what the
+        // title cannot: which way the trade goes.
+        case "buy": return "Buy"
+        case "sell": return "Sell"
         case "add_agent": return "New trading bot · Budget from the pot"
         case "pause_agent": return "Pause the trading bot"
         case "resume_agent": return "Turn the trading bot back on"

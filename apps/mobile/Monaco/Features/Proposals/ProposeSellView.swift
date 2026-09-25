@@ -45,7 +45,7 @@ struct ProposeSellView: View {
                             picked = PickedHolding(row: row)
                         } label: {
                             MonacoRow(
-                                title: ProposeStock.displayName(symbol: row.symbol),
+                                title: AssetSymbolFormatter.display(row.symbol),
                                 subtitle: ProposalShareFormatter.sharesLabel(fromAtomics: row.tokenAmount ?? "0"),
                                 chevron: true,
                                 isLast: index == holdings.count - 1

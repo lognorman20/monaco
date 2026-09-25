@@ -115,8 +115,8 @@ public struct MarketRowData: Identifiable, Equatable, Sendable {
     /// Nil when the backend had no day series for this symbol, in which case the
     /// row draws no sparkline at all.
     public let spark: SparklineSeries?
-    /// Replaces the ticker under the name, for the rows that have something more
-    /// useful to say there ("2 cabals · your slice $294.70").
+    /// The line under the ticker, for the rows that have something to say there
+    /// ("2 cabals · your slice $294.70"). Nil draws a single-line row.
     public let subtitle: String?
     /// Read by VoiceOver after the row's figures, for what the subtitle cannot say
     /// in the space it has ("closes in 4 hours").
