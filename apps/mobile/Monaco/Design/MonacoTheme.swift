@@ -234,6 +234,21 @@ enum MonacoTheme {
     /// Amber: pending, after hours, closing soon.
     static let warning = Color.adaptive(light: 0x8A5A16, dark: 0xE5B26A)
 
+    // MARK: Gold
+
+    /// The coin's family, as text: the rank-1 caption on a board. Gold is a material in this app —
+    /// the stock marks are struck in it — so it means "first" and nothing else. Never a button and
+    /// never a fill behind small text. 5.7:1 on the cream canvas in light.
+    static let gold = Color.adaptive(light: 0x7A5C12, dark: 0xE2B04A)
+
+    /// The crown itself: a brighter gold that still reads as metal at glyph size. Decorative, and
+    /// always beside a rank the row also prints.
+    static let goldGlyph = Color.adaptive(light: 0xC9A24A, dark: 0xD9B85A)
+
+    /// The wash behind the leader's row on a board.
+    static let goldWash = Color.adaptive(light: 0xC9A24A, lightAlpha: 0.16, dark: 0xD9B85A, darkAlpha: 0.16)
+
+
     /// Green for gains, red for losses, muted for zero / missing.
     /// Accepts ASCII "-" and the typographic minus "−" (U+2212) as a loss sign.
     static func signed(_ raw: String?) -> Color {
@@ -263,25 +278,53 @@ enum MonacoTheme {
     /// Saturated identity tints. Picked from the group id, never from the name, so a rename keeps
     /// the colour. `soft` is the low-alpha wash for tinted areas that still hold ink text.
     ///
-    /// Left as they were when the brand moved from electric blue to forest: none of the five is a
-    /// money colour, and the move actually *widened* the gap — `sky` used to sit near the old blue
-    /// brand and no longer sits near anything. `sage` is a teal at hue 185°, 30° off `profit`, and
-    /// it only ever draws inside a 44pt mark or a stripe, never on a figure.
+    /// Retuned for the forest brand. The old five were carried over from the electric-blue app and
+    /// none of them was a money colour, which was the correctness bar — but at full saturation a
+    /// teal, a safety orange and a hot crimson are a different design language from cream paper and
+    /// forest ink, and a cabal row sat between the two. These five keep the same job and the same
+    /// separation while belonging to the palette around them.
     ///
-    /// White initials on `fill` clear the 3:1 large-text minimum, not the 4.5:1 body minimum — in
-    /// dark the lighter fills sit at 3.5:1. That is the right bar for what draws there (bold tile
-    /// initials at 15pt and up), but it does mean `fill` must not be used behind small white text.
+    /// The constraint is not contrast, it is *hue*. Five cabals have to be five colours at a glance,
+    /// and none of them may be mistaken for `profit` or `loss` in a row that also carries money:
+    ///
+    /// | tint   | hue  | L*    | from `profit` | from `loss` |
+    /// |--------|------|-------|---------------|-------------|
+    /// | pine   | 190° | 0.487 | 35°           | 159°        |
+    /// | ochre  |  78° | 0.535 | 78°           |  46°        |
+    /// | plum   | 341° | 0.447 | 175°          |  51°        |
+    /// | indigo | 255° | 0.452 |  99°          | 137°        |
+    /// | moss   | 118° | 0.438 |  38°          |  93°        |
+    ///
+    /// Hue alone is not enough, which a first pass proved on the Home list: ochre and moss are the
+    /// closest pair at 40°, and at equal lightness two cabals in adjacent rows read as one colour.
+    /// So every pair is separated by 60° of hue *or* 0.08 of L\*, and ochre and moss take the
+    /// second route — moss is a deep olive where ochre is a mid gold.
+    ///
+    /// That is also why moss barely lifts in dark while the others do. Lifting each fill to the
+    /// same contrast floor independently flattened the ladder and put ochre and moss back within
+    /// 0.024 of each other; the ladder is the constraint, and white initials clear AA on a darker
+    /// tile anyway.
+    ///
+    /// The closest approach to a money colour is moss at 38° from profit. Hue is what does that
+    /// work — these tints are not quieter than the money colours, they run 0.9× to 1.2× profit's
+    /// chroma — and it is enough because a tint only ever fills a mark or a stripe, never a figure.
+    ///
+    /// White initials clear 4.5:1 on every fill in both schemes, where the old palette met only the
+    /// 3:1 large-text bar in dark. That was defensible for 15pt bold initials; holding the body bar
+    /// costs nothing here and means `fill` is safe behind small white text too.
     enum CabalTint: CaseIterable {
-        case sage, peach, butter, clay, sky
+        // Order is the identity mapping: a cabal's tint is its id hashed mod 5, so these stay in
+        // their slots and no existing cabal changes which of the five it gets.
+        case pine, ochre, plum, indigo, moss
 
         /// Mark tile, accent stripe, chart key.
         var fill: Color {
             switch self {
-            case .sage: return Color.adaptive(light: 0x0D7D74, dark: 0x10938A)
-            case .peach: return Color.adaptive(light: 0xC2570C, dark: 0xD9681A)
-            case .butter: return Color.adaptive(light: 0xA16207, dark: 0xBC7A10)
-            case .clay: return Color.adaptive(light: 0xBE3455, dark: 0xD44467)
-            case .sky: return Color.adaptive(light: 0x17627D, dark: 0x1E7A99)
+            case .pine: return Color.adaptive(light: 0x0E6E6A, dark: 0x11827D)
+            case .ochre: return Color.adaptive(light: 0x8F6410, dark: 0x9A6C11)
+            case .plum: return Color.adaptive(light: 0x7A3A66, dark: 0xB15494)
+            case .indigo: return Color.adaptive(light: 0x2F5788, dark: 0x4076B9)
+            case .moss: return Color.adaptive(light: 0x4E5817, dark: 0x545F19)
             }
         }
 
@@ -294,22 +337,22 @@ enum MonacoTheme {
         /// Brighter than `fill` so the tint still reads as a mark or stripe on a deep ink hero card.
         var onInk: Color {
             switch self {
-            case .sage: return Color(hex: 0x2CC3B4)
-            case .peach: return Color(hex: 0xFF9248)
-            case .butter: return Color(hex: 0xEBB13C)
-            case .clay: return Color(hex: 0xFF6C8B)
-            case .sky: return Color(hex: 0x46B3DB)
+            case .pine: return Color(hex: 0x35C4BD)
+            case .ochre: return Color(hex: 0xE2B04A)
+            case .plum: return Color(hex: 0xD68CC2)
+            case .indigo: return Color(hex: 0x7DAFE0)
+            case .moss: return Color(hex: 0xB8CC63)
             }
         }
 
         /// Chart line colour for this cabal.
         var stroke: Color {
             switch self {
-            case .sage: return Color.adaptive(light: 0x0D7D74, dark: 0x2CC3B4)
-            case .peach: return Color.adaptive(light: 0xC2570C, dark: 0xFF9248)
-            case .butter: return Color.adaptive(light: 0xA16207, dark: 0xEBB13C)
-            case .clay: return Color.adaptive(light: 0xBE3455, dark: 0xFF6C8B)
-            case .sky: return Color.adaptive(light: 0x17627D, dark: 0x46B3DB)
+            case .pine: return Color.adaptive(light: 0x0E6E6A, dark: 0x35C4BD)
+            case .ochre: return Color.adaptive(light: 0x8F6410, dark: 0xE2B04A)
+            case .plum: return Color.adaptive(light: 0x7A3A66, dark: 0xD68CC2)
+            case .indigo: return Color.adaptive(light: 0x2F5788, dark: 0x7DAFE0)
+            case .moss: return Color.adaptive(light: 0x4E5817, dark: 0xB8CC63)
             }
         }
 
@@ -349,42 +392,86 @@ enum MonacoTheme {
         }
     }
 
-    /// Two voices: Avenir Next for display and section titles, SF Pro (tabular digits) for everything else.
+    /// Two voices.
+    ///
+    /// **Avenir Next is the brand**: every word a member reads, and every figure that is their own
+    /// money — a slice, a pot, a return. **SF Mono is the market**: tickers, quotes, day moves,
+    /// ranks, timestamps, the stats grid, an address. Data that is *about* something rather than
+    /// owned by someone sets in the second voice, so a row reads as a name next to a quote and a
+    /// screen never has to say which figure is whose.
+    ///
+    /// Custom faces ignore `.weight(_:)`, so every weight is its own role here (`bodyStrong`,
+    /// `captionStrong`) rather than a modifier on a lighter one. Avenir Next's lining figures are
+    /// tabular by default — measured: "1111.11" and "8888.88" set to the same width in every
+    /// face — so money set in it lines up in a column without a feature switch.
+    ///
+    /// Every role scales with Dynamic Type through `relativeTo:`; nothing here is a fixed size.
     enum Typo {
+        // MARK: Words — Avenir Next
+
+        static let display = Font.custom("AvenirNext-Bold", size: 34, relativeTo: .largeTitle)
+        static let title = Font.custom("AvenirNext-DemiBold", size: 24, relativeTo: .title)
+        static let section = Font.custom("AvenirNext-DemiBold", size: 20, relativeTo: .title3)
+        static let rowTitle = Font.custom("AvenirNext-DemiBold", size: 17, relativeTo: .body)
+        static let body = Font.custom("AvenirNext-Regular", size: 17, relativeTo: .body)
+        static let bodyStrong = Font.custom("AvenirNext-DemiBold", size: 17, relativeTo: .body)
+        /// Every Monaco button label.
+        static let button = Font.custom("AvenirNext-DemiBold", size: 17, relativeTo: .body)
+        static let callout = Font.custom("AvenirNext-Regular", size: 16, relativeTo: .callout)
+        static let calloutStrong = Font.custom("AvenirNext-DemiBold", size: 16, relativeTo: .callout)
+        /// Medium, not Regular: at 13pt Avenir Next Regular goes thin on cream.
+        static let caption = Font.custom("AvenirNext-Medium", size: 13, relativeTo: .footnote)
+        static let captionStrong = Font.custom("AvenirNext-DemiBold", size: 13, relativeTo: .footnote)
+        static let micro = Font.custom("AvenirNext-DemiBold", size: 11, relativeTo: .caption2)
+
+        // MARK: The market — SF Mono
+
+        /// The stock's label on every row: `AAPL`, the way a tape prints it.
+        static let ticker = Font.system(.body, design: .monospaced).weight(.semibold)
+        /// The price at the top of the stock screen.
+        static let quoteHero = Font.system(.largeTitle, design: .monospaced).weight(.medium)
+        /// A price in a row or a cell.
+        static let quote = Font.system(.subheadline, design: .monospaced).weight(.medium)
+        /// Any other market figure: a day move, a rank, a stat.
+        static let data = Font.system(.subheadline, design: .monospaced).weight(.medium)
+        static let dataStrong = Font.system(.subheadline, design: .monospaced).weight(.semibold)
+        static let dataCaption = Font.system(.footnote, design: .monospaced).weight(.medium)
+        static let dataMicro = Font.system(.caption2, design: .monospaced).weight(.semibold)
+        /// Timestamps and countdowns.
+        static let stamp = Font.system(.caption, design: .monospaced).weight(.medium)
+
+        // MARK: Money statics for older call sites
+
         /// Prefer `.moneyFont(_:)`. These statics pre-scale with `UIFontMetrics`, so they ignore a
         /// `.dynamicTypeSize` cap on the view tree and do not re-render when the text size changes.
         static var moneyHero: Font { money(size: 44, weight: .semibold, relativeTo: .largeTitle) }
         static var moneyLarge: Font { money(size: 28, weight: .semibold, relativeTo: .title1) }
         static var moneyRow: Font { money(size: 17, weight: .semibold, relativeTo: .body) }
         static var moneyCaption: Font { money(size: 13, weight: .medium, relativeTo: .footnote) }
-        static let display = Font.custom("AvenirNext-Bold", size: 30, relativeTo: .largeTitle)
-        static let title = Font.custom("AvenirNext-DemiBold", size: 22, relativeTo: .title2)
-        static let section = Font.custom("AvenirNext-DemiBold", size: 19, relativeTo: .title3)
-        static let rowTitle = Font.system(.body, weight: .semibold)
-        static let body = Font.system(.body)
-        static let callout = Font.system(.callout)
-        static let caption = Font.system(.footnote)
-        static let micro = Font.system(.caption2, weight: .semibold)
 
-        /// SF Pro pre-scaled against the process-wide content size category.
+        /// Avenir Next pre-scaled against the process-wide content size category.
         /// Prefer `.moneyFont(_:)`, which scales inside the view tree.
         static func money(size: CGFloat, weight: Font.Weight, relativeTo style: UIFont.TextStyle) -> Font {
             let scaled = UIFontMetrics(forTextStyle: style).scaledValue(for: size)
-            return Font.system(size: scaled, weight: weight).monospacedDigit()
+            return Font.custom(MonacoTypeface.avenirNext(weight), fixedSize: scaled)
         }
     }
 
+    /// Squarer than before. The 24pt cards read as the app's whole personality, and now that a
+    /// section is rows on the paper rather than a card, the few cards left are things a member
+    /// acts on and want to sit flat, not float.
     enum Radius {
-        static let chip: CGFloat = 20
-        static let card: CGFloat = 24
-        static let sheet: CGFloat = 28
+        static let chip: CGFloat = 12
+        static let card: CGFloat = 16
+        static let sheet: CGFloat = 24
         static let pill: CGFloat = 28
-        static let hero: CGFloat = 28
+        static let hero: CGFloat = 24
         /// `CabalMark` / `StockMark` at 44pt; marks scale this proportionally.
         static let tile: CGFloat = 16
-        static let field: CGFloat = 14
-        static let bubble: CGFloat = 20
+        static let field: CGFloat = 12
+        static let bubble: CGFloat = 18
     }
+
 
     enum Space {
         static let xs: CGFloat = 4
@@ -399,12 +486,29 @@ enum MonacoTheme {
 
     /// Existing call sites. New code uses `Typo`.
     enum TypeRole {
-        static let display = Font.custom("AvenirNext-Bold", size: 28)
-        static let title = Font.custom("AvenirNext-DemiBold", size: 20)
-        static let body = Font.system(.body)
-        static let caption = Font.system(.footnote)
+        static let display = Typo.display
+        static let title = Typo.title
+        static let body = Typo.body
+        static let caption = Typo.caption
     }
 }
+
+/// The brand family's PostScript names, so a weight asked for in SwiftUI terms lands on a real
+/// face. Custom fonts do not synthesise weights: `.weight(.semibold)` on `AvenirNext-Regular`
+/// draws Regular.
+enum MonacoTypeface {
+    static func avenirNext(_ weight: Font.Weight) -> String {
+        switch weight {
+        case .ultraLight, .thin, .light: return "AvenirNext-Regular"
+        case .regular: return "AvenirNext-Regular"
+        case .medium: return "AvenirNext-Medium"
+        case .semibold: return "AvenirNext-DemiBold"
+        case .bold, .heavy, .black: return "AvenirNext-Bold"
+        default: return "AvenirNext-DemiBold"
+        }
+    }
+}
+
 
 extension Color {
     /// A single fixed colour from an 0xRRGGBB literal — same in both schemes.

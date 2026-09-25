@@ -3,7 +3,8 @@ import MonacoCore
 import SwiftUI
 
 /// Debug-only: the stock detail screen on canned market data, no sign-in and no
-/// backend. Launch with `-MonacoAssetDetailSample <scenario>`.
+/// backend. Launch with `-MonacoAssetDetailSample <scenario>`; add
+/// `-MonacoAssetDetailScroll <center|bottom|0…1>` to open it scrolled past the chart.
 ///
 /// Every state the data layer can produce is reachable from here, so each one can
 /// be screenshotted: the four market sessions, a holiday and a half day, a full
@@ -71,6 +72,12 @@ enum AssetDetailSampleScenario: String, CaseIterable {
     /// Nothing can be bought: the trade bar carries the reason next to the button
     /// it disables.
     case notRoutable
+    /// A finger resting on the curve: the hero shows the sample under it and the
+    /// period label becomes that sample's time, in the market's voice.
+    case scrubbed
+    /// A cabal voting on its first buy of a stock nobody holds yet — the normal way
+    /// a position starts. The section says no cabal holds it, then the vote.
+    case votesOnly
 
     static let launchArgument = "-MonacoAssetDetailSample"
 
@@ -89,6 +96,28 @@ enum AssetDetailSampleScenario: String, CaseIterable {
     }
 }
 
+/// Where a sample harness opens its scroll view: `<flag> center`, `<flag> bottom`, or a
+/// fraction of the way down (`<flag> 0.25`). The stock screen runs to about three screens
+/// under the chart, so without it a screenshot only ever shows the hero and the chart —
+/// the sections below it, and the last one against the trade bar, were never looked at.
+///
+/// Its own type rather than a member of a scenario enum: `scripts/qa/screens.sh` reads
+/// every `case` line inside those enums as a scenario.
+enum SampleScrollAnchor {
+    /// Leading anchors, never `.center` / `.bottom`: the anchor reaches every scroll view
+    /// on the screen, and the range chips and the mover strip scroll sideways. A
+    /// horizontal x of 0.5 would start those rows mid-way; 0 leaves them where they always
+    /// start. Nil without the flag, so every other launch opens exactly as the app does.
+    static func requested(by flag: String, in arguments: [String] = ProcessInfo.processInfo.arguments) -> UnitPoint? {
+        guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
+        let value = arguments[index + 1]
+        if value == "center" { return .leading }
+        if value == "bottom" { return .bottomLeading }
+        guard let fraction = Double(value), (0...1).contains(fraction) else { return nil }
+        return UnitPoint(x: 0, y: fraction)
+    }
+}
+
 struct AssetDetailSampleHarness: View {
     let scenario: AssetDetailSampleScenario
     @ObservedObject var auth: PrivyAuthService
@@ -104,10 +133,14 @@ struct AssetDetailSampleHarness: View {
                 // cadence a screenshot would wait ten seconds for the first move.
                 pricePollInterval: scenario == .ticking ? .seconds(2) : AssetDetailPolling.price,
                 // Same for the quiet chart re-read, which ships at two minutes.
-                chartPollInterval: scenario == .tickingChart ? .seconds(2) : AssetDetailPolling.chart
+                chartPollInterval: scenario == .tickingChart ? .seconds(2) : AssetDetailPolling.chart,
+                // A sample a third of the way into the day, well off the curve's end, so
+                // the price, the badge and the time under it all visibly change.
+                scrubbedIndexOnLoad: scenario == .scrubbed ? 26 : nil
             )
         }
         .tint(MonacoTheme.ink)
+        .defaultScrollAnchor(SampleScrollAnchor.requested(by: "-MonacoAssetDetailScroll"))
         .environment(\.scrubSelectionPersists, AssetDetailSampleScenario.scrubHolds)
     }
 }
@@ -132,7 +165,7 @@ private final class AssetDetailSampleDataSource: AssetDetailDataSource {
         detailCalls += 1
         switch scenario {
         case .open, .fallbackSeries, .emptyChart, .chartFailed, .loading, .slowRange, .staleRange, .tickingChart,
-             .cabals, .oneCabal, .noCabals, .cabalsPartial, .cabalsFailed:
+             .cabals, .oneCabal, .noCabals, .cabalsPartial, .cabalsFailed, .scrubbed, .votesOnly:
             return MarketSampleData.detail()
         case .notRoutable:
             return unroutableDetail()
@@ -251,6 +284,12 @@ private struct AssetDetailSampleSocialSource: AssetSocialDataSource {
             return AssetSocialSampleData.empty(symbol: symbol)
         case .cabalsFailed:
             throw SampleSocialFailure()
+        case .votesOnly:
+            return AssetSocialDTO(
+                symbol: symbol,
+                openProposals: [AssetSocialSampleData.openBuy],
+                activity: Array(AssetSocialSampleData.activity.prefix(1))
+            )
         case .loading:
             // Never answers, so the screen can be screenshotted with the cards still
             // unbuilt and the trade bar still holding back its sell.

@@ -15,8 +15,8 @@ struct GroupActivityListView: View {
                 retryingTransactionIDs: retryingTransactionIDs,
                 onRetry: onRetry
             )
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+            .padding(.vertical, MonacoTheme.Space.m)
+
         }
         .monacoCanvas()
         .navigationTitle("Activity")

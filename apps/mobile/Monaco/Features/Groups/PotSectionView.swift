@@ -9,7 +9,10 @@ import SwiftUI
 /// the same instrument in both places, so it should not be two different objects.
 struct PotSectionView: View {
     let pot: [PotRowDTO]
+    /// Which cabal this is, so the mix bar draws in its tint.
+    var groupId: String = ""
     var onAddMoney: () -> Void = {}
+
     /// Nil-op by default so previews and older call sites still compile; the cabal screen
     /// passes a push into the stock.
     var onOpenStock: (String) -> Void = { _ in }
@@ -30,6 +33,7 @@ struct PotSectionView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
             MonacoSectionHeader("Holdings")
+                .padding(.horizontal, MonacoTheme.Space.m)
 
             if stocks.isEmpty && !hasCash {
                 EmptyState(
@@ -40,7 +44,13 @@ struct PotSectionView: View {
                 )
                 .accessibilityIdentifier("pot-empty")
             } else {
+                if !stocks.isEmpty {
+                    PotMixBar(pot: pot, groupId: groupId)
+                        .padding(.horizontal, MonacoTheme.Space.m)
+                        .padding(.bottom, MonacoTheme.Space.xs)
+                }
                 MonacoGroupedList {
+
                     ForEach(stocks) { row in
                         Button {
                             Haptics.selection()
@@ -65,8 +75,10 @@ struct PotSectionView: View {
                     Text("Nothing bought yet. Propose the first buy.")
                         .font(MonacoTheme.Typo.caption)
                         .foregroundStyle(MonacoTheme.muted)
+                        .padding(.horizontal, MonacoTheme.Space.m)
                         .accessibilityIdentifier("pot-nothing-bought")
                 }
+
             }
         }
         .accessibilityIdentifier("group-holdings")
@@ -148,7 +160,9 @@ private struct PotHoldingRow: View {
     var body: some View {
         MonacoRow(
             title: AssetSymbolFormatter.display(row.symbol, kind: row.resolvedAssetKind),
+            titleFont: MonacoTheme.Typo.ticker,
             subtitle: PotSectionView.potSubtitle(row),
+
             chevron: true,
             isLast: isLast
         ) {
@@ -165,7 +179,6 @@ private struct PotHoldingRow: View {
                 }
                 VStack(alignment: .trailing, spacing: 2) {
                     HStack(spacing: MonacoTheme.Space.s) {
-                        // A pre-IPO token trades round the clock; it has no after hours.
                         if row.afterHours == true, row.resolvedAssetKind != .preIpo {
                             Image(systemName: "moon.fill")
                                 .font(.caption2)

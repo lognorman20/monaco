@@ -27,8 +27,13 @@ struct ProposalDetailView: View {
     /// not issued into a layout the keyboard is still about to resize.
     @State private var pendingScrollCommentId: String?
     @State private var toast: MonacoToast?
+    /// The header says what this is; the bar only repeats it once the header has scrolled away.
+    @State private var headerScrolledAway = false
 
     private let votes = ProposalVoteLedger.shared
+
+    /// How far the header scrolls before the bar takes the title: past the ticker row.
+    private static let titleThreshold: CGFloat = 64
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -61,6 +66,8 @@ struct ProposalDetailView: View {
 
     private var detail: some View {
         ScrollView {
+            // No horizontal padding on the stack: the ballots and the discussion are ruled lists
+            // that run edge to edge, and every section insets its own header and words.
             VStack(alignment: .leading, spacing: MonacoTheme.Space.xl) {
                 if let proposal {
                     ProposalCardView(
@@ -68,8 +75,10 @@ struct ProposalDetailView: View {
                         isVoting: isVoting,
                         onVote: { choice in Task { await vote(choice) } },
                         viewerChoice: viewerChoice,
+                        viewerId: service.viewerId,
                         showsChrome: false
                     )
+                    .padding(.horizontal, MonacoTheme.Space.m)
                     reasonSection(proposal)
                     trackerSection(proposal)
                     ballotsSection(proposal)
@@ -78,6 +87,7 @@ struct ProposalDetailView: View {
                         rows: commentRows,
                         isLoading: commentsLoading,
                         errorMessage: commentsError,
+                        emptyMessage: ProposalDiscussionCopy.emptyThread(for: proposal),
                         onRetry: { Task { await loadComments() } },
                         onReply: { replyTarget = $0 }
                     )
@@ -87,14 +97,18 @@ struct ProposalDetailView: View {
                     }
                     .padding(.top, MonacoTheme.Space.xl)
                 } else {
-                    ProposalCardSkeleton()
+                    ProposalDetailSkeleton()
                 }
             }
-            .padding(.horizontal, MonacoTheme.Space.gutter)
             .padding(.top, MonacoTheme.Space.m)
             .padding(.bottom, MonacoTheme.Space.l)
         }
         .scrollDismissesKeyboard(.interactively)
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentOffset.y + geometry.contentInsets.top > Self.titleThreshold
+        } action: { _, scrolledAway in
+            headerScrolledAway = scrolledAway
+        }
         .background(MonacoTheme.canvas.ignoresSafeArea())
         .safeAreaInset(edge: .bottom) {
             if proposal != nil {
@@ -111,7 +125,7 @@ struct ProposalDetailView: View {
             }
         }
         .monacoToast($toast, bottomInset: 72)
-        .navigationTitle(proposal.map(ProposalFeedCopy.title(for:)) ?? "")
+        .navigationTitle(headerScrolledAway ? proposal.map(ProposalFeedCopy.title(for:)) ?? "" : "")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: proposalId) {
             // Feed items carry no ballots; always fetch detail so votes and canVote are current.
@@ -139,11 +153,12 @@ struct ProposalDetailView: View {
     private func reasonSection(_ proposal: ProposalDTO) -> some View {
         if let thesis = proposal.thesis?.trimmingCharacters(in: .whitespacesAndNewlines), !thesis.isEmpty {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
-                MonacoSectionHeader(ProposalFeedCopy.reasonTitle(for: proposal))
+                MonacoSectionHeader(ProposalDiscussionCopy.reasonTitle(for: proposal))
                 ProposalQuoteBlock(text: thesis)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("proposal-detail-thesis")
             }
+            .padding(.horizontal, MonacoTheme.Space.m)
         }
     }
 
@@ -153,59 +168,50 @@ struct ProposalDetailView: View {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
                 MonacoSectionHeader(ProposalFeedCopy.statusTitle)
                 ProposalExecutionTracker(stage: stage, isSell: proposal.isSell)
+                    .padding(.top, MonacoTheme.Space.xs)
                 switch stage {
                 case .failed:
                     Text(ProposalFeedCopy.executionFailed(isSell: proposal.isSell))
                         .font(MonacoTheme.Typo.callout)
                         .foregroundStyle(MonacoTheme.loss)
+                        .fixedSize(horizontal: false, vertical: true)
                 case .executing:
                     Text(ProposalFeedCopy.executionPending(isSell: proposal.isSell))
                         .font(MonacoTheme.Typo.callout)
                         .foregroundStyle(MonacoTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 case .done:
+                    // When it landed, as the stamp it is. The chip at the top of the screen
+                    // already says "Bought"; this says when.
                     if let executedAt = proposal.execution?.executedAt, let date = ProposalTimeFormatter.parse(executedAt) {
                         Text(date.formatted(date: .abbreviated, time: .shortened))
-                            .font(MonacoTheme.Typo.caption)
-                            .foregroundStyle(MonacoTheme.muted)
+                            .font(MonacoTheme.Typo.stamp)
+                            .foregroundStyle(MonacoTheme.tertiaryText)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .transition(.opacity)
                     }
                 case .voting:
                     EmptyView()
                 }
             }
+            .padding(.horizontal, MonacoTheme.Space.m)
             .accessibilityIdentifier("proposal-detail-buy-status")
         }
     }
 
+    /// Who is behind this, by name: every ballot the payload names, the viewer if they still owe
+    /// one, and a count for everyone else. A ruled list on the paper, the viewer's own line washed
+    /// the way the leaderboard washes it.
     @ViewBuilder
     private func ballotsSection(_ proposal: ProposalDTO) -> some View {
-        let votes = proposal.votes ?? []
-        let viewerWaiting = proposal.showsVoteActions && viewerChoice == nil
-        let progress = proposal.voteSummary.map(ProposalVoteProgress.init(summary:))
-        // Ballots we can name, the viewer if they still owe a vote, and a count for everyone else.
-        let othersWaiting = max((progress?.pendingCount ?? 0) - (viewerWaiting ? 1 : 0), 0)
-        if !votes.isEmpty || viewerWaiting || (proposal.isOpen && othersWaiting > 0) {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+        let lines = ProposalBallotList.lines(for: proposal, viewerId: service.viewerId, viewerChoice: viewerChoice)
+        if !lines.isEmpty {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
                 MonacoSectionHeader(ProposalFeedCopy.votesTitle)
+                    .padding(.horizontal, MonacoTheme.Space.m)
                 MonacoGroupedList {
-                    ForEach(Array(votes.enumerated()), id: \.element.id) { index, vote in
-                        BallotRow(
-                            name: vote.displayName,
-                            choice: vote.choice.lowercased() == "yes" ? ProposalFeedCopy.ballotYes : ProposalFeedCopy.ballotNo,
-                            isNo: vote.choice.lowercased() != "yes",
-                            isLast: index == votes.count - 1 && !viewerWaiting && !(proposal.isOpen && othersWaiting > 0)
-                        )
-                    }
-                    if viewerWaiting {
-                        BallotRow(name: "You", choice: ProposalFeedCopy.ballotWaiting, isWaiting: true, isLast: !(proposal.isOpen && othersWaiting > 0))
-                    }
-                    if proposal.isOpen, othersWaiting > 0 {
-                        BallotRow(
-                            name: othersWaiting == 1 ? "1 more member" : "\(othersWaiting) more members",
-                            choice: ProposalFeedCopy.ballotWaiting,
-                            isWaiting: true,
-                            showsAvatar: false,
-                            isLast: true
-                        )
+                    ForEach(lines) { line in
+                        BallotRow(line: line, isLast: line.id == lines.last?.id)
                     }
                 }
             }
@@ -217,11 +223,12 @@ struct ProposalDetailView: View {
     private func agentSection(_ proposal: ProposalDTO) -> some View {
         if proposal.resolvedKind == "add_agent", let key = proposal.mintedAgentKey, !key.isEmpty {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
-                MonacoSectionHeader(ProposeFlowCopy.copyKey)
+                MonacoSectionHeader(ProposeFlowCopy.botKeyTitle)
                 AgentKeyRevealView(apiKey: key) { message in
                     toast = MonacoToast(message: message, isSuccess: true)
                 }
             }
+            .padding(.horizontal, MonacoTheme.Space.m)
             .accessibilityIdentifier("proposal-detail-agent")
         }
     }
@@ -288,7 +295,7 @@ struct ProposalDetailView: View {
         toast = result.toast
         if result.succeeded {
             Haptics.success()
-            withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.7)) {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                 votes.record(choice, for: proposalId, viewerId: service.viewerId)
             }
         }
@@ -333,71 +340,103 @@ struct ProposalDetailView: View {
     }
 }
 
-/// Voting → Buying → Done as three connected steps. A failed swap stops on the middle step in loss.
+
+/// Voting → Buying → Done as three nodes on a rule. Steps behind are filled with a check, the
+/// step in play is an ink ring with a dot at its centre (breathing while the swap runs), and steps
+/// ahead are open rings. A failed swap stops on the middle step, filled in loss.
+///
+/// When a passed buy lands, the last node fills and the rule into it goes to ink: one settled
+/// moment, a quarter of a second, and the success haptic the screen already plays. No bounce.
 struct ProposalExecutionTracker: View {
     let stage: ProposalExecutionStage
     let isSell: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private static let nodeSize: CGFloat = 20
+    private static let ruleWeight: CGFloat = 2
+
     private var steps: [String] {
         ProposalFeedCopy.trackerSteps(isSell: isSell)
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            ForEach(Array(steps.enumerated()), id: \.offset) { index, title in
-                VStack(spacing: MonacoTheme.Space.s) {
-                    HStack(spacing: 0) {
-                        connector(visible: index > 0, reached: index <= stage.stepIndex)
-                        node(index)
-                        connector(visible: index < steps.count - 1, reached: index < stage.stepIndex)
+        // The rule runs the width of the section: the first step sits on the left edge where
+        // every header and row on the page starts, the last on the right, the middle between.
+        VStack(spacing: MonacoTheme.Space.s) {
+            HStack(spacing: 0) {
+                ForEach(steps.indices, id: \.self) { index in
+                    if index > 0 {
+                        segment(reached: index <= stage.stepIndex)
                     }
+                    node(ProposalTrackerNode.of(index: index, stage: stage))
+                }
+            }
+            ZStack {
+                ForEach(Array(steps.enumerated()), id: \.offset) { index, title in
                     Text(title)
-                        .font(MonacoTheme.Typo.caption.weight(index == stage.stepIndex ? .semibold : .regular))
+                        .font(labelFont(index))
                         .foregroundStyle(labelColor(index))
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity, alignment: labelAlignment(index))
                 }
-                .frame(maxWidth: .infinity)
             }
         }
-        .animation(reduceMotion ? nil : .spring(response: 0.4, dampingFraction: 0.8), value: stage)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: stage)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
         .accessibilityIdentifier("proposal-tracker")
     }
 
-    private func node(_ index: Int) -> some View {
-        let reached = index <= stage.stepIndex
-        let failedHere = stage == .failed && index == stage.stepIndex
-        let current = index == stage.stepIndex && stage != .done
-        return ZStack {
-            Circle()
-                .fill(reached ? (failedHere ? MonacoTheme.loss : MonacoTheme.ink) : MonacoTheme.surfaceSunken)
-            if failedHere {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(MonacoTheme.primaryButtonLabel)
-            } else if reached && !current {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(MonacoTheme.primaryButtonLabel)
-            } else if current {
+    @ViewBuilder
+    private func node(_ state: ProposalTrackerNode) -> some View {
+        ZStack {
+            switch state {
+            case .done:
+                Circle().fill(MonacoTheme.brandFill)
+                glyph("checkmark")
+            case .failed:
+                Circle().fill(MonacoTheme.loss)
+                glyph("xmark")
+            case .current:
+                Circle().fill(MonacoTheme.canvas)
+                Circle().strokeBorder(MonacoTheme.ink, lineWidth: Self.ruleWeight)
                 Circle()
-                    .fill(MonacoTheme.primaryButtonLabel)
+                    .fill(MonacoTheme.ink)
                     .frame(width: 8, height: 8)
                     .modifier(TrackerPulse(active: stage == .executing && !reduceMotion))
+            case .ahead:
+                Circle().fill(MonacoTheme.canvas)
+                Circle().strokeBorder(MonacoTheme.hairline, lineWidth: Self.ruleWeight)
             }
         }
-        .frame(width: 22, height: 22)
+        .frame(width: Self.nodeSize, height: Self.nodeSize)
     }
 
-    private func connector(visible: Bool, reached: Bool) -> some View {
+    private func glyph(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(MonacoTheme.onBrand)
+    }
+
+    /// The stretch of rule leading into a step: ink once the proposal has reached it.
+    private func segment(reached: Bool) -> some View {
         Rectangle()
-            .fill(visible ? (reached ? MonacoTheme.ink : MonacoTheme.hairline) : Color.clear)
-            .frame(height: 2)
+            .fill(reached ? MonacoTheme.ink : MonacoTheme.hairline)
+            .frame(height: Self.ruleWeight)
             .frame(maxWidth: .infinity)
+    }
+
+    /// Each label sits under its node: the first flush left, the last flush right.
+    private func labelAlignment(_ index: Int) -> Alignment {
+        if index == 0 { return .leading }
+        if index == steps.count - 1 { return .trailing }
+        return .center
+    }
+
+    private func labelFont(_ index: Int) -> Font {
+        index == stage.stepIndex ? MonacoTheme.Typo.captionStrong : MonacoTheme.Typo.caption
     }
 
     private func labelColor(_ index: Int) -> Color {
@@ -415,6 +454,26 @@ struct ProposalExecutionTracker: View {
     }
 }
 
+/// How one tracker node draws for the stage the proposal is at.
+enum ProposalTrackerNode: Equatable {
+    /// Behind the proposal, or the last step once it is done: filled, with a check.
+    case done
+    /// Where the proposal is now: an ink ring with a dot.
+    case current
+    /// The step a swap failed on: filled in loss, with a cross.
+    case failed
+    /// Not reached yet: an open ring on the rule.
+    case ahead
+
+    static func of(index: Int, stage: ProposalExecutionStage) -> ProposalTrackerNode {
+        if stage == .failed, index == stage.stepIndex { return .failed }
+        if stage == .done, index <= stage.stepIndex { return .done }
+        if index < stage.stepIndex { return .done }
+        if index == stage.stepIndex { return .current }
+        return .ahead
+    }
+}
+
 /// Slow breathing on the current step while the swap runs.
 private struct TrackerPulse: ViewModifier {
     let active: Bool
@@ -424,40 +483,261 @@ private struct TrackerPulse: ViewModifier {
     }
 }
 
-/// One ballot: avatar, name, Yes / No / Waiting.
-private struct BallotRow: View {
+/// One line of the Votes list.
+struct ProposalBallotLine: Identifiable, Equatable {
+    enum Choice: Equatable {
+        case yes, no, waiting
+    }
+
+    let id: String
+    /// "You" for the member reading, the voter's name otherwise, "3 more members" for the rest.
     let name: String
-    let choice: String
-    var isNo = false
-    var isWaiting = false
-    var showsAvatar = true
-    var isLast = false
+    /// Whose initials the face shows. Empty draws a plain person, which is the viewer before
+    /// their ballot names them; nil draws an open ring, which is a seat nobody has filled.
+    let faceName: String?
+    let choice: Choice
+    /// When the ballot was cast, as the server sent it. Nil for a ballot still to come.
+    let castAt: String?
+    let isViewer: Bool
+}
+
+/// The Votes list, in order: the ballots the payload names, the viewer if they still owe a vote,
+/// and one line counting everyone else who does.
+enum ProposalBallotList {
+    static func lines(for proposal: ProposalDTO, viewerId: String?, viewerChoice: String?) -> [ProposalBallotLine] {
+        var lines = (proposal.votes ?? []).map { vote in
+            let isViewer = viewerId.map { vote.voterId == $0 } ?? false
+            return ProposalBallotLine(
+                id: "ballot-\(vote.voterId)",
+                name: isViewer ? ProposalDiscussionCopy.you : vote.displayName,
+                faceName: vote.displayName,
+                choice: vote.choice.lowercased() == ProposalVoteChoice.yes.rawValue ? .yes : .no,
+                castAt: vote.castAt,
+                isViewer: isViewer
+            )
+        }
+        let viewerWaiting = proposal.showsVoteActions && viewerChoice == nil
+        let pending = proposal.voteSummary.map { ProposalVoteProgress(summary: $0).pendingCount } ?? 0
+        let othersWaiting = max(pending - (viewerWaiting ? 1 : 0), 0)
+        if viewerWaiting {
+            lines.append(ProposalBallotLine(
+                id: "ballot-viewer-waiting",
+                name: ProposalDiscussionCopy.you,
+                faceName: "",
+                choice: .waiting,
+                castAt: nil,
+                isViewer: true
+            ))
+        }
+        if proposal.isOpen, othersWaiting > 0 {
+            lines.append(ProposalBallotLine(
+                id: "ballot-others-waiting",
+                name: ProposalDiscussionCopy.moreMembers(othersWaiting),
+                faceName: nil,
+                choice: .waiting,
+                castAt: nil,
+                isViewer: false
+            ))
+        }
+        return lines
+    }
+}
+
+/// One ballot: the face, the name with when they voted, and Yes / No / Waiting in the market's
+/// voice on the right.
+private struct BallotRow: View {
+    let line: ProposalBallotLine
+    let isLast: Bool
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private static let faceSize: CGFloat = 40
+
+    private var isStacked: Bool { dynamicTypeSize.isAccessibilitySize }
 
     var body: some View {
-        HStack(spacing: MonacoTheme.Space.sm) {
-            if showsAvatar {
-                MonacoAvatar(photoURL: nil, displayName: name, size: 28)
+        Group {
+            if isStacked {
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                    HStack(spacing: MonacoTheme.Space.sm) {
+                        face
+                        who
+                    }
+                    choice
+                }
             } else {
-                Circle()
-                    .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
-                    .frame(width: 28, height: 28)
+                HStack(spacing: MonacoTheme.Space.sm) {
+                    face
+                    who
+                    choice
+                }
             }
-            Text(name)
-                .font(MonacoTheme.Typo.body)
-                .foregroundStyle(isWaiting && !showsAvatar ? MonacoTheme.muted : MonacoTheme.ink)
-                .lineLimit(1)
-            Spacer(minLength: MonacoTheme.Space.s)
-            Text(choice)
-                .font(MonacoTheme.Typo.callout.weight(.semibold))
-                .foregroundStyle(isWaiting ? MonacoTheme.tertiaryText : (isNo ? MonacoTheme.loss : MonacoTheme.ink))
         }
         .padding(.horizontal, MonacoTheme.Space.m)
-        .frame(minHeight: 52)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+        .background(line.isViewer ? MonacoTheme.brandWash : Color.clear)
         .overlay(alignment: .bottom) {
             if !isLast {
-                Rectangle().fill(MonacoTheme.hairline).frame(height: 1).padding(.leading, 56)
+                MonacoRule().padding(.leading, isStacked ? MonacoTheme.Space.m : MonacoTheme.Space.m + Self.faceSize + MonacoTheme.Space.sm)
             }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
+    }
+
+    @ViewBuilder
+    private var face: some View {
+        Group {
+            if let faceName = line.faceName {
+                MonacoAvatar(photoURL: nil, displayName: faceName, size: Self.faceSize)
+            } else {
+                Circle()
+                    .strokeBorder(MonacoTheme.hairline, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            }
+        }
+        .frame(width: Self.faceSize, height: Self.faceSize)
+    }
+
+    private var age: String? {
+        guard let castAt = line.castAt else { return nil }
+        let label = RelativeTimeFormatter.label(iso: castAt)
+        return label.isEmpty ? nil : label
+    }
+
+    private var nameText: Text {
+        Text(line.name)
+            .font(MonacoTheme.Typo.rowTitle)
+            .foregroundStyle(line.faceName == nil ? MonacoTheme.muted : MonacoTheme.ink)
+    }
+
+    /// The name with when they voted: side by side, or one run of text once the name can wrap.
+    @ViewBuilder
+    private var who: some View {
+        Group {
+            if isStacked {
+                ProposalStampedLine.text(nameText, stamp: age ?? "")
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.s) {
+                    nameText
+                        .lineLimit(1)
+                    if let age {
+                        Text(age)
+                            .font(MonacoTheme.Typo.stamp)
+                            .foregroundStyle(MonacoTheme.tertiaryText)
+                            .fixedSize()
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var choice: some View {
+        Text(choiceLabel)
+            .font(line.choice == .waiting ? MonacoTheme.Typo.data : MonacoTheme.Typo.dataStrong)
+            .foregroundStyle(choiceColor)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    private var choiceLabel: String {
+        switch line.choice {
+        case .yes: ProposalFeedCopy.ballotYes
+        case .no: ProposalFeedCopy.ballotNo
+        case .waiting: ProposalFeedCopy.ballotWaiting
+        }
+    }
+
+    private var choiceColor: Color {
+        switch line.choice {
+        case .yes: MonacoTheme.ink
+        case .no: MonacoTheme.loss
+        case .waiting: MonacoTheme.tertiaryText
+        }
+    }
+
+    private var spoken: String {
+        "\(line.name), \(choiceLabel)"
+    }
+}
+
+/// Placeholder in the shape of the proposal screen: the header, the reason, a few ballots.
+private struct ProposalDetailSkeleton: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.xl) {
+            ProposalCardSkeleton(showsChrome: false)
+                .padding(.horizontal, MonacoTheme.Space.m)
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+                SkeletonBlock(width: 96, height: 20)
+                SkeletonBlock(height: 14)
+                SkeletonBlock(width: 220, height: 14)
+            }
+            .padding(.horizontal, MonacoTheme.Space.m)
+            VStack(alignment: .leading, spacing: 0) {
+                SkeletonBlock(width: 72, height: 20)
+                    .padding(.horizontal, MonacoTheme.Space.m)
+                    .padding(.bottom, MonacoTheme.Space.s)
+                ForEach(0..<3, id: \.self) { _ in
+                    HStack(spacing: MonacoTheme.Space.sm) {
+                        SkeletonBlock(width: 40, height: 40, radius: 20)
+                        SkeletonBlock(width: 120, height: 14)
+                        Spacer(minLength: MonacoTheme.Space.s)
+                        SkeletonBlock(width: 32, height: 14)
+                    }
+                    .padding(.horizontal, MonacoTheme.Space.m)
+                    .frame(minHeight: 60)
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading")
+    }
+}
+
+/// Words the proposal screen needs that depend on what kind of proposal it is. The shared
+/// `ProposalFeedCopy` says "buy" for every kind, which reads wrong over a sell or a bot.
+enum ProposalDiscussionCopy {
+    /// The viewer's own line in the Votes list.
+    static let you = "You"
+
+    static func moreMembers(_ count: Int) -> String {
+        count == 1 ? "1 more member" : "\(count) more members"
+    }
+
+    /// The reason's heading: "Why buy", "Why sell", "Why add this bot".
+    static func reasonTitle(for proposal: ProposalDTO) -> String {
+        switch proposal.resolvedKind {
+        case "add_agent": return "Why add this bot"
+        case "pause_agent": return "Why pause the bot"
+        case "resume_agent": return "Why turn the bot back on"
+        case "revoke_agent": return "Why remove the bot"
+        default: return ProposalFeedCopy.reasonTitle(for: proposal)
+        }
+    }
+
+    /// Once the vote is over there is no case left to make.
+    static let emptyClosedThread = "No comments yet."
+
+    /// What an empty discussion says, in the words of the thing being decided.
+    static func emptyThread(for proposal: ProposalDTO) -> String {
+        guard proposal.isOpen else { return emptyClosedThread }
+        switch proposal.resolvedKind {
+        case "buy": return ProposalFeedCopy.emptyThread
+        case "sell": return "No comments yet. Make the case for or against this sell."
+        case "add_agent": return "No comments yet. Make the case for or against this bot."
+        default: return "No comments yet. Make the case for or against this change."
+        }
+    }
+
+    /// Every string above for every kind, for the copy audit. Built from the functions so the
+    /// audit reads what the screen shows.
+    static var auditedStrings: [String] {
+        let kinds = ["buy", "sell", "add_agent", "pause_agent", "resume_agent", "revoke_agent"]
+        let proposals = kinds.map { ProposalDTO(id: "audit", symbol: "AAPLx", status: "open", kind: $0) }
+        return [you, moreMembers(1), moreMembers(3), emptyClosedThread]
+            + proposals.map { reasonTitle(for: $0) }
+            + proposals.map { emptyThread(for: $0) }
     }
 }

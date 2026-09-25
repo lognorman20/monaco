@@ -39,9 +39,15 @@ struct ProposalHistorySection: View {
         VStack(alignment: .leading, spacing: 0) {
             if !openProposals.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    MonacoSectionHeader(title, trailing: "See all", action: onSeeAll)
-                        .accessibilityIdentifier("group-proposals-feed-link")
+                    MonacoSectionHeader(
+                        title,
+                        count: openProposals.filter(\.showsVoteActions).count,
+                        trailing: "See all",
+                        action: onSeeAll
+                    )
+                    .accessibilityIdentifier("group-proposals-feed-link")
                     VStack(spacing: 12) {
+
                         ForEach(preview) { proposal in
                             ProposalCardView(
                                 proposal: proposal,
@@ -56,8 +62,10 @@ struct ProposalHistorySection: View {
                         }
                     }
                 }
-                .padding(.bottom, 32)
+                .padding(.horizontal, MonacoTheme.Space.m)
+                .padding(.bottom, MonacoTheme.Space.xl)
                 .accessibilityIdentifier("group-open-votes")
+
             }
         }
         .task(id: "\(groupId)-\(refreshToken)") {

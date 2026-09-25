@@ -3,7 +3,8 @@ import MonacoCore
 import SwiftUI
 
 /// Debug-only: the Stocks tab on canned market data, no sign-in and no backend.
-/// Launch with `-MonacoStocksTabSample <scenario>`.
+/// Launch with `-MonacoStocksTabSample <scenario>`; add `-MonacoStocksTabScroll bottom`
+/// to open it scrolled down to the mover cards and the catalogue.
 ///
 /// Every state the four sections can be in is reachable from here, so each one can
 /// be screenshotted: the whole tab populated, a member whose cabals own nothing,
@@ -64,6 +65,7 @@ struct StocksTabSampleHarness: View {
         }
         .environment(session)
         .tint(MonacoTheme.ink)
+        .defaultScrollAnchor(SampleScrollAnchor.requested(by: "-MonacoStocksTabScroll"))
         .task {
             await prepare()
             isPrepared = true

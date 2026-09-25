@@ -21,6 +21,8 @@ struct AssetChartCard: View {
             // into a fixed height does not clip it — it overflows, and at the
             // accessibility text sizes the retry button draws straight over the
             // caption and the chip row below.
+            //
+            // The curve runs edge to edge; the caption and the chips keep the inset.
             chart
             if let caption = model.series?.basisCaption {
                 // The curve is the underlying equity's; the price above it is the
@@ -29,10 +31,13 @@ struct AssetChartCard: View {
                 Text(caption)
                     .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(MonacoTheme.muted)
+                    .padding(.horizontal, MonacoTheme.Space.m)
                     .accessibilityIdentifier("asset-chart-basis")
             }
             rangeChips
+                .padding(.horizontal, MonacoTheme.Space.m)
         }
+
         // No identifier on this stack. A modifier on a `VStack` is applied to each of
         // its children, so an identifier here is not a name for the group: it renames
         // the curve, the caption and the chip row, and every one of them becomes
@@ -47,8 +52,9 @@ struct AssetChartCard: View {
     private var chart: some View {
         switch model.chartState {
         case .loading:
-            SkeletonBlock(width: nil, height: Self.chartHeight, radius: MonacoTheme.Radius.card)
+            SkeletonBlock(width: nil, height: Self.chartHeight, radius: 0)
                 .frame(maxWidth: .infinity)
+
                 // `SkeletonBlock` hides itself from VoiceOver, so a label on the
                 // outside would attach to nothing and the loading chart would
                 // announce silence. Making this one element first is what gives the
@@ -66,6 +72,7 @@ struct AssetChartCard: View {
                 action: { reload() }
             )
             .frame(minHeight: Self.chartHeight)
+            .padding(.horizontal, MonacoTheme.Space.m)
             .accessibilityIdentifier("asset-detail-chart-empty")
         case .failed:
             EmptyState(
@@ -74,9 +81,11 @@ struct AssetChartCard: View {
                 action: { reload() }
             )
             .frame(minHeight: Self.chartHeight)
+            .padding(.horizontal, MonacoTheme.Space.m)
             .accessibilityIdentifier("asset-detail-chart-failed")
         }
     }
+
 
     private func curve(_ series: AssetChartSeries) -> some View {
         MonacoScrubChart(
@@ -218,7 +227,7 @@ struct AssetChartRangeChip: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Text(range.label)
-                    .font(MonacoTheme.Typo.callout.weight(.semibold))
+                    .font(MonacoTheme.Typo.dataCaption)
                     .lineLimit(1)
                 if isLoading {
                     ProgressView()
@@ -226,12 +235,16 @@ struct AssetChartRangeChip: View {
                         .tint(isSelected ? MonacoTheme.primaryButtonLabel : MonacoTheme.muted)
                 }
             }
-            .foregroundStyle(isSelected ? MonacoTheme.primaryButtonLabel : MonacoTheme.ink)
+            .foregroundStyle(isSelected ? MonacoTheme.primaryButtonLabel : MonacoTheme.muted)
             .padding(.horizontal, 14)
-            .frame(minHeight: 44)
+            .frame(minWidth: 48, minHeight: 34)
             .background(Capsule().fill(isSelected ? MonacoTheme.primaryButtonFill : MonacoTheme.surfaceSunken))
+            // Drawn 34pt and padded out to the 44pt target, so the row reads as a control
+            // strip in the market's voice rather than as six buttons.
+            .padding(.vertical, 5)
             .contentShape(Capsule())
         }
+
         .buttonStyle(.plain)
         .accessibilityLabel(range.accessibilityLabel)
         .accessibilityValue(isLoading ? "Loading" : "")

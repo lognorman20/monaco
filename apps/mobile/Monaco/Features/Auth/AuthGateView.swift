@@ -11,9 +11,16 @@ struct AuthGateView: View {
                     if isAuthenticated {
                         SessionGateView(auth: auth)
                     } else if auth.phase == .restoring {
-                        restoringView
+                        // A returning member never sees the login form flash before the app opens.
+                        SessionRestoringView()
                     } else if case .restoreFailed(let message) = auth.phase {
-                        restoreFailedView(message: message)
+                        SessionFailureView(
+                            title: SessionGateCopy.restoreFailedTitle,
+                            message: message,
+                            onRetry: { await auth.restoreSessionIfNeeded() },
+                            onSignOut: { await auth.logout() }
+                        )
+                        .accessibilityIdentifier("sessionRestoreFailedView")
                     } else {
                         LoginView(auth: auth)
                     }
@@ -38,36 +45,6 @@ struct AuthGateView: View {
         }
     }
 
-    /// Shown while a saved sign-in is being restored, so a returning user never
-    /// sees the login form flash before the app opens.
-    private var restoringView: some View {
-        VStack(spacing: MonacoTheme.Space.l) {
-            MonacoMark(size: 88)
-            ProgressView()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Signing you in")
-        .accessibilityIdentifier("sessionRestoringView")
-    }
-
-    private func restoreFailedView(message: String) -> some View {
-        VStack(spacing: MonacoTheme.Space.m) {
-            EmptyState(title: "Can't sign you in yet", message: message)
-            Button("Try again") {
-                Task { await auth.restoreSessionIfNeeded() }
-            }
-            .buttonStyle(.monacoPrimary)
-            Button("Sign out") {
-                Task { await auth.logout() }
-            }
-            .buttonStyle(.monacoSecondary)
-        }
-        .padding(.horizontal, MonacoTheme.Space.gutter)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityIdentifier("sessionRestoreFailedView")
-    }
-
     private var isAuthenticated: Bool {
         if case .authenticated = auth.phase {
             return auth.accessToken != nil
@@ -79,26 +56,66 @@ struct AuthGateView: View {
         Config.privy.smsLoginEnabled || Config.privy.emailLoginEnabled
     }
 
-    private var missingConfigView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Privy not configured", systemImage: "key.fill")
-                .font(.headline)
-                .foregroundStyle(MonacoTheme.primaryText)
+    // Developer-facing only: a build without Privy credentials, or with every method off.
 
-            Text("Set PRIVY_APP_ID and PRIVY_APP_CLIENT_ID in your Xcode scheme or shell env. Copy values from `.env.example`.")
-                .authSecondaryCaption()
-        }
+    private var missingConfigView: some View {
+        EmptyState(
+            title: "Privy isn't configured",
+            message: "Set PRIVY_APP_ID and PRIVY_APP_CLIENT_ID in your Xcode scheme or shell env. Copy values from .env.example."
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var missingLoginMethodsView: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("No login methods enabled", systemImage: "person.crop.circle.badge.exclamationmark")
-                .font(.headline)
-                .foregroundStyle(MonacoTheme.primaryText)
+        EmptyState(
+            title: "No sign-in methods are on",
+            message: "Enable PRIVY_SMS_LOGIN_ENABLED and/or PRIVY_EMAIL_LOGIN_ENABLED, or turn SMS/email on in Privy dashboard Login Methods."
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
 
-            Text("Enable PRIVY_SMS_LOGIN_ENABLED and/or PRIVY_EMAIL_LOGIN_ENABLED, or turn SMS/email on in Privy dashboard Login Methods.")
-                .authSecondaryCaption()
+/// The launch screen, held while a saved sign-in is restored: the same mark at the same size in
+/// the same place (`LaunchScreen.storyboard` centres a 96pt mark in the whole screen), so a
+/// returning member sees the app open rather than a second splash that jumps.
+///
+/// A spinner joins the mark only if the restore runs long. A quick one never shows it, so the
+/// handoff from the launch screen stays invisible.
+struct SessionRestoringView: View {
+    /// `LaunchScreen.storyboard`'s mark.
+    private static let markSize: CGFloat = 96
+
+    @State private var showsProgress = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            MonacoTheme.canvas
+            MonacoMark(size: Self.markSize)
+                // Below the mark without moving it off the launch screen's centre.
+                .overlay(alignment: .top) {
+                    if showsProgress {
+                        ProgressView()
+                            .tint(MonacoTheme.muted)
+                            .offset(y: Self.markSize + MonacoTheme.Space.l)
+                            .transition(.opacity)
+                    }
+                }
         }
+        .ignoresSafeArea()
+        .task {
+            do {
+                try await Task.sleep(for: .milliseconds(800))
+            } catch {
+                return
+            }
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+                showsProgress = true
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Signing you in")
+        .accessibilityIdentifier("sessionRestoringView")
     }
 }
 

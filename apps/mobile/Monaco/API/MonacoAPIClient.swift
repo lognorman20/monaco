@@ -443,6 +443,12 @@ final class MonacoAPIClient {
         try await withCoreClient(accessToken) { try await $0.myGroupsPnLHistory(range: range) }
     }
 
+    /// One cabal's P&L series, for the curve on its hero.
+    func groupPnLHistory(accessToken: String, groupId: String, range: GroupPnLRange = .oneMonth) async throws -> GroupPnLSeriesDTO {
+        try await withCoreClient(accessToken) { try await $0.groupPnLHistory(groupId: groupId, range: range) }
+    }
+
+
     private func withCoreClient<T>(
         _ accessToken: String,
         _ call: (MonacoCore.MonacoAPIClient) async throws -> T

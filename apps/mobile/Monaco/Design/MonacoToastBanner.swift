@@ -26,7 +26,7 @@ struct MonacoToastBanner: View {
                 .foregroundStyle(isSuccess ? MonacoTheme.toastSuccessGlyph : MonacoTheme.toastErrorGlyph)
                 .accessibilityHidden(true)
             Text(message)
-                .font(.subheadline.weight(.semibold))
+                .font(MonacoTheme.Typo.calloutStrong)
                 .foregroundStyle(MonacoTheme.toastLabel)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)

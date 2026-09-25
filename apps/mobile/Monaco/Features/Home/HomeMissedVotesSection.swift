@@ -44,8 +44,9 @@ enum HomeMissedVotes {
     }
 }
 
-/// "Needs your vote": plain rows, not compact proposal cards. `HomeMissedProposalRowDTO`
-/// carries no amount or tally, so this only ever routes to the real detail screen.
+/// "Needs your vote": a counted header and ruled rows, each ending in an ink "Vote".
+/// `HomeMissedProposalRowDTO` carries no amount or tally, so this only ever routes to the real
+/// detail screen, where the ballot is cast.
 /// The section is not rendered at all when nothing is open — no "caught up" card.
 /// Rows open the proposal through `HomeView`'s `navigationDestination`, not through a
 /// `NavigationLink` of their own. Two reasons: a destination closure inside this section's
@@ -72,21 +73,15 @@ struct HomeMissedVotesSection: View {
 
     private func section(now: Date) -> some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            MonacoSectionHeader("Needs your vote")
+            MonacoSectionHeader("Needs your vote", count: rows.count)
+                .padding(.horizontal, MonacoTheme.Space.m)
 
             MonacoGroupedList {
                 ForEach(rows, id: \.proposalId) { (row: HomeMissedProposalRowDTO) in
                     Button {
                         onOpen(row.proposalId)
                     } label: {
-                        MonacoRow(
-                            title: AssetSymbolFormatter.display(row.symbol),
-                            subtitle: subtitle(for: row, now: now),
-                            chevron: true,
-                            isLast: row.proposalId == rows.last?.proposalId
-                        ) {
-                            StockMark(symbol: row.symbol)
-                        }
+                        HomeMissedVoteRow(row: row, now: now, isLast: row.proposalId == rows.last?.proposalId)
                     }
                     .buttonStyle(.monacoRow)
                     .accessibilityIdentifier("home-missed-\(row.proposalId)")
@@ -94,11 +89,101 @@ struct HomeMissedVotesSection: View {
             }
         }
     }
+}
 
-    private func subtitle(for row: HomeMissedProposalRowDTO, now: Date) -> String {
-        guard let closes = HomeVoteCountdown.label(expiresAt: row.expiresAt, now: now) else {
-            return row.groupName
+/// One open vote: the stock's coin and ticker, the cabal and the countdown, and the word
+/// "Vote" in ink on the right — the row is the errand and says so.
+private struct HomeMissedVoteRow: View {
+    let row: HomeMissedProposalRowDTO
+    let now: Date
+    let isLast: Bool
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var closes: String? {
+        HomeVoteCountdown.label(expiresAt: row.expiresAt, now: now)
+    }
+
+    /// At the accessibility sizes the cabal and the countdown get two lines and the word
+    /// "Vote" drops under them, the way every `MonacoRow` stacks.
+    private var isStacked: Bool { dynamicTypeSize.isAccessibilitySize }
+
+    var body: some View {
+        Group {
+            if isStacked {
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                    HStack(spacing: MonacoTheme.Space.sm) {
+                        mark
+                        labels(lineLimit: 2)
+                    }
+                    voteBadge
+                }
+            } else {
+                HStack(spacing: MonacoTheme.Space.sm) {
+                    mark
+                    labels(lineLimit: 1)
+                    voteBadge
+                }
+            }
         }
-        return "\(row.groupName) · \(closes)"
+        .padding(.horizontal, MonacoTheme.Space.m)
+
+        .padding(.vertical, 8)
+        .frame(minHeight: 60)
+        .contentShape(Rectangle())
+        .overlay(alignment: .bottom) {
+            if !isLast {
+                MonacoRule().padding(.leading, MonacoTheme.Space.m + 44 + MonacoTheme.Space.sm)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(spoken)
+    }
+
+    private var mark: some View {
+        StockMark(symbol: row.symbol)
+            .frame(width: 44, height: 44)
+    }
+
+    private func labels(lineLimit: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(AssetSymbolFormatter.display(row.symbol))
+                .font(MonacoTheme.Typo.ticker)
+                .foregroundStyle(MonacoTheme.ink)
+                .lineLimit(1)
+            subtitle
+                .lineLimit(lineLimit)
+                .truncationMode(.middle)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var voteBadge: some View {
+        Text("Vote")
+            .font(MonacoTheme.Typo.captionStrong)
+            .foregroundStyle(MonacoTheme.onBrand)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 30)
+            .background(Capsule().fill(MonacoTheme.brandFill))
+            .accessibilityHidden(true)
+    }
+
+    /// The cabal in the brand voice, the countdown in the market's, so the deadline reads as
+    /// the clock it is.
+
+    private var subtitle: Text {
+        let cabal = Text(row.groupName)
+            .font(MonacoTheme.Typo.caption)
+            .foregroundStyle(MonacoTheme.muted)
+        guard let closes else { return cabal }
+        return cabal
+            + Text("  ·  ").font(MonacoTheme.Typo.caption).foregroundStyle(MonacoTheme.tertiaryText)
+            + Text(closes).font(MonacoTheme.Typo.stamp).foregroundStyle(MonacoTheme.tertiaryText)
+    }
+
+    private var spoken: String {
+        var sentence = "\(AssetSymbolFormatter.display(row.symbol)), \(row.groupName)"
+        if let closes { sentence += ", \(closes)" }
+        return sentence + ". Vote."
     }
 }

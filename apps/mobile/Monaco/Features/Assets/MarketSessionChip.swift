@@ -55,7 +55,7 @@ struct MarketSessionChip: View {
         HStack(spacing: 6) {
             MarketSessionDot(isLive: session.isLive)
             Text(title)
-                .font(MonacoTheme.Typo.caption.weight(.semibold))
+                .font(MonacoTheme.Typo.captionStrong)
                 .foregroundStyle(MonacoTheme.ink)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)

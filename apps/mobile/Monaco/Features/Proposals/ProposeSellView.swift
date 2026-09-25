@@ -3,6 +3,10 @@ import SwiftUI
 
 /// Sell, step 1 of 3: which holding. Members think in dollars, so step 2 asks for an amount in
 /// dollars and converts to token atomics at the holding's mark.
+///
+/// The holdings read as they do on the cabal screen — largest first, the ticker in the market's
+/// voice, the shares and the mark under it, what the position is worth and what it has made on
+/// the right — so the thing being sold looks the same here as where the member last saw it.
 struct ProposeSellView: View {
     let groupId: String
     var initialSymbol: String?
@@ -34,37 +38,36 @@ struct ProposeSellView: View {
         _pot = State(initialValue: pot)
     }
 
+    /// Largest position first, as the cabal screen lists them.
+    private var sortedHoldings: [PotRowDTO] {
+        holdings.sorted {
+            (GroupHeroMath.decimal(from: $0.valueUsd) ?? 0) > (GroupHeroMath.decimal(from: $1.valueUsd) ?? 0)
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
                 MonacoSectionHeader(ProposeFlowCopy.holdingsTitle)
-                MonacoGroupedList {
-                    ForEach(Array(holdings.enumerated()), id: \.element.id) { index, row in
-                        Button {
-                            Haptics.tap()
-                            picked = PickedHolding(row: row)
-                        } label: {
-                            MonacoRow(
-                                title: AssetSymbolFormatter.display(row.symbol, kind: row.resolvedAssetKind),
-                                subtitle: ProposalShareFormatter.sharesLabel(
-                                    fromAtomics: row.tokenAmount ?? "0",
-                                    decimals: row.resolvedTokenDecimals,
-                                    kind: row.resolvedAssetKind
-                                ),
-                                chevron: true,
-                                isLast: index == holdings.count - 1
-                            ) {
-                                StockMark(symbol: row.symbol, displayName: row.symbol, assetKind: row.resolvedAssetKind)
-                            } trailing: {
-                                MoneyText(decimalString: row.valueUsd, style: .row)
+                    .padding(.horizontal, MonacoTheme.Space.m)
+                if holdings.isEmpty {
+                    EmptyState(title: ProposeFlowCopy.sellRowEmpty)
+                } else {
+                    let rows = sortedHoldings
+                    MonacoGroupedList {
+                        ForEach(rows) { row in
+                            Button {
+                                Haptics.tap()
+                                picked = PickedHolding(row: row)
+                            } label: {
+                                ProposeHoldingRow(row: row, chevron: true, isLast: row.id == rows.last?.id)
                             }
+                            .buttonStyle(.monacoRow)
+                            .accessibilityIdentifier("proposal-sell-\(row.symbol)")
                         }
-                        .buttonStyle(.monacoRow)
-                        .accessibilityIdentifier("proposal-sell-\(row.symbol)")
                     }
                 }
             }
-            .padding(.horizontal, MonacoTheme.Space.gutter)
             .padding(.top, MonacoTheme.Space.s)
             .padding(.bottom, MonacoTheme.Space.xl)
         }
@@ -111,6 +114,35 @@ struct PickedHolding: Hashable, Identifiable {
     func hash(into hasher: inout Hasher) { hasher.combine(row.symbol) }
 }
 
+/// One holding the cabal could sell: the coin, the ticker over "1.2034 shares · $231.40", and the
+/// position's value over what it has made. The cabal screen's holdings row without the day's
+/// shape — here the question is how much to sell, not how the stock moved today.
+struct ProposeHoldingRow: View {
+    let row: PotRowDTO
+    var chevron = false
+    var isLast = false
+
+    var body: some View {
+        MonacoRow(
+            title: AssetSymbolFormatter.display(row.symbol, kind: row.resolvedAssetKind),
+            titleFont: MonacoTheme.Typo.ticker,
+            subtitle: PotSectionView.potSubtitle(row),
+            chevron: chevron,
+            isLast: isLast
+        ) {
+            StockMark(
+                symbol: row.symbol,
+                displayName: AssetCatalogDisplayName.format(catalogName: "", symbol: row.symbol, kind: row.resolvedAssetKind),
+                assetKind: row.resolvedAssetKind,
+                logoURL: row.logoURL
+            )
+        } trailing: {
+            MoneyText(decimalString: row.valueUsd, style: .row)
+            PnLText(dollarPnl: row.dollarPnl, style: .caption)
+        }
+    }
+}
+
 /// Sell, step 2 of 3: dollars (or shares when the holding has no price), and an optional reason.
 struct ProposeSellAmountView: View {
     let groupId: String
@@ -120,19 +152,31 @@ struct ProposeSellAmountView: View {
     private let service: ProposeService
 
     @State private var pot: ProposePot?
-    @State private var amountText = ""
-    @State private var reason = ""
+    @State private var amountText: String
+    @State private var reason: String
     @State private var isQuoting = false
     @State private var errorMessage: String?
     @State private var review: ProposeSellReview?
     @FocusState private var reasonFocused: Bool
 
-    init(service: ProposeService, groupId: String, holding: PotRowDTO, pot: ProposePot?, onProposed: @escaping (_ proposalId: String) -> Void) {
+    /// `initialAmount` and `initialReason` start the step part-filled; empty by default, which is
+    /// how the flow opens it.
+    init(
+        service: ProposeService,
+        groupId: String,
+        holding: PotRowDTO,
+        pot: ProposePot?,
+        initialAmount: String = "",
+        initialReason: String = "",
+        onProposed: @escaping (_ proposalId: String) -> Void
+    ) {
         self.service = service
         self.groupId = groupId
         self.holding = holding
         self.onProposed = onProposed
         _pot = State(initialValue: pot)
+        _amountText = State(initialValue: AmountEntryText.sanitize(initialAmount))
+        _reason = State(initialValue: initialReason)
     }
 
     private var name: String {
@@ -167,8 +211,7 @@ struct ProposeSellAmountView: View {
                 multiplier: holding.resolvedUiMultiplier
             )
         }
-        guard let atomics = ProposeMath.atomics(fromShares: amountText, decimals: holding.resolvedTokenDecimals, multiplier: holding.resolvedUiMultiplier),
-              atomics <= ceilingAtomics else { return nil }
+        guard let atomics = ProposeMath.atomics(fromShares: amountText, decimals: holding.resolvedTokenDecimals, multiplier: holding.resolvedUiMultiplier), atomics <= ceilingAtomics else { return nil }
         return atomics
     }
 
@@ -216,53 +259,42 @@ struct ProposeSellAmountView: View {
 
     private var form: some View {
         ScrollView {
-            VStack(spacing: MonacoTheme.Space.xl) {
-                HStack(spacing: MonacoTheme.Space.sm) {
-                    StockMark(symbol: holding.symbol, size: 56)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(name)
-                            .font(MonacoTheme.Typo.title)
-                            .foregroundStyle(MonacoTheme.ink)
-                            .lineLimit(1)
-                        Text(
-                            ProposalShareFormatter.sharesLabel(
-                                fromAtomics: holding.tokenAmount ?? "0",
-                                decimals: holding.resolvedTokenDecimals,
-                                kind: holding.resolvedAssetKind
-                            )
-                        )
-                            .font(MonacoTheme.Typo.caption.monospacedDigit())
-                            .foregroundStyle(MonacoTheme.muted)
-                    }
-                    Spacer(minLength: 0)
+            VStack(spacing: 0) {
+                MonacoGroupedList {
+                    ProposeHoldingRow(row: holding, isLast: true)
                 }
-                .accessibilityElement(children: .combine)
 
-                if entersDollars, let valueUsd {
-                    AmountEntry(
-                        amountText: $amountText,
-                        max: valueUsd,
-                        presets: [.fraction(0.25, label: "25%"), .fraction(0.5, label: "50%"), .fraction(1, label: "All")],
-                        helper: ProposeFlowCopy.sellHelper(UsdAmountFormatter.format(decimal: valueUsd)),
-                        overLimitHelper: ProposeFlowCopy.overHoldings
-                    )
-                } else {
-                    VStack(spacing: MonacoTheme.Space.s) {
-                        MonacoTextField(quantityRowLabel, text: $amountText, keyboard: .decimalPad)
-                            .accessibilityIdentifier("proposal-sell-amount")
-                        Text(
-                            isOverHoldings
-                                ? ProposeFlowCopy.overHoldings
-                                : ProposalShareFormatter.sharesLabel(
-                                    fromAtomics: holding.tokenAmount ?? "0",
-                                    decimals: holding.resolvedTokenDecimals,
-                                    kind: holding.resolvedAssetKind
-                                )
-                        )
-                            .font(MonacoTheme.Typo.callout)
-                            .foregroundStyle(isOverHoldings ? MonacoTheme.loss : MonacoTheme.muted)
+                Group {
+                    if entersDollars, let valueUsd {
+                        VStack(spacing: MonacoTheme.Space.m) {
+                            AmountEntry(
+                                amountText: $amountText,
+                                max: valueUsd,
+                                helper: ProposeFlowCopy.sellHelper(UsdAmountFormatter.format(decimal: valueUsd)),
+                                overLimitHelper: ProposeFlowCopy.overHoldings
+                            )
+                            ProposePresetChips(
+                                amountText: $amountText,
+                                presets: [.fraction(0.25, label: "25%"), .fraction(0.5, label: "50%"), .fraction(1, label: "All")],
+                                max: valueUsd
+                            )
+                        }
+                    } else {
+                        VStack(spacing: MonacoTheme.Space.s) {
+                            MonacoTextField(quantityRowLabel, text: $amountText, keyboard: .decimalPad)
+                                .accessibilityIdentifier("proposal-sell-amount")
+                            Text(isOverHoldings ? ProposeFlowCopy.overHoldings : ProposalShareFormatter.sharesLabel(
+                            fromAtomics: holding.tokenAmount ?? "0",
+                            decimals: holding.resolvedTokenDecimals,
+                            kind: holding.resolvedAssetKind
+                        ))
+                                .font(MonacoTheme.Typo.callout)
+                                .foregroundStyle(isOverHoldings ? MonacoTheme.loss : MonacoTheme.muted)
+                        }
                     }
                 }
+                .padding(.top, MonacoTheme.Space.xl)
+                .padding(.horizontal, MonacoTheme.Space.m)
 
                 ProposeReasonField(
                     placeholder: ProposeFlowCopy.reasonPlaceholderSell,
@@ -271,17 +303,21 @@ struct ProposeSellAmountView: View {
                     lineLimit: 2...6,
                     identifier: "proposal-sell-thesis-field"
                 )
+                .padding(.top, MonacoTheme.Space.xl)
+                .padding(.horizontal, MonacoTheme.Space.m)
 
                 if let errorMessage {
                     Text(errorMessage)
                         .font(MonacoTheme.Typo.callout)
                         .foregroundStyle(MonacoTheme.loss)
                         .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity)
+                        .padding(.top, MonacoTheme.Space.l)
+                        .padding(.horizontal, MonacoTheme.Space.m)
                 }
             }
-            .padding(.horizontal, MonacoTheme.Space.gutter)
-            .padding(.top, MonacoTheme.Space.m)
+            .padding(.top, MonacoTheme.Space.s)
             .padding(.bottom, MonacoTheme.Space.l)
         }
         .scrollDismissesKeyboard(.interactively)
@@ -302,8 +338,7 @@ struct ProposeSellAmountView: View {
             }
             let estimate = quote.outputUsdcMicros.flatMap { Int64($0) }
                 ?? markUsd.flatMap { mark in
-                    ProposeMath.shares(fromAtomics: String(tokenAmount), decimals: holding.resolvedTokenDecimals)
-                        .flatMap { ProposeMath.micros(fromUsd: $0 * mark) }
+                    ProposeMath.shares(fromAtomics: String(tokenAmount), decimals: holding.resolvedTokenDecimals).flatMap { ProposeMath.micros(fromUsd: $0 * mark) }
                 }
             review = ProposeSellReview(
                 symbol: holding.symbol,
@@ -313,6 +348,8 @@ struct ProposeSellAmountView: View {
                 cabalId: pot?.groupId ?? groupId,
                 cabalName: pot?.name,
                 thesis: reason.trimmingCharacters(in: .whitespacesAndNewlines),
+                heldTokenAmount: ceilingAtomics,
+                logoURL: holding.logoURL,
                 assetKind: holding.resolvedAssetKind,
                 tokenDecimals: holding.resolvedTokenDecimals
             )
@@ -335,21 +372,23 @@ struct ProposeSellReview: Hashable, Identifiable {
     let cabalId: String
     let cabalName: String?
     let thesis: String
-    let assetKind: AssetKind
-    let tokenDecimals: Int
+    /// What the cabal held when the sale was priced, so the receipt can say what it keeps.
+    var heldTokenAmount: Int64?
+    /// The company's logo from the holding, for the receipt's coin.
+    var logoURL: URL?
+    /// A pre-IPO token counts in tokens with its own decimals, not in shares.
+    var assetKind: AssetKind = .stock
+    var tokenDecimals: Int = AssetCatalogDefaults.decimals
 
     var id: String { "\(symbol)-\(tokenAmount)" }
 
     var sharesLabel: String {
-        ProposalShareFormatter.sharesLabel(
-            fromAtomics: String(tokenAmount),
-            decimals: tokenDecimals,
-            kind: assetKind
-        )
+        ProposalShareFormatter.sharesLabel(fromAtomics: String(tokenAmount), decimals: tokenDecimals, kind: assetKind)
     }
 }
 
-/// Sell, step 3 of 3.
+/// Sell, step 3 of 3: the same receipt as a buy. The headline is the number of shares, because
+/// that is what the cabal votes to sell; what they raise is the price check's estimate, under it.
 struct ProposeSellReviewView: View {
     let groupId: String
     let review: ProposeSellReview
@@ -369,21 +408,35 @@ struct ProposeSellReviewView: View {
         self.onProposed = onProposed
     }
 
+    private var ticker: String { AssetSymbolFormatter.display(review.symbol) }
+
+    /// The rows this sale can fill, in order; the last one drops its rule.
+    private enum Line: Hashable {
+        case raises(Int64)
+        case keeps(String)
+        case votes(String)
+    }
+
+    private var lines: [Line] {
+        var lines: [Line] = []
+        if let estimate = review.estimateMicros { lines.append(.raises(estimate)) }
+        if let held = review.heldTokenAmount {
+            lines.append(.keeps(ProposeScreenCopy.keeps(heldAtomics: held, soldAtomics: review.tokenAmount)))
+        }
+        if let cabalName = review.cabalName { lines.append(.votes(cabalName)) }
+        return lines
+    }
+
     var body: some View {
         ScrollView {
-            VStack(spacing: MonacoTheme.Space.xl) {
+            VStack(alignment: .leading, spacing: 0) {
                 ProposeReceiptHeader(
-                    caption: ProposeFlowCopy.youreSelling,
-                    amount: Group {
-                        if let estimate = review.estimateMicros {
-                            MoneyText(micros: estimate, style: .hero)
-                        } else {
-                            Text(review.sharesLabel).font(MonacoTheme.Typo.moneyHero)
-                        }
-                    },
-                    stockName: review.name,
-                    detail: review.estimateMicros == nil ? nil : ProposeFlowCopy.aboutShares(review.sharesLabel)
+                    symbol: review.symbol,
+                    name: review.name,
+                    logoURL: review.logoURL,
+                    headline: ProposeScreenCopy.sellHeadline(shares: review.sharesLabel, ticker: ticker)
                 )
+                .accessibilityElement(children: .combine)
                 .accessibilityLabel(
                     ProposeFlowCopy.sellSummary(
                         amount: review.estimateMicros.map(UsdAmountFormatter.format(micros:)) ?? review.sharesLabel,
@@ -391,34 +444,31 @@ struct ProposeSellReviewView: View {
                         shares: review.sharesLabel
                     )
                 )
+                .padding(.horizontal, MonacoTheme.Space.m)
+                .padding(.bottom, MonacoTheme.Space.l)
 
-                MonacoGroupedList {
-                    ReceiptRow(label: ProposeFlowCopy.sharesRow) {
-                        Text(review.sharesLabel).font(MonacoTheme.Typo.body.monospacedDigit())
-                    }
-                    if let cabalName = review.cabalName {
-                        ReceiptRow(label: ProposeFlowCopy.cabalRow, isLast: review.thesis.isEmpty) {
-                            HStack(spacing: MonacoTheme.Space.s) {
-                                CabalMark(groupId: review.cabalId, name: cabalName, size: 28)
-                                Text(cabalName).font(MonacoTheme.Typo.body).lineLimit(1)
-                            }
+                if !lines.isEmpty {
+                    MonacoGroupedList {
+                        ForEach(lines, id: \.self) { line in
+                            row(line, isLast: line == lines.last)
                         }
                     }
-                    if !review.thesis.isEmpty {
-                        ReceiptReasonRow(text: review.thesis)
-                    }
+                }
+
+                if !review.thesis.isEmpty {
+                    ReceiptReasonRow(title: ProposeScreenCopy.reasonTitle(isSell: true), text: review.thesis)
+                        .padding(.horizontal, MonacoTheme.Space.m)
+                        .padding(.top, MonacoTheme.Space.l)
                 }
 
                 if let errorMessage {
-                    Text(errorMessage)
-                        .font(MonacoTheme.Typo.callout)
-                        .foregroundStyle(MonacoTheme.loss)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
+                    ReceiptError(message: errorMessage)
+                        .padding(.horizontal, MonacoTheme.Space.m)
+                        .padding(.top, MonacoTheme.Space.l)
                 }
             }
-            .padding(.horizontal, MonacoTheme.Space.gutter)
-            .padding(.vertical, MonacoTheme.Space.l)
+            .padding(.top, MonacoTheme.Space.m)
+            .padding(.bottom, MonacoTheme.Space.l)
         }
         .background(MonacoTheme.canvas.ignoresSafeArea())
         .navigationTitle(ProposeFlowCopy.review)
@@ -436,6 +486,24 @@ struct ProposeSellReviewView: View {
                 .buttonStyle(.monacoPrimary)
                 .disabled(isSending)
                 .accessibilityIdentifier("proposal-sell-submit")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ line: Line, isLast: Bool) -> some View {
+        switch line {
+        case .raises(let micros):
+            ReceiptRow(label: ProposeScreenCopy.raisesRow, isLast: isLast) {
+                ReceiptFigure(ProposeScreenCopy.about(UsdAmountFormatter.format(micros: micros)))
+            }
+        case .keeps(let left):
+            ReceiptRow(label: ProposeScreenCopy.keepsRow, isLast: isLast) {
+                ReceiptFigure(left)
+            }
+        case .votes(let cabalName):
+            ReceiptRow(label: ProposeScreenCopy.whoVotesRow, isLast: isLast) {
+                ReceiptCabal(groupId: review.cabalId, name: cabalName)
             }
         }
     }

@@ -11,6 +11,10 @@ enum AmountPreset: Equatable {
 /// Big centred dollar figure over the system decimal pad, preset chips and one helper line.
 /// `amountText` holds a plain decimal string ("50", "12.5"); the view keeps it to digits,
 /// one ".", and two decimals.
+///
+/// The figure is the member's own money, so it sets in Avenir Next (`moneyFont(.hero)`); the
+/// presets are a strip of choices, so they set in the market's voice at the size of Home's
+/// range chips. A screen that says what the money will do puts an `AmountEntryNote` under it.
 struct AmountEntry: View {
     @Binding private var amountText: String
     private let max: Decimal?
@@ -23,15 +27,16 @@ struct AmountEntry: View {
     @FocusState private var focused: Bool
     @State private var hasRaisedKeyboard = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// - Parameter problem: why the amount can't be used, in the member's words. It replaces
     ///   `helper` while it is set, so a screen with a rule of its own — a minimum, a remainder
     ///   too small to leave behind — can say so instead of leaving a dead button unexplained.
-    /// - Parameter showsKeyboardDoneButton: adds a Done bar above the decimal pad, which has no
-    ///   return key of its own. It is opt-in and off by default because it is a keyboard accessory
-    ///   view: it makes the keyboard ~44pt taller on every screen that asks for it, which moves
-    ///   anything the screen pins to the bottom. A screen turns it on once it has checked that its
-    ///   own layout — and its UI tests — survive the taller keyboard.
+    /// - Parameter showsKeyboardDoneButton: puts a Done button in the navigation bar while the
+    ///   decimal pad is up, because the pad has no return key of its own. It lives in the bar, not
+    ///   on the keyboard: as a keyboard accessory it floated over the screen's `BottomCTA` on
+    ///   iOS 26 and covered the end of its label. Opt-in, because it needs a navigation bar and a
+    ///   screen that has nothing else in the bar's trailing slot.
     init(
         amountText: Binding<String>,
         max: Decimal? = nil,
@@ -87,13 +92,12 @@ struct AmountEntry: View {
             focused = true
         }
         .toolbar {
-            // The decimal pad has no return key, so the member needs a way out of it. Only for
-            // the screens that asked: this bar is part of the keyboard, so it changes the height
-            // of everything below it.
+            // The decimal pad has no return key, so the member needs a way out of it. Only while
+            // the pad is up, and only for the screens that asked.
             if showsKeyboardDoneButton, focused {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { focused = false }
+                        .font(MonacoTheme.Typo.bodyStrong)
                         .accessibilityIdentifier("amount-entry-done-button")
                 }
             }
@@ -111,6 +115,13 @@ struct AmountEntry: View {
         problem != nil || isOverLimit
     }
 
+    /// The empty "$0" is a placeholder, not an amount, so it takes the placeholder token: at
+    /// `tertiaryText` it read as money the member had already typed (see `disabledLabel`).
+    private var figureColor: Color {
+        if amountText.isEmpty { return MonacoTheme.disabledLabel }
+        return hasProblem ? MonacoTheme.loss : MonacoTheme.ink
+    }
+
     private var helperLine: String? {
         if let problem { return problem }
         return isOverLimit ? overLimitHelper : helper
@@ -119,9 +130,11 @@ struct AmountEntry: View {
     private var figure: some View {
         ZStack {
             HStack(alignment: .center, spacing: 2) {
+                // `moneyFont` scales inside the view tree, so the cap below reaches the figure;
+                // the pre-scaled `Typo.moneyHero` it used to set ignored it.
                 Text(AmountEntryText.display(amountText))
-                    .font(MonacoTheme.Typo.moneyHero)
-                    .foregroundStyle(amountText.isEmpty ? MonacoTheme.tertiaryText : (hasProblem ? MonacoTheme.loss : MonacoTheme.ink))
+                    .moneyFont(.hero)
+                    .foregroundStyle(figureColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.4)
                     .contentTransition(reduceMotion ? .identity : .numericText())
@@ -151,32 +164,53 @@ struct AmountEntry: View {
         .onTapGesture { focused = true }
     }
 
+    /// One strip of chips. At the accessibility text sizes four mono chips are wider than the
+    /// screen, so they fall into two rows rather than squeezing their labels. Decided by the
+    /// text size, not by measuring: each chip is in the tree once, so a UI test asking for the
+    /// "$50" button finds exactly one.
     private var presetRow: some View {
-        HStack(spacing: MonacoTheme.Space.s) {
-            ForEach(Array(presets.enumerated()), id: \.offset) { _, preset in
-                let target = amount(for: preset)
-                let selected = target != nil && value == target
-                Button {
-                    guard let target else { return }
-                    Haptics.selection()
-                    amountText = AmountEntryText.plain(target)
-                } label: {
-                    Text(label(for: preset))
-                        .font(MonacoTheme.Typo.callout.weight(.semibold).monospacedDigit())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .foregroundStyle(selected ? MonacoTheme.primaryButtonLabel : MonacoTheme.ink)
-                        .padding(.horizontal, 16)
-                        .frame(minWidth: 64, minHeight: 44)
-                        .background(Capsule().fill(selected ? MonacoTheme.primaryButtonFill : MonacoTheme.surfaceSunken))
-                        .contentShape(Capsule())
+        VStack(spacing: 0) {
+            ForEach(Array(AmountEntryText.presetRows(presets.count, stacked: dynamicTypeSize.isAccessibilitySize).enumerated()), id: \.offset) { _, row in
+                HStack(spacing: MonacoTheme.Space.s) {
+                    ForEach(row, id: \.self) { index in
+                        presetChip(presets[index])
+                    }
                 }
-                .buttonStyle(.plain)
-                .disabled(target == nil)
-                .opacity(target == nil ? 0.4 : 1)
-                .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
+    }
+
+    /// Drawn 34pt tall like Home's range chips and padded out to a 44pt target. The label is
+    /// what UI tests and VoiceOver find the chip by ("$50", "Max"), so it stays the bare amount.
+    private func presetChip(_ preset: AmountPreset) -> some View {
+        let target = amount(for: preset)
+        let selected = target != nil && value == target
+        return Button {
+            guard let target else { return }
+            Haptics.selection()
+            amountText = AmountEntryText.plain(target)
+        } label: {
+            Text(label(for: preset))
+                .font(MonacoTheme.Typo.dataCaption)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .foregroundStyle(chipLabelColor(selected: selected, enabled: target != nil))
+                .padding(.horizontal, 14)
+                .frame(minWidth: 56, minHeight: 34)
+                .background(Capsule().fill(selected ? MonacoTheme.primaryButtonFill : MonacoTheme.surfaceSunken))
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(target == nil)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// A chip with nothing to fill in (Max before there is a balance) keeps its shape and
+    /// greys its label, the way a disabled button does.
+    private func chipLabelColor(selected: Bool, enabled: Bool) -> Color {
+        if !enabled { return MonacoTheme.disabledLabel }
+        return selected ? MonacoTheme.primaryButtonLabel : MonacoTheme.ink
     }
 
     private func amount(for preset: AmountPreset) -> Decimal? {
@@ -199,17 +233,62 @@ struct AmountEntry: View {
     }
 }
 
-/// Blinking ink caret after the figure while the field has focus.
+/// Blinking ink caret after the figure while the field has focus. It grows with the figure,
+/// and stops where the figure's own text-size cap stops it.
 private struct AmountCaret: View {
     let visible: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .largeTitle) private var height: CGFloat = 40
 
     var body: some View {
         RoundedRectangle(cornerRadius: 1.5)
             .fill(MonacoTheme.ink)
-            .frame(width: 3, height: 40)
+            .frame(width: 3, height: height)
             .opacityLoop(to: 0, halfPeriod: 0.5, active: visible && !reduceMotion)
             .opacity(visible ? 1 : 0)
+    }
+}
+
+/// The sentence under an amount pad that says what the money will do. Fund this cabal and
+/// Cash out both end on one, set the same way, so the two screens read as a pair.
+struct AmountEntryNote: View {
+    private let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .font(MonacoTheme.Typo.caption)
+            .foregroundStyle(MonacoTheme.muted)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, MonacoTheme.Space.sm)
+    }
+}
+
+/// An amount screen before its balance has loaded: the figure, the chips and the helper line
+/// in their own places, so nothing moves when the real ones arrive.
+struct AmountEntrySkeleton: View {
+    var presetCount = 4
+
+    var body: some View {
+        VStack(spacing: MonacoTheme.Space.l) {
+            SkeletonBlock(width: 132, height: 48)
+                .frame(minHeight: 72)
+            HStack(spacing: MonacoTheme.Space.s) {
+                ForEach(0..<presetCount, id: \.self) { _ in
+                    SkeletonBlock(width: 56, height: 34, radius: 17)
+                        .padding(.vertical, 5)
+                }
+            }
+            SkeletonBlock(width: 168, height: 14)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading")
     }
 }
 
@@ -339,6 +418,15 @@ enum AmountEntryText {
         formatter.maximumFractionDigits = 2
         return formatter
     }()
+
+    /// Which preset goes on which row: one row normally, two at the accessibility text sizes
+    /// (the longer half first) once there are more than two chips.
+    static func presetRows(_ count: Int, stacked: Bool) -> [[Int]] {
+        guard count > 0 else { return [] }
+        guard stacked, count > 2 else { return [Array(0..<count)] }
+        let split = (count + 1) / 2
+        return [Array(0..<split), Array(split..<count)]
+    }
 
     static func roundDownToCents(_ decimal: Decimal) -> Decimal {
         var source = decimal

@@ -5,8 +5,9 @@ import SwiftUI
 /// field itself, and underneath it either the rule the draft breaks or a hint.
 ///
 /// `ProfileNameEditor` (Profile → Edit profile) and `OnboardingNameView` (first run)
-/// both build on this, so the validation copy, the counter and the focus ring can't
-/// drift apart between the two places a name is set.
+/// both build on this, so the validation copy, the counter and the field can't drift
+/// apart between the two places a name is set. The field is `MonacoFieldChrome`, the
+/// anatomy every other field in the app has.
 ///
 /// `identifierPrefix` names the three elements for UI tests: `<prefix>-field`,
 /// `<prefix>-count` and `<prefix>-error`.
@@ -51,63 +52,54 @@ struct DisplayNameField<Trailing: View>: View {
             HStack {
                 if let label {
                     Text(label)
-                        .font(MonacoTheme.TypeRole.caption)
+                        .font(MonacoTheme.Typo.caption)
                         .foregroundStyle(MonacoTheme.muted)
                 }
                 Spacer()
                 Text("\(characterCount)/\(DisplayNameRules.maxLength)")
-                    .font(.caption.monospacedDigit())
+                    .font(MonacoTheme.Typo.stamp)
                     .foregroundStyle(
                         characterCount > DisplayNameRules.maxLength
-                            ? MonacoTheme.destructive
+                            ? MonacoTheme.loss
                             : MonacoTheme.muted
                     )
                     .accessibilityIdentifier("\(identifierPrefix)-count")
             }
 
             HStack(spacing: MonacoTheme.Space.s) {
-                TextField(placeholder, text: $draft)
-                    .font(MonacoTheme.TypeRole.body)
-                    .foregroundStyle(MonacoTheme.ink)
-                    .textInputAutocapitalization(.words)
-                    .autocorrectionDisabled()
-                    .submitLabel(.done)
-                    .focused(focus)
-                    .onSubmit(onSubmit)
-                    .padding(.horizontal, MonacoTheme.Space.m)
-                    .padding(.vertical, 12)
-                    .background(
-                        MonacoTheme.surface,
-                        in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous)
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: MonacoTheme.Radius.field, style: .continuous)
-                            .strokeBorder(borderColor, lineWidth: focus.wrappedValue ? 2 : 1)
-                    }
-                    .accessibilityIdentifier("\(identifierPrefix)-field")
+                TextField(
+                    placeholder,
+                    text: $draft,
+                    prompt: Text(placeholder).foregroundStyle(MonacoTheme.disabledLabel)
+                )
+                .font(MonacoTheme.Typo.body)
+                .foregroundStyle(MonacoTheme.ink)
+                .tint(MonacoTheme.ink)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled()
+                .submitLabel(.done)
+                .focused(focus)
+                .onSubmit(onSubmit)
+                .monacoFieldChrome(isFocused: focus.wrappedValue, isInvalid: errorMessage != nil)
+                .accessibilityIdentifier("\(identifierPrefix)-field")
 
                 trailing()
             }
 
             if let errorMessage {
                 Text(errorMessage)
-                    .font(MonacoTheme.TypeRole.caption)
-                    .foregroundStyle(MonacoTheme.destructive)
+                    .font(MonacoTheme.Typo.caption)
+                    .foregroundStyle(MonacoTheme.loss)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("\(identifierPrefix)-error")
             } else {
                 Text(hint)
-                    .monacoSecondaryCaption()
+                    .font(MonacoTheme.Typo.caption)
+                    .foregroundStyle(MonacoTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .animation(.easeInOut(duration: 0.15), value: errorMessage)
-    }
-
-    private var borderColor: Color {
-        if errorMessage != nil {
-            return MonacoTheme.destructive.opacity(0.6)
-        }
-        return focus.wrappedValue ? MonacoTheme.brand : MonacoTheme.hairline
     }
 }
 

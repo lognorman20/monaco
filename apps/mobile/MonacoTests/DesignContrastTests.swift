@@ -155,7 +155,12 @@ struct MonacoContrastTests {
             pairs.append(Pair("brandOnWash", MonacoTheme.brandOnWash, on: [surface, MonacoTheme.brandWash]))
             // `brand` as a label: "See all", "Show more", "Try again", the selected tab item.
             pairs.append(Pair("brand", MonacoTheme.brand, on: [surface]))
+            // `gold` as text: the rank-1 caption on a board. `goldGlyph` is not here on purpose —
+            // the crown is decoration beside a rank the row also prints, so it is exempt.
+            pairs.append(Pair("gold", MonacoTheme.gold, on: [surface]))
+            pairs.append(Pair("gold on wash", MonacoTheme.gold, on: [surface, MonacoTheme.goldWash]))
         }
+
         pairs.append(Pair("onBrand", MonacoTheme.onBrand, on: [MonacoTheme.brandFill]))
         // The same pair through the role aliases, so repointing a role is caught even if the
         // token it aliased stayed put.
@@ -313,6 +318,58 @@ struct MonacoContrastTests {
             // the text on them is what carries the difference and it is the text that is pinned.
             let onWash = OKLCh.distance(MonacoTheme.brandOnWash, MonacoTheme.profitOnWash, scheme)
             #expect(onWash >= 0.13, "brandOnWash vs profitOnWash in \(name): ΔE OKLab is \(onWash)")
+        }
+    }
+
+    /// Five cabals have to be five colours at a glance, and hue alone does not deliver that.
+    ///
+    /// A first pass at the forest tints separated them by hue only, with the two earthiest sitting
+    /// at nearly the same lightness. On the Home list, two cabals in adjacent rows came out as one
+    /// brown. Hue separation is what keeps a tint off the money colours; *lightness* separation is
+    /// what keeps two tints off each other when they happen to land next to one another, and which
+    /// pair lands next to which is a hash of the group id, so every pair has to survive it.
+    ///
+    /// Either route is enough on its own: 60° of hue, or 0.08 of L*.
+    @Test func everyPairOfCabalTintsIsTellableApart() {
+        let tints = MonacoTheme.CabalTint.allCases
+        for scheme in [UIUserInterfaceStyle.light, .dark] {
+            let name = scheme == .light ? "light" : "dark"
+            for (index, first) in tints.enumerated() {
+                for second in tints[(index + 1)...] {
+                    let a = OKLCh.value(first.fill, scheme)
+                    let b = OKLCh.value(second.fill, scheme)
+                    let hueGap = abs(a.hue - b.hue)
+                    let deltaHue = min(hueGap, 360 - hueGap)
+                    let deltaLightness = abs(a.lightness - b.lightness)
+                    #expect(
+                        deltaHue >= 60 || deltaLightness >= 0.08,
+                        "\(first) and \(second) in \(name) are only \(deltaHue)° apart at ΔL* \(deltaLightness): two cabals would read as one"
+                    )
+                }
+            }
+        }
+    }
+
+    /// A cabal tile sits in a row that also carries a gain or a loss, so no tint may be mistaken for
+    /// either.
+    ///
+    /// Hue is the whole guard here, and deliberately so. The tints are *not* quieter than the money
+    /// colours — measured, they run 0.9× to 1.2× profit's chroma — so a "the tint is more muted"
+    /// assertion would have been asserting something false. What separates them is that no tint
+    /// shares a hue with a money colour, and the two that come nearest are moss (a yellow-green, 38°
+    /// off profit) and ochre (a gold, 46° off loss).
+    @Test func noCabalTintReadsAsAMoneyColour() {
+        for scheme in [UIUserInterfaceStyle.light, .dark] {
+            let name = scheme == .light ? "light" : "dark"
+            for tint in MonacoTheme.CabalTint.allCases {
+                for (label, money) in [("profit", MonacoTheme.profit), ("loss", MonacoTheme.loss)] {
+                    let hueGap = abs(OKLCh.value(tint.fill, scheme).hue - OKLCh.value(money, scheme).hue)
+                    #expect(
+                        min(hueGap, 360 - hueGap) >= 30,
+                        "\(tint) vs \(label) in \(name): only \(min(hueGap, 360 - hueGap))° of hue apart"
+                    )
+                }
+            }
         }
     }
 

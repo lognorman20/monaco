@@ -39,10 +39,12 @@ struct AssetsTabView: View {
             .textInputAutocapitalization(.words)
             .autocorrectionDisabled()
             .submitLabel(.search)
+            .padding(.horizontal, MonacoTheme.Space.m)
 
+            // The lists run edge to edge; each section insets its own header.
             listRegion
         }
-        .padding(MonacoTheme.Space.m)
+        .padding(.vertical, MonacoTheme.Space.m)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .monacoCanvas()
         .foregroundStyle(MonacoTheme.ink)
@@ -94,7 +96,7 @@ struct AssetsTabView: View {
     private var searchRegion: some View {
         switch model.searchState {
         case .idle, .loading:
-            ScrollView { skeletonRows(count: 6) }
+            ScrollView { skeletonRows(count: 6, subtitles: false) }
                 .scrollDisabled(true)
                 .accessibilityIdentifier("assets-search-loading")
         case .failed:
@@ -113,6 +115,8 @@ struct AssetsTabView: View {
             ScrollView {
                 if model.refreshFailed {
                     staleCaption(identifier: "assets-refresh-failed")
+                        .padding(.horizontal, MonacoTheme.Space.m)
+                        .padding(.bottom, MonacoTheme.Space.sm)
                 }
                 assetList(model.resultRows, identifierPrefix: "assets-row")
                 if model.loadMoreFailed {
@@ -143,7 +147,7 @@ struct AssetsTabView: View {
     private var browseRegion: some View {
         switch model.popularState {
         case .loading where model.popular.isEmpty:
-            ScrollView { skeletonRows(count: 6) }
+            ScrollView { browseSkeleton }
                 .scrollDisabled(true)
                 .accessibilityIdentifier("assets-popular-loading")
         case .failed where model.popular.isEmpty:
@@ -157,7 +161,7 @@ struct AssetsTabView: View {
             }
         default:
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
+                LazyVStack(alignment: .leading, spacing: MonacoTheme.Space.xl) {
                     inYourCabalsSection
                     upForVoteSection
                     topMoversSection
@@ -175,7 +179,7 @@ struct AssetsTabView: View {
         switch model.socialState {
         case .loading where model.heldRows.isEmpty:
             section("In your cabals", identifier: "assets-held-loading") {
-                skeletonRows(count: 2)
+                skeletonRows(count: 2, subtitles: true)
             }
         case .failed where model.heldRows.isEmpty:
             section("In your cabals", identifier: "assets-held-failed") {
@@ -195,10 +199,11 @@ struct AssetsTabView: View {
                     )
                 }
             } else {
-                section("In your cabals", identifier: "assets-held") {
-                    if model.socialRefreshFailed {
-                        staleCaption(identifier: "assets-held-stale")
-                    }
+                section(
+                    "In your cabals",
+                    identifier: "assets-held",
+                    staleCaptionIdentifier: model.socialRefreshFailed ? "assets-held-stale" : nil
+                ) {
                     assetList(model.heldRows, identifierPrefix: "assets-held")
                 }
             }
@@ -206,13 +211,14 @@ struct AssetsTabView: View {
     }
 
     /// The same sentence the search region uses. One wording for "what you are
-    /// looking at may be out of date", wherever it happens.
+    /// looking at may be out of date", wherever it happens. Unpadded: whoever places it
+    /// sets it on the page's inset.
     private func staleCaption(identifier: String) -> some View {
         Text(AssetsTabView.staleRefreshCaption)
             .font(MonacoTheme.Typo.caption)
             .foregroundStyle(MonacoTheme.warning)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, MonacoTheme.Space.s)
+            .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier(identifier)
     }
 
@@ -237,6 +243,7 @@ struct AssetsTabView: View {
         if !model.moverRows.isEmpty, StockMoverStrip.isAvailable(at: dynamicTypeSize) {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
                 MonacoSectionHeader("Top movers")
+                    .padding(.horizontal, MonacoTheme.Space.m)
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: MonacoTheme.Space.sm) {
                         ForEach(model.moverRows) { row in
@@ -251,7 +258,6 @@ struct AssetsTabView: View {
                     // but its first card lines up with the sections above it.
                     .padding(.horizontal, MonacoTheme.Space.m)
                 }
-                .padding(.horizontal, -MonacoTheme.Space.m)
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("assets-movers")
@@ -275,13 +281,23 @@ struct AssetsTabView: View {
         }
     }
 
+    /// A title, then the section's rows. `staleCaptionIdentifier` puts the "may be out of
+    /// date" line under the title it qualifies rather than over the rows: it is about the
+    /// whole section, and between the rule and the first row it read as a row of its own.
     private func section<Content: View>(
         _ title: String,
         identifier: String,
+        staleCaptionIdentifier: String? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
-            MonacoSectionHeader(title)
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
+                MonacoSectionHeader(title)
+                if let staleCaptionIdentifier {
+                    staleCaption(identifier: staleCaptionIdentifier)
+                }
+            }
+            .padding(.horizontal, MonacoTheme.Space.m)
             content()
         }
         // `.contain` first, so the section is itself one container element and the
@@ -320,27 +336,36 @@ struct AssetsTabView: View {
         selectedSymbol = symbol
     }
 
-    private func skeletonRows(count: Int) -> some View {
+    /// Rows in the loaded rows' shape — coin, ticker, the price over its pill, the
+    /// separators — rather than grey tiles, so the list does not change shape when it
+    /// lands. `subtitles` gives each the second line the cabal rows carry.
+    private func skeletonRows(count: Int, subtitles: Bool) -> some View {
         MonacoGroupedList {
-            ForEach(0..<count, id: \.self) { _ in
-                HStack(spacing: MonacoTheme.Space.sm) {
-                    SkeletonBlock(width: 40, height: 40, radius: MonacoTheme.Radius.tile)
-                    VStack(alignment: .leading, spacing: 6) {
-                        SkeletonBlock(width: 120, height: 14)
-                        SkeletonBlock(width: 56, height: 12)
-                    }
-                    Spacer()
-                    SkeletonBlock(width: 56, height: 24)
-                    VStack(alignment: .trailing, spacing: 6) {
-                        SkeletonBlock(width: 64, height: 14)
-                        SkeletonBlock(width: 46, height: 14)
-                    }
-                }
-                .padding(.horizontal, MonacoTheme.Space.m)
-                .frame(minHeight: 64)
+            ForEach(0..<count, id: \.self) { index in
+                StockListRowSkeleton(hasSubtitle: subtitles, isLast: index == count - 1)
             }
         }
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("Loading stocks")
+    }
+
+    /// The whole browse page before anything has answered: two sections, each a title
+    /// over ruled rows — the cabals' rows with their second line, then the market's.
+    private var browseSkeleton: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.xl) {
+            skeletonSection(rows: 3, subtitles: true)
+            skeletonSection(rows: 4, subtitles: false)
+        }
+    }
+
+    private func skeletonSection(rows: Int, subtitles: Bool) -> some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+            // A section title's height, so the rows start where they will.
+            SkeletonBlock(width: 132, height: 18, radius: 4)
+                .padding(.vertical, 4)
+                .padding(.horizontal, MonacoTheme.Space.m)
+            skeletonRows(count: rows, subtitles: subtitles)
+        }
     }
 
     /// Keeps the shared session strip in step with the tab so other screens read fresh prices too.

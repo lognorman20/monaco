@@ -26,31 +26,44 @@ struct AssetTradeBar: View {
             if let reason = state.buyDisabledReason {
                 // The reason lives here, next to the disabled button, rather than in
                 // a toast after a tap that was never going to work.
-                Label(reason, systemImage: "exclamationmark.triangle")
-                    .font(MonacoTheme.Typo.caption)
-                    .foregroundStyle(MonacoTheme.warning)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("asset-trade-bar-blocked")
+                HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.s) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(MonacoTheme.Typo.captionStrong)
+                        .accessibilityHidden(true)
+                    Text(reason)
+                        .font(MonacoTheme.Typo.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundStyle(MonacoTheme.warning)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("asset-trade-bar-blocked")
             }
             buttons
+                // One or two capsules across the whole bar, the way `BottomCTA` sets
+                // them. Sized to their labels, a lone "Propose buy" sat at the left of an
+                // empty bar and two buttons left a third of it unused.
+                .monacoFullWidthButtons()
             if let caption = state.caption {
                 Text(caption)
                     .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(MonacoTheme.muted)
+                    .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .accessibilityIdentifier("asset-trade-bar-caption")
             }
         }
+        // The bar is as wide as the screen whatever it holds. Only the caption used to
+        // stretch it, so a bar with none — a token that cannot be bought — shrank to its
+        // widest line and the page showed down both sides of it.
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, MonacoTheme.Space.m)
         .padding(.top, MonacoTheme.Space.sm)
         .padding(.bottom, MonacoTheme.Space.s)
-        // A material, so the cards scrolling under the bar stay legible as they pass
-        // behind it instead of colliding with a flat fill.
-        .background(.regularMaterial)
+        // Paper, like `BottomCTA`. It was a material: sections scrolling under it showed
+        // through as a grey blur, which is the glass the design language turned down.
+        .background(MonacoTheme.canvas.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) {
-            Rectangle()
-                .fill(MonacoTheme.hairline)
-                .frame(height: 1)
+            MonacoRule()
         }
         // No identifier on this stack. A modifier on a `VStack` is applied to each of
         // its children, so naming the bar would rename both buttons and the blocked

@@ -20,8 +20,13 @@ struct Sparkline: View {
     /// than from the series: the change is measured against the previous close, so
     /// a stock can be down on the day while the drawn window slopes up.
     let tone: PnLTone
-    var width: CGFloat = 56
+    var width: CGFloat = Sparkline.rowWidth
     var height: CGFloat = 24
+
+    /// The shape's width in a list row. 48pt reads as a day's shape and leaves the row's
+    /// words the room they need; at 56pt, with 4pt either side, the Stocks tab cut "your
+    /// slice $294.70" down to "your slice $29…".
+    static let rowWidth: CGFloat = 48
 
     /// A hair under the row height so the line never touches the separator.
     private var lineWidth: CGFloat { 1.5 }

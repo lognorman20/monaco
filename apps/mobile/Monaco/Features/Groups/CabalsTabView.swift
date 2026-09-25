@@ -49,11 +49,15 @@ struct CabalsTabView: View {
     var body: some View {
         MonacoScreen {
             ScrollView {
-                VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
+                // Edge to edge: the strip and the ruled lists run to the screen's edges, and
+                // each section insets its own header.
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.xl) {
                     MonacoSearchField(placeholder: "Find a cabal by name", text: $searchText)
+                        .padding(.horizontal, MonacoTheme.Space.m)
                         .accessibilityIdentifier("cabals-search-field")
 
                     if model.isSearching {
+
                         CabalsSearchResultsSection(model: model, onSelect: { route = $0 })
                     } else {
                         CabalsStripSection(
@@ -66,9 +70,9 @@ struct CabalsTabView: View {
                         CabalsLeaderboardSection(model: model, onSelect: { route = $0 })
                     }
                 }
-                .padding(.horizontal, MonacoTheme.Space.m)
-                .padding(.bottom, MonacoTheme.Space.l)
+                .padding(.bottom, MonacoTheme.Space.xl)
             }
+
             .scrollDismissesKeyboard(.interactively)
         }
         .navigationTitle("Cabals")
@@ -102,7 +106,6 @@ struct CabalsTabView: View {
                     showNewCabalSheet = false
                 }
             )
-            .presentationDetents([.medium])
         }
         .navigationDestination(item: $route) { route in
             CabalsRouteDestination(
@@ -156,44 +159,61 @@ struct CabalsTabView: View {
     }
 }
 
-/// The `.medium` sheet behind the tab's trailing "New cabal" button: two big
-/// choices, start fresh or join with a code someone shared.
-private struct NewCabalSheet: View {
+/// The `.medium` sheet behind the tab's trailing "New cabal" button: two
+/// choices as ruled rows, start fresh or join with a code someone shared.
+/// Internal rather than private so the Debug harness can open it on its own.
+struct NewCabalSheet: View {
     let onCreate: () -> Void
     let onJoin: () -> Void
 
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: MonacoTheme.Space.s) {
-                Button(action: onCreate) {
-                    MonacoRowCard(
-                        systemImage: "plus",
-                        title: "Start a cabal",
-                        subtitle: "Name it and invite friends",
-                        trailing: nil
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("new-cabal-create-row")
+    /// The sheet is as tall as its two rows. A medium detent left the bottom half empty.
+    @State private var contentHeight: CGFloat = 0
 
-                Button(action: onJoin) {
-                    MonacoRowCard(
-                        systemImage: "person.badge.plus",
-                        title: "Join with an invite code",
-                        subtitle: "Paste a code your friend shared",
-                        trailing: nil
-                    )
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+                Text("New cabal")
+                    .font(MonacoTheme.Typo.title)
+                    .foregroundStyle(MonacoTheme.ink)
+                    .padding(.horizontal, MonacoTheme.Space.m)
+                    .padding(.top, MonacoTheme.Space.l)
+                    .accessibilityAddTraits(.isHeader)
+
+                MonacoGroupedList {
+                    Button(action: onCreate) {
+                        MonacoRow(
+                            title: "Start a cabal",
+                            subtitle: "Name it and set the rules",
+                            chevron: true
+                        ) {
+                            SunkenGlyphMark(systemImage: "plus", size: 40)
+                        }
+                    }
+                    .buttonStyle(.monacoRow)
+                    .accessibilityIdentifier("new-cabal-create-row")
+
+                    Button(action: onJoin) {
+                        MonacoRow(
+                            title: "Join with an invite code",
+                            subtitle: "Paste the code a friend sent you",
+                            chevron: true,
+                            isLast: true
+                        ) {
+                            SunkenGlyphMark(systemImage: "person.badge.plus", size: 40)
+                        }
+                    }
+                    .buttonStyle(.monacoRow)
+                    .accessibilityIdentifier("new-cabal-join-row")
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("new-cabal-join-row")
             }
-            .padding(MonacoTheme.Space.m)
-            .padding(.top, MonacoTheme.Space.m)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .monacoCanvas()
-            .navigationTitle("New cabal")
-            .navigationBarTitleDisplayMode(.inline)
+            .padding(.bottom, MonacoTheme.Space.xl)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
         }
+        .scrollBounceBehavior(.basedOnSize)
+        .monacoCanvas()
+        .presentationDetents(contentHeight > 0 ? [.height(contentHeight)] : [.medium])
+        .presentationDragIndicator(.visible)
     }
 }
 

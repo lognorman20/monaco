@@ -59,10 +59,12 @@ enum MonacoAppearance {
         tabBar.shadowColor = hairline
         let brand = UIColor(MonacoTheme.brand)
         let tabItem = UITabBarItemAppearance()
+        let tabFont = UIFont(name: "AvenirNext-DemiBold", size: 10) ?? .systemFont(ofSize: 10, weight: .semibold)
         tabItem.normal.iconColor = muted
-        tabItem.normal.titleTextAttributes = [.foregroundColor: muted]
+        tabItem.normal.titleTextAttributes = [.foregroundColor: muted, .font: tabFont]
         tabItem.selected.iconColor = brand
-        tabItem.selected.titleTextAttributes = [.foregroundColor: brand]
+        tabItem.selected.titleTextAttributes = [.foregroundColor: brand, .font: tabFont]
+
         tabBar.stackedLayoutAppearance = tabItem
         tabBar.inlineLayoutAppearance = tabItem
         tabBar.compactInlineLayoutAppearance = tabItem
@@ -144,7 +146,7 @@ extension View {
 
     /// Toolbar / nav bar SF Symbol — ink tint, readable weight.
     func monacoToolbarIcon() -> some View {
-        font(.body.weight(.semibold))
+        font(MonacoTheme.Typo.bodyStrong)
             .foregroundStyle(MonacoTheme.ink)
             .symbolRenderingMode(.hierarchical)
     }

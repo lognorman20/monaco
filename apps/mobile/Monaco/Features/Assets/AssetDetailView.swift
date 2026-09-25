@@ -28,6 +28,10 @@ struct AssetDetailView: View {
     /// can be watched inside a screenshot run rather than two minutes after one.
     private let pricePollInterval: Duration
     private let chartPollInterval: Duration
+    /// A sample to hold selected once the curve lands, as if a finger were resting on it.
+    /// Only the sample harness passes one: the scrubbed hero is a gesture, and a
+    /// screenshot run cannot make gestures.
+    private let scrubbedIndexOnLoad: Int?
 
     init(
         auth: PrivyAuthService,
@@ -35,12 +39,14 @@ struct AssetDetailView: View {
         dataSource: AssetDetailDataSource? = nil,
         socialDataSource: AssetSocialDataSource? = nil,
         pricePollInterval: Duration = AssetDetailPolling.price,
-        chartPollInterval: Duration = AssetDetailPolling.chart
+        chartPollInterval: Duration = AssetDetailPolling.chart,
+        scrubbedIndexOnLoad: Int? = nil
     ) {
         self.auth = auth
         self.symbol = symbol
         self.pricePollInterval = pricePollInterval
         self.chartPollInterval = chartPollInterval
+        self.scrubbedIndexOnLoad = scrubbedIndexOnLoad
         _model = State(initialValue: AssetDetailModel(
             symbol: symbol,
             dataSource: dataSource ?? LiveAssetDetailDataSource(auth: auth)
@@ -57,7 +63,12 @@ struct AssetDetailView: View {
                 switch model.detailState {
                 case .loading:
                     AssetDetailHeroSkeleton()
+                        .padding(.horizontal, MonacoTheme.Space.m)
                     chartCard
+                    // The screen keeps its shape below the chart too: one ruled section
+                    // where the first section will land, rather than bare paper.
+                    AssetDetailSectionSkeleton()
+                        .padding(.top, MonacoTheme.Space.s)
                 case .failed:
                     EmptyState(
                         title: "Could not load this stock",
@@ -65,6 +76,7 @@ struct AssetDetailView: View {
                         action: { Task { await model.loadDetail() } }
                     )
                     .accessibilityIdentifier("asset-detail-failed")
+
                     // The curve was decoupled from this call; throwing away a chart that did
                     // arrive would leave the screen emptier than before they were split.
                     chartCard
@@ -75,10 +87,20 @@ struct AssetDetailView: View {
                     // trade bar — saying it twice made the screen argue with itself.
                     chartCard
                     detailSections
+                        // 32pt from the range chips to the first section's rule: the
+                        // same break as between two sections, whose last lines keep
+                        // their own padding and the chips do not.
+                        .padding(.top, MonacoTheme.Space.s)
                 }
             }
-            .padding(MonacoTheme.Space.m)
+            // No horizontal padding on the stack: the curve runs edge to edge, and the hero
+            // and every section inset themselves.
+            .padding(.top, MonacoTheme.Space.m)
+            // The last section ends a full step above the trade bar rather than 16pt from
+            // its rule, where the bar's hairline read as the section's own last line.
+            .padding(.bottom, MonacoTheme.Space.xl)
         }
+
         .monacoCanvas()
         .foregroundStyle(MonacoTheme.ink)
         .navigationTitle(AssetSymbolFormatter.display(symbol, kind: model.detail?.resolvedKind ?? .stock))
@@ -92,7 +114,10 @@ struct AssetDetailView: View {
         // Three independent loads: the curve does not wait on the (slow) detail call,
         // and neither waits on the per-cabal read behind the social cards.
         .task { await model.loadDetail() }
-        .task(id: model.range) { await model.loadChart(range: model.range) }
+        .task(id: model.range) {
+            await model.loadChart(range: model.range)
+            holdScrubIfAsked()
+        }
         .task { await social.load() }
         // The hero keeps itself current while the member is looking at it. Both loops
         // are silent: a tick that fails leaves the screen exactly as they last saw it.
@@ -108,6 +133,14 @@ struct AssetDetailView: View {
             destination(for: route)
         }
         .monacoFrameStats("AssetDetail")
+    }
+
+    /// See `scrubbedIndexOnLoad`. Never overrides a scrub a finger has already made.
+    private func holdScrubIfAsked() {
+        guard let scrubbedIndexOnLoad, model.scrubbedIndex == nil,
+              let count = model.series?.points.count, count > 0
+        else { return }
+        model.scrubbedIndex = min(max(scrubbedIndexOnLoad, 0), count - 1)
     }
 
     /// The screen behind a route. Declared once, so no card ever builds a destination.
@@ -185,14 +218,16 @@ struct AssetDetailView: View {
         AssetDetailHero(
             // Same resolver as the list rows, so one stock never carries two names.
             displayName: heroDisplayName,
+            ticker: AssetSymbolFormatter.display(symbol),
             priceUsdcMicros: model.heroPriceUsdcMicros,
             move: model.move,
             isScrubbing: model.isScrubbing,
             tick: model.heroTick,
-            // A pre-IPO token trades round the clock, so a session chip would be a lie.
             session: isPreIpo ? nil : model.sessionChip
         )
+        .padding(.horizontal, MonacoTheme.Space.m)
     }
+
 
     private var chartCard: some View {
         AssetChartCard(model: model, isMarketLive: model.isMarketLive)
@@ -201,77 +236,78 @@ struct AssetDetailView: View {
     // MARK: - Section slots
     //
     // Everything below the chart, in the order it appears. Each slot is one view;
-    // adding a card means adding it here, in its place, and nothing above or below
+    // adding a section means adding it here, in its place, and nothing above or below
     // has to move. The order is the product's, not the implementation's: what the
     // member's own cabals are doing comes before what the market says about the
     // stock, and the disclosure comes last.
     //
     //   1. Your cabals' position — holdings, P&L, open votes            (#341)
-    //   2. Stats grid — open/high/low, 52-week range, trading cost      (#342)
+    //   2. Stats — open/high/low, 52-week range, trading cost           (#342)
     //   3. Stock vs token — NASDAQ against the xStock, premium          (#347)
     //   4. About — what the token is, and the tracker disclosure        (#343)
     //   5. Activity on this stock — proposals, fills and comments       (#344)
     //
     // The trade bar (#340) is not a slot: it belongs in a `safeAreaInset`, not in
     // this stack.
-    // No stack around the slots while they are all empty. The `EmptyView`s collapse
-    // but a `VStack` holding them does not: it is still a child of the outer stack,
-    // so the screen would carry a stray 24pt gap between the chart and the action row
-    // until the first card lands. Each slot brings its own spacing from the outer
-    // stack when it arrives.
     //
-    // Do not put an accessibility identifier on a stack of cards either. A modifier
-    // on a VStack is applied to each of its children, so naming the stack renames
-    // every card inside it and makes each one unfindable by its own name — which is
-    // exactly what it did to the chart before this was noticed.
-    @ViewBuilder
+    // The slots share one stack so the gap between two sections is set once: 24pt above
+    // each rule, on top of the 12pt a section's last line already keeps under itself.
+    // The stack is never empty: this is only built once the detail has loaded, and
+    // About draws from the detail alone.
+    //
+    // Do not put an accessibility identifier on this stack. A modifier on a VStack is
+    // applied to each of its children, so naming the stack renames every section
+    // inside it and makes each one unfindable by its own name — which is exactly
+    // what it did to the chart before this was noticed.
     private var detailSections: some View {
-        // 1. Your cabals' position — holdings, P&L, open votes            (#341)
-        if let summary = social.summary {
-            AssetPositionCard(
-                summary: summary,
-                proposals: social.openProposals,
-                symbol: symbol,
-                // #341: a holding row opens the cabal, a vote row opens the vote.
-                // Without these the rows fall into their non-Button branch and the
-                // card is a picture of a position rather than a way into one.
-                openCabal: { route = .cabal(id: $0, name: cabalName($0)) },
-                openProposal: { route = .proposal(id: $0.id) }
-            )
-        } else if social.hasFailed {
-            // A read that failed is not an answer of "nobody holds this". Say so, and
-            // offer the way back — the same retry restores the activity card below.
-            AssetSocialFailedCard(symbol: symbol, retry: { Task { await social.load() } })
-        }
-        // 1b. What a pre-IPO token carries that a stock does not: reference price,
-        //     premium, the issuer's disclosure and the other issuers it comes from.
-        if let detail = model.detail, detail.resolvedKind == .preIpo {
-            PreIpoDetailSection(detail: detail, openVariant: { route = .variant(symbol: $0) })
-        }
-        // 2. Stats grid — open/high/low, 52-week range, trading cost      (#342)
-        if let grid = AssetStatsGrid.make(model.detail?.stats, currentUsdcMicros: model.detail?.priceUsdcMicros) {
-            AssetStatsCard(grid: grid)
-        }
-        // 3. Stock vs token — NASDAQ against the xStock, premium          (#347)
-        if let card = stockVsTokenCard {
-            StockVsTokenCardView(card: card)
-        }
-        // 4. About — what the token is, and the tracker disclosure        (#343)
-        if let detail = model.detail {
-            AssetAboutCard(about: AssetAboutCopy.make(
-                symbol: detail.symbol,
-                name: detail.name,
-                solanaMint: detail.solanaMint,
-                liquidityLabel: detail.liquidity.label
-            ))
-        }
-        // 5. Activity on this stock — proposals, fills and comments       (#344)
-        if !social.activity.isEmpty {
-            AssetActivityCard(
-                symbol: symbol,
-                activity: social.activity,
-                openCabal: { route = .cabal(id: $0, name: cabalName($0)) }
-            )
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
+            // 1. Your cabals' position — holdings, P&L, open votes            (#341)
+            if let summary = social.summary {
+                AssetPositionCard(
+                    summary: summary,
+                    proposals: social.openProposals,
+                    symbol: symbol,
+                    // #341: a holding row opens the cabal, a vote row opens the vote.
+                    // Without these the rows fall into their non-Button branch and the
+                    // section is a picture of a position rather than a way into one.
+                    openCabal: { route = .cabal(id: $0, name: cabalName($0)) },
+                    openProposal: { route = .proposal(id: $0.id) }
+                )
+            } else if social.hasFailed {
+                // A read that failed is not an answer of "nobody holds this". Say so, and
+                // offer the way back — the same retry restores the activity below.
+                AssetSocialFailedCard(symbol: symbol, retry: { Task { await social.load() } })
+            }
+            // 1b. What a pre-IPO token carries that a stock does not: reference price,
+            //     premium, the issuer's disclosure and the other issuers it comes from.
+            if let detail = model.detail, detail.resolvedKind == .preIpo {
+                PreIpoDetailSection(detail: detail, openVariant: { route = .variant(symbol: $0) })
+            }
+            // 2. Stats — open/high/low, 52-week range, trading cost           (#342)
+            if let grid = AssetStatsGrid.make(model.detail?.stats, currentUsdcMicros: model.detail?.priceUsdcMicros) {
+                AssetStatsCard(grid: grid)
+            }
+            // 3. Stock vs token — NASDAQ against the xStock, premium          (#347)
+            if let card = stockVsTokenCard {
+                StockVsTokenCardView(card: card)
+            }
+            // 4. About — what the token is, and the tracker disclosure        (#343)
+            if let detail = model.detail {
+                AssetAboutCard(about: AssetAboutCopy.make(
+                    symbol: detail.symbol,
+                    name: detail.name,
+                    solanaMint: detail.solanaMint,
+                    liquidityLabel: detail.liquidity.label
+                ))
+            }
+            // 5. Activity on this stock — proposals, fills and comments       (#344)
+            if !social.activity.isEmpty {
+                AssetActivityCard(
+                    symbol: symbol,
+                    activity: social.activity,
+                    openCabal: { route = .cabal(id: $0, name: cabalName($0)) }
+                )
+            }
         }
     }
 

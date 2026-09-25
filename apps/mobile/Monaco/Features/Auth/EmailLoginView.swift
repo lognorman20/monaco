@@ -1,30 +1,39 @@
 import SwiftUI
 
-/// Email OTP sign-in via Privy — kept for internal testers.
-struct EmailLoginView: View {
-    @ObservedObject var auth: PrivyAuthService
+/// Email one-time-code sign-in via Privy: kept for internal testers.
+struct EmailLoginView<Auth: OTPSignIn>: View {
+    @ObservedObject var auth: Auth
+    let scroll: ScrollViewProxy
+    /// Debug harness only: the code the form opens with.
+    var initialCode = ""
 
     var body: some View {
         OTPLoginForm(
             auth: auth,
-            destination: OTPLoginForm.Destination(
-                caption: "We’ll email you a one-time code. Check spam if it doesn’t arrive.",
-                prompt: "Email address",
-                keyboardType: .emailAddress,
-                contentType: .emailAddress,
-                invalidHint: "Enter an email address, like you@example.com.",
-                changeLabel: "Change email",
-                addressFieldIdentifier: "emailAddressField",
-                identifierPrefix: "email",
-                normalize: Self.normalizedEmail,
-                display: { $0 }
-            ),
+            destination: .email,
+            scroll: scroll,
+            initialCode: initialCode,
             send: { await auth.sendEmailCode(to: $0) },
             verify: { code, email in
                 await auth.loginWithEmailCode(code, sentTo: email)
             }
         )
     }
+}
+
+extension OTPDestination {
+    static let email = OTPDestination(
+        caption: "We'll email you a one-time code. Check spam if it doesn't arrive.",
+        prompt: "Email address",
+        keyboardType: .emailAddress,
+        contentType: .emailAddress,
+        invalidHint: "Enter an email address, like you@example.com.",
+        changeLabel: "Change email",
+        addressFieldIdentifier: "emailAddressField",
+        identifierPrefix: "email",
+        normalize: OTPDestination.normalizedEmail,
+        display: { $0 }
+    )
 
     private static func normalizedEmail(_ input: String) -> String? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -38,5 +47,8 @@ struct EmailLoginView: View {
 }
 
 #Preview {
-    EmailLoginView(auth: PrivyAuthService())
+    ScrollViewReader { proxy in
+        EmailLoginView(auth: PrivyAuthService(), scroll: proxy)
+            .padding()
+    }
 }

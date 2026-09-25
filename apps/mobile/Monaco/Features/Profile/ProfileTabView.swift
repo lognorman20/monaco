@@ -59,17 +59,15 @@ struct ProfileTabView: View {
         .monacoToast($toast)
         .sheet(isPresented: $showEditProfile) {
             NavigationStack {
-                Form {
+                ScrollView {
                     ProfileNameEditor(auth: auth, initialDraft: initialNameDraft, saveName: saveName) {
                         // Close first: the toast is an overlay on this screen, so it is
                         // only readable once the sheet is out of the way.
                         showEditProfile = false
                         toast = MonacoToast(message: "Name updated.", isSuccess: true)
                     }
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
                 }
-                .monacoFormScreen()
+                .monacoCanvas()
                 .navigationTitle("Edit profile")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -107,12 +105,26 @@ struct ProfileTabView: View {
 
     private var profileScroll: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
-                header
+            // Edge to edge, like Home: the ruled lists run to the screen's edges and each
+            // section insets its own header.
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.xl) {
+                // One ruled table: the three figures, then the cash line under them.
+                VStack(spacing: 0) {
+                    header
+                        .padding(.bottom, MonacoTheme.Space.l)
+                    statRow
+                    HomeBalanceRowSection(
+                        auth: auth,
+                        balance: session.platformBalance,
+                        isBalanceLoading: session.isBalanceLoading,
+                        joinedCabals: session.joinedCabals,
+                        onRetryBalance: { Task { await session.refresh(auth: auth) } },
+                        identifierPrefix: "profile",
+                        balanceIdentifier: "profile-balance-value",
+                        rules: .bottom
+                    )
+                }
 
-                statRow
-
-                accountCard
 
                 ProfileCabalsSection(
                     auth: auth,
@@ -124,14 +136,15 @@ struct ProfileTabView: View {
 
                 if let errorMessage = session.errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .font(MonacoTheme.TypeRole.caption)
+                        .font(MonacoTheme.Typo.caption)
                         .foregroundStyle(MonacoTheme.warning)
+                        .padding(.horizontal, MonacoTheme.Space.m)
                 }
             }
-            .padding(.horizontal, MonacoTheme.Space.m)
-            .padding(.bottom, MonacoTheme.Space.l)
+            .padding(.bottom, MonacoTheme.Space.xl)
         }
     }
+
 
     private var header: some View {
         VStack(spacing: MonacoTheme.Space.s) {
@@ -148,7 +161,7 @@ struct ProfileTabView: View {
                     showEditProfile = true
                 } label: {
                     Image(systemName: "pencil")
-                        .font(.footnote.weight(.semibold))
+                        .font(MonacoTheme.Typo.captionStrong)
                         .foregroundStyle(MonacoTheme.muted)
                         .frame(width: 44, height: 44)
                 }
@@ -169,98 +182,58 @@ struct ProfileTabView: View {
         .accessibilityIdentifier("profile-header")
     }
 
+    /// Three figures in a ruled band: what the member has in cabals, how it has done, and how
+    /// many cabals that is across. Typography does the separating; there is no card.
     private var statRow: some View {
         HStack(spacing: 0) {
-            statItem(label: "Total in cabals") {
-                MoneyText(decimalString: session.dashboard?.netWorthUsd ?? "0", style: .row)
+            statItem(label: "In cabals") {
+                MoneyText(decimalString: session.dashboard?.netWorthUsd ?? "0", style: .large)
             }
             statDivider
-            statItem(label: "All-time") {
-                PercentText(percentReturn: session.dashboard?.netWorthPercentReturn, style: .row)
+            statItem(label: "All time") {
+                PercentText(percentReturn: session.dashboard?.netWorthPercentReturn, style: .large)
             }
             statDivider
-            statItem(label: "Cabals") {
+            statItem(label: cabalRows.count == 1 ? "Cabal" : "Cabals") {
                 Text("\(cabalRows.count)")
-                    .font(MonacoTheme.Typo.moneyRow)
+                    .moneyFont(.large)
                     .foregroundStyle(MonacoTheme.ink)
             }
         }
-        .padding(.vertical, MonacoTheme.Space.s)
-        .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
+        .padding(.vertical, MonacoTheme.Space.sm)
+        .overlay(alignment: .top) { MonacoRule() }
+        .overlay(alignment: .bottom) { MonacoRule() }
     }
 
     private var statDivider: some View {
         Rectangle()
             .fill(MonacoTheme.hairline)
             .frame(width: 1)
-            .padding(.vertical, MonacoTheme.Space.s)
+            .padding(.vertical, MonacoTheme.Space.xs)
     }
 
     private func statItem<Value: View>(label: String, @ViewBuilder value: () -> Value) -> some View {
         VStack(spacing: 2) {
             value()
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
             Text(label)
                 .font(MonacoTheme.Typo.caption)
                 .foregroundStyle(MonacoTheme.muted)
         }
         .frame(maxWidth: .infinity)
+        .padding(.horizontal, MonacoTheme.Space.s)
     }
 
-    private var accountCard: some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Account balance")
-                    .font(MonacoTheme.Typo.caption)
-                    .foregroundStyle(MonacoTheme.muted)
-                if let balance = session.platformBalance {
-                    MoneyText(micros: balance.availableUsdcMicros, style: .large)
-                        .accessibilityIdentifier("profile-balance-value")
-                } else if session.isBalanceLoading {
-                    ProgressView()
-                        .tint(MonacoTheme.accent)
-                        .accessibilityIdentifier("profile-balance-loading")
-                } else {
-                    Text("Unavailable. Pull to refresh.")
-                        .font(MonacoTheme.Typo.body)
-                        .foregroundStyle(MonacoTheme.muted)
-                        .accessibilityIdentifier("profile-balance-unavailable")
-                }
-            }
-
-            HStack(spacing: MonacoTheme.Space.s) {
-                NavigationLink {
-                    DepositView(auth: auth, joinedCabals: session.joinedCabals)
-                } label: {
-                    Text("Add money")
-                        .frame(maxWidth: .infinity)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-                .buttonStyle(.monacoPrimary)
-                .accessibilityIdentifier("profile-add-money-link")
-
-                NavigationLink {
-                    WithdrawView(auth: auth)
-                } label: {
-                    Text("Cash out")
-                        .frame(maxWidth: .infinity)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-                .buttonStyle(.monacoSecondary)
-                .accessibilityIdentifier("profile-cash-out-link")
-            }
-        }
-        .padding(MonacoTheme.Space.m)
-        .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
-    }
 
     /// #210 moved Settings into Profile: block explorers and sign out sit under the cabals.
     /// Withdraw is the balance card's "Cash out".
     private var accountActions: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             MonacoSectionHeader("Account")
+                .padding(.horizontal, MonacoTheme.Space.m)
             MonacoGroupedList {
+
                 NavigationLink {
                     AdvancedSettingsView()
                 } label: {
@@ -284,7 +257,9 @@ struct ProfileTabView: View {
             }
             .buttonStyle(.monacoDestructive)
             .frame(maxWidth: .infinity)
-            .padding(.top, MonacoTheme.Space.s)
+            .padding(.horizontal, MonacoTheme.Space.m)
+            .padding(.top, MonacoTheme.Space.m)
+
             .disabled(isSigningOut)
             .accessibilityIdentifier("profile-sign-out")
             .confirmationDialog("Sign out of Monaco?", isPresented: $confirmSignOut, titleVisibility: .visible) {

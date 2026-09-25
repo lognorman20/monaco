@@ -2,7 +2,10 @@ import MonacoCore
 import SwiftUI
 import UIKit
 
-/// Deposit — inbound USDC lands in account balance; fund a cabal separately.
+/// Add money: the member's USDC deposit address on Solana. What lands there becomes account
+/// balance; funding a cabal is its own step.
+///
+/// Owns the address load, the balance poll and the toasts. `DepositContent` is the layout.
 struct DepositView: View {
     @ObservedObject var auth: PrivyAuthService
     var joinedCabals: [HomeGroupBoardRowDTO] = []
@@ -21,109 +24,22 @@ struct DepositView: View {
     @State private var toast: MonacoToast?
 
     var body: some View {
-        Form {
-            Section {
-                Text("Send USDC on the Solana network only. Your account balance updates within a few seconds after it lands on chain.")
-                    .monacoSecondaryCaption()
-            }
-
-            if let balance = session.platformBalance {
-                Section("Account balance") {
-                    MoneyText(micros: balance.availableUsdcMicros, style: .row)
-                        .accessibilityIdentifier("deposit-screen-balance-value")
-                }
-            }
-
-            Section("Your deposit address") {
-                if isLoading {
-                    HStack(spacing: 12) {
-                        ProgressView()
-                            .tint(MonacoTheme.accent)
-                        Text("Loading address…")
-                            .monacoSecondaryCaption()
-                    }
-                    .accessibilityIdentifier("deposit-address-loading")
-                } else if let depositAddress {
-                    addressBlock(depositAddress)
-                } else {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label(
-                            errorMessage ?? "Deposit address not ready yet.",
-                            systemImage: "exclamationmark.triangle.fill"
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(MonacoTheme.warning)
-
-                        Button("Try again") {
-                            Task { await loadDepositAddress() }
-                        }
-                        .monacoFormSecondaryAction()
-                        .accessibilityIdentifier("deposit-address-retry")
-                    }
-                }
-            }
-
-            Section("How it works") {
-                stepRow(number: 1, text: "Send USDC on Solana to the address above.")
-                stepRow(number: 2, text: "Your account balance updates when USDC arrives.")
-                stepRow(number: 3, text: "Fund a cabal to move USDC into the pot and credit your share.")
-            }
-
-            if !joinedCabals.isEmpty {
-                Section("Fund a cabal") {
-                    NavigationLink {
-                        FundCabalView(
-                            auth: auth,
-                            joinedCabals: joinedCabals,
-                            preselectedGroupId: preselectedGroupId
-                        )
-                    } label: {
-                        Label("Choose cabal and amount", systemImage: "arrow.right.circle")
-                    }
-                    .accessibilityIdentifier("deposit-fund-cabal-link")
-                }
-            }
-        }
-        .monacoFormScreen()
-        .navigationTitle("Add money")
-        .navigationBarTitleDisplayMode(.inline)
+        DepositContent(
+            auth: auth,
+            address: .resolve(isLoading: isLoading, address: depositAddress, errorMessage: errorMessage),
+            balance: .resolve(balance: session.platformBalance, isLoading: session.isBalanceLoading),
+            pendingAllocationMicros: session.platformBalance?.pendingAllocationMicros ?? 0,
+            joinedCabals: joinedCabals,
+            preselectedGroupId: preselectedGroupId,
+            onCopy: copyAddress,
+            onRetry: { Task { await loadDepositAddress() } }
+        )
         .monacoToast($toast)
         .task(id: auth.accessToken) {
             await loadDepositAddress()
         }
         .pollWhileVisible(every: DepositPolling.balanceInterval, isActive: depositAddress != nil) {
             try await refreshPlatformBalance()
-        }
-    }
-
-    @ViewBuilder
-    private func addressBlock(_ address: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            MonacoWalletAddressText(address: address)
-                .accessibilityIdentifier("deposit-address-value")
-                .onTapGesture {
-                    copyAddress(address)
-                }
-
-            Button {
-                copyAddress(address)
-            } label: {
-                Label("Copy address", systemImage: "doc.on.doc")
-            }
-            .buttonStyle(.monacoSecondary)
-            .accessibilityIdentifier("deposit-address-copy-button")
-        }
-    }
-
-    private func stepRow(number: Int, text: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text("\(number).")
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-                .foregroundStyle(MonacoTheme.accent)
-                .frame(width: 20, alignment: .trailing)
-            Text(text)
-                .font(.subheadline)
-                .foregroundStyle(MonacoTheme.primaryText)
         }
     }
 
@@ -170,15 +86,15 @@ struct DepositView: View {
             session.me = profile
             depositAddress = address
         } catch MonacoAPIError.httpStatus {
-            // The Try again button in this section is the way back, so the copy does not send the
-            // member pulling on a screen that has no pull-to-refresh.
+            // The Try again button on the address card is the way back, so the copy does not send
+            // the member pulling on a screen that has no pull-to-refresh.
             errorMessage = "Couldn't load your deposit address."
         } catch where error.isRequestCancellation {
             // The hourly token rotation restarts `.task(id: auth.accessToken)` and cancels this
             // request. Nothing went wrong, so nothing is claimed about the connection — but the
-            // spinner is not left running either: a cancellation is not proof that a replacement
+            // skeleton is not left running either: a cancellation is not proof that a replacement
             // is on its way (URLSession reports -999 for more than a cancelled task), and the
-            // section's Try again button is the member's way out of any state but the spinner.
+            // card's Try again button is the member's way out of any state but the skeleton.
             errorMessage = nil
         } catch {
             errorMessage = "No connection. Check your internet and try again."
@@ -205,6 +121,234 @@ struct DepositView: View {
         lastAnnouncedBalanceMicros = fresh.availableUsdcMicros
         guard let previous, fresh.availableUsdcMicros > previous else { return }
         toast = MonacoToast(message: "USDC arrived in your account balance.", isSuccess: true)
+    }
+}
+
+/// Add money's layout, top to bottom in the order a member uses it: the address to copy (the
+/// one card on the screen, because it is the one thing to act on), the balance it fills with
+/// the way on to a cabal under it, and how the whole thing works as three ruled lines.
+///
+/// Pure: what the screen knows comes in, what the member does goes out.
+struct DepositContent: View {
+    @ObservedObject var auth: PrivyAuthService
+    let address: DepositAddressCard.Content
+    let balance: HomeBalanceDisplay
+    var pendingAllocationMicros: Int64 = 0
+    let joinedCabals: [HomeGroupBoardRowDTO]
+    var preselectedGroupId: String?
+    let onCopy: (String) -> Void
+    let onRetry: () -> Void
+
+    static let steps = [
+        "Send USDC to the address above from an exchange or another app.",
+        "Your account balance updates a few seconds after it arrives.",
+        "Fund a cabal to move it into the pot and grow your slice.",
+    ]
+
+    var body: some View {
+        ScrollView {
+            // No horizontal padding on the stack: the ruled lists run edge to edge, and the card
+            // and each header inset themselves.
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.xl) {
+                DepositAddressCard(content: address, onCopy: onCopy, onRetry: onRetry)
+                    .padding(.horizontal, MonacoTheme.Space.m)
+
+                balanceSection
+
+                howItWorks
+            }
+            .padding(.top, MonacoTheme.Space.m)
+            .padding(.bottom, MonacoTheme.Space.xl)
+        }
+        .monacoCanvas()
+        .navigationTitle("Add money")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// The balance the address fills, with the next step under it once there is a cabal to
+    /// fund — Home's balance row, with Home's text action.
+    private var balanceSection: some View {
+        MonacoGroupedList {
+            PlatformBalanceCard(
+                display: balance,
+                pendingAllocationMicros: pendingAllocationMicros,
+                valueIdentifier: "deposit-screen-balance-value"
+            )
+
+            if !joinedCabals.isEmpty {
+                NavigationLink {
+                    FundCabalView(
+                        auth: auth,
+                        joinedCabals: joinedCabals,
+                        preselectedGroupId: preselectedGroupId
+                    )
+                } label: {
+                    Text("Fund a cabal")
+                        .font(MonacoTheme.Typo.calloutStrong)
+                        .foregroundStyle(MonacoTheme.brand)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("deposit-fund-cabal-link")
+                .padding(.leading, MonacoTheme.Space.m + 44 + MonacoTheme.Space.sm)
+                .padding(.trailing, MonacoTheme.Space.m)
+                .padding(.bottom, MonacoTheme.Space.xs)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private var howItWorks: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+            MonacoSectionHeader("How it works")
+                .padding(.horizontal, MonacoTheme.Space.m)
+
+            MonacoGroupedList {
+                ForEach(Array(Self.steps.enumerated()), id: \.offset) { index, step in
+                    DepositStepRow(number: index + 1, text: step, isLast: index == Self.steps.count - 1)
+                }
+            }
+        }
+    }
+}
+
+/// One step of "How it works": the number in the market's voice, the sentence in the brand's.
+private struct DepositStepRow: View {
+    let number: Int
+    let text: String
+    let isLast: Bool
+
+    @ScaledMetric(relativeTo: .subheadline) private var numberColumn: CGFloat = 20
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.sm) {
+            Text("\(number)")
+                .font(MonacoTheme.Typo.data)
+                .foregroundStyle(MonacoTheme.tertiaryText)
+                .frame(width: numberColumn, alignment: .leading)
+            Text(text)
+                .font(MonacoTheme.Typo.callout)
+                .foregroundStyle(MonacoTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, MonacoTheme.Space.m)
+        .padding(.vertical, MonacoTheme.Space.sm)
+        .frame(minHeight: 52)
+        .overlay(alignment: .bottom) {
+            if !isLast {
+                MonacoRule()
+                    .padding(.leading, MonacoTheme.Space.m + numberColumn + MonacoTheme.Space.sm)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Step \(number). \(text)")
+    }
+}
+
+/// The deposit address as the one card on a money screen: it is the thing the member acts on.
+/// The address in the market's voice, never hyphenated; a full-width Copy; and the one rule
+/// that matters — Solana only — as a caption under it rather than a warning.
+///
+/// Add money shows every state of it. Fund this cabal shows it when there is nothing to fund
+/// with yet, under its own identifiers.
+struct DepositAddressCard: View {
+    enum Content: Equatable {
+        case loading
+        case ready(String)
+        /// Why there is no address, in the member's words.
+        case unavailable(String)
+
+        /// The address load's three values as one state: a load in flight wins, then an
+        /// address, then whatever went wrong — "not ready yet" when nothing was said.
+        static func resolve(isLoading: Bool, address: String?, errorMessage: String?) -> Content {
+            if isLoading { return .loading }
+            if let address { return .ready(address) }
+            return .unavailable(errorMessage ?? "Deposit address not ready yet.")
+        }
+    }
+
+    let content: Content
+    var addressIdentifier = "deposit-address-value"
+    var copyIdentifier = "deposit-address-copy-button"
+    let onCopy: (String) -> Void
+    /// Offered on `unavailable` when set.
+    var onRetry: (() -> Void)?
+
+    static let networkNote = "Send USDC on the Solana network only."
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+            Text("Your deposit address")
+                .font(MonacoTheme.Typo.captionStrong)
+                .foregroundStyle(MonacoTheme.muted)
+
+            switch content {
+            case .loading:
+                loading
+            case .ready(let address):
+                ready(address)
+            case .unavailable(let message):
+                unavailable(message)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .monacoSurfaceCard()
+    }
+
+    private func ready(_ address: String) -> some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+            MonacoWalletAddressText(address: address)
+                .accessibilityIdentifier(addressIdentifier)
+                .onTapGesture {
+                    onCopy(address)
+                }
+
+            VStack(spacing: MonacoTheme.Space.s) {
+                Button("Copy address") {
+                    onCopy(address)
+                }
+                .buttonStyle(.monacoPrimary)
+                .monacoFullWidthButtons()
+                .accessibilityIdentifier(copyIdentifier)
+
+                Text(Self.networkNote)
+                    .font(MonacoTheme.Typo.caption)
+                    .foregroundStyle(MonacoTheme.muted)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    /// The card's own shape while the address loads: two lines of address and the button.
+    private var loading: some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                SkeletonBlock(height: 16)
+                SkeletonBlock(width: 120, height: 16)
+            }
+            SkeletonBlock(height: MonacoButtonMetrics.minimumHeight, radius: MonacoButtonMetrics.minimumHeight / 2)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading your deposit address")
+        .accessibilityIdentifier("deposit-address-loading")
+    }
+
+    private func unavailable(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+            Text(message)
+                .font(MonacoTheme.Typo.body)
+                .foregroundStyle(MonacoTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            if let onRetry {
+                Button("Try again", action: onRetry)
+                    .buttonStyle(.monacoSecondary)
+                    .monacoFullWidthButtons()
+                    .accessibilityIdentifier("deposit-address-retry")
+            }
+        }
     }
 }
 

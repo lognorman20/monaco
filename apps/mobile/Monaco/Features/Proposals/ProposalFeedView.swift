@@ -10,7 +10,7 @@ struct ProposalFeedView: View {
     /// A proposal that just arrived (from the propose flow): its card pulses once.
     var highlightProposalId: String?
 
-    @State private var tab: ProposalFeedTab = .open
+    @State private var tab: ProposalFeedTab
     @State private var proposals: [ProposalFeedTab: [ProposalDTO]] = [:]
     @State private var failedTabs: Set<ProposalFeedTab> = []
     @State private var votingIDs: Set<String> = []
@@ -25,6 +25,20 @@ struct ProposalFeedView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let votes = ProposalVoteLedger.shared
+
+    init(
+        service: ProposalFeedService,
+        groupId: String,
+        title: String = ProposalFeedCopy.feedTitle,
+        highlightProposalId: String? = nil,
+        initialTab: ProposalFeedTab = .open
+    ) {
+        self.service = service
+        self.groupId = groupId
+        self.title = title
+        self.highlightProposalId = highlightProposalId
+        _tab = State(initialValue: initialTab)
+    }
 
     /// Votes and swaps move in seconds; a feed with nothing in play only needs to notice new
     /// proposals. Only the Open list counts: list rows carry no execution state, so a closed row
@@ -108,6 +122,7 @@ struct ProposalFeedView: View {
                         ProposalDetailView(service: service, proposalId: proposal.id, initialProposal: proposal)
                     },
                     viewerChoice: votes.choice(for: proposal, viewerId: service.viewerId),
+                    viewerId: service.viewerId,
                     highlight: proposal.id == highlightProposalId
                 )
             }
@@ -178,7 +193,7 @@ struct ProposalFeedView: View {
         toast = result.toast
         if result.succeeded {
             Haptics.success()
-            withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.7)) {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
                 votes.record(choice, for: proposal.id, viewerId: service.viewerId)
             }
         }
@@ -214,24 +229,52 @@ enum ProposalFeedPolling {
     }
 }
 
-/// Placeholder in the shape of a proposal card.
+/// Placeholder in the shape of a proposal card: the coin and ticker with the corner stamp, the
+/// amount, the byline over two lines of reason, the tally, and the two ballot buttons.
+/// Without chrome it is the header of the proposal screen, on the paper.
 struct ProposalCardSkeleton: View {
+    var showsChrome = true
+
     var body: some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
-            HStack(spacing: MonacoTheme.Space.sm) {
-                SkeletonBlock(width: 40, height: 40, radius: 13)
-                VStack(alignment: .leading, spacing: 6) {
-                    SkeletonBlock(width: 110, height: 14)
-                    SkeletonBlock(width: 70, height: 11)
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.m) {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+                HStack(spacing: MonacoTheme.Space.sm) {
+                    SkeletonBlock(width: 40, height: 40, radius: 20)
+                    VStack(alignment: .leading, spacing: 6) {
+                        SkeletonBlock(width: 64, height: 15)
+                        SkeletonBlock(width: 36, height: 11)
+                    }
+                    Spacer(minLength: MonacoTheme.Space.s)
+                    SkeletonBlock(width: 88, height: 11)
                 }
+                SkeletonBlock(width: 120, height: 28)
             }
-            SkeletonBlock(width: 120, height: 28)
-            SkeletonBlock(height: 12)
-            SkeletonBlock(width: 180, height: 12)
+            VStack(alignment: .leading, spacing: 6) {
+                SkeletonBlock(width: 96, height: 13)
+                SkeletonBlock(height: 12)
+                SkeletonBlock(width: 200, height: 12)
+            }
+            SkeletonBlock(width: 190, height: 11)
+            HStack(spacing: MonacoTheme.Space.s) {
+                SkeletonBlock(height: MonacoButtonMetrics.minimumHeight, radius: MonacoButtonMetrics.minimumHeight / 2)
+                SkeletonBlock(height: MonacoButtonMetrics.minimumHeight, radius: MonacoButtonMetrics.minimumHeight / 2)
+            }
         }
-        .padding(MonacoTheme.Space.m)
+        .padding(showsChrome ? MonacoTheme.Space.m : 0)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
+        .background {
+            if showsChrome {
+                RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
+                    .fill(MonacoTheme.surface)
+            }
+        }
+        .overlay {
+            if showsChrome {
+                RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous)
+                    .strokeBorder(MonacoTheme.hairline, lineWidth: 1)
+            }
+        }
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("Loading")
     }
 }

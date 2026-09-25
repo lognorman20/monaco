@@ -15,7 +15,8 @@ extension GroupPnLRange {
     }
 }
 
-/// One P&L line per cabal the viewer belongs to.
+/// One return line per cabal the viewer belongs to, on the paper, with the cabals as a
+/// ruled legend under it.
 struct CabalsPnLChartSection: View {
     let model: CabalsTabModel
     let hasCabals: Bool
@@ -39,16 +40,15 @@ struct CabalsPnLChartSection: View {
 
     var body: some View {
         if model.showsChartSection(hasCabals: hasCabals) {
-            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-                Text("Your cabals' P&L")
-                    .font(MonacoTheme.Typo.section)
-                    .foregroundStyle(MonacoTheme.ink)
-                rangePicker
-
-                MonacoCard {
-                    content
-                        .frame(maxWidth: .infinity, minHeight: 180)
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
+                VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                    MonacoSectionHeader("Your cabals' return")
+                    rangePicker
                 }
+                .padding(.horizontal, MonacoTheme.Space.m)
+
+                content
+                    .frame(maxWidth: .infinity, minHeight: 180)
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("cabals-pnl-section")
@@ -56,16 +56,25 @@ struct CabalsPnLChartSection: View {
     }
 
     private var rangePicker: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: MonacoTheme.Space.s) {
             ForEach(GroupPnLRange.allCases, id: \.self) { option in
+                let isSelected = model.range == option
                 Button {
                     model.selectRange(option)
                 } label: {
-                    MonacoChip(title: option.label, isSelected: model.range == option)
+                    Text(option.label)
+                        .font(MonacoTheme.Typo.dataCaption)
+                        .foregroundStyle(isSelected ? MonacoTheme.primaryButtonLabel : MonacoTheme.muted)
+                        .padding(.horizontal, 14)
+                        .frame(minWidth: 48, minHeight: 34)
+                        .background(Capsule().fill(isSelected ? MonacoTheme.primaryButtonFill : MonacoTheme.surfaceSunken))
+                        .padding(.vertical, 5)
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(option.spokenWindow)
                 .accessibilityIdentifier("cabals-pnl-range-\(option.rawValue)")
-                .accessibilityAddTraits(model.range == option ? .isSelected : [])
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
     }
@@ -90,22 +99,18 @@ struct CabalsPnLChartSection: View {
     }
 
     private func emptyMessage(_ text: String, id: String) -> some View {
-        VStack(spacing: MonacoTheme.Space.s) {
-            Image(systemName: "chart.xyaxis.line")
-                .font(.title2)
-                .foregroundStyle(MonacoTheme.muted)
-            Text(text)
-                .font(MonacoTheme.TypeRole.body)
-                .foregroundStyle(MonacoTheme.muted)
-                .multilineTextAlignment(.center)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier(id)
+        Text(text)
+            .font(MonacoTheme.Typo.callout)
+            .foregroundStyle(MonacoTheme.muted)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, MonacoTheme.Space.l)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier(id)
     }
 
     private var chart: some View {
         let series = drawable
-        return VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+        return VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
             Chart {
                 RuleMark(y: .value("Break even", 0))
                     .foregroundStyle(MonacoTheme.hairline)
@@ -119,7 +124,7 @@ struct CabalsPnLChartSection: View {
                         )
                         .foregroundStyle(Self.color(forGroupID: line.groupID))
                         .interpolationMethod(.monotone)
-                        .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                        .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                     }
                 }
             }
@@ -127,33 +132,42 @@ struct CabalsPnLChartSection: View {
             .chartXAxis {
                 AxisMarks(values: .automatic(desiredCount: 3)) { _ in
                     AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                        .font(MonacoTheme.Typo.stamp)
                         .foregroundStyle(MonacoTheme.tertiaryText)
                 }
             }
             .chartYAxis(.hidden)
-            .frame(height: 180)
+            .frame(height: 160)
+            .padding(.horizontal, MonacoTheme.Space.m)
             .accessibilityIdentifier("cabals-pnl-chart")
 
             legend(series: series)
         }
     }
 
+    /// The cabals as ruled rows: a swatch in the line's colour, the name, and where the line
+    /// ends in the window.
     private func legend(series: [GroupPnLSeriesDTO]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(series, id: \.id) { line in
-                HStack(spacing: MonacoTheme.Space.s) {
+        MonacoGroupedList {
+            ForEach(Array(series.enumerated()), id: \.element.id) { index, line in
+                HStack(spacing: MonacoTheme.Space.sm) {
                     Capsule()
                         .fill(Self.color(forGroupID: line.groupID))
                         .frame(width: 18, height: 3)
                     Text(line.name)
-                        .font(MonacoTheme.TypeRole.caption)
+                        .font(MonacoTheme.Typo.rowTitle)
                         .foregroundStyle(MonacoTheme.ink)
                         .lineLimit(1)
                     Spacer()
                     if let last = line.points.last {
-                        Text(SignedUsdFormatter.format(last.dollarPnl))
-                            .font(MonacoTheme.TypeRole.caption.monospacedDigit())
-                            .foregroundStyle(SignedUsdFormatter.isLoss(last.dollarPnl) ? MonacoTheme.loss : MonacoTheme.profit)
+                        PnLText(dollarPnl: last.dollarPnl, style: .row)
+                    }
+                }
+                .padding(.horizontal, MonacoTheme.Space.m)
+                .frame(minHeight: 44)
+                .overlay(alignment: .bottom) {
+                    if index < series.count - 1 {
+                        MonacoRule().padding(.leading, MonacoTheme.Space.m + 18 + MonacoTheme.Space.sm)
                     }
                 }
                 .accessibilityElement(children: .combine)

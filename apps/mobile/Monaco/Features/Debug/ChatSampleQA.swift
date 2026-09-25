@@ -16,6 +16,8 @@ import MonacoCore
 /// - `-MonacoChatSampleClosedFirstLoad` — with the above, the *first* load answers 403 and
 ///   every call after it succeeds: the thread opens closed, and the member has to be left
 ///   something to tap that gets them back in
+/// - `-MonacoChatSampleLoading` — with the above, the first page never arrives, so the thread's
+///   loading state stays on screen
 enum ChatSampleQA {
     static var isEnabled: Bool { arguments.contains("-MonacoChatSampleQA") }
 
@@ -27,10 +29,13 @@ enum ChatSampleQA {
             failSends: arguments.contains("-MonacoChatSampleOffline"),
             busy: arguments.contains("-MonacoChatSampleBusy"),
             closedListCalls: closedListCalls,
-            closedFirstLoad: arguments.contains("-MonacoChatSampleClosedFirstLoad")
+            closedFirstLoad: arguments.contains("-MonacoChatSampleClosedFirstLoad"),
+            neverAnswers: arguments.contains("-MonacoChatSampleLoading")
         )
         return NavigationStack {
-            GroupChatView(groupId: SampleGroupChatService.groupId, groupName: "Weekend investors") { service }
+            OpensOnceActive {
+                GroupChatView(groupId: SampleGroupChatService.groupId, groupName: "Weekend investors") { service }
+            }
         }
     }
 
@@ -44,8 +49,42 @@ enum ChatSampleQA {
     }
 }
 
+/// Puts the chat on screen once the app is in the foreground, which is how the product always
+/// reaches it: pushed from the cabal screen of an app that is already running.
+///
+/// Launched straight into the chat, the app's own activation lands after the first load and
+/// reads to the screen as the member coming back to the app — which it answers, on a closed
+/// thread, by asking the server again. A first load refused on purpose was then retried before
+/// anyone could see it, and the closed-on-first-load scenario opened on a readable thread.
+private struct OpensOnceActive<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var isOpen = false
+
+    var body: some View {
+        Group {
+            if isOpen {
+                content()
+            } else {
+                MonacoTheme.canvas.ignoresSafeArea()
+            }
+        }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            if phase == .active { isOpen = true }
+        }
+    }
+}
+
 private actor SampleGroupChatService: GroupChatService {
     static let groupId = "00000000-0000-4000-8000-000000000166"
+
+    /// The 403 the chat routes answer for a member who is out of the cabal. Spelled with the
+    /// module on purpose: the app has a `MonacoAPIError` of its own, and a bare name picks that
+    /// one, which `GroupChatCopy.chatClosed` does not recognise. The closed scenarios then never
+    /// closed anything — the first load read as a generic failure and the blip rode out because
+    /// no answer counted as closed at all, not because the tracker waited for a run of them.
+    static let closed = MonacoCore.MonacoAPIError.httpStatus(403)
 
     private var messages: [GroupMessageDTO]
     private let failSends: Bool
@@ -57,18 +96,22 @@ private actor SampleGroupChatService: GroupChatService {
     private var closedAnswersGiven = 0
     /// The first load answers 403, so the screen opens in its closed state.
     private let closedFirstLoad: Bool
+    /// No page ever arrives: the loading state, held.
+    private let neverAnswers: Bool
 
     init(
         startEmpty: Bool,
         failSends: Bool,
         busy: Bool = false,
         closedListCalls: Int = 0,
-        closedFirstLoad: Bool = false
+        closedFirstLoad: Bool = false,
+        neverAnswers: Bool = false
     ) {
         self.failSends = failSends
         self.busy = busy
         self.closedListCalls = closedListCalls
         self.closedFirstLoad = closedFirstLoad
+        self.neverAnswers = neverAnswers
         guard !startEmpty else {
             messages = []
             return
@@ -99,17 +142,20 @@ private actor SampleGroupChatService: GroupChatService {
     }
 
     func listGroupMessages(groupId: String, before: String?, limit: Int) async throws -> GroupMessagesPageDTO {
+        if neverAnswers {
+            try await Task.sleep(for: .seconds(3600))
+        }
         if before == nil {
             listCalls += 1
             // Only the first load, so the member's retry finds the cabal readable again.
             if closedFirstLoad, listCalls == 1 {
-                throw MonacoAPIError.httpStatus(403)
+                throw Self.closed
             }
             // Otherwise the first load lands, so the thread is on screen and the closed state
             // shows as the banner over it rather than as a whole-screen error.
             if listCalls > 1, closedAnswersGiven < closedListCalls {
                 closedAnswersGiven += 1
-                throw MonacoAPIError.httpStatus(403)
+                throw Self.closed
             }
             // Not on the first load: the test needs to get itself scrolled up first.
             if busy, listCalls > 1 {

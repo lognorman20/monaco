@@ -69,8 +69,11 @@ struct GroupDetailView: View {
     @State private var viewerMayBeAdmin = true
     @State private var decidingRequestIDs: Set<String> = []
     @State private var proposalService: LiveProposalFeedService
+    /// The pot's curve on the hero: one slot per range, re-read with the rest of the screen.
+    @State private var pnl: GroupPnLHistoryModel
     /// Owns the cabal picture: which one is current, and whether a write is in flight.
     @StateObject private var pictureEditor: CabalPictureEditor
+
     @State private var proposalRefreshCount = 0
     @State private var route: GroupDetailRoute?
     @State private var showProposeSheet = false
@@ -116,6 +119,8 @@ struct GroupDetailView: View {
         self.onLeft = onLeft
         _isLoading = State(initialValue: initialView == nil)
         _proposalService = State(initialValue: LiveProposalFeedService(auth: auth))
+        _pnl = State(initialValue: GroupPnLHistoryModel(groupId: groupId, source: LiveGroupPnLHistorySource(auth: auth)))
+
         _pictureEditor = StateObject(wrappedValue: CabalPictureEditor(
             groupId: groupId,
             pictureUrl: initialView?.pictureUrl,
@@ -135,6 +140,8 @@ struct GroupDetailView: View {
             // The hero carries the name; the bar only shows it once the hero scrolls away.
             .navigationTitle(groupView == nil || heroScrolledAway ? displayName : "")
             .navigationBarTitleDisplayMode(.inline)
+            .cabalHeroNavigationBar(isOverHero: groupView != nil && !heroScrolledAway)
+
             .toolbar {
                 if groupView != nil, !isLeaving {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -166,6 +173,11 @@ struct GroupDetailView: View {
             .pollWhileVisible(every: pollInterval, isActive: groupView != nil && !hasLeft, gate: refreshGate) {
                 try await refresh(.quiet)
             }
+            // A range chip on the hero: read that window if it has not been read yet.
+            .onChange(of: pnl.range) { _, range in
+                Task { await pnl.load(range: range) }
+            }
+
             // A vote that just closed is still landing: keep watching closely for a little while.
             .task(id: voteOutcomeWatch) {
                 guard voteOutcomeWatch > 0 else { return }
@@ -236,12 +248,16 @@ struct GroupDetailView: View {
                 },
                 onToast: { toast = $0 },
                 onHeroScrolledAway: { heroScrolledAway = $0 },
-                pictureEditor: pictureEditor
+                pictureEditor: pictureEditor,
+                heroChart: pnl.chart,
+                heroRange: pnl.range,
+                onHeroRange: { pnl.range = $0 }
             )
         } else if let errorMessage {
+
             statusCard {
                 Text(errorMessage)
-                    .font(.body)
+                    .font(MonacoTheme.Typo.body)
                     .foregroundStyle(MonacoTheme.secondaryText)
                     .multilineTextAlignment(.center)
                 Button("Try again") {
@@ -255,7 +271,7 @@ struct GroupDetailView: View {
         } else {
             statusCard {
                 Text("Couldn't load this cabal. Pull down to try again")
-                    .font(.body)
+                    .font(MonacoTheme.Typo.body)
                     .foregroundStyle(MonacoTheme.secondaryText)
                     .multilineTextAlignment(.center)
                 Button("Try again") {
@@ -399,9 +415,14 @@ struct GroupDetailView: View {
         async let viewLoad = apiClient.getGroupView(accessToken: token, groupId: groupId)
         async let activityLoad = apiClient.getGroupActivity(accessToken: token, groupId: groupId)
         async let joinLoad = readJoinRequests(token: token)
+        // The curve rides along with the rest of the read; its failures are its own, and a
+        // quiet one leaves the drawn curve alone.
+        async let curveLoad: Void = pnl.load(range: pnl.range, quietly: mode == .quiet)
 
         let activity = try? await activityLoad
         let joinRequestsRead = await joinLoad
+        await curveLoad
+
         var loadedView: GroupViewDTO?
         var viewFailure: Error?
         do {
@@ -623,7 +644,17 @@ struct GroupDetailView: View {
 }
 
 extension View {
+    /// The bar over the cabal hero is the hero's own ink, so the band runs from the status bar
+    /// down; once the band has scrolled away the bar goes back to the paper.
+    func cabalHeroNavigationBar(isOverHero: Bool) -> some View {
+        toolbarBackground(MonacoTheme.heroInk, for: .navigationBar)
+            .toolbarBackground(isOverHero ? .visible : .hidden, for: .navigationBar)
+            .toolbarColorScheme(isOverHero ? .dark : nil, for: .navigationBar)
+            .animation(.easeInOut(duration: 0.2), value: isOverHero)
+    }
+
     /// The cabal screen while a leave is running.
+
     ///
     /// Leaving sells a slice and waits for the payout to confirm, which can take most of a
     /// minute. For that whole time the screen says what is happening and takes no taps: an idle
@@ -658,7 +689,7 @@ struct GroupLeaveProgressCover: View {
                     .font(MonacoTheme.Typo.rowTitle)
                     .foregroundStyle(MonacoTheme.ink)
                 Text("This can take a minute. Keep the app open.")
-                    .font(.footnote)
+                    .font(MonacoTheme.Typo.caption)
                     .foregroundStyle(MonacoTheme.secondaryText)
                     .multilineTextAlignment(.center)
             }
@@ -719,17 +750,27 @@ struct GroupDetailContent: View {
     var onHeroScrolledAway: (Bool) -> Void = { _ in }
     /// Nil on read-only surfaces; the hero then draws a plain mark.
     var pictureEditor: CabalPictureEditor?
+    /// The pot's curve on the hero, owned by the screen.
+    var heroChart: GroupHeroChart = .loading
+    var heroRange: GroupPnLRange = .oneMonth
+    var onHeroRange: (GroupPnLRange) -> Void = { _ in }
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 32) {
-                VStack(spacing: 20) {
+            // No horizontal padding on the stack: the hero band and the ruled lists run edge to
+            // edge, and each section insets its own header.
+            LazyVStack(alignment: .leading, spacing: MonacoTheme.Space.xl) {
+                VStack(spacing: MonacoTheme.Space.l) {
                     GroupHeroSection(
                         view: view,
+                        chart: heroChart,
+                        range: heroRange,
+                        onRange: onHeroRange,
                         pictureEditor: pictureEditor,
                         onPictureResult: onToast
                     )
                     GroupActionRow(slice: view.you, onRoute: onRoute, onPropose: onPropose)
+                        .padding(.horizontal, MonacoTheme.Space.m)
                 }
 
                 if !joinRequests.isEmpty {
@@ -751,10 +792,12 @@ struct GroupDetailContent: View {
                     )
                     PotSectionView(
                         pot: view.pot,
+                        groupId: view.id,
                         onAddMoney: { onRoute(.addMoney) },
                         onOpenStock: { onRoute(.stock(symbol: $0)) }
                     )
                 }
+
 
                 if let agent = view.agent {
                     AgentSectionView(agent: agent) { message in
@@ -774,9 +817,7 @@ struct GroupDetailContent: View {
                     onSeeAll: { onRoute(.activity) }
                 )
             }
-            .padding(.horizontal, MonacoTheme.Space.gutter)
-            .padding(.top, 8)
-            .padding(.bottom, 32)
+            .padding(.bottom, MonacoTheme.Space.xl)
         }
         .scrollIndicators(.hidden)
         .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -786,6 +827,7 @@ struct GroupDetailContent: View {
         }
     }
 }
+
 
 /// Add money · Propose · Cash out · Chat, directly under the hero.
 struct GroupActionRow: View {
@@ -812,20 +854,21 @@ struct GroupActionRow: View {
     }
 }
 
-/// Admin-only: people waiting to join, answered inline.
+/// Admin-only: people waiting to join, answered inline in a ruled list.
 struct GroupJoinRequestsCard: View {
     let requests: [JoinRequestDTO]
     let decidingRequestIDs: Set<String>
     let onDecide: (JoinRequestDTO, Bool) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
             MonacoSectionHeader(requests.count == 1 ? "1 person wants to join" : "\(requests.count) people want to join")
-            VStack(spacing: 0) {
+                .padding(.horizontal, MonacoTheme.Space.m)
+            MonacoGroupedList {
                 ForEach(requests) { request in
                     let name = request.displayName.isEmpty ? "Member" : request.displayName
-                    HStack(spacing: 8) {
-                        MonacoAvatar(photoURL: request.profilePhotoUrl, displayName: name, size: 36)
+                    HStack(spacing: MonacoTheme.Space.sm) {
+                        MonacoAvatar(photoURL: request.profilePhotoUrl, displayName: name, size: 40)
                         Text(name)
                             .font(MonacoTheme.Typo.rowTitle)
                             .foregroundStyle(MonacoTheme.ink)
@@ -833,7 +876,7 @@ struct GroupJoinRequestsCard: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .layoutPriority(1)
                         Button("Deny") { onDecide(request, false) }
-                            .font(.subheadline.weight(.semibold))
+                            .font(MonacoTheme.Typo.calloutStrong)
                             .lineLimit(1)
                             .fixedSize()
                             .foregroundStyle(MonacoTheme.muted)
@@ -843,7 +886,7 @@ struct GroupJoinRequestsCard: View {
                             Haptics.success()
                             onDecide(request, true)
                         }
-                            .font(.subheadline.weight(.semibold))
+                            .font(MonacoTheme.Typo.calloutStrong)
                             .lineLimit(1)
                             .fixedSize()
                             .foregroundStyle(MonacoTheme.primaryButtonLabel)
@@ -855,35 +898,55 @@ struct GroupJoinRequestsCard: View {
                     }
                     .disabled(decidingRequestIDs.contains(request.id))
                     .opacity(decidingRequestIDs.contains(request.id) ? 0.5 : 1)
+                    .padding(.horizontal, MonacoTheme.Space.m)
                     .padding(.vertical, 6)
+                    .frame(minHeight: 60)
+                    .overlay(alignment: .bottom) {
+                        if request.id != requests.last?.id {
+                            MonacoRule().padding(.leading, MonacoTheme.Space.m + 40 + MonacoTheme.Space.sm)
+                        }
+                    }
                 }
             }
-            .padding(.horizontal, MonacoTheme.Space.m)
-            .background(MonacoTheme.surface, in: RoundedRectangle(cornerRadius: MonacoTheme.Radius.card, style: .continuous))
         }
         .accessibilityIdentifier("group-join-requests")
     }
 }
 
-/// Placeholder shaped like the loaded screen: hero, action row, three rows.
 struct GroupDetailSkeleton: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 32) {
-            SkeletonBlock(height: 300, radius: MonacoTheme.Radius.hero)
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.xl) {
+            // The band, in its own shape.
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
+                HStack(spacing: MonacoTheme.Space.sm) {
+                    SkeletonBlock(width: 48, height: 48, radius: MonacoTheme.Radius.tile)
+                    SkeletonBlock(width: 180, height: 22)
+                }
+                SkeletonBlock(width: 200, height: 44)
+                SkeletonBlock(height: 76, radius: 0)
+                SkeletonBlock(width: 140, height: 18)
+            }
+            .padding(.horizontal, MonacoTheme.Space.gutter)
+            .padding(.vertical, MonacoTheme.Space.l)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(MonacoTheme.heroInk.opacity(0.08))
+
             HStack {
                 ForEach(0..<4, id: \.self) { _ in
                     SkeletonBlock(width: 56, height: 56, radius: 28)
                         .frame(maxWidth: .infinity)
                 }
             }
-            VStack(alignment: .leading, spacing: 12) {
+            .padding(.horizontal, MonacoTheme.Space.m)
+
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.sm) {
                 SkeletonBlock(width: 120, height: 22)
                 ForEach(0..<3, id: \.self) { _ in
-                    SkeletonBlock(height: 60, radius: 14)
+                    SkeletonBlock(height: 60, radius: 0)
                 }
             }
+            .padding(.horizontal, MonacoTheme.Space.m)
         }
-        .padding(.horizontal, MonacoTheme.Space.gutter)
         .padding(.top, 8)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Loading cabal")

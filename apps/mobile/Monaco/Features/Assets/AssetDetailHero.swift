@@ -10,6 +10,8 @@ import SwiftUI
 /// reading the live price itself.
 struct AssetDetailHero: View {
     let displayName: String
+    /// The ticker, in the market's voice, beside the company's name.
+    var ticker: String = ""
     let priceUsdcMicros: Int64?
     let move: AssetDetailModel.Move?
     let isScrubbing: Bool
@@ -19,13 +21,26 @@ struct AssetDetailHero: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            Text(displayName)
-                .font(MonacoTheme.Typo.caption)
-                .foregroundStyle(MonacoTheme.muted)
-                .accessibilityIdentifier("asset-detail-name")
+            // The company in the brand's voice, the ticker in the market's: this is the one
+            // screen where the name leads, because the tap was the question "what is this?".
+            HStack(alignment: .firstTextBaseline, spacing: MonacoTheme.Space.s) {
+                Text(displayName)
+                    .font(MonacoTheme.Typo.title)
+                    .foregroundStyle(MonacoTheme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .accessibilityIdentifier("asset-detail-name")
+                if !ticker.isEmpty, ticker != displayName {
+                    Text(ticker)
+                        .font(MonacoTheme.Typo.data)
+                        .foregroundStyle(MonacoTheme.muted)
+                        .accessibilityHidden(true)
+                }
+            }
 
             price
                 .accessibilityIdentifier("asset-detail-price")
+
 
             if let move {
                 changeRow(move)
@@ -38,16 +53,18 @@ struct AssetDetailHero: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// A quote, so it sets in the market's voice — the one hero figure in the app that does.
     @ViewBuilder
     private var price: some View {
         if let priceUsdcMicros {
-            MoneyText(micros: priceUsdcMicros, style: .hero)
+            MoneyText(micros: priceUsdcMicros, style: .hero, voice: .market)
         } else {
             Text("—")
-                .moneyFont(.hero)
+                .moneyFont(.hero, voice: .market)
                 .foregroundStyle(MonacoTheme.muted)
         }
     }
+
 
     /// "▲ $5.50 · 2.4%  Past day · AAPL", or the scrubbed sample's own time in place
     /// of the period. Dollars come from the curve, so they are only shown when there
@@ -74,10 +91,11 @@ struct AssetDetailHero: View {
             }
 
             Text(periodLabel(move))
-                .font(MonacoTheme.Typo.caption)
+                .font(isScrubbing ? MonacoTheme.Typo.stamp : MonacoTheme.Typo.caption)
                 .foregroundStyle(isScrubbing ? MonacoTheme.ink : MonacoTheme.muted)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spokenChange(move))
@@ -116,13 +134,34 @@ struct AssetDetailHero: View {
 
 /// The hero's shape while both calls are still in flight, so the screen does not jump
 /// when the numbers land.
+///
+/// Each block is the thing it stands in for: text-height bars for the name, the ticker
+/// and the captions, the price's own height, and capsules where the change badge and
+/// the session chip will be — not four rounded slabs of roughly the right width.
 struct AssetDetailHeroSkeleton: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            SkeletonBlock(width: 120, height: 14)
-            SkeletonBlock(width: 200, height: 40, radius: 12)
-            SkeletonBlock(width: 150, height: 20, radius: 10)
-            SkeletonBlock(width: 110, height: 24, radius: 12)
+            // "Apple  AAPL"
+            HStack(alignment: .bottom, spacing: MonacoTheme.Space.s) {
+                SkeletonBlock(width: 104, height: 22, radius: 4)
+                SkeletonBlock(width: 44, height: 13, radius: 3)
+                    .padding(.bottom, 2)
+            }
+            .padding(.vertical, 5)
+            // "$232.05"
+            SkeletonBlock(width: 196, height: 36, radius: 6)
+                .padding(.vertical, 8)
+            // "▲ $6.59 · 2.9%  Past day · AAPL"
+            HStack(spacing: MonacoTheme.Space.s) {
+                SkeletonBlock(width: 118, height: 26, radius: 13)
+                SkeletonBlock(width: 96, height: 12, radius: 3)
+            }
+            // "Market open" and the line under it
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.xs) {
+                SkeletonBlock(width: 124, height: 28, radius: 14)
+                SkeletonBlock(width: 104, height: 12, radius: 3)
+                    .padding(.vertical, 3)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)

@@ -29,7 +29,7 @@ struct MonacoSearchField: View {
     var body: some View {
         HStack(spacing: MonacoTheme.Space.s) {
             Image(systemName: "magnifyingglass")
-                .font(.body.weight(.medium))
+                .font(MonacoTheme.Typo.body)
                 .foregroundStyle(MonacoTheme.muted)
                 .accessibilityHidden(true)
             TextField("", text: $text, prompt: Text(placeholder).foregroundStyle(MonacoTheme.disabledLabel))
@@ -90,7 +90,8 @@ struct MonacoChip: View {
 
     var body: some View {
         Text(title)
-            .font(MonacoTheme.TypeRole.caption.weight(.semibold))
+            .font(MonacoTheme.Typo.captionStrong)
+
             .foregroundStyle(isSelected ? MonacoTheme.primaryButtonLabel : MonacoTheme.ink)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -177,11 +178,11 @@ struct MonacoRowCard<Leading: View>: View {
             if let trailing, !trailing.isEmpty {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(trailing)
-                        .font(.subheadline.monospacedDigit())
+                        .font(MonacoTheme.Typo.data)
                         .foregroundStyle(trailingColor)
                     if let trailingCaption, !trailingCaption.isEmpty {
                         Text(trailingCaption)
-                            .font(.caption.monospacedDigit())
+                            .font(MonacoTheme.Typo.dataCaption)
                             .foregroundStyle(trailingCaptionColor)
                             .monacoOptionalAccessibilityIdentifier(trailingCaptionAccessibilityIdentifier)
                     }
