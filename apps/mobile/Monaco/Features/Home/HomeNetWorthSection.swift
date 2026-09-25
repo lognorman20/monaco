@@ -50,14 +50,27 @@ struct HomeNetWorthSection: View {
     /// The 1H curve's slot, resolved by `HomeView` from the dashboard and the series.
     var chart: HomeHeroChart = .hidden
 
+    // lane: portfolio
+    /// Opens the portfolio. Nil keeps the figure a plain figure (previews, older call sites).
+    var onSeePortfolio: (() -> Void)?
+
     private static let chartHeight: CGFloat = 92
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-                Text("Your money in cabals")
-                    .font(MonacoTheme.Typo.caption)
-                    .foregroundStyle(MonacoTheme.muted)
+                // lane: portfolio
+                HStack(spacing: MonacoTheme.Space.xs) {
+                    Text("Your money in cabals")
+                        .font(MonacoTheme.Typo.caption)
+                        .foregroundStyle(MonacoTheme.muted)
+                    if onSeePortfolio != nil {
+                        Image(systemName: "chevron.right")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(MonacoTheme.tertiaryText)
+                            .accessibilityHidden(true)
+                    }
+                }
 
                 MoneyText(decimalString: dashboard.netWorthUsd, style: .hero)
 
@@ -73,6 +86,8 @@ struct HomeNetWorthSection: View {
             }
             .padding(.horizontal, MonacoTheme.Space.m)
             .accessibilityElement(children: .combine)
+            // lane: portfolio
+            .modifier(SeePortfolioAction(action: onSeePortfolio))
             .accessibilityIdentifier("home-net-worth")
 
             chartSlot
@@ -121,5 +136,29 @@ struct HomeNetWorthSection: View {
                 .padding(.horizontal, MonacoTheme.Space.m)
         }
         .padding(.top, MonacoTheme.Space.m)
+    }
+}
+
+// lane: portfolio
+/// Makes Home's figure the way into the portfolio: the whole block is the target, and it
+/// reads as a button to VoiceOver.
+private struct SeePortfolioAction: ViewModifier {
+    let action: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        if let action {
+            Button {
+                Haptics.selection()
+                action()
+            } label: {
+                content
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens your portfolio")
+        } else {
+            content
+        }
     }
 }
