@@ -67,6 +67,8 @@ type GroupChatService struct {
 	store   *postgres.Store
 	privy   privy.Client
 	limiter *KeyedRateLimiter
+	// lane: notifications
+	notifier *Notifier
 }
 
 // NewGroupChatService wires chat with the default per-user posting limit.
@@ -142,6 +144,8 @@ func (s *GroupChatService) PostMessage(ctx context.Context, accessToken, groupID
 	if err != nil {
 		return GroupMessage{}, err
 	}
+	// lane: notifications
+	s.notifier.ChatMessage(ctx, groupID, userID, body)
 	return groupMessageFromRow(row, userID), nil
 }
 

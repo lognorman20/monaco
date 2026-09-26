@@ -48,6 +48,9 @@ struct ContentView: View {
         // lane: portfolio
         } else if let scenario = PortfolioSampleScenario.requested {
             PortfolioSampleHarness(scenario: scenario, auth: auth)
+        // lane: notifications
+        } else if let scenario = InboxSampleScenario.requested {
+            InboxSampleHarness(scenario: scenario, auth: auth)
         } else if SampleProposalFeedService.isRequested {
             SampleProposalFeedRoot()
         } else {

@@ -88,6 +88,10 @@ struct HomeView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // lane: notifications
+            ToolbarItem(placement: .topBarTrailing) {
+                InboxBellButton()
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 profileButton
             }
@@ -117,6 +121,8 @@ struct HomeView: View {
             try await session.pollLive(auth: auth)
         }
         .monacoToast($toast)
+        // lane: notifications
+        .inboxEntry(auth: auth, selectedTab: $selectedTab)
         .monacoFrameStats("Home")
     }
 

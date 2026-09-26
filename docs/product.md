@@ -24,6 +24,10 @@ Formula and worked numbers: [NAV and share units](#nav-and-share-units).
 
 Two boards, both percent return. Inside a cabal: who in this pot is ahead. Across the app: which cabals and which people are ahead. The boards are why people come back and argue about the next trade. Buys and cash-out exist so those numbers are real.
 
+## Notifications
+
+The daily pull is friends waiting on your vote. Every member has an inbox (the bell on Home) and, once they allow it, push on their phone: a new proposal, a vote about to close, a reminder from a friend who already voted, what the cabal decided and bought, chat, and their own money arriving or settling. Each kind belongs to one of four switches (proposals, results, chat, money). Chat is held to one buzz per cabal every ten minutes. The app asks for push permission after the member joins or starts their first cabal, not at launch. Events, recipients and shapes: [API notifications](api.md#notifications).
+
 ## Agents
 
 A cabal can vote to hand a slice of the treasury to an agent. Example: 10% of the pot, one strategy. That slice sits in the portfolio next to positions members picked and USDC left idle.

@@ -61,5 +61,7 @@ struct MainTabView: View {
         }
         // lane: invites
         .inviteLinkSheet(auth: auth)
+        // lane: notifications
+        .pushPermissionPrompt()
     }
 }

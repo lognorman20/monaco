@@ -276,6 +276,8 @@ func (s *BuyService) StartBuy(ctx context.Context, req StartBuyRequest) (StartBu
 type ExecuteOnPassService struct {
 	swap  *SwapService
 	store *postgres.Store
+	// lane: notifications
+	notifier *Notifier
 }
 
 // NewExecuteOnPassService wires vote-pass buy execute dependencies.
@@ -371,6 +373,10 @@ func (s *ExecuteOnPassService) executeBuyOnPass(ctx context.Context, proposal Pr
 	}
 
 	logExecuteOnPassSuccess(proposal.ID, linked.ID, executeResult.Created)
+	// lane: notifications
+	if executeResult.Created {
+		s.notifier.TradeFilled(ctx, proposal, linked)
+	}
 	return ExecuteOnPassResult{
 		Transaction: linked,
 		Created:     executeResult.Created,
@@ -411,6 +417,10 @@ func (s *ExecuteOnPassService) executeSellOnPass(ctx context.Context, proposal P
 		return ExecuteOnPassResult{}, err
 	}
 	logExecuteOnPassSuccess(proposal.ID, result.Transaction.ID, result.Created)
+	// lane: notifications
+	if result.Created {
+		s.notifier.TradeFilled(ctx, proposal, result.Transaction)
+	}
 	return ExecuteOnPassResult{Transaction: result.Transaction, Created: result.Created}, nil
 }
 

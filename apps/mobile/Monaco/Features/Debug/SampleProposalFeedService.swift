@@ -165,13 +165,16 @@ final class SampleProposalFeedService: ProposalFeedService {
     /// sample-0 starts untouched, which the vote-from-the-card UI test depends on.
     private static func ballotPlan(index: Int, proposer: String) -> (yes: [String], no: [String], viewer: String?) {
         if let closed = closedBallots[index] { return closed }
+        // lane: notifications — the viewer has voted yes on the open ones, so the proposal screen
+        // shows "Remind them" (`-MonacoProposalSampleViewerVoted`).
+        let viewerVoted = ProcessInfo.processInfo.arguments.contains("-MonacoProposalSampleViewerVoted") && index != 0
         let yesCount = index % 3
         let noCount = index % 2
         let start = members.firstIndex(of: proposer) ?? 0
         let rotation = (0..<members.count).map { members[(start + $0) % members.count] }
         let yes = Array(rotation.prefix(yesCount))
         let no = Array(rotation.dropFirst(max(yesCount, 1)).prefix(noCount))
-        return (yes, no, nil)
+        return (yes, no, viewerVoted ? "yes" : nil)
     }
 
     /// The record's proposal with its vote summary counted from its ballots.

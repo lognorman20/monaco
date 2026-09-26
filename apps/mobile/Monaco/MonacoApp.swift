@@ -9,6 +9,8 @@ import SwiftUI
 
 @main
 struct MonacoApp: App {
+    // lane: notifications
+    @UIApplicationDelegateAdaptor(MonacoAppDelegate.self) private var appDelegate
     @StateObject private var auth = PrivyAuthService()
 
     init() {
@@ -26,6 +28,8 @@ struct MonacoApp: App {
             root
                 .environmentObject(auth)
                 .tint(MonacoTheme.ink)
+                // lane: notifications
+                .pushRegistration(auth: auth)
         }
     }
 

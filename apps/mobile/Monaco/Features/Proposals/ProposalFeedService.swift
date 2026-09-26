@@ -22,7 +22,8 @@ protocol ProposalFeedService: AnyObject {
 /// Live service over the MonacoCore API client, authenticated with the Privy session token.
 @MainActor
 final class LiveProposalFeedService: ProposalFeedService {
-    private let client: MonacoCore.MonacoAPIClient
+    // lane: notifications — internal so the "Remind them" conformance (Features/Inbox) can use it.
+    let client: MonacoCore.MonacoAPIClient
 
     init(auth: PrivyAuthService, baseURL: URL = Config.apiBaseURL) {
         client = MonacoCore.MonacoAPIClient(

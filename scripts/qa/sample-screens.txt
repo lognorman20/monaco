@@ -219,3 +219,9 @@ history-filtered              -MonacoPortfolioSample historyFiltered
 history-empty                 -MonacoPortfolioSample historyEmpty
 history-loading               -MonacoPortfolioSample historyLoading
 history-failed                -MonacoPortfolioSample historyFailed
+# lane: notifications
+inbox-main                    -MonacoInboxSample inbox
+inbox-empty                   -MonacoInboxSample empty
+inbox-loading                 -MonacoInboxSample loading
+inbox-permission              -MonacoInboxSample permission
+proposal-detail-remind        -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-4 -MonacoProposalSampleViewerVoted

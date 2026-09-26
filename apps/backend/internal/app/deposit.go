@@ -91,6 +91,8 @@ type DepositService struct {
 	privy   privy.Client
 	pyth    pyth.Client
 	symbols *SymbolResolver
+	// lane: notifications
+	notifier *Notifier
 }
 
 // NewDepositService wires deposit dependencies.
@@ -276,6 +278,8 @@ func (d *DepositService) platformBalanceForWallet(ctx context.Context, userID, m
 	if err != nil {
 		return 0, 0, fmt.Errorf("member usdc balance: %w", err)
 	}
+	// lane: notifications
+	d.notifier.ObserveMemberBalance(ctx, userID, memberAddress, chainBalance)
 	pendingDeposits, err := d.store.SumPendingDepositAmountByUserID(ctx, userID)
 	if err != nil {
 		return 0, 0, err
@@ -522,6 +526,8 @@ func (d *DepositService) ObserveSweep(ctx context.Context, sweep ObservedSweep) 
 	logDepositObserveSweepConfirmed(sweep.DepositID, sweep.GroupID, sweep.UserID, sweep.TxSignature, newlyConfirmed)
 	if newlyConfirmed {
 		telemetry.MoneyMoved(telemetry.EventDepositSweep, confirmed.Amount)
+		// lane: notifications
+		d.notifier.FundCredited(ctx, sweep.UserID, sweep.GroupID, confirmed.Amount)
 	}
 	return ObserveSweepResult{
 		Deposit:  depositFromRow(confirmed),

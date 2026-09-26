@@ -79,6 +79,12 @@ struct ProposalDetailView: View {
                         showsChrome: false
                     )
                     .padding(.horizontal, MonacoTheme.Space.m)
+                    // lane: notifications
+                    if ProposalRemindButton.shows(proposal: proposal, service: service, viewerChoice: viewerChoice) {
+                        ProposalRemindButton(proposal: proposal, service: service, viewerChoice: viewerChoice, toast: $toast)
+                            .padding(.horizontal, MonacoTheme.Space.m)
+                            .padding(.top, -MonacoTheme.Space.m)
+                    }
                     reasonSection(proposal)
                     trackerSection(proposal)
                     ballotsSection(proposal)

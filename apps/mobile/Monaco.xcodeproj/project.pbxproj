@@ -36,9 +36,22 @@
 		B463064430590362008E7964 /* Monaco.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Monaco.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		C0DE00A130590361008E7964 /* Exceptions for "Monaco" folder in "Monaco" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Monaco.entitlements,
+			);
+			target = B46306123059035D008E7964 /* Monaco */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		B46306153059035D008E7964 /* Monaco */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C0DE00A130590361008E7964 /* Exceptions for "Monaco" folder in "Monaco" target */,
+			);
 			path = Monaco;
 			sourceTree = "<group>";
 		};

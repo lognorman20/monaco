@@ -90,6 +90,9 @@ type RedeemService struct {
 
 	payoutConfirmTimeout time.Duration
 	payoutPollInterval   time.Duration
+
+	// lane: notifications
+	notifier *Notifier
 }
 
 // NewRedeemService wires redeem dependencies.
@@ -791,6 +794,8 @@ func (r *RedeemService) settleRedeemPayout(ctx context.Context, view RedeemJobVi
 	view.Position = positionFromRowPostgres(position)
 	logRedeemSettled(view.ID, view.UserID, view.GroupID, withdrawal.ID, view.SliceUsdc)
 	telemetry.MoneyMoved(telemetry.EventRedeem, view.SliceUsdc)
+	// lane: notifications
+	r.notifier.CashOutSettled(ctx, view.UserID, view.GroupID, payout.Amount, payout.ToAddress)
 	return view, nil
 }
 
