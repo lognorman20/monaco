@@ -209,3 +209,13 @@ invite-join-unknown           -MonacoInviteSample joinUnknown
 invite-join-link              -MonacoInviteSample joinLink
 invite-details-large-text     -MonacoInviteSample details -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
 invite-join-preview-large-text -MonacoInviteSample joinPreview -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+# lane: portfolio
+portfolio                     -MonacoPortfolioSample portfolio
+portfolio-empty               -MonacoPortfolioSample portfolioEmpty
+portfolio-loading             -MonacoPortfolioSample portfolioLoading
+portfolio-failed              -MonacoPortfolioSample portfolioFailed
+history                       -MonacoPortfolioSample history
+history-filtered              -MonacoPortfolioSample historyFiltered
+history-empty                 -MonacoPortfolioSample historyEmpty
+history-loading               -MonacoPortfolioSample historyLoading
+history-failed                -MonacoPortfolioSample historyFailed

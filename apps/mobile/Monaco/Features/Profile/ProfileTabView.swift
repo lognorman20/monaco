@@ -235,6 +235,19 @@ struct ProfileTabView: View {
             MonacoSectionHeader("Account")
                 .padding(.horizontal, MonacoTheme.Space.m)
             MonacoGroupedList {
+                // lane: portfolio
+                NavigationLink {
+                    HistoryView(auth: auth)
+                } label: {
+                    MonacoRow(
+                        title: PortfolioCopy.historyTitle,
+                        subtitle: PortfolioCopy.historyCaption,
+                        chevron: true,
+                        leading: { StockMark(systemImage: "list.bullet", size: 40) }
+                    )
+                }
+                .buttonStyle(.monacoRow)
+                .accessibilityIdentifier("profile-history-row")
 
                 NavigationLink {
                     AdvancedSettingsView()

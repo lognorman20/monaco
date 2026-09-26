@@ -36,6 +36,8 @@ struct HomeView: View {
     /// The proposal pushed from "Needs your vote". Held here, at the tab root, so the pushed
     /// screen outlives both the countdown's tick and the row's own expiry.
     @State private var openProposalId: String?
+    // lane: portfolio
+    @State private var showPortfolio = false
 
     private var joinedCabals: [HomeGroupBoardRowDTO] {
         session.joinedCabals
@@ -92,6 +94,10 @@ struct HomeView: View {
         }
         .navigationDestination(item: $openProposalId) { proposalId in
             ProposalDetailView(auth: auth, proposalId: proposalId)
+        }
+        // lane: portfolio
+        .navigationDestination(isPresented: $showPortfolio) {
+            PortfolioView(auth: auth)
         }
         .refreshable {
             await pullToRefresh()
@@ -150,7 +156,9 @@ struct HomeView: View {
                         loaded: session.homePnLSeries,
                         embedded: dashboard.pnlSeries1H,
                         hasCabals: !dashboard.myGroups.isEmpty
-                    )
+                    ),
+                    // lane: portfolio
+                    onSeePortfolio: { showPortfolio = true }
                 )
 
                 HomeBalanceRowSection(

@@ -95,6 +95,9 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/me/balance` | Account balance: member-wallet USDC minus in-flight funds and withdrawals. |
 | `POST /v1/me/withdrawals` ● | Send USDC from the account balance to an external Solana address. |
 | `GET /v1/me/withdrawals/{id}` | One withdrawal. |
+| `GET /v1/me/portfolio` | The caller's slice of every cabal, merged by stock. See [Portfolio and history](#portfolio-and-history). |
+| `GET /v1/me/transactions` | The caller's money history, newest first. `type` = `all`, `money_in`, `cash_out`, `buy`, `sell`; `cursor`; `limit` (default 30, max 100). |
+| `GET /v1/me/transactions/export.csv` | The same history as a CSV download. Takes `type`. |
 | `GET /v1/home` | Group and people boards. |
 | `GET /v1/home/dashboard` | Net worth, the caller's cabals, a 1H series, leaderboard and missed proposals in one call. |
 | `GET /v1/home/pnl-series` | The caller's equity series. `range` = `1H`, `1D`, `1W`, `1M`. At most one point per second, so `ts` is unique at second precision. |
@@ -222,3 +225,60 @@ series.
 `spark` is always served from cache. A list route never fetches price history: a miss
 is a row without a sparkline now and a background warm for the next request, so no
 page of rows can ever wait on a vendor.
+
+## Portfolio and history
+
+`GET /v1/me/portfolio` is what Home's "Your money in cabals" is made of. It values each cabal
+with the same pot valuation Home uses, so `totalUsd` is the same figure.
+
+```
+{ "totalUsd", "cashUsd", "accountBalanceUsd", "dollarPnl", "percentReturn", "unvaluedCabals",
+  "holdings": [{ "symbol", "name", "kind", "logoUrl", "valueUsd", "shareOfTotal", "dollarPnl", "percentReturn",
+                 "cabals": [{ "groupId", "name", "tint", "pictureUrl", "valueUsd", "quantity", "dollarPnl" }] }] }
+```
+
+| Field | Rule |
+| --- | --- |
+| slice | The caller's share units over the pot's share base (units held by an unpaid cash out included). |
+| holding `valueUsd` | Slice × the cabal's position, at the mark the pot valuation used. Summed across cabals. |
+| holding `dollarPnl` | Value less slice × the cabal's fill-derived cost basis (the `cost-basis/{symbol}` figure). |
+| `quantity` | Slice × the cabal's tokens, in whole shares or tokens, as a decimal string. |
+| `cashUsd` | The caller's slice less their holdings: USDC in the pots. Holdings plus cash equal `totalUsd`. |
+| `totalUsd`, `dollarPnl`, `percentReturn` | As Home: slices summed, against net USDC put in. |
+| `accountBalanceUsd` | `GET /v1/me/balance`, outside every cabal and not in `totalUsd`. `null` when it could not be read. |
+| `shareOfTotal` | Holding value over `totalUsd`, 0..1. Cash's share is `cashUsd / totalUsd`. |
+| `tint` | `pine`, `ochre`, `plum`, `indigo` or `moss`: the app's rule (FNV-1a of the lowercased group id, mod 5). |
+| `unvaluedCabals` | Cabals that could not be valued this pass. They are left out of every figure rather than shown at zero. |
+
+Holdings are sorted by value, and each holding's cabals too.
+
+`GET /v1/me/transactions` returns `{ "items": [...], "nextCursor" }`; `nextCursor` is `null` on
+the last page. Pass it back unchanged. Rows are ordered by (`at`, `id`), newest first.
+
+```
+{ "id", "kind", "status", "groupId", "groupName", "symbol", "name", "assetKind", "amountUsd", "quantity", "at", "transactionId" }
+```
+
+| `kind` | Source | `id` |
+| --- | --- | --- |
+| `fund` | Money moved from the account balance into a cabal. | deposit (`GET /v1/deposits/{id}`) |
+| `cash_out` | A cash out of a cabal: paid, still running, or a transfer that failed and returned the shares. | withdrawal, redeem job, or payout |
+| `withdrawal` | USDC sent from the account balance to an outside address. | platform withdrawal |
+| `buy`, `sell` | The cabal's trade, attributed to the caller by slice. | transaction (`GET /v1/transactions/{id}`) |
+| `bot_buy`, `bot_sell` | The same, placed by the cabal's agent. | transaction |
+| `deposit` | Reserved. USDC arriving in the account balance is read from the chain and not recorded, so no rows yet. | |
+
+`status` is `pending`, `done` or `failed`. `symbol`, `name` and `assetKind` (`stock` or `pre_ipo`) are set on trades only. `money_in` keeps `deposit` and `fund`; `cash_out` keeps
+`cash_out` and `withdrawal`; `buy` and `sell` include the agent's trades.
+
+**Trade attribution uses the current slice.** Share units are stored as they are now, not as
+they were at each trade, so a trade's `amountUsd` and `quantity` are the caller's slice today
+times the cabal's trade. Trades from before the caller's first confirmed fund into that cabal
+are left out, and so are the trades of a cabal the caller has fully cashed out of. A sell that
+has not filled has no `amountUsd`; a buy that has not filled has no `quantity`.
+
+The CSV has the columns `date,kind,status,cabal,stock,amount_usd,quantity,id` and is sent with
+`Content-Disposition: attachment; filename="monaco-history.csv"`. It holds at most 10,000 rows,
+newest first; past that `X-Monaco-History-Truncated: true` is set. Cabal names that a spreadsheet
+would run as a formula are prefixed with `'`.
+

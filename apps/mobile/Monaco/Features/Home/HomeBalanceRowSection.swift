@@ -82,11 +82,15 @@ struct HomeBalanceRowSection: View {
             VStack(alignment: .leading, spacing: 0) {
                 addMoney
                 cashOut
+                // lane: portfolio
+                history
             }
         } else {
             HStack(spacing: MonacoTheme.Space.l) {
                 addMoney
                 cashOut
+                // lane: portfolio
+                history
                 Spacer(minLength: 0)
             }
         }
@@ -118,6 +122,22 @@ struct HomeBalanceRowSection: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("\(identifierPrefix)-cash-out-link")
+    }
+
+    // lane: portfolio
+    /// Every dollar in and out of the account and the cabals, with a CSV export.
+    private var history: some View {
+        NavigationLink {
+            HistoryView(auth: auth)
+        } label: {
+            Text(PortfolioCopy.history)
+                .font(MonacoTheme.Typo.calloutStrong)
+                .foregroundStyle(MonacoTheme.brand)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("\(identifierPrefix)-history-link")
     }
 
     @ViewBuilder
