@@ -59,6 +59,11 @@ var apiRoutes = []string{
 	"GET /v1/me",
 	"PATCH /v1/me",
 	"POST /v1/me/profile-photo",
+	// lane: settings
+	"GET /v1/me/preferences",
+	"PATCH /v1/me/preferences",
+	"GET /v1/me/deletion-check",
+	"DELETE /v1/me",
 	"GET /v1/me/balance",
 	"POST /v1/me/withdrawals",
 	"GET /v1/me/withdrawals/{id}",
@@ -302,6 +307,10 @@ func boot(ctx context.Context) (*bootResult, error) {
 	auth := &httpapi.AuthHandlers{Sessions: sessions}
 	me := &httpapi.MeHandlers{Sessions: sessions, ProfilePhoto: profilePhotos}
 	homeHandlers := &httpapi.HomeHandlers{Home: home}
+	// lane: settings
+	accountHandlers := &httpapi.AccountHandlers{Accounts: app.NewAccountService(store, privyClient, home).
+		WithPreferencesLimiter(app.NewPreferencesUpdateLimiter()).
+		WithDeleteLimiter(app.NewAccountDeleteLimiter())}
 	assetSocialHandlers := &httpapi.AssetSocialHandlers{Home: home}
 	groupHandlers := &httpapi.GroupHandlers{
 		Groups:     groups,
@@ -415,6 +424,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
 	mux.HandleFunc("PATCH /v1/me", me.PatchMeHandler)
 	mux.HandleFunc("POST /v1/me/profile-photo", me.UploadProfilePhotoHandler)
+	// lane: settings
+	mux.HandleFunc("GET /v1/me/preferences", accountHandlers.GetPreferencesHandler)
+	mux.HandleFunc("PATCH /v1/me/preferences", accountHandlers.PatchPreferencesHandler)
+	mux.HandleFunc("GET /v1/me/deletion-check", accountHandlers.DeletionCheckHandler)
+	mux.HandleFunc("DELETE /v1/me", accountHandlers.DeleteMeHandler)
 	mux.HandleFunc("GET /v1/me/balance", depositHandlers.GetPlatformBalanceHandler)
 	mux.HandleFunc("POST /v1/me/withdrawals", platformWithdrawHandlers.CreatePlatformWithdrawalHandler)
 	mux.HandleFunc("GET /v1/me/withdrawals/{id}", platformWithdrawHandlers.GetPlatformWithdrawalHandler)

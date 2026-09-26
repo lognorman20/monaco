@@ -71,6 +71,11 @@ func (s *SessionService) OpenSession(ctx context.Context, accessToken string) (S
 
 	user, err := s.store.UpsertUser(ctx, identity.PrivyUserID, identity.DisplayName)
 	if err != nil {
+		// lane: settings. A deleted account stays deleted: the same login is refused, not reopened.
+		if errors.Is(err, postgres.ErrUserDeleted) {
+			logSessionBranchWarn("session open rejected", "account deleted")
+			return SessionResult{}, ErrAccountDeleted
+		}
 		logSessionBranchError("session open upsert user failed", err)
 		return SessionResult{}, err
 	}

@@ -29,7 +29,8 @@ type User struct {
 	CreatedAt       time.Time
 }
 
-// UpsertUser inserts a user keyed by privy_user_id or returns the existing row.
+// UpsertUser inserts a user keyed by privy_user_id or returns the existing row. A row whose
+// member deleted the account is not handed back: it returns ErrUserDeleted.
 func (s *Store) UpsertUser(ctx context.Context, privyUserID string, displayName string) (User, error) {
 	if privyUserID == "" {
 		return User{}, fmt.Errorf("privy_user_id is required")
@@ -45,6 +46,7 @@ INSERT INTO users (privy_user_id, display_name)
 VALUES ($1, $2)
 ON CONFLICT (privy_user_id) DO UPDATE
   SET privy_user_id = users.privy_user_id
+  WHERE users.deleted_at IS NULL
 RETURNING id, privy_user_id, display_name, profile_photo_url, created_at`
 
 	var user User
@@ -55,6 +57,10 @@ RETURNING id, privy_user_id, display_name, profile_photo_url, created_at`
 		&user.ProfilePhotoURL,
 		&user.CreatedAt,
 	)
+	// lane: settings. The conflict's WHERE skipped a deleted row, so nothing came back.
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrUserDeleted
+	}
 	if err != nil {
 		return User{}, fmt.Errorf("upsert user: %w", err)
 	}
@@ -62,16 +68,18 @@ RETURNING id, privy_user_id, display_name, profile_photo_url, created_at`
 	return user, nil
 }
 
-// GetUserByPrivyUserID returns the user for privyUserID, or false if none exists.
+// GetUserByPrivyUserID returns the user for privyUserID, or false if none exists. A deleted
+// account reads as none, so no route acts as a member who deleted it.
 func (s *Store) GetUserByPrivyUserID(ctx context.Context, privyUserID string) (User, bool, error) {
 	if privyUserID == "" {
 		return User{}, false, fmt.Errorf("privy_user_id is required")
 	}
 
+	// lane: settings
 	const selectSQL = `
 SELECT id, privy_user_id, display_name, profile_photo_url, created_at
 FROM users
-WHERE privy_user_id = $1`
+WHERE privy_user_id = $1 AND deleted_at IS NULL`
 
 	var user User
 	err := s.db.QueryRowContext(ctx, selectSQL, privyUserID).Scan(
