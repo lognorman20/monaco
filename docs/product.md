@@ -253,6 +253,10 @@ The Profile tab is the signed-in user's own page: photo, display name, member-si
 - Both writes are limited per user (name: 5 quick edits, then one per 12 s; photo: 3, then one per 20 s) and return 429 with `Retry-After` past that.
 - After either write the app refetches Home, so the people board, dashboard leaderboard, and cabal member boards show the new name and photo. Those rows carry `profilePhotoUrl`.
 
+## Watchlist and price alerts
+
+A member can follow a stock before any cabal buys it. The star on a stock's screen adds it to their watchlist, which sits at the top of the Stocks tab as ordinary market rows in the order they choose. A price alert is one line on one stock ("tell me when Alphabet is above $360"): it is priced the way the Stocks tab prices the row, fires once when the price reaches the line, and then shows as fired on Profile → Price alerts. A member keeps up to 20 alerts waiting and 40 stocks on the watchlist. Both are private to the member. Contract: [API](api.md#watchlist-and-price-alerts).
+
 ## Withdraw
 
 **Platform withdraw** (Settings → Withdraw) sends idle USDC from the user's Privy **member wallet** to any Solana address they paste. It uses `GET /v1/me/balance` (chain USDC minus in-flight fund jobs and pending platform withdrawals) and `POST /v1/me/withdrawals`. It does not sell cabal holdings, debit share units, or pull from group treasuries. Deployed stake must return to the member wallet first (see leave / withdraw-to-balance flows).

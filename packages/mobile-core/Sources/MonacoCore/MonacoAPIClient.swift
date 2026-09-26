@@ -68,7 +68,8 @@ public enum MonacoAPIError: Error, Equatable {
 public typealias AccessTokenProvider = @Sendable () async throws -> String?
 
 public final class MonacoAPIClient: @unchecked Sendable {
-    private let baseURL: URL
+    // lane: watchlist — internal, so feature extensions in their own files can build requests.
+    let baseURL: URL
     /// Every request goes through the transport so an expired access token is
     /// refreshed and the request retried once instead of surfacing a 401.
     private let session: MonacoHTTPTransport
@@ -263,7 +264,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
     /// is in `accepting`. Any other status throws, carrying as much of the answer as
     /// `mapping` allows plus the request id.
     /// Money POSTs pass their `submission` so the idempotency key rides along.
-    private func send(
+    // lane: watchlist — internal, see `baseURL`.
+    func send(
         _ request: URLRequest,
         route: String,
         accepting: Set<Int> = [200],
@@ -765,7 +767,8 @@ public final class MonacoAPIClient: @unchecked Sendable {
         return parsed
     }
 
-    private func applyAuthorizationHeader(to request: inout URLRequest) async throws {
+    // lane: watchlist — internal, see `baseURL`.
+    func applyAuthorizationHeader(to request: inout URLRequest) async throws {
         guard let accessTokenProvider else { return }
         guard let token = try await accessTokenProvider(), !token.isEmpty else { return }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

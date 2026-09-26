@@ -19,6 +19,11 @@ struct AssetDetailView: View {
     /// The one screen this one is pushing, if any. See `AssetDetailRoute`.
     @State private var route: AssetDetailRoute?
     @State private var toast: MonacoToast?
+    // lane: watchlist
+    @State private var watch: AssetWatchModel
+    @State private var showsAlertSheet = false
+    private let alertSource: PriceAlertDataSource
+    private let alertSheetPrefill: PriceAlertPrefill?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -40,7 +45,10 @@ struct AssetDetailView: View {
         socialDataSource: AssetSocialDataSource? = nil,
         pricePollInterval: Duration = AssetDetailPolling.price,
         chartPollInterval: Duration = AssetDetailPolling.chart,
-        scrubbedIndexOnLoad: Int? = nil
+        scrubbedIndexOnLoad: Int? = nil,
+        // lane: watchlist
+        watchDataSource: (any WatchlistDataSource & PriceAlertDataSource)? = nil,
+        alertSheetPrefill: PriceAlertPrefill? = nil
     ) {
         self.auth = auth
         self.symbol = symbol
@@ -55,6 +63,11 @@ struct AssetDetailView: View {
             symbol: symbol,
             dataSource: socialDataSource ?? LiveAssetSocialDataSource(auth: auth)
         ))
+        // lane: watchlist
+        let watchSource: any WatchlistDataSource & PriceAlertDataSource = watchDataSource ?? LiveWatchlistDataSource(auth: auth)
+        _watch = State(initialValue: AssetWatchModel(symbol: symbol, dataSource: watchSource))
+        alertSource = watchSource
+        self.alertSheetPrefill = alertSheetPrefill
     }
 
     var body: some View {
@@ -82,6 +95,10 @@ struct AssetDetailView: View {
                     chartCard
                 case .loaded:
                     hero
+                    // lane: watchlist
+                    PriceAlertButton(alertCount: watch.alertCount) { showsAlertSheet = true }
+                        .padding(.horizontal, MonacoTheme.Space.m)
+                        .padding(.top, -MonacoTheme.Space.sm)
                     // The "can't be bought" line used to live here, above the chart.
                     // It belongs next to the button it disables, which is now in the
                     // trade bar — saying it twice made the screen argue with itself.
@@ -111,6 +128,16 @@ struct AssetDetailView: View {
         // they have to scroll to.
         .safeAreaInset(edge: .bottom, spacing: 0) { tradeBar }
         .monacoToast($toast)
+        // lane: watchlist
+        .assetWatchChrome(
+            watch: watch,
+            detail: model.detail,
+            name: heroDisplayName,
+            alerts: alertSource,
+            showsAlertSheet: $showsAlertSheet,
+            prefill: alertSheetPrefill,
+            toast: $toast
+        )
         // Three independent loads: the curve does not wait on the (slow) detail call,
         // and neither waits on the per-cabal read behind the social cards.
         .task { await model.loadDetail() }

@@ -235,6 +235,19 @@ struct ProfileTabView: View {
             MonacoSectionHeader("Account")
                 .padding(.horizontal, MonacoTheme.Space.m)
             MonacoGroupedList {
+                // lane: watchlist
+                NavigationLink {
+                    AlertsView(auth: auth)
+                } label: {
+                    MonacoRow(
+                        title: AlertCopy.profileRowTitle,
+                        subtitle: AlertCopy.profileRowSubtitle,
+                        chevron: true,
+                        leading: { StockMark(systemImage: "bell", size: 40) }
+                    )
+                }
+                .buttonStyle(.monacoRow)
+                .accessibilityIdentifier("profile-price-alerts-link")
 
                 NavigationLink {
                     AdvancedSettingsView()
