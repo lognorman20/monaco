@@ -10,11 +10,14 @@ detail. A test (`cmd/api/routes_doc_test.go`) fails if a route is missing from t
 `X-Monaco-Agent-Key` on the `/v1/agent` routes (the key names the cabal), `POST /v1/groups/{id}/agents/intents`
 and `GET /v1/groups/{id}/assets`. `GET /v1/agent/skill.md` and `GET /v1/invites/{code}` are public.
 A valid token with no Monaco user yet gets `404 user not found`: call `POST /v1/auth/session` first.
+A deleted account reads as no user on every route, and `POST /v1/auth/session` answers its login with
+`410` and `reason: account_deleted` rather than opening a fresh account on it.
 
 **Errors.** `{ "error": "message", "requestId": "…" }`. Send your own `X-Request-Id` (1–64 of
 `A-Z a-z 0-9 - _`) or the API mints one; it is echoed on the response and stamped on log lines.
 A blocked `POST /v1/groups/{id}/leave` is `409` with the same shape plus a machine-readable `reason`
-(for example `share_units_remaining`, `creator_must_transfer`).
+(for example `share_units_remaining`, `creator_must_transfer`). A refused `DELETE /v1/me` is `409`
+with `reason: account_not_empty` and the same `canDelete` and `blockers` as the deletion check.
 
 **Money.** USDC is integer micros (1 USDC = 1,000,000). Timestamps are UTC RFC 3339. `priceUsdcMicros` is the price of one whole token, whatever that token's decimals are.
 
@@ -62,6 +65,7 @@ callers: per agent key). A bearer token that fails verification is limited per I
 
 Chat, comments, display name and profile photo have their own tighter per-user limits, and a
 proposal can be nudged once an hour whoever sends it.
+Chat, comments, display name, profile photo, preferences and account deletion have their own tighter per-user limits.
 Set `TRUST_PROXY_HEADERS=true` only behind a proxy that overwrites `X-Forwarded-For`.
 
 **Idempotency.** Routes marked ● accept an `Idempotency-Key` header (8–128 of
@@ -76,7 +80,7 @@ Agent intents do not read the header. They take an `idempotencyKey` field in the
 the same replay rules, scoped per agent ([agent trading](agent-trading.md)). Without it, a
 resent intent is a new trade.
 
-**Limits.** JSON bodies are capped at 64 KiB (chat and comments 16 KiB, `PATCH /v1/me` 4 KiB,
+**Limits.** JSON bodies are capped at 64 KiB (chat and comments 16 KiB, `PATCH /v1/me` and `PATCH /v1/me/preferences` 4 KiB,
 profile photo 2 MB). Over the cap is `413` on every route; a body that fits but cannot be parsed
 is `400`, as is a message or comment over its character limit. The server write timeout is
 3 minutes because cash out, withdraw, retry and agent intents confirm a Solana transaction
@@ -93,6 +97,10 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/me` | Signed-in profile. |
 | `PATCH /v1/me` | Set the display name. |
 | `POST /v1/me/profile-photo` | Upload a profile photo (`multipart/form-data`). |
+| `GET /v1/me/preferences` | The member's settings, every key present: `{"notifications": {"proposals", "results", "chat", "money"}}`, each a boolean, `true` until turned off. |
+| `PATCH /v1/me/preferences` | Merge patch of the same document, for example `{"notifications": {"chat": false}}`. Known keys and booleans only, else `400 invalid_preferences`. Returns the merged document. |
+| `GET /v1/me/deletion-check` | Whether the account can be deleted now: `{"canDelete", "blockers": [...]}`. A blocker is `{"kind", "groupId", "groupName", "valueUsd"}`; `kind` is `cabal_slice` (share units left in a cabal), `cash_out_pending` (a cash out not settled), `transfer_pending` (a fund or withdrawal on its way) or `account_balance`. The group fields come with the cabal kinds; `valueUsd` is a decimal string, `null` when a slice cannot be priced right now. `503` when the balance cannot be read. |
+| `DELETE /v1/me` | Delete the account once the check is clear: sets `deleted_at`, renames the member "Deleted member", drops photo and preferences, leaves every cabal and withdraws open join requests. Votes, trades, chat and the ledger stay, under that name. `200 {"deletedAt"}`, and the same answer again on a repeat. `409 account_not_empty` otherwise. |
 | `GET /v1/me/balance` | Account balance: member-wallet USDC minus in-flight funds and withdrawals. |
 | `POST /v1/me/withdrawals` ● | Send USDC from the account balance to an external Solana address. |
 | `GET /v1/me/withdrawals/{id}` | One withdrawal. |

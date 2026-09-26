@@ -225,3 +225,13 @@ inbox-empty                   -MonacoInboxSample empty
 inbox-loading                 -MonacoInboxSample loading
 inbox-permission              -MonacoInboxSample permission
 proposal-detail-remind        -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-4 -MonacoProposalSampleViewerVoted
+# lane: settings. Settings, Delete account and the app lock.
+settings-main                 -MonacoSettingsSample settings
+settings-about                -MonacoSettingsSample settingsAbout
+settings-delete-blocked       -MonacoSettingsSample deleteBlocked
+settings-delete-ready         -MonacoSettingsSample deleteReady
+settings-delete-loading       -MonacoSettingsSample deleteLoading
+settings-delete-failed        -MonacoSettingsSample deleteFailed
+settings-lock                 -MonacoSettingsSample lock
+settings-main-large-text      -MonacoSettingsSample settings -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+settings-delete-blocked-large-text -MonacoSettingsSample deleteBlocked -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL

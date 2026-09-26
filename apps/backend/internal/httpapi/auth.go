@@ -36,6 +36,11 @@ func (h *AuthHandlers) SessionHandler(w http.ResponseWriter, r *http.Request) {
 			logJSONError(ctx, log, "invalid_token", w, http.StatusUnauthorized, "invalid or expired access token")
 			return
 		}
+		// lane: settings
+		if errors.Is(err, app.ErrAccountDeleted) {
+			logJSONErrorWithReason(ctx, log, "account_deleted", w, http.StatusGone, "this account was deleted", "account_deleted")
+			return
+		}
 		logJSONError(ctx, log, "open_session_failed", w, http.StatusInternalServerError, "internal server error", "err", err.Error())
 		return
 	}

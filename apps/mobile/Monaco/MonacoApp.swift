@@ -30,6 +30,8 @@ struct MonacoApp: App {
                 .tint(MonacoTheme.ink)
                 // lane: notifications
                 .pushRegistration(auth: auth)
+                // lane: settings
+                .monacoSettingsRoot()
         }
     }
 

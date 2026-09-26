@@ -51,6 +51,9 @@ struct ContentView: View {
         // lane: notifications
         } else if let scenario = InboxSampleScenario.requested {
             InboxSampleHarness(scenario: scenario, auth: auth)
+        // lane: settings
+        } else if let scenario = SettingsSampleScenario.requested {
+            SettingsSampleHarness(scenario: scenario, auth: auth)
         } else if SampleProposalFeedService.isRequested {
             SampleProposalFeedRoot()
         } else {

@@ -265,6 +265,12 @@ The Profile tab is the signed-in user's own page: photo, display name, member-si
 - Both writes are limited per user (name: 5 quick edits, then one per 12 s; photo: 3, then one per 20 s) and return 429 with `Retry-After` past that.
 - After either write the app refetches Home, so the people board, dashboard leaderboard, and cabal member boards show the new name and photo. Those rows carry `profilePhotoUrl`.
 
+### Settings and deleting an account
+
+Settings (Profile, Account, Settings) holds the name, how the member signs in (masked), the app lock (Face ID with the passcode behind it, locking again after a chosen time in the background), notification switches, appearance, and the terms, privacy and support links. The notification switches live on the server as the member's preferences (`/v1/me/preferences`, every category on until turned off) so pushes can honour them; the phone keeps a copy so the screen never waits. The lock and the appearance stay on the phone.
+
+Deleting an account is refused while money is still in it: a slice in any cabal, a cash out or transfer on its way, or an account balance above zero. Each blocker says how to clear it. Once clear, the account is closed for good: the name becomes "Deleted member", the photo and preferences go, and the member leaves every cabal. Votes, trades, chat and the ledger stay, under that name, so every cabal's history still adds up. The same Privy login is then refused, not reopened as a new account. A creator who deletes leaves the cabal without its creator, since handing that role on is still an open decision (below).
+
 ## Withdraw
 
 **Platform withdraw** (Settings → Withdraw) sends idle USDC from the user's Privy **member wallet** to any Solana address they paste. It uses `GET /v1/me/balance` (chain USDC minus in-flight fund jobs and pending platform withdrawals) and `POST /v1/me/withdrawals`. It does not sell cabal holdings, debit share units, or pull from group treasuries. Deployed stake must return to the member wallet first (see leave / withdraw-to-balance flows).
