@@ -45,6 +45,27 @@ One take per row, shot in this order because each needs the state the one before
 | 22 | `board-outro` | Maya | See who's up | Cabals tab, Home top investors with the three faces |
 | 23 | outro card | | trymonaco.xyz | |
 
+## The launch spot
+
+`scripts/demo/film.py --film=launch` cuts a second film from the same takes: thirty seconds for the waitlist, at `docs/demo/out/monaco-launch-{vertical,site}.mp4`. One story and one pot, so every figure on screen agrees with the one before it. The hook is the product in four words, the ask is the site.
+
+| # | Take | Seconds | Caption | On screen |
+| --- | --- | --- | --- | --- |
+| 1 | `join-priya` | 3.0 | Invest with your friends. | The cabal with $500 in the pot, as a headline over the phone |
+| 2 | `start-cabal` | 2.4 | Start a cabal | The name typed, Create, the cabal lands |
+| 3 | `join-jordan` | 1.9 | Friends join with a code | Join cabal, the cabal with 2 members |
+| 4 | `fund` | 1.7 | Fund the pot | $500 typed, Add $500 to the pot |
+| 5 | `join-priya` | 2.4 | Anyone with the code can join | Join cabal, the $500 pot with 3 members, coins |
+| 6 | `stocks` | 2.0 | Pick a real stock | Stocks, Alphabet, the curve draws |
+| 7 | `propose` | 4.1 | Propose a buy | Propose buy, the cabal, $250, the thesis, Review, Send, the toast |
+| 8 | `vote-priya` and `vote-maya` | 1.8 | Everyone votes | Two phones, two Yes taps |
+| 9 | `vote-maya` | 2.9 | Majority wins. The cabal buys. | Bought, the tracker at Done, coins, the cast |
+| 10 | `pre-ipo` | 1.6 | Pre-IPO too | The pre-IPO list, SpaceX with its private-market reference |
+| 11 | `bot` | 1.1 | Or add a trading bot | $200 budget, Scout, Send to cabal |
+| 12 | sign-off | 6.4 | Join the waitlist, trymonaco.xyz | Icon, wordmark, the line, the ask typed on, the cast |
+
+Every cut lands on the frame it names: the takes are filled to a constant rate before cutting, since the simulator only records a frame when the screen changes. Where a take was shot after the story's numbers had moved on, the film covers what would contradict them: the relative stamps the app writes in real time ("34m", a fill date), the $800 holdings figure on Priya's phone (re-set as $500 in the app's own face, moving with its row), the ghost of her slice under the status bar, and an initials disc that predates the animal faces. Each cover copies the frame's own pixels, so nothing is painted in.
+
 ## Rules for every clip
 
 - Status bar at 9:41, full battery and bars (`scripts/demo/record-clip.sh` sets it). Light mode. Default text size.
