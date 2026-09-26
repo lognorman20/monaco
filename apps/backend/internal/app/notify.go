@@ -59,6 +59,8 @@ func NotificationCategory(kind string) string {
 		return NotifyCategoryChat
 	case NotifyFundsArrived, NotifyFundCredited, NotifyCashOutSettled:
 		return NotifyCategoryMoney
+	case NotifyPriceAlert:
+		return NotifyCategoryResults
 	default:
 		return NotifyCategoryResults
 	}

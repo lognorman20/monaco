@@ -350,6 +350,7 @@ Seeded ghost members never get rows. The push carries `aps.alert` (the row's tit
 | `proposal_expired` | results | A vote runs out of time (the poller closes it within a minute) | Every member |
 | `trade_bought`, `trade_sold` | results | A voted buy or sell fills | Every member |
 | `bot_trade` | results | The cabal's bot fills an intent | Every member |
+| `price_alert` | results | A price alert the member set fires | That member |
 | `member_joined` | results | Someone joins | The creator |
 | `join_approved` | results | The creator lets a requester in | The requester |
 | `chat_message` | chat | A chat message | Every member but the author, at most one per cabal per 10 minutes |

@@ -634,8 +634,8 @@ func boot(ctx context.Context) (*bootResult, error) {
 	}
 
 	// lane: watchlist
-	// Fires price alerts once a minute. The notifier logs until push delivery is wired.
-	alertPoller := worker.NewAlertPoller(store, alertMarks, app.LogAlertNotifier{}, nil)
+	// Fires price alerts once a minute; a fired alert lands in the inbox and on the phone.
+	alertPoller := worker.NewAlertPoller(store, alertMarks, app.NewPriceAlertNotifier(notifier), nil)
 	alertCtx, stopAlertPoller := context.WithCancel(context.Background())
 	workers.Add(1)
 	go func() {
