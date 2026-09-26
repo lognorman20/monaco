@@ -427,6 +427,8 @@ struct InboxDestinationView: View {
             ProposalDetailView(auth: auth, proposalId: id)
         case .cabal(let id, let name):
             GroupDetailView(auth: auth, groupId: id, groupName: name)
+        case .stock(let symbol):
+            AssetDetailView(auth: auth, symbol: symbol)
         case .transaction(let id, let isSell):
             // The receipt reads everything it shows from the transaction itself; the row here
             // only names it. `confirmed` because the server tells members about fills, not tries.

@@ -123,6 +123,8 @@ public enum NotificationKind {
     public static let fundsArrived = "funds_arrived"
     public static let fundCredited = "fund_credited"
     public static let cashOutSettled = "cash_out_settled"
+    /// A price alert the member set fired. The row wears the stock's mark and opens the stock.
+    public static let priceAlert = "price_alert"
 
     static let trades: Set<String> = [tradeBought, tradeSold, botTrade]
     static let money: Set<String> = [fundsArrived, fundCredited, cashOutSettled]
@@ -135,9 +137,14 @@ public enum NotificationDestination: Hashable, Sendable {
     case proposal(id: String)
     case transaction(id: String, isSell: Bool)
     case cabal(id: String, name: String?)
+    /// The stock's screen: where a price alert's answer is.
+    case stock(symbol: String)
     case none
 
     public static func of(_ notification: NotificationDTO) -> NotificationDestination {
+        if notification.kind == NotificationKind.priceAlert, let symbol = notification.symbol.nonBlank {
+            return .stock(symbol: symbol)
+        }
         if let proposalId = notification.proposalId.nonBlank {
             return .proposal(id: proposalId)
         }
@@ -167,7 +174,8 @@ public enum NotificationMark: Equatable, Sendable {
     case bell
 
     public static func of(_ notification: NotificationDTO) -> NotificationMark {
-        if NotificationKind.trades.contains(notification.kind), let symbol = notification.symbol.nonBlank {
+        if NotificationKind.trades.contains(notification.kind) || notification.kind == NotificationKind.priceAlert,
+           let symbol = notification.symbol.nonBlank {
             return .stock(symbol: symbol)
         }
         if NotificationKind.money.contains(notification.kind) || notification.category == "money" {

@@ -66,6 +66,8 @@ final class NotificationDTOTests: XCTestCase {
             (NotificationDTO(id: "4", kind: "chat_message", title: "t", groupId: "g", groupName: "Sunday", createdAt: at), .cabal(id: "g", name: "Sunday")),
             (NotificationDTO(id: "5", kind: "funds_arrived", title: "t", createdAt: at), .none),
             (NotificationDTO(id: "6", kind: "member_joined", title: "t", groupId: "  ", proposalId: "", createdAt: at), .none),
+            (NotificationDTO(id: "7", kind: "price_alert", title: "t", symbol: "GOOGLx", createdAt: at), .stock(symbol: "GOOGLx")),
+            (NotificationDTO(id: "8", kind: "price_alert", title: "t", createdAt: at), .none),
         ]
         for (notification, want) in cases {
             XCTAssertEqual(NotificationDestination.of(notification), want, notification.kind)
@@ -87,6 +89,7 @@ final class NotificationDTOTests: XCTestCase {
         XCTAssertEqual(NotificationMark.of(NotificationDTO(id: "3", kind: "proposal_created", title: "t", groupId: "g", groupName: "Sunday", symbol: "AAPLx", createdAt: at)), .cabal(groupId: "g", name: "Sunday", pictureUrl: nil))
         XCTAssertEqual(NotificationMark.of(NotificationDTO(id: "4", kind: "trade_bought", title: "t", groupId: "g", groupName: "S", createdAt: at)), .cabal(groupId: "g", name: "S", pictureUrl: nil), "a trade without a symbol falls back to the cabal")
         XCTAssertEqual(NotificationMark.of(NotificationDTO(id: "5", kind: "something_new", title: "t", createdAt: at)), .bell)
+        XCTAssertEqual(NotificationMark.of(NotificationDTO(id: "6", kind: "price_alert", title: "t", symbol: "GOOGLx", createdAt: at)), .stock(symbol: "GOOGLx"), "an alert wears the stock it is about")
     }
 
     // MARK: - Grouping
