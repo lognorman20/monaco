@@ -184,3 +184,10 @@ propose-pick-cabal            -MonacoProposalFeedSample -MonacoProposeSample -Mo
 propose-pick-cabal-sell       -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSamplePickCabalSell
 propose-buy-large-text        -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleBuy -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
 propose-review-large-text     -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleReview -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+
+# lane: notifications
+inbox-main                    -MonacoInboxSample inbox
+inbox-empty                   -MonacoInboxSample empty
+inbox-loading                 -MonacoInboxSample loading
+inbox-permission              -MonacoInboxSample permission
+proposal-detail-remind        -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-4 -MonacoProposalSampleViewerVoted

@@ -33,6 +33,9 @@ struct ContentView: View {
             AssetDetailSampleHarness(scenario: scenario, auth: auth)
         } else if let scenario = MoneyFlowSampleScenario.requested {
             MoneyFlowSampleHarness(scenario: scenario, auth: auth)
+        // lane: notifications
+        } else if let scenario = InboxSampleScenario.requested {
+            InboxSampleHarness(scenario: scenario, auth: auth)
         } else if SampleProposalFeedService.isRequested {
             SampleProposalFeedRoot()
         } else {
