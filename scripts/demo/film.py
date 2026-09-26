@@ -37,6 +37,7 @@ AVATARS = ROOT / "apps/mobile/Monaco/Assets.xcassets/Avatars"
 
 FPS = 30
 PAPER, INK, MUTED, GOLD, GOLD_DARK = "#F8F5EE", "#0F291C", "#55645B", "#C9A24A", "#7A5C12"
+TAKE_PAPER, TAKE_INK = "#F7F4ED", "#091C13"  # as the simulator records the paper and the hero band
 HEAD, DEMI, MEDIUM = "Avenir-Next-Bold", "Avenir-Next-Demi-Bold", "Avenir-Next-Medium"
 TAKE_W, TAKE_H = 1206, 2622  # the simulator records at 3x
 
@@ -46,13 +47,18 @@ CAST = [("Maya", "cat"), ("Jordan", "rabbit"), ("Priya", "penguin")]
 
 @dataclass
 class Clip:
-    """One take, cut to segments. `punch` segments read "a-b@z:cx,cy"."""
+    """One take, cut to segments. A segment is "a-b" in seconds of the take, "a-b/1.4" at
+    its own speed, or "a-b@z:cx,cy" punched in z times around a point."""
     take: str
     segs: str
     speed: float = 1.8
     caption: str = ""
+    headline: str = ""             # a hook: big type over the phone instead of a caption
     coins_at: float | None = None  # seconds into the beat: a burst of coins from the phone
     faces_at: float | None = None  # seconds into the beat: the cast bounces up at the foot of the frame
+    patches: tuple = ()            # (x, y, w, h[, colour]) in take pixels, painted over: a stray clock stamp
+    labels: tuple = ()             # (text, size, right_x, top_y) in take pixels: a figure set in the app's money face
+    faces: tuple = ()              # (animal, x, y, size) in take pixels: a pixel animal over an initials disc
     transition: str = "cut"        # how this beat arrives: cut | slideleft | fade | smoothup
 
 
@@ -101,14 +107,63 @@ BEATS: list[Clip | Split | Card] = [
     Card("outro", 3.2),
 ]
 
+# The launch spot: thirty seconds for the waitlist. One story and one pot, and every figure
+# on screen agrees with the one before it: Jordan funds $500, the proposal reads a $500 pot,
+# and nothing from later in the shoot appears. Two kinds of touch-up keep it honest: paper
+# patches over the clock stamps the app writes in real time (a "34m", a date), which would
+# contradict the 9:41 status bar, and one figure re-set in the app's money face where a take
+# was shot after more money had arrived than the story shows.
+PROPOSAL_STAMPS = ((505, 724, 90, 54, 700, 724),)                    # "34m" beside "Proposed by Jordan"
+BOUGHT_STAMPS = PROPOSAL_STAMPS + ((610, 1880, 560, 60, 40, 1880),)  # the fill's date under the tracker
+# Priya's phone was shot after she had funded, so its holdings row reads $800; the story
+# has $500 in the pot. The row moves up when her ballot replaces the buttons, so the
+# figure set over it moves with it. Her collapsed hero band carries a blurred ghost of her
+# slice under the status bar, covered with the band's own pixels from beside the island.
+PRIYA_CASH_TOP = "if(lt(t,0.42),2075,if(lt(t,0.69),2075-43*(t-0.42)/0.27,2032))"
+PRIYA_TOUCHUPS = dict(
+    patches=((940, 2028, 230, 96, 480, 2028),                 # the $800 figure, both positions
+             # The band darkens toward the top, so each cover comes from its own rows: the
+             # clean stretch right of the island for the figures, the stretch between the
+             # clock and the island for the labels above them.
+             (24, 128, 240, 70, 790, 128), (150, 128, 240, 70, 790, 128), (170, 128, 240, 70, 790, 128),  # "$300.00"
+             (1000, 128, 206, 70, 790, 128),                                                              # "$0.00"
+             # "Your slice", in the rows above the clock. The faint label on the right sits
+             # behind the status icons, whose tops begin at row 77, so it stays.
+             (30, 36, 135, 56, 280, 36)),
+    labels=(("$500.00", 60, 1155, PRIYA_CASH_TOP),),
+)
+# Maya's proposal screen predates the animal ballot faces, so "Priya voted yes" wears an
+# initial; the penguin goes over it.
+PRIYA_DISC = (("penguin", 51, 911, 62),)
+VOTES_ROW_STAMP = ((340, 2140, 80, 70, 620, 2140),)         # "27m" on Priya's ballot, under the comment bar
+LAUNCH: list = [
+    Clip("join-priya", "50.0-53.3", 1.1, headline="Invest with your friends.", transition="fade"),
+    Clip("start-cabal", "30.0-32.6/1.8,58.9-59.45/1.5,60.4-61.3/1.5", 1.6, "Start a cabal", transition="slideleft"),
+    Clip("join-jordan", "52.4-54.9", 1.3, "Friends join with a code", transition="slideleft"),
+    Clip("fund", "20.6-21.9/1.3,26.2-27.15/1.3", 1.3, "Fund the pot", transition="slideleft"),
+    Clip("join-priya", "42.2-43.15/1.3,47.9-49.9/1.3", 1.3, "Anyone with the code can join", coins_at=1.05, transition="slideleft"),
+    Clip("stocks", "4.5-6.9", 1.2, "Pick a real stock", transition="slideleft"),
+    Clip("propose", "2.1-3.4/1.5,5.1-6.1/1.5,18.35-19.15/1.5,27.1-28.5/1.5,37.7-38.15/1.4,38.85-39.9/1.4", 1.5, "Propose a buy", transition="cut"),
+    Split(Clip("vote-priya", "17.3-19.7", 1.3, **PRIYA_TOUCHUPS),
+          Clip("vote-maya", "17.8-20.2", 1.3, patches=PROPOSAL_STAMPS + VOTES_ROW_STAMP, faces=PRIYA_DISC), "Everyone votes", transition="slideleft"),
+    Clip("vote-maya", "43.2-46.1", 1.0, "Majority wins. The cabal buys.", coins_at=0.55, faces_at=0.7, patches=BOUGHT_STAMPS, faces=PRIYA_DISC, transition="slideleft"),
+    Clip("pre-ipo", "24.0-24.45/1.4,25.45-27.2/1.4", 1.4, "Pre-IPO too", transition="slideleft"),
+    Clip("bot", "33.9-34.9/1.3,39.9-40.35/1.3", 1.3, "Or add a trading bot", transition="slideleft"),
+    Card("outro", 6.4),
+]
+
 # Frame geometry per master: the phone (w, h, x, y), the split phones, the caption slot.
 GEOMETRY = {
     "vertical": dict(size=(1080, 1920), phone=(690, 1500, 195, 120), radius=76,
+                     hook=(600, 1304, 240, 500), hook_radius=66,
                      split=[(480, 1044, 48, 330), (480, 1044, 552, 330)],
-                     caption=dict(size=54, width=940, gravity="south", offset=(0, 118), align="center")),
+                     caption=dict(size=54, width=940, gravity="south", offset=(0, 118), align="center"),
+                     headline=dict(size=92, width=940, gravity="north", offset=(0, 170), align="center")),
     "site": dict(size=(1920, 1080), phone=(396, 858, 1188, 105), radius=44,
+                 hook=(396, 858, 1188, 105), hook_radius=44,
                  split=[(396, 858, 984, 105), (396, 858, 1420, 105)],
-                 caption=dict(size=62, width=820, gravity="west", offset=(150, 0), align="west")),
+                 caption=dict(size=62, width=820, gravity="west", offset=(150, 0), align="west"),
+                 headline=dict(size=104, width=880, gravity="west", offset=(150, 0), align="west")),
 }
 
 
@@ -133,7 +188,7 @@ def duration(path: Path) -> float:
     return float(out)
 
 
-VERSION = 5
+VERSION = 6
 
 
 def spec_of(beat: object) -> dict:
@@ -157,20 +212,21 @@ def paper(fmt: str) -> Path:
     return p
 
 
-def bezel(fmt: str, phone: tuple[int, int, int, int]) -> Path:
+def bezel(fmt: str, phone: tuple[int, int, int, int], radius: int | None = None) -> Path:
     """The paper with one ink rounded rectangle where a phone sits."""
     w, h = GEOMETRY[fmt]["size"]
     pw, ph, px, py = phone
-    r = GEOMETRY[fmt]["radius"] + 16
-    p = WORK / f"bezel-{fmt}-{pw}x{ph}-{px}-{py}.png"
+    r = (GEOMETRY[fmt]["radius"] if radius is None else radius) + 16
+    p = WORK / f"bezel-{fmt}-{pw}x{ph}-{px}-{py}-{r}.png"
     if not p.exists():
         magick("-size", f"{w}x{h}", f"xc:{PAPER}", "-fill", INK,
                "-draw", f"roundrectangle {px - 14},{py - 14} {px + pw + 13},{py + ph + 13} {r},{r}", str(p))
     return p
 
 
-def mask(fmt: str, pw: int, ph: int) -> Path:
-    r = GEOMETRY[fmt]["radius"] if pw >= 600 or fmt == "site" else 52
+def mask(fmt: str, pw: int, ph: int, r: int | None = None) -> Path:
+    if r is None:
+        r = GEOMETRY[fmt]["radius"] if pw >= 600 or fmt == "site" else 52
     p = WORK / f"mask-{pw}x{ph}-{r}.png"
     if not p.exists():
         magick("-size", f"{pw}x{ph}", "xc:none", "-fill", "white",
@@ -178,14 +234,15 @@ def mask(fmt: str, pw: int, ph: int) -> Path:
     return p
 
 
-def caption_png(fmt: str, text: str) -> Path:
+def caption_png(fmt: str, text: str, style: str = "caption") -> Path:
     w, h = GEOMETRY[fmt]["size"]
-    c = GEOMETRY[fmt]["caption"]
-    p = WORK / f"cap-{fmt}-{hashlib.sha1(text.encode()).hexdigest()[:8]}.png"
+    c = GEOMETRY[fmt][style]
+    font = HEAD if style == "headline" else DEMI
+    p = WORK / f"cap-{fmt}-{style}-{hashlib.sha1(text.encode()).hexdigest()[:8]}.png"
     if not p.exists():
         ox, oy = c["offset"]
-        magick("-size", f"{w}x{h}", "xc:none", "-font", DEMI, "-fill", INK, "-pointsize", str(c["size"]),
-               "-interline-spacing", "6", "-size", f"{c['width']}x", "-background", "none",
+        magick("-size", f"{w}x{h}", "xc:none", "-font", font, "-fill", INK, "-pointsize", str(c["size"]),
+               "-interline-spacing", "6" if style == "caption" else "-4", "-size", f"{c['width']}x", "-background", "none",
                "-gravity", c["align"], f"caption:{text}", "-gravity", c["gravity"],
                "-geometry", f"+{ox}+{oy}", "-composite", str(p))
     return p
@@ -193,7 +250,7 @@ def caption_png(fmt: str, text: str) -> Path:
 
 def text_png(text: str, font: str, size: int, color: str, name: str) -> Path:
     """A line of type on nothing, trimmed to its ink."""
-    p = WORK / f"text-{name}.png"
+    p = WORK / f"text-{name}-{hashlib.sha1(f'{text}|{font}|{size}|{color}'.encode()).hexdigest()[:8]}.png"
     if not p.exists():
         magick("-background", "none", "-fill", color, "-font", font, "-pointsize", str(size),
                f"label:{text}", "-trim", "+repage", str(p))
@@ -261,11 +318,12 @@ def settle(x: int, y: int, drop: int = 42, d: float = 0.4) -> str:
     return f"x={x}:y='{y}+{drop}*{ease_out('t', d)}':eval=frame"
 
 
-def caption_layer(fmt: str, text: str, secs: float, idx: int) -> tuple[list[str], str]:
-    """Inputs and a filter that fade the caption in, slide it up, and fade it out."""
-    p = caption_png(fmt, text)
-    filt = (f"[{idx}:v]format=rgba,fade=t=in:st=0.18:d=0.32:alpha=1,"
-            f"fade=t=out:st={max(0.0, secs - 0.5):.2f}:d=0.35:alpha=1[cap];")
+def caption_layer(fmt: str, text: str, secs: float, idx: int, style: str = "caption") -> tuple[list[str], str]:
+    """Inputs and a filter that fade the caption in, slide it up, and fade it out. A
+    headline holds to the cut; the beat after it changes the subject."""
+    p = caption_png(fmt, text, style)
+    out_fade = "" if style == "headline" else f",fade=t=out:st={max(0.0, secs - 0.5):.2f}:d=0.35:alpha=1"
+    filt = f"[{idx}:v]format=rgba,fade=t=in:st=0.18:d=0.32:alpha=1{out_fade}[cap];"
     pos = f"x=0:y='26*{ease_out('t-0.18', 0.45)}':eval=frame"
     return ["-loop", "1", "-t", f"{secs:.3f}", "-i", str(p)], filt + "{bg}[cap]overlay=" + pos + "{out}"
 
@@ -292,7 +350,7 @@ def bounce(y: int, start: float, d: float = 0.45, travel: int = 700, lift: int =
             f"-{lift}*sin(PI*min(1,(t-{start})/{d})))")
 
 
-def cast_layer(fmt: str, secs: float, at: float, start_idx: int) -> tuple[list[str], str, int]:
+def cast_layer(fmt: str, secs: float, at: float, start_idx: int, phone: tuple | None = None) -> tuple[list[str], str, int]:
     """The three faces, bouncing up in a row: at the foot of the vertical frame, under the
     caption on the site frame."""
     W, H = GEOMETRY[fmt]["size"]
@@ -300,7 +358,7 @@ def cast_layer(fmt: str, secs: float, at: float, start_idx: int) -> tuple[list[s
     gap = 12
     total = 3 * (size + FACE_PAD) + 2 * gap
     if fmt == "vertical":
-        pw, ph, px, py = GEOMETRY[fmt]["phone"]
+        pw, ph, px, py = phone or GEOMETRY[fmt]["phone"]
         x0, y = (W - total) // 2, py + ph - size + 30
     else:
         x0, y = 150, H // 2 + 96
@@ -331,45 +389,101 @@ def chain(pieces: str, first: str, last: str) -> str:
 
 # --- the takes ---------------------------------------------------------------------------
 
-def parse_segs(spec: str) -> list[tuple[float, float, float, float, float]]:
-    """"a-b" or "a-b@z:cx,cy" -> (a, b, z, cx, cy). The punch centre carries a comma, so
-    the tokens are re-joined in pairs where one carries an @."""
+def parse_segs(spec: str, speed: float) -> list[tuple[float, float, float, float, float, float]]:
+    """"a-b", "a-b/1.4" or "a-b@z:cx,cy" -> (a, b, z, cx, cy, speed). The punch centre
+    carries a comma, so the tokens are re-joined in pairs where one carries an @."""
     tokens = [t.strip() for t in spec.split(",")]
     segs = []
     k = 0
     while k < len(tokens):
         tok = tokens[k]
+        sp = speed
+        if "/" in tok:
+            tok, rate = tok.split("/")
+            sp = float(rate)
         if "@" in tok:
             ab, punch = tok.split("@")
             z, cx = punch.split(":")
             cy = tokens[k + 1]
             k += 2
             a, b = ab.split("-")
-            segs.append((float(a), float(b), float(z), float(cx), float(cy)))
+            segs.append((float(a), float(b), float(z), float(cx), float(cy), sp))
         else:
             a, b = tok.split("-")
-            segs.append((float(a), float(b), 1.0, 0.5, 0.5))
+            segs.append((float(a), float(b), 1.0, 0.5, 0.5, sp))
             k += 1
     return segs
 
 
+def money_png(text: str, size: int) -> Path:
+    """A figure in the app's money face, ink on nothing, for setting over a patched one."""
+    p = WORK / f"money-{hashlib.sha1(f'{text}-{size}'.encode()).hexdigest()[:8]}.png"
+    if not p.exists():
+        magick("-background", "none", "-fill", INK, "-font", DEMI, "-pointsize", str(size), f"label:{text}", "-trim", "+repage", str(p))
+    return p
+
+
+def disc_png(animal: str, size: int) -> Path:
+    """One pixel animal cut to a disc, the way the app draws a face."""
+    p = WORK / f"disc-{animal}-{size}.png"
+    if not p.exists():
+        src = AVATARS / f"avatar-{animal}.imageset" / f"avatar-{animal}.png"
+        magick(str(src), "-filter", "point", "-resize", f"{size}x{size}",
+               "(", "-size", f"{size}x{size}", "xc:none", "-fill", "white", "-draw", f"circle {size // 2},{size // 2} {size // 2},1", ")",
+               "-compose", "DstIn", "-composite", str(p))
+    return p
+
+
 def cut_take(clip: Clip) -> tuple[Path, float]:
-    """Render the take's segments, sped up and punched, at take resolution. Returns (path, seconds)."""
-    segs = parse_segs(clip.segs)
-    secs = sum((b - a) / clip.speed for a, b, *_ in segs)
-    out = stamp(f"cut-{clip.take}", [clip.take, clip.segs, clip.speed])
+    """Render the take's segments, sped up and punched, at take resolution. Returns (path, seconds).
+
+    The simulator only records a frame when the screen changes, so a segment that opens in
+    stillness would otherwise start at the next change instead of where it says. The take
+    is filled to a constant rate first, and every cut lands on the second it names."""
+    segs = parse_segs(clip.segs, clip.speed)
+    secs = sum((b - a) / sp for a, b, _, _, _, sp in segs)
+    out = stamp(f"cut-{clip.take}", [clip.take, clip.segs, clip.speed, list(clip.patches), list(clip.labels), list(clip.faces)])
     if out.exists():
         return out, secs
     n = len(segs)
-    filt = f"[0:v]split={n}" + "".join(f"[i{k}]" for k in range(n)) + ";"
-    for k, (a, b, z, cx, cy) in enumerate(segs):
-        f = f"[i{k}]trim=start={a}:end={b},setpts=(PTS-STARTPTS)/{clip.speed}"
+    inputs = ["-i", str(CLIPS / f"{clip.take}.mov")]
+    filt = f"[0:v]fps={FPS},split={n}" + "".join(f"[i{k}]" for k in range(n)) + ";"
+    for k, (a, b, z, cx, cy, sp) in enumerate(segs):
+        f = f"[i{k}]trim=start={a}:end={b},setpts=(PTS-STARTPTS)/{sp}"
         if z > 1:
             f += (f",crop=w=iw/{z}:h=ih/{z}:x=(iw-iw/{z})*{cx}:y=(ih-ih/{z})*{cy},"
                   f"scale={TAKE_W}:{TAKE_H}")
         filt += f + f"[s{k}];"
-    filt += "".join(f"[s{k}]" for k in range(n)) + f"concat=n={n}:v=1:a=0,fps={FPS},format=yuv420p[v]"
-    ffmpeg("-i", str(CLIPS / f"{clip.take}.mov"), "-filter_complex", filt, "-map", "[v]",
+    filt += "".join(f"[s{k}]" for k in range(n)) + f"concat=n={n}:v=1:a=0,fps={FPS}[c0];"
+    cur = "[c0]"
+    # A patch copies a flat region of the same frame over the stamp, so the colour is the
+    # frame's own; a colour painted in would land a few levels off after the YUV round trip
+    # and show as a faint box. A patch with a colour string is a flat fill for dark areas,
+    # where those levels are invisible.
+    for m, patch in enumerate(clip.patches):
+        x, y, w, h = patch[:4]
+        if len(patch) == 5:
+            filt += f"{cur}drawbox=x={x}:y={y}:w={w}:h={h}:color={patch[4]}:t=fill[p{m}];"
+        else:
+            sx, sy = patch[4], patch[5]
+            filt += (f"{cur}split[pa{m}][pb{m}];[pb{m}]crop={w}:{h}:{sx}:{sy}[pc{m}];"
+                     f"[pa{m}][pc{m}]overlay=x={x}:y={y}[p{m}];")
+        cur = f"[p{m}]"
+    extra = 1
+    for j, (text, size, right_x, top_y) in enumerate(clip.labels):
+        png = money_png(text, size)
+        lw, lh = png_size(png)
+        inputs += ["-i", str(png)]
+        filt += f"{cur}[{extra}:v]overlay=x={right_x - lw}:y='{top_y}':eval=frame[l{j}];"
+        cur = f"[l{j}]"
+        extra += 1
+    for j, (animal, x, y, size) in enumerate(clip.faces):
+        inputs += ["-i", str(disc_png(animal, size))]
+        filt += f"{cur}[{extra}:v]overlay=x={x}:y={y}[f{j}];"
+        cur = f"[f{j}]"
+        extra += 1
+    filt += f"{cur}format=yuv420p[v]"
+    ffmpeg(*inputs, "-filter_complex", filt, "-map", "[v]",
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-an", str(out))
     return out, secs
 
@@ -385,24 +499,33 @@ def render_clip(fmt: str, beat: Clip, name: str) -> tuple[Path, float]:
     if out.exists():
         return out, secs
     g = GEOMETRY[fmt]
-    pw, ph, px, py = g["phone"]
-    inputs = ["-loop", "1", "-t", f"{secs:.3f}", "-i", str(bezel(fmt, g["phone"])), "-i", str(cut),
-              "-loop", "1", "-t", f"{secs:.3f}", "-i", str(mask(fmt, pw, ph))]
+    phone = g["hook"] if beat.headline else g["phone"]
+    radius = g["hook_radius"] if beat.headline else g["radius"]
+    pw, ph, px, py = phone
+    inputs = ["-loop", "1", "-t", f"{secs:.3f}", "-i", str(bezel(fmt, phone, radius)), "-i", str(cut),
+              "-loop", "1", "-t", f"{secs:.3f}", "-i", str(mask(fmt, pw, ph, radius))]
     filt = phone_filter(1, pw, ph, 2, "phone")
     # The bezel is drawn on the paper, so it settles with the phone: draw it as a layer.
     filt += f"[0:v]crop={pw + 28}:{ph + 28}:{px - 14}:{py - 14}[bz];"
     inputs += ["-loop", "1", "-t", f"{secs:.3f}", "-i", str(paper(fmt))]
-    steps = (f"{{bg}}[bz]overlay={settle(px - 14, py - 14)}{{out}};"
-             f"{{bg}}[phone]overlay={settle(px, py)}{{out}};")
+    # A beat that continues the last one on a hard cut keeps the phone where it is.
+    drop = 0 if beat.transition == "cut" else 42
+    steps = (f"{{bg}}[bz]overlay={settle(px - 14, py - 14, drop)}{{out}};"
+             f"{{bg}}[phone]overlay={settle(px, py, drop)}{{out}};")
     idx = 4
     if beat.coins_at is not None:
         cin, cf, idx = coins(secs, beat.coins_at, px + pw // 2, py + ph // 2, idx)
         inputs += cin
         steps += cf
     if beat.faces_at is not None:
-        cin, cf, idx = cast_layer(fmt, secs, beat.faces_at, idx)
+        cin, cf, idx = cast_layer(fmt, secs, beat.faces_at, idx, phone)
         inputs += cin
         steps += cf
+    if beat.headline:
+        cin, cf = caption_layer(fmt, beat.headline, secs, idx, "headline")
+        inputs += cin
+        steps += cf
+        idx += 1
     if beat.caption:
         cin, cf = caption_layer(fmt, beat.caption, secs, idx)
         inputs += cin
@@ -515,15 +638,18 @@ def render_card(fmt: str, beat: Card, name: str) -> tuple[Path, float]:
             magick("-size", f"{canvas}x{canvas}", "xc:none", str(icon_png(icon_size)), "-gravity", "center",
                    "-composite", str(icon))
         word = text_png("Monaco", HEAD, 150 if vertical else 128, INK, f"word-{fmt}")
-        line = "The hedge fund with your friends." if beat.kind == "intro" else "trymonaco.xyz"
-        tag = text_png(line, MEDIUM if beat.kind == "intro" else DEMI, 54 if vertical else 50, MUTED if beat.kind == "intro" else INK,
-                       f"tag-{fmt}-{beat.kind}")
+        line = "The hedge fund with your friends."
+        tag = text_png(line, MEDIUM, 54 if vertical else 50, MUTED, f"tag-{fmt}-{beat.kind}")
         ww, wh = png_size(word)
         tw, th = png_size(tag)
         if vertical:
-            ix, iy = (W - canvas) // 2, 470
-            wx, wy = (W - ww) // 2, 900
-            tx, ty = (W - tw) // 2, 1090
+            ix, iy = (W - canvas) // 2, (470 if beat.kind == "intro" else 250)
+            wx, wy = (W - ww) // 2, (900 if beat.kind == "intro" else 760)
+            tx, ty = (W - tw) // 2, (1090 if beat.kind == "intro" else 950)
+        elif beat.kind == "outro":
+            ix, iy = (W - canvas) // 2, 30
+            wx, wy = (W - ww) // 2, 420
+            tx, ty = (W - tw) // 2, 580
         else:
             ix, iy = (W - canvas) // 2 - 300, 330
             block = wh + 22 + th
@@ -535,16 +661,25 @@ def render_card(fmt: str, beat: Card, name: str) -> tuple[Path, float]:
         steps += (f"[{i_tag}:v]format=rgba,fade=t=in:st=1.05:d=0.35:alpha=1[tag];"
                   f"{{bg}}[tag]overlay=x={tx}:y='{ty}+30*{ease_out('t-1.05', 0.45)}':eval=frame{{out}};")
         if beat.kind == "outro":
-            # The cast comes back to wave the film off.
-            size = 150 if vertical else 120
+            # The ask, then the cast comes back to wave the film off.
+            ask = text_png("Join the waitlist", DEMI, 62 if vertical else 50, INK, f"ask-{fmt}")
+            site_line = text_png("trymonaco.xyz", HEAD, 104 if vertical else 84, INK, f"site-{fmt}")
+            aw, ah = png_size(ask)
+            sw, sh = png_size(site_line)
+            ay = 1210 if vertical else 700
+            sy = ay + ah + (28 if vertical else 18)
+            steps += (f"[{add(ask)}:v]format=rgba,fade=t=in:st=1.45:d=0.3:alpha=1[ask];"
+                      f"{{bg}}[ask]overlay=x={(W - aw) // 2}:y='{ay}+30*{ease_out('t-1.45', 0.45)}':eval=frame{{out}};")
+            steps += typed(add, (W - sw) // 2, sy, site_line, 1.85, 0.6)
+            size = 150 if vertical else 110
             faces = [face_png(a, "", size) for _, a in CAST]
             gap = 10
             total = 3 * (size + FACE_PAD) + 2 * gap
-            fy = 1300 if vertical else 700
+            fy = (sy + sh + 120) if vertical else (sy + sh + 60)
             for k, f in enumerate(faces):
                 i = add(f)
                 fx = (W - total) // 2 + k * (size + FACE_PAD + gap)
-                start = 1.3 + 0.12 * k
+                start = 2.5 + 0.12 * k
                 steps += (f"{{bg}}[{i}:v]overlay=x={fx}:y='if(lt(t,{start}),{H + 10},"
                           f"{fy}+700*pow(max(0,1-(t-{start})/0.45),2)-26*sin(PI*min(1,(t-{start})/0.45)))':eval=frame{{out}};")
     elif beat.kind == "cast":
@@ -599,12 +734,12 @@ def render_card(fmt: str, beat: Card, name: str) -> tuple[Path, float]:
 TRANSITION_SECONDS = {"cut": 0.0, "fade": 0.25, "slideleft": 0.28, "slideup": 0.3, "smoothup": 0.35}
 
 
-def assemble(fmt: str, only: list[str]) -> None:
+def assemble(fmt: str, only: list[str], beats: list, stem: str) -> None:
     W, H = GEOMETRY[fmt]["size"]
     parts: list[tuple[Path, float, str]] = []
     want_cards = not only or "cards" in only
     only = [o for o in only if o != "cards"]
-    for k, beat in enumerate(BEATS):
+    for k, beat in enumerate(beats):
         if isinstance(beat, Card):
             if not want_cards:
                 continue
@@ -652,19 +787,29 @@ def assemble(fmt: str, only: list[str]) -> None:
     if music.exists() and not only:
         inputs += ["-i", str(music)]
         audio = ["-map", f"{n}:a", "-shortest", "-af", "volume=0.35"]
-    target = OUT / f"monaco-demo-{fmt}.mp4"
-    ffmpeg(*inputs, "-filter_complex", filt.rstrip(";"), "-map", "[vout]", *audio,
+    target = OUT / f"{stem}-{fmt}.mp4"
+    total = sum(duration(p) for p, _, _ in parts) - sum(TRANSITION_SECONDS.get(tr, 0.0) for _, _, tr in parts[1:])
+    filt += f"[vout]fade=t=in:st=0:d=0.35:color={PAPER},fade=t=out:st={total - 0.6:.2f}:d=0.6:color={PAPER}[vfinal];"
+    ffmpeg(*inputs, "-filter_complex", filt.rstrip(";"), "-map", "[vfinal]", *audio,
            "-r", str(FPS), "-c:v", "libx264", "-preset", "medium", "-crf", "19", "-pix_fmt", "yuv420p",
            "-movflags", "+faststart", str(target))
     print(f"wrote {target} ({n} parts, {duration(target):.1f}s)")
 
 
+FILMS = {"tour": ("monaco-demo", BEATS), "launch": ("monaco-launch", LAUNCH)}
+
+
 def main(argv: list[str]) -> None:
     WORK.mkdir(parents=True, exist_ok=True)
+    film = "tour"
+    for a in argv:
+        if a.startswith("--film="):
+            film = a.split("=", 1)[1]
     only = [a for a in argv if not a.startswith("-")]
+    stem, beats = FILMS[film]
     for fmt in ("vertical", "site"):
         print(fmt)
-        assemble(fmt, only)
+        assemble(fmt, only, beats, stem)
 
 
 if __name__ == "__main__":

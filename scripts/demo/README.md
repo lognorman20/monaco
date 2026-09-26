@@ -34,7 +34,7 @@ scripts/demo/film.py stocks vote     # only these takes' beats, to check them
 scripts/demo/film.py cards login     # the drawn cards too
 ```
 
-writes `docs/demo/out/monaco-demo-vertical.mp4` (9:16) and `monaco-demo-site.mp4` (16:9). The film is the `BEATS` list at the top of `film.py`: which seconds of each take to keep, how fast to play them, where to punch in, which two takes run side by side, and the cards the script draws itself (the title, the cast, the pot counting up, the sign-off). Pieces are cached under `docs/demo/out/film/` by their spec, so a change to one beat re-renders one beat.
+writes `docs/demo/out/monaco-demo-vertical.mp4` (9:16) and `monaco-demo-site.mp4` (16:9). `--film=launch` cuts the thirty-second waitlist spot instead (`monaco-launch-*.mp4`; its beats are `LAUNCH` in `film.py`). The film is the `BEATS` list at the top of `film.py`: which seconds of each take to keep, how fast to play them, where to punch in, which two takes run side by side, and the cards the script draws itself (the title, the cast, the pot counting up, the sign-off). Pieces are cached under `docs/demo/out/film/` by their spec, so a change to one beat re-renders one beat.
 
 ## Faces
 
