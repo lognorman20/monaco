@@ -20,6 +20,9 @@ enum AssetDetailRoute: Hashable, Identifiable {
     case proposal(id: String)
     /// The same pre-IPO company from another issuer, from the variants list.
     case variant(symbol: String)
+    // lane: news
+    /// Every headline about the stock, from the News section's "See all".
+    case news
 
     var id: Self { self }
 }

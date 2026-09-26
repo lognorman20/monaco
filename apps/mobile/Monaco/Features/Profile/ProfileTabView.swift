@@ -235,6 +235,45 @@ struct ProfileTabView: View {
             MonacoSectionHeader("Account")
                 .padding(.horizontal, MonacoTheme.Space.m)
             MonacoGroupedList {
+                // lane: settings
+                NavigationLink {
+                    SettingsView(auth: auth, userId: session.me?.userId)
+                } label: {
+                    MonacoRow(
+                        title: "Settings",
+                        subtitle: "App lock, notifications, your account",
+                        chevron: true,
+                        leading: { StockMark(systemImage: "gearshape", size: 40) }
+                    )
+                }
+                .buttonStyle(.monacoRow)
+                .accessibilityIdentifier("profile-settings-link")
+                // lane: portfolio
+                NavigationLink {
+                    HistoryView(auth: auth)
+                } label: {
+                    MonacoRow(
+                        title: PortfolioCopy.historyTitle,
+                        subtitle: PortfolioCopy.historyCaption,
+                        chevron: true,
+                        leading: { StockMark(systemImage: "list.bullet", size: 40) }
+                    )
+                }
+                .buttonStyle(.monacoRow)
+                .accessibilityIdentifier("profile-history-row")
+                // lane: watchlist
+                NavigationLink {
+                    AlertsView(auth: auth)
+                } label: {
+                    MonacoRow(
+                        title: AlertCopy.profileRowTitle,
+                        subtitle: AlertCopy.profileRowSubtitle,
+                        chevron: true,
+                        leading: { StockMark(systemImage: "bell", size: 40) }
+                    )
+                }
+                .buttonStyle(.monacoRow)
+                .accessibilityIdentifier("profile-price-alerts-link")
 
                 NavigationLink {
                     AdvancedSettingsView()

@@ -202,6 +202,9 @@ struct GroupDetailView: View {
                 if let groupView {
                     GroupDetailsSheet(
                         groupId: groupId,
+                        // lane: invites
+                        groupName: displayName,
+                        invites: LiveInviteSource(auth: auth),
                         treasuryAddress: groupView.treasuryAddress,
                         isLeaving: isLeaving,
                         onLeave: {
@@ -797,6 +800,9 @@ struct GroupDetailContent: View {
                         onOpenStock: { onRoute(.stock(symbol: $0)) }
                     )
                 }
+
+                // lane: matchups
+                CabalMatchupSection(auth: auth, groupId: view.id, groupName: view.name)
 
 
                 if let agent = view.agent {

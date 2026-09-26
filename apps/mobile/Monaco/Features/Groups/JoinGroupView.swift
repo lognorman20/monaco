@@ -8,14 +8,19 @@ enum JoinCabalCopy {
     /// details sheet and this form all use it, so the handoff reads the same
     /// everywhere.
     static let codeLabel = "Invite code"
-    static let codeFooter = "Paste the invite code your friend shared."
+    // lane: invites — the field takes a link as well as a code.
+    static let codeFooter = "Paste the code or link your friend shared."
     static let malformedCode = "That doesn't look like an invite code. Ask your friend to send it again."
 
     static func failureMessage(for error: Error, enteredCode: Bool) -> String {
         if case MonacoAPIError.missingAccessToken = error {
             return "Sign in again to join a cabal."
         }
-        switch status(of: error) {
+        // lane: invites — the code route answers with MonacoCore's error type, and can be offline.
+        if InviteErrorStatus.isOffline(error) {
+            return "You're offline. Join again when you're back."
+        }
+        switch InviteErrorStatus.of(error) {
         case 403:
             // Demo cabals on the board are read-only; retrying never works.
             return "This cabal is a demo. You can look, but not join."
@@ -25,16 +30,10 @@ enum JoinCabalCopy {
                 : "This cabal isn't around any more."
         case 401:
             return "Sign in again to join a cabal."
+        case 429:
+            return "Too many tries. Wait a moment and join again."
         default:
             return "Couldn't join this cabal. Try again."
-        }
-    }
-
-    private static func status(of error: Error) -> Int? {
-        switch error as? MonacoAPIError {
-        case .httpStatus(let status): return status
-        case .apiError(let status, _): return status
-        default: return nil
         }
     }
 }
@@ -58,6 +57,16 @@ enum JoinCabalScreenCopy {
         }
     }
 
+    // lane: invites
+    /// The button once a code's preview has named the cabal: "Join Sunday Investors", or
+    /// "Ask to join Sunday Investors" when its admin approves members.
+    static func actionTitle(cabalName: String, joinMode: GroupJoinMode, isJoining: Bool, requestPending: Bool) -> String {
+        if isJoining || requestPending {
+            return actionTitle(joinMode: joinMode, isJoining: isJoining, requestPending: requestPending)
+        }
+        return joinMode == .request ? "Ask to join \(cabalName)" : "Join \(cabalName)"
+    }
+
     /// "9 members" under the cabal's name. Nil when the route did not carry a count, rather
     /// than a guess.
     static func memberLine(_ count: Int?) -> String? {
@@ -74,6 +83,10 @@ enum JoinCabalScreenCopy {
 
 /// Join a cabal by pasted invite code, or from a search/board row that already knows the
 /// cabal's name and join policy — in which case the screen leads with the cabal itself.
+///
+/// The code route takes a short code, a link carrying one, or a legacy cabal id
+/// (`InviteLink`), and shows the cabal from the code's public preview before the member
+/// commits (`InviteCodeEntryModel`).
 struct JoinGroupView: View {
     @ObservedObject var auth: PrivyAuthService
     /// Present inside the signed-in shell; refreshed after a join so every tab updates.
@@ -89,10 +102,16 @@ struct JoinGroupView: View {
     /// this screen never pushes the cabal itself, so Back cannot land back on a
     /// join form for a cabal the member is already in.
     private let onJoined: (_ groupId: String, _ groupName: String?) -> Void
+    /// The cabal id on the row route; what the member typed or pasted on the code route.
     @State private var groupId: String
     @State private var requestPending = false
     @State private var isJoining = false
     @State private var toast: MonacoToast?
+    // lane: invites
+    private let invites: InviteSource
+    @State private var entry: InviteCodeEntryModel
+    /// A code that arrived whole (an opened link) is looked up without the typing pause.
+    private let arrivedWhole: Bool
 
     init(
         auth: PrivyAuthService,
@@ -101,7 +120,9 @@ struct JoinGroupView: View {
         joinMode: GroupJoinMode? = nil,
         memberCount: Int? = nil,
         pictureUrl: String? = nil,
+        initialCode: String? = nil,
         actions: CabalsActionSource? = nil,
+        invites: InviteSource? = nil,
         onJoined: @escaping (_ groupId: String, _ groupName: String?) -> Void = { _, _ in }
     ) {
         self.auth = auth
@@ -111,31 +132,40 @@ struct JoinGroupView: View {
         self.memberCount = memberCount
         self.pictureUrl = pictureUrl
         self.onJoined = onJoined
-        _groupId = State(initialValue: groupId)
+        let source = invites ?? LiveInviteSource(auth: auth)
+        self.invites = source
+        _entry = State(initialValue: InviteCodeEntryModel(source: source))
+        arrivedWhole = initialCode != nil
+        // A code that arrived whole reads in two groups of four, as the details sheet shows it.
+        let prefill = initialCode.map { InviteLink.normalizeCode($0).map(InviteLink.displayCode) ?? $0 }
+        _groupId = State(initialValue: prefill ?? groupId)
     }
 
-    /// True on the paste-a-code route, where the member types the cabal id.
+    /// True on the paste-a-code route, where the member types a code or link.
     private var entersCode: Bool { groupName == nil }
 
     private var trimmedId: String {
         groupId.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Invite codes are cabal ids. Checking the shape here keeps a truncated
-    /// paste from becoming a server error the member is told to retry.
-    private var isCodeWellFormed: Bool {
-        UUID(uuidString: trimmedId) != nil
-    }
-
-    /// The shape check guards what the member typed. An id that came from a row
-    /// is the server's own, so it is taken as given.
+    /// The code route checks what was typed before offering Join, so a truncated paste never
+    /// becomes a server error the member is told to retry. An id that came from a row is the
+    /// server's own, so it is taken as given.
     private var canSubmit: Bool {
         guard !trimmedId.isEmpty else { return false }
-        return entersCode ? isCodeWellFormed : true
+        return entersCode ? entry.canJoin : true
     }
 
     private var actionTitle: String {
-        JoinCabalScreenCopy.actionTitle(joinMode: joinMode, isJoining: isJoining, requestPending: requestPending)
+        if entersCode, let preview = entry.loadedPreview {
+            return JoinCabalScreenCopy.actionTitle(
+                cabalName: preview.name,
+                joinMode: preview.joinPolicy,
+                isJoining: isJoining,
+                requestPending: requestPending
+            )
+        }
+        return JoinCabalScreenCopy.actionTitle(joinMode: joinMode, isJoining: isJoining, requestPending: requestPending)
     }
 
     var body: some View {
@@ -166,6 +196,13 @@ struct JoinGroupView: View {
         .monacoToast($toast, placement: .aboveBottomCTA)
         .navigationTitle(JoinCabalScreenCopy.title)
         .navigationBarTitleDisplayMode(.inline)
+        // lane: invites
+        .task { if entersCode { entry.update(text: groupId, immediately: arrivedWhole) } }
+        .onChange(of: groupId) { _, text in
+            guard entersCode else { return }
+            requestPending = false
+            entry.update(text: text)
+        }
     }
 
     // MARK: - A cabal the row already knows
@@ -201,23 +238,36 @@ struct JoinGroupView: View {
 
     // MARK: - A pasted invite code
 
-    private var codeIsMalformed: Bool {
-        !trimmedId.isEmpty && !isCodeWellFormed
-    }
-
+    // lane: invites
     private var codeEntry: some View {
-        VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
-            InviteCodeField(code: $groupId, isDisabled: isJoining || requestPending)
-            Text(codeIsMalformed ? JoinCabalCopy.malformedCode : JoinCabalCopy.codeFooter)
-                .font(MonacoTheme.Typo.caption)
-                .foregroundStyle(codeIsMalformed ? MonacoTheme.warning : MonacoTheme.muted)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: MonacoTheme.Space.l) {
+            VStack(alignment: .leading, spacing: MonacoTheme.Space.s) {
+                InviteCodeField(
+                    code: $groupId,
+                    isDisabled: isJoining || requestPending,
+                    onPasteRejected: { toast = MonacoToast(message: InviteEntryCopy.notAnInvite) }
+                )
+                if let footer = entry.footer {
+                    Text(footer.text)
+                        .font(MonacoTheme.Typo.caption)
+                        .foregroundStyle(footer.tone == .warning ? MonacoTheme.warning : MonacoTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("join-group-footer")
+                }
+            }
+            InviteCodePreviewSection(preview: entry.preview, onRetry: entry.retryPreview)
         }
+        .animation(.easeOut(duration: 0.2), value: entry.preview)
     }
 
     private func joinGroup() async {
         guard !isJoining, canSubmit else { return }
-        let id = trimmedId
+        // lane: invites — a code joins through its own route; a row or a legacy id by cabal id.
+        if entersCode, let code = entry.link?.code {
+            await joinWithCode(code)
+            return
+        }
+        let id = entersCode ? (entry.link?.groupId ?? trimmedId) : trimmedId
         isJoining = true
         defer { isJoining = false }
         do {
@@ -229,15 +279,42 @@ struct JoinGroupView: View {
                 onJoined(id, groupName)
                 await session?.refresh(auth: auth)
             case .pending:
-                requestPending = true
-                toast = MonacoToast(
-                    message: "Request sent. You'll be in once an admin approves.",
-                    isSuccess: true
-                )
+                showRequestSent()
             }
         } catch {
             toast = MonacoToast(message: JoinCabalCopy.failureMessage(for: error, enteredCode: entersCode))
         }
+    }
+
+    // lane: invites
+    private func joinWithCode(_ code: String) async {
+        let preview = entry.loadedPreview
+        isJoining = true
+        defer { isJoining = false }
+        do {
+            let result = try await invites.join(code: code)
+            switch result.status {
+            case .joined:
+                if let id = result.groupId ?? preview?.groupId {
+                    onJoined(id, preview?.name)
+                } else {
+                    toast = MonacoToast(message: InviteEntryCopy.joinedWithoutCabal, isSuccess: true)
+                }
+                await session?.refresh(auth: auth)
+            case .pending:
+                showRequestSent()
+            }
+        } catch {
+            toast = MonacoToast(message: JoinCabalCopy.failureMessage(for: error, enteredCode: true))
+        }
+    }
+
+    private func showRequestSent() {
+        requestPending = true
+        toast = MonacoToast(
+            message: "Request sent. You'll be in once an admin approves.",
+            isSuccess: true
+        )
     }
 }
 
@@ -247,6 +324,8 @@ struct JoinGroupView: View {
 private struct InviteCodeField: View {
     @Binding var code: String
     let isDisabled: Bool
+    /// lane: invites — the clipboard held something that is not a code or link.
+    var onPasteRejected: () -> Void = {}
 
     @FocusState private var focused: Bool
 
@@ -275,7 +354,13 @@ private struct InviteCodeField: View {
             PasteButton(payloadType: String.self) { strings in
                 guard let pasted = strings.first else { return }
                 Task { @MainActor in
-                    code = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+                    // lane: invites — a link or the whole share text becomes its code; the
+                    // field is left alone when the clipboard holds no invite at all.
+                    switch InviteLink.parse(pasted) {
+                    case .code(let parsed): code = InviteLink.displayCode(parsed)
+                    case .groupId(let id): code = id
+                    case nil: onPasteRejected()
+                    }
                 }
             }
             .labelStyle(.iconOnly)

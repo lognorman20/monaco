@@ -36,6 +36,8 @@ struct HomeView: View {
     /// The proposal pushed from "Needs your vote". Held here, at the tab root, so the pushed
     /// screen outlives both the countdown's tick and the row's own expiry.
     @State private var openProposalId: String?
+    // lane: portfolio
+    @State private var showPortfolio = false
 
     private var joinedCabals: [HomeGroupBoardRowDTO] {
         session.joinedCabals
@@ -86,12 +88,20 @@ struct HomeView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // lane: notifications
+            ToolbarItem(placement: .topBarTrailing) {
+                InboxBellButton()
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 profileButton
             }
         }
         .navigationDestination(item: $openProposalId) { proposalId in
             ProposalDetailView(auth: auth, proposalId: proposalId)
+        }
+        // lane: portfolio
+        .navigationDestination(isPresented: $showPortfolio) {
+            PortfolioView(auth: auth)
         }
         .refreshable {
             await pullToRefresh()
@@ -111,6 +121,8 @@ struct HomeView: View {
             try await session.pollLive(auth: auth)
         }
         .monacoToast($toast)
+        // lane: notifications
+        .inboxEntry(auth: auth, selectedTab: $selectedTab)
         .monacoFrameStats("Home")
     }
 
@@ -150,7 +162,9 @@ struct HomeView: View {
                         loaded: session.homePnLSeries,
                         embedded: dashboard.pnlSeries1H,
                         hasCabals: !dashboard.myGroups.isEmpty
-                    )
+                    ),
+                    // lane: portfolio
+                    onSeePortfolio: { showPortfolio = true }
                 )
 
                 HomeBalanceRowSection(
@@ -163,6 +177,9 @@ struct HomeView: View {
                     // three-request refresh, so it cannot be stacked by tapping repeatedly.
                     onRetryBalance: { Task { await retryLoad() } }
                 )
+
+                // lane: matchups
+                if !dashboard.myGroups.isEmpty { HomeMatchupsSection(auth: auth) }
 
                 // Gated on the rows still open rather than on the payload: a section that
                 // renders nothing still takes a `VStack` spacing on each side, which would

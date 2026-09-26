@@ -16,9 +16,18 @@ struct AssetDetailView: View {
     /// separate read at a separate cadence: the price is polled every ten seconds,
     /// this changes when somebody votes.
     @State private var social: AssetSocialModel
+    // lane: news
+    /// Headlines about the stock. Its own read, loaded beside the social one so the hero
+    /// and the chart never wait on a feed.
+    @State private var news: NewsFeedModel
     /// The one screen this one is pushing, if any. See `AssetDetailRoute`.
     @State private var route: AssetDetailRoute?
     @State private var toast: MonacoToast?
+    // lane: watchlist
+    @State private var watch: AssetWatchModel
+    @State private var showsAlertSheet = false
+    private let alertSource: PriceAlertDataSource
+    private let alertSheetPrefill: PriceAlertPrefill?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -38,9 +47,14 @@ struct AssetDetailView: View {
         symbol: String,
         dataSource: AssetDetailDataSource? = nil,
         socialDataSource: AssetSocialDataSource? = nil,
+        // lane: news
+        newsDataSource: NewsDataSource? = nil,
         pricePollInterval: Duration = AssetDetailPolling.price,
         chartPollInterval: Duration = AssetDetailPolling.chart,
-        scrubbedIndexOnLoad: Int? = nil
+        scrubbedIndexOnLoad: Int? = nil,
+        // lane: watchlist
+        watchDataSource: (any WatchlistDataSource & PriceAlertDataSource)? = nil,
+        alertSheetPrefill: PriceAlertPrefill? = nil
     ) {
         self.auth = auth
         self.symbol = symbol
@@ -55,6 +69,14 @@ struct AssetDetailView: View {
             symbol: symbol,
             dataSource: socialDataSource ?? LiveAssetSocialDataSource(auth: auth)
         ))
+        // lane: news
+        let newsSource: NewsDataSource = newsDataSource ?? LiveNewsDataSource(auth: auth)
+        _news = State(initialValue: NewsFeedModel(fetch: { try await newsSource.assetNews(symbol: symbol) }))
+        // lane: watchlist
+        let watchSource: any WatchlistDataSource & PriceAlertDataSource = watchDataSource ?? LiveWatchlistDataSource(auth: auth)
+        _watch = State(initialValue: AssetWatchModel(symbol: symbol, dataSource: watchSource))
+        alertSource = watchSource
+        self.alertSheetPrefill = alertSheetPrefill
     }
 
     var body: some View {
@@ -82,6 +104,10 @@ struct AssetDetailView: View {
                     chartCard
                 case .loaded:
                     hero
+                    // lane: watchlist
+                    PriceAlertButton(alertCount: watch.alertCount) { showsAlertSheet = true }
+                        .padding(.horizontal, MonacoTheme.Space.m)
+                        .padding(.top, -MonacoTheme.Space.sm)
                     // The "can't be bought" line used to live here, above the chart.
                     // It belongs next to the button it disables, which is now in the
                     // trade bar — saying it twice made the screen argue with itself.
@@ -111,6 +137,16 @@ struct AssetDetailView: View {
         // they have to scroll to.
         .safeAreaInset(edge: .bottom, spacing: 0) { tradeBar }
         .monacoToast($toast)
+        // lane: watchlist
+        .assetWatchChrome(
+            watch: watch,
+            detail: model.detail,
+            name: heroDisplayName,
+            alerts: alertSource,
+            showsAlertSheet: $showsAlertSheet,
+            prefill: alertSheetPrefill,
+            toast: $toast
+        )
         // Three independent loads: the curve does not wait on the (slow) detail call,
         // and neither waits on the per-cabal read behind the social cards.
         .task { await model.loadDetail() }
@@ -119,6 +155,9 @@ struct AssetDetailView: View {
             holdScrubIfAsked()
         }
         .task { await social.load() }
+        // lane: news
+        .task { await news.load() }
+        .pollWhileVisible(every: NewsRefresh.interval) { await news.refresh() }
         // The hero keeps itself current while the member is looking at it. Both loops
         // are silent: a tick that fails leaves the screen exactly as they last saw it.
         .pollWhileVisible(every: pricePollInterval) { await model.refreshDetail() }
@@ -167,6 +206,9 @@ struct AssetDetailView: View {
             AssetDetailView(auth: auth, symbol: variantSymbol)
         case .proposal(let id):
             ProposalDetailView(auth: auth, proposalId: id)
+        // lane: news
+        case .news:
+            AssetNewsView(model: news, companyName: heroDisplayName)
         }
     }
 
@@ -244,6 +286,7 @@ struct AssetDetailView: View {
     //   1. Your cabals' position — holdings, P&L, open votes            (#341)
     //   2. Stats — open/high/low, 52-week range, trading cost           (#342)
     //   3. Stock vs token — NASDAQ against the xStock, premium          (#347)
+    //   3b. News — the newest three headlines, "See all" for the rest   (lane: news)
     //   4. About — what the token is, and the tracker disclosure        (#343)
     //   5. Activity on this stock — proposals, fills and comments       (#344)
     //
@@ -291,6 +334,9 @@ struct AssetDetailView: View {
             if let card = stockVsTokenCard {
                 StockVsTokenCardView(card: card)
             }
+            // lane: news
+            // 3b. News — what happened to it today: the newest three headlines
+            AssetNewsSection(model: news, companyName: heroDisplayName, seeAll: { route = .news })
             // 4. About — what the token is, and the tracker disclosure        (#343)
             if let detail = model.detail {
                 AssetAboutCard(about: AssetAboutCopy.make(

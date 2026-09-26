@@ -2,7 +2,8 @@
 # Decrypt repo-root .env.local via dotenvx and materialize iOS Privy config.
 # Writes gitignored Privy.local.xcconfig + Privy.local.Info.plist (merged into app at build;
 # Debug uses Privy.local.Debug.Info.plist, the same keys plus the ATS local-networking
-# exception that Release must not carry).
+# exception that Release must not carry). Both carry the `monaco` URL scheme that invite
+# links (monaco://join/<code>) open the app with.
 # Also writes gitignored Environment.local.xcconfig with the staging / production API base
 # URLs (optional, non-secret) that Config/Monaco.xcconfig resolves MONACO_API_BASE_URL from.
 # `placeholder` writes a compile-only config instead (CI and sample-data QA; no secret needed).
@@ -91,6 +92,18 @@ write_info_plist() {
 	<string>\$(MONACO_ENVIRONMENT)</string>
 	<key>MONACO_API_BASE_URL</key>
 	<string>\$(MONACO_API_BASE_URL)</string>
+	<!-- lane: invites — monaco://join/<code> opens the join screen. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.monaco.app.invite</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>monaco</string>
+			</array>
+		</dict>
+	</array>
 ${extra_keys}
 </dict>
 </plist>

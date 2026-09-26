@@ -25,3 +25,4 @@ build/
 supabase/.temp/
 docs/demo/clips/
 docs/demo/out/
+docs/demo/features/

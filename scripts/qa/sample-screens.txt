@@ -184,3 +184,76 @@ propose-pick-cabal            -MonacoProposalFeedSample -MonacoProposeSample -Mo
 propose-pick-cabal-sell       -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSamplePickCabalSell
 propose-buy-large-text        -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleBuy -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
 propose-review-large-text     -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleReview -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+
+# lane: news — headlines on the stock screen (scrolled to the News section), "See all",
+# and "Market today" on the Stocks tab. The asset-* and stocks-tab-* samples above show
+# the same canned headlines.
+news-detail                   -MonacoNewsSample detail -MonacoNewsScroll 0.7
+news-detail-empty             -MonacoNewsSample detailEmpty -MonacoNewsScroll 0.7
+news-detail-loading           -MonacoNewsSample detailLoading -MonacoNewsScroll 0.7
+news-detail-failed            -MonacoNewsSample detailFailed -MonacoNewsScroll 0.7
+news-detail-large-text        -MonacoNewsSample detail -MonacoNewsScroll 0.62 -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+news-all                      -MonacoNewsSample all
+news-tab                      -MonacoNewsSample tab -MonacoNewsScroll 0.7
+news-tab-loading              -MonacoNewsSample tabLoading -MonacoNewsScroll 0.7
+news-tab-failed               -MonacoNewsSample tabFailed -MonacoNewsScroll 0.7
+# lane: invites — the invite card on the details sheet, the join screen's code route, and a
+# link opening the app.
+invite-details                -MonacoInviteSample details
+invite-details-loading        -MonacoInviteSample detailsLoading
+invite-details-failed         -MonacoInviteSample detailsFailed
+invite-join-preview           -MonacoInviteSample joinPreview
+invite-join-typing            -MonacoInviteSample joinTyping
+invite-join-request           -MonacoInviteSample joinRequest
+invite-join-unknown           -MonacoInviteSample joinUnknown
+invite-join-link              -MonacoInviteSample joinLink
+invite-details-large-text     -MonacoInviteSample details -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+invite-join-preview-large-text -MonacoInviteSample joinPreview -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+# lane: portfolio
+portfolio                     -MonacoPortfolioSample portfolio
+portfolio-empty               -MonacoPortfolioSample portfolioEmpty
+portfolio-loading             -MonacoPortfolioSample portfolioLoading
+portfolio-failed              -MonacoPortfolioSample portfolioFailed
+history                       -MonacoPortfolioSample history
+history-filtered              -MonacoPortfolioSample historyFiltered
+history-empty                 -MonacoPortfolioSample historyEmpty
+history-loading               -MonacoPortfolioSample historyLoading
+history-failed                -MonacoPortfolioSample historyFailed
+# lane: notifications
+inbox-main                    -MonacoInboxSample inbox
+inbox-empty                   -MonacoInboxSample empty
+inbox-loading                 -MonacoInboxSample loading
+inbox-permission              -MonacoInboxSample permission
+proposal-detail-remind        -MonacoProposalFeedSample -MonacoProposalSampleDetail sample-4 -MonacoProposalSampleViewerVoted
+# lane: settings. Settings, Delete account and the app lock.
+settings-main                 -MonacoSettingsSample settings
+settings-about                -MonacoSettingsSample settingsAbout
+settings-delete-blocked       -MonacoSettingsSample deleteBlocked
+settings-delete-ready         -MonacoSettingsSample deleteReady
+settings-delete-loading       -MonacoSettingsSample deleteLoading
+settings-delete-failed        -MonacoSettingsSample deleteFailed
+settings-lock                 -MonacoSettingsSample lock
+settings-main-large-text      -MonacoSettingsSample settings -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+settings-delete-blocked-large-text -MonacoSettingsSample deleteBlocked -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+# lane: watchlist
+watchlist-stocks-tab          -MonacoWatchlistSample stocksTab
+watchlist-stocks-tab-hint     -MonacoWatchlistSample stocksTabHint
+watchlist-stocks-tab-loading  -MonacoWatchlistSample stocksTabLoading
+watchlist-stocks-tab-edit     -MonacoWatchlistSample stocksTabEdit
+watchlist-stock               -MonacoWatchlistSample stock
+watchlist-alert-sheet         -MonacoWatchlistSample alertSheet
+watchlist-alert-sheet-problem -MonacoWatchlistSample alertSheetProblem
+watchlist-alerts              -MonacoWatchlistSample alerts
+watchlist-alerts-empty        -MonacoWatchlistSample alertsEmpty
+watchlist-alerts-loading      -MonacoWatchlistSample alertsLoading
+watchlist-alerts-failed       -MonacoWatchlistSample alertsFailed
+# lane: matchups
+matchup-home                  -MonacoMatchupSample home
+matchup-cabal                 -MonacoMatchupSample cabal
+matchup-matchup               -MonacoMatchupSample matchup
+matchup-bye                   -MonacoMatchupSample matchupBye
+matchup-loading               -MonacoMatchupSample matchupLoading
+matchup-table                 -MonacoMatchupSample table
+matchup-challenge             -MonacoMatchupSample challenge
+matchup-home-large-text       -MonacoMatchupSample home -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+matchup-matchup-large-text    -MonacoMatchupSample matchup -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL

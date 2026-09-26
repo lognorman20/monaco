@@ -9,3 +9,8 @@
 
 /assets/*
   Cache-Control: public, max-age=86400
+
+# Universal links: Apple fetches this file (no extension) and requires JSON.
+/.well-known/apple-app-site-association
+  Content-Type: application/json
+  Cache-Control: public, max-age=3600

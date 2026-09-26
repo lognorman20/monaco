@@ -177,6 +177,12 @@ final class AppSessionStore {
             return
         }
 
+        // lane: settings. The account was deleted, here or on another phone: sign out and say so.
+        if case MonacoAPIError.httpStatus(410) = failure {
+            await auth.signOut(reason: SettingsCopy.deletedElsewhere, rejectedToken: rejectedToken)
+            return
+        }
+
         errorMessage = mapped.message
         #if DEBUG
         errorDebugDetail = "\(mapped.debugDetail)\n\(Config.api.debugSummary)"

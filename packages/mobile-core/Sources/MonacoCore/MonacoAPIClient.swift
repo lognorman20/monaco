@@ -68,10 +68,12 @@ public enum MonacoAPIError: Error, Equatable {
 public typealias AccessTokenProvider = @Sendable () async throws -> String?
 
 public final class MonacoAPIClient: @unchecked Sendable {
-    private let baseURL: URL
+    // lane: invites — internal rather than private so feature extensions
+    // (`MonacoAPIClient+<Feature>.swift`) can build their requests the same way.
+    let baseURL: URL
     /// Every request goes through the transport so an expired access token is
     /// refreshed and the request retried once instead of surfacing a 401.
-    private let session: MonacoHTTPTransport
+    let session: MonacoHTTPTransport
     private let accessTokenProvider: AccessTokenProvider?
 
     /// - Parameter telemetry: receives one event per request; defaults to whatever is
@@ -263,7 +265,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
     /// is in `accepting`. Any other status throws, carrying as much of the answer as
     /// `mapping` allows plus the request id.
     /// Money POSTs pass their `submission` so the idempotency key rides along.
-    private func send(
+    func send(
         _ request: URLRequest,
         route: String,
         accepting: Set<Int> = [200],
@@ -650,14 +652,16 @@ public final class MonacoAPIClient: @unchecked Sendable {
         )
     }
 
-    private func getJSON<T: Decodable>(
+    // lane: news — internal, not private, so a `MonacoAPIClient+<Feature>.swift` extension can
+    // use it; an empty query no longer leaves a bare "?" on the URL.
+    func getJSON<T: Decodable>(
         path: String,
         route: String,
         queryItems: [URLQueryItem],
         as type: T.Type
     ) async throws -> T {
         var components = URLComponents(url: baseURL.appending(path: path), resolvingAgainstBaseURL: false)!
-        components.queryItems = queryItems
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
         guard let url = components.url else {
             throw MonacoAPIError.invalidResponse
         }
@@ -765,7 +769,7 @@ public final class MonacoAPIClient: @unchecked Sendable {
         return parsed
     }
 
-    private func applyAuthorizationHeader(to request: inout URLRequest) async throws {
+    func applyAuthorizationHeader(to request: inout URLRequest) async throws {
         guard let accessTokenProvider else { return }
         guard let token = try await accessTokenProvider(), !token.isEmpty else { return }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

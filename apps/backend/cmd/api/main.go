@@ -23,6 +23,7 @@ import (
 	"github.com/monaco/monaco/apps/backend/internal/httpapi"
 	"github.com/monaco/monaco/apps/backend/internal/jupiter"
 	"github.com/monaco/monaco/apps/backend/internal/jupitercharts"
+	"github.com/monaco/monaco/apps/backend/internal/news"
 	"github.com/monaco/monaco/apps/backend/internal/postgres"
 	"github.com/monaco/monaco/apps/backend/internal/prestocks"
 	"github.com/monaco/monaco/apps/backend/internal/pricechain"
@@ -48,6 +49,12 @@ type bootResult struct {
 	stopExecutePoller context.CancelFunc
 	stopRedeemPoller  context.CancelFunc
 	stopSparkWarmer   context.CancelFunc
+	// lane: notifications
+	stopNotificationPoller context.CancelFunc
+	// lane: watchlist
+	stopAlertPoller context.CancelFunc
+	// lane: matchups
+	stopMatchupPoller context.CancelFunc
 	// workers tracks the poller goroutines so shutdown can wait for an in-flight tick.
 	workers *sync.WaitGroup
 }
@@ -59,9 +66,18 @@ var apiRoutes = []string{
 	"GET /v1/me",
 	"PATCH /v1/me",
 	"POST /v1/me/profile-photo",
+	// lane: settings
+	"GET /v1/me/preferences",
+	"PATCH /v1/me/preferences",
+	"GET /v1/me/deletion-check",
+	"DELETE /v1/me",
 	"GET /v1/me/balance",
 	"POST /v1/me/withdrawals",
 	"GET /v1/me/withdrawals/{id}",
+	// lane: portfolio
+	"GET /v1/me/portfolio",
+	"GET /v1/me/transactions",
+	"GET /v1/me/transactions/export.csv",
 	"GET /v1/home",
 	"GET /v1/home/dashboard",
 	"GET /v1/home/pnl-series",
@@ -98,6 +114,9 @@ var apiRoutes = []string{
 	"GET /v1/assets/popular",
 	"GET /v1/assets/{symbol}/chart",
 	"GET /v1/assets/{symbol}/social",
+	// lane: news
+	"GET /v1/assets/{symbol}/news",
+	"GET /v1/news/market",
 	"GET /v1/assets/{symbol}",
 	"POST /v1/groups/{id}/quotes",
 	"GET /v1/groups/{id}/proposals",
@@ -114,6 +133,32 @@ var apiRoutes = []string{
 	"GET /v1/agent/skill.md",
 	"GET /v1/proposals/{id}/comments",
 	"POST /v1/proposals/{id}/comments",
+	// lane: invites
+	"GET /v1/groups/{id}/invites",
+	"POST /v1/groups/{id}/invites",
+	"POST /v1/groups/{id}/invites/revoke",
+	"GET /v1/invites/{code}",
+	"POST /v1/groups/join-by-code",
+	// lane: notifications
+	"GET /v1/me/notifications",
+	"POST /v1/me/notifications/read",
+	"PUT /v1/me/devices",
+	"DELETE /v1/me/devices/{token}",
+	"POST /v1/proposals/{id}/nudge",
+	// lane: watchlist
+	"GET /v1/me/watchlist",
+	"PUT /v1/me/watchlist",
+	"PUT /v1/me/watchlist/{symbol}",
+	"DELETE /v1/me/watchlist/{symbol}",
+	"GET /v1/me/alerts",
+	"POST /v1/me/alerts",
+	"DELETE /v1/me/alerts/{id}",
+	// lane: matchups
+	"GET /v1/groups/{id}/matchup",
+	"GET /v1/home/matchups",
+	"GET /v1/matchups/table",
+	"POST /v1/groups/{id}/matchups/challenge",
+	"POST /v1/groups/{id}/matchups/challenges/{challengeId}/accept",
 }
 
 // boot loads config, registers the relayer fee payer, applies migrations, and builds the HTTP server.
@@ -302,6 +347,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 	auth := &httpapi.AuthHandlers{Sessions: sessions}
 	me := &httpapi.MeHandlers{Sessions: sessions, ProfilePhoto: profilePhotos}
 	homeHandlers := &httpapi.HomeHandlers{Home: home}
+	// lane: portfolio
+	portfolioHandlers := &httpapi.PortfolioHandlers{Portfolio: app.NewPortfolioService(home)}
+	// lane: settings
+	accountHandlers := &httpapi.AccountHandlers{Accounts: app.NewAccountService(store, privyClient, home).
+		WithPreferencesLimiter(app.NewPreferencesUpdateLimiter()).
+		WithDeleteLimiter(app.NewAccountDeleteLimiter())}
 	assetSocialHandlers := &httpapi.AssetSocialHandlers{Home: home}
 	groupHandlers := &httpapi.GroupHandlers{
 		Groups:     groups,
@@ -315,6 +366,11 @@ func boot(ctx context.Context) (*bootResult, error) {
 		Market: &httpapi.MarketRowSource{Catalog: catalogComposite, Pyth: priceChain, Price: jupiterPriceClient},
 	}
 	groupsTabHandlers := &httpapi.GroupsTabHandlers{GroupsTab: app.NewGroupsTabService(home, store)}
+	// lane: invites
+	inviteHandlers := &httpapi.InviteHandlers{Invites: app.NewInviteService(store, privyClient, governance, groupsTabHandlers.GroupsTab)}
+	// lane: matchups
+	matchups := app.NewMatchupService(store, home)
+	matchupHandlers := &httpapi.MatchupHandlers{Matchups: matchups}
 	groupPictureHandlers := &httpapi.GroupPictureHandlers{Pictures: groupPictures}
 	executeOnPass := app.NewExecuteOnPassService(swap, store)
 	governance.SetBuyService(buy)
@@ -356,6 +412,16 @@ func boot(ctx context.Context) (*bootResult, error) {
 		}
 		assetsHandlers.Quotes = quotes
 	}
+	// lane: news
+	// Headlines from keyless RSS (Yahoo Finance per ticker, Google News by name),
+	// cached per company for ten minutes; a feed that fails serves its last list.
+	newsHandlers := &httpapi.NewsHandlers{Assets: assetsHandlers, News: news.NewService(news.NewClient(nil))}
+	// lane: watchlist
+	// Alerts are priced the way the Stocks tab prices a row: catalogue mint, Jupiter mark.
+	alertMarks := &app.CatalogMarkSource{Catalog: catalogComposite, Price: jupiterPriceClient}
+	watchlist := app.NewWatchlistService(store, privyClient, catalogComposite, alertMarks)
+	assetsHandlers.Watchlist = watchlist
+	watchlistHandlers := &httpapi.WatchlistHandlers{Watchlist: watchlist, Assets: assetsHandlers}
 	quoteHandlers := &httpapi.QuoteHandlers{
 		Store:      store,
 		Privy:      privyClient,
@@ -392,6 +458,16 @@ func boot(ctx context.Context) (*bootResult, error) {
 
 	groupChat := app.NewGroupChatService(store, privyClient)
 	groupMessageHandlers := &httpapi.GroupMessageHandlers{Chat: groupChat}
+
+	// lane: notifications
+	notifier := app.NewNotifier(store, pushSender(cfg.APNS, store))
+	governance.SetNotifier(notifier)
+	deposits.SetNotifier(notifier)
+	redeem.SetNotifier(notifier)
+	groupChat.SetNotifier(notifier)
+	executeOnPass.SetNotifier(notifier)
+	agentIntents.SetNotifier(notifier)
+	notificationHandlers := &httpapi.NotificationHandlers{Inbox: app.NewNotificationService(store, privyClient), Governance: governance}
 	fakerHandlers := &httpapi.DevFakerHandlers{
 		Enabled:     config.FakerEnabled(),
 		DatabaseURL: cfg.DatabaseURL,
@@ -415,9 +491,18 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/me", me.MeHandler)
 	mux.HandleFunc("PATCH /v1/me", me.PatchMeHandler)
 	mux.HandleFunc("POST /v1/me/profile-photo", me.UploadProfilePhotoHandler)
+	// lane: settings
+	mux.HandleFunc("GET /v1/me/preferences", accountHandlers.GetPreferencesHandler)
+	mux.HandleFunc("PATCH /v1/me/preferences", accountHandlers.PatchPreferencesHandler)
+	mux.HandleFunc("GET /v1/me/deletion-check", accountHandlers.DeletionCheckHandler)
+	mux.HandleFunc("DELETE /v1/me", accountHandlers.DeleteMeHandler)
 	mux.HandleFunc("GET /v1/me/balance", depositHandlers.GetPlatformBalanceHandler)
 	mux.HandleFunc("POST /v1/me/withdrawals", platformWithdrawHandlers.CreatePlatformWithdrawalHandler)
 	mux.HandleFunc("GET /v1/me/withdrawals/{id}", platformWithdrawHandlers.GetPlatformWithdrawalHandler)
+	// lane: portfolio
+	mux.HandleFunc("GET /v1/me/portfolio", portfolioHandlers.GetPortfolioHandler)
+	mux.HandleFunc("GET /v1/me/transactions", portfolioHandlers.ListHistoryHandler)
+	mux.HandleFunc("GET /v1/me/transactions/export.csv", portfolioHandlers.ExportHistoryCSVHandler)
 	mux.HandleFunc("GET /v1/home", homeHandlers.HomeHandler)
 	mux.HandleFunc("GET /v1/home/dashboard", homeHandlers.HomeDashboardHandler)
 	mux.HandleFunc("GET /v1/home/pnl-series", homeHandlers.HomePnLSeriesHandler)
@@ -454,6 +539,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/assets/popular", assetsHandlers.PopularAssetsHandler)
 	mux.HandleFunc("GET /v1/assets/{symbol}/chart", assetsHandlers.GetAssetChartHandler)
 	mux.HandleFunc("GET /v1/assets/{symbol}/social", assetSocialHandlers.GetAssetSocialHandler)
+	// lane: news
+	mux.HandleFunc("GET /v1/assets/{symbol}/news", newsHandlers.GetAssetNewsHandler)
+	mux.HandleFunc("GET /v1/news/market", newsHandlers.GetMarketNewsHandler)
 	mux.HandleFunc("GET /v1/assets/{symbol}", assetsHandlers.GetAssetHandler)
 	mux.HandleFunc("POST /v1/groups/{id}/quotes", quoteHandlers.QuoteHandler)
 	mux.HandleFunc("GET /v1/groups/{id}/proposals", proposalHandlers.ListGroupProposalsHandler)
@@ -470,6 +558,32 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/agent/skill.md", agentHandlers.AgentSkillHandler)
 	mux.HandleFunc("GET /v1/proposals/{id}/comments", proposalHandlers.ListProposalCommentsHandler)
 	mux.HandleFunc("POST /v1/proposals/{id}/comments", proposalHandlers.CreateProposalCommentHandler)
+	// lane: invites
+	mux.HandleFunc("GET /v1/groups/{id}/invites", inviteHandlers.GetGroupInviteHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/invites", inviteHandlers.CreateGroupInviteHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/invites/revoke", inviteHandlers.RevokeGroupInviteHandler)
+	mux.HandleFunc("GET /v1/invites/{code}", inviteHandlers.GetInvitePreviewHandler)
+	mux.HandleFunc("POST /v1/groups/join-by-code", inviteHandlers.JoinByCodeHandler)
+	// lane: notifications
+	mux.HandleFunc("GET /v1/me/notifications", notificationHandlers.ListNotificationsHandler)
+	mux.HandleFunc("POST /v1/me/notifications/read", notificationHandlers.MarkNotificationsReadHandler)
+	mux.HandleFunc("PUT /v1/me/devices", notificationHandlers.RegisterDeviceHandler)
+	mux.HandleFunc("DELETE /v1/me/devices/{token}", notificationHandlers.UnregisterDeviceHandler)
+	mux.HandleFunc("POST /v1/proposals/{id}/nudge", notificationHandlers.NudgeProposalHandler)
+	// lane: watchlist
+	mux.HandleFunc("GET /v1/me/watchlist", watchlistHandlers.GetWatchlistHandler)
+	mux.HandleFunc("PUT /v1/me/watchlist", watchlistHandlers.ReorderWatchlistHandler)
+	mux.HandleFunc("PUT /v1/me/watchlist/{symbol}", watchlistHandlers.AddToWatchlistHandler)
+	mux.HandleFunc("DELETE /v1/me/watchlist/{symbol}", watchlistHandlers.RemoveFromWatchlistHandler)
+	mux.HandleFunc("GET /v1/me/alerts", watchlistHandlers.ListPriceAlertsHandler)
+	mux.HandleFunc("POST /v1/me/alerts", watchlistHandlers.CreatePriceAlertHandler)
+	mux.HandleFunc("DELETE /v1/me/alerts/{id}", watchlistHandlers.DeletePriceAlertHandler)
+	// lane: matchups
+	mux.HandleFunc("GET /v1/groups/{id}/matchup", matchupHandlers.GroupMatchupHandler)
+	mux.HandleFunc("GET /v1/home/matchups", matchupHandlers.HomeMatchupsHandler)
+	mux.HandleFunc("GET /v1/matchups/table", matchupHandlers.MatchupTableHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/matchups/challenge", matchupHandlers.CreateMatchupChallengeHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/matchups/challenges/{challengeId}/accept", matchupHandlers.AcceptMatchupChallengeHandler)
 	routes := registerDevFakerRoute(mux, fakerHandlers, apiRoutes)
 	logRoutesReady(routes)
 
@@ -498,6 +612,15 @@ func boot(ctx context.Context) (*bootResult, error) {
 		worker.RunRedeemRecoveryPoller(redeemCtx, redeemPoller, worker.DefaultRedeemRecoveryInterval)
 	}()
 
+	// lane: notifications
+	notificationPoller := worker.NewNotificationPoller(store, governance, notifier, privyClient, nil)
+	notifyCtx, stopNotificationPoller := context.WithCancel(context.Background())
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		worker.RunNotificationPoller(notifyCtx, notificationPoller, worker.DefaultNotificationInterval)
+	}()
+
 	// Keeps the popular symbols' day series hot, so the Stocks list serves every
 	// row's sparkline from the chart cache instead of waiting on Hermes.
 	sparkCtx, stopSparkWarmer := context.WithCancel(context.Background())
@@ -510,6 +633,23 @@ func boot(ctx context.Context) (*bootResult, error) {
 		slog.Info("spark warmer started")
 	}
 
+	// lane: watchlist
+	// Fires price alerts once a minute; a fired alert lands in the inbox and on the phone.
+	alertPoller := worker.NewAlertPoller(store, alertMarks, app.NewPriceAlertNotifier(notifier), nil)
+	alertCtx, stopAlertPoller := context.WithCancel(context.Background())
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		worker.RunAlertPoller(alertCtx, alertPoller, worker.DefaultAlertPollInterval)
+	}()
+	// lane: matchups — freezes ended weeks and draws the current one, on boot and every few minutes.
+	matchupCtx, stopMatchupPoller := context.WithCancel(context.Background())
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		worker.RunMatchupPoller(matchupCtx, matchups, worker.DefaultMatchupInterval)
+	}()
+
 	return &bootResult{
 		Server:            newHTTPServer(addr, platformHandler(mux, privyClient, httpapi.NewIdempotency(store, privyClient))),
 		Config:            cfg,
@@ -519,6 +659,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 		stopExecutePoller: stopExecutePoller,
 		stopRedeemPoller:  stopRedeemPoller,
 		stopSparkWarmer:   stopSparkWarmer,
+		// lane: notifications
+		stopNotificationPoller: stopNotificationPoller,
+		// lane: watchlist
+		stopAlertPoller: stopAlertPoller,
+		// lane: matchups
+		stopMatchupPoller: stopMatchupPoller,
 		workers:           workers,
 	}, nil
 }
@@ -588,6 +734,12 @@ func main() {
 	result.stopExecutePoller()
 	result.stopRedeemPoller()
 	result.stopSparkWarmer()
+	// lane: notifications
+	result.stopNotificationPoller()
+	// lane: watchlist
+	result.stopAlertPoller()
+	// lane: matchups
+	result.stopMatchupPoller()
 	if waitWorkers(result.workers, workerStopTimeout) {
 		slog.Info("pollers stopped")
 	} else {

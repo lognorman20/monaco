@@ -3,10 +3,9 @@ import SwiftUI
 
 /// "Activity on AAPLx": what the member's cabals have actually done with this stock.
 ///
-/// Monaco's answer to a news feed. There is no news vendor behind this app, and a
-/// fabricated headline would be worse than none — but "Weekend investors bought $905
-/// of AAPLx" is both true and the thing a member wants to know when they are looking
-/// at a stock their friends already own.
+/// The cabals' own news, beside the market's in the News section (lane: news): "Weekend
+/// investors bought $905 of AAPLx" is the thing a member wants to know when they are
+/// looking at a stock their friends already own.
 ///
 /// The wording is `AssetActivityCopy` (MonacoCore, tested).
 struct AssetActivityCard: View {

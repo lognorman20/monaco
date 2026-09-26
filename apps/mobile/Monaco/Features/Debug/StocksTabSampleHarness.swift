@@ -58,7 +58,8 @@ struct StocksTabSampleHarness: View {
     var body: some View {
         NavigationStack {
             if isPrepared {
-                AssetsTabView(auth: auth, model: model)
+                // lane: news
+                AssetsTabView(auth: auth, model: model, newsDataSource: NewsSampleSource(scenario: .tab))
             } else {
                 Color.clear
             }

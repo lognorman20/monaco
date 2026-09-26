@@ -24,6 +24,13 @@ Formula and worked numbers: [NAV and share units](#nav-and-share-units).
 
 Two boards, both percent return. Inside a cabal: who in this pot is ahead. Across the app: which cabals and which people are ahead. The boards are why people come back and argue about the next trade. Buys and cash-out exist so those numbers are real.
 
+## Notifications
+
+The daily pull is friends waiting on your vote. Every member has an inbox (the bell on Home) and, once they allow it, push on their phone: a new proposal, a vote about to close, a reminder from a friend who already voted, what the cabal decided and bought, chat, and their own money arriving or settling. Each kind belongs to one of four switches (proposals, results, chat, money). Chat is held to one buzz per cabal every ten minutes. The app asks for push permission after the member joins or starts their first cabal, not at launch. Events, recipients and shapes: [API notifications](api.md#notifications).
+## Matchups
+
+Every cabal gets a game each week. On Monday 00:00 UTC every cabal with two or more members and more than $1 in the pot is paired with the cabal closest to it in pot size, so a $200 pot does not race a $20,000 one; an odd cabal out sits the week out on a bye. The two race on percent return from the draw to the next Monday, counting money added or taken out as money, not as gains. The higher return gets the W, equal returns tie, and a bye counts for nothing. The season table ranks cabals by wins, then by the sum of their weekly returns. A cabal can also challenge another for next week; if a member of the other cabal accepts, the pair plays ahead of the draw. A cabal created mid-week joins the next Monday's draw. HTTP: [Matchups](api.md#matchups).
+
 ## Agents
 
 A cabal can vote to hand a slice of the treasury to an agent. Example: 10% of the pot, one strategy. That slice sits in the portfolio next to positions members picked and USDC left idle.
@@ -93,6 +100,8 @@ At create, the **group creator** sets:
 - **Vote threshold.** Unanimous among the voter set, or majority among the voter set.
 - **Vote expiry.** A duration the creator chooses. If the proposal does not pass before expiry, it dies and no swap runs.
 
+**Invites.** Any member shares the cabal with one tap: a link (`trymonaco.xyz/join/<code>`), the eight-character code inside it, or a QR code of the link, from the cabal's details sheet. The link opens the app on the join screen with the code filled in; without the app it opens a page with the cabal's name, member count, and the code. A friend who is signed out signs in first and lands on the same join screen. Joining through a code follows the cabal's join policy: an open cabal takes them in, one by request sends the admin a request. One code is live per cabal; "New code" retires the old one for everyone.
+
 ## Votes and buys
 
 On-chain governance is out of scope. Votes live in Postgres. The Go API is the source of truth.
@@ -125,6 +134,10 @@ Tessera and PreStocks tokens sit in the same catalog, propose, buy, hold, and se
 | Charts | No price history until samples exist. The detail screen says the chart is empty. |
 
 The xStocks public API is mint metadata only. It is not an execution rail. Poll `/execute` for confirmation. Do not use a Jupiter WebSocket. Do not use Privy production webhooks (Enterprise-only).
+
+## News
+
+A member deciding whether to propose a stock wants to know what happened to it today. The stock screen shows the newest three headlines about it (all twelve behind "See all"), and the Stocks tab shows the day's market headlines under the movers. The API reads free public RSS, Yahoo Finance by ticker and Google News by company name for pre-IPO tokens, and caches each list for ten minutes; the app never calls a feed. Articles open in Safari's in-app reader. Contract: [News](api.md#news).
 
 ## Architecture
 
@@ -238,6 +251,8 @@ Skip a row when net USDC in is 0 (no divide by zero, no fake 0% clubs).
 - **Group board.** One row per group with net USDC in greater than 0. Equity is that group's pot NAV. Net USDC in is all member sweeps into that treasury minus all redeems out of it. This is how clubs compete with each other. A join password still hides entry, not the score. The row shows the group name, percent, and dollar P&L of the pot. Tap through to join or open.
 - **People board.** One row per user with net USDC in greater than 0 across **all** groups they belong to. Equity is the sum of their slices. Net USDC in is the sum of their per-group net USDC in. Alex in three clubs is one row, not three. Tap through to their profile list of groups.
 
+**Your portfolio** (`GET /v1/me/portfolio`, opened from Home's "Your money in cabals"). The same money as the Home figure, taken apart by stock: a member in three cabals that each own Apple sees one Apple row worth the sum of their slices, with each cabal's part under it. Cash in the pots and the account balance sit below. **History** (`GET /v1/me/transactions`, CSV export) lists every dollar that moved: adds, cabal funds, cash outs, and the member's slice of each cabal buy and sell. Trade amounts use the member's current slice; the ledger does not keep past slices. Contract: [api.md](api.md#portfolio-and-history).
+
 **Why two boards.** Friends care who is winning this pot. The app-wide loop is which clubs are hot and who is good across clubs. The people board only works if one user can sit in many groups.
 
 Postgres stores NAV snapshots on deposit, fill, and redeem so charts and both boards are replayable. Do not recompute history only from live wallets.
@@ -252,6 +267,15 @@ The Profile tab is the signed-in user's own page: photo, display name, member-si
 - **Photo** (`POST /v1/me/profile-photo`) is picked on Profile or Settings through one shared picker. Storage details: [ops-profile-photos.md](ops-profile-photos.md).
 - Both writes are limited per user (name: 5 quick edits, then one per 12 s; photo: 3, then one per 20 s) and return 429 with `Retry-After` past that.
 - After either write the app refetches Home, so the people board, dashboard leaderboard, and cabal member boards show the new name and photo. Those rows carry `profilePhotoUrl`.
+
+### Settings and deleting an account
+
+Settings (Profile, Account, Settings) holds the name, how the member signs in (masked), the app lock (Face ID with the passcode behind it, locking again after a chosen time in the background), notification switches, appearance, and the terms, privacy and support links. The notification switches live on the server as the member's preferences (`/v1/me/preferences`, every category on until turned off) so pushes can honour them; the phone keeps a copy so the screen never waits. The lock and the appearance stay on the phone.
+
+Deleting an account is refused while money is still in it: a slice in any cabal, a cash out or transfer on its way, or an account balance above zero. Each blocker says how to clear it. Once clear, the account is closed for good: the name becomes "Deleted member", the photo and preferences go, and the member leaves every cabal. Votes, trades, chat and the ledger stay, under that name, so every cabal's history still adds up. The same Privy login is then refused, not reopened as a new account. A creator who deletes leaves the cabal without its creator, since handing that role on is still an open decision (below).
+## Watchlist and price alerts
+
+A member can follow a stock before any cabal buys it. The star on a stock's screen adds it to their watchlist, which sits at the top of the Stocks tab as ordinary market rows in the order they choose. A price alert is one line on one stock ("tell me when Alphabet is above $360"): it is priced the way the Stocks tab prices the row, fires once when the price reaches the line, and then shows as fired on Profile → Price alerts. A member keeps up to 20 alerts waiting and 40 stocks on the watchlist. Both are private to the member. Contract: [API](api.md#watchlist-and-price-alerts).
 
 ## Withdraw
 

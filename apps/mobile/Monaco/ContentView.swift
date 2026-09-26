@@ -8,6 +8,12 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .monacoRootAppearance()
             .onAppear { MonacoLaunchTrace.markFirstFrame() }
+            // lane: invites — monaco://join/<code> and https://trymonaco.xyz/join/<code> wait
+            // in PendingInviteStore until the signed-in tabs present the join sheet.
+            .onOpenURL { PendingInviteStore.shared.receive($0) }
+            .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                if let url = activity.webpageURL { PendingInviteStore.shared.receive(url) }
+            }
     }
 
     @ViewBuilder
@@ -31,8 +37,29 @@ struct ContentView: View {
             StocksTabSampleHarness(scenario: scenario, auth: auth)
         } else if let scenario = AssetDetailSampleScenario.requested {
             AssetDetailSampleHarness(scenario: scenario, auth: auth)
+        // lane: news
+        } else if let scenario = NewsSampleScenario.requested {
+            NewsSampleHarness(scenario: scenario, auth: auth)
         } else if let scenario = MoneyFlowSampleScenario.requested {
             MoneyFlowSampleHarness(scenario: scenario, auth: auth)
+        // lane: invites
+        } else if let scenario = InviteSampleScenario.requested {
+            InviteSampleHarness(scenario: scenario, auth: auth)
+        // lane: portfolio
+        } else if let scenario = PortfolioSampleScenario.requested {
+            PortfolioSampleHarness(scenario: scenario, auth: auth)
+        // lane: notifications
+        } else if let scenario = InboxSampleScenario.requested {
+            InboxSampleHarness(scenario: scenario, auth: auth)
+        // lane: settings
+        } else if let scenario = SettingsSampleScenario.requested {
+            SettingsSampleHarness(scenario: scenario, auth: auth)
+        // lane: watchlist
+        } else if let scenario = WatchlistSampleScenario.requested {
+            WatchlistSampleHarness(scenario: scenario, auth: auth)
+        // lane: matchups
+        } else if let scenario = MatchupSampleScenario.requested {
+            MatchupSampleHarness(scenario: scenario, auth: auth)
         } else if SampleProposalFeedService.isRequested {
             SampleProposalFeedRoot()
         } else {

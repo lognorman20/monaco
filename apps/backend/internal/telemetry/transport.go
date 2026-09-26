@@ -16,6 +16,9 @@ const (
 	UpstreamPreStocks = "prestocks"
 	UpstreamFlash     = "flash"
 	UpstreamSupabase  = "supabase_storage"
+	// lane: news
+	UpstreamYahooNews  = "yahoo_news"
+	UpstreamGoogleNews = "google_news"
 )
 
 type instrumentedTransport struct {
