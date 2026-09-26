@@ -441,23 +441,6 @@ func shareOfTotalDecimal(part, total int64) string {
 	return formatted
 }
 
-// cabalTints is the app's tint ladder, in the app's order. A cabal's tint is picked from its
-// id, never its name, so a rename keeps the colour.
-var cabalTints = []string{"pine", "ochre", "plum", "indigo", "moss"}
-
-// CabalTintName is the tint the app draws a cabal in: FNV-1a 64 over the trimmed, lowercased
-// group id, mod 5 — the same rule as `MonacoTheme.CabalTint.forGroupId` on iOS, so a client
-// that only has this payload paints the cabal the colour it has everywhere else.
-func CabalTintName(groupID string) string {
-	key := strings.ToLower(strings.TrimSpace(groupID))
-	var hash uint64 = 0xCBF29CE484222325
-	for i := 0; i < len(key); i++ {
-		hash ^= uint64(key[i])
-		hash *= 0x00000100000001B3
-	}
-	return cabalTints[hash%uint64(len(cabalTints))]
-}
-
 // FormatUsdDecimal is micros as the API's dollar string ("1248.50"), the same rounding every
 // other money figure in the API uses, so a portfolio total reads exactly as Home's does.
 func FormatUsdDecimal(micros int64) string {
