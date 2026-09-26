@@ -115,6 +115,7 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/home/dashboard` | Net worth, the caller's cabals, a 1H series, leaderboard and missed proposals in one call. |
 | `GET /v1/home/pnl-series` | The caller's equity series. `range` = `1H`, `1D`, `1W`, `1M`. At most one point per second, so `ts` is unique at second precision. |
 | `GET /v1/home/missed-proposals` | Proposals the caller missed. |
+| `GET /v1/home/matchups` | This week's matchup for each of the caller's cabals, the caller's cabal as side `a`. See [Matchups](#matchups). |
 | `GET /v1/users/{id}/groups` | Cabals the caller shares with another user. |
 | `POST /v1/groups` | Create a cabal and its treasury. |
 | `GET /v1/groups/search` | Search cabals by name. |
@@ -123,6 +124,10 @@ inside the request; give clients the same patience. Browser origins are refused 
 | `GET /v1/groups/{id}` | Name and treasury address. |
 | `GET /v1/groups/{id}/view` | The cabal screen in one call: pot, holdings, members, agent. |
 | `GET /v1/groups/{id}/pnl-history` | P&L series for one cabal. |
+| `GET /v1/groups/{id}/matchup` | The cabal's live matchup (the cabal as side `a`), record, last four results, and, for members, next week's challenges. |
+| `POST /v1/groups/{id}/matchups/challenge` | Challenge another cabal (`{ "groupId" }`) for next week. Members only. `201`, or `200` with the challenge already open. |
+| `POST /v1/groups/{id}/matchups/challenges/{challengeId}/accept` | Accept a challenge sent to this cabal; the pair plays next week ahead of the draw. Members only. |
+| `GET /v1/matchups/table` | The season table: cabals by wins, then points. `limit` 1–50 (default 20); the caller's cabals below it are appended with their rank. |
 | `GET /v1/groups/{id}/activity` | Trade and money activity, agent trades marked. |
 | `POST /v1/groups/{id}/picture` | Set or replace the cabal picture (`multipart/form-data`, field `picture`). Creator only. |
 | `DELETE /v1/groups/{id}/picture` | Remove the cabal picture, falling back to its initials. Creator only. |
@@ -220,6 +225,28 @@ page reading it needs its origin in `CORS_ALLOWED_ORIGINS`.
 same way: `204` when the member is in (or already was), `202 { "status": "pending", "groupId" }` when
 the cabal's admin approves members. Both carry `Location: /v1/groups/{id}`. An unknown or revoked
 code is `404 invite not found`; a demo cabal is `403`. The old id route keeps working.
+## Matchups
+
+Every Monday 00:00 UTC each cabal with two or more members, more than $1 in the pot, and
+created before that Monday is paired with the cabal nearest it by pot size (an accepted
+challenge is paired first; an odd one out gets a bye). The week's `score` is the cabal's
+return since the draw as a ratio string (`"0.0123"` is +1.23%), money in or out during the
+week weighted by how long it was in the pot. It is live until the next Monday, then frozen.
+
+| Field | Meaning |
+| --- | --- |
+| `current` | `{ id, weekStart, weekEnd, daysLeft, a, b, leading, fromChallenge }`, or `null` when the cabal is not in this week's draw. `b` is `null` on a bye. |
+| `a` / `b` | `{ groupId, name, pictureUrl, memberCount, score }`. `score` is `null` on a bye. |
+| `leading` | `a`, `b` or `tie`; `null` on a bye. |
+| `record` | `{ wins, losses, ties }` over frozen weeks. Byes count for nothing. |
+| `recent` | Up to four frozen weeks, newest first: `{ id, weekStart, result, opponent, score, opponentScore, winner }`, `result` one of `win`, `loss`, `tie`, `bye`. |
+| `challenges` | Next week's `pending` and `accepted` challenges: `{ id, weekStart, direction, status, opponent, createdAt, acceptedAt }`, `direction` `incoming` or `outgoing`. Empty for non-members. |
+| `nextDrawAt` | The next Monday 00:00 UTC. `GET /v1/home/matchups` also sends `drawn` (false in the minutes before the week's draw lands) and `hasCabals`. |
+| Table rows | `{ rank, groupId, name, pictureUrl, wins, losses, ties, points, streak, isMine }`. `points` sums weekly scores; `streak` is `W3`, `L1`, `T2` or `null`. `throughWeek` is the last frozen week. |
+
+A refused challenge is `409` with a `reason`: `already_matched` (either cabal already has next
+week's opponent), `incoming_challenge` (they challenged you first; accept that one),
+`too_many_challenges` (five open this week), `challenge_closed` (the draw ran).
 
 ## Market rows
 

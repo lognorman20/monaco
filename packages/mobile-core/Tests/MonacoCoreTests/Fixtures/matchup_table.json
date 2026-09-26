@@ -1,0 +1,7 @@
+{
+  "throughWeek": "2026-09-14T00:00:00Z",
+  "cabals": [
+    { "rank": 1, "groupId": "3f9a1b2c-4d5e-4f6a-8b7c-9d0e1f2a3b4c", "name": "Weekend investors", "pictureUrl": null, "wins": 4, "losses": 1, "ties": 0, "points": "0.0412", "streak": "W3", "isMine": true },
+    { "rank": 2, "groupId": "7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f", "name": "Semis or bust", "pictureUrl": "https://img.test/semis.jpg", "wins": 3, "losses": 1, "ties": 1, "points": "0.02", "streak": null, "isMine": false }
+  ]
+}

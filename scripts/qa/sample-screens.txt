@@ -247,3 +247,13 @@ watchlist-alerts              -MonacoWatchlistSample alerts
 watchlist-alerts-empty        -MonacoWatchlistSample alertsEmpty
 watchlist-alerts-loading      -MonacoWatchlistSample alertsLoading
 watchlist-alerts-failed       -MonacoWatchlistSample alertsFailed
+# lane: matchups
+matchup-home                  -MonacoMatchupSample home
+matchup-cabal                 -MonacoMatchupSample cabal
+matchup-matchup               -MonacoMatchupSample matchup
+matchup-bye                   -MonacoMatchupSample matchupBye
+matchup-loading               -MonacoMatchupSample matchupLoading
+matchup-table                 -MonacoMatchupSample table
+matchup-challenge             -MonacoMatchupSample challenge
+matchup-home-large-text       -MonacoMatchupSample home -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+matchup-matchup-large-text    -MonacoMatchupSample matchup -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL

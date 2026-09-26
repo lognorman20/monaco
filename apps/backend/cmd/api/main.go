@@ -53,6 +53,8 @@ type bootResult struct {
 	stopNotificationPoller context.CancelFunc
 	// lane: watchlist
 	stopAlertPoller context.CancelFunc
+	// lane: matchups
+	stopMatchupPoller context.CancelFunc
 	// workers tracks the poller goroutines so shutdown can wait for an in-flight tick.
 	workers *sync.WaitGroup
 }
@@ -151,6 +153,12 @@ var apiRoutes = []string{
 	"GET /v1/me/alerts",
 	"POST /v1/me/alerts",
 	"DELETE /v1/me/alerts/{id}",
+	// lane: matchups
+	"GET /v1/groups/{id}/matchup",
+	"GET /v1/home/matchups",
+	"GET /v1/matchups/table",
+	"POST /v1/groups/{id}/matchups/challenge",
+	"POST /v1/groups/{id}/matchups/challenges/{challengeId}/accept",
 }
 
 // boot loads config, registers the relayer fee payer, applies migrations, and builds the HTTP server.
@@ -360,6 +368,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 	groupsTabHandlers := &httpapi.GroupsTabHandlers{GroupsTab: app.NewGroupsTabService(home, store)}
 	// lane: invites
 	inviteHandlers := &httpapi.InviteHandlers{Invites: app.NewInviteService(store, privyClient, governance, groupsTabHandlers.GroupsTab)}
+	// lane: matchups
+	matchups := app.NewMatchupService(store, home)
+	matchupHandlers := &httpapi.MatchupHandlers{Matchups: matchups}
 	groupPictureHandlers := &httpapi.GroupPictureHandlers{Pictures: groupPictures}
 	executeOnPass := app.NewExecuteOnPassService(swap, store)
 	governance.SetBuyService(buy)
@@ -567,6 +578,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("GET /v1/me/alerts", watchlistHandlers.ListPriceAlertsHandler)
 	mux.HandleFunc("POST /v1/me/alerts", watchlistHandlers.CreatePriceAlertHandler)
 	mux.HandleFunc("DELETE /v1/me/alerts/{id}", watchlistHandlers.DeletePriceAlertHandler)
+	// lane: matchups
+	mux.HandleFunc("GET /v1/groups/{id}/matchup", matchupHandlers.GroupMatchupHandler)
+	mux.HandleFunc("GET /v1/home/matchups", matchupHandlers.HomeMatchupsHandler)
+	mux.HandleFunc("GET /v1/matchups/table", matchupHandlers.MatchupTableHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/matchups/challenge", matchupHandlers.CreateMatchupChallengeHandler)
+	mux.HandleFunc("POST /v1/groups/{id}/matchups/challenges/{challengeId}/accept", matchupHandlers.AcceptMatchupChallengeHandler)
 	routes := registerDevFakerRoute(mux, fakerHandlers, apiRoutes)
 	logRoutesReady(routes)
 
@@ -625,6 +642,13 @@ func boot(ctx context.Context) (*bootResult, error) {
 		defer workers.Done()
 		worker.RunAlertPoller(alertCtx, alertPoller, worker.DefaultAlertPollInterval)
 	}()
+	// lane: matchups — freezes ended weeks and draws the current one, on boot and every few minutes.
+	matchupCtx, stopMatchupPoller := context.WithCancel(context.Background())
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		worker.RunMatchupPoller(matchupCtx, matchups, worker.DefaultMatchupInterval)
+	}()
 
 	return &bootResult{
 		Server:            newHTTPServer(addr, platformHandler(mux, privyClient, httpapi.NewIdempotency(store, privyClient))),
@@ -639,7 +663,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 		stopNotificationPoller: stopNotificationPoller,
 		// lane: watchlist
 		stopAlertPoller: stopAlertPoller,
-		workers:         workers,
+		// lane: matchups
+		stopMatchupPoller: stopMatchupPoller,
+		workers:           workers,
 	}, nil
 }
 
@@ -712,6 +738,8 @@ func main() {
 	result.stopNotificationPoller()
 	// lane: watchlist
 	result.stopAlertPoller()
+	// lane: matchups
+	result.stopMatchupPoller()
 	if waitWorkers(result.workers, workerStopTimeout) {
 		slog.Info("pollers stopped")
 	} else {

@@ -27,6 +27,9 @@ Two boards, both percent return. Inside a cabal: who in this pot is ahead. Acros
 ## Notifications
 
 The daily pull is friends waiting on your vote. Every member has an inbox (the bell on Home) and, once they allow it, push on their phone: a new proposal, a vote about to close, a reminder from a friend who already voted, what the cabal decided and bought, chat, and their own money arriving or settling. Each kind belongs to one of four switches (proposals, results, chat, money). Chat is held to one buzz per cabal every ten minutes. The app asks for push permission after the member joins or starts their first cabal, not at launch. Events, recipients and shapes: [API notifications](api.md#notifications).
+## Matchups
+
+Every cabal gets a game each week. On Monday 00:00 UTC every cabal with two or more members and more than $1 in the pot is paired with the cabal closest to it in pot size, so a $200 pot does not race a $20,000 one; an odd cabal out sits the week out on a bye. The two race on percent return from the draw to the next Monday, counting money added or taken out as money, not as gains. The higher return gets the W, equal returns tie, and a bye counts for nothing. The season table ranks cabals by wins, then by the sum of their weekly returns. A cabal can also challenge another for next week; if a member of the other cabal accepts, the pair plays ahead of the draw. A cabal created mid-week joins the next Monday's draw. HTTP: [Matchups](api.md#matchups).
 
 ## Agents
 
