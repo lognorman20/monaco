@@ -108,6 +108,11 @@ func (p *NotificationPoller) finalizeExpired(ctx context.Context, now time.Time)
 	var firstErr error
 	for _, id := range ids {
 		if _, err := p.governance.FinalizeExpiredProposal(ctx, id); err != nil {
+			if errors.Is(err, app.ErrProposalNotFound) {
+				// Closed or removed between the list and now, by a request or another
+				// instance. There is nothing left to do for it, and the tick goes on.
+				continue
+			}
 			slog.ErrorContext(ctx, "notification poller finalize expired failed", "proposal_id", id, "err", err)
 			if firstErr == nil {
 				firstErr = err
@@ -130,6 +135,10 @@ func (p *NotificationPoller) remindClosing(ctx context.Context, now time.Time) e
 	for _, row := range rows {
 		reminded, err := p.governance.RemindClosingProposal(ctx, row)
 		if err != nil {
+			if errors.Is(err, app.ErrProposalNotFound) {
+				// The vote ended between the list and the reminder; nobody is waiting on it.
+				continue
+			}
 			slog.ErrorContext(ctx, "notification poller closing reminder failed", "proposal_id", row.ID, "err", err)
 			if firstErr == nil {
 				firstErr = err

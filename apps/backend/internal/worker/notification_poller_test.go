@@ -310,3 +310,19 @@ func TestProposalExecutePoller_fillTellsEveryMemberWhatTheCabalBought(t *testing
 		}
 	}
 }
+
+// A proposal that vanishes between the poller's list and its reminder (closed by a request, or
+// by another instance's tick) is nobody's to remind. The tick skips it and keeps going, rather
+// than failing every other proposal in the batch with it.
+func TestNotificationPoller_skipsAProposalThatVanishedMidTick(t *testing.T) {
+	f := newNotificationPollerFixture(t, 24*time.Hour)
+	row := f.propose(t, 10_000_000)
+	poller := f.poller()
+	f.now = row.ExpiresAt.Add(-55 * time.Minute)
+	if _, err := f.app.DB.ExecContext(context.Background(), `DELETE FROM proposals WHERE id = $1`, row.ID); err != nil {
+		t.Fatalf("delete proposal: %v", err)
+	}
+	if err := poller.Tick(context.Background()); err != nil {
+		t.Fatalf("tick after the proposal vanished: %v", err)
+	}
+}
