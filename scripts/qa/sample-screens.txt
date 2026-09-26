@@ -184,3 +184,14 @@ propose-pick-cabal            -MonacoProposalFeedSample -MonacoProposeSample -Mo
 propose-pick-cabal-sell       -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSamplePickCabalSell
 propose-buy-large-text        -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleBuy -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
 propose-review-large-text     -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleReview -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+
+# lane: matchups
+matchup-home                  -MonacoMatchupSample home
+matchup-cabal                 -MonacoMatchupSample cabal
+matchup-matchup               -MonacoMatchupSample matchup
+matchup-bye                   -MonacoMatchupSample matchupBye
+matchup-loading               -MonacoMatchupSample matchupLoading
+matchup-table                 -MonacoMatchupSample table
+matchup-challenge             -MonacoMatchupSample challenge
+matchup-home-large-text       -MonacoMatchupSample home -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+matchup-matchup-large-text    -MonacoMatchupSample matchup -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL

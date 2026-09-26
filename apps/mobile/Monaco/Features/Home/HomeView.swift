@@ -164,6 +164,9 @@ struct HomeView: View {
                     onRetryBalance: { Task { await retryLoad() } }
                 )
 
+                // lane: matchups
+                if !dashboard.myGroups.isEmpty { HomeMatchupsSection(auth: auth) }
+
                 // Gated on the rows still open rather than on the payload: a section that
                 // renders nothing still takes a `VStack` spacing on each side, which would
                 // leave a doubled gap here until the next dashboard write.

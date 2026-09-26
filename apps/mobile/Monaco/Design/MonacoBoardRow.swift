@@ -22,6 +22,8 @@ struct BoardRow<Leading: View>: View {
     var isViewer = false
     var isLast = false
     var chevron = false
+    // lane: matchups — a season table row shows its record in place of a return.
+    var record: BoardRowRecord? = nil
     @ViewBuilder let leading: Leading
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -81,7 +83,17 @@ struct BoardRow<Leading: View>: View {
         return MonacoTheme.Space.m + rankColumnWidth + 40 + MonacoTheme.Space.sm
     }
 
+    @ViewBuilder
     private func figures(alignment: HorizontalAlignment) -> some View {
+        // lane: matchups
+        if let record {
+            BoardRowRecordColumns(record: record)
+        } else {
+            returnFigures(alignment: alignment)
+        }
+    }
+
+    private func returnFigures(alignment: HorizontalAlignment) -> some View {
         VStack(alignment: alignment, spacing: 2) {
             PercentText(percentReturn: percentReturn, style: .row)
             if let dollarPnl {
@@ -138,6 +150,8 @@ struct BoardRow<Leading: View>: View {
         var sentence = name
         if let rank { sentence = isLeader ? "First, \(name)" : "Rank \(rank), \(name)" }
         if let detail, !detail.isEmpty { sentence += ", \(detail)" }
+        // lane: matchups
+        if let record { return sentence + ", " + record.spoken }
         sentence += ", \(PnLSpeech.percent(PercentReturnFormatter.format(percentReturn)))"
         if let dollarPnl { sentence += ", \(PnLSpeech.dollars(dollarPnl))" }
         if let potValueUsd { sentence += ", pot \(UsdAmountFormatter.format(decimalString: potValueUsd))" }
@@ -177,6 +191,57 @@ struct BoardRowSkeleton: View {
         }
         .overlay(alignment: .top) { MonacoRule() }
         .overlay(alignment: .bottom) { MonacoRule() }
+        .accessibilityHidden(true)
+    }
+}
+
+
+// lane: matchups — wins, losses and ties as three mono columns, for the season table.
+struct BoardRowRecord: Equatable {
+    let wins: Int
+    let losses: Int
+    let ties: Int
+
+    static let columnWidth: CGFloat = 30
+
+    var spoken: String {
+        MatchupCopy.recordSpoken(MatchupRecordDTO(wins: wins, losses: losses, ties: ties))
+    }
+}
+
+struct BoardRowRecordColumns: View {
+    let record: BoardRowRecord
+
+    var body: some View {
+        HStack(spacing: 0) {
+            column(record.wins, emphasis: true)
+            column(record.losses, emphasis: false)
+            column(record.ties, emphasis: false)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func column(_ value: Int, emphasis: Bool) -> some View {
+        Text("\(value)")
+            .font(emphasis ? MonacoTheme.Typo.dataStrong : MonacoTheme.Typo.data)
+            .foregroundStyle(emphasis ? MonacoTheme.ink : MonacoTheme.secondaryText)
+            .monospacedDigit()
+            .lineLimit(1)
+            .frame(width: BoardRowRecord.columnWidth, alignment: .trailing)
+    }
+}
+
+/// "W  L  T" over the record columns.
+struct BoardRowRecordHeader: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(["W", "L", "T"], id: \.self) { letter in
+                Text(letter)
+                    .font(MonacoTheme.Typo.dataMicro)
+                    .foregroundStyle(MonacoTheme.tertiaryText)
+                    .frame(width: BoardRowRecord.columnWidth, alignment: .trailing)
+            }
+        }
         .accessibilityHidden(true)
     }
 }

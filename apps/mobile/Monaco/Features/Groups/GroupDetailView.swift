@@ -798,6 +798,9 @@ struct GroupDetailContent: View {
                     )
                 }
 
+                // lane: matchups
+                CabalMatchupSection(auth: auth, groupId: view.id, groupName: view.name)
+
 
                 if let agent = view.agent {
                     AgentSectionView(agent: agent) { message in
