@@ -51,6 +51,8 @@ type bootResult struct {
 	stopSparkWarmer   context.CancelFunc
 	// lane: notifications
 	stopNotificationPoller context.CancelFunc
+	// lane: watchlist
+	stopAlertPoller context.CancelFunc
 	// workers tracks the poller goroutines so shutdown can wait for an in-flight tick.
 	workers *sync.WaitGroup
 }
@@ -141,6 +143,14 @@ var apiRoutes = []string{
 	"PUT /v1/me/devices",
 	"DELETE /v1/me/devices/{token}",
 	"POST /v1/proposals/{id}/nudge",
+	// lane: watchlist
+	"GET /v1/me/watchlist",
+	"PUT /v1/me/watchlist",
+	"PUT /v1/me/watchlist/{symbol}",
+	"DELETE /v1/me/watchlist/{symbol}",
+	"GET /v1/me/alerts",
+	"POST /v1/me/alerts",
+	"DELETE /v1/me/alerts/{id}",
 }
 
 // boot loads config, registers the relayer fee payer, applies migrations, and builds the HTTP server.
@@ -395,6 +405,12 @@ func boot(ctx context.Context) (*bootResult, error) {
 	// Headlines from keyless RSS (Yahoo Finance per ticker, Google News by name),
 	// cached per company for ten minutes; a feed that fails serves its last list.
 	newsHandlers := &httpapi.NewsHandlers{Assets: assetsHandlers, News: news.NewService(news.NewClient(nil))}
+	// lane: watchlist
+	// Alerts are priced the way the Stocks tab prices a row: catalogue mint, Jupiter mark.
+	alertMarks := &app.CatalogMarkSource{Catalog: catalogComposite, Price: jupiterPriceClient}
+	watchlist := app.NewWatchlistService(store, privyClient, catalogComposite, alertMarks)
+	assetsHandlers.Watchlist = watchlist
+	watchlistHandlers := &httpapi.WatchlistHandlers{Watchlist: watchlist, Assets: assetsHandlers}
 	quoteHandlers := &httpapi.QuoteHandlers{
 		Store:      store,
 		Privy:      privyClient,
@@ -543,6 +559,14 @@ func boot(ctx context.Context) (*bootResult, error) {
 	mux.HandleFunc("PUT /v1/me/devices", notificationHandlers.RegisterDeviceHandler)
 	mux.HandleFunc("DELETE /v1/me/devices/{token}", notificationHandlers.UnregisterDeviceHandler)
 	mux.HandleFunc("POST /v1/proposals/{id}/nudge", notificationHandlers.NudgeProposalHandler)
+	// lane: watchlist
+	mux.HandleFunc("GET /v1/me/watchlist", watchlistHandlers.GetWatchlistHandler)
+	mux.HandleFunc("PUT /v1/me/watchlist", watchlistHandlers.ReorderWatchlistHandler)
+	mux.HandleFunc("PUT /v1/me/watchlist/{symbol}", watchlistHandlers.AddToWatchlistHandler)
+	mux.HandleFunc("DELETE /v1/me/watchlist/{symbol}", watchlistHandlers.RemoveFromWatchlistHandler)
+	mux.HandleFunc("GET /v1/me/alerts", watchlistHandlers.ListPriceAlertsHandler)
+	mux.HandleFunc("POST /v1/me/alerts", watchlistHandlers.CreatePriceAlertHandler)
+	mux.HandleFunc("DELETE /v1/me/alerts/{id}", watchlistHandlers.DeletePriceAlertHandler)
 	routes := registerDevFakerRoute(mux, fakerHandlers, apiRoutes)
 	logRoutesReady(routes)
 
@@ -592,6 +616,16 @@ func boot(ctx context.Context) (*bootResult, error) {
 		slog.Info("spark warmer started")
 	}
 
+	// lane: watchlist
+	// Fires price alerts once a minute. The notifier logs until push delivery is wired.
+	alertPoller := worker.NewAlertPoller(store, alertMarks, app.LogAlertNotifier{}, nil)
+	alertCtx, stopAlertPoller := context.WithCancel(context.Background())
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		worker.RunAlertPoller(alertCtx, alertPoller, worker.DefaultAlertPollInterval)
+	}()
+
 	return &bootResult{
 		Server:            newHTTPServer(addr, platformHandler(mux, privyClient, httpapi.NewIdempotency(store, privyClient))),
 		Config:            cfg,
@@ -603,7 +637,9 @@ func boot(ctx context.Context) (*bootResult, error) {
 		stopSparkWarmer:   stopSparkWarmer,
 		// lane: notifications
 		stopNotificationPoller: stopNotificationPoller,
-		workers:                workers,
+		// lane: watchlist
+		stopAlertPoller: stopAlertPoller,
+		workers:         workers,
 	}, nil
 }
 
@@ -674,6 +710,8 @@ func main() {
 	result.stopSparkWarmer()
 	// lane: notifications
 	result.stopNotificationPoller()
+	// lane: watchlist
+	result.stopAlertPoller()
 	if waitWorkers(result.workers, workerStopTimeout) {
 		slog.Info("pollers stopped")
 	} else {

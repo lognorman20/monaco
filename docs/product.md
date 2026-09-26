@@ -270,6 +270,9 @@ The Profile tab is the signed-in user's own page: photo, display name, member-si
 Settings (Profile, Account, Settings) holds the name, how the member signs in (masked), the app lock (Face ID with the passcode behind it, locking again after a chosen time in the background), notification switches, appearance, and the terms, privacy and support links. The notification switches live on the server as the member's preferences (`/v1/me/preferences`, every category on until turned off) so pushes can honour them; the phone keeps a copy so the screen never waits. The lock and the appearance stay on the phone.
 
 Deleting an account is refused while money is still in it: a slice in any cabal, a cash out or transfer on its way, or an account balance above zero. Each blocker says how to clear it. Once clear, the account is closed for good: the name becomes "Deleted member", the photo and preferences go, and the member leaves every cabal. Votes, trades, chat and the ledger stay, under that name, so every cabal's history still adds up. The same Privy login is then refused, not reopened as a new account. A creator who deletes leaves the cabal without its creator, since handing that role on is still an open decision (below).
+## Watchlist and price alerts
+
+A member can follow a stock before any cabal buys it. The star on a stock's screen adds it to their watchlist, which sits at the top of the Stocks tab as ordinary market rows in the order they choose. A price alert is one line on one stock ("tell me when Alphabet is above $360"): it is priced the way the Stocks tab prices the row, fires once when the price reaches the line, and then shows as fired on Profile → Price alerts. A member keeps up to 20 alerts waiting and 40 stocks on the watchlist. Both are private to the member. Contract: [API](api.md#watchlist-and-price-alerts).
 
 ## Withdraw
 

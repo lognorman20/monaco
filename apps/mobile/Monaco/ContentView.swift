@@ -54,6 +54,9 @@ struct ContentView: View {
         // lane: settings
         } else if let scenario = SettingsSampleScenario.requested {
             SettingsSampleHarness(scenario: scenario, auth: auth)
+        // lane: watchlist
+        } else if let scenario = WatchlistSampleScenario.requested {
+            WatchlistSampleHarness(scenario: scenario, auth: auth)
         } else if SampleProposalFeedService.isRequested {
             SampleProposalFeedRoot()
         } else {

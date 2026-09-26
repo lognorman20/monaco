@@ -534,6 +534,11 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
     public let holders: Int?
     public let variantCount: Int?
     public let variants: [AssetVariantDTO]?
+    // lane: watchlist
+    /// The member's own: whether this stock is on their watchlist, and how many of their
+    /// price alerts wait on it. Nil when the server could not say.
+    public let watching: Bool?
+    public let alertCount: Int?
 
     public var resolvedKind: AssetKind { kind ?? .stock }
     public var resolvedDecimals: Int { tokenDecimals ?? AssetCatalogDefaults.decimals }
@@ -565,7 +570,10 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
         premiumBps: Int? = nil,
         holders: Int? = nil,
         variantCount: Int? = nil,
-        variants: [AssetVariantDTO]? = nil
+        variants: [AssetVariantDTO]? = nil,
+        // lane: watchlist
+        watching: Bool? = nil,
+        alertCount: Int? = nil
     ) {
         self.symbol = symbol
         self.name = name
@@ -594,12 +602,17 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
         self.holders = holders
         self.variantCount = variantCount
         self.variants = variants
+        // lane: watchlist
+        self.watching = watching
+        self.alertCount = alertCount
     }
 
     private enum CodingKeys: String, CodingKey {
         case symbol, name, solanaMint, routable, priceUsdcMicros, change24h, liquidity
         case marketSession, afterHours, market, stats, stockVsToken
         case kind, source, issuer, underlyingId, tokenDecimals, sector, logoUrl, alwaysOpen, referenceMarkUsdcMicros, referenceValuationUsd, referenceUpdatedAt, premiumBps, holders, variantCount, variants
+        // lane: watchlist
+        case watching, alertCount
     }
 
     public init(from decoder: Decoder) throws {
@@ -634,6 +647,9 @@ public struct AssetDetailDTO: Codable, Equatable, Sendable {
         holders = try container.decodeIfPresent(Int.self, forKey: .holders)
         variantCount = try container.decodeIfPresent(Int.self, forKey: .variantCount)
         variants = try container.decodeIfPresent([AssetVariantDTO].self, forKey: .variants)
+        // lane: watchlist
+        watching = try container.decodeIfPresent(Bool.self, forKey: .watching)
+        alertCount = try container.decodeIfPresent(Int.self, forKey: .alertCount)
     }
 }
 

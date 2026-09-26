@@ -43,6 +43,9 @@ type AssetsHandlers struct {
 	// Now is the market clock; tests pin it so session assertions do not depend on
 	// the wall clock of whoever runs them.
 	Now func() time.Time
+	// lane: watchlist
+	// Watchlist answers the detail's watching and alertCount. Nil leaves both off.
+	Watchlist *app.WatchlistService
 }
 
 func (h *AssetsHandlers) now() time.Time {
@@ -189,6 +192,11 @@ type assetDetailResponse struct {
 	StockVsToken  *stockVsTokenResponse `json:"stockVsToken,omitempty"`
 	assetCatalogJSONFields
 	Variants []assetVariantResponse `json:"variants,omitempty"`
+	// lane: watchlist
+	// Watching and AlertCount are the caller's own: is this stock on their watchlist, and
+	// how many of their alerts are waiting on it. Omitted when they could not be read.
+	Watching   *bool `json:"watching,omitempty"`
+	AlertCount *int  `json:"alertCount,omitempty"`
 }
 
 type assetChartResponse struct {
@@ -289,7 +297,9 @@ func (h *AssetsHandlers) GetAssetHandler(w http.ResponseWriter, r *http.Request)
 		logJSONError(ctx, log, "missing_auth", w, http.StatusUnauthorized, "missing or invalid authorization")
 		return
 	}
-	if _, err := h.authorizeUser(ctx, token); err != nil {
+	// lane: watchlist
+	userID, err := h.authorizeUser(ctx, token)
+	if err != nil {
 		writeAssetsError(ctx, log, w, err)
 		return
 	}
@@ -311,6 +321,8 @@ func (h *AssetsHandlers) GetAssetHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	detail := h.buildAssetDetail(ctx, asset)
+	// lane: watchlist
+	h.applyWatchState(ctx, &detail, userID)
 	writeMarketJSON(ctx, log, w, http.StatusOK, detail, "ok", "symbol", symbol)
 }
 

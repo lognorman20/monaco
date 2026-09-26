@@ -235,3 +235,15 @@ settings-delete-failed        -MonacoSettingsSample deleteFailed
 settings-lock                 -MonacoSettingsSample lock
 settings-main-large-text      -MonacoSettingsSample settings -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
 settings-delete-blocked-large-text -MonacoSettingsSample deleteBlocked -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+# lane: watchlist
+watchlist-stocks-tab          -MonacoWatchlistSample stocksTab
+watchlist-stocks-tab-hint     -MonacoWatchlistSample stocksTabHint
+watchlist-stocks-tab-loading  -MonacoWatchlistSample stocksTabLoading
+watchlist-stocks-tab-edit     -MonacoWatchlistSample stocksTabEdit
+watchlist-stock               -MonacoWatchlistSample stock
+watchlist-alert-sheet         -MonacoWatchlistSample alertSheet
+watchlist-alert-sheet-problem -MonacoWatchlistSample alertSheetProblem
+watchlist-alerts              -MonacoWatchlistSample alerts
+watchlist-alerts-empty        -MonacoWatchlistSample alertsEmpty
+watchlist-alerts-loading      -MonacoWatchlistSample alertsLoading
+watchlist-alerts-failed       -MonacoWatchlistSample alertsFailed
