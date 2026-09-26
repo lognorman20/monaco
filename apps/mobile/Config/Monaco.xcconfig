@@ -16,6 +16,10 @@ MONACO_ENVIRONMENT = $(MONACO_ENVIRONMENT_DEFAULT_$(CONFIGURATION))
 
 MONACO_API_BASE_URL = $(MONACO_API_BASE_URL_$(MONACO_ENVIRONMENT))
 
+// lane: settings. Settings > Security locks the app behind Face ID, which iOS only allows
+// with a reason in Info.plist. The app's Info.plist is generated, so the key lives here.
+INFOPLIST_KEY_NSFaceIDUsageDescription = Monaco uses Face ID to unlock the app.
+
 // Gitignored, written by scripts/ensure-ios-privy-config.sh from .env.local:
 // MONACO_STAGING_API_BASE_URL / MONACO_PRODUCTION_API_BASE_URL. Included last so it
 // wins over the placeholders above.

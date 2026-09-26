@@ -26,6 +26,8 @@ struct MonacoApp: App {
             root
                 .environmentObject(auth)
                 .tint(MonacoTheme.ink)
+                // lane: settings
+                .monacoSettingsRoot()
         }
     }
 

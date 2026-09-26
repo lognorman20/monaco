@@ -184,3 +184,14 @@ propose-pick-cabal            -MonacoProposalFeedSample -MonacoProposeSample -Mo
 propose-pick-cabal-sell       -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSamplePickCabalSell
 propose-buy-large-text        -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleBuy -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
 propose-review-large-text     -MonacoProposalFeedSample -MonacoProposeSample -MonacoProposeSampleReview -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+
+# lane: settings. Settings, Delete account and the app lock.
+settings-main                 -MonacoSettingsSample settings
+settings-about                -MonacoSettingsSample settingsAbout
+settings-delete-blocked       -MonacoSettingsSample deleteBlocked
+settings-delete-ready         -MonacoSettingsSample deleteReady
+settings-delete-loading       -MonacoSettingsSample deleteLoading
+settings-delete-failed        -MonacoSettingsSample deleteFailed
+settings-lock                 -MonacoSettingsSample lock
+settings-main-large-text      -MonacoSettingsSample settings -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
+settings-delete-blocked-large-text -MonacoSettingsSample deleteBlocked -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityL
