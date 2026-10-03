@@ -1,4 +1,4 @@
-h1:YLWxzUf8hD+El+ncNNAbO0jPJtbx0NaxNHOEnJ/UanM=
+h1:MFGRzd59KXp1sb5+k/3/BwA65PjgWtW3W2e5BaFF7Ds=
 20260927140427_platform.sql h1:dpKT9ALI2RTf1SBI4IzLY9kt47VTa8+JAziYaHsX5Jw=
 20260927185159_idempotency.sql h1:iYIp5Y5kBuPj5UJGcOifMeosr8qf0tj17c+5bmF37zE=
 20260929120000_system.sql h1:m6n0Y3tCc4MlfYNzi6Fh01YnogvlBbpQb1/X4WCtW40=
@@ -29,3 +29,4 @@ h1:YLWxzUf8hD+El+ncNNAbO0jPJtbx0NaxNHOEnJ/UanM=
 20261003143338_funding_deposits.sql h1:iwZ7o3XAh3x8qCaH2tjTrFEZSKC3JfnauG9lvKxx65g=
 20261003151042_treasury_cabal_activity.sql h1:lRAKP4E87hsQ3ajDPfsxKdHGboQ6/9vZPBAkuLbCQ7Y=
 20261003151904_cabal_invites_user_idx.sql h1:z+NIMPlrdKzKql7QXR5XhWEN9qZXQTkZ3og4Zx9RsS8=
+20261003212131_funding_deposit_backfill_cursor.sql h1:wshqQrMKNZTk40yMKJWSM1kiaWPDOCTruyYirSkxs3A=
