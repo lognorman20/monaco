@@ -33,7 +33,7 @@ func TestLoadFillsDefaultsFromTheRFC(t *testing.T) {
 		Env:    config.EnvLocal,
 		HTTP:   config.HTTP{Addr: ":8080", MaxBodyBytes: 1 << 20},
 		Worker: config.Worker{HealthAddr: ":8081"},
-		DB:     config.DB{URL: "postgres://monaco@localhost:54322/monaco", MaxConns: 10},
+		DB:     config.DB{URL: "postgres://monaco@localhost:54322/monaco", MaxConns: 11},
 		NATS:   config.NATS{URL: "nats://localhost:4222"},
 		Bus:    config.Bus{APIRelay: true},
 		OTel:   config.OTel{ServiceName: "monaco"},
@@ -72,6 +72,18 @@ func TestLoadFillsDefaultsFromTheRFC(t *testing.T) {
 	}
 	if !reflect.DeepEqual(cfg, want) {
 		t.Fatalf("Load = %+v, want %+v", cfg, want)
+	}
+}
+
+func TestLoadDefaultPoolLeavesConnectionFreeAfterWorkerPollersHoldTheirLocks(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.Load(append(required(), "PATH=/usr/bin", "HOME=/home/monaco"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const workerPollers = 10
+	if cfg.DB.MaxConns <= workerPollers {
+		t.Fatalf("DB.MaxConns = %d, want more than %d worker pollers", cfg.DB.MaxConns, workerPollers)
 	}
 }
 
@@ -427,7 +439,7 @@ func TestRedactedHidesSecretsAndShowsTheRest(t *testing.T) {
 		{"MONACO_HTTP_ADDR", ":8080"},
 		{"MONACO_HTTP_MAX_BODY_BYTES", "1048576"},
 		{"MONACO_WORKER_HEALTH_ADDR", ":8081"},
-		{"MONACO_DB_MAX_CONNS", "10"},
+		{"MONACO_DB_MAX_CONNS", "11"},
 		{"OTEL_EXPORTER_OTLP_ENDPOINT", ""},
 		{"OTEL_SERVICE_NAME", "monaco"},
 		{"MONACO_TIMEOUT_RPC", "5s"},

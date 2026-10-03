@@ -175,10 +175,37 @@ func TestStatus_blockhashExpiresOnlyWhenNotFoundPastTheLastValidHeight(t *testin
 	}
 }
 
+func TestBlockhashValid_readsTheConfirmedValidity(t *testing.T) {
+	t.Parallel()
+	hash := "7be9CjQttHDBAkNkocfWMgzW5yDB853CYkhN7ZmBJsgF"
+	u := result(`{"value":true}`)
+	valid, err := client(u).BlockhashValid(t.Context(), hash)
+	if err != nil || !valid {
+		t.Fatalf("BlockhashValid = %t, %v", valid, err)
+	}
+	if got := string(u.requests()[0].params[1]); got != `{"commitment":"confirmed"}` {
+		t.Fatalf("commitment = %s, want confirmed", got)
+	}
+	if _, err = client(result(`{"value":false}`)).BlockhashValid(t.Context(), hash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client(result(`{"value":true}`)).BlockhashValid(
+		t.Context(), "bad",
+	); errs.CodeOf(err) != errs.CodeInvalidAddress {
+		t.Fatalf("invalid hash = %v", err)
+	}
+	if _, err = client(replying(503, "")).BlockhashValid(
+		t.Context(), hash,
+	); errs.CodeOf(err) != errs.CodeRPCUnavailable {
+		t.Fatalf("unavailable = %v", err)
+	}
+}
+
 func TestSignatureStatuses_edges(t *testing.T) {
 	t.Parallel()
 	c, u, _ := overFakes(t)
-	if got, err := c.SignatureStatuses(t.Context(), nil); got != nil || err != nil || len(u.requests()) != 0 {
+	if got, err := c.SignatureStatuses(t.Context(), nil); got != nil || err != nil ||
+		len(u.requests()) != 0 {
 		t.Fatalf("no signatures = %v, %v with %d calls", got, err, len(u.requests()))
 	}
 	_, err := c.SignatureStatuses(t.Context(), make([]chain.Signature, 257))
@@ -197,7 +224,12 @@ func TestSignaturesFor_pagesBackFromBefore(t *testing.T) {
 	got, err := c.SignaturesFor(t.Context(), member, solana.SignaturesOpts{Before: olderSig, Limit: 50})
 	want := []solana.SignatureInfo{
 		{Signature: deposit, Slot: 450_999_500, BlockTime: time.Unix(1_790_000_000, 0).UTC()},
-		{Signature: olderSig, Slot: 450_999_400, Failed: true, BlockTime: time.Unix(1_789_999_990, 0).UTC()},
+		{
+			Signature: olderSig,
+			Slot:      450_999_400,
+			Failed:    true,
+			BlockTime: time.Unix(1_789_999_990, 0).UTC(),
+		},
 	}
 	if err != nil || !slices.Equal(got, want) {
 		t.Fatalf("SignaturesFor = %+v, %v", got, err)
@@ -302,7 +334,12 @@ func TestSignatureStatuses_acceptsExactlyTheMostItAsksForAndRefusesOneMore(t *te
 	}
 	got, err := client(byMethod(body)).SignatureStatuses(t.Context(), make([]chain.Signature, most))
 	if err != nil || len(got) != most || got[most-1].State != solana.StateNotFound {
-		t.Fatalf("%d signatures = %d statuses, %v; want one not-found status each", most, len(got), err)
+		t.Fatalf(
+			"%d signatures = %d statuses, %v; want one not-found status each",
+			most,
+			len(got),
+			err,
+		)
 	}
 	_, err = client(byMethod(body)).SignatureStatuses(t.Context(), make([]chain.Signature, most+1))
 	wantCode(t, err, errs.CodeInvalidInput)

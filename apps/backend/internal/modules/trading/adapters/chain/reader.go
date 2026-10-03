@@ -19,6 +19,7 @@ type Solana interface {
 		platform.SolanaAddress,
 		platform.SolanaAddress,
 	) ([]solana.Transfer, error)
+	BlockhashValid(context.Context, string) (bool, error)
 }
 
 type Reader struct {
@@ -31,6 +32,14 @@ var (
 )
 
 func NewReader(s Solana) Reader { return Reader{solana: s} }
+
+func (r Reader) BlockhashValid(ctx context.Context, signed []byte) (bool, error) {
+	hash, err := platform.RecentBlockhash(signed)
+	if err != nil {
+		return false, err
+	}
+	return r.solana.BlockhashValid(ctx, hash)
+}
 
 func (r Reader) SignatureStatuses(ctx context.Context, sigs []platform.Signature) ([]app.SigStatus, error) {
 	statuses, err := r.solana.SignatureStatuses(ctx, sigs)
