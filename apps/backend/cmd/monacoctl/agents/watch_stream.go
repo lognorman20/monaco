@@ -161,16 +161,34 @@ func (s *stream) stack(ctx context.Context, r Record, drafts []queueDraft) []str
 		s.ejected[r.Ticket] = true
 		return items
 	}
-	return append(items, s.eject(ctx, r, out, drafts)...)
+	return append(items, s.eject(ctx, r, prs, out, drafts)...)
 }
 
-func (s *stream) eject(ctx context.Context, r Record, out stackPR, drafts []queueDraft) []string {
-	line, requeued, err := s.env.ejectStack(ctx, r, out)
-	if err != nil {
-		return []string{watchErr(fmt.Sprintf("eject #%d: ", r.Queued.Top), err)}
+func (s *stream) eject(ctx context.Context, r Record, prs []stackPR, out stackPR, drafts []queueDraft) []string {
+	env, top := s.env, r.Queued.Top
+	held := false
+	for _, p := range prs {
+		if p.labeled(env.Config.QueueLabel) {
+			if err := env.removeLabel(ctx, p.Number); err != nil {
+				return []string{watchErr(fmt.Sprintf("eject #%d: ", top), err)}
+			}
+		}
+		held = held || draftHolds(drafts, p.Number)
 	}
-	if requeued {
-		return []string{line}
+	if held {
+		s.ejected[r.Ticket] = true
+		return nil
+	}
+	again, err := env.requeued(r)(ctx)
+	if err != nil {
+		return []string{watchErr(fmt.Sprintf("eject #%d: ", top), err)}
+	}
+	if again {
+		return []string{requeuedLine(top)}
+	}
+	line := ejectedLine(top, out)
+	if err := env.conclude(ctx, r, outcomeEjected, line); err != nil {
+		return []string{watchErr(fmt.Sprintf("eject #%d: ", top), err)}
 	}
 	s.reported[out.Number] = true
 	f := failure{

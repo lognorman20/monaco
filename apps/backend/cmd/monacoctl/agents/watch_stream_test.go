@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -181,8 +182,17 @@ func TestWatchStream_aStackListedByAnOpenDraftIsNotEjectedWithoutTheLabel(t *tes
 
 func TestWatchStream_printsAStackQueuedAgainDuringItsReleaseWithoutAFailureBlock(t *testing.T) {
 	t.Parallel()
-	f, _, _ := requeuedDuringRelease(t, 1, true)
-	f.noFailures()
+	f := newFixture(t)
+	s := queuedStack(t, f, f.dir)
+	s.prs[2].Labels.Nodes = nil
+	onLabel := f.hub.hook
+	f.hub.hook = func(method, path, body string, status int) {
+		onLabel(method, path, body, status)
+		if method == "DELETE" && strings.Contains(path, "/issues/1/labels/") {
+			again := &Queue{Top: 2, PRs: []int{1, 2}, At: f.now.Add(time.Hour)}
+			f.owner(t, Record{Ticket: 40, State: Exited, Worktree: f.dir, Queued: again})
+		}
+	}
 	got := streamRounds(t, f, 3, func(int) {})
 	if !strings.Contains(got, "stack #2 was re-queued during its release; left it queued\n") ||
 		strings.Contains(got, "stack #2 ejected:") || strings.Contains(got, "fresh owner") {
@@ -332,6 +342,37 @@ func TestWatchStream_reportsAFailedSettleOrUnmark(t *testing.T) {
 		s := queuedStack(t, f, "/w/40")
 		s.prs[2].Labels.Nodes = nil
 		freeze(t, f.Env(t).recordPath(40))
+		got := streamRounds(t, f, 2, func(int) {})
+		if !strings.Contains(got, "watch error: eject #2: ") || strings.Contains(got, "stack #2 ejected") {
+			t.Fatalf("stream:\n%s", got)
+		}
+	})
+	t.Run("an ejected stack whose label cannot be removed", func(t *testing.T) {
+		t.Parallel()
+		f := newFixture(t)
+		s := queuedStack(t, f, "/w/40")
+		s.prs[2].Labels.Nodes = nil
+		f.hub.status["DELETE /repos/"+testRepo+"/issues/1/labels/merge-queue"] = 500
+		got := streamRounds(t, f, 2, func(int) {})
+		if !strings.Contains(got, "watch error: eject #2: ") || f.owned(t).Queued == nil {
+			t.Fatalf("stream:\n%s", got)
+		}
+	})
+	t.Run("an ejected stack whose record cannot be reread", func(t *testing.T) {
+		t.Parallel()
+		f := newFixture(t)
+		s := queuedStack(t, f, "/w/40")
+		s.prs[2].Labels.Nodes = nil
+		path := f.Env(t).recordPath(40)
+		onLabel := f.hub.hook
+		f.hub.hook = func(method, route, body string, status int) {
+			onLabel(method, route, body, status)
+			if method == "DELETE" {
+				if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+					t.Error(err)
+				}
+			}
+		}
 		got := streamRounds(t, f, 2, func(int) {})
 		if !strings.Contains(got, "watch error: eject #2: ") || strings.Contains(got, "stack #2 ejected") {
 			t.Fatalf("stream:\n%s", got)
@@ -812,5 +853,62 @@ func TestWatch_flagsAConflictingPRUnderARecordOrLabeledOnEveryPass(t *testing.T)
 	}
 	if strings.Contains(out, "#1952") || strings.Contains(out, "#1953") {
 		t.Fatalf("stream:\n%s", out)
+	}
+}
+
+func TestWatchStream_recordsAnEjectOnceInOnePassWithoutWaitingOnGraphite(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	newStackGH(t, f, green(t, 1, "b1", "fb"), green(t, 2, "b2", "b1"))
+	at := f.now.Add(-25 * time.Minute)
+	f.owner(t, Record{Ticket: 40, State: Running, Worktree: "/w/40", Queued: &Queue{Top: 2, PRs: []int{1, 2}, At: at}})
+	f.noFailures()
+	f.hub.on(get("/compare/fb...b2-oid"), `{"status":"diverged"}`)
+	clearedAfter, changed := 0, time.Time{}
+	got := streamRounds(t, f, 5, func(round int) {
+		r := f.owned(t)
+		switch {
+		case r.Queued == nil && clearedAfter == 0:
+			clearedAfter, changed = round, r.Changed
+		case r.Queued == nil && !r.Changed.Equal(changed):
+			t.Errorf("round %d wrote the ejected record again", round)
+		}
+	})
+	if clearedAfter != 2 {
+		t.Fatalf("the queued mark cleared after round %d, want 2:\n%s", clearedAfter, got)
+	}
+	if slices.Contains(f.waited, dequeueEvery) {
+		t.Fatalf("the watch pass waited %v on Graphite", f.waited)
+	}
+	if n := strings.Count(got, "stack #2 ejected: #1 left the Graphite merge queue\n"); n != 1 {
+		t.Fatalf("printed the ejection %d times:\n%s", n, got)
+	}
+	if r := f.owned(t).Settled; r == nil || r.Outcome != outcomeEjected {
+		t.Fatalf("settled %+v", r)
+	}
+}
+
+func TestWatchStream_leavesAnEjectedStackQueuedWithoutWaitingWhileADraftHoldsAnotherPR(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	s := queuedStack(t, f, "/w/40")
+	s.prs[2].Labels.Nodes = nil
+	holds := queueDraftNode(90, "[Graphite MQ] Draft PR GROUP:spec_1 (PRs 1)", rollup(greenOK))
+	f.hub.on(graphqlRoute, draftData([]string{holds}))
+	queuedAfter := map[int]bool{}
+	got := streamRounds(t, f, 5, func(round int) {
+		queuedAfter[round] = f.owned(t).Queued != nil
+		if round == 3 {
+			f.hub.on(graphqlRoute, draftData([]string{strings.Replace(holds, `"OPEN"`, `"CLOSED"`, 1)}))
+		}
+	})
+	if !queuedAfter[2] || !queuedAfter[3] || queuedAfter[4] {
+		t.Fatalf("queued after each round %v:\n%s", queuedAfter, got)
+	}
+	if s.prs[1].labeled("merge-queue") || slices.Contains(f.waited, dequeueEvery) {
+		t.Fatalf("#1 labels %v, waited %v", s.prs[1].Labels, f.waited)
+	}
+	if strings.Count(got, "stack #2 ejected: ") != 1 {
+		t.Fatalf("stream:\n%s", got)
 	}
 }

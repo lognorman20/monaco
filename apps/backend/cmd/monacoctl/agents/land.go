@@ -436,19 +436,26 @@ func ejectedWhy(out stackPR) string {
 
 func (env *Env) ejectStack(ctx context.Context, rec Record, out stackPR) (string, bool, error) {
 	stop := env.requeued(rec)
-	requeuedLine := fmt.Sprintf("stack #%d was re-queued during its release; left it queued", rec.Queued.Top)
 	err := env.releaseQueue(ctx, rec.Queued, stop)
 	if errors.Is(err, errRequeued) {
-		return requeuedLine, true, nil
+		return requeuedLine(rec.Queued.Top), true, nil
 	}
 	if err != nil {
 		return "", false, err
 	}
 	if again, err := stop(ctx); err != nil || again {
-		return requeuedLine, again, err
+		return requeuedLine(rec.Queued.Top), again, err
 	}
-	line := fmt.Sprintf("stack #%d ejected: #%d %s", rec.Queued.Top, out.Number, ejectedWhy(out))
+	line := ejectedLine(rec.Queued.Top, out)
 	return line, false, env.conclude(ctx, rec, outcomeEjected, line)
+}
+
+func requeuedLine(top int) string {
+	return fmt.Sprintf("stack #%d was re-queued during its release; left it queued", top)
+}
+
+func ejectedLine(top int, out stackPR) string {
+	return fmt.Sprintf("stack #%d ejected: #%d %s", top, out.Number, ejectedWhy(out))
 }
 
 func (env *Env) requeued(rec Record) func(context.Context) (bool, error) {
