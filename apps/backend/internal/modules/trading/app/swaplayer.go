@@ -238,16 +238,17 @@ func (l *SwapLayer) beating(ctx context.Context, beat func(), work func(ctx cont
 func (r SwapRequest) insertParams(id uuid.UUID, now time.Time) (sqlc.InsertCreatedParams, error) {
 	in, inOK := domain.Column(r.InAmount)
 	quote, quoteOK := domain.Column(r.QuoteOutAmount)
-	if !inOK || !quoteOK || r.SlippageBps < 0 || r.SlippageBps > math.MaxInt32 {
+	if !inOK || !quoteOK || r.SourceBatchSize < 1 || r.SourceBatchSize > math.MaxInt32 ||
+		r.SlippageBps < 0 || r.SlippageBps > math.MaxInt32 {
 		return sqlc.InsertCreatedParams{}, errs.New(errs.CodeInvalidInput, "trading.SwapLayer.Run",
 			slog.Uint64("in_amount", r.InAmount), slog.Uint64("quote_out_amount", r.QuoteOutAmount),
-			slog.Int64("slippage_bps", r.SlippageBps))
+			slog.Int64("slippage_bps", r.SlippageBps), slog.Int("source_batch_size", r.SourceBatchSize))
 	}
 	p := sqlc.InsertCreatedParams{
 		ID: id, SourceKind: string(r.Source.Kind), SourceID: r.Source.ID, CabalID: r.CabalID.UUID(),
 		TreasuryAddress: string(r.TreasuryWallet.Address), Action: string(r.Action), Symbol: r.Symbol,
-		InMint: string(r.InMint.Address), OutMint: string(r.OutMint.Address), InAmount: in,
-		SlippageBps: int32(r.SlippageBps), CreatedAt: now,
+		InMint: string(r.InMint.Address), OutMint: string(r.OutMint.Address), OutDecimals: int16(r.OutMint.Decimals),
+		InAmount: in, SlippageBps: int32(r.SlippageBps), SourceBatchSize: int32(r.SourceBatchSize), CreatedAt: now,
 	}
 	p.QuoteOutAmount.Int64, p.QuoteOutAmount.Valid = quote, true
 	return p, nil

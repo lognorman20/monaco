@@ -55,7 +55,7 @@ func TestMain_servesHealthzUntilSIGTERMThenExitsZero(t *testing.T) {
 	want := "nats ok\ndb ok\npoller:platform.retention ok\npoller:cabal.invite_expiry ok\npoller:funding.deposits ok\n" +
 		"poller:governance.proposal_expiry ok\npoller:identity.nudges ok\n" +
 		"poller:identity.photo_purges ok\npoller:market.catalog ok\n" +
-		"poller:market.prices ok\npoller:market.retention ok\n"
+		"poller:market.prices ok\npoller:market.retention ok\npoller:trading.swap_sweeper ok\n"
 	waitUntil(t, "a healthy worker", func() bool {
 		code, body := testkit.Get(t, "http://"+p.Addr+"/healthz")
 		return code == http.StatusOK && body == want

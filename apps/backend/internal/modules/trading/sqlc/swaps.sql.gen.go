@@ -93,11 +93,11 @@ func (q *Queries) FinishFailed(ctx context.Context, arg FinishFailedParams) (int
 const insertCreated = `-- name: InsertCreated :exec
 INSERT INTO swaps (
   id, source_kind, source_id, cabal_id, treasury_address, action, symbol,
-  in_mint, out_mint, in_amount, quote_out_amount, slippage_bps, status, created_at, updated_at
+  in_mint, out_mint, out_decimals, in_amount, quote_out_amount, slippage_bps, source_batch_size, status, created_at, updated_at
 )
 VALUES (
   $1, $2, $3, $4, $5, $6, $7,
-  $8, $9, $10, $11, $12, 'created', $13, $13
+  $8, $9, $10, $11, $12, $13, $14, 'created', $15, $15
 )
 `
 
@@ -111,9 +111,11 @@ type InsertCreatedParams struct {
 	Symbol          string
 	InMint          string
 	OutMint         string
+	OutDecimals     int16
 	InAmount        int64
 	QuoteOutAmount  pgtype.Int8
 	SlippageBps     int32
+	SourceBatchSize int32
 	CreatedAt       time.Time
 }
 
@@ -128,12 +130,135 @@ func (q *Queries) InsertCreated(ctx context.Context, arg InsertCreatedParams) er
 		arg.Symbol,
 		arg.InMint,
 		arg.OutMint,
+		arg.OutDecimals,
 		arg.InAmount,
 		arg.QuoteOutAmount,
 		arg.SlippageBps,
+		arg.SourceBatchSize,
 		arg.CreatedAt,
 	)
 	return err
+}
+
+const listStaleCreated = `-- name: ListStaleCreated :many
+SELECT id, cabal_id, source_kind, source_id, action, symbol, in_mint, source_batch_size, in_amount
+FROM swaps
+WHERE status = 'created' AND created_at < $1
+ORDER BY created_at, id
+LIMIT $2
+`
+
+type ListStaleCreatedParams struct {
+	OlderThan time.Time
+	MaxRows   int32
+}
+
+type ListStaleCreatedRow struct {
+	ID              uuid.UUID
+	CabalID         uuid.UUID
+	SourceKind      string
+	SourceID        uuid.UUID
+	Action          string
+	Symbol          string
+	InMint          string
+	SourceBatchSize int32
+	InAmount        int64
+}
+
+func (q *Queries) ListStaleCreated(ctx context.Context, arg ListStaleCreatedParams) ([]ListStaleCreatedRow, error) {
+	rows, err := q.db.Query(ctx, listStaleCreated, arg.OlderThan, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStaleCreatedRow
+	for rows.Next() {
+		var i ListStaleCreatedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CabalID,
+			&i.SourceKind,
+			&i.SourceID,
+			&i.Action,
+			&i.Symbol,
+			&i.InMint,
+			&i.SourceBatchSize,
+			&i.InAmount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStaleSubmitted = `-- name: ListStaleSubmitted :many
+SELECT id, cabal_id, source_kind, source_id, action, symbol, in_mint, out_mint, out_decimals, in_amount,
+  source_batch_size, treasury_address, tx_signature, signed_tx
+FROM swaps
+WHERE status = 'submitted' AND submitted_at < $1::timestamptz
+ORDER BY updated_at, id
+LIMIT $2
+`
+
+type ListStaleSubmittedParams struct {
+	OlderThan time.Time
+	MaxRows   int32
+}
+
+type ListStaleSubmittedRow struct {
+	ID              uuid.UUID
+	CabalID         uuid.UUID
+	SourceKind      string
+	SourceID        uuid.UUID
+	Action          string
+	Symbol          string
+	InMint          string
+	OutMint         string
+	OutDecimals     int16
+	InAmount        int64
+	SourceBatchSize int32
+	TreasuryAddress string
+	TxSignature     pgtype.Text
+	SignedTx        []byte
+}
+
+func (q *Queries) ListStaleSubmitted(ctx context.Context, arg ListStaleSubmittedParams) ([]ListStaleSubmittedRow, error) {
+	rows, err := q.db.Query(ctx, listStaleSubmitted, arg.OlderThan, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStaleSubmittedRow
+	for rows.Next() {
+		var i ListStaleSubmittedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CabalID,
+			&i.SourceKind,
+			&i.SourceID,
+			&i.Action,
+			&i.Symbol,
+			&i.InMint,
+			&i.OutMint,
+			&i.OutDecimals,
+			&i.InAmount,
+			&i.SourceBatchSize,
+			&i.TreasuryAddress,
+			&i.TxSignature,
+			&i.SignedTx,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const markSubmitted = `-- name: MarkSubmitted :execrows
@@ -159,6 +284,25 @@ func (q *Queries) MarkSubmitted(ctx context.Context, arg MarkSubmittedParams) (i
 		arg.SubmittedAt,
 		arg.ID,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const touchSubmitted = `-- name: TouchSubmitted :execrows
+UPDATE swaps
+SET updated_at = $1
+WHERE id = $2 AND status = 'submitted'
+`
+
+type TouchSubmittedParams struct {
+	UpdatedAt time.Time
+	ID        uuid.UUID
+}
+
+func (q *Queries) TouchSubmitted(ctx context.Context, arg TouchSubmittedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, touchSubmitted, arg.UpdatedAt, arg.ID)
 	if err != nil {
 		return 0, err
 	}
