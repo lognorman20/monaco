@@ -56,6 +56,14 @@ func seedDepositWallet(s *scenario.Scenario) testkit.SeededUser {
 	); err != nil {
 		s.Fatalf("flows: update deposit wallet: %v", err)
 	}
+	if _, err := s.DB().Exec(
+		s.Context(),
+		`INSERT INTO deposit_cursors (wallet_address, last_signature, cursor_slot, scanned_at)
+		VALUES ($1, '', 0, now()) ON CONFLICT (wallet_address) DO NOTHING`,
+		user.Address,
+	); err != nil {
+		s.Fatalf("flows: seed deposit cursor: %v", err)
+	}
 	return user
 }
 

@@ -371,8 +371,11 @@ func (q *Queries) SetDisplayName(ctx context.Context, arg SetDisplayNameParams) 
 }
 
 const setFirstDepositAt = `-- name: SetFirstDepositAt :execrows
-UPDATE users SET first_deposit_at = $1::timestamptz, updated_at = $2
-WHERE id = $3 AND first_deposit_at IS NULL AND deleted_at IS NULL
+UPDATE users
+SET first_deposit_at = LEAST(COALESCE(first_deposit_at, $1::timestamptz), $1::timestamptz),
+    updated_at = $2
+WHERE id = $3 AND deleted_at IS NULL
+  AND (first_deposit_at IS NULL OR first_deposit_at > $1::timestamptz)
 `
 
 type SetFirstDepositAtParams struct {

@@ -114,5 +114,8 @@ UPDATE users SET photo_purged_at = sqlc.arg(at)::timestamptz
 WHERE id = sqlc.arg(id) AND account_status = 'deleted' AND photo_purged_at IS NULL;
 
 -- name: SetFirstDepositAt :execrows
-UPDATE users SET first_deposit_at = sqlc.arg(deposited_at)::timestamptz, updated_at = sqlc.arg(now)
-WHERE id = sqlc.arg(id) AND first_deposit_at IS NULL AND deleted_at IS NULL;
+UPDATE users
+SET first_deposit_at = LEAST(COALESCE(first_deposit_at, sqlc.arg(deposited_at)::timestamptz), sqlc.arg(deposited_at)::timestamptz),
+    updated_at = sqlc.arg(now)
+WHERE id = sqlc.arg(id) AND deleted_at IS NULL
+  AND (first_deposit_at IS NULL OR first_deposit_at > sqlc.arg(deposited_at)::timestamptz);

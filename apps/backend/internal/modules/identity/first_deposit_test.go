@@ -106,6 +106,11 @@ func TestFirstDepositAtTheThresholdRecordsBlockTimeAndKeepsIt(t *testing.T) {
 		!strings.Contains(f.logs.String(), `"user_id":"`+user.ID.String()+`"`) {
 		t.Fatalf("logs lack identity.first_deposit.already_set for %s:\n%s", user.ID, f.logs)
 	}
+	earlier := first.Add(-time.Hour)
+	f.handle(t, f.deposit(user.ID, 20_000_000, &earlier))
+	if got := f.firstDepositAt(t, user.ID); got == nil || !got.Equal(earlier) {
+		t.Fatalf("first_deposit_at after an earlier $20 deposit = %v, want %v", got, earlier)
+	}
 }
 
 func TestFirstDepositWithoutBlockTimeUsesTheDeliveryTime(t *testing.T) {

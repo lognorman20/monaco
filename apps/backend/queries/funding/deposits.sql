@@ -14,14 +14,26 @@ SET last_signature = EXCLUDED.last_signature,
     scanned_at = EXCLUDED.scanned_at
 WHERE EXCLUDED.cursor_slot >= deposit_cursors.cursor_slot;
 
--- name: DepositCursor :one
-SELECT COALESCE(deposit_cursors.last_signature, '') AS last_signature, deposit_cursors.scanned_at
-FROM deposit_cursors
-WHERE deposit_cursors.wallet_address = $1
-UNION ALL
-SELECT '', to_timestamp(0)
-WHERE NOT EXISTS (SELECT 1 FROM deposit_cursors WHERE wallet_address = $1)
-LIMIT 1;
+-- name: DepositCursorsForWallets :many
+WITH wallets AS (SELECT unnest(sqlc.arg(wallet_addresses)::text[])::text AS wallet_address)
+SELECT wallets.wallet_address,
+  COALESCE(deposit_cursors.last_signature, '') AS last_signature,
+  COALESCE(deposit_cursors.cursor_slot, 0) AS cursor_slot,
+  COALESCE(deposit_cursors.backfill_before_signature, '') AS backfill_before_signature,
+  COALESCE(deposit_cursors.backfill_head_signature, '') AS backfill_head_signature,
+  COALESCE(deposit_cursors.backfill_head_slot, 0) AS backfill_head_slot,
+  COALESCE(deposit_cursors.scanned_at, to_timestamp(0)) AS scanned_at,
+  (deposit_cursors.wallet_address IS NOT NULL)::bool AS exists
+FROM wallets
+LEFT JOIN deposit_cursors ON deposit_cursors.wallet_address = wallets.wallet_address
+ORDER BY COALESCE(deposit_cursors.scanned_at, to_timestamp(0));
+
+-- name: SetDepositBackfill :exec
+UPDATE deposit_cursors
+SET backfill_before_signature = sqlc.arg(before_signature)::text,
+    backfill_head_signature = sqlc.arg(head_signature)::text,
+    backfill_head_slot = sqlc.arg(head_slot)::bigint
+WHERE wallet_address = $1;
 
 -- name: TouchDepositCursor :exec
 INSERT INTO deposit_cursors (wallet_address, last_signature, cursor_slot, scanned_at)

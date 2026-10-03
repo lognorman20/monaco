@@ -27,6 +27,7 @@ type CreditDeposit struct {
 	BlockTime       time.Time
 	CreditedAt      time.Time
 	CursorSignature chain.Signature
+	DeferCursor     bool
 }
 
 type CreditDepositHandler struct {
@@ -76,12 +77,7 @@ func (h *CreditDepositHandler) Handle(ctx context.Context, cmd CreditDeposit) (b
 		if err := tx.Events.Append(ctx, event); err != nil {
 			return err
 		}
-		if err := q.AdvanceDepositCursor(ctx, sqlc.AdvanceDepositCursorParams{
-			WalletAddress: string(cmd.WalletAddress),
-			LastSignature: string(cmd.CursorSignature),
-			CursorSlot:    cmd.Slot,
-			ScannedAt:     cmd.CreditedAt,
-		}); err != nil {
+		if err := advanceCursor(ctx, q, cmd); err != nil {
 			return err
 		}
 		tx.AfterCommit(func(ctx context.Context) {
@@ -96,6 +92,16 @@ func (h *CreditDepositHandler) Handle(ctx context.Context, cmd CreditDeposit) (b
 		return nil
 	})
 	return credited, err
+}
+
+func advanceCursor(ctx context.Context, q *sqlc.Queries, cmd CreditDeposit) error {
+	if cmd.DeferCursor {
+		return nil
+	}
+	return q.AdvanceDepositCursor(ctx, sqlc.AdvanceDepositCursorParams{
+		WalletAddress: string(cmd.WalletAddress), LastSignature: string(cmd.CursorSignature), CursorSlot: cmd.Slot,
+		ScannedAt: cmd.CreditedAt,
+	})
 }
 
 func optionalTime(value time.Time) *time.Time {
