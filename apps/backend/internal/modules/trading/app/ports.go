@@ -74,6 +74,7 @@ type SigStatus struct {
 
 type ChainReader interface {
 	SignatureStatuses(ctx context.Context, sigs []chain.Signature) ([]SigStatus, error)
+	BlockhashValid(ctx context.Context, signed []byte) (bool, error)
 	InboundAmount(
 		ctx context.Context,
 		signature chain.Signature,

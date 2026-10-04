@@ -47,8 +47,9 @@ func (d swapDB) created(source uuid.UUID, inMint string) sqlc.InsertCreatedParam
 	return sqlc.InsertCreatedParams{
 		ID: d.ids.NewV7(), SourceKind: "proposal", SourceID: source, CabalID: d.ids.NewV7(),
 		TreasuryAddress: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin", Action: "buy", Symbol: "AAPLx",
-		InMint: inMint, OutMint: aaplxMint, InAmount: 25_000_000,
-		QuoteOutAmount: pgtype.Int8{Int64: 105_000_000, Valid: true}, SlippageBps: 100, CreatedAt: d.now,
+		InMint: inMint, OutMint: aaplxMint, OutDecimals: 8, InAmount: 25_000_000,
+		QuoteOutAmount: pgtype.Int8{Int64: 105_000_000, Valid: true}, SlippageBps: 100, SourceBatchSize: 1,
+		CreatedAt: d.now,
 	}
 }
 
