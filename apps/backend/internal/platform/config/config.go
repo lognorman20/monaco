@@ -322,7 +322,7 @@ func platformFields() []field {
 		boolean("TRUST_PROXY_HEADERS", func(c *Config) *bool { return &c.HTTP.TrustProxyHeaders }),
 		text("MONACO_WORKER_HEALTH_ADDR", ":8081", func(c *Config) *string { return &c.Worker.HealthAddr }),
 		text("DATABASE_URL", "", func(c *Config) *string { return &c.DB.URL }).required().secret(),
-		count("MONACO_DB_MAX_CONNS", 10, func(c *Config) *int32 { return &c.DB.MaxConns }),
+		count("MONACO_DB_MAX_CONNS", 11, func(c *Config) *int32 { return &c.DB.MaxConns }),
 		text("NATS_URL", "", func(c *Config) *string { return &c.NATS.URL }).required().secret(),
 		text("OTEL_EXPORTER_OTLP_ENDPOINT", "", func(c *Config) *string { return &c.OTel.Endpoint }),
 		text("OTEL_EXPORTER_OTLP_HEADERS", "", func(c *Config) *string { return &c.OTel.Headers }).secret(),

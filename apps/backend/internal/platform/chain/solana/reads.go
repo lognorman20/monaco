@@ -272,6 +272,20 @@ func (c *Client) SignatureStatuses(ctx context.Context, sigs []chain.Signature) 
 	return out, nil
 }
 
+func (c *Client) BlockhashValid(ctx context.Context, hash string) (bool, error) {
+	const op = "solana.BlockhashValid"
+	if raw, ok := chain.DecodeBase58(hash); !ok || len(raw) != 32 {
+		return false, errs.New(errs.CodeInvalidAddress, op, slog.String("blockhash", hash))
+	}
+	var wire struct {
+		Value bool `json:"value"`
+	}
+	if err := c.call(ctx, "isBlockhashValid", []any{hash, commitment("confirmed")}, &wire); err != nil {
+		return false, err
+	}
+	return wire.Value, nil
+}
+
 func (c *Client) SignaturesFor(
 	ctx context.Context,
 	addr chain.SolanaAddress,
